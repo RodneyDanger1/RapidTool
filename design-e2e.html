@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <meta name="description" content="Deterministic design system preview for HVAC Dispatch" />
+  <title>HVAC Dispatch · Design system</title>
+  <style>
+:root {
+  --bg: #f5f0e6;
+  --surface: #ffffff;
+  --surface-alt: #faf8f3;
+  --ink: #241a10;
+  --ink-muted: #6b5d49;
+  --line: #dedddb;
+  --brand: #9a3412;
+  --on-brand: #ffffff;
+  --brand-soft: #f1e3de;
+  --brand-ink: #652811;
+  --accent: #1b4965;
+  --on-accent: #ffffff;
+  --accent-soft: #dfe6e9;
+  --accent-ink: #1f343f;
+  --ok: #166534;
+  --ok-soft: #dee9e3;
+  --bad: #b42318;
+  --bad-soft: #f5e0df;
+  --warn: #92400e;
+  --warn-soft: #f0e4dd;
+  --fs-0: 12px;
+  --fs-1: 14px;
+  --fs-2: 16px;
+  --fs-3: 18px;
+  --fs-4: 20px;
+  --fs-5: 24px;
+  --fs-6: 32px;
+  --space-0: 4px;
+  --space-1: 8px;
+  --space-2: 12px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 48px;
+  --radius-0: 4px;
+  --radius-1: 8px;
+  --radius-2: 12px;
+  --radius-3: 16px;
+  --shadow-0: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-1: 0 4px 12px -2px rgba(16, 24, 40, 0.08);
+  --shadow-2: 0 16px 40px -12px rgba(16, 24, 40, 0.18);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--ink); font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: var(--fs-2); line-height: 1.55; }
+code { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: var(--fs-0); }
+.wrap { max-width: 1080px; margin: 0 auto; padding: var(--space-5) var(--space-4); }
+header.hero { margin-bottom: var(--space-5); }
+h1 { font-size: var(--fs-6); line-height: 1.15; margin: 0 0 var(--space-2); letter-spacing: -0.02em; }
+h2.sec { font-size: var(--fs-4); margin: var(--space-5) 0 var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line); }
+p.lede { color: var(--ink-muted); margin: 0; max-width: 72ch; }
+.chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.chip { display: inline-flex; align-items: center; border-radius: var(--radius-3); padding: 2px var(--space-2); font-size: var(--fs-0); font-weight: 600; }
+.chip-brand { background: var(--brand-soft); color: var(--brand-ink); }
+.chip-accent { background: var(--accent-soft); color: var(--accent-ink); }
+.chip-ok { background: var(--ok-soft); color: var(--ok); }
+.chip-warn { background: var(--warn-soft); color: var(--warn); }
+.chip-bad { background: var(--bad-soft); color: var(--bad); }
+.chip-neutral { background: var(--surface); color: var(--ink-muted); border: 1px solid var(--line); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--space-3); }
+.sw { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-1); padding: var(--space-2); }
+.swatch { height: 52px; border-radius: var(--radius-0); border: 1px solid var(--line); }
+.sw-meta { margin-top: var(--space-1); display: flex; flex-direction: column; gap: 2px; }
+.sw-meta .muted { color: var(--ink-muted); font-size: var(--fs-0); }
+.muted { color: var(--ink-muted); }
+.scale-row { display: flex; align-items: baseline; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }
+.size-tag { color: var(--ink-muted); min-width: 110px; flex: none; }
+.sample { color: var(--ink); }
+.row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-2) 0; }
+.btn { font: inherit; font-weight: 600; padding: var(--space-1) var(--space-3); border-radius: var(--radius-1); border: 1px solid transparent; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: var(--space-1); }
+.btn-primary { background: var(--brand); color: var(--on-brand); }
+.btn-accent { background: var(--accent); color: var(--on-accent); }
+.btn-outline { background: var(--surface); color: var(--brand); border-color: var(--line); }
+.btn-ghost { background: transparent; color: var(--ink-muted); }
+.btn:hover { filter: brightness(0.93); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
+.btn:focus-visible, .field:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-2); box-shadow: var(--shadow-1); padding: var(--space-4); }
+.card h3 { margin: 0 0 var(--space-1); font-size: var(--fs-4); }
+.card .meta { color: var(--ink-muted); font-size: var(--fs-1); margin-bottom: var(--space-2); }
+.card ul { margin: 0 0 var(--space-3); padding-left: var(--space-4); }
+form.ds-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--space-3); }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field > label, .field > legend { font-size: var(--fs-1); font-weight: 600; color: var(--ink); }
+.field input, .field select, .field textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-1); padding: var(--space-2); }
+.check-row { display: flex; align-items: center; gap: var(--space-1); font-size: var(--fs-1); }
+fieldset.field { border: none; margin: 0; padding: 0; }
+.well { background: var(--surface-alt); border: 1px solid var(--line); border-radius: var(--radius-1); padding: var(--space-3); color: var(--ink); font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: var(--fs-1); overflow-x: auto; }
+table.pairs { border-collapse: collapse; width: 100%; max-width: 720px; font-size: var(--fs-1); }
+table.pairs th, table.pairs td { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); }
+table.pairs th { color: var(--ink-muted); font-weight: 600; }
+table.pairs code { color: var(--accent-ink); }
+footer.site { margin-top: var(--space-5); padding-top: var(--space-3); border-top: 1px solid var(--line); color: var(--ink-muted); font-size: var(--fs-1); }
+a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="hero">
+      <div class="chips">
+        <span class="chip chip-brand">logistics · rust</span>
+        <span class="chip chip-accent">domain: logistics</span>
+        <span class="chip chip-ok">status: complete</span>
+        <span class="chip chip-neutral">phase P12</span>
+      </div>
+      <h1>HVAC Dispatch — design system</h1>
+      <p class="lede">Build a field-service dispatch board for HVAC technicians: job assignment, route planning, and customer notifications.</p>
+    </header>
+
+      <h2 class="sec">Color tokens — surfaces & text</h2>
+      <div class="grid">
+        <div class="sw">
+          <div class="swatch" style="background: #f5f0e6" data-token="--bg" title="--bg"></div>
+          <div class="sw-meta">
+            <code>--bg</code>
+            <span class="muted">#f5f0e6 · Page background</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #ffffff" data-token="--surface" title="--surface"></div>
+          <div class="sw-meta">
+            <code>--surface</code>
+            <span class="muted">#ffffff · Cards, inputs, elevated blocks</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #faf8f3" data-token="--surface-alt" title="--surface-alt"></div>
+          <div class="sw-meta">
+            <code>--surface-alt</code>
+            <span class="muted">#faf8f3 · Inset wells, code blocks</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #241a10" data-token="--ink" title="--ink"></div>
+          <div class="sw-meta">
+            <code>--ink</code>
+            <span class="muted">#241a10 · Primary text</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #6b5d49" data-token="--ink-muted" title="--ink-muted"></div>
+          <div class="sw-meta">
+            <code>--ink-muted</code>
+            <span class="muted">#6b5d49 · Secondary text, captions</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #dedddb" data-token="--line" title="--line"></div>
+          <div class="sw-meta">
+            <code>--line</code>
+            <span class="muted">#dedddb · Borders, dividers</span>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="sec">Color tokens — brand & accent</h2>
+      <div class="grid">
+        <div class="sw">
+          <div class="swatch" style="background: #9a3412" data-token="--brand" title="--brand"></div>
+          <div class="sw-meta">
+            <code>--brand</code>
+            <span class="muted">#9a3412 · Primary action, focus brand</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #ffffff" data-token="--on-brand" title="--on-brand"></div>
+          <div class="sw-meta">
+            <code>--on-brand</code>
+            <span class="muted">#ffffff · Text/icon on brand</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #f1e3de" data-token="--brand-soft" title="--brand-soft"></div>
+          <div class="sw-meta">
+            <code>--brand-soft</code>
+            <span class="muted">#f1e3de · Brand chip background</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #652811" data-token="--brand-ink" title="--brand-ink"></div>
+          <div class="sw-meta">
+            <code>--brand-ink</code>
+            <span class="muted">#652811 · Text on brandSoft</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #1b4965" data-token="--accent" title="--accent"></div>
+          <div class="sw-meta">
+            <code>--accent</code>
+            <span class="muted">#1b4965 · Secondary action, links</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #ffffff" data-token="--on-accent" title="--on-accent"></div>
+          <div class="sw-meta">
+            <code>--on-accent</code>
+            <span class="muted">#ffffff · Text/icon on accent</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #dfe6e9" data-token="--accent-soft" title="--accent-soft"></div>
+          <div class="sw-meta">
+            <code>--accent-soft</code>
+            <span class="muted">#dfe6e9 · Accent chip background</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #1f343f" data-token="--accent-ink" title="--accent-ink"></div>
+          <div class="sw-meta">
+            <code>--accent-ink</code>
+            <span class="muted">#1f343f · Text on accentSoft</span>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="sec">Color tokens — semantic states</h2>
+      <div class="grid">
+        <div class="sw">
+          <div class="swatch" style="background: #166534" data-token="--ok" title="--ok"></div>
+          <div class="sw-meta">
+            <code>--ok</code>
+            <span class="muted">#166534 · Success text / strong state</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #dee9e3" data-token="--ok-soft" title="--ok-soft"></div>
+          <div class="sw-meta">
+            <code>--ok-soft</code>
+            <span class="muted">#dee9e3 · Success chip background</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #b42318" data-token="--bad" title="--bad"></div>
+          <div class="sw-meta">
+            <code>--bad</code>
+            <span class="muted">#b42318 · Error text / strong state</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #f5e0df" data-token="--bad-soft" title="--bad-soft"></div>
+          <div class="sw-meta">
+            <code>--bad-soft</code>
+            <span class="muted">#f5e0df · Error chip background</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #92400e" data-token="--warn" title="--warn"></div>
+          <div class="sw-meta">
+            <code>--warn</code>
+            <span class="muted">#92400e · Warning text / strong state</span>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="swatch" style="background: #f0e4dd" data-token="--warn-soft" title="--warn-soft"></div>
+          <div class="sw-meta">
+            <code>--warn-soft</code>
+            <span class="muted">#f0e4dd · Warning chip background</span>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="sec">Typography</h2>
+      <p class="muted" style="margin: 0 0 var(--space-2)">Mono stack: <code>ui-monospace, &quot;SF Mono&quot;, SFMono-Regular, Menlo, Consolas, &quot;Liberation Mono&quot;, monospace</code></p>
+        <div class="scale-row"><code class="size-tag">--fs-0: 12px</code><span class="sample" style="font-size: var(--fs-0)">The quick brown fox jumps — 12px</span></div>
+        <div class="scale-row"><code class="size-tag">--fs-1: 14px</code><span class="sample" style="font-size: var(--fs-1)">The quick brown fox jumps — 14px</span></div>
+        <div class="scale-row"><code class="size-tag">--fs-2: 16px</code><span class="sample" style="font-size: var(--fs-2)">The quick brown fox jumps — 16px</span></div>
+        <div class="scale-row"><code class="size-tag">--fs-3: 18px</code><span class="sample" style="font-size: var(--fs-3)">The quick brown fox jumps — 18px</span></div>
+        <div class="scale-row"><code class="size-tag">--fs-4: 20px</code><span class="sample" style="font-size: var(--fs-4)">The quick brown fox jumps — 20px</span></div>
+        <div class="scale-row"><code class="size-tag">--fs-5: 24px</code><span class="sample" style="font-size: var(--fs-5)">The quick brown fox jumps — 24px</span></div>
+        <div class="scale-row"><code class="size-tag">--fs-6: 32px</code><span class="sample" style="font-size: var(--fs-6)">The quick brown fox jumps — 32px</span></div>
+
+      <h2 class="sec">Buttons</h2>
+      <div class="row">
+          <button class="btn btn-primary" type="button">Primary action</button>
+          <button class="btn btn-accent" type="button">Accent action</button>
+          <button class="btn btn-outline" type="button">Secondary action</button>
+          <button class="btn btn-ghost" type="button">Ghost action</button>
+          <button class="btn btn-primary" type="button" disabled>Disabled</button>
+      </div>
+      <div class="row">
+        <span class="chip chip-brand">brand-soft chip</span>
+        <span class="chip chip-accent">accent-soft chip</span>
+        <span class="chip chip-ok">ok soft chip</span>
+        <span class="chip chip-warn">warn soft chip</span>
+        <span class="chip chip-bad">bad soft chip</span>
+      </div>
+
+      <h2 class="sec">Sample card</h2>
+      <div class="card" style="max-width: 640px">
+        <h3>HVAC Dispatch</h3>
+        <div class="meta">domain: logistics · palette logistics · rust · surface / line / ink-muted tokens in use</div>
+        <ul>
+            <li>dispatch</li>
+            <li>route</li>
+        </ul>
+        <div class="chips" style="margin-bottom: var(--space-3)">
+              <span class="chip chip-brand">technician</span>
+              <span class="chip chip-brand">customer</span>
+              <span class="chip chip-brand">job</span>
+              <span class="chip chip-brand">jobs</span>
+              <span class="chip chip-brand">route</span>
+        </div>
+        <div class="row" style="margin: 0">
+          <button class="btn btn-primary" type="button">Open</button>
+          <button class="btn btn-outline" type="button">Details</button>
+        </div>
+      </div>
+
+      <h2 class="sec">Elevation</h2>
+      <div class="row" style="align-items: stretch">
+        <div class="card" style="width: 190px; box-shadow: var(--shadow-0); margin: 0"><div class="meta">shadow-0</div><code>var(--shadow-0)</code></div>
+        <div class="card" style="width: 190px; box-shadow: var(--shadow-1); margin: 0"><div class="meta">shadow-1</div><code>var(--shadow-1)</code></div>
+        <div class="card" style="width: 190px; box-shadow: var(--shadow-2); margin: 0"><div class="meta">shadow-2</div><code>var(--shadow-2)</code></div>
+      </div>
+
+      <h2 class="sec">Spacing & radius</h2>
+      <div class="row" style="align-items: flex-end">
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width: var(--space-0); height: 24px; background: var(--brand-soft); border-radius: 2px"></div><code class="muted">4</code></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width: var(--space-1); height: 24px; background: var(--brand-soft); border-radius: 2px"></div><code class="muted">8</code></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width: var(--space-2); height: 24px; background: var(--brand-soft); border-radius: 2px"></div><code class="muted">12</code></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width: var(--space-3); height: 24px; background: var(--brand-soft); border-radius: 2px"></div><code class="muted">16</code></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width: var(--space-4); height: 24px; background: var(--brand-soft); border-radius: 2px"></div><code class="muted">24</code></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width: var(--space-5); height: 24px; background: var(--brand-soft); border-radius: 2px"></div><code class="muted">32</code></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width: var(--space-6); height: 24px; background: var(--brand-soft); border-radius: 2px"></div><code class="muted">48</code></div>
+      </div>
+      <div class="row" style="align-items: flex-end">
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width: 44px; height: 44px; background: var(--accent-soft); border-radius: var(--radius-0)"></div><code class="muted">r 4</code></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width: 44px; height: 44px; background: var(--accent-soft); border-radius: var(--radius-1)"></div><code class="muted">r 8</code></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width: 44px; height: 44px; background: var(--accent-soft); border-radius: var(--radius-2)"></div><code class="muted">r 12</code></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="width: 44px; height: 44px; background: var(--accent-soft); border-radius: var(--radius-3)"></div><code class="muted">r 16</code></div>
+      </div>
+
+      <h2 class="sec">Form elements</h2>
+      <form class="ds-form" action="#" method="get">
+        <div class="field">
+          <label for="ds-name">Record name</label>
+          <input id="ds-name" name="name" type="text" placeholder="e.g. HVAC Dispatch" />
+        </div>
+        <div class="field">
+          <label for="ds-kind">Kind</label>
+          <select id="ds-kind" name="kind">
+            <option value="draft">Draft</option>
+            <option value="active">Active</option>
+            <option value="archived">Archived</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="ds-note">Note</label>
+          <textarea id="ds-note" name="note" rows="2" placeholder="Optional note…"></textarea>
+        </div>
+        <fieldset class="field">
+          <legend>Priority</legend>
+          <div class="check-row"><input type="radio" id="ds-p-low" name="priority" value="low" checked /><label for="ds-p-low">Low</label></div>
+          <div class="check-row"><input type="radio" id="ds-p-high" name="priority" value="high" /><label for="ds-p-high">High</label></div>
+        </fieldset>
+        <div class="field">
+          <div class="check-row"><input type="checkbox" id="ds-flag" name="flag" /><label for="ds-flag">Flag for review</label></div>
+        </div>
+        <div class="field">
+          <button class="btn btn-primary" type="submit">Submit</button>
+        </div>
+      </form>
+
+      <h2 class="sec">Contrast-safe pairings (WCAG AA ≥ 4.5:1)</h2>
+      <table class="pairs">
+        <caption class="muted" style="text-align:left;font-size:var(--fs-1);margin-bottom:var(--space-1)">Rule: every pairing below passes 4.5:1 on all 12 curated rows; enforced by design.test.ts with an independent WCAG luminance check.</caption>
+        <thead><tr><th>Pairing</th><th>Tokens</th></tr></thead>
+        <tbody>
+          <tr><td>Body text</td><td><code>ink</code> on <code>bg</code> / <code>surface</code> / <code>surface-alt</code></td></tr>
+          <tr><td>Secondary text</td><td><code>ink-muted</code> on <code>bg</code> / <code>surface</code></td></tr>
+          <tr><td>Primary buttons</td><td><code>on-brand</code> on <code>brand</code></td></tr>
+          <tr><td>Accent buttons</td><td><code>on-accent</code> on <code>accent</code></td></tr>
+          <tr><td>Brand chips</td><td><code>brand-ink</code> on <code>brand-soft</code></td></tr>
+          <tr><td>Accent chips</td><td><code>accent-ink</code> on <code>accent-soft</code></td></tr>
+          <tr><td>Links / brand text</td><td><code>accent</code> / <code>brand</code> on <code>surface</code></td></tr>
+          <tr><td>State chips</td><td><code>ok</code> / <code>bad</code> / <code>warn</code> on their softs and on <code>surface</code></td></tr>
+        </tbody>
+      </table>
+
+    <footer class="site">
+      Generated deterministically by the RapidTool design module · logistics · rust · 20 color tokens · zero runtime JS
+    </footer>
+  </main>
+</body>
+</html>

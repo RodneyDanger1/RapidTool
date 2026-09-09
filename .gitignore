@@ -1,0 +1,22 @@
+# Dependencies / build output
+node_modules/
+dist/
+.vercel/
+.netlify/
+.tanstack/
+
+# Secrets — NEVER commit (read server-side only, never VITE_-prefixed)
+.env
+.env.local
+.env.*.local
+
+# Logs / OS / probes
+*.log
+.DS_Store
+Thumbs.db
+.probe-tmp/
+logs/trajectory.db*
+.rapidtool/logs/
+
+# Local eval / emit scratch
+RapidTool Software/

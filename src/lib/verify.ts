@@ -1,0 +1,235 @@
+// ---------------------------------------------------------------------------
+// verify.ts — client-safe seam for the machine-run verify-fix loop (A3-05).
+//
+// HONEST DISPOSITION (fixes/134 T1.2, TOP-10 #7): the Oracle tab's
+// "Run machine verify" affordance (store.runVerifyAsync) triggers this shim —
+// it posts the project's generatedSource + brief to verify.server
+// verifyAndFixServer and applies the returned outcome locally via
+// applyVerifyOutcome (defined at the bottom of this module). The audit-46
+// export binding (withCommonJsExports, moved here from headless.ts) is
+// applied before the loop runs, so engine-template sources that declare
+// top-level functions without module.exports actually execute inside the
+// harness's `with(exports)` oracle instead of failing every case with
+// "X is not defined". Whole-project/CLI callers keep using
+// headless.verifyGeneratedSource — headless re-exports the helpers defined
+// here so there is ONE implementation; they live in this browser-safe module
+// because the store (client bundle) must apply an outcome locally without
+// pulling headless.ts's server-only node:fs surface into the browser.
+//
+// Outcome honesty: passed → the project converges (lastTest label "tested" +
+// evidenceHash, verify artifact + verify.pass log, P6 gate + packet re-stamped
+// when P6 is complete); failed/error → verify.fail artifact + warn log, NO
+// tested label; not-configured (no DEEPSEEK_API_KEY server-side) → no state
+// change. On transport failure an `{ status: "error" }` envelope is returned —
+// never a fabricated verdict.
+// ---------------------------------------------------------------------------
+import { createServerFn } from "@tanstack/react-start";
+import { fnv1a } from "./algorithms.ts";
+import { recordGateInto } from "./dod.ts";
+import { stampPacket } from "./engine.ts";
+import type { Artifact, ArtifactKind, MemoryEntry, PhaseId, Project } from "./types.ts";
+import type { VerifyOutcome } from "./verify.server.ts";
+
+export type { VerifyOutcome } from "./verify.server.ts";
+
+const verifyServer = createServerFn({ method: "POST" })
+  .validator((input: { source: string; brief: string; maxIterations?: number }) => input)
+  .handler(async ({ data }) => {
+    const { verifyAndFixServer } = await import("./verify.server.ts");
+    // audit-46 binding (see the header): without it, engine-template sources
+    // that declare top-level functions but export nothing fail every oracle
+    // case with "X is not defined" inside the harness's with(exports).
+    return verifyAndFixServer(withCommonJsExports(data.source), data.brief, {
+      maxIterations: data.maxIterations,
+    });
+  });
+
+/** Injected server seam (exec.ts runner-parity) for tests. */
+export type VerifyServerFn = (
+  source: string,
+  brief: string,
+  opts?: { maxIterations?: number },
+) => Promise<VerifyOutcome>;
+
+/**
+ * Raw source/brief verify-fix loop over the server harness — the Oracle tab's
+ * "Run machine verify" action (store.runVerifyAsync) calls this with the
+ * project's generatedSource + brief and applies the outcome locally. Returns
+ * the honest typed outcome; on transport failure an `{ status: "error" }`
+ * envelope — never fabricated verdicts.
+ */
+export async function verifyAndFix(
+  source: string,
+  brief: string,
+  opts?: { maxIterations?: number; server?: VerifyServerFn | null },
+): Promise<VerifyOutcome> {
+  if (typeof source !== "string" || source.trim().length === 0) {
+    return { status: "error", iterations: 0, evidence: "empty source" };
+  }
+  // Test/dev dependency injection: an explicit `server` bypasses the
+  // createServerFn round-trip; `null` models an unavailable transport without
+  // inventing a verdict.
+  if (opts?.server !== undefined) {
+    return opts.server
+      ? opts.server(source, brief, { maxIterations: opts.maxIterations })
+      : {
+          status: "not-configured",
+          iterations: 0,
+          evidence: "no verify transport (injected server: null)",
+        };
+  }
+  try {
+    return await verifyServer({ data: { source, brief, maxIterations: opts?.maxIterations } });
+  } catch (err) {
+    return {
+      status: "error",
+      iterations: 0,
+      evidence: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Shape of the whole-project verify outcome (moved here from headless.ts —
+ * headless re-exports it). Structurally a superset-tolerant view of
+ * verify.server's VerifyOutcome; consumers that need lint/typed cases use
+ * VerifyOutcome directly.
+ */
+export type VerifyOutcomeShape = {
+  status: "passed" | "failed" | "not-configured" | "error";
+  iterations: number;
+  evidence: string;
+  finalSource?: string;
+  cases?: unknown[];
+  /** L3 (failed/error) or L4 (passed) lesson row minted by verify.server.ts's
+   *  outcome seam — applyVerifyOutcome appends it to project memory. */
+  lesson?: MemoryEntry;
+};
+
+/**
+ * audit-46 export binding: appends guarded CommonJS export assignments for the
+ * source's top-level functions so verify.server's oracle harness (which binds
+ * expressions via `with(exports)`) can actually call them. No-op when the
+ * source already exports or declares no top-level functions.
+ */
+export function withCommonJsExports(source: string): string {
+  const fns = [...source.matchAll(/^function\s+([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
+  const unique = [...new Set(fns)];
+  if (unique.length === 0) return source; // not a function-module source — honest no-op
+  if (/module\.exports/.test(source)) return source; // already exports — no-op
+  const block = unique
+    .map((f) => `if (typeof module !== "undefined" && module.exports) module.exports.${f} = ${f};`)
+    .join("\n");
+  return `${source}\n${block}\n`;
+}
+
+/**
+ * E-06: persist a machine verify outcome into the project (pure, never throws;
+ * moved here from headless.ts so the client store can apply outcomes without
+ * headless's server-only fs surface — headless re-exports this function).
+ * - `passed`  → stamps `lastTest` as a machine-tested verdict (label "tested" +
+ *   evidenceHash over finalSource+evidence), appends a "verify" artifact
+ *   (evidence + cases + iterations) and a `verify.pass` log.
+ * - `failed` / `error` → appends a `verify.fail` artifact + warn log with the
+ *   evidence. NO labels are minted (an untested verdict must never look like a
+ *   machine pass).
+ * - `not-configured` → no artifact, no state change (returns the same reference).
+ *
+ * P0-09 convergence: a PASSED machine verify converges the recorded state —
+ * stored `generatedSource` becomes the machine-verified source, and when P6 is
+ * complete the P6 gate is re-recorded (recordGateInto) and the packet
+ * re-stamped, so gate_passed and the recorded gate agree with reality by
+ * construction. Re-apply of the SAME outcome is deduped (23 CAVEAT-2): a
+ * re-apply whose evidenceHash already matches the stored tested verdict
+ * returns the same reference — no duplicate verify artifacts/logs.
+ */
+export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape): Project {
+  if (outcome.status === "not-configured") return project;
+  const passed = outcome.status === "passed";
+  const now = Date.now();
+  const evidence = typeof outcome.evidence === "string" ? outcome.evidence : "";
+  const evidenceHash = String(fnv1a(`${outcome.finalSource ?? ""}${evidence}`));
+  // P0-09 dedupe (23 CAVEAT-2): same-hash re-apply is a no-op (same reference).
+  const prior = project.lastTest as { label?: string; evidenceHash?: string } | null;
+  if (passed && prior?.label === "tested" && prior.evidenceHash === evidenceHash) {
+    return project;
+  }
+  const caseLines: string[] = [];
+  for (const c of outcome.cases ?? []) {
+    const row = c as { id?: unknown; expression?: unknown } | null | undefined;
+    if (!row || typeof row !== "object") continue;
+    const id = typeof row.id === "string" ? row.id : "";
+    const expression = typeof row.expression === "string" ? row.expression : "";
+    caseLines.push(`- ${id}: ${expression}`);
+  }
+  const body = [
+    `# Verify outcome — ${passed ? "PASSED (machine-run)" : outcome.status.toUpperCase()}`,
+    "",
+    evidence || "(no evidence text)",
+    `Iterations: ${typeof outcome.iterations === "number" ? outcome.iterations : 0}`,
+    ...(caseLines.length > 0 ? ["", "Cases:", ...caseLines] : []),
+  ].join("\n");
+  const artifact: Artifact = {
+    id: `verify-${outcome.status}-${evidenceHash.slice(0, 8)}`,
+    phase: 6,
+    kind:
+      // "verify" joins ArtifactKind with E-07 (sibling-owned types.ts); the
+      // double cast keeps this compiling whether or not that member has
+      // landed yet — the runtime value is "verify" either way.
+      "verify" as unknown as ArtifactKind,
+    title: `Verify outcome — ${passed ? "passed (machine-run)" : outcome.status}`,
+    body,
+    language: "markdown",
+  };
+  // lastTest: built as a structural value and spread (NOT an inline literal) so
+  // the E-07 superset fields (label/evidenceHash) compile before types.ts
+  // carries them; once it does, they hydrate unchanged.
+  const lastTest = passed
+    ? { ok: true as const, detail: evidence, label: "tested" as const, evidenceHash }
+    : project.lastTest;
+  // P0-09: a passed verdict replaces generatedSource with the machine-verified
+  // source (the code the harness actually ran — never a pre-verify shape).
+  const finalSource =
+    passed && typeof outcome.finalSource === "string" && outcome.finalSource.trim()
+      ? outcome.finalSource.trim()
+      : null;
+  // L3/L4 lesson capture (fixes/98 §2.3 writer 2(c)/3): append the lesson row
+  // minted at verify.server.ts's outcome seam to project memory. Idempotent:
+  // the id is content-addressed and an existing twin is dropped (H43-P2-1).
+  const lesson = outcome.lesson as MemoryEntry | undefined;
+  const hasLesson = !!lesson && (project.memory ?? []).some((m) => m.id === lesson.id);
+  const updated: Project = {
+    ...project,
+    lastTest,
+    ...(finalSource !== null ? { generatedSource: finalSource } : {}),
+    artifacts: [...(project.artifacts ?? []), artifact],
+    memory:
+      lesson && !hasLesson ? [...(project.memory ?? []), lesson].slice(-80) : project.memory,
+    logs: [
+      ...(project.logs ?? []),
+      {
+        ts: now,
+        phase: 6 as PhaseId,
+        level: passed ? ("info" as const) : ("warn" as const),
+        event: passed ? "verify.pass" : "verify.fail",
+        detail: `${outcome.status} · ${evidence.slice(0, 160) || "(no evidence text)"}`,
+      },
+      ...(lesson
+        ? [
+            {
+              ts: now,
+              phase: 6 as PhaseId,
+              level: "info" as const,
+              event: "lesson.capture",
+              detail: `${passed ? "L4 verified-procedure" : "L3 verify-failure"} ${lesson.id} (verify ${outcome.status})`,
+            },
+          ]
+        : []),
+    ].slice(-200),
+  };
+  if (!passed) return updated;
+  // P0-09 convergence: re-record the P6 gate (no-op unless P6 is complete)
+  // and re-stamp the packet so gate_passed + the artifact window reflect the
+  // machine-verified state.
+  return stampPacket(recordGateInto(updated, 6));
+}

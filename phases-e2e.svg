@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="328" viewBox="0 0 1360 328" role="img" aria-label="HVAC Dispatch — phase pipeline" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif">
+<title>HVAC Dispatch — phase pipeline</title>
+<rect x="0" y="0" width="1360" height="328" fill="#0d1117"/>
+<defs><marker id="dg-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a4351"/></marker></defs>
+<text x="26" y="30" font-size="15" fill="#e6edf3" font-weight="700">HVAC Dispatch — phase pipeline</text>
+<text x="26" y="50" font-size="10.5" fill="#8b949e">P0 → P12 · status complete · 13/13 sealed · 4 HITL gates</text>
+<line x1="182" y1="125" x2="218" y2="125" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<line x1="374" y1="125" x2="410" y2="125" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<line x1="566" y1="125" x2="602" y2="125" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<line x1="758" y1="125" x2="794" y2="125" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<line x1="950" y1="125" x2="986" y2="125" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<line x1="1142" y1="125" x2="1178" y2="125" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<path d="M1256,154 V187 H104 V220" fill="none" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<line x1="182" y1="249" x2="218" y2="249" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<line x1="374" y1="249" x2="410" y2="249" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<line x1="566" y1="249" x2="602" y2="249" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<line x1="758" y1="249" x2="794" y2="249" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<line x1="950" y1="249" x2="986" y2="249" stroke="#3a4351" stroke-width="1.25" marker-end="url(#dg-a)"/>
+<rect x="26" y="96" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="104" y="119" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P0</text>
+<text x="104" y="137" font-size="9" fill="#c9d1d9" text-anchor="middle">Deep Research &amp; Feasibility</text>
+<rect x="218" y="96" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="296" y="119" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P1</text>
+<text x="296" y="137" font-size="9" fill="#c9d1d9" text-anchor="middle">Core Orchestration &amp; State…</text>
+<rect x="410" y="96" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="488" y="119" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P2</text>
+<text x="488" y="137" font-size="9" fill="#c9d1d9" text-anchor="middle">Memory &amp; Context Consolida…</text>
+<rect x="602" y="96" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="680" y="119" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P3</text>
+<text x="680" y="137" font-size="9" fill="#c9d1d9" text-anchor="middle">Tool Integration &amp; Interop…</text>
+<rect x="794" y="96" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="872" y="119" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P4</text>
+<text x="872" y="137" font-size="9" fill="#c9d1d9" text-anchor="middle">Security, Isolation &amp; Auth…</text>
+<polygon points="872,77 881,86 872,95 863,86" fill="#d2a8ff" stroke="#e6edf3" stroke-width="1" data-hitl="true"/>
+<rect x="986" y="96" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="1064" y="119" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P5</text>
+<text x="1064" y="137" font-size="9" fill="#c9d1d9" text-anchor="middle">Validation, HITL &amp; Self-Le…</text>
+<polygon points="1064,77 1073,86 1064,95 1055,86" fill="#d2a8ff" stroke="#e6edf3" stroke-width="1" data-hitl="true"/>
+<rect x="1178" y="96" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="1256" y="119" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P6</text>
+<text x="1256" y="137" font-size="9" fill="#c9d1d9" text-anchor="middle">Code Generation, Testing &amp;…</text>
+<rect x="26" y="220" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="104" y="243" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P7</text>
+<text x="104" y="261" font-size="9" fill="#c9d1d9" text-anchor="middle">Domain &amp; Market Research</text>
+<rect x="218" y="220" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="296" y="243" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P8</text>
+<text x="296" y="261" font-size="9" fill="#c9d1d9" text-anchor="middle">Dynamic UI/UX Prototyping</text>
+<polygon points="296,201 305,210 296,219 287,210" fill="#d2a8ff" stroke="#e6edf3" stroke-width="1" data-hitl="true"/>
+<rect x="410" y="220" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="488" y="243" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P9</text>
+<text x="488" y="261" font-size="9" fill="#c9d1d9" text-anchor="middle">CI/CD &amp; Cloud Deployment R…</text>
+<polygon points="488,201 497,210 488,219 479,210" fill="#d2a8ff" stroke="#e6edf3" stroke-width="1" data-hitl="true"/>
+<rect x="602" y="220" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="680" y="243" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P10</text>
+<text x="680" y="261" font-size="9" fill="#c9d1d9" text-anchor="middle">Local Agent &amp; Edge Inferen…</text>
+<rect x="794" y="220" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="872" y="243" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P11</text>
+<text x="872" y="261" font-size="9" fill="#c9d1d9" text-anchor="middle">Real-Time Web &amp; Tool Augme…</text>
+<rect x="986" y="220" width="156" height="58" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25" data-state="complete"/>
+<text x="1064" y="243" font-size="12" fill="#7ee787" font-weight="700" text-anchor="middle">P12</text>
+<text x="1064" y="261" font-size="9" fill="#c9d1d9" text-anchor="middle">Documentation &amp; Technical …</text>
+<rect x="26" y="294" width="10" height="10" rx="6" fill="#0d2f1c" stroke="#3fb950" stroke-width="1.25"/>
+<text x="42" y="304" font-size="9.5" fill="#8b949e">complete</text>
+<rect x="148" y="294" width="10" height="10" rx="6" fill="#33280a" stroke="#f5a623" stroke-width="1.25"/>
+<text x="164" y="304" font-size="9.5" fill="#8b949e">current</text>
+<rect x="270" y="294" width="10" height="10" rx="6" fill="#0e2233" stroke="#58a6ff" stroke-width="1.25"/>
+<text x="286" y="304" font-size="9.5" fill="#8b949e">ready</text>
+<rect x="392" y="294" width="10" height="10" rx="6" fill="#10151c" stroke="#2d333b" stroke-width="1.25"/>
+<text x="408" y="304" font-size="9.5" fill="#8b949e">locked</text>
+<rect x="514" y="294" width="10" height="10" rx="6" fill="#331315" stroke="#f85149" stroke-width="1.25"/>
+<text x="530" y="304" font-size="9.5" fill="#8b949e">blocked</text>
+<rect x="636" y="294" width="10" height="10" rx="6" fill="#241235" stroke="#d2a8ff" stroke-width="1.25"/>
+<text x="652" y="304" font-size="9.5" fill="#8b949e">awaiting_hitl</text>
+<polygon points="763,285 772,294 763,303 754,294" fill="#d2a8ff" stroke="#e6edf3" stroke-width="1"/>
+<text x="779" y="304" font-size="9.5" fill="#8b949e">HITL gate</text>
+</svg>

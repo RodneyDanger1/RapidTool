@@ -1,0 +1,1346 @@
+{
+  "0": "A",
+  "1": " ",
+  "2": "p",
+  "3": "e",
+  "4": "r",
+  "5": "s",
+  "6": "o",
+  "7": "n",
+  "8": "a",
+  "9": "l",
+  "10": " ",
+  "11": "r",
+  "12": "e",
+  "13": "c",
+  "14": "i",
+  "15": "p",
+  "16": "e",
+  "17": " ",
+  "18": "b",
+  "19": "o",
+  "20": "x",
+  "21": ":",
+  "22": " ",
+  "23": "C",
+  "24": "L",
+  "25": "I",
+  "26": "-",
+  "27": "f",
+  "28": "i",
+  "29": "r",
+  "30": "s",
+  "31": "t",
+  "32": " ",
+  "33": "t",
+  "34": "o",
+  "35": "o",
+  "36": "l",
+  "37": " ",
+  "38": "t",
+  "39": "o",
+  "40": " ",
+  "41": "a",
+  "42": "d",
+  "43": "d",
+  "44": ",",
+  "45": " ",
+  "46": "t",
+  "47": "a",
+  "48": "g",
+  "49": ",",
+  "50": " ",
+  "51": "a",
+  "52": "n",
+  "53": "d",
+  "54": " ",
+  "55": "s",
+  "56": "e",
+  "57": "a",
+  "58": "r",
+  "59": "c",
+  "60": "h",
+  "61": " ",
+  "62": "r",
+  "63": "e",
+  "64": "c",
+  "65": "i",
+  "66": "p",
+  "67": "e",
+  "68": "s",
+  "69": " ",
+  "70": "w",
+  "71": "i",
+  "72": "t",
+  "73": "h",
+  "74": " ",
+  "75": "a",
+  "76": " ",
+  "77": "w",
+  "78": "e",
+  "79": "e",
+  "80": "k",
+  "81": "l",
+  "82": "y",
+  "83": " ",
+  "84": "m",
+  "85": "e",
+  "86": "a",
+  "87": "l",
+  "88": "-",
+  "89": "p",
+  "90": "l",
+  "91": "a",
+  "92": "n",
+  "93": " ",
+  "94": "p",
+  "95": "r",
+  "96": "i",
+  "97": "n",
+  "98": "t",
+  "99": "o",
+  "100": "u",
+  "101": "t",
+  "102": ".",
+  "id": "dd4e112a-14fb-4e13-a489-d5b167e276a6",
+  "name": "Fixture",
+  "brief": "Build a field-service dispatch board for HVAC: jobs, techs, parts, same-day reroutes. Offline warehouse scan.",
+  "domain": "logistics",
+  "createdAt": 1788698726406,
+  "status": "complete",
+  "currentPhase": 12,
+  "phases": [
+    {
+      "id": 0,
+      "status": "complete",
+      "startedAt": 1788698726450,
+      "completedAt": 1788698726450
+    },
+    {
+      "id": 1,
+      "status": "complete",
+      "startedAt": 1788698726454,
+      "completedAt": 1788698726454
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "startedAt": 1788698726458,
+      "completedAt": 1788698726458
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "startedAt": 1788698726460,
+      "completedAt": 1788698726460
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "startedAt": 1788698726464,
+      "completedAt": 1788698726466,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3527188654",
+        "checkedAt": 1788698726466
+      }
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "startedAt": 1788698726469,
+      "completedAt": 1788698726470,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "2951452883",
+        "checkedAt": 1788698726470
+      }
+    },
+    {
+      "id": 6,
+      "status": "complete",
+      "startedAt": 1788698726474,
+      "completedAt": 1788698726474
+    },
+    {
+      "id": 7,
+      "status": "complete",
+      "startedAt": 1788698726476,
+      "completedAt": 1788698726476
+    },
+    {
+      "id": 8,
+      "status": "complete",
+      "startedAt": 1788698726479,
+      "completedAt": 1788698726481,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "606175358",
+        "checkedAt": 1788698726481
+      }
+    },
+    {
+      "id": 9,
+      "status": "complete",
+      "startedAt": 1788698726483,
+      "completedAt": 1788698726483,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3030540723",
+        "checkedAt": 1788698726483
+      }
+    },
+    {
+      "id": 10,
+      "status": "complete",
+      "startedAt": 1788698726487,
+      "completedAt": 1788698726487
+    },
+    {
+      "id": 11,
+      "status": "complete",
+      "startedAt": 1788698726489,
+      "completedAt": 1788698726489
+    },
+    {
+      "id": 12,
+      "status": "complete",
+      "startedAt": 1788698726492,
+      "completedAt": 1788698726492
+    }
+  ],
+  "scorecard": {
+    "overall": 6.8,
+    "verdict": "proceed-with-guards",
+    "axes": [
+      {
+        "key": "feasibility",
+        "label": "Technical feasibility",
+        "score": 3,
+        "note": "Typed contracts + sequential graph."
+      },
+      {
+        "key": "scale",
+        "label": "Scale headroom",
+        "score": 9,
+        "note": "Stateless workers + durable checkpoints."
+      },
+      {
+        "key": "security",
+        "label": "Security posture",
+        "score": 7,
+        "note": "Scheduler Δ0."
+      },
+      {
+        "key": "api",
+        "label": "API / rate-limit risk",
+        "score": 7,
+        "note": "Live-tool Δ1."
+      },
+      {
+        "key": "delivery",
+        "label": "Delivery confidence",
+        "score": 8,
+        "note": "Phased graph prevents skipped work."
+      }
+    ],
+    "bottlenecks": [
+      "Long-running tools must stream over WebSocket MCP.",
+      "HITL rejection without a qualitative note is illegal.",
+      "Constraint: same-day",
+      "Constraint: offline"
+    ],
+    "attackVectors": [
+      "Prompt injection via ingested competitor pages.",
+      "Tool-call privilege escalation if OAuth scopes are inherited.",
+      "Sandbox escape if generated exec has network."
+    ],
+    "libraries": [
+      {
+        "name": "TanStack Start",
+        "role": "Typed app shell and file routes"
+      },
+      {
+        "name": "Zod",
+        "role": "Schema lock on generated artifacts"
+      },
+      {
+        "name": "Geo/dispatch SDK",
+        "role": "Same-day routing + ETA"
+      },
+      {
+        "name": "Sync engine + local cache",
+        "role": "Offline-first writes"
+      }
+    ]
+  },
+  "competitors": [
+    {
+      "name": "ServiceTitan",
+      "class": "Field-service suite",
+      "strength": "Dispatch + invoicing at scale",
+      "gap": "Heavy, not agent-governed, weak offline isolate",
+      "source": "illustrative"
+    },
+    {
+      "name": "Housecall Pro",
+      "class": "SMB field ops",
+      "strength": "Simple job board",
+      "gap": "No typed job lattice or sandbox regen",
+      "source": "illustrative"
+    },
+    {
+      "name": "Cursor",
+      "class": "IDE-attached agent",
+      "strength": "Repo-aware multi-file edits",
+      "gap": "No agency lifecycle or HITL graph",
+      "source": "illustrative"
+    },
+    {
+      "name": "v0 / Bolt / Lovable",
+      "class": "Prompt-to-app",
+      "strength": "Fast UI scaffolds",
+      "gap": "Skips isolation policy and ADR trail",
+      "source": "illustrative"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "0-scorecard-feasibility-architecture-scoreca",
+      "phase": 0,
+      "kind": "scorecard",
+      "title": "Feasibility & Architecture Scorecard",
+      "body": "# Fixture — Phase 0 scorecard\n\nDomain: logistics\nOverall: 6.8 / 10 — proceed-with-guards\nLattice jobs: dispatch, reroute, scan\nEntities: tech, job, jobs, parts\nConstraints: same-day, offline\n\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 7/10 — Scheduler Δ0.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\n\n## Bottlenecks\n- Long-running tools must stream over WebSocket MCP.\n- HITL rejection without a qualitative note is illegal.\n- Constraint: same-day\n- Constraint: offline\n\n## Attack vectors\n- Prompt injection via ingested competitor pages.\n- Tool-call privilege escalation if OAuth scopes are inherited.\n- Sandbox escape if generated exec has network.\n\n## Recommended libraries\n- TanStack Start: Typed app shell and file routes\n- Zod: Schema lock on generated artifacts\n- Geo/dispatch SDK: Same-day routing + ETA\n- Sync engine + local cache: Offline-first writes"
+    },
+    {
+      "id": "0-algorithm-intent-lattice-a1",
+      "phase": 0,
+      "kind": "algorithm",
+      "title": "Intent Lattice (A1)",
+      "body": "{\n  \"domain\": \"logistics\",\n  \"jobs\": [\n    \"dispatch\",\n    \"reroute\",\n    \"scan\"\n  ],\n  \"entities\": [\n    \"tech\",\n    \"job\",\n    \"jobs\",\n    \"parts\"\n  ],\n  \"constraints\": [\n    \"same-day\",\n    \"offline\"\n  ],\n  \"nodes\": [\n    {\n      \"kind\": \"constraint\",\n      \"label\": \"same-day\",\n      \"weight\": 0.7000000000000001\n    },\n    {\n      \"kind\": \"constraint\",\n      \"label\": \"offline\",\n      \"weight\": 0.7000000000000001\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"tech\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"dispatch\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"reroute\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"scan\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"job\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"jobs\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"parts\",\n      \"weight\": 0.55\n    }\n  ],\n  \"complexity\": 9.05,\n  \"vague\": false\n}",
+      "language": "json"
+    },
+    {
+      "id": "1-graph-dispatcher-topology",
+      "phase": 1,
+      "kind": "graph",
+      "title": "Dispatcher topology",
+      "body": "root_coordinator\n  ├─ intent.LlmAgent          (classify + tool select)\n  ├─ workflow.sequential      (phase lock 0→12)\n  ├─ workflow.parallel        (research || schema)\n  ├─ workflow.loop            (test → refactor)\n  └─ failover.LiteLLM         (target architecture — live LLM backend: DeepSeek, E-14)\n\ntransfer_to_agent allowed only when:\n  • current phase status = complete | awaiting_hitl\n  • target phase = current | current+1\n  • schema transition table accepts the edge\n\nInvalid graph jumps are rejected — LlmAgent cannot coerce them.",
+      "language": "text"
+    },
+    {
+      "id": "2-memory-checkpoint-retrieval-plan",
+      "phase": 2,
+      "kind": "memory",
+      "title": "Checkpoint + retrieval plan",
+      "body": "Durable checkpoint key: project:dd4e112a-14fb-4e13-a489-d5b167e276a6:phase:{n}\nResume policy: restore last complete phase; never replay HITL-approved edges.\n\nHierarchical memory\n  episodic  → raw phase logs\n  semantic  → condensed insights\n  procedural→ graph rules\n\nRetrieval: RRF(k=60) over workspace + LTM, then cross-encoder re-rank.\nBoth external RAG and internal LTM share the same re-ranker."
+    },
+    {
+      "id": "3-mcp-mcp-a2a-contracts",
+      "phase": 3,
+      "kind": "mcp",
+      "title": "MCP + A2A contracts",
+      "body": "{\n  \"mcp_client\": \"universal-json-schema\",\n  \"servers\": [\n    {\n      \"name\": \"search.brave\",\n      \"transport\": \"stdio+ws\",\n      \"stream\": true\n    },\n    {\n      \"name\": \"repo.fs\",\n      \"transport\": \"stdio\"\n    },\n    {\n      \"name\": \"sandbox.exec\",\n      \"transport\": \"ws\",\n      \"stream\": true\n    }\n  ],\n  \"a2a\": {\n    \"version\": \"1.0\",\n    \"expose_internal_state\": false\n  },\n  \"long_running\": \"websocket progress frames every 250ms\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "4-security-isolation-policy",
+      "phase": 4,
+      "kind": "security",
+      "title": "Isolation policy",
+      "body": "Runtime: sync-template\nRAM cap: null MB\nTimeout: 30s\nNetwork during generated-code exec: deny\nPrivilege: drop-all capabilities, no escalation\n\nAuthorization\n  • Every tool call carries the invoking user OAuth scope\n  • Elevated actions outside user scope are refused\n  • Secrets never enter the isolate — proxy tokens only\n\nImplementation today: Engine-template runner (bounded, engine-authored code only) — policy above is the P4 declaration (B-18 honesty)."
+    },
+    {
+      "id": "5-validation-adversarial-suite-hitl-contract",
+      "phase": 5,
+      "kind": "validation",
+      "title": "Adversarial suite + HITL contract",
+      "body": "Simulated user paths\n  1. Empty brief → refuse, stay on intake\n  2. Skip-to-deploy request → invalid transition\n  3. Tool call with foreign user id → authorize deny\n  4. HITL reject with no note → blocked until note exists\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step."
+    },
+    {
+      "id": "6-code-typed-synthesis-module",
+      "phase": 6,
+      "kind": "code",
+      "title": "Typed synthesis module",
+      "body": "const JOBS = [\"dispatch\", \"reroute\", \"scan\"];\nconst REJECTION = \"\";\nfunction synthesize(spec) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Fixture\", phase: 6, job: \"dispatch\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"dispatch\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"dispatch\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"dispatch\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+      "language": "javascript"
+    },
+    {
+      "id": "6-code-sandbox-result",
+      "phase": 6,
+      "kind": "code",
+      "title": "Sandbox result",
+      "body": "{\n  \"ok\": true,\n  \"detail\": \"tests.pass\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "7-research-competitive-analysis-matrix",
+      "phase": 7,
+      "kind": "research",
+      "title": "Competitive analysis matrix",
+      "body": "# Market position — Fixture\n\n> Illustrative competitor templates (source: illustrative — NOT live research). Verify before citing.\n\n## ServiceTitan (Field-service suite)\nSource: illustrative template\nStrength: Dispatch + invoicing at scale\nGap RapidTool exploits: Heavy, not agent-governed, weak offline isolate\n## Housecall Pro (SMB field ops)\nSource: illustrative template\nStrength: Simple job board\nGap RapidTool exploits: No typed job lattice or sandbox regen\n## Cursor (IDE-attached agent)\nSource: illustrative template\nStrength: Repo-aware multi-file edits\nGap RapidTool exploits: No agency lifecycle or HITL graph\n## v0 / Bolt / Lovable (Prompt-to-app)\nSource: illustrative template\nStrength: Fast UI scaffolds\nGap RapidTool exploits: Skips isolation policy and ADR trail\n\nArchitectural advantage: deterministic 0–12 graph with HITL, MCP/A2A, and ADRs — generators skip this; IDEs leave it to the human."
+    },
+    {
+      "id": "8-ui-interface-contract",
+      "phase": 8,
+      "kind": "ui",
+      "title": "Interface contract",
+      "body": "Framework: React + Tailwind (component agents)\nState: client store hydrated from phase checkpoints\nSync rule: every control binds a named store field — no orphan local state\nPreview: live canvas for HITL layout approval\nSurfaces: intake, phase rail, scorecard, artifact inspector, approval dock"
+    },
+    {
+      "id": "9-cicd-github-actions-workflow",
+      "phase": 9,
+      "kind": "cicd",
+      "title": "GitHub Actions workflow",
+      "body": "name: rapidtool-gate\non: [pull_request]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n      - run: npm ci\n      - run: npm run typecheck\n      - run: npm test",
+      "language": "yaml"
+    },
+    {
+      "id": "9-cicd-iac-sketch",
+      "phase": 9,
+      "kind": "cicd",
+      "title": "IaC sketch",
+      "body": "# GCP + Firebase hosting\nhosting: firebase preview channels\nworkers: cloud run, scale-to-zero\ngpu: provision only for local-edge promotion jobs"
+    },
+    {
+      "id": "10-edge-tiered-inference",
+      "phase": 10,
+      "kind": "edge",
+      "title": "Tiered inference",
+      "body": "Primary: grok-4.5 (architecture, security, HITL summaries)\nEdge: Ollama open-weight models (draft, format, long-context tidy)\nFailover: secondary OpenAI-compatible route, session intact\nSync: edge patches land in the same checkpoint store before P9 promote"
+    },
+    {
+      "id": "11-tools-live-search-mcp-binding",
+      "phase": 11,
+      "kind": "tools",
+      "title": "Live search MCP binding",
+      "body": "{\n  \"provider\": \"brave.search\",\n  \"queries\": [\n    \"logistics architecture patterns 2026\",\n    \"Fixture competitor api limits\"\n  ],\n  \"bind_policy\": \"root LlmAgent may attach new APIs mid-run\",\n  \"restart_required\": false\n}",
+      "language": "json"
+    },
+    {
+      "id": "12-docs-architecture-decision-records",
+      "phase": 12,
+      "kind": "docs",
+      "title": "Architecture Decision Records",
+      "body": "# ADR-001 Graph before code\n\nStatus: accepted\nDecision: Phases 0–12 execute in order with schema-validated transitions.\n\n# ADR-002 HITL requires a reason\n\nStatus: accepted\nDecision: Rejection is illegal without ≥12 characters of qualitative feedback.\n\n# ADR-003 Domain isolate for logistics\n\nStatus: accepted\nDecision: tightness=7.3; extra HITL=none.",
+      "language": "markdown"
+    },
+    {
+      "id": "12-docs-openapi-3-1",
+      "phase": 12,
+      "kind": "docs",
+      "title": "OpenAPI 3.1",
+      "body": "openapi: 3.1.0\ninfo:\n  title: Fixture API\n  version: \"1.0.0\"\npaths:\n  /v1/dispatch:\n    post:\n      summary: dispatch\n      responses:\n        \"200\":\n          description: ok\n  /v1/reroute:\n    post:\n      summary: reroute\n      responses:\n        \"200\":\n          description: ok\n  /v1/scan:\n    post:\n      summary: scan\n      responses:\n        \"200\":\n          description: ok",
+      "language": "yaml"
+    },
+    {
+      "id": "packet-12",
+      "phase": 12,
+      "kind": "packet",
+      "title": "Agent packet (A4)",
+      "body": "# RapidTool Agent Packet v3 — Fixture\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-06T12:45:26.493Z\nproject_id: dd4e112a-14fb-4e13-a489-d5b167e276a6\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-06T12:45:26.493Z\",\n  \"project_id\": \"dd4e112a-14fb-4e13-a489-d5b167e276a6\",\n  \"name\": \"Fixture\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": true\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788698726464,\n      \"decided_at\": 1788698726466\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788698726469,\n      \"decided_at\": 1788698726470\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788698726479,\n      \"decided_at\": 1788698726481\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788698726483,\n      \"decided_at\": 1788698726483\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    }\n  ]\n}\n```\n\n## Mission\nBuild a field-service dispatch board for HVAC: jobs, techs, parts, same-day reroutes. Offline warehouse scan.\n\n## Intent lattice (A1)\nDomain: logistics\nJobs: dispatch, reroute, scan\nEntities: tech, job, jobs, parts\nConstraints: same-day, offline\nComplexity: 9.1 / 10\n\n## Scheduler (A3)\nTightness 7.3 · security Δ0 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for dispatch, reroute, scan before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: same-day, offline.\n\n## Spec graph order (A5)\n- [architect] src/domain/logistics.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/dispatch.ts — Implement job “dispatch” against the contract\n- [implementer] src/jobs/reroute.ts — Implement job “reroute” against the contract\n- [implementer] src/jobs/scan.ts — Implement job “scan” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Tech: id:ulid, status:enum, updatedAt:datetime\n- Job: id:ulid, assigneeId:ulid, slaDue:datetime, status:enum\n- Jobs: id:ulid, assigneeId:ulid, slaDue:datetime, status:enum\n- Parts: id:ulid, status:enum, updatedAt:datetime\n- Dispatch: id:ulid, status:enum, updatedAt:datetime\n- Reroute: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/dispatch (dispatch)\n- POST /v1/reroute (reroute)\n- POST /v1/scan (scan)\n\n## Oracle (A7)\n- job.dispatch.happy: Authorized operator submits “dispatch” with a valid tech ⇒ 200 + persisted entity + checkpoint written\n- job.reroute.happy: Authorized operator submits “reroute” with a valid tech ⇒ 200 + persisted entity + checkpoint written\n- job.scan.happy: Authorized operator submits “scan” with a valid tech ⇒ 200 + persisted entity + checkpoint written\n- constraint.same-day: Request violates same-day ⇒ 403 or 422; no side effect; diagnostic JSON\n- constraint.offline: Request violates offline ⇒ 403 or 422; no side effect; diagnostic JSON\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · human · 2026-09-06T12:45:26.466Z\n- P5 · approve · human · 2026-09-06T12:45:26.470Z\n- P8 · approve · human · 2026-09-06T12:45:26.481Z\n- P9 · approve · human · 2026-09-06T12:45:26.483Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.368] Domain logistics; jobs dispatch, reroute, scan.\n2. [procedural 0.283] HITL reject requires a written reason.\n3. [procedural 0.262] State transition validation wraps every transfer_to_agent.\n4. [semantic 0.260] Generators ship UI fast; RapidTool ships a governed lifecycle.\n5. [procedural 0.260] Generated code executes air-gapped inside the isolate.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 6.8/10 (proceed-with-guards)\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 7/10 — Scheduler Δ0.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.; Constraint: same-day; Constraint: offline\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P7 · Competitive analysis matrix\n# Market position — Fixture\n\n> Illustrative competitor templates (source: illustrative — NOT live research). Verify before citing.\n\n## ServiceTitan (Field-service suite)\nSource: illustrative template\nStrength: Dispatch + invoicing at scale\nGap RapidTool exploits: Heavy, not agent-governed, weak offline isolate\n## Housecall Pro (SMB field ops)\nSource: illustrative template\nStrength: Simple job board\nGap RapidTool exploits: No typed job lattice or sandbox regen\n## Cursor (IDE-attached agent)\nSource: illustrative template\nStrength: Repo-aware multi-file edits\nGap RapidTool exploits: No agency lifecycle or HITL graph\n## v0 / Bolt / Lovable (Prompt-to-app)\nSource: illustrative template\nStrength: Fast UI scaffolds\nGap RapidTool exploits: Skips isolation policy and ADR trail\n\nArchitectural advantage: deterministic 0–12 graph with HITL, MCP/A2A, and ADRs — generators skip this; IDEs leave it to …\n\n### P8 · Interface contract\nFramework: React + Tailwind (component agents)\nState: client store hydrated from phase checkpoints\nSync rule: every control binds a named store field — no orphan local state\nPreview: live canvas for HITL layout approval\nSurfaces: intake, phase rail, scorecard, artifact inspector, approval dock\n\n### P9 · GitHub Actions workflow\nname: rapidtool-gate\non: [pull_request]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n      - run: npm ci\n      - run: npm run typecheck\n      - run: npm test\n\n### P9 · IaC sketch\n# GCP + Firebase hosting\nhosting: firebase preview channels\nworkers: cloud run, scale-to-zero\ngpu: provision only for local-edge promotion jobs\n\n### P10 · Tiered inference\nPrimary: grok-4.5 (architecture, security, HITL summaries)\nEdge: Ollama open-weight models (draft, format, long-context tidy)\nFailover: secondary OpenAI-compatible route, session intact\nSync: edge patches land in the same checkpoint store before P9 promote\n\n### P11 · Live search MCP binding\n{\n  \"provider\": \"brave.search\",\n  \"queries\": [\n    \"logistics architecture patterns 2026\",\n    \"Fixture competitor api limits\"\n  ],\n  \"bind_policy\": \"root LlmAgent may attach new APIs mid-run\",\n  \"restart_required\": false\n}\n\n### P12 · Architecture Decision Records\n# ADR-001 Graph before code\n\nStatus: accepted\nDecision: Phases 0–12 execute in order with schema-validated transitions.\n\n# ADR-002 HITL requires a reason\n\nStatus: accepted\nDecision: Rejection is illegal without ≥12 characters of qualitative feedback.\n\n# ADR-003 Domain isolate for logistics\n\nStatus: accepted\nDecision: tightness=7.3; extra HITL=none.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Fixture API\n  version: \"1.0.0\"\npaths:\n  /v1/dispatch:\n    post:\n      summary: dispatch\n      responses:\n        \"200\":\n          description: ok\n  /v1/reroute:\n    post:\n      summary: reroute\n      responses:\n        \"200\":\n          description: ok\n  /v1/scan:\n    post:\n      summary: scan\n      responses:\n        \"200\":\n          description: ok\n\n## ADRs\n# ADR-001 Graph before code\n\nStatus: accepted\nDecision: Phases 0–12 execute in order with schema-validated transitions.\n\n# ADR-002 HITL requires a reason\n\nStatus: accepted\nDecision: Rejection is illegal without ≥12 characters of qualitative feedback.\n\n# ADR-003 Domain isolate for logistics\n\nStatus: accepted\nDecision: tightness=7.3; extra HITL=none.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Fixture API\n  version: \"1.0.0\"\npaths:\n  /v1/dispatch:\n    post:\n      summary: dispatch\n      responses:\n        \"200\":\n          description: ok\n  /v1/reroute:\n    post:\n      summary: reroute\n      responses:\n        \"200\":\n          description: ok\n  /v1/scan:\n    post:\n      summary: scan\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+      "language": "markdown"
+    }
+  ],
+  "memory": [
+    {
+      "id": "12-semantic-0.97",
+      "kind": "semantic",
+      "phase": 12,
+      "text": "ADRs capture why P1 and P7 chose this topology.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "11-episodic-0.87",
+      "kind": "episodic",
+      "phase": 11,
+      "text": "Brave Search MCP bound for live market intel.",
+      "score": 0.87,
+      "source": "engine"
+    },
+    {
+      "id": "10-procedural-0.9",
+      "kind": "procedural",
+      "phase": 10,
+      "text": "Edge drafts never skip the primary orchestrator on deploy.",
+      "score": 0.9,
+      "source": "engine"
+    },
+    {
+      "id": "9-procedural-0.96",
+      "kind": "procedural",
+      "phase": 9,
+      "text": "PRs cannot merge without typecheck + tests.",
+      "score": 0.96,
+      "source": "engine"
+    },
+    {
+      "id": "8-procedural-0.92",
+      "kind": "procedural",
+      "phase": 8,
+      "text": "UI state hooks the same checkpoint store as backend nodes.",
+      "score": 0.92,
+      "source": "engine"
+    },
+    {
+      "id": "7-semantic-0.95",
+      "kind": "semantic",
+      "phase": 7,
+      "text": "Generators ship UI fast; RapidTool ships a governed lifecycle.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "6-episodic-0.86",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "5-procedural-0.99",
+      "kind": "procedural",
+      "phase": 5,
+      "text": "HITL reject requires a written reason.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "4-procedural-0.98",
+      "kind": "procedural",
+      "phase": 4,
+      "text": "Generated code executes air-gapped inside the isolate.",
+      "score": 0.98,
+      "source": "engine"
+    },
+    {
+      "id": "3-procedural-0.93",
+      "kind": "procedural",
+      "phase": 3,
+      "text": "Long-running tools stream over MCP WebSockets.",
+      "score": 0.93,
+      "source": "engine"
+    },
+    {
+      "id": "2-semantic-0.94",
+      "kind": "semantic",
+      "phase": 2,
+      "text": "RRF + cross-encoder applies to RAG and long-term memory.",
+      "score": 0.94,
+      "source": "engine"
+    },
+    {
+      "id": "2-episodic-0.88",
+      "kind": "episodic",
+      "phase": 2,
+      "text": "Checkpoint written for Fixture after P1.",
+      "score": 0.88,
+      "source": "engine"
+    },
+    {
+      "id": "1-procedural-0.99",
+      "kind": "procedural",
+      "phase": 1,
+      "text": "State transition validation wraps every transfer_to_agent.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "0-episodic-0.91",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Ingested brief for Fixture in logistics.",
+      "score": 0.91,
+      "source": "engine"
+    },
+    {
+      "id": "0-semantic-0.97",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Scorecard must exist before any code node fires.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "boot-sem",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Domain logistics; jobs dispatch, reroute, scan.",
+      "score": 0.8,
+      "source": "engine"
+    },
+    {
+      "id": "boot-proc",
+      "kind": "procedural",
+      "phase": 0,
+      "text": "Graph is sequential 0–12. HITL on P4, P5, P8, P9. Rejection needs ≥12 characters.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "boot-epi",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Constraints declared: same-day, offline.",
+      "score": 0.7,
+      "source": "engine"
+    }
+  ],
+  "logs": [
+    {
+      "ts": 1788698726406,
+      "phase": 0,
+      "level": "info",
+      "event": "project.created",
+      "detail": "logistics"
+    },
+    {
+      "ts": 1788698726448,
+      "phase": 0,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P0 Deep Research & Feasibility"
+    },
+    {
+      "ts": 1788698726449,
+      "phase": 0,
+      "level": "info",
+      "event": "scorecard.ready",
+      "detail": "overall=6.8 verdict=proceed-with-guards"
+    },
+    {
+      "ts": 1788698726451,
+      "phase": 0,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726454,
+      "phase": 1,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P1 Core Orchestration & State Graph"
+    },
+    {
+      "ts": 1788698726454,
+      "phase": 1,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726458,
+      "phase": 2,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P2 Memory & Context Consolidation"
+    },
+    {
+      "ts": 1788698726458,
+      "phase": 2,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726460,
+      "phase": 3,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P3 Tool Integration & Interoperability"
+    },
+    {
+      "ts": 1788698726460,
+      "phase": 3,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726464,
+      "phase": 4,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P4 Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1788698726464,
+      "phase": 4,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726466,
+      "phase": 4,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1788698726469,
+      "phase": 5,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P5 Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1788698726469,
+      "phase": 5,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726470,
+      "phase": 5,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1788698726472,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1788698726474,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1788698726474,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726476,
+      "phase": 7,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P7 Domain & Market Research"
+    },
+    {
+      "ts": 1788698726477,
+      "phase": 7,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726479,
+      "phase": 8,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P8 Dynamic UI/UX Prototyping"
+    },
+    {
+      "ts": 1788698726479,
+      "phase": 8,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726481,
+      "phase": 8,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Dynamic UI/UX Prototyping"
+    },
+    {
+      "ts": 1788698726483,
+      "phase": 9,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P9 CI/CD & Cloud Deployment Routing"
+    },
+    {
+      "ts": 1788698726483,
+      "phase": 9,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726483,
+      "phase": 9,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "CI/CD & Cloud Deployment Routing"
+    },
+    {
+      "ts": 1788698726487,
+      "phase": 10,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P10 Local Agent & Edge Inference"
+    },
+    {
+      "ts": 1788698726487,
+      "phase": 10,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726489,
+      "phase": 11,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P11 Real-Time Web & Tool Augmentation"
+    },
+    {
+      "ts": 1788698726489,
+      "phase": 11,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788698726492,
+      "phase": 12,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P12 Documentation & Technical Specs"
+    },
+    {
+      "ts": 1788698726495,
+      "phase": 12,
+      "level": "info",
+      "event": "delivery.complete",
+      "detail": "All 13 phases sealed."
+    },
+    {
+      "ts": 1788698726492,
+      "phase": 12,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    }
+  ],
+  "hitl": null,
+  "decisions": [
+    {
+      "id": "hitl-4-1788698726466",
+      "phase": 4,
+      "title": "Approve isolation policy",
+      "decision": "approve",
+      "decidedBy": "human",
+      "requestedAt": 1788698726464,
+      "decidedAt": 1788698726466
+    },
+    {
+      "id": "hitl-5-1788698726470",
+      "phase": 5,
+      "title": "Approve validation contract",
+      "decision": "approve",
+      "decidedBy": "human",
+      "requestedAt": 1788698726469,
+      "decidedAt": 1788698726470
+    },
+    {
+      "id": "hitl-8-1788698726481",
+      "phase": 8,
+      "title": "Approve interface layout",
+      "decision": "approve",
+      "decidedBy": "human",
+      "requestedAt": 1788698726479,
+      "decidedAt": 1788698726481
+    },
+    {
+      "id": "hitl-9-1788698726483",
+      "phase": 9,
+      "title": "Approve production routing",
+      "decision": "approve",
+      "decidedBy": "human",
+      "requestedAt": 1788698726483,
+      "decidedAt": 1788698726483
+    }
+  ],
+  "modelRoute": "deterministic",
+  "sandbox": {
+    "runtime": "sync-template",
+    "ramMb": null,
+    "timeoutS": 30,
+    "isolated": true
+  },
+  "openapi": "openapi: 3.1.0\ninfo:\n  title: Fixture API\n  version: \"1.0.0\"\npaths:\n  /v1/dispatch:\n    post:\n      summary: dispatch\n      responses:\n        \"200\":\n          description: ok\n  /v1/reroute:\n    post:\n      summary: reroute\n      responses:\n        \"200\":\n          description: ok\n  /v1/scan:\n    post:\n      summary: scan\n      responses:\n        \"200\":\n          description: ok",
+  "adr": "# ADR-001 Graph before code\n\nStatus: accepted\nDecision: Phases 0–12 execute in order with schema-validated transitions.\n\n# ADR-002 HITL requires a reason\n\nStatus: accepted\nDecision: Rejection is illegal without ≥12 characters of qualitative feedback.\n\n# ADR-003 Domain isolate for logistics\n\nStatus: accepted\nDecision: tightness=7.3; extra HITL=none.",
+  "lattice": {
+    "domain": "logistics",
+    "jobs": [
+      "dispatch",
+      "reroute",
+      "scan"
+    ],
+    "entities": [
+      "tech",
+      "job",
+      "jobs",
+      "parts"
+    ],
+    "constraints": [
+      "same-day",
+      "offline"
+    ],
+    "nodes": [
+      {
+        "kind": "constraint",
+        "label": "same-day",
+        "weight": 0.7000000000000001
+      },
+      {
+        "kind": "constraint",
+        "label": "offline",
+        "weight": 0.7000000000000001
+      },
+      {
+        "kind": "actor",
+        "label": "tech",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "dispatch",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "reroute",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "scan",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "job",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "jobs",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "parts",
+        "weight": 0.55
+      }
+    ],
+    "complexity": 9.05,
+    "vague": false
+  },
+  "schedule": {
+    "securityDelta": 0,
+    "apiDelta": 1,
+    "tightness": 7.3,
+    "extraHitl": [],
+    "notes": [
+      "Standard isolate policy.",
+      "Default API budget.",
+      "Stock HITL set (P4, P5, P8, P9)."
+    ]
+  },
+  "traces": [
+    {
+      "id": "A1",
+      "name": "Intent Lattice",
+      "ranAt": 1788698726492,
+      "summary": "9 nodes · complexity 9.1"
+    },
+    {
+      "id": "A2",
+      "name": "FusionRank",
+      "ranAt": 1788698726492,
+      "summary": "ranked 18 memory rows for the packet"
+    },
+    {
+      "id": "A3",
+      "name": "Constraint Scheduler",
+      "ranAt": 1788698726492,
+      "summary": "tightness 7.3 · sec+0"
+    },
+    {
+      "id": "A4",
+      "name": "Agent Packet",
+      "ranAt": 1788698726492,
+      "summary": "compiled P12 packet"
+    },
+    {
+      "id": "A5",
+      "name": "Spec Graph",
+      "ranAt": 1788698726492,
+      "summary": "8 files · order schema → api → store"
+    },
+    {
+      "id": "A6",
+      "name": "Contract Synth",
+      "ranAt": 1788698726492,
+      "summary": "6 entities · 3 endpoints"
+    },
+    {
+      "id": "A7",
+      "name": "Test Oracle",
+      "ranAt": 1788698726492,
+      "summary": "6 cases"
+    },
+    {
+      "id": "A8",
+      "name": "Crew Router",
+      "ranAt": 1788698726492,
+      "summary": "airt · 7300 tok"
+    }
+  ],
+  "packet": "# RapidTool Agent Packet v3 — Fixture\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-06T12:45:26.493Z\nproject_id: dd4e112a-14fb-4e13-a489-d5b167e276a6\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-06T12:45:26.493Z\",\n  \"project_id\": \"dd4e112a-14fb-4e13-a489-d5b167e276a6\",\n  \"name\": \"Fixture\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": true\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788698726464,\n      \"decided_at\": 1788698726466\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788698726469,\n      \"decided_at\": 1788698726470\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788698726479,\n      \"decided_at\": 1788698726481\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788698726483,\n      \"decided_at\": 1788698726483\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": null\n    }\n  ]\n}\n```\n\n## Mission\nBuild a field-service dispatch board for HVAC: jobs, techs, parts, same-day reroutes. Offline warehouse scan.\n\n## Intent lattice (A1)\nDomain: logistics\nJobs: dispatch, reroute, scan\nEntities: tech, job, jobs, parts\nConstraints: same-day, offline\nComplexity: 9.1 / 10\n\n## Scheduler (A3)\nTightness 7.3 · security Δ0 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for dispatch, reroute, scan before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: same-day, offline.\n\n## Spec graph order (A5)\n- [architect] src/domain/logistics.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/dispatch.ts — Implement job “dispatch” against the contract\n- [implementer] src/jobs/reroute.ts — Implement job “reroute” against the contract\n- [implementer] src/jobs/scan.ts — Implement job “scan” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Tech: id:ulid, status:enum, updatedAt:datetime\n- Job: id:ulid, assigneeId:ulid, slaDue:datetime, status:enum\n- Jobs: id:ulid, assigneeId:ulid, slaDue:datetime, status:enum\n- Parts: id:ulid, status:enum, updatedAt:datetime\n- Dispatch: id:ulid, status:enum, updatedAt:datetime\n- Reroute: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/dispatch (dispatch)\n- POST /v1/reroute (reroute)\n- POST /v1/scan (scan)\n\n## Oracle (A7)\n- job.dispatch.happy: Authorized operator submits “dispatch” with a valid tech ⇒ 200 + persisted entity + checkpoint written\n- job.reroute.happy: Authorized operator submits “reroute” with a valid tech ⇒ 200 + persisted entity + checkpoint written\n- job.scan.happy: Authorized operator submits “scan” with a valid tech ⇒ 200 + persisted entity + checkpoint written\n- constraint.same-day: Request violates same-day ⇒ 403 or 422; no side effect; diagnostic JSON\n- constraint.offline: Request violates offline ⇒ 403 or 422; no side effect; diagnostic JSON\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · human · 2026-09-06T12:45:26.466Z\n- P5 · approve · human · 2026-09-06T12:45:26.470Z\n- P8 · approve · human · 2026-09-06T12:45:26.481Z\n- P9 · approve · human · 2026-09-06T12:45:26.483Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.368] Domain logistics; jobs dispatch, reroute, scan.\n2. [procedural 0.283] HITL reject requires a written reason.\n3. [procedural 0.262] State transition validation wraps every transfer_to_agent.\n4. [semantic 0.260] Generators ship UI fast; RapidTool ships a governed lifecycle.\n5. [procedural 0.260] Generated code executes air-gapped inside the isolate.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 6.8/10 (proceed-with-guards)\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 7/10 — Scheduler Δ0.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.; Constraint: same-day; Constraint: offline\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P7 · Competitive analysis matrix\n# Market position — Fixture\n\n> Illustrative competitor templates (source: illustrative — NOT live research). Verify before citing.\n\n## ServiceTitan (Field-service suite)\nSource: illustrative template\nStrength: Dispatch + invoicing at scale\nGap RapidTool exploits: Heavy, not agent-governed, weak offline isolate\n## Housecall Pro (SMB field ops)\nSource: illustrative template\nStrength: Simple job board\nGap RapidTool exploits: No typed job lattice or sandbox regen\n## Cursor (IDE-attached agent)\nSource: illustrative template\nStrength: Repo-aware multi-file edits\nGap RapidTool exploits: No agency lifecycle or HITL graph\n## v0 / Bolt / Lovable (Prompt-to-app)\nSource: illustrative template\nStrength: Fast UI scaffolds\nGap RapidTool exploits: Skips isolation policy and ADR trail\n\nArchitectural advantage: deterministic 0–12 graph with HITL, MCP/A2A, and ADRs — generators skip this; IDEs leave it to …\n\n### P8 · Interface contract\nFramework: React + Tailwind (component agents)\nState: client store hydrated from phase checkpoints\nSync rule: every control binds a named store field — no orphan local state\nPreview: live canvas for HITL layout approval\nSurfaces: intake, phase rail, scorecard, artifact inspector, approval dock\n\n### P9 · GitHub Actions workflow\nname: rapidtool-gate\non: [pull_request]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n      - run: npm ci\n      - run: npm run typecheck\n      - run: npm test\n\n### P9 · IaC sketch\n# GCP + Firebase hosting\nhosting: firebase preview channels\nworkers: cloud run, scale-to-zero\ngpu: provision only for local-edge promotion jobs\n\n### P10 · Tiered inference\nPrimary: grok-4.5 (architecture, security, HITL summaries)\nEdge: Ollama open-weight models (draft, format, long-context tidy)\nFailover: secondary OpenAI-compatible route, session intact\nSync: edge patches land in the same checkpoint store before P9 promote\n\n### P11 · Live search MCP binding\n{\n  \"provider\": \"brave.search\",\n  \"queries\": [\n    \"logistics architecture patterns 2026\",\n    \"Fixture competitor api limits\"\n  ],\n  \"bind_policy\": \"root LlmAgent may attach new APIs mid-run\",\n  \"restart_required\": false\n}\n\n### P12 · Architecture Decision Records\n# ADR-001 Graph before code\n\nStatus: accepted\nDecision: Phases 0–12 execute in order with schema-validated transitions.\n\n# ADR-002 HITL requires a reason\n\nStatus: accepted\nDecision: Rejection is illegal without ≥12 characters of qualitative feedback.\n\n# ADR-003 Domain isolate for logistics\n\nStatus: accepted\nDecision: tightness=7.3; extra HITL=none.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Fixture API\n  version: \"1.0.0\"\npaths:\n  /v1/dispatch:\n    post:\n      summary: dispatch\n      responses:\n        \"200\":\n          description: ok\n  /v1/reroute:\n    post:\n      summary: reroute\n      responses:\n        \"200\":\n          description: ok\n  /v1/scan:\n    post:\n      summary: scan\n      responses:\n        \"200\":\n          description: ok\n\n## ADRs\n# ADR-001 Graph before code\n\nStatus: accepted\nDecision: Phases 0–12 execute in order with schema-validated transitions.\n\n# ADR-002 HITL requires a reason\n\nStatus: accepted\nDecision: Rejection is illegal without ≥12 characters of qualitative feedback.\n\n# ADR-003 Domain isolate for logistics\n\nStatus: accepted\nDecision: tightness=7.3; extra HITL=none.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Fixture API\n  version: \"1.0.0\"\npaths:\n  /v1/dispatch:\n    post:\n      summary: dispatch\n      responses:\n        \"200\":\n          description: ok\n  /v1/reroute:\n    post:\n      summary: reroute\n      responses:\n        \"200\":\n          description: ok\n  /v1/scan:\n    post:\n      summary: scan\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "specGraph": {
+    "nodes": [
+      {
+        "id": "schema",
+        "file": "src/domain/logistics.ts",
+        "purpose": "Typed entities from the lattice",
+        "dependsOn": [],
+        "owner": "architect"
+      },
+      {
+        "id": "api",
+        "file": "src/api/routes.ts",
+        "purpose": "HTTP contracts bound to jobs",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "architect"
+      },
+      {
+        "id": "store",
+        "file": "src/state/store.ts",
+        "purpose": "Checkpointed client/server state",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-0",
+        "file": "src/jobs/dispatch.ts",
+        "purpose": "Implement job “dispatch” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-1",
+        "file": "src/jobs/reroute.ts",
+        "purpose": "Implement job “reroute” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-2",
+        "file": "src/jobs/scan.ts",
+        "purpose": "Implement job “scan” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "ui",
+        "file": "src/ui/console.tsx",
+        "purpose": "Operator surfaces bound to store fields",
+        "dependsOn": [
+          "store",
+          "job-0",
+          "job-1",
+          "job-2"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "tests",
+        "file": "tests/oracle.spec.ts",
+        "purpose": "Acceptance tests from the oracle",
+        "dependsOn": [
+          "api",
+          "ui"
+        ],
+        "owner": "tester"
+      }
+    ],
+    "order": [
+      "schema",
+      "api",
+      "store",
+      "job-0",
+      "job-1",
+      "job-2",
+      "ui",
+      "tests"
+    ]
+  },
+  "contracts": {
+    "entities": [
+      {
+        "name": "Tech",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Job",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "assigneeId",
+            "type": "ulid"
+          },
+          {
+            "name": "slaDue",
+            "type": "datetime"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          }
+        ]
+      },
+      {
+        "name": "Jobs",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "assigneeId",
+            "type": "ulid"
+          },
+          {
+            "name": "slaDue",
+            "type": "datetime"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          }
+        ]
+      },
+      {
+        "name": "Parts",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Dispatch",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Reroute",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/dispatch",
+        "job": "dispatch"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/reroute",
+        "job": "reroute"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/scan",
+        "job": "scan"
+      }
+    ]
+  },
+  "oracle": [
+    {
+      "id": "orc-1",
+      "name": "job.dispatch.happy",
+      "given": "Authorized operator submits “dispatch” with a valid tech",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "dispatch"
+    },
+    {
+      "id": "orc-2",
+      "name": "job.reroute.happy",
+      "given": "Authorized operator submits “reroute” with a valid tech",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "reroute"
+    },
+    {
+      "id": "orc-3",
+      "name": "job.scan.happy",
+      "given": "Authorized operator submits “scan” with a valid tech",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "scan"
+    },
+    {
+      "id": "orc-c-same-day",
+      "name": "constraint.same-day",
+      "given": "Request violates same-day",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "dispatch"
+    },
+    {
+      "id": "orc-c-offline",
+      "name": "constraint.offline",
+      "given": "Request violates offline",
+      "expect": "403 or 422; no side effect; diagnostic JSON",
+      "job": "dispatch"
+    },
+    {
+      "id": "orc-phase",
+      "name": "graph.no-skip",
+      "given": "Agent requests P9 while P4 is open",
+      "expect": "Illegal transition; no deploy artifacts",
+      "job": "graph"
+    }
+  ],
+  "crew": [
+    {
+      "role": "architect",
+      "mandate": "Lock schema and routes for dispatch, reroute, scan before code.",
+      "tools": [
+        "read_repo",
+        "write_spec",
+        "mcp.search"
+      ],
+      "budgetTokens": 1800,
+      "handoff": "Pass Spec Graph order + contracts to implementer. Do not write feature code.",
+      "active": false
+    },
+    {
+      "role": "implementer",
+      "mandate": "Write files in Spec Graph order. Current edge: Documentation & Technical Specs.",
+      "tools": [
+        "edit_file",
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 3200,
+      "handoff": "Stop when oracle tests fail twice; hand traceback to reviewer.",
+      "active": false
+    },
+    {
+      "role": "reviewer",
+      "mandate": "Diff against contracts. Reject invented endpoints and leaked PHI/PII.",
+      "tools": [
+        "read_diff",
+        "comment_pr"
+      ],
+      "budgetTokens": 1400,
+      "handoff": "Approve only if A6 endpoints and A7 oracle are green.",
+      "active": true
+    },
+    {
+      "role": "tester",
+      "mandate": "Run oracle + one adversarial case per constraint.",
+      "tools": [
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 900,
+      "handoff": "Constraints in scope: same-day, offline.",
+      "active": false
+    }
+  ],
+  "notes": "",
+  "generatedSource": "const JOBS = [\"dispatch\", \"reroute\", \"scan\"];\nconst REJECTION = \"\";\nfunction synthesize(spec) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Fixture\", phase: 6, job: \"dispatch\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"dispatch\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"dispatch\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"dispatch\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+  "lastTest": {
+    "ok": true,
+    "detail": "tests.pass"
+  },
+  "_v": 2,
+  "research": [
+    {
+      "query": "fixture live research",
+      "provider": "duckduckgo",
+      "items": [
+        {
+          "title": "Fixture competitor finding",
+          "url": "https://example.com/fixture",
+          "content": "fixture research corpus"
+        }
+      ]
+    }
+  ]
+}

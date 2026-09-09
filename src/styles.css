@@ -1,0 +1,652 @@
+@import "tailwindcss";
+
+@theme {
+  /* ---- RapidTool shell tokens (dark = default). ---------------------------
+     Palette source: src/lib/design.ts — the project's own deterministic
+     design-token engine. The shell identity is the engine's "fintech ·
+     emerald" cast (brand #065f46 / accent #b45309 on fintech neutrals); the
+     dark theme below is that family's deep-mode adaptation (same hue
+     families, lightness raised so every text pairing clears WCAG AA ≥ 4.5:1
+     — verified with the same luminance math design.test.ts uses). Light mode
+     uses the engine's curated hexes verbatim. Provenance table +
+     per-pairing ratios: fixes/79_ui_design.md. --------------------------- */
+  --color-bg: #0a0c0b;
+  --color-surface: #101312;
+  --color-raised: #161a18;
+  --color-overlay: #1c211e;
+  --color-fg: #e8ece7;
+  --color-muted: #97a29b;
+  --color-faint: #7d8881;
+  --color-accent: #9dbfab; /* emerald (engine brand hue, lifted for dark bg) */
+  --color-accent-fg: #0a0c0b; /* text on accent fills (dark theme) */
+  --color-accent-soft: color-mix(in oklab, var(--color-accent) 12%, transparent);
+  --color-border: #2f3832;
+  --color-line: #222825;
+  --color-ok: #8cc493;
+  --color-ok-soft: color-mix(in oklab, var(--color-ok) 13%, transparent);
+  --color-warn: #d9b184;
+  --color-warn-soft: color-mix(in oklab, var(--color-warn) 13%, transparent);
+  --color-danger: #e08e8e;
+  --color-danger-soft: color-mix(in oklab, var(--color-danger) 13%, transparent);
+  /* Wild-mode violet — distinct from every phase tone so the unattended-run
+     surface never reads as ok/warn/danger (B7 pillar: phase badges + wild UI). */
+  --color-wild: #b3a0d9;
+  --color-wild-soft: color-mix(in oklab, var(--color-wild) 14%, transparent);
+  --font-sans: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  /* Tight radii: terminal-pro surfaces over rounded-chunky. */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Dark is the default theme; native form controls, scrollbars, and
+       color-scheme primitives should match the theme instead of flashing light. */
+    color-scheme: dark;
+    scrollbar-color: var(--color-border) transparent;
+  }
+  html[data-theme="light"] {
+    color-scheme: light;
+  }
+  /* html + body carry the full-page surface; there is no #app wrapper (the
+     root route renders <html><body> directly), so none is listed here. */
+  html,
+  body {
+    min-height: 100%;
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+  /* Deep layered backdrop: a faint accent bloom top-right over the flat
+     base keeps long console sessions easy on the eye without stealing
+     attention from surfaces. */
+  body {
+    background-image: radial-gradient(
+        1100px 520px at 85% -12%,
+        color-mix(in oklab, var(--color-accent) 7%, transparent),
+        transparent 65%
+      ),
+      radial-gradient(
+        900px 480px at -10% 110%,
+        color-mix(in oklab, var(--color-wild) 4%, transparent),
+        transparent 60%
+      );
+    background-attachment: fixed;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  /* Visible, theme-consistent keyboard focus for every interactive element:
+     a crisp accent outline with a soft outer glow ring (both themes). */
+  :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-accent) 16%, transparent);
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--color-accent) 35%, transparent);
+    color: var(--color-fg);
+  }
+  /* Consistent thin scrollbars everywhere, not only in scroll-thin regions. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
+}
+
+/* Light theme tokens — the engine's "fintech · emerald" curated values
+   VERBATIM from src/lib/design.ts (NEUTRALS.fintech + the emerald cast +
+   SEMANTIC; design.test.ts re-verifies those pairings ≥ 4.5:1 every run).
+   Tailwind utilities resolve to var(--color-*) custom properties (defined in
+   @theme above), so overriding the properties under data-theme="light"
+   re-themes every surface without touching markup. The dark values remain
+   the default (no attribute) so existing users see no change. */
+html[data-theme="light"] {
+  --color-bg: #edf3f0;
+  --color-surface: #ffffff;
+  --color-raised: #f6f9f8;
+  --color-overlay: #e9efec;
+  --color-fg: #0f1f19;
+  --color-muted: #48625a;
+  --color-faint: #5a6c62;
+  --color-accent: #065f46;
+  --color-accent-fg: #ffffff;
+  --color-border: #bfcac3;
+  --color-line: #dde2dd;
+  --color-ok: #166534;
+  --color-warn: #92400e;
+  --color-danger: #b42318;
+  --color-wild: #6b4f96;
+}
+
+/* ---------- Vault tab (console.tsx) ----------
+   Clickable [[wikilink]] chips inside note bodies. All colors resolve through
+   the --color-* tokens, so they re-theme automatically under data-theme="light"
+   (no raw hex values, per the console's theme contract). */
+.vault-link {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 2px;
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  border: 1px solid color-mix(in oklab, var(--color-accent) 40%, transparent);
+  background: color-mix(in oklab, var(--color-accent) 10%, transparent);
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  line-height: 1.5;
+  vertical-align: baseline;
+  white-space: normal;
+}
+.vault-link:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--color-accent) 75%, transparent);
+  color: var(--color-fg);
+  background: color-mix(in oklab, var(--color-accent) 16%, transparent);
+}
+/* Dangling link: dead, Obsidian-style — dashed, struck through, not focusable. */
+.vault-link:disabled {
+  border-style: dashed;
+  border-color: var(--color-border);
+  background: transparent;
+  color: var(--color-faint);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--color-faint) 60%, transparent);
+  cursor: default;
+}
+
+/* ---------- Thin scroll regions (console.tsx) ----------
+   Shared by chat, code blocks, artifact/vault panes, the wild-mode feed and
+   every capped list. Colors resolve through the --color-* tokens so both
+   themes apply with no raw hex values (same contract as .vault-link above). */
+.chat-scroll,
+.scroll-thin {
+  scrollbar-color: var(--color-border) transparent;
+  scrollbar-width: thin;
+}
+.chat-scroll::-webkit-scrollbar,
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.chat-scroll::-webkit-scrollbar-thumb,
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-xs);
+}
+.chat-scroll::-webkit-scrollbar-track,
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Hard wrap for long unbroken tokens inside monospace prose (packet bodies,
+   artifact bodies, prompts, crew messages): pre-wrap still overflows on
+   unbroken 200-char lines, so carry overflow-wrap:anywhere on the leaf
+   containers rather than the <pre> blocks (which keep their own wrap rule). */
+.wrap-any {
+  overflow-wrap: anywhere;
+}
+
+/* Live-activity dot for the wild-mode feed — a calmer pulse than Tailwind's
+   animate-pulse so feed rows stay readable while the run streams. */
+@keyframes wild-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-wild) 45%, transparent);
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+.wild-live-dot {
+  animation: wild-live-pulse 1.4s ease-in-out infinite;
+}
+
+/* ===========================================================================
+   Component chrome — console.tsx surfaces (added classes only; everything
+   resolves through --color-* / --radius-* tokens so both themes apply).
+   =========================================================================== */
+
+/* ---------- Buttons: solid primary (inverted fg→bg, Codex-style) ---------- */
+.btn-solid {
+  position: relative;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    filter 0.12s ease;
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-fg) 14%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.btn-solid:hover:not(:disabled) {
+  filter: brightness(1.04);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-fg) 18%, transparent),
+    0 0 0 1px color-mix(in oklab, var(--color-accent) 28%, transparent),
+    0 0 22px -6px color-mix(in oklab, var(--color-accent) 42%, transparent),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.btn-solid:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.btn-solid:disabled {
+  box-shadow: none;
+}
+
+/* ---------- Inline alerts (error / notice lines) ---------- */
+.rt-alert {
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  border: 1px solid;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.rt-alert-err {
+  color: var(--color-danger);
+  border-color: color-mix(in oklab, var(--color-danger) 32%, transparent);
+  background: var(--color-danger-soft);
+}
+.rt-alert-ok {
+  color: var(--color-ok);
+  border-color: color-mix(in oklab, var(--color-ok) 32%, transparent);
+  background: var(--color-ok-soft);
+}
+
+/* ---------- Status badges: crisp state pills ---------- */
+.rt-badge {
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10px;
+  line-height: 1.7;
+  letter-spacing: 0.07em;
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 6%, transparent);
+}
+
+/* ---------- Tabs: underline chrome with accent active bar ---------- */
+.rt-tab {
+  position: relative;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* sit flush on the list's hairline */
+  transition:
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.rt-tab:hover {
+  color: var(--color-fg);
+}
+.rt-tab[data-state="active"] {
+  color: var(--color-fg);
+  border-bottom-color: var(--color-accent);
+}
+.rt-tab[data-state="active"]::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  filter: blur(0);
+  box-shadow: 0 1px 8px color-mix(in oklab, var(--color-accent) 55%, transparent);
+}
+
+/* ---------- Chat: bubbles, provenance footers, composer ---------- */
+.chat-row {
+  display: flex;
+}
+.chat-row-user {
+  justify-content: flex-end;
+}
+.chat-bubble {
+  max-width: min(84%, 780px);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  padding: 9px 14px 10px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 color-mix(in oklab, white 3%, transparent);
+}
+.chat-row-assistant .chat-bubble {
+  border-top-left-radius: var(--radius-sm);
+}
+.chat-row-user .chat-bubble {
+  background: color-mix(in oklab, var(--color-accent) 9%, var(--color-surface));
+  border-color: color-mix(in oklab, var(--color-accent) 30%, transparent);
+  border-top-right-radius: var(--radius-sm);
+}
+.chat-row-error .chat-bubble {
+  background: var(--color-danger-soft);
+  border-color: color-mix(in oklab, var(--color-danger) 34%, transparent);
+  border-top-left-radius: var(--radius-sm);
+}
+.chat-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--color-faint);
+}
+.chat-meta .chat-meta-role {
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.chat-row-user .chat-meta-role {
+  color: var(--color-accent);
+}
+.chat-row-error .chat-meta-role {
+  color: var(--color-danger);
+}
+.chat-prov {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--color-line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--color-faint);
+}
+.chat-prov::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-ok);
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+.chat-thinking {
+  animation: chat-think-in 0.2s ease-out both;
+}
+.chat-thinking-dot {
+  animation: wild-live-pulse 1.4s ease-in-out infinite;
+}
+@keyframes chat-think-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+.chat-quick {
+  border: 1px solid color-mix(in oklab, var(--color-border) 80%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  background: color-mix(in oklab, var(--color-surface) 55%, transparent);
+}
+.chat-quick > button {
+  transition:
+    color 0.12s ease,
+    border-color 0.12s ease,
+    background-color 0.12s ease;
+}
+.chat-quick > button:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--color-accent) 45%, transparent);
+  color: var(--color-fg);
+  background: color-mix(in oklab, var(--color-accent) 8%, transparent);
+}
+.chat-composer-row {
+  border-top: 1px solid var(--color-line);
+  background: color-mix(in oklab, var(--color-bg) 45%, transparent);
+}
+.chat-input {
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.chat-input:focus {
+  border-color: color-mix(in oklab, var(--color-accent) 60%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--color-accent) 14%, transparent),
+    0 0 20px -8px color-mix(in oklab, var(--color-accent) 45%, transparent);
+}
+.chat-send {
+  border-color: color-mix(in oklab, var(--color-accent) 45%, transparent) !important;
+  background: var(--color-accent) !important;
+  color: var(--color-accent-fg) !important;
+  font-weight: 500;
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 22%, transparent),
+    0 2px 10px -4px color-mix(in oklab, var(--color-accent) 55%, transparent);
+  transition:
+    filter 0.12s ease,
+    box-shadow 0.12s ease,
+    transform 0.12s ease;
+}
+.chat-send:hover:not(:disabled) {
+  filter: brightness(1.05);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 26%, transparent),
+    0 0 20px -4px color-mix(in oklab, var(--color-accent) 60%, transparent);
+}
+.chat-send:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.chat-send:disabled {
+  box-shadow: none;
+  filter: none;
+}
+
+/* ---------- Wild-mode activity strip ---------- */
+.wild-row {
+  position: relative;
+  padding-left: 16px;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.15s ease;
+}
+.wild-row::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background: var(--color-faint);
+  opacity: 0.85;
+}
+.wild-row:hover {
+  background-color: color-mix(in oklab, var(--color-fg) 4%, transparent);
+}
+.wild-row--wild::before {
+  background: var(--color-wild);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--color-wild) 70%, transparent);
+}
+.wild-row--ok::before {
+  background: var(--color-ok);
+}
+.wild-row--warn::before {
+  background: var(--color-warn);
+}
+.wild-row--danger::before {
+  background: var(--color-danger);
+}
+.wild-row-auto {
+  background: color-mix(in oklab, var(--color-wild) 6%, transparent);
+}
+.wild-row:first-child {
+  animation: wild-row-in 0.25s ease-out both;
+}
+@keyframes wild-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+/* ---------- Agent packet: terminal-style frame ---------- */
+.term-frame {
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow:
+    0 18px 44px -22px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 color-mix(in oklab, white 4%, transparent);
+}
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--color-line);
+  background: linear-gradient(
+    180deg,
+    var(--color-raised),
+    color-mix(in oklab, var(--color-raised) 88%, var(--color-bg))
+  );
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-muted);
+  user-select: none;
+}
+.term-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--color-border);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 10%, transparent);
+}
+.term-dot:first-child {
+  background: color-mix(in oklab, var(--color-accent) 55%, var(--color-border));
+}
+.term-name {
+  margin-left: 4px;
+  color: var(--color-fg);
+  font-weight: 500;
+}
+.term-meta {
+  margin-left: auto;
+  color: var(--color-faint);
+  font-variant-numeric: tabular-nums;
+}
+/* Darker well inside the frame so the document reads as the "screen". */
+.term-body {
+  background: color-mix(in oklab, var(--color-bg) 42%, var(--color-surface));
+}
+.term-body code {
+  font-size: 11.5px;
+}
+/* Section numbering — packet sections become citable (§01, §02 …). */
+.term-body {
+  counter-reset: packet-section;
+}
+.term-body :is(h2, h3, h4)::before {
+  counter-increment: packet-section;
+  content: counter(packet-section, decimal-leading-zero) " · ";
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--color-faint);
+}
+/* Fenced blocks inside the frame get the deeper well treatment. */
+.term-body > div:has(pre) {
+  background: color-mix(in oklab, var(--color-bg) 65%, var(--color-surface));
+}
+
+/* ---------- Phase progress rail ---------- */
+.rail-seg {
+  transition:
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.rail-current {
+  animation: rail-glow 1.8s ease-in-out infinite;
+}
+@keyframes rail-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-accent) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 10px 1px color-mix(in oklab, var(--color-accent) 55%, transparent);
+  }
+}
+.rail-lbl {
+  transition: color 0.15s ease;
+}
+.rail-lbl-done {
+  color: color-mix(in oklab, var(--color-ok) 72%, transparent);
+}
+.rail-lbl-now {
+  color: color-mix(in oklab, var(--color-accent) 85%, transparent);
+}
+.rail-lbl-warn {
+  color: color-mix(in oklab, var(--color-warn) 75%, transparent);
+}
+.rail-lbl-bad {
+  color: color-mix(in oklab, var(--color-danger) 80%, transparent);
+}
+
+/* ---------- Phase rail (left nav) buttons ---------- */
+.rt-phase {
+  position: relative;
+  transition:
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.rt-phase:hover {
+  background-image: linear-gradient(
+    color-mix(in oklab, var(--color-fg) 4%, transparent),
+    color-mix(in oklab, var(--color-fg) 4%, transparent)
+  );
+}
+.rt-phase[aria-current="true"] {
+  background: var(--color-raised);
+  box-shadow:
+    inset 2px 0 0 0 var(--color-accent),
+    0 1px 0 color-mix(in oklab, white 2%, transparent);
+}
+.rt-phase[aria-pressed="true"]:not([aria-current="true"]) {
+  background-image: linear-gradient(
+    color-mix(in oklab, var(--color-accent) 7%, transparent),
+    color-mix(in oklab, var(--color-accent) 7%, transparent)
+  );
+}
+
+/* ---------- Radix dialog panels: elevation + hairline ---------- */
+[role="dialog"] {
+  box-shadow:
+    0 28px 80px -28px rgba(0, 0, 0, 0.6),
+    0 0 0 1px color-mix(in oklab, var(--color-border) 65%, transparent),
+    0 0 44px -18px color-mix(in oklab, var(--color-accent) 30%, transparent);
+}
+
+/* ---------- Validation feedback (HITL rejection note) ---------- */
+textarea[aria-invalid="true"] {
+  border-color: color-mix(in oklab, var(--color-danger) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-danger) 12%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

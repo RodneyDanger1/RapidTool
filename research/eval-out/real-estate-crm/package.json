@@ -1,0 +1,21 @@
+{
+  "name": "real-estate-crm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A real estate agent CRM web app: manage buyer and seller contacts; a lead pipeline with stages (new, contacted, qualified, showing-booked, offer-made, closed-wo",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/oracle.spec.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "generatedBy": "RapidTool scaffold emitter — machine-generated from RapidTool packet fff84028-8b4b-4820-8562-e17e5d4af790; regenerate, don't hand-edit."
+}

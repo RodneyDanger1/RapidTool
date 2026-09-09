@@ -1,0 +1,213 @@
+/**
+ * Tavily web-search provider (server-only).
+ *
+ * Reads the key from `process.env.TAVILY_API_KEY` ONLY — never `import.meta.env`,
+ * never a `VITE_` prefix. The browser-facing contract lives in `./research.ts`;
+ * this module is the raw fetch and must never be imported from client code.
+ *
+ * Call shape per `research/runtime-integration.md` §1.3: a single
+ * `POST https://api.tavily.com/search` with a Bearer key. Results already carry
+ * LLM-ready `content` snippets, so `results[].title/url/content` (plus `score`)
+ * are the field set persisted into artifacts.
+ *
+ * Honesty contract: when the key is absent this returns
+ * `{ ok: false, reason: "not-configured", code: "RT_E_RESEARCH_UNAVAILABLE" }`
+ * and NEVER fabricates research. Result entries without a usable http(s) URL
+ * are dropped (an entry with no anchor cannot be cited honestly). Transient
+ * network failures are retried once; timeout aborts are reported immediately.
+ */
+
+import type { ResearchResult } from "./research.ts";
+
+export const TAVILY_BASE_URL = "https://api.tavily.com";
+
+const DEFAULT_MAX_RESULTS = 5;
+const TIMEOUT_MS = 20_000;
+// Transient statuses get a bounded retry (runtime-integration.md §1.3: "retry
+// once" for 500). 401/432/433 are config/billing and are NOT retried.
+const RETRYABLE_STATUS = new Set([429, 500, 503]);
+const MAX_ATTEMPTS = 2;
+
+function env(key: string): string | undefined {
+  const v = process.env[key]?.trim();
+  return v || undefined;
+}
+
+export function tavilyApiKey(): string | undefined {
+  return env("TAVILY_API_KEY");
+}
+
+export function isTavilyConfigured(): boolean {
+  return Boolean(tavilyApiKey());
+}
+
+function isAbortError(err: unknown): boolean {
+  if (err instanceof Error && err.name === "AbortError") return true;
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { name?: unknown }).name === "AbortError"
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export type TavilySearchOptions = {
+  maxResults?: number;
+  /** Test/dev hook; defaults to TIMEOUT_MS. */
+  timeoutMs?: number;
+};
+
+async function postWithRetry(url: string, init: RequestInit): Promise<Response> {
+  let response: Response | null = null;
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) await sleep(500 * 2 ** attempt);
+    try {
+      response = await fetch(url, init);
+    } catch (err) {
+      // Timeout abort: report immediately — retrying would double the latency
+      // the caller already paid for.
+      if (isAbortError(err)) throw err;
+      // Transient network failure (DNS/TCP/TLS): one bounded retry is safe.
+      lastError = err instanceof Error ? err : new Error(String(err));
+      continue;
+    }
+    if (!RETRYABLE_STATUS.has(response.status)) return response;
+    // Transient HTTP status → retry; remember it in case retries exhaust.
+  }
+  if (response) return response; // retries exhausted on a transient status
+  throw lastError ?? new Error("Tavily request failed");
+}
+
+async function describeError(res: Response): Promise<string> {
+  let detail = "";
+  try {
+    const body = (await res.json()) as { detail?: { error?: unknown } };
+    const msg = body?.detail?.error;
+    if (typeof msg === "string" && msg.trim()) detail = `: ${msg.trim()}`;
+  } catch {
+    /* non-JSON error body — ignore */
+  }
+  switch (res.status) {
+    case 400:
+      return `Tavily rejected the request (HTTP 400${detail})`;
+    case 401:
+      return `Tavily API key is invalid (HTTP 401${detail})`;
+    case 429:
+      return `Tavily rate limit reached (HTTP 429${detail})`;
+    case 432:
+      return `Tavily plan usage limit exceeded (HTTP 432${detail})`;
+    case 433:
+      return `Tavily pay-as-you-go limit exceeded (HTTP 433${detail})`;
+    case 500:
+      return `Tavily server error (HTTP 500${detail})`;
+    case 503:
+      return `Tavily server overloaded (HTTP 503${detail})`;
+    default:
+      return `Tavily request failed (HTTP ${res.status}${detail})`;
+  }
+}
+
+export async function tavilySearch(
+  query: string,
+  opts: TavilySearchOptions = {},
+): Promise<ResearchResult> {
+  const key = tavilyApiKey();
+  if (!key) {
+    return {
+      ok: false,
+      reason: "not-configured",
+      code: "RT_E_RESEARCH_UNAVAILABLE",
+    };
+  }
+
+  if (typeof query !== "string") {
+    return {
+      ok: false,
+      reason: "error",
+      code: "RT_E_VALIDATION",
+      error: "search query must be a string",
+    };
+  }
+  const q = query.trim();
+  if (!q) {
+    return {
+      ok: false,
+      reason: "error",
+      code: "RT_E_VALIDATION",
+      error: "empty search query",
+    };
+  }
+  const maxResults = opts.maxResults ?? DEFAULT_MAX_RESULTS;
+  const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await postWithRetry(`${TAVILY_BASE_URL}/search`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        query: q.slice(0, 400),
+        search_depth: "basic",
+        max_results: maxResults,
+        topic: "general",
+        include_answer: false,
+        include_raw_content: false,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        reason: "error",
+        code: "RT_E_RESEARCH_UNAVAILABLE",
+        error: await describeError(res),
+      };
+    }
+
+    const body = (await res.json()) as { results?: unknown[] };
+    if (!Array.isArray(body.results)) {
+      return {
+        ok: false,
+        reason: "error",
+        code: "RT_E_RESEARCH_UNAVAILABLE",
+        error: "Tavily response contained no results array",
+      };
+    }
+
+    // Honesty filter: an entry without a usable http(s) URL is not a citable
+    // result — keep it and an agent may cite a bare string. Entries that only
+    // carry a URL stay (title/content are best-effort enrichments).
+    const items = (body.results as Array<Record<string, unknown>>)
+      .map((r) => ({
+        title: typeof r.title === "string" ? r.title : "",
+        url: typeof r.url === "string" ? r.url : "",
+        content: typeof r.content === "string" ? r.content : "",
+        ...(typeof r.score === "number" ? { score: r.score } : {}),
+      }))
+      .filter((it) => /^https?:\/\//i.test(it.url));
+
+    return { ok: true, query: q, items, provider: "tavily" };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "error",
+      code: "RT_E_RESEARCH_UNAVAILABLE",
+      error: isAbortError(err)
+        ? `Tavily request timed out after ${Math.round(timeoutMs / 1000)}s`
+        : err instanceof Error
+          ? `Tavily request failed: ${err.message}`
+          : "Tavily request failed",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "RapidTool",
+      "hasCanvas": false,
+      "bodyTextLen": 552,
+      "bodyTextHash": "4fb341e1649c51edee9d1e011d1dd6ac755db39f68b54d358c742f06a1451540",
+      "bodyTextPrefix": "RapidTool autonomous software agency phases 0–12 · graph locked ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "RapidTool",
+      "hasCanvas": false,
+      "bodyTextLen": 525,
+      "bodyTextHash": "12c9880acbd7ed3549f519fd315164653841080116097eb620f4e4e44e4e651e",
+      "bodyTextPrefix": "RapidTool autonomous software agency GOVERNED DELIVERY Research ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

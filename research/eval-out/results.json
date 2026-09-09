@@ -1,0 +1,101 @@
+{
+  "generatedAt": "2026-09-09T02:16:22.226Z",
+  "mode": "keyed",
+  "corpusDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus",
+  "entries": [
+    {
+      "slug": "coffeehouse2home-property-ledger",
+      "name": "Coffeehouse2Home Property Ledger",
+      "domain": "real-estate",
+      "domainMatch": 1,
+      "kind": "webapp",
+      "status": "complete",
+      "mode": "keyed",
+      "criteria": {
+        "M1": {
+          "score": 1,
+          "evidence": "tree 1 file(s); reqTrace: One shared Property Ledger record per property (ownership, address, status, full history) across brokerage, flipping, rentals, and field services->src/generated.ts | Real-estate CRM: contacts, buyer and seller leads, and a deal pipeline with stages->src/generated.ts | Showing slots (private showings and open houses) publishable from any listing, flip, or rental property; buyers book with email confirmation, reminders, calendar-sync stub, and per-property showing history with buyer feedback->src/generated.ts | Flip manager: acquisitions, renovation budgets with line items, contractor bids, flip project phases, job costing per property->src/generated.ts | Rental portfolio: leases, tenants, rent roll with payment records, maintenance requests, vacancy tracking, lease-renewal reminders->src/generated.ts | Field-ops suite: work orders raised from any property become crew task lists; crew time sheets roll into weekly payroll with rates and overtime; material/supply lists with purchase records and reorder flags->src/generated.ts | Cross-domain flows: work-order hours feed payroll and job cost; showings on flip or rental properties create CRM buyer leads; deals, flips, leases, and work orders accumulate on the shared ledger record->src/generated.ts"
+        },
+        "M2": {
+          "score": 1,
+          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\coffeehouse2home-property-ledger; tests 16 pass / 0 fail)"
+        },
+        "M3": {
+          "score": 1,
+          "evidence": "P6 journey converged after 1/3 cycle(s)"
+        },
+        "M4": {
+          "score": 1,
+          "evidence": "lastTest \"tested\" + evidenceHash 16895818"
+        },
+        "M5": {
+          "score": 1,
+          "evidence": "1 red gate record(s) (P7) surfaced loudly: sealedWithFailures flag + census log + warn gate.verdict"
+        },
+        "M6": {
+          "score": 1,
+          "evidence": "handover dir emitted with DEPLOY.md + oracle spec (18520b)"
+        },
+        "M7": {
+          "score": 1,
+          "evidence": "M1+M2+M3 3 ≥ prior same-domain 3 (m1 1/m2 1/m3 1)"
+        },
+        "M8": {
+          "score": 1,
+          "evidence": "journey used 1/3 cycle(s) — inside budget"
+        },
+        "M9": {
+          "score": 1,
+          "evidence": "run stopped on time, no refusal — nothing to shout"
+        }
+      },
+      "total": 9,
+      "mean": 1,
+      "baseline": "delivery ≈ 1/10, process ≈ 8/10 — 0 shipped modules across all six journeys; learning loop fires on a real keyed run for the first time (L2/L4/L5) but lesson content stays hollow (dossier 99)",
+      "coverage": {
+        "covered": {
+          "One shared Property Ledger record per property (ownership, address, status, full history) across brokerage, flipping, rentals, and field services": [
+            "src/generated.ts"
+          ],
+          "Real-estate CRM: contacts, buyer and seller leads, and a deal pipeline with stages": [
+            "src/generated.ts"
+          ],
+          "Showing slots (private showings and open houses) publishable from any listing, flip, or rental property; buyers book with email confirmation, reminders, calendar-sync stub, and per-property showing history with buyer feedback": [
+            "src/generated.ts"
+          ],
+          "Flip manager: acquisitions, renovation budgets with line items, contractor bids, flip project phases, job costing per property": [
+            "src/generated.ts"
+          ],
+          "Rental portfolio: leases, tenants, rent roll with payment records, maintenance requests, vacancy tracking, lease-renewal reminders": [
+            "src/generated.ts"
+          ],
+          "Field-ops suite: work orders raised from any property become crew task lists; crew time sheets roll into weekly payroll with rates and overtime; material/supply lists with purchase records and reorder flags": [
+            "src/generated.ts"
+          ],
+          "Cross-domain flows: work-order hours feed payroll and job cost; showings on flip or rental properties create CRM buyer leads; deals, flips, leases, and work orders accumulate on the shared ledger record": [
+            "src/generated.ts"
+          ]
+        },
+        "missing": []
+      },
+      "notes": {
+        "approvedGates": [
+          "P4",
+          "P5",
+          "P8",
+          "P9"
+        ],
+        "treeRunOk": true,
+        "journey": "converged",
+        "stall": null,
+        "emitError": null,
+        "p6Refused": false,
+        "synthesisSucceeded": true
+      }
+    }
+  ],
+  "summary": {
+    "entries": 1,
+    "meanTotal": 1
+  }
+}

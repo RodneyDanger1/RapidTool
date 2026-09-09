@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="862" height="786" viewBox="0 0 862 786" role="img" aria-label="HVAC Dispatch — architecture" font-family="ui-sans-serif, system-ui, 'Segoe UI', sans-serif">
+<title>HVAC Dispatch — architecture</title>
+<rect x="0" y="0" width="862" height="786" fill="#0d1117"/>
+<text x="20" y="30" font-size="15" fill="#e6edf3" font-weight="700">HVAC Dispatch — architecture</text>
+<text x="20" y="50" font-size="10.5" fill="#8b949e">18 artifacts across 13 phases · box color = kind</text>
+<rect x="128" y="91" width="168" height="34" rx="6" fill="#0d1d33" stroke="#79c0ff" stroke-width="1.25" data-phase="0" data-kind="algorithm"/>
+<text x="136" y="106" font-size="9.5" fill="#c9d1d9" font-weight="600">Intent Lattice (A1)</text>
+<text x="136" y="118" font-size="7.5" fill="#79c0ff">algorithm</text>
+<rect x="310" y="91" width="168" height="34" rx="6" fill="#101f33" stroke="#58a6ff" stroke-width="1.25" data-phase="0" data-kind="scorecard"/>
+<text x="318" y="106" font-size="9.5" fill="#c9d1d9" font-weight="600">Feasibility &amp; Architect…</text>
+<text x="318" y="118" font-size="7.5" fill="#58a6ff">scorecard</text>
+<rect x="128" y="139" width="168" height="34" rx="6" fill="#1d1430" stroke="#bc8cff" stroke-width="1.25" data-phase="1" data-kind="graph"/>
+<text x="136" y="154" font-size="9.5" fill="#c9d1d9" font-weight="600">Dispatcher topology</text>
+<text x="136" y="166" font-size="7.5" fill="#bc8cff">graph</text>
+<rect x="128" y="187" width="168" height="34" rx="6" fill="#2a1230" stroke="#f778ba" stroke-width="1.25" data-phase="2" data-kind="memory"/>
+<text x="136" y="202" font-size="9.5" fill="#c9d1d9" font-weight="600">Checkpoint + retrieval …</text>
+<text x="136" y="214" font-size="7.5" fill="#f778ba">memory</text>
+<rect x="128" y="235" width="168" height="34" rx="6" fill="#0d2a30" stroke="#39c5cf" stroke-width="1.25" data-phase="3" data-kind="mcp"/>
+<text x="136" y="250" font-size="9.5" fill="#c9d1d9" font-weight="600">MCP + A2A contracts</text>
+<text x="136" y="262" font-size="7.5" fill="#39c5cf">mcp</text>
+<rect x="128" y="283" width="168" height="34" rx="6" fill="#2a1113" stroke="#f85149" stroke-width="1.25" data-phase="4" data-kind="security"/>
+<text x="136" y="298" font-size="9.5" fill="#c9d1d9" font-weight="600">Isolation policy</text>
+<text x="136" y="310" font-size="7.5" fill="#f85149">security</text>
+<rect x="128" y="331" width="168" height="34" rx="6" fill="#0d2a16" stroke="#3fb950" stroke-width="1.25" data-phase="5" data-kind="validation"/>
+<text x="136" y="346" font-size="9.5" fill="#c9d1d9" font-weight="600">Adversarial suite + HIT…</text>
+<text x="136" y="358" font-size="7.5" fill="#3fb950">validation</text>
+<rect x="128" y="379" width="168" height="34" rx="6" fill="#0d2f1e" stroke="#7ee787" stroke-width="1.25" data-phase="6" data-kind="code"/>
+<text x="136" y="394" font-size="9.5" fill="#c9d1d9" font-weight="600">Sandbox result</text>
+<text x="136" y="406" font-size="7.5" fill="#7ee787">code</text>
+<rect x="310" y="379" width="168" height="34" rx="6" fill="#0d2f1e" stroke="#7ee787" stroke-width="1.25" data-phase="6" data-kind="code"/>
+<text x="318" y="394" font-size="9.5" fill="#c9d1d9" font-weight="600">Typed synthesis module</text>
+<text x="318" y="406" font-size="7.5" fill="#7ee787">code</text>
+<rect x="128" y="427" width="168" height="34" rx="6" fill="#2d1d0c" stroke="#ffa657" stroke-width="1.25" data-phase="7" data-kind="research"/>
+<text x="136" y="442" font-size="9.5" fill="#c9d1d9" font-weight="600">Competitive analysis ma…</text>
+<text x="136" y="454" font-size="7.5" fill="#ffa657">research</text>
+<rect x="128" y="475" width="168" height="34" rx="6" fill="#2f2608" stroke="#ffd33d" stroke-width="1.25" data-phase="8" data-kind="ui"/>
+<text x="136" y="490" font-size="9.5" fill="#c9d1d9" font-weight="600">Interface contract</text>
+<text x="136" y="502" font-size="7.5" fill="#ffd33d">ui</text>
+<rect x="128" y="523" width="168" height="34" rx="6" fill="#1c1430" stroke="#a371f7" stroke-width="1.25" data-phase="9" data-kind="cicd"/>
+<text x="136" y="538" font-size="9.5" fill="#c9d1d9" font-weight="600">GitHub Actions workflow</text>
+<text x="136" y="550" font-size="7.5" fill="#a371f7">cicd</text>
+<rect x="310" y="523" width="168" height="34" rx="6" fill="#1c1430" stroke="#a371f7" stroke-width="1.25" data-phase="9" data-kind="cicd"/>
+<text x="318" y="538" font-size="9.5" fill="#c9d1d9" font-weight="600">IaC sketch</text>
+<text x="318" y="550" font-size="7.5" fill="#a371f7">cicd</text>
+<rect x="128" y="571" width="168" height="34" rx="6" fill="#332a08" stroke="#e3b341" stroke-width="1.25" data-phase="10" data-kind="edge"/>
+<text x="136" y="586" font-size="9.5" fill="#c9d1d9" font-weight="600">Tiered inference</text>
+<text x="136" y="598" font-size="7.5" fill="#e3b341">edge</text>
+<rect x="128" y="619" width="168" height="34" rx="6" fill="#331313" stroke="#ff7b72" stroke-width="1.25" data-phase="11" data-kind="tools"/>
+<text x="136" y="634" font-size="9.5" fill="#c9d1d9" font-weight="600">Live search MCP binding</text>
+<text x="136" y="646" font-size="7.5" fill="#ff7b72">tools</text>
+<rect x="128" y="667" width="168" height="34" rx="6" fill="#151b22" stroke="#8b949e" stroke-width="1.25" data-phase="12" data-kind="docs"/>
+<text x="136" y="682" font-size="9.5" fill="#c9d1d9" font-weight="600">Architecture Decision R…</text>
+<text x="136" y="694" font-size="7.5" fill="#8b949e">docs</text>
+<rect x="310" y="667" width="168" height="34" rx="6" fill="#151b22" stroke="#8b949e" stroke-width="1.25" data-phase="12" data-kind="docs"/>
+<text x="318" y="682" font-size="9.5" fill="#c9d1d9" font-weight="600">OpenAPI 3.1</text>
+<text x="318" y="694" font-size="7.5" fill="#8b949e">docs</text>
+<rect x="492" y="667" width="168" height="34" rx="6" fill="#2d2005" stroke="#d29922" stroke-width="1.25" data-phase="12" data-kind="packet"/>
+<text x="500" y="682" font-size="9.5" fill="#c9d1d9" font-weight="600">Agent packet (A4)</text>
+<text x="500" y="694" font-size="7.5" fill="#d29922">packet</text>
+<text x="68" y="106" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P0</text>
+<text x="68" y="118" font-size="7" fill="#6e7681" text-anchor="middle">Deep Research …</text>
+<text x="68" y="154" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P1</text>
+<text x="68" y="166" font-size="7" fill="#6e7681" text-anchor="middle">Core Orchestra…</text>
+<text x="68" y="202" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P2</text>
+<text x="68" y="214" font-size="7" fill="#6e7681" text-anchor="middle">Memory &amp; Conte…</text>
+<text x="68" y="250" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P3</text>
+<text x="68" y="262" font-size="7" fill="#6e7681" text-anchor="middle">Tool Integrati…</text>
+<text x="68" y="298" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P4</text>
+<text x="68" y="310" font-size="7" fill="#6e7681" text-anchor="middle">Security, Isol…</text>
+<text x="68" y="346" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P5</text>
+<text x="68" y="358" font-size="7" fill="#6e7681" text-anchor="middle">Validation, HI…</text>
+<text x="68" y="394" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P6</text>
+<text x="68" y="406" font-size="7" fill="#6e7681" text-anchor="middle">Code Generatio…</text>
+<text x="68" y="442" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P7</text>
+<text x="68" y="454" font-size="7" fill="#6e7681" text-anchor="middle">Domain &amp; Marke…</text>
+<text x="68" y="490" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P8</text>
+<text x="68" y="502" font-size="7" fill="#6e7681" text-anchor="middle">Dynamic UI/UX …</text>
+<text x="68" y="538" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P9</text>
+<text x="68" y="550" font-size="7" fill="#6e7681" text-anchor="middle">CI/CD &amp; Cloud …</text>
+<text x="68" y="586" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P10</text>
+<text x="68" y="598" font-size="7" fill="#6e7681" text-anchor="middle">Local Agent &amp; …</text>
+<text x="68" y="634" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P11</text>
+<text x="68" y="646" font-size="7" fill="#6e7681" text-anchor="middle">Real-Time Web …</text>
+<text x="68" y="682" font-size="10.5" fill="#e6edf3" font-weight="700" text-anchor="middle">P12</text>
+<text x="68" y="694" font-size="7" fill="#6e7681" text-anchor="middle">Documentation …</text>
+<text x="128" y="726" font-size="8" fill="#6e7681">Specification layer — derived from project fields</text>
+<rect x="128" y="736" width="168" height="34" rx="6" fill="#0d2a30" stroke="#39c5cf" stroke-width="1.25" data-kind="contract"/>
+<text x="136" y="751" font-size="9.5" fill="#c9d1d9" font-weight="600">Data contract</text>
+<text x="136" y="763" font-size="7.5" fill="#39c5cf">6 entities · 2 endpoints</text>
+<rect x="310" y="736" width="168" height="34" rx="6" fill="#101f33" stroke="#58a6ff" stroke-width="1.25" data-kind="openapi"/>
+<text x="318" y="751" font-size="9.5" fill="#c9d1d9" font-weight="600">OpenAPI spec</text>
+<text x="318" y="763" font-size="7.5" fill="#58a6ff">3.1.0 declared</text>
+<rect x="492" y="736" width="168" height="34" rx="6" fill="#1d1430" stroke="#bc8cff" stroke-width="1.25" data-kind="adr"/>
+<text x="500" y="751" font-size="9.5" fill="#c9d1d9" font-weight="600">ADR trail</text>
+<text x="500" y="763" font-size="7.5" fill="#bc8cff">3 records</text>
+</svg>

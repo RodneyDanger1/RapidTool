@@ -1,0 +1,1548 @@
+{
+  "id": "9f7b40f0-80e9-4959-8007-8d7b006a1451",
+  "name": "House Showing Scheduler",
+  "brief": "a house-showing scheduler: agents publish open-house and private-showing slots, buyers book slots with email confirmation, reminders, calendar sync stub, showing feedback form, per-property showing history",
+  "domain": "real-estate",
+  "createdAt": 1788874729651,
+  "status": "complete",
+  "currentPhase": 12,
+  "phases": [
+    {
+      "id": 0,
+      "status": "complete",
+      "startedAt": 1788874729652,
+      "completedAt": 1788874729653,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3269632901",
+        "checkedAt": 1788874729654
+      }
+    },
+    {
+      "id": 1,
+      "status": "complete",
+      "startedAt": 1788874729655,
+      "completedAt": 1788874729656,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1050713914",
+        "checkedAt": 1788874729657
+      }
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "startedAt": 1788874729658,
+      "completedAt": 1788874729660,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1845537766",
+        "checkedAt": 1788874729661
+      }
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "startedAt": 1788874729663,
+      "completedAt": 1788874729664,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1638292844",
+        "checkedAt": 1788874729666
+      }
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "startedAt": 1788874729667,
+      "completedAt": 1788874729670,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3527188654",
+        "checkedAt": 1788874729671
+      }
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "startedAt": 1788874729672,
+      "completedAt": 1788874729674,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "2951452883",
+        "checkedAt": 1788874729675
+      }
+    },
+    {
+      "id": 6,
+      "status": "complete",
+      "startedAt": 1788874729676,
+      "completedAt": 1788874729677,
+      "gate": {
+        "passed": false,
+        "unmet": [
+          "Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)",
+          "Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)"
+        ],
+        "evidenceHash": "552477142",
+        "checkedAt": 1788874729679
+      }
+    },
+    {
+      "id": 7,
+      "status": "complete",
+      "startedAt": 1788874729680,
+      "completedAt": 1788874729682,
+      "gate": {
+        "passed": false,
+        "unmet": [
+          "Live research corpus exists for P7 (≥1 fetched finding)"
+        ],
+        "evidenceHash": "425504246",
+        "checkedAt": 1788874729683
+      }
+    },
+    {
+      "id": 8,
+      "status": "complete",
+      "startedAt": 1788874729685,
+      "completedAt": 1788874729690,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "606175358",
+        "checkedAt": 1788874729692
+      }
+    },
+    {
+      "id": 9,
+      "status": "complete",
+      "startedAt": 1788874729694,
+      "completedAt": 1788874729700,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3030540723",
+        "checkedAt": 1788874729702
+      }
+    },
+    {
+      "id": 10,
+      "status": "complete",
+      "startedAt": 1788874729705,
+      "completedAt": 1788874729707,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3218462335",
+        "checkedAt": 1788874729708
+      }
+    },
+    {
+      "id": 11,
+      "status": "complete",
+      "startedAt": 1788874729709,
+      "completedAt": 1788874729710,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1663625674",
+        "checkedAt": 1788874729712
+      }
+    },
+    {
+      "id": 12,
+      "status": "complete",
+      "startedAt": 1788874729716,
+      "completedAt": 1788874729718,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3530055408",
+        "checkedAt": 1788874729720
+      }
+    }
+  ],
+  "scorecard": {
+    "overall": 7.8,
+    "verdict": "proceed",
+    "axes": [
+      {
+        "key": "feasibility",
+        "label": "Technical feasibility",
+        "score": 6,
+        "note": "Typed contracts + sequential graph."
+      },
+      {
+        "key": "scale",
+        "label": "Scale headroom",
+        "score": 9,
+        "note": "Stateless workers + durable checkpoints."
+      },
+      {
+        "key": "security",
+        "label": "Security posture",
+        "score": 9,
+        "note": "Scheduler Δ1."
+      },
+      {
+        "key": "api",
+        "label": "API / rate-limit risk",
+        "score": 7,
+        "note": "Live-tool Δ1."
+      },
+      {
+        "key": "delivery",
+        "label": "Delivery confidence",
+        "score": 8,
+        "note": "Phased graph prevents skipped work."
+      }
+    ],
+    "bottlenecks": [
+      "Long-running tools must stream over WebSocket MCP.",
+      "HITL rejection without a qualitative note is illegal."
+    ],
+    "attackVectors": [
+      "Prompt injection via ingested competitor pages.",
+      "Tool-call privilege escalation if OAuth scopes are inherited.",
+      "Sandbox escape if generated exec has network."
+    ],
+    "libraries": [
+      {
+        "name": "TanStack Start",
+        "role": "Typed app shell and file routes"
+      },
+      {
+        "name": "Zod",
+        "role": "Schema lock on generated artifacts"
+      },
+      {
+        "name": "MLS / property-data API",
+        "role": "Listings, comps, and ARV inputs"
+      }
+    ]
+  },
+  "competitors": [
+    {
+      "name": "DealMachine / PropStream",
+      "class": "REI deal flow",
+      "strength": "Driving-for-dollars + comps",
+      "gap": "No flip/renovation lifecycle or ARV grounding",
+      "source": "illustrative"
+    },
+    {
+      "name": "Follow Up Boss",
+      "class": "Agent CRM",
+      "strength": "Lead nurture",
+      "gap": "Not a governed delivery graph; no escrow/title handoff",
+      "source": "illustrative"
+    },
+    {
+      "name": "Cursor",
+      "class": "IDE-attached agent",
+      "strength": "Repo-aware multi-file edits",
+      "gap": "No agency lifecycle or HITL graph",
+      "source": "illustrative"
+    },
+    {
+      "name": "v0 / Bolt / Lovable",
+      "class": "Prompt-to-app",
+      "strength": "Fast UI scaffolds",
+      "gap": "Skips isolation policy and ADR trail",
+      "source": "illustrative"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "0-scorecard-feasibility-architecture-scoreca",
+      "phase": 0,
+      "kind": "scorecard",
+      "title": "Feasibility & Architecture Scorecard",
+      "body": "# House Showing Scheduler — Phase 0 scorecard\n\nDomain: real-estate\nOverall: 7.8 / 10 — proceed\nLattice jobs: show, schedule, publish, sync\nEntities: showing, house, buyer, agent, property, calendar\nConstraints: none\n\n- Technical feasibility: 6/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\n\n## Bottlenecks\n- Long-running tools must stream over WebSocket MCP.\n- HITL rejection without a qualitative note is illegal.\n\n## Attack vectors\n- Prompt injection via ingested competitor pages.\n- Tool-call privilege escalation if OAuth scopes are inherited.\n- Sandbox escape if generated exec has network.\n\n## Recommended libraries\n- TanStack Start: Typed app shell and file routes\n- Zod: Schema lock on generated artifacts\n- MLS / property-data API: Listings, comps, and ARV inputs"
+    },
+    {
+      "id": "0-algorithm-intent-lattice-a1",
+      "phase": 0,
+      "kind": "algorithm",
+      "title": "Intent Lattice (A1)",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"jobs\": [\n    \"show\",\n    \"schedule\",\n    \"publish\",\n    \"sync\"\n  ],\n  \"entities\": [\n    \"showing\",\n    \"house\",\n    \"buyer\",\n    \"agent\",\n    \"property\",\n    \"calendar\"\n  ],\n  \"constraints\": [],\n  \"nodes\": [\n    {\n      \"kind\": \"job\",\n      \"label\": \"show\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"showing\",\n      \"weight\": 1\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"house\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"buyer\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"agent\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"schedule\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"publish\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"sync\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"property\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"calendar\",\n      \"weight\": 0.55\n    }\n  ],\n  \"complexity\": 7.5,\n  \"vague\": false\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p0-32696329",
+      "phase": 0,
+      "kind": "gate",
+      "title": "DoD gate — P0",
+      "body": "# DoD gate — P0\n\n**Result: PASS**\n\nAll criteria met for phase 0.\n\nEvidence hash: 3269632901",
+      "language": "markdown"
+    },
+    {
+      "id": "1-graph-dispatcher-topology",
+      "phase": 1,
+      "kind": "graph",
+      "title": "Dispatcher topology",
+      "body": "Sequential pipeline: show → schedule → publish → sync\nState entities: showing, house, buyer, agent, property, calendar\n\nEach step advances a showing through its lifecycle in the real estate domain — the flow is the brief's own verbs, the state its own nouns (P0 lattice).\n\n> Derivation: a single sequential flow over showings; no parallel, event, or failover topology is claimed beyond what the brief states.",
+      "language": "text"
+    },
+    {
+      "id": "gate-p1-10507139",
+      "phase": 1,
+      "kind": "gate",
+      "title": "DoD gate — P1",
+      "body": "# DoD gate — P1\n\n**Result: PASS**\n\nAll criteria met for phase 1.\n\nEvidence hash: 1050713914",
+      "language": "markdown"
+    },
+    {
+      "id": "2-memory-data-model-retrieval",
+      "phase": 2,
+      "kind": "memory",
+      "title": "Data model & retrieval",
+      "body": "Records: showing, house, buyer, agent, property, calendar\nOperations: show, schedule, publish, sync\n\nEach showing is the unit of state; show steps read and write that state in order.\n\n> Persistence is shaped by the brief's own nouns — no specific database or durable store is claimed beyond the brief."
+    },
+    {
+      "id": "gate-p2-18455377",
+      "phase": 2,
+      "kind": "gate",
+      "title": "DoD gate — P2",
+      "body": "# DoD gate — P2\n\n**Result: PASS**\n\nAll criteria met for phase 2.\n\nEvidence hash: 1845537766",
+      "language": "markdown"
+    },
+    {
+      "id": "3-mcp-integration-surface-declared",
+      "phase": 3,
+      "kind": "mcp",
+      "title": "Integration surface (declared)",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"surface\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Integration surface derived from the brief's domain — declarations, not implemented bindings (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p3-16382928",
+      "phase": 3,
+      "kind": "gate",
+      "title": "DoD gate — P3",
+      "body": "# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844",
+      "language": "markdown"
+    },
+    {
+      "id": "4-security-security-authorization-policy",
+      "phase": 4,
+      "kind": "security",
+      "title": "Security & authorization policy",
+      "body": "Protected data: showing, house, buyer, agent, property, calendar (the brief's own entities).\nAccess model: buyer, agent — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the showings its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive showing data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty)."
+    },
+    {
+      "id": "gate-p4-35271886",
+      "phase": 4,
+      "kind": "gate",
+      "title": "DoD gate — P4",
+      "body": "# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654",
+      "language": "markdown"
+    },
+    {
+      "id": "5-validation-validation-hitl-contract",
+      "phase": 5,
+      "kind": "validation",
+      "title": "Validation + HITL contract",
+      "body": "Validation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap."
+    },
+    {
+      "id": "gate-p5-29514528",
+      "phase": 5,
+      "kind": "gate",
+      "title": "DoD gate — P5",
+      "body": "# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883",
+      "language": "markdown"
+    },
+    {
+      "id": "6-code-p6-placeholder-module-determinis",
+      "phase": 6,
+      "kind": "code",
+      "title": "P6 placeholder module (deterministic template)",
+      "body": "const JOBS = [\"show\", \"schedule\", \"publish\", \"sync\"];\nconst REJECTION = \"\";\nfunction synthesize(spec) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"House Showing Scheduler\", phase: 6, job: \"show\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"show\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"show\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"show\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+      "language": "javascript"
+    },
+    {
+      "id": "6-code-sandbox-result",
+      "phase": 6,
+      "kind": "code",
+      "title": "Sandbox result",
+      "body": "{\n  \"ok\": true,\n  \"detail\": \"tests.pass\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p6-55247714",
+      "phase": 6,
+      "kind": "gate",
+      "title": "DoD gate — P6",
+      "body": "# DoD gate — P6\n\n**Result: FAIL**\n\nUnmet criteria:\n- Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)\n\nEvidence hash: 552477142",
+      "language": "markdown"
+    },
+    {
+      "id": "7-research-competitive-analysis-matrix",
+      "phase": 7,
+      "kind": "research",
+      "title": "Competitive analysis matrix",
+      "body": "# Market position — House Showing Scheduler\n\n> Illustrative competitor templates (source: illustrative — NOT live research). Verify before citing.\n\n## DealMachine / PropStream (REI deal flow)\nSource: illustrative template\nStrength: Driving-for-dollars + comps\nGap RapidTool exploits: No flip/renovation lifecycle or ARV grounding\n## Follow Up Boss (Agent CRM)\nSource: illustrative template\nStrength: Lead nurture\nGap RapidTool exploits: Not a governed delivery graph; no escrow/title handoff\n## Cursor (IDE-attached agent)\nSource: illustrative template\nStrength: Repo-aware multi-file edits\nGap RapidTool exploits: No agency lifecycle or HITL graph\n## v0 / Bolt / Lovable (Prompt-to-app)\nSource: illustrative template\nStrength: Fast UI scaffolds\nGap RapidTool exploits: Skips isolation policy and ADR trail\n\nArchitectural advantage: deterministic 0–12 graph with HITL, MCP/A2A, and ADRs — generators skip this; IDEs leave it to the human."
+    },
+    {
+      "id": "gate-p7-42550424",
+      "phase": 7,
+      "kind": "gate",
+      "title": "DoD gate — P7",
+      "body": "# DoD gate — P7\n\n**Result: FAIL**\n\nUnmet criteria:\n- Live research corpus exists for P7 (≥1 fetched finding)\n\nEvidence hash: 425504246",
+      "language": "markdown"
+    },
+    {
+      "id": "8-ui-interface-contract-client-ui",
+      "phase": 8,
+      "kind": "ui",
+      "title": "Interface contract (client UI)",
+      "body": "Screens derived from the brief's product surfaces (one distinct entity-management responsibility each — never one screen per verb):\nScreen: showing\n  Responsibility: showing management\n  Actions: show, schedule, publish\n  State: showing\nScreen: house\n  Responsibility: house management\n  Actions: show, schedule, publish\n  State: house\nScreen: buyer\n  Responsibility: buyer management\n  Actions: (none named)\n  State: buyer\nScreen: agent\n  Responsibility: agent management\n  Actions: show, publish\n  State: agent\nScreen: property\n  Responsibility: property management\n  Actions: show\n  State: property\nScreen: calendar\n  Responsibility: calendar management\n  Actions: sync\n  State: calendar\n\n> prototype pending — no UI code generated; this contract is a declaration (deterministic template), not an implementation (B-18 honesty)."
+    },
+    {
+      "id": "gate-p8-60617535",
+      "phase": 8,
+      "kind": "gate",
+      "title": "DoD gate — P8",
+      "body": "# DoD gate — P8\n\n**Result: PASS**\n\nAll criteria met for phase 8.\n\nEvidence hash: 606175358",
+      "language": "markdown"
+    },
+    {
+      "id": "9-cicd-github-actions-workflow",
+      "phase": 9,
+      "kind": "cicd",
+      "title": "GitHub Actions workflow",
+      "body": "name: rapidtool-gate\non: [pull_request]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n      - run: npm ci\n      - run: npm run typecheck\n      - run: npm test",
+      "language": "yaml"
+    },
+    {
+      "id": "9-cicd-iac-sketch",
+      "phase": 9,
+      "kind": "cicd",
+      "title": "IaC sketch",
+      "body": "# GCP + Firebase hosting\nhosting: firebase preview channels\nworkers: cloud run, scale-to-zero\ngpu: provision only for local-edge promotion jobs"
+    },
+    {
+      "id": "gate-p9-30305407",
+      "phase": 9,
+      "kind": "gate",
+      "title": "DoD gate — P9",
+      "body": "# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723",
+      "language": "markdown"
+    },
+    {
+      "id": "10-edge-local-compute-inference",
+      "phase": 10,
+      "kind": "edge",
+      "title": "Local compute & inference",
+      "body": "Compute model: show, schedule, publish, sync run as deterministic local steps over showing.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model."
+    },
+    {
+      "id": "gate-p10-32184623",
+      "phase": 10,
+      "kind": "gate",
+      "title": "DoD gate — P10",
+      "body": "# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335",
+      "language": "markdown"
+    },
+    {
+      "id": "11-tools-live-data-tool-surfaces",
+      "phase": 11,
+      "kind": "tools",
+      "title": "Live data & tool surfaces",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"surfaces\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p11-16636256",
+      "phase": 11,
+      "kind": "gate",
+      "title": "DoD gate — P11",
+      "body": "# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674",
+      "language": "markdown"
+    },
+    {
+      "id": "12-docs-architecture-decision-records",
+      "phase": 12,
+      "kind": "docs",
+      "title": "Architecture Decision Records",
+      "body": "# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around showing, house, buyer, agent, property, calendar derived from the brief (P0 lattice).\n\n# ADR-002 show pipeline\n\nStatus: accepted\nDecision: The product runs a sequential show → schedule → publish → sync pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.",
+      "language": "markdown"
+    },
+    {
+      "id": "12-docs-openapi-3-1",
+      "phase": 12,
+      "kind": "docs",
+      "title": "OpenAPI 3.1",
+      "body": "openapi: 3.1.0\ninfo:\n  title: House Showing Scheduler API\n  version: \"1.0.0\"\npaths:\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/publish:\n    post:\n      summary: publish\n      responses:\n        \"200\":\n          description: ok\n  /v1/sync:\n    post:\n      summary: sync\n      responses:\n        \"200\":\n          description: ok",
+      "language": "yaml"
+    },
+    {
+      "id": "gate-p12-35300554",
+      "phase": 12,
+      "kind": "gate",
+      "title": "DoD gate — P12",
+      "body": "# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408",
+      "language": "markdown"
+    },
+    {
+      "id": "packet-12",
+      "phase": 12,
+      "kind": "packet",
+      "title": "Agent packet (A4)",
+      "body": "# RapidTool Agent Packet v3 — House Showing Scheduler\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-08T13:38:49.721Z\nproject_id: 9f7b40f0-80e9-4959-8007-8d7b006a1451\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-08T13:38:49.721Z\",\n  \"project_id\": \"9f7b40f0-80e9-4959-8007-8d7b006a1451\",\n  \"name\": \"House Showing Scheduler\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": true\n  },\n  \"verdict\": \"proceed\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874729668,\n      \"decided_at\": 1788874729670\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874729672,\n      \"decided_at\": 1788874729674\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874729687,\n      \"decided_at\": 1788874729690\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874729696,\n      \"decided_at\": 1788874729700\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ]\n}\n```\n\n## Mission\na house-showing scheduler: agents publish open-house and private-showing slots, buyers book slots with email confirmation, reminders, calendar sync stub, showing feedback form, per-property showing history\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: show, schedule, publish, sync\nEntities: showing, house, buyer, agent, property, calendar\nConstraints: none declared\nComplexity: 7.5 / 10\n\n## Scheduler (A3)\nTightness 8.4 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for show, schedule, publish before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/show.ts — Implement job “show” against the contract\n- [implementer] src/jobs/schedule.ts — Implement job “schedule” against the contract\n- [implementer] src/jobs/publish.ts — Implement job “publish” against the contract\n- [implementer] src/jobs/sync.ts — Implement job “sync” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Showing: id:ulid, status:enum, updatedAt:datetime\n- House: id:ulid, status:enum, updatedAt:datetime\n- Buyer: id:ulid, status:enum, updatedAt:datetime\n- Agent: id:ulid, status:enum, updatedAt:datetime\n- Property: id:ulid, status:enum, updatedAt:datetime\n- Calendar: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/show (show)\n- POST /v1/schedule (schedule)\n- POST /v1/publish (publish)\n- POST /v1/sync (sync)\n\n## Oracle (A7)\n- job.show.happy: Authorized operator submits “show” with a valid showing ⇒ 200 + persisted entity + checkpoint written\n- job.schedule.happy: Authorized operator submits “schedule” with a valid showing ⇒ 200 + persisted entity + checkpoint written\n- job.publish.happy: Authorized operator submits “publish” with a valid showing ⇒ 200 + persisted entity + checkpoint written\n- job.sync.happy: Authorized operator submits “sync” with a valid showing ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed\n## Decision ledger (HITL)\n- P4 · approve · human · 2026-09-08T13:38:49.670Z\n- P5 · approve · human · 2026-09-08T13:38:49.674Z\n- P8 · approve · human · 2026-09-08T13:38:49.690Z\n- P9 · approve · human · 2026-09-08T13:38:49.700Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.327] Data model written for House Showing Scheduler: showing, house, buyer, agent, property, calendar.\n2. [procedural 0.303] House Showing Scheduler executes as one sequential real estate pipeline.\n3. [semantic 0.289] Domain real-estate; jobs show, schedule, publish, sync.\n4. [procedural 0.279] HITL reject requires a written reason.\n5. [episodic 0.267] Ingested brief for House Showing Scheduler in real-estate.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.8/10 (proceed)\n- Technical feasibility: 6/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: show, schedule, publish, sync run as deterministic local steps over showing.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"real-estate\",\n  \"surfaces\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around showing, house, buyer, agent, property, calendar derived from the brief (P0 lattice).\n\n# ADR-002 show pipeline\n\nStatus: accepted\nDecision: The product runs a sequential show → schedule → publish → sync pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: House Showing Scheduler API\n  version: \"1.0.0\"\npaths:\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/publish:\n    post:\n      summary: publish\n      responses:\n        \"200\":\n          description: ok\n  /v1/sync:\n    post:\n      summary: sync\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around showing, house, buyer, agent, property, calendar derived from the brief (P0 lattice).\n\n# ADR-002 show pipeline\n\nStatus: accepted\nDecision: The product runs a sequential show → schedule → publish → sync pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: House Showing Scheduler API\n  version: \"1.0.0\"\npaths:\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/publish:\n    post:\n      summary: publish\n      responses:\n        \"200\":\n          description: ok\n  /v1/sync:\n    post:\n      summary: sync\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+      "language": "markdown"
+    }
+  ],
+  "memory": [
+    {
+      "id": "12-semantic-0.97",
+      "kind": "semantic",
+      "phase": 12,
+      "text": "ADRs capture the product's entity model and pipeline decisions.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "11-episodic-0.87",
+      "kind": "episodic",
+      "phase": 11,
+      "text": "Live data surfaces declared from domain vocabulary; no runtime binding.",
+      "score": 0.87,
+      "source": "engine"
+    },
+    {
+      "id": "10-procedural-0.9",
+      "kind": "procedural",
+      "phase": 10,
+      "text": "Product logic runs locally and deterministically; no remote model is claimed.",
+      "score": 0.9,
+      "source": "engine"
+    },
+    {
+      "id": "9-procedural-0.96",
+      "kind": "procedural",
+      "phase": 9,
+      "text": "PRs cannot merge without typecheck + tests.",
+      "score": 0.96,
+      "source": "engine"
+    },
+    {
+      "id": "8-procedural-0.92",
+      "kind": "procedural",
+      "phase": 8,
+      "text": "Client UI contract written — screens bound to briefed entities; flows listed as actions.",
+      "score": 0.92,
+      "source": "engine"
+    },
+    {
+      "id": "lesson-template-emission-1a5cba7c",
+      "kind": "episodic",
+      "phase": 7,
+      "text": "unmet: Live research corpus exists for P7 (≥1 fetched finding)",
+      "score": 0.7,
+      "source": "engine",
+      "tags": [
+        "L2",
+        "lesson",
+        "template-emission"
+      ]
+    },
+    {
+      "id": "7-semantic-0.95",
+      "kind": "semantic",
+      "phase": 7,
+      "text": "Generators ship UI fast; RapidTool ships a governed lifecycle.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "lesson-template-emission-b90f22a6",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)",
+      "score": 0.7,
+      "source": "engine",
+      "tags": [
+        "L2",
+        "lesson",
+        "template-emission"
+      ]
+    },
+    {
+      "id": "6-episodic-0.86",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "5-procedural-0.99",
+      "kind": "procedural",
+      "phase": 5,
+      "text": "HITL reject requires a written reason.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "4-procedural-0.98",
+      "kind": "procedural",
+      "phase": 4,
+      "text": "Product data is protected by least-privilege role access.",
+      "score": 0.98,
+      "source": "engine"
+    },
+    {
+      "id": "3-procedural-0.93",
+      "kind": "procedural",
+      "phase": 3,
+      "text": "Integration surface for real estate declared from domain vocabulary.",
+      "score": 0.93,
+      "source": "engine"
+    },
+    {
+      "id": "2-semantic-0.94",
+      "kind": "semantic",
+      "phase": 2,
+      "text": "Data model written for House Showing Scheduler: showing, house, buyer, agent, property, calendar.",
+      "score": 0.94,
+      "source": "engine"
+    },
+    {
+      "id": "1-procedural-0.99",
+      "kind": "procedural",
+      "phase": 1,
+      "text": "House Showing Scheduler executes as one sequential real estate pipeline.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "0-episodic-0.91",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Ingested brief for House Showing Scheduler in real-estate.",
+      "score": 0.91,
+      "source": "engine"
+    },
+    {
+      "id": "0-semantic-0.97",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Scorecard must exist before any code node fires.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "boot-sem",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Domain real-estate; jobs show, schedule, publish, sync.",
+      "score": 0.8,
+      "source": "engine"
+    },
+    {
+      "id": "boot-proc",
+      "kind": "procedural",
+      "phase": 0,
+      "text": "Graph is sequential 0–12. HITL on P4, P5, P8, P9. Rejection needs ≥12 characters.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "boot-epi",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Constraints declared: none.",
+      "score": 0.7,
+      "source": "engine"
+    },
+    {
+      "id": "lesson-run-summary-d9355806",
+      "kind": "episodic",
+      "phase": 12,
+      "text": "L5 run-summary: run completed with gate FAIL P6,P7; reconcile the failed gates and lesson rows before reuse.",
+      "score": 0.6,
+      "source": "engine",
+      "tags": [
+        "L5",
+        "lesson",
+        "run-summary"
+      ]
+    }
+  ],
+  "logs": [
+    {
+      "ts": 1788874729651,
+      "phase": 0,
+      "level": "info",
+      "event": "project.created",
+      "detail": "real-estate"
+    },
+    {
+      "ts": 1788874729653,
+      "phase": 0,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P0 Deep Research & Feasibility"
+    },
+    {
+      "ts": 1788874729654,
+      "phase": 0,
+      "level": "info",
+      "event": "scorecard.ready",
+      "detail": "overall=7.8 verdict=proceed"
+    },
+    {
+      "ts": 1788874729653,
+      "phase": 0,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729654,
+      "phase": 0,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32696329"
+    },
+    {
+      "ts": 1788874729656,
+      "phase": 1,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P1 Core Orchestration & State Graph"
+    },
+    {
+      "ts": 1788874729656,
+      "phase": 1,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729657,
+      "phase": 1,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 10507139"
+    },
+    {
+      "ts": 1788874729660,
+      "phase": 2,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P2 Memory & Context Consolidation"
+    },
+    {
+      "ts": 1788874729660,
+      "phase": 2,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729661,
+      "phase": 2,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 18455377"
+    },
+    {
+      "ts": 1788874729664,
+      "phase": 3,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P3 Tool Integration & Interoperability"
+    },
+    {
+      "ts": 1788874729664,
+      "phase": 3,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729666,
+      "phase": 3,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16382928"
+    },
+    {
+      "ts": 1788874729668,
+      "phase": 4,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P4 Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1788874729668,
+      "phase": 4,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729670,
+      "phase": 4,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1788874729671,
+      "phase": 4,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35271886"
+    },
+    {
+      "ts": 1788874729672,
+      "phase": 5,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P5 Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1788874729673,
+      "phase": 5,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729674,
+      "phase": 5,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1788874729675,
+      "phase": 5,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 29514528"
+    },
+    {
+      "ts": 1788874729676,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1788874729678,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1788874729677,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729677,
+      "phase": 6,
+      "level": "info",
+      "event": "lesson.capture",
+      "detail": "L2 template-emission lesson-template-emission-b90f22a6 (P6 sealed with unmet DoD: p6-verified, p6-brief-fit)"
+    },
+    {
+      "ts": 1788874729679,
+      "phase": 6,
+      "level": "warn",
+      "event": "gate.verdict",
+      "detail": "FAIL · 2 unmet · 55247714"
+    },
+    {
+      "ts": 1788874729682,
+      "phase": 7,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P7 Domain & Market Research"
+    },
+    {
+      "ts": 1788874729682,
+      "phase": 7,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729682,
+      "phase": 7,
+      "level": "info",
+      "event": "lesson.capture",
+      "detail": "L2 template-emission lesson-template-emission-1a5cba7c (P7 sealed with unmet DoD: p7-research)"
+    },
+    {
+      "ts": 1788874729683,
+      "phase": 7,
+      "level": "warn",
+      "event": "gate.verdict",
+      "detail": "FAIL · 1 unmet · 42550424"
+    },
+    {
+      "ts": 1788874729687,
+      "phase": 8,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P8 Dynamic UI/UX Prototyping"
+    },
+    {
+      "ts": 1788874729687,
+      "phase": 8,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729690,
+      "phase": 8,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Dynamic UI/UX Prototyping"
+    },
+    {
+      "ts": 1788874729692,
+      "phase": 8,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 60617535"
+    },
+    {
+      "ts": 1788874729696,
+      "phase": 9,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P9 CI/CD & Cloud Deployment Routing"
+    },
+    {
+      "ts": 1788874729696,
+      "phase": 9,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729700,
+      "phase": 9,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "CI/CD & Cloud Deployment Routing"
+    },
+    {
+      "ts": 1788874729702,
+      "phase": 9,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 30305407"
+    },
+    {
+      "ts": 1788874729707,
+      "phase": 10,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P10 Local Agent & Edge Inference"
+    },
+    {
+      "ts": 1788874729707,
+      "phase": 10,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729708,
+      "phase": 10,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32184623"
+    },
+    {
+      "ts": 1788874729710,
+      "phase": 11,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P11 Real-Time Web & Tool Augmentation"
+    },
+    {
+      "ts": 1788874729710,
+      "phase": 11,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729712,
+      "phase": 11,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16636256"
+    },
+    {
+      "ts": 1788874729718,
+      "phase": 12,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P12 Documentation & Technical Specs"
+    },
+    {
+      "ts": 1788874729721,
+      "phase": 12,
+      "level": "warn",
+      "event": "delivery.complete",
+      "detail": "All 13 phases sealed. 2 failed gates: P6, P7"
+    },
+    {
+      "ts": 1788874729718,
+      "phase": 12,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1788874729720,
+      "phase": 12,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35300554"
+    },
+    {
+      "ts": 1788874729722,
+      "phase": 12,
+      "level": "warn",
+      "event": "run.complete.with.failed.gates",
+      "detail": "sealed complete with 2 failed DoD gate(s): P6(Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash),Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)); P7(Live research corpus exists for P7 (≥1 fetched finding))"
+    },
+    {
+      "ts": 1788874729722,
+      "phase": 12,
+      "level": "info",
+      "event": "lesson.capture",
+      "detail": "L5 run-summary lesson-run-summary-d9355806 (run completed with failure signals)"
+    }
+  ],
+  "hitl": null,
+  "decisions": [
+    {
+      "id": "hitl-4-1788874729670",
+      "phase": 4,
+      "title": "Approve isolation policy",
+      "decision": "approve",
+      "decidedBy": "human",
+      "requestedAt": 1788874729668,
+      "decidedAt": 1788874729670
+    },
+    {
+      "id": "hitl-5-1788874729674",
+      "phase": 5,
+      "title": "Approve validation contract",
+      "decision": "approve",
+      "decidedBy": "human",
+      "requestedAt": 1788874729672,
+      "decidedAt": 1788874729674
+    },
+    {
+      "id": "hitl-8-1788874729690",
+      "phase": 8,
+      "title": "Approve interface contract",
+      "decision": "approve",
+      "decidedBy": "human",
+      "requestedAt": 1788874729687,
+      "decidedAt": 1788874729690
+    },
+    {
+      "id": "hitl-9-1788874729700",
+      "phase": 9,
+      "title": "Approve production routing",
+      "decision": "approve",
+      "decidedBy": "human",
+      "requestedAt": 1788874729696,
+      "decidedAt": 1788874729700
+    }
+  ],
+  "modelRoute": "deterministic",
+  "sandbox": {
+    "runtime": "sync-template",
+    "ramMb": null,
+    "timeoutS": 30,
+    "isolated": true
+  },
+  "openapi": "openapi: 3.1.0\ninfo:\n  title: House Showing Scheduler API\n  version: \"1.0.0\"\npaths:\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/publish:\n    post:\n      summary: publish\n      responses:\n        \"200\":\n          description: ok\n  /v1/sync:\n    post:\n      summary: sync\n      responses:\n        \"200\":\n          description: ok",
+  "adr": "# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around showing, house, buyer, agent, property, calendar derived from the brief (P0 lattice).\n\n# ADR-002 show pipeline\n\nStatus: accepted\nDecision: The product runs a sequential show → schedule → publish → sync pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.",
+  "lattice": {
+    "domain": "real-estate",
+    "jobs": [
+      "show",
+      "schedule",
+      "publish",
+      "sync"
+    ],
+    "entities": [
+      "showing",
+      "house",
+      "buyer",
+      "agent",
+      "property",
+      "calendar"
+    ],
+    "constraints": [],
+    "nodes": [
+      {
+        "kind": "job",
+        "label": "show",
+        "weight": 1
+      },
+      {
+        "kind": "object",
+        "label": "showing",
+        "weight": 1
+      },
+      {
+        "kind": "object",
+        "label": "house",
+        "weight": 0.75
+      },
+      {
+        "kind": "actor",
+        "label": "buyer",
+        "weight": 0.55
+      },
+      {
+        "kind": "actor",
+        "label": "agent",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "schedule",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "publish",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "sync",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "property",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "calendar",
+        "weight": 0.55
+      }
+    ],
+    "complexity": 7.5,
+    "vague": false
+  },
+  "schedule": {
+    "securityDelta": 1,
+    "apiDelta": 1,
+    "tightness": 8.4,
+    "extraHitl": [],
+    "notes": [
+      "Standard isolate policy.",
+      "Default API budget.",
+      "Stock HITL set (P4, P5, P8, P9)."
+    ]
+  },
+  "traces": [
+    {
+      "id": "A1",
+      "name": "Intent Lattice",
+      "ranAt": 1788874729721,
+      "summary": "10 nodes · complexity 7.5"
+    },
+    {
+      "id": "A2",
+      "name": "FusionRank",
+      "ranAt": 1788874729721,
+      "summary": "ranked 19 memory rows for the packet"
+    },
+    {
+      "id": "A3",
+      "name": "Constraint Scheduler",
+      "ranAt": 1788874729721,
+      "summary": "tightness 8.4 · sec+1"
+    },
+    {
+      "id": "A4",
+      "name": "Agent Packet",
+      "ranAt": 1788874729721,
+      "summary": "compiled P12 packet"
+    },
+    {
+      "id": "A5",
+      "name": "Spec Graph",
+      "ranAt": 1788874729721,
+      "summary": "9 files · order schema → api → store"
+    },
+    {
+      "id": "A6",
+      "name": "Contract Synth",
+      "ranAt": 1788874729721,
+      "summary": "6 entities · 4 endpoints"
+    },
+    {
+      "id": "A7",
+      "name": "Test Oracle",
+      "ranAt": 1788874729721,
+      "summary": "5 cases"
+    },
+    {
+      "id": "A8",
+      "name": "Crew Router",
+      "ranAt": 1788874729721,
+      "summary": "airt · 7300 tok"
+    }
+  ],
+  "packet": "# RapidTool Agent Packet v3 — House Showing Scheduler\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-08T13:38:49.721Z\nproject_id: 9f7b40f0-80e9-4959-8007-8d7b006a1451\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-08T13:38:49.721Z\",\n  \"project_id\": \"9f7b40f0-80e9-4959-8007-8d7b006a1451\",\n  \"name\": \"House Showing Scheduler\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": true\n  },\n  \"verdict\": \"proceed\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874729668,\n      \"decided_at\": 1788874729670\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874729672,\n      \"decided_at\": 1788874729674\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874729687,\n      \"decided_at\": 1788874729690\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874729696,\n      \"decided_at\": 1788874729700\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ]\n}\n```\n\n## Mission\na house-showing scheduler: agents publish open-house and private-showing slots, buyers book slots with email confirmation, reminders, calendar sync stub, showing feedback form, per-property showing history\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: show, schedule, publish, sync\nEntities: showing, house, buyer, agent, property, calendar\nConstraints: none declared\nComplexity: 7.5 / 10\n\n## Scheduler (A3)\nTightness 8.4 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for show, schedule, publish before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/show.ts — Implement job “show” against the contract\n- [implementer] src/jobs/schedule.ts — Implement job “schedule” against the contract\n- [implementer] src/jobs/publish.ts — Implement job “publish” against the contract\n- [implementer] src/jobs/sync.ts — Implement job “sync” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Showing: id:ulid, status:enum, updatedAt:datetime\n- House: id:ulid, status:enum, updatedAt:datetime\n- Buyer: id:ulid, status:enum, updatedAt:datetime\n- Agent: id:ulid, status:enum, updatedAt:datetime\n- Property: id:ulid, status:enum, updatedAt:datetime\n- Calendar: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/show (show)\n- POST /v1/schedule (schedule)\n- POST /v1/publish (publish)\n- POST /v1/sync (sync)\n\n## Oracle (A7)\n- job.show.happy: Authorized operator submits “show” with a valid showing ⇒ 200 + persisted entity + checkpoint written\n- job.schedule.happy: Authorized operator submits “schedule” with a valid showing ⇒ 200 + persisted entity + checkpoint written\n- job.publish.happy: Authorized operator submits “publish” with a valid showing ⇒ 200 + persisted entity + checkpoint written\n- job.sync.happy: Authorized operator submits “sync” with a valid showing ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed\n## Decision ledger (HITL)\n- P4 · approve · human · 2026-09-08T13:38:49.670Z\n- P5 · approve · human · 2026-09-08T13:38:49.674Z\n- P8 · approve · human · 2026-09-08T13:38:49.690Z\n- P9 · approve · human · 2026-09-08T13:38:49.700Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.327] Data model written for House Showing Scheduler: showing, house, buyer, agent, property, calendar.\n2. [procedural 0.303] House Showing Scheduler executes as one sequential real estate pipeline.\n3. [semantic 0.289] Domain real-estate; jobs show, schedule, publish, sync.\n4. [procedural 0.279] HITL reject requires a written reason.\n5. [episodic 0.267] Ingested brief for House Showing Scheduler in real-estate.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.8/10 (proceed)\n- Technical feasibility: 6/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: show, schedule, publish, sync run as deterministic local steps over showing.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"real-estate\",\n  \"surfaces\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around showing, house, buyer, agent, property, calendar derived from the brief (P0 lattice).\n\n# ADR-002 show pipeline\n\nStatus: accepted\nDecision: The product runs a sequential show → schedule → publish → sync pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: House Showing Scheduler API\n  version: \"1.0.0\"\npaths:\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/publish:\n    post:\n      summary: publish\n      responses:\n        \"200\":\n          description: ok\n  /v1/sync:\n    post:\n      summary: sync\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around showing, house, buyer, agent, property, calendar derived from the brief (P0 lattice).\n\n# ADR-002 show pipeline\n\nStatus: accepted\nDecision: The product runs a sequential show → schedule → publish → sync pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: House Showing Scheduler API\n  version: \"1.0.0\"\npaths:\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/publish:\n    post:\n      summary: publish\n      responses:\n        \"200\":\n          description: ok\n  /v1/sync:\n    post:\n      summary: sync\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "specGraph": {
+    "nodes": [
+      {
+        "id": "schema",
+        "file": "src/domain/real_estate.ts",
+        "purpose": "Typed entities from the lattice",
+        "dependsOn": [],
+        "owner": "architect"
+      },
+      {
+        "id": "api",
+        "file": "src/api/routes.ts",
+        "purpose": "HTTP contracts bound to jobs",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "architect"
+      },
+      {
+        "id": "store",
+        "file": "src/state/store.ts",
+        "purpose": "Checkpointed client/server state",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-0",
+        "file": "src/jobs/show.ts",
+        "purpose": "Implement job “show” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-1",
+        "file": "src/jobs/schedule.ts",
+        "purpose": "Implement job “schedule” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-2",
+        "file": "src/jobs/publish.ts",
+        "purpose": "Implement job “publish” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-3",
+        "file": "src/jobs/sync.ts",
+        "purpose": "Implement job “sync” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "ui",
+        "file": "src/ui/console.tsx",
+        "purpose": "Operator surfaces bound to store fields",
+        "dependsOn": [
+          "store",
+          "job-0",
+          "job-1",
+          "job-2",
+          "job-3"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "tests",
+        "file": "tests/oracle.spec.ts",
+        "purpose": "Acceptance tests from the oracle",
+        "dependsOn": [
+          "api",
+          "ui"
+        ],
+        "owner": "tester"
+      }
+    ],
+    "order": [
+      "schema",
+      "api",
+      "store",
+      "job-0",
+      "job-1",
+      "job-2",
+      "job-3",
+      "ui",
+      "tests"
+    ]
+  },
+  "contracts": {
+    "entities": [
+      {
+        "name": "Showing",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "House",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Buyer",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Agent",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Property",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Calendar",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/show",
+        "job": "show"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/schedule",
+        "job": "schedule"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/publish",
+        "job": "publish"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/sync",
+        "job": "sync"
+      }
+    ]
+  },
+  "oracle": [
+    {
+      "id": "orc-1",
+      "name": "job.show.happy",
+      "given": "Authorized operator submits “show” with a valid showing",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "show"
+    },
+    {
+      "id": "orc-2",
+      "name": "job.schedule.happy",
+      "given": "Authorized operator submits “schedule” with a valid showing",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "schedule"
+    },
+    {
+      "id": "orc-3",
+      "name": "job.publish.happy",
+      "given": "Authorized operator submits “publish” with a valid showing",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "publish"
+    },
+    {
+      "id": "orc-4",
+      "name": "job.sync.happy",
+      "given": "Authorized operator submits “sync” with a valid showing",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "sync"
+    },
+    {
+      "id": "orc-phase",
+      "name": "graph.no-skip",
+      "given": "Agent requests P9 while P4 is open",
+      "expect": "Illegal transition; no deploy artifacts",
+      "job": "graph"
+    }
+  ],
+  "crew": [
+    {
+      "role": "architect",
+      "mandate": "Lock schema and routes for show, schedule, publish before code.",
+      "tools": [
+        "read_repo",
+        "write_spec",
+        "mcp.search"
+      ],
+      "budgetTokens": 1800,
+      "handoff": "Pass Spec Graph order + contracts to implementer. Do not write feature code.",
+      "active": false
+    },
+    {
+      "role": "implementer",
+      "mandate": "Write files in Spec Graph order. Current edge: Documentation & Technical Specs.",
+      "tools": [
+        "edit_file",
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 3200,
+      "handoff": "Stop when oracle tests fail twice; hand traceback to reviewer.",
+      "active": false
+    },
+    {
+      "role": "reviewer",
+      "mandate": "Diff against contracts. Reject invented endpoints and leaked PHI/PII.",
+      "tools": [
+        "read_diff",
+        "comment_pr"
+      ],
+      "budgetTokens": 1400,
+      "handoff": "Approve only if A6 endpoints and A7 oracle are green.",
+      "active": true
+    },
+    {
+      "role": "tester",
+      "mandate": "Run oracle + one adversarial case per constraint.",
+      "tools": [
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 900,
+      "handoff": "Constraints in scope: none.",
+      "active": false
+    }
+  ],
+  "notes": "",
+  "generatedSource": "const JOBS = [\"show\", \"schedule\", \"publish\", \"sync\"];\nconst REJECTION = \"\";\nfunction synthesize(spec) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"House Showing Scheduler\", phase: 6, job: \"show\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"show\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"show\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"show\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+  "lastTest": {
+    "ok": true,
+    "detail": "tests.pass"
+  },
+  "enforceDod": false,
+  "wildMode": false,
+  "wildRun": null,
+  "chatLog": [],
+  "_v": 2
+}
