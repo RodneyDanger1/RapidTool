@@ -781,24 +781,42 @@ function emitUi(
   kind: ProjectKind,
 ): string {
   if (kind === "webapp") {
+    const hasGenerated =
+      (typeof project.generatedSource === "string" && project.generatedSource.trim().length > 0) ||
+      (Array.isArray(project.generatedTree) && project.generatedTree.length > 0);
+    const genImport = hasGenerated
+      ? [`import * as generated from "../generated.ts";`, ""]
+      : [];
+    const genBody = hasGenerated
+      ? [
+          `  const exported = Object.keys(generated);`,
+          `  return (`,
+          `    <main>`,
+          `      <h1>{${jstr(prose(project.name))}}</h1>`,
+          `      <p>generated exports ({exported.length}): {exported.join(", ") || "(none)"}</p>`,
+          `    </main>`,
+          `  );`,
+        ]
+      : [
+          `  const [notice] = useState<string>(`,
+          `    "shell — no generated module yet; run P6 then re-emit",`,
+          `  );`,
+          `  return (`,
+          `    <main>`,
+          `      <h1>{${jstr(prose(project.name))}}</h1>`,
+          `      <p>{notice}</p>`,
+          `    </main>`,
+          `  );`,
+        ];
     return [
       ...sourceHeader(node.file, node.purpose, project, [
-        "// Operator surfaces bound to store fields (P8 interface contract).",
-        "// Shell only — implementing the surfaces named in the project's",
-        '// "Interface contract" artifact is the human/agent build work ahead.',
+        "// Operator surfaces bound to generated modules (P8). Not a stub wall:",
+        "// the barrel at src/generated.ts is imported when P6 produced a module.",
       ]),
-      `import { useState } from "react";`,
-      "",
+      ...(hasGenerated ? [] : [`import { useState } from "react";`]),
+      ...genImport,
       `export function Console() {`,
-      `  const [notice] = useState<string>(`,
-      `    "shell — implement the P8 interface-contract surfaces against the store stubs",`,
-      `  );`,
-      `  return (`,
-      `    <main>`,
-      `      <h1>{${jstr(prose(project.name))}}</h1>`,
-      `      <p>{notice}</p>`,
-      `    </main>`,
-      `  );`,
+      ...genBody,
       `}`,
       "",
       `export default Console;`,

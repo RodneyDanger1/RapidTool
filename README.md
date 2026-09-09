@@ -11,14 +11,12 @@ evidence-hashed DoD gates, an append-only decision ledger, and a hard no-fabrica
 `http://localhost:8080`) and a file-based headless CLI (`scripts/rapidtool-cli.mjs`, **31
 verbs** at this write) that drives the same pure engine with no browser and no server.
 
-> **Status: built, and honest about the rest.** The live what-is-left ledger is
-> [`research/multiagent/94_readiness_plan.md`](research/multiagent/94_readiness_plan.md)
-> (ranked basic→big); the engineering scorecard is `96_engineering_completion.md`; the
-> competitor-gap strategy is [`90_LEAPFROG.md`](research/multiagent/90_LEAPFROG.md).
-> `npm run typecheck`, `npm run lint`, `npm run build` and `npm test` are all green
-> (full suite **1360/1360** at the fixes/148 gate; the 94 §B1 platform-chrome failures
-> are fixed). The declare-or-strike line — what is real on disk today and what is not —
-> is [What it does and does not do today](#what-it-does-and-does-not-do-today).
+> **Status: built, and honest about the rest.** Live gates (2026-09-09): `npm test`
+> **1488/1488**, typecheck 0, lint 0 errors / 18 warnings, build 0. RapidTool is **not**
+> yet an autonomous software factory that beats Codex/OpenHands/Claude Code — 4/5
+> maker-test jobs are still `TODO(E-15)` stubs; Chat is one-shot DeepSeek with no
+> tools. The declare-or-strike line is
+> [What it does and does not do today](#what-it-does-and-does-not-do-today).
 
 ---
 

@@ -100,7 +100,8 @@ describe("scaffoldProject — file-tree shape per kind", () => {
     assert.ok((pkg.devDependencies as Record<string, string>).vite);
     assert.equal(pkg.name, slugName(p.name));
     const ui = bodyOf(result, "src/ui/console.tsx");
-    assert.ok(ui.includes("useState"), "React shell expected for app kind");
+    assert.ok(ui.includes("from \"react\"") || ui.includes("../generated"), "React or generated barrel");
+    assert.ok(ui.includes("../generated"), "webapp console must import the generated barrel (168)");
     assert.ok(/<h1>\{/.test(ui), "name goes through a JSX expression");
     assert.ok(!ui.includes("<h1>A/B"), "raw name never becomes JSX text");
   });
