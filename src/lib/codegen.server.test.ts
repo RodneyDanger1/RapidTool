@@ -2223,3 +2223,96 @@ describe("216r patch repair through liveP6Synthesis (W8-L5 pins)", () => {
   });
 });
 
+// --- 216r patch-path defect fixes (W9-L2) ------------------------------------
+// fixes/216r §2 recorded two real defects in the T-107.1 patch path; this block
+// pins their fixes:
+//   (d) the masked↔raw line map — a JSDoc'd module (the system prompt mandates
+//       full JSDoc; block comments destroy the masked line numbering) ATTAINS
+//       the patch level and its delta lands with RAW line numbers;
+//   (e) a landed delta short-circuits the legacy full-rewrite block — a
+//       PARSEABLE legacy-style reply can no longer overwrite the patched
+//       envelope (the unparseable-reply crutch the W8-L5 (a) pins used is
+//       gone).
+
+/** W9-L2 fixture: the realistic JSDoc'd module — KANBAN_MODULE carries full
+ *  block-comment JSDoc, and has Math.random() swapped into code. Raw 38 lines
+ *  → masked 27: this is the exact shape whose masked line numbers used to
+ *  empty the patch candidate list (W8-L5 defect 1). */
+const JSDOC_NONDET_MODULE = KANBAN_MODULE.replace(
+  'return { id: "b-" + name, name: name, columns: [] };',
+  'return { id: "b-" + Math.random(), name: name, columns: [] };',
+);
+
+describe("216r patch-path defect fixes (W9-L2)", () => {
+  it("(d) a JSDoc'd non-deterministic module ATTAINS the patch level — the delta lands with RAW line numbers", async () => {
+    const base = p6Base();
+    const h = patchHarness(
+      [
+        () => ({ ok: true, text: JSON.stringify({ module: JSDOC_NONDET_MODULE, exports: KANBAN_ENVELOPE.exports, reqTrace: KANBAN_ENVELOPE.reqTrace }), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: patchReply("Math.random()", "name"), model: "deepseek-v4-flash" }),
+        // Unparseable follow-up (the W8-L5 style): this test isolates defect 1
+        // — the parseable-overwrite case is (e)'s.
+        () => ({ ok: true, text: "no json — the patch is the only repair this module gets", model: "deepseek-v4-flash" }),
+      ],
+      { patchRepairs: true },
+    );
+    const q = await liveP6Synthesis(base, h.deps);
+
+    assert.equal(h.kinds[0], "synthesis");
+    assert.equal(h.kinds[1], "patch", "patch-first: the JSDoc'd module attains the patch level (masked↔raw map)");
+    assert.ok(
+      h.prompts[1]!.includes(
+        '--- lines 7-9 (line numbers are for orientation only — they are NOT part of the text) ---\n' +
+          '  if (typeof name !== "string" || name === "") { throw new Error("name required"); }\n' +
+          '  return { id: "b-" + Math.random(), name: name, columns: [] };\n}',
+      ),
+      "the excerpt window quotes the RAW lines 7-9 verbatim around the code occurrence",
+    );
+
+    const deltas = (q.logs ?? []).filter((l) => l.event === "p6.repair.delta");
+    assert.equal(deltas.length, 1, "exactly one landed-delta record");
+    const rec = JSON.parse(deltas[0]!.detail) as { kind: string; matches: number; unified: string };
+    assert.equal(rec.kind, "exact");
+    assert.equal(rec.matches, 1);
+    assert.equal(rec.unified, "@@ -8,1 +8,1 @@\n-Math.random()\n+name", "the hunk names the RAW line (8) — the masked line (4) never leaks into the record");
+
+    assert.ok(!(q.generatedSource ?? "").includes("Math.random"), "the determinism defect is gone");
+    assert.equal(
+      q.generatedSource,
+      JSDOC_NONDET_MODULE.replace("Math.random()", "name").trim(),
+      "the accepted bytes are the landed delta's module",
+    );
+    assert.ok(validateSynthesisModule(q.generatedSource ?? "", KANBAN_ENVELOPE.exports, ["createBoard", "addColumn"]).ok);
+    assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"), "no refusal — the patched module was accepted");
+  });
+
+  it("(e) after a landed delta a PARSEABLE legacy-style reply can no longer overwrite it (legacy block short-circuited)", async () => {
+    const base = p6Base();
+    const h = patchHarness(
+      [
+        () => ({ ok: true, text: JSON.stringify({ module: NOCOMMENT_NONDET_MODULE, exports: KANBAN_ENVELOPE.exports, reqTrace: KANBAN_ENVELOPE.reqTrace }), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: patchReply("Math.random()", "name"), model: "deepseek-v4-flash" }),
+        // A PARSEABLE legacy full-rewrite reply — the pre-fix overwrite path
+        // (216r §2 defect 2): it used to be accepted and replace the patched
+        // module with the plain kanban one, silently discarding the delta.
+        () => ({ ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" }),
+      ],
+      { patchRepairs: true },
+    );
+    const q = await liveP6Synthesis(base, h.deps);
+
+    assert.deepEqual(h.kinds, ["synthesis", "patch"], "a landed delta short-circuits the legacy block — no third call");
+    assert.equal(h.prompts.length, 2, "the parseable legacy-style reply was never consumed");
+    const deltas = (q.logs ?? []).filter((l) => l.event === "p6.repair.delta");
+    assert.equal(deltas.length, 1, "the delta landed once");
+    assert.equal(
+      q.generatedSource,
+      NOCOMMENT_NONDET_MODULE.replace("Math.random()", "name").trim(),
+      "the landed delta's bytes survive (the legacy reply did not overwrite them)",
+    );
+    assert.notEqual(q.generatedSource, KANBAN_MODULE.trim(), "the overwrite would have produced the plain kanban module");
+    assert.ok(!(q.generatedSource ?? "").includes("Math.random"));
+    assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"));
+  });
+});
+

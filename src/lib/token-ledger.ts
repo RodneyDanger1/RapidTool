@@ -19,6 +19,21 @@
  *
  * Parent wires recordSpend + assertWithinBudget / recordSpendWithinCap at
  * codegen synth paths. Do not add Project.tokenCap here (types.ts is parent).
+ *
+ * T-107.6 (dossier 107 §6 "Budgets that bind"): the ledger went cache-aware and
+ * budget-threadable. `TokenSpend` / `TokenLedger` carry OPTIONAL cache fields
+ * (cached prompt reads, cache writes, reasoning/thinking output) that
+ * accumulate only when a sample actually reports them, so every legacy 3-key
+ * ledger and every legacy `recordSpend` call keeps the exact pre-107.6 shape.
+ * The `TokenBudget` seam helpers let ONE caller-owned ledger thread through
+ * several seams (verify / chat / crew / …): `assertBudgetHeadroom` is the
+ * pre-dispatch gate (refuse before the wire call), `recordBudgetSpend` records
+ * the completed call's real usage and signals a cap crossing with
+ * SessionBudgetExceeded so the seam can block the result — the spend itself is
+ * NEVER clamped away (subagent.ts's "spend kept" rule; codegen.server.ts
+ * `accountSynthUsage` is the same pattern). `estimateCostUsd` takes
+ * CALLER-supplied per-1M prices: the dossier verified accounting MECHANISMS,
+ * not dollar figures (107 §11), so no price catalog ships here.
  */
 export class SessionBudgetExceeded extends Error {
   readonly code = "RT_E_BUDGET_EXHAUSTED" as const;

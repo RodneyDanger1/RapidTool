@@ -144,6 +144,24 @@ size, where it lives, and what the next wave should pick up.
   (`rowsOk`), 216r/216k bodies. **ACCEPTANCE (real runs):** corpus-shaped emit → scaffold →
   **census `{stubs: 0, reexports: 0, real: 3}`**; track/record/lease never-bridged (counted +
   surfaced); spec carries `jobMod_rent` + guarded call; **`orc-4` real**; §3 shortfall log → W9-L1.
+- **WAVE 9 `deleg_ea7a2afa` CLOSED (2026-09-17 ~09:45) — patch-path defects FIXED + CLI behavior
+  suites LANDED. Boundary `gate.sh`: `{"ok":true}`** — typecheck 0 · lint 0 · gaps 0 · build 0 ·
+  scripts **261/261** (+23) + src **1907/1907**. **Lane outcomes:** L1 ⚠️ recon-only (zero
+  patches — repo byte-untouched by design; full landing plan + a decision question, below);
+  L2 ✅ **COMPLETE** — `codeTokenLineNumbers()` :659 (masked→raw offset map; both
+  `patchableDefect` branches rewired :709/:720) + `patchLanded = validation.ok` short-circuits
+  (:2504/:2528/:2830/:2854; guard :2534/:2860); tests :2246 (99/99, +2; legacy bytes kept);
+  L3 ✅ **COMPLETE** — NEW `rapidtool-cli-edit.test.mjs` (10) + `rapidtool-cli-lesson.test.mjs`
+  (13); `rapidtool-cli.mjs` byte-identical; 216s §1-4 filled with real output; L4 ⚠️ recon +
+  skeleton (`fixes/216w` IN PROGRESS) + ONE additive doc-comment on token-ledger.ts (:~22);
+  L5 ⚠️ (A) **T-11 VERDICT: FAILS today** — live red-seal run captures a lesson from
+  `engine.ts:1416-1418` (`!needsHitl && !r.pass`) with tags `['L2','lesson','template-emission']`
+  — NO probe id (knowledge.ts:916-931); the feedback half works (selectLessons renders it);
+  (B) 108-T7 spike: scratch `npm install` exit 0 (31s), tree-run exit 0 (25.5s, envelope NOT
+  read — not claimed); doc NOT written (→ W10-L4 from the analysis + probe). **Parent decision
+  (T-11 probe-id):** surface the ids ALREADY inside the lesson row (failureSignature/DoD
+  anchors) as an explicit `[probe:<id>]` tag — no row-id re-minting; red-seal lessons stop
+  being minted (the signal becomes a `p6.*` log instead).
 - **Wave-start gate baseline (reproduced 2026-09-16 19:11–19:13, no writers active):**
   typecheck **0** · lint **0 errors / 1 warning** (the warning IS the census defect — assigned to L1)
   · `npm test` **scripts 195/195 + src 1662/1662, 0 fail** · build **0**.
@@ -298,8 +316,8 @@ size, where it lives, and what the next wave should pick up.
 | `fixes/216o_policy_integration.md` | ⏳ bodies → W8-L2 (code+pins ✅; suites verified) |
 | `fixes/216p_provider_registry.md` | ⏳ body → W8-L2 (registry 21/21 ✅) |
 | `fixes/216q_eval_fixtures.md` | ✅ COMPLETE (W6-L4) |
-| `fixes/216r_patch_integration.md` | ✅ tests 97/97 + body (2 patch-path DEFECTS → W9-L2) |
-| `fixes/216s_cli_wave.md` | ⏳ arm + 3 tests + README section ✅; behavior suites → W9-L3 |
+| `fixes/216r_patch_integration.md` | ✅ COMPLETE (defects FIXED W9-L2; tests 99/99) |
+| `fixes/216s_cli_wave.md` | ✅ COMPLETE (W9-L3; +23 tests; 216s §1-5) |
 | `fixes/216t_subagent_contract.md` | ✅ COMPLETE (W8-L4) |
 | `fixes/216u_w7_e2e_verification.md` | ✅ WRITTEN (parent-assembled; carries the falsification record) |
 | `fixes/216v_compaction_constants.md` | ✅ WRITTEN (W8-L2) |
@@ -336,19 +354,21 @@ size, where it lives, and what the next wave should pick up.
 > Ownership is only valid once every W1 lane has stopped. Re-grep anchors before briefing.
 > Keep ≤5 lanes, disjoint files, flash-only, §3.0 guardrails verbatim, skeleton-first.
 
-> **W8 CLOSED (§1 — TA-15 ACCEPTANCE MET). W9 DISPATCHED 2026-09-17 ~09:50 — "engine truth +
-> patch-path + CLI tails" (5 lanes; every brief orders the lane to read its own
-> `wave_plans/W9/lane-N.md` FIRST).**
-1. **W9-L1 — §3 shortfall log + T-11** (`engine.ts`+test: `p6.jobs.shortfall` caller for
-   `doctor.jobScopeShortfall`; lesson capture gated on a green seal + probe id).
-2. **W9-L2 — patch-path DEFECTS** (`codegen.server.ts`+test: masked↔raw line mapping;
-   post-patch short-circuit — repros in `fixes/216r` §2).
-3. **W9-L3 — CLI behavior suites** (`edit` dry-run-never-writes / refusal / write+ledger pins;
-   T5 suites; `scripts/*` + `fixes/216s` §1-4).
-4. **W9-L4 — T-107.6 token ledger** to the verify/chat/crew/node-runner seams
-   (`token-ledger.ts` + those seams; codegen seam DEFERRED — W9-L2 owns that file).
-5. **W9-L5 — T-11 verify + 108-T7 spike** (lesson-capture gating evidence; E2E-vs-running-
-   instance feasibility + isolation-boundary decision doc).
+> **W9 CLOSED (§1 — patch-path fixed, CLI suites in). W10 DISPATCHED 2026-09-17 ~09:48 —
+> "engine truth + token ledger + verify-kind" (5 lanes; every brief orders the lane to read its
+> own `wave_plans/W10/lane-N.md` FIRST).**
+1. **W10-L1 — §3 shortfall log + T-11 LANDING** (`engine.ts` + `knowledge.ts`: green-seal gate
+   + `[probe:<id>]` tag per the parent decision; 216k §3).
+2. **W10-L2 — T-107.6 token-ledger functional** (finish the W9-L4 plan on disk: additive cache
+   fields, TokenBudget seam, recordBudgetSpend, estimateCostUsd; verify/chat/crew/node-runner
+   seams + caps; 216w).
+3. **W10-L3 — verify-kind install leg (T4.1/TA-16)** (`compile-check.server.ts` + `emit
+   --verify-kind`; scratch-copy + real `npm ci` + build/test verdict — the W9-L5 spike proved
+   install works in ~31s; honest envelope, no overclaim).
+4. **W10-L4 — `fixes/216x` write** (from `w9l5_scratch`: re-run the red-seal probe; T-11
+   FAILS-today evidence + the 108-T7 decision doc + spike boundaries).
+5. **W10-L5 — TA-11 oracle-strength audit + TA-12 error-handling audit** (docs-only;
+   `fixes/216y`; real bytes, report-don't-fix).
 
 > **W3 sketch (after W2):** TA-15 + T-13 (multi-job — THE product blocker; files free after R1/R3)
 > · T-18 (tree-run builds+tests; after R2) · T-11 · T4 hops · UI remainder (TASK-01/06/10/11) ·
@@ -447,3 +467,9 @@ Deferred to W3+: 105 standalones (TA-1/TA-3/TA-21/TA-23), 112 T5/T9/T11/T12, Wav
   real). L2 ✅ logs; L4 ✅ T-107.10 closed; L5's patch tests 97/97 + 2 documented patch-path
   defects (→ W9-L2). Parent budget: the big scaffold completion + 3 stale pins + README-cli +
   `rowsOk` lint. **`gate.sh {"ok":true}`** — scripts 238 + src **1905**. W9 dispatched.
+- **2026-09-17 (wave 9 close)** — patch-path defects FIXED (masked→raw line map + post-patch
+  short-circuit; codegen 99/99) · CLI behavior suites LANDED (edit 10 + lesson 13 tests; scripts
+  261) · T-11 verified FAILING today with live evidence (red-seal lesson minted, no probe id) ·
+  108-T7 spike: scratch install + tree-run both exit 0 (envelope unread — not claimed). L1/L4
+  recon-only (plans complete; budget). **`gate.sh {"ok":true}`** — scripts **261** · src
+  **1907**. W10 dispatched: engine truth + token ledger + verify-kind.

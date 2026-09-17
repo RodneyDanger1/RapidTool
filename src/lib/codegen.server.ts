@@ -638,6 +638,54 @@ export type PatchRepairOptions = {
   log?: (entry: JsonLog) => void;
 };
 
+/**
+ * 216r (W9-L2 · DEFECT 1): raw-source line numbers carrying a CODE occurrence
+ * of `token` — the masked↔raw line map the patch path needs.
+ *
+ * `maskLiteralsAndComments` replaces every masked span with SAME-LENGTH spaces,
+ * so masked and raw CHARACTER offsets stay aligned — but the newlines inside a
+ * block comment (i.e. every JSDoc'd module, the system-prompt-mandated shape)
+ * are destroyed (W9-L2 repro: raw 38 lines → masked 27). Masked line numbers
+ * therefore named the wrong raw lines, `patchableDefect`'s raw-line filter
+ * emptied, and the patch path never fired for the common case (the W8-L5
+ * defect). This walks every masked occurrence of `token` — an occurrence
+ * exists in the masked text iff the token sits in CODE, never inside a masked
+ * literal/comment — and maps its character offset onto the raw line that
+ * offset falls on. A line is kept only when its raw text really carries the
+ * token, so every excerpted window quotes a copyable occurrence. Capped at
+ * `cap` line numbers, order kept, duplicates dropped. Pure and total: garbage
+ * arguments yield [].
+ */
+function codeTokenLineNumbers(source: unknown, masked: unknown, token: unknown, cap = 6): number[] {
+  if (typeof source !== "string" || typeof masked !== "string" || typeof token !== "string" || token.length === 0) {
+    return [];
+  }
+  const limit = Number.isFinite(cap) ? Math.max(1, Math.floor(cap)) : 6;
+  const rawLineStarts = [0];
+  for (let i = 0; i < source.length; i += 1) {
+    if (source[i] === "\n") rawLineStarts.push(i + 1);
+  }
+  const srcLines = source.split("\n");
+  const out: number[] = [];
+  let from = 0;
+  while (out.length < limit) {
+    const at = masked.indexOf(token, from);
+    if (at === -1) break;
+    from = at + 1;
+    // Greatest raw line start ≤ at (binary search; both strings share offsets).
+    let lo = 0;
+    let hi = rawLineStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (rawLineStarts[mid]! <= at) lo = mid;
+      else hi = mid - 1;
+    }
+    const lineNo = lo + 1;
+    if ((srcLines[lineNo - 1] ?? "").includes(token) && out[out.length - 1] !== lineNo) out.push(lineNo);
+  }
+  return out;
+}
+
 /** The localized defect a patch can fix, or null when the defect class is not
  *  a bounded text edit (binding / missing-signature / envelope classes keep the
  *  legacy path untouched). Priority mirrors the legacy repair dispatch
@@ -653,10 +701,12 @@ function patchableDefect(input: {
   prose: readonly ProseLineHit[];
 }): { defect: string; lines: number[] } | null {
   if (input.unbound.length > 0) return null;
-  const srcLines = input.source.split("\n");
   if (input.softToken !== null) {
     const token = input.softToken;
-    const lines = tokenLineNumbers(input.masked, token).filter((n) => (srcLines[n - 1] ?? "").includes(token));
+    // 216r (W9-L2 · DEFECT 1): RAW line numbers via the masked↔raw offset map
+    // — masked line numbers drift on any JSDoc'd module and used to empty this
+    // candidate list (the patch path never fired for the common case).
+    const lines = codeTokenLineNumbers(input.source, input.masked, token);
     if (lines.length === 0) return null;
     return {
       defect: `the module uses a forbidden primitive: \`${token}\` (the zero-dep / zero-IO contract forbids it)`,
@@ -666,7 +716,8 @@ function patchableDefect(input: {
   if (input.missingSig.length > 0) return null;
   if (input.nondet !== null) {
     const token = input.nondet;
-    const lines = tokenLineNumbers(input.masked, token).filter((n) => (srcLines[n - 1] ?? "").includes(token));
+    // 216r (W9-L2 · DEFECT 1): same raw-line map as the soft-token branch.
+    const lines = codeTokenLineNumbers(input.source, input.masked, token);
     if (lines.length === 0) return null;
     return { defect: `the module uses a non-deterministic primitive: \`${token}\``, lines };
   }
@@ -2442,6 +2493,15 @@ async function synthesizeSingleModule(
     // outcome (no excerpt, non-delta reply, coded refusal, patched module
     // still invalid) falls through to the legacy full-rewrite repair with its
     // prompt bytes unchanged.
+    // 216r (W9-L2 · DEFECT 2): a landed delta that REVALIDATES leaves no
+    // legacy repair class open on the patched bytes — the re-check above runs
+    // every class the legacy block below would dispatch (bound exports,
+    // forbidden, signatures, non-determinism, prose) — so `patchLanded`
+    // short-circuits that block. Before this guard the legacy re-prompt still
+    // fired after a successful patch (guards were read from the ORIGINAL
+    // defect values) and a PARSEABLE reply overwrote the patched envelope,
+    // silently discarding the landed delta (216r §2 defect 2).
+    let patchLanded = false;
     if (patch !== undefined) {
       const defect = patchableDefect({
         source: envelope.module,
@@ -2467,10 +2527,11 @@ async function synthesizeSingleModule(
         if (patched !== null) {
           envelope = patched;
           validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames);
+          patchLanded = validation.ok;
         }
       }
     }
-    if (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0) {
+    if (!patchLanded && (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0)) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
         : repairableForbidden
@@ -2761,6 +2822,12 @@ async function synthesizeChunkEnvelope(
     // non-landing outcome (no excerpt, non-delta reply, coded refusal, patched
     // module still invalid) falls through to the legacy full-rewrite repair
     // with its prompt bytes unchanged.
+    // 216r (W9-L2 · DEFECT 2): the single-module-site fix, mirrored — a landed
+    // delta that REVALIDATES leaves no legacy repair class open on the patched
+    // bytes, so `patchLanded` short-circuits the legacy block below (whose
+    // parseable reply used to overwrite the patched chunk envelope: 216r §2
+    // defect 2).
+    let patchLanded = false;
     if (patch !== undefined) {
       const defect = patchableDefect({
         source: envelope.module,
@@ -2786,10 +2853,11 @@ async function synthesizeChunkEnvelope(
         if (patched !== null) {
           envelope = patched;
           validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames);
+          patchLanded = validation.ok;
         }
       }
     }
-    if (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0) {
+    if (!patchLanded && (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0)) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
         : repairableForbidden

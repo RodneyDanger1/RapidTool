@@ -134,3 +134,55 @@ the boundary sweep that closed this file.
 target + headless.ts repairTreeDir surface) and held baselines at lane time (codegen 86/86,
 headless 90/90); parent full sweep green (src 1894/1894). The NEW tests (unique-match apply +
 revalidate / ambiguous+no-match refusal / byte-parity) and section 2 evidence STILL OWED → W8-L5.
+
+---
+
+## 4. W9-L2 — patch-path DEFECT fixes (2026-09-17)
+
+**Status:** both §2 defects FIXED and pinned (codegen.server.ts + codegen.server.test.ts).
+
+**DEFECT 1 — masked↔raw line mismatch.** Probe-confirmed on the JSDoc'd shape: raw 38
+lines → masked 27 (`maskLiteralsAndComments` destroys block-comment newlines; masked/raw
+character offsets stay aligned because each masked span becomes SAME-LENGTH spaces), masked
+hit line 4 filtered against raw source lines → `[]` → `attemptPatchRepair` never fired.
+Fix: `codeTokenLineNumbers(source, masked, token, cap)` (`codegen.server.ts:659`) walks
+every masked occurrence of the token — an occurrence exists in masked text iff the token
+sits in CODE — and maps its CHARACTER OFFSET onto the raw line that offset falls on
+(binary search over raw line starts); a line is kept only when its raw text really carries
+the token, so the excerpted window always quotes a copyable occurrence. Used for BOTH
+localized-token classes in `patchableDefect` (`:709` soft-forbidden, `:720`
+non-deterministic). Unique-match contract / coded refusal strings / legacy prompt bytes
+untouched. Probe check: hit "Math.random", raw line map `[8]`; a comment-only mention
+filters to `[]`-free `[8]` (never counted as a candidate).
+
+**DEFECT 2 — landed delta did not short-circuit the legacy repair block.** Both sites now
+set `patchLanded = validation.ok` when `attemptPatchRepair` returned a patched envelope
+(`:2504/:2528` single-module, `:2830/:2854` chunked) and the legacy guard is
+`!patchLanded && (…)` (`:2534`, `:2860`). Soundness: `attemptPatchRepair` only returns a
+patched envelope after `validateSynthesisModule` accepted the patched bytes — i.e. NO
+legacy repair class (bound exports / forbidden / signature / non-determinism / prose) is
+open on them — so the skip can never skip a needed repair; a patch that fails revalidation
+still returns null and the legacy path runs UNCHANGED (prompts byte-identical whenever no
+patch landed — W8-L5 pin (c) preserved).
+
+**Tests added** (`216r patch-path defect fixes (W9-L2)`, test file `:2246`; 2 new):
+- (d) a JSDoc'd non-deterministic module ATTAINS the patch level; delta lands; the patch
+  prompt quotes RAW lines 7-9 verbatim; delta record `@@ -8,1 +8,1 @@\n-Math.random()\n+name`
+  (raw line 8 — the masked line 4 never leaks into the record); accepted bytes are the
+  patched module.
+- (e) after a landed delta a PARSEABLE legacy-style reply can no longer overwrite it:
+  `kinds === ["synthesis","patch"]`, the third reply is never consumed, the patched bytes
+  survive. W8-L5's (a) pins kept an unparseable third reply as the crutch; this pin
+  removes the crutch (deliberately).
+
+**Non-vacuity check** (scratch copy of src/lib, both fixes reverted, then deleted): new
+tests fail exactly as expected — (d) `kinds[1]` 'legacy-nondeterministic' ≠ 'patch';
+(e) kinds deepStrictEqual failure (third call fired) — while the existing 97 pins stay
+green, so the pins do not encode the defects.
+
+**Real outputs (final tree):**
+- `node --experimental-strip-types --test src/lib/codegen.server.test.ts` → **# tests 99 /
+  # pass 99 / # fail 0** (97 → 99 — "grow" satisfied; no pin weakened or deleted).
+- `node --experimental-strip-types --test src/lib/headless.test.ts` → **# tests 90 / # pass
+  90 / # fail 0** (unchanged).
+- `npm run typecheck` → exit 0. `npx eslint` on both changed files → exit 0.
