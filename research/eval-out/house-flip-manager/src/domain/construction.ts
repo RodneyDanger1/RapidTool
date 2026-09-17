@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // src/domain/construction.ts — Typed entities from the lattice
-// machine-generated from RapidTool packet 4207cef0-e4ea-4436-b2e2-5ac48ab8138c; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet d8afd788-8d33-4145-ba89-16c565a9df31; regenerate, don't hand-edit.
 // Typed entities from the A6 data contract. TODO(E-15) stub: extend fields,
 // add per-entity invariants, and keep in sync with the store + api stubs.
 // ---------------------------------------------------------------------------

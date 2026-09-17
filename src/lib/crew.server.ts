@@ -16,18 +16,19 @@
  * it never approves, rejects, advances, or deploys.
  *
  * Honesty contract: no DeepSeek key → { ok:false, reason:"not-configured" }
- * from the very first dispatch (completeDeepSeek returns it before any
- * network I/O). A run NEVER fabricates a session, findings, or a completion —
+ * from the very first dispatch (the registry-backed completer returns it —
+ * via the provider's keyless envelope — before any network I/O). A run NEVER
+ * fabricates a session, findings, or a completion —
  * max-steps/cost stops return the honest partial transcript with `stopped`.
  */
 
 import {
-  completeDeepSeek,
   isDeepSeekConfigured,
   DEEPSEEK_MODELS,
   DEEPSEEK_LONG_TIMEOUT_MS,
   type DeepSeekCompleteOptions,
 } from "./deepseek.server.ts";
+import { callModel, type RapidToolModelRole } from "./llm/providers/registry.ts";
 import { freeWebSearch } from "./websearch.server.ts";
 import { estimateTokens } from "./algorithms.ts";
 import { researchQueryText } from "./engine.ts";
@@ -860,6 +861,29 @@ export type CrewCompleter = (
 export const CREW_TURN_MAX_ATTEMPTS = 2;
 export const CREW_TURN_BACKOFF_MS = 1000;
 
+/**
+ * Map a crew tier onto a registry role (T-107.2 / fixes/216p): the crew's
+ * `pro` tier is the reasoning role, everything else (today: every ROLE_SPECS
+ * entry is `flash`) is the main workhorse role. Pure — no I/O.
+ */
+export function crewRoleForModel(model?: LlmModel): RapidToolModelRole {
+  return model === DEEPSEEK_MODELS.pro ? "reasoning" : "main";
+}
+
+/**
+ * Registry-backed default completer (T-107.2 / fixes/216p). The crew's DI
+ * surface (`createCrewRuntime` / `CrewCompleter`) is unchanged, so injected
+ * stub completers in tests keep full control; the REAL backend now routes
+ * every turn through `callModel(role, …)`: an explicit `opts.model` (the crew
+ * tier table's id, or a caller override) is validated by the registry's
+ * explicit-model rule — unknown ids are REFUSED (RT_E_VALIDATION) rather than
+ * silently defaulted — and undefined resolves from the role tier. The request
+ * shape, retry wrapper (completeCrewTurn) and 90s budget are byte-identical to
+ * the legacy `completeDeepSeek` binding.
+ */
+export const crewRegistryCompleter: CrewCompleter = (prompt, opts) =>
+  callModel(crewRoleForModel(opts?.model), prompt, opts);
+
 async function completeCrewTurn(
   complete: CrewCompleter,
   prompt: string,
@@ -1345,7 +1369,10 @@ export function createCrewRuntime(deps: {
 // Default bindings (real backend) + entry points
 // ---------------------------------------------------------------------------
 
-const defaultCrew = createCrewRuntime({ complete: completeDeepSeek, search: freeWebSearch });
+const defaultCrew = createCrewRuntime({
+  complete: crewRegistryCompleter,
+  search: freeWebSearch,
+});
 
 /**
  * Run the crew over a project (the orchestration loop). Config-gated: no

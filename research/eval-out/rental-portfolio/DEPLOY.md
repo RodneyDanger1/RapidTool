@@ -1,6 +1,6 @@
 # DEPLOY.md — Rental Portfolio Manager
 
-> machine-generated from RapidTool packet 5587eca3-156b-4c57-9ea4-23879f548cb5; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet e0451662-7106-402f-aa2c-9a456861b3e5; regenerate, don't hand-edit.
 > > template derived from P9/P12 artifacts — verify credentials before any deploy
 
 ## What this is
@@ -90,12 +90,12 @@ gpu: provision only for local-edge promotion jobs
 # ADR-001 real estate entity model
 
 Status: accepted
-Decision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, work-order, vendor derived from the brief (P0 lattice).
+Decision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, vendor, work-order derived from the brief (P0 lattice).
 
-# ADR-002 rent pipeline
+# ADR-002 lease pipeline
 
 Status: accepted
-Decision: The product runs a sequential rent → schedule → track → lease pipeline over its entities.
+Decision: The product runs a sequential lease → rent → schedule → track pipeline over its entities.
 
 # ADR-003 real estate integration boundaries
 
@@ -111,6 +111,12 @@ info:
   title: Rental Portfolio Manager API
   version: "1.0.0"
 paths:
+  /v1/lease:
+    post:
+      summary: lease
+      responses:
+        "200":
+          description: ok
   /v1/rent:
     post:
       summary: rent
@@ -126,12 +132,6 @@ paths:
   /v1/track:
     get:
       summary: track
-      responses:
-        "200":
-          description: ok
-  /v1/lease:
-    post:
-      summary: lease
       responses:
         "200":
           description: ok

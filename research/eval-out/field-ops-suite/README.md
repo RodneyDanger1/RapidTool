@@ -1,13 +1,13 @@
 # Field-Ops Suite
 
-> machine-generated from RapidTool packet 1bf0e807-f549-4335-938e-25dd71643cc2; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet 4a1e6b41-4a7f-4c19-9f9d-4089f5df79c8; regenerate, don't hand-edit.
 
 a field-ops suite for a small construction company: projects with phases + budgets, daily task lists per crew member, time sheets that roll into weekly payroll with rates + overtime, material/supply lists with purchase tracking + reorder flags, job costing by project
 
 ## Status
-- **Kind:** webapp — web app (kind webapp (inferred from brief/domain — no declared kind yet))
+- **Kind:** webapp — web app (kind webapp (mapped from declared kind "app"))
 - **Status:** complete · **Current phase:** P12 · **Model route:** deterministic
-- **Created:** 2026-09-10T05:29:25.294Z
+- **Created:** 2026-09-17T02:41:33.883Z
 
 ## What ships in this scaffold
 
@@ -50,10 +50,10 @@ a field-ops suite for a small construction company: projects with phases + budge
   # install + verify the emitted tree (Node >= 22)
   npm install
   npm run typecheck
-  # oracle spec = REAL assertions over the emitted modules (no todo stubs); green
-  # means the scaffold modules are intact + every oracle seam is still honestly
-  # stubbed — a seam test fails the moment that seam is implemented, which is
-  # the cue to replace it with the row's real acceptance assertion
+  # oracle spec = REAL assertions over the emitted modules (no todo stubs);
+  # green means the scaffold modules are intact + every oracle seam is still
+  # honestly stubbed — a seam test fails the moment that seam is implemented,
+  # which is the cue to replace it with the row's real acceptance assertion.
   npm test
   
   # dev server — index.html + src/main entry + vite config are emitted; the UI
@@ -69,6 +69,7 @@ a field-ops suite for a small construction company: projects with phases + budge
 ## Honest boundaries
 
 - The machine-verified core is the generated P6 module under `src/` (project.generatedSource); everything else is a typed stub awaiting implementation.
+- Oracle rows (`tests/oracle.spec.ts`): all 2 pinned row(s) assert the emitted modules' real current behavior — no NOT IMPLEMENTED skips.
 - `src/ui/` is a contract-level shell (P8 interface contract), not a finished UI.
 - Deploy templates from P9/P12 are recorded artifacts only — see DEPLOY.md; nothing here deploys by itself.
 - `assets/` and `public/` are expected at the emitted scaffold and are NOT engine-generated.

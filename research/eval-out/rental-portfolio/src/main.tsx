@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // src/main.tsx — Browser entry — mounts the UI shell (P8 interface contract)
-// machine-generated from RapidTool packet 5587eca3-156b-4c57-9ea4-23879f548cb5; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet e0451662-7106-402f-aa2c-9a456861b3e5; regenerate, don't hand-edit.
 // The mounted surface is the contract-level Console shell from src/ui; wiring
 // it to the store/job modules is the build work ahead (see README honest
 // boundaries).

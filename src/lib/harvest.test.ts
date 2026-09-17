@@ -307,6 +307,164 @@ describe("harvestRepos", () => {
     assert.equal(res.hits.length, 1);
     assert.equal(res.hits[0].repo, "acme/real-repo");
   });
+
+  // 109 T-09 / W5-L2 (a): cap-enforcement teeth for the loop-top break
+  // (`harvest.ts:417`) — the per-result break at `:441` only caps the list
+  // WITHIN one query page, so without the loop-top check a further query still
+  // burned a search call with a full candidate list in hand. 4 queries × 4
+  // distinct repos: query 1 fills 4, query 2 tops up to HARVEST_MAX_CANDIDATES
+  // (6) mid-page, queries 3–4 must NOT be searched at all.
+  it("candidate cap: stops searching once HARVEST_MAX_CANDIDATES is reached (loop-top break)", async () => {
+    let searchCalls = 0;
+    const search: HarvestOptions["search"] = async (q) => {
+      searchCalls += 1;
+      const qi = q.replace(/\D/g, "");
+      return {
+        ok: true,
+        query: q,
+        items: [1, 2, 3, 4].map((i) => ({
+          title: `cap ${qi}/${i}`,
+          url: `https://github.com/capq${qi}/repo-${i}`,
+          content: "candidate summary",
+        })),
+        provider: "duckduckgo",
+      };
+    };
+    const res = await harvestRepos(["q1", "q2", "q3", "q4"], {
+      maxFetches: 20, // generous: the cap under test is the CANDIDATE cap
+      search,
+      fetchText: async () => "readme body",
+      fetchJson: async () => ({ license: null }),
+    });
+    assert.equal(
+      searchCalls,
+      2,
+      `the cap must stop further searches: 4+2 candidates fill the cap in 2 queries, got ${searchCalls} search calls`,
+    );
+    assert.equal(res.hits.length, HARVEST_MAX_CANDIDATES, `hits must be the capped candidate list, got ${res.hits.length}`);
+    assert.ok(
+      !res.hits.some((h) => h.repo.includes("capq3") || h.repo.includes("capq4")),
+      `repos surfaced only by post-cap queries must not appear: ${JSON.stringify(res.hits.map((h) => h.repo))}`,
+    );
+  });
+
+  // W5-L2 (b): the zero-budget note branch — `fetches === 0` (no attempt was
+  // made) must NEVER read as tried-and-failed (109 T-09 fix at `harvest.ts:511`).
+  it("zero fetch budget: honest zero-attempt note, never a tried-and-failed claim", async () => {
+    let attempts = 0;
+    const res = await harvestRepos(["q"], {
+      maxFetches: 0,
+      search: searchWith([
+        { title: "Acme", url: "https://github.com/acme/one", content: "summary one" },
+        { title: "Beta", url: "https://github.com/beta/two", content: "summary two" },
+      ]),
+      fetchText: async () => {
+        attempts += 1;
+        return "readme";
+      },
+      fetchJson: async () => {
+        attempts += 1;
+        return { license: null };
+      },
+    });
+    assert.equal(attempts, 0, "a zero fetch budget must make zero fetch attempts");
+    assert.deepEqual(res.hits, []);
+    assert.ok(
+      res.notes.includes("fetch budget is 0 — no candidate fetched"),
+      `zero-attempt note must state the real reason: ${JSON.stringify(res.notes)}`,
+    );
+    assert.ok(
+      !res.notes.some((n) => n.includes("all candidate fetches failed")),
+      `zero attempts must never be reported as tried-and-failed: ${JSON.stringify(res.notes)}`,
+    );
+  });
+
+  // W5-L2 (b, second trigger): a deadline that expired before the first attempt
+  // is the same `fetches === 0` state and takes the same honest note (`harvest.ts:418`
+  // pushed the time note; the aggregate note must agree).
+  it("deadline expired before the first fetch also takes the zero-attempt note", async () => {
+    const res = await harvestRepos(["q"], {
+      timeoutMs: 1,
+      search: async (q) => {
+        await new Promise((r) => setTimeout(r, 15)); // burn past the 1 ms budget deterministically
+        return {
+          ok: true,
+          query: q,
+          items: [{ title: "Acme", url: "https://github.com/acme/one", content: "s" }],
+          provider: "duckduckgo",
+        };
+      },
+      fetchText: async () => "readme",
+      fetchJson: async () => ({ license: null }),
+    });
+    assert.deepEqual(res.hits, []);
+    assert.ok(
+      res.notes.includes("fetch budget is 0 — no candidate fetched"),
+      `expired deadline with zero attempts must state the real reason: ${JSON.stringify(res.notes)}`,
+    );
+    assert.ok(
+      !res.notes.some((n) => n.includes("all candidate fetches failed")),
+      `zero attempts must never be reported as tried-and-failed: ${JSON.stringify(res.notes)}`,
+    );
+  });
+
+  // W5-L2 (c): every fetch attempt fails while the budget is spent. Pinned honest
+  // shape (probe 2026-09-16, real output): attempts 4 → hits 2, both `web-search`
+  // (the candidates' own search snippets), one per-candidate failure note each —
+  // nothing fabricated, no license claimed. NOTE (reachability, witnessed): the
+  // aggregate "all candidate fetches failed" arm of the ternary at `harvest.ts:511`
+  // is DORMANT in the current implementation — every iteration that increments
+  // `fetches` unconditionally pushes a hit at `:498`, so `hits.length === 0`
+  // implies `fetches === 0` (the zero-attempt note). The arm stays as defense:
+  // if a future edit ever drops failed candidates, it names the truth. Reverting
+  // the ternary to the old unconditional wording flips the two tests above RED.
+  it("all fetch attempts fail with budget spent: honest web-search hits, per-candidate notes, aggregate claim stays dormant", async () => {
+    let attempts = 0;
+    const res = await harvestRepos(["q"], {
+      maxFetches: 4,
+      search: searchWith([
+        { title: "Acme", url: "https://github.com/acme/one", content: "summary one" },
+        { title: "Beta", url: "https://github.com/beta/two", content: "summary two" },
+        { title: "Gamma", url: "https://github.com/gamma/three", content: "summary three" },
+      ]),
+      fetchText: async () => {
+        attempts += 1;
+        throw new Error("HTTP 404");
+      },
+      fetchJson: async () => {
+        attempts += 1;
+        throw new Error("HTTP 403 rate limited");
+      },
+    });
+    assert.equal(attempts, 4, `the whole budget is spent on attempts, got ${attempts}`);
+    assert.equal(res.hits.length, 2, `every attempted candidate still yields an honest hit, got ${res.hits.length}`);
+    assert.ok(
+      res.hits.every((h) => h.provenance === "web-search"),
+      `failed fetches must fall back to the search snippet (web-search), never claim raw/api: ${JSON.stringify(res.hits.map((h) => h.provenance))}`,
+    );
+    assert.ok(
+      res.hits.every((h) => h.license === undefined),
+      `no license may be claimed without a successful spot-check: ${JSON.stringify(res.hits)}`,
+    );
+    assert.equal(
+      res.notes.filter((n) => n.includes("raw README fetch failed")).length,
+      2,
+      `one honest failure note per attempted candidate: ${JSON.stringify(res.notes)}`,
+    );
+    assert.equal(
+      res.notes.filter((n) => n.includes("license spot-check failed")).length,
+      2,
+      `one honest spot-check note per attempted candidate: ${JSON.stringify(res.notes)}`,
+    );
+    assert.ok(
+      res.notes.some((n) => n.includes("fetch budget (4) reached")),
+      `the spent budget must be stated: ${JSON.stringify(res.notes)}`,
+    );
+    assert.ok(
+      !res.notes.some((n) => n.includes("all candidate fetches failed")),
+      `the tried-and-failed aggregate must not fire while hits exist: ${JSON.stringify(res.notes)}`,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

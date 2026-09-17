@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // src/state/store.ts — Checkpointed client/server state
-// machine-generated from RapidTool packet 5587eca3-156b-4c57-9ea4-23879f548cb5; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet e0451662-7106-402f-aa2c-9a456861b3e5; regenerate, don't hand-edit.
 // Checkpointed state stub. TODO(E-15) stub: wire hydration from
 // .rapidtool/project.json and keep every control bound to a named field.
 // ---------------------------------------------------------------------------

@@ -1,0 +1,43 @@
+{
+  "graderVersion": 1,
+  "slug": "real-estate-crm",
+  "caseName": "Real-Estate CRM",
+  "authority": "RUN-SIDE GRADER (W5-L5 / T-107.5) — the acceptance bar for this eval case. Declared before the run; read ONLY by scripts/run-eval.mjs; never copied into research/eval-out; the emitted project tree must neither contain nor reference it (scripts/run-eval.mjs graderLeakScan + scripts/run-eval.test.mjs pin that).",
+  "movedFrom": "research/eval-corpus/real-estate-crm.md frontmatter (acceptance / expectedNouns / expectedCapabilities) — the corpus fixture stays the documented D3 brief contract; this file is the grading source of truth and the driver no longer grades from the frontmatter copy.",
+  "acceptanceBar": "A user can capture an inbound email as a contact plus pipeline lead, move the lead through all seven stages to closed-won, attach listings and per-property showing notes, and complete dated follow-up tasks — in one runnable web app.",
+  "requiredIdentifiers": [
+    "contact",
+    "buyer",
+    "seller",
+    "lead",
+    "pipeline",
+    "listing",
+    "showingNote",
+    "followUpTask",
+    "inboundEmail"
+  ],
+  "requiredCapabilities": [
+    "Manage buyer and seller contacts",
+    "Lead pipeline with stages new, contacted, qualified, showing-booked, offer-made, closed-won, closed-lost",
+    "Property listings with address, list price, beds/baths/sqft and status",
+    "Per-property showing notes",
+    "Follow-up task scheduling with due dates and completion",
+    "Email-to-lead capture that parses an inbound email into a contact and a pipeline lead"
+  ],
+  "expectedFiles": [
+    "package.json",
+    "index.html",
+    "README.md"
+  ],
+  "expectedContent": [
+    {
+      "file": "package.json",
+      "contains": "\"test\""
+    }
+  ],
+  "passWhen": {
+    "meanAtLeast": 1,
+    "requireExpectedFiles": true,
+    "requireExpectedContent": true
+  }
+}

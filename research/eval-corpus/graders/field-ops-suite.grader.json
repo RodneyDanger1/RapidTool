@@ -1,0 +1,47 @@
+{
+  "graderVersion": 1,
+  "slug": "field-ops-suite",
+  "caseName": "Field-Ops Suite",
+  "authority": "RUN-SIDE GRADER (W5-L5 / T-107.5) — the acceptance bar for this eval case. Declared before the run; read ONLY by scripts/run-eval.mjs; never copied into research/eval-out; the emitted project tree must neither contain nor reference it (scripts/run-eval.mjs graderLeakScan + scripts/run-eval.test.mjs pin that).",
+  "movedFrom": "research/eval-corpus/field-ops-suite.md frontmatter (acceptance / expectedNouns / expectedCapabilities) — the corpus fixture stays the documented D3 brief contract; this file is the grading source of truth and the driver no longer grades from the frontmatter copy.",
+  "acceptanceBar": "A small construction company can run a project from phases and budgets through daily per-crew task lists, weekly payroll computed from time sheets with rates and overtime, and supply purchases with reorder flags — with job costing per project — in one runnable web app.",
+  "requiredIdentifiers": [
+    "project",
+    "phase",
+    "budget",
+    "taskList",
+    "crewMember",
+    "timeSheet",
+    "payroll",
+    "rate",
+    "overtime",
+    "material",
+    "supply",
+    "purchase",
+    "reorderFlag",
+    "jobCost"
+  ],
+  "requiredCapabilities": [
+    "Projects with phases and budgets",
+    "Daily task lists per crew member",
+    "Time sheets that roll into weekly payroll with rates and overtime",
+    "Material and supply lists with purchase tracking and reorder flags",
+    "Job costing by project"
+  ],
+  "expectedFiles": [
+    "package.json",
+    "index.html",
+    "README.md"
+  ],
+  "expectedContent": [
+    {
+      "file": "package.json",
+      "contains": "\"test\""
+    }
+  ],
+  "passWhen": {
+    "meanAtLeast": 1,
+    "requireExpectedFiles": true,
+    "requireExpectedContent": true
+  }
+}

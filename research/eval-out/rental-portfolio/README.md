@@ -1,13 +1,13 @@
 # Rental Portfolio Manager
 
-> machine-generated from RapidTool packet 5587eca3-156b-4c57-9ea4-23879f548cb5; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet e0451662-7106-402f-aa2c-9a456861b3e5; regenerate, don't hand-edit.
 
 a rental portfolio manager: properties with units, tenants with leases and rent schedules, rent collection tracking with payment status, maintenance requests with vendor work orders, vacancy pipeline for marketing available units, portfolio cash-flow dashboard, lease-renewal reminders
 
 ## Status
-- **Kind:** webapp — web app (kind webapp (inferred from brief/domain — no declared kind yet))
+- **Kind:** webapp — web app (kind webapp (mapped from declared kind "app"))
 - **Status:** complete · **Current phase:** P12 · **Model route:** deterministic
-- **Created:** 2026-09-10T05:29:28.183Z
+- **Created:** 2026-09-17T02:41:38.625Z
 
 ## What ships in this scaffold
 
@@ -24,10 +24,10 @@ a rental portfolio manager: properties with units, tenants with leases and rent 
 | `src/domain/real_estate.ts` | schema — Typed entities from the lattice |
 | `src/api/routes.ts` | api — HTTP contracts bound to jobs |
 | `src/state/store.ts` | store — Checkpointed client/server state |
-| `src/jobs/rent.ts` | job-0 — Implement job “rent” against the contract |
-| `src/jobs/schedule.ts` | job-1 — Implement job “schedule” against the contract |
-| `src/jobs/track.ts` | job-2 — Implement job “track” against the contract |
-| `src/jobs/lease.ts` | job-3 — Implement job “lease” against the contract |
+| `src/jobs/lease.ts` | job-0 — Implement job “lease” against the contract |
+| `src/jobs/rent.ts` | job-1 — Implement job “rent” against the contract |
+| `src/jobs/schedule.ts` | job-2 — Implement job “schedule” against the contract |
+| `src/jobs/track.ts` | job-3 — Implement job “track” against the contract |
 | `src/ui/console.tsx` | ui — Operator surfaces bound to store fields |
 | `tests/oracle.spec.ts` | tests — Acceptance tests from the oracle |
 
@@ -53,10 +53,10 @@ a rental portfolio manager: properties with units, tenants with leases and rent 
   # install + verify the emitted tree (Node >= 22)
   npm install
   npm run typecheck
-  # oracle spec = REAL assertions over the emitted modules (no todo stubs); green
-  # means the scaffold modules are intact + every oracle seam is still honestly
-  # stubbed — a seam test fails the moment that seam is implemented, which is
-  # the cue to replace it with the row's real acceptance assertion
+  # oracle spec = REAL assertions over the emitted modules (no todo stubs);
+  # green means the scaffold modules are intact + every oracle seam is still
+  # honestly stubbed — a seam test fails the moment that seam is implemented,
+  # which is the cue to replace it with the row's real acceptance assertion.
   npm test
   
   # dev server — index.html + src/main entry + vite config are emitted; the UI
@@ -72,6 +72,7 @@ a rental portfolio manager: properties with units, tenants with leases and rent 
 ## Honest boundaries
 
 - The machine-verified core is the generated P6 module under `src/` (project.generatedSource); everything else is a typed stub awaiting implementation.
+- Oracle rows (`tests/oracle.spec.ts`): all 5 pinned row(s) assert the emitted modules' real current behavior — no NOT IMPLEMENTED skips.
 - `src/ui/` is a contract-level shell (P8 interface contract), not a finished UI.
 - Deploy templates from P9/P12 are recorded artifacts only — see DEPLOY.md; nothing here deploys by itself.
 - `assets/` and `public/` are expected at the emitted scaffold and are NOT engine-generated.

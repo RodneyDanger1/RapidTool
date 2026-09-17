@@ -1,11 +1,12 @@
 // ---------------------------------------------------------------------------
 // src/ui/console.tsx — Operator surfaces bound to store fields
-// machine-generated from RapidTool packet 4207cef0-e4ea-4436-b2e2-5ac48ab8138c; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet d8afd788-8d33-4145-ba89-16c565a9df31; regenerate, don't hand-edit.
 // Operator surfaces bound to generated modules (P8). Not a stub wall:
-// the barrel at src/generated.ts is imported when P6 produced a module.
+// the generated entry module (the file this emitter wrote) is imported
+// when P6 produced one — never a path nothing writes.
 // ---------------------------------------------------------------------------
 
-import * as generated from "../generated.ts";
+import * as generated from "../jobs/flip.ts";
 
 export function Console() {
   const exported = Object.keys(generated);

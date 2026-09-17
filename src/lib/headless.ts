@@ -41,6 +41,7 @@ import { runSummaryLesson, templateEmissionLesson } from "./knowledge.ts";
 import { exportPacketText, exportProjectJson, importProject, slugName } from "./io.ts";
 import { applyReportResult, validateReport, type ReportApplyReason } from "./report-intake.ts";
 import { canEnter, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
+import { evaluatePolicy } from "./policy.ts";
 import { applyWrite, rollback, snapshotPaths } from "./write-set.ts";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -746,7 +747,14 @@ export const HARNESS_APPROVE_ACTOR: ApproveActor = { decidedBy: "autopilot", sea
  *  (by the person at the keyboard, in their own shell) and presented here as
  *  `opts.humanSeatToken` — a call claiming the human seat without a matching
  *  token throws instead of minting a human row. Every row's note carries a
- *  `[seat <label>]` tag so the ledger shows which seat decided. */
+ *  `[seat <label>]` tag so the ledger shows which seat decided.
+ *
+ *  216o (T-107.3 / P0-01·P0-06): the seat/token test above is no longer this
+ *  file's own — the decision routes through the ONE policy seam
+ *  (`evaluatePolicy`, src/lib/policy.ts) with `hitl.force` when `force` is set
+ *  (a machine may never force past a human gate) and `hitl.approve` otherwise.
+ *  A denied verdict throws a coded `RT_E_VALIDATION` refusal naming the
+ *  sanctioned fallback; there is no seat combination that can bypass it. */
 export function approve(
   project: Project,
   opts: { force?: boolean; actor?: ApproveActor; humanSeatToken?: string } = {},
@@ -760,29 +768,41 @@ export function approve(
     );
   }
   const actor = opts.actor ?? HARNESS_APPROVE_ACTOR;
-  let note: string;
-  if (actor.decidedBy === "human") {
-    // 216 (TA-2): the human seat is mintable ONLY through the out-of-band
-    // token — a machine path has no RT_HUMAN_SEAT_TOKEN in its environment
-    // (the person at the keyboard exports it in their own shell) and cannot
-    // produce the matching pair, so it can never mint a human actor.
-    const expected = (process.env.RT_HUMAN_SEAT_TOKEN ?? "").trim();
-    const presented = (opts.humanSeatToken ?? "").trim();
-    if (expected.length === 0 || presented !== expected) {
-      // Machine-readable code on the thrown Error (same shape as
-      // phases.ts:119): a seat claim without its out-of-band evidence is a
-      // validation refusal, not an opaque internal error, so the CLI's
-      // catch-all preserves RT_E_VALIDATION on the envelope.
-      const err = new Error(
-        "approve: the human seat requires the out-of-band RT_HUMAN_SEAT_TOKEN (set it in your own shell and pass it as opts.humanSeatToken) — refusing to mint decidedBy:human without it.",
-      ) as Error & { code?: string };
-      err.code = "RT_E_VALIDATION";
-      throw err;
-    }
-    note = `[seat ${actor.seat}] out-of-band RT_HUMAN_SEAT_TOKEN verified`;
-  } else {
-    note = `[seat ${actor.seat}] autopilot seat — no human decision claimed`;
+  // 216o (T-107.3 · P0-01/P0-06 · W5-L3): the decision routes through the ONE
+  // policy seam (`evaluatePolicy`, src/lib/policy.ts) instead of this file's
+  // ad-hoc seat/token test. Action routing: `force` overrides a forceHuman
+  // gate ⇒ `hitl.force` (Rule B — only a verified human seat may force; the
+  // autopilot seat can never self-approve one); otherwise `hitl.approve` on
+  // this edge's gate. The env read stays HERE on purpose: policy.ts is a pure
+  // leaf that never touches `process.env` (its purity test pins that) — the
+  // out-of-band RT_HUMAN_SEAT_TOKEN is the *expected* side, opts.humanSeatToken
+  // the presented side.
+  const policyAction = opts.force === true ? "hitl.force" : "hitl.approve";
+  const policyResource = `gate:P${project.hitl.phase}`;
+  const verdict = evaluatePolicy(policyAction, policyResource, {
+    actor,
+    humanSeatToken: opts.humanSeatToken,
+    expectedHumanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN,
+  });
+  if (verdict.decision !== "allow") {
+    // Machine-readable code on the thrown Error (same shape as phases.ts:119):
+    // a seat claim the seam refuses is a validation refusal, not an opaque
+    // internal error, so the CLI's catch-all preserves RT_E_VALIDATION on the
+    // envelope. The verdict's reason names the cause and its fallback the
+    // sanctioned alternative (P0-01's mandatory-fallback shape).
+    const err = new Error(
+      `approve: the policy seam refused ${policyAction} on ${policyResource} (${verdict.reason}) — sanctioned fallback: ${verdict.fallback}.`,
+    ) as Error & { code?: string };
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
+  // The `[seat <label>]` tags are the 216 TA-2 ledger contract — byte-identical
+  // to the pre-216o strings (pinned by headless.test.ts TA-2 tests), so the
+  // tag keeps naming the seat itself, not the policy label vocabulary.
+  const note =
+    actor.decidedBy === "human"
+      ? `[seat ${actor.seat}] out-of-band RT_HUMAN_SEAT_TOKEN verified`
+      : `[seat ${actor.seat}] autopilot seat — no human decision claimed`;
   const base = approveHitl(project, { decidedBy: actor.decidedBy, force: opts.force, note });
   // E-02 (store.approve parity): record the just-approved phase's DoD gate —
   // approveHitl sets PhaseRecord.gate inline but the gate artifact + log are

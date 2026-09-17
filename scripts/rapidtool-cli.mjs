@@ -531,6 +531,39 @@ async function main() {
             1,
           );
         }
+        // 216o (T-107.3 · P0-01/P0-06 · W5-L3 — the CLI length of the ONE seam):
+        // the approve verb consults the policy seam BEFORE handing the decision
+        // to the driver, which re-checks at the same seam (defense in depth, one
+        // rule). Action routing mirrors headless.approve: --force ⇒ hitl.force
+        // (Rule B — the human seat plus the out-of-band token; an autopilot seat
+        // can never self-approve a force); otherwise hitl.approve on
+        // gate:P<phase>. The --i-am-human flag is the human-seat claim; the
+        // out-of-band RT_HUMAN_SEAT_TOKEN is read HERE (policy.ts is a pure,
+        // env-free leaf — its purity test pins that it never reads env). The
+        // non-TTY guard above stays deliberately STRICTER than the seam: an
+        // unattended process must name the human seat explicitly.
+        const { evaluatePolicy } = await import("../src/lib/policy.ts");
+        const policyVerdict = evaluatePolicy(
+          flag(args, "force") ? "hitl.force" : "hitl.approve",
+          `gate:P${project.hitl.phase}`,
+          {
+            actor: flag(args, "i-am-human")
+              ? { decidedBy: "human", seat: "human-cli-i-am-human" }
+              : { decidedBy: "autopilot", seat: "harness" },
+            humanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN,
+            expectedHumanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN,
+          },
+        );
+        if (policyVerdict.decision !== "allow") {
+          return respond(
+            {
+              ok: false,
+              error: `approve: refused by the policy seam — ${policyVerdict.reason}`,
+              code: "RT_E_VALIDATION",
+            },
+            1,
+          );
+        }
         const updated = h.approve(project, { force: flag(args, "force"), actor: flag(args, "i-am-human") ? { decidedBy: "human", seat: "human-cli-i-am-human" } : undefined, humanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN });
         h.saveProject(requireProjectPath(args, "approve"), updated);
         respond({ ok: true, path: requireProjectPath(args, "approve"), summary: h.summary(updated) }, 0);

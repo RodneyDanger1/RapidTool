@@ -1,7 +1,8 @@
 {
-  "generatedAt": "2026-09-10T06:05:29.683Z",
-  "mode": "keyed",
+  "generatedAt": "2026-09-17T02:41:43.608Z",
+  "mode": "keyless",
   "corpusDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus",
+  "graderDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders",
   "entries": [
     {
       "slug": "coffeehouse2home-property-ledger",
@@ -9,20 +10,20 @@
       "domain": "real-estate",
       "domainMatch": 1,
       "kind": "webapp",
-      "status": "dod",
-      "mode": "keyed",
+      "status": "complete",
+      "mode": "keyless",
       "criteria": {
         "M1": {
-          "score": 1,
-          "evidence": "tree 4 file(s); reqTrace: One shared Property Ledger record per property (ownership, address, status, full history) across brokerage, flipping, rentals, and field services->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Real-estate CRM: contacts, buyer and seller leads, and a deal pipeline with stages->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Showing slots (private showings and open houses) publishable from any listing, flip, or rental property; buyers book with email confirmation, reminders, calendar-sync stub, and per-property showing history with buyer feedback->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Flip manager: acquisitions, renovation budgets with line items, contractor bids, flip project phases, job costing per property->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Rental portfolio: leases, tenants, rent roll with payment records, maintenance requests, vacancy tracking, lease-renewal reminders->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Field-ops suite: work orders raised from any property become crew task lists; crew time sheets roll into weekly payroll with rates and overtime; material/supply lists with purchase records and reorder flags->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Cross-domain flows: work-order hours feed payroll and job cost; showings on flip or rental properties create CRM buyer leads; deals, flips, leases, and work orders accumulate on the shared ledger record->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts"
+          "score": 0,
+          "evidence": "no generatedTree (0 file(s)) and 7 expectedCapabilities uncovered; single-module pass needs a library kind (got \"webapp\")"
         },
         "M2": {
           "score": 0,
-          "evidence": "treeRun not ok — spec tests/oracle.spec.ts failed: test \"C:\\\\Users\\\\mnril\\\\AppData\\\\Local\\\\Temp\\\\rt-treerun-ZmsS18\\\\tests\\\\oracle.spec.ts\" failed"
+          "evidence": "no treeRun verdict supplied"
         },
         "M3": {
           "score": 0,
-          "evidence": "no iteration convergence: journey outcome \"failed\""
+          "evidence": "no iteration convergence: P6 gate recorded FAIL (Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored))"
         },
         "M4": {
           "score": 0,
@@ -30,91 +31,855 @@
         },
         "M5": {
           "score": 1,
-          "evidence": "no red DoD gate records — nothing to hide"
+          "evidence": "2 red gate record(s) (P6, P7) surfaced loudly: sealedWithFailures flag + census log + warn gate.verdict"
         },
         "M6": {
-          "score": 1,
-          "evidence": "handover dir emitted with DEPLOY.md + oracle spec (30055b)"
+          "score": 0,
+          "evidence": "no emitted handover dir — foreign files in emit dir (pass --force to keep): src/generated/check-reorder-flags.ts, src/generated/chunk-0.ts, src/generated/compute-rent-roll.ts, src/genera"
         },
         "M7": {
           "score": 0,
-          "evidence": "M1+M2+M3 1 < prior same-domain 2 — regression (m1 1/m2 1/m3 0)"
+          "evidence": "M1+M2+M3 0 < prior same-domain 1 — regression (m1 1/m2 0/m3 0)"
         },
         "M8": {
           "score": 1,
-          "evidence": "journey used 3/3 cycle(s) — inside budget · cycle count only (no measured token usage)"
+          "evidence": "journey used 0/3 cycle(s) — inside budget · cycle count only (no measured token usage)"
         },
         "M9": {
-          "score": 0,
-          "evidence": "run did not stop on time (cap/overrun without terminal state)"
+          "score": 1,
+          "evidence": "run stopped on time, no refusal — nothing to shout"
         }
       },
-      "total": 4,
-      "mean": 0.4444,
+      "total": 3,
+      "mean": 0.3333,
       "baseline": "delivery ≈ 1/10, process ≈ 8/10 — 0 shipped modules across all six journeys; learning loop fires on a real keyed run for the first time (L2/L4/L5) but lesson content stays hollow (dossier 99)",
       "coverage": {
-        "covered": {
-          "One shared Property Ledger record per property (ownership, address, status, full history) across brokerage, flipping, rentals, and field services": [
-            "src/generated/chunk-0.ts",
-            "src/generated/create-flip-project.ts",
-            "src/generated/compute-rent-roll.ts",
-            "src/generated/check-reorder-flags.ts"
-          ],
-          "Real-estate CRM: contacts, buyer and seller leads, and a deal pipeline with stages": [
-            "src/generated/chunk-0.ts",
-            "src/generated/create-flip-project.ts",
-            "src/generated/compute-rent-roll.ts",
-            "src/generated/check-reorder-flags.ts"
-          ],
-          "Showing slots (private showings and open houses) publishable from any listing, flip, or rental property; buyers book with email confirmation, reminders, calendar-sync stub, and per-property showing history with buyer feedback": [
-            "src/generated/chunk-0.ts",
-            "src/generated/create-flip-project.ts",
-            "src/generated/compute-rent-roll.ts",
-            "src/generated/check-reorder-flags.ts"
-          ],
-          "Flip manager: acquisitions, renovation budgets with line items, contractor bids, flip project phases, job costing per property": [
-            "src/generated/chunk-0.ts",
-            "src/generated/create-flip-project.ts",
-            "src/generated/compute-rent-roll.ts",
-            "src/generated/check-reorder-flags.ts"
-          ],
-          "Rental portfolio: leases, tenants, rent roll with payment records, maintenance requests, vacancy tracking, lease-renewal reminders": [
-            "src/generated/chunk-0.ts",
-            "src/generated/create-flip-project.ts",
-            "src/generated/compute-rent-roll.ts",
-            "src/generated/check-reorder-flags.ts"
-          ],
-          "Field-ops suite: work orders raised from any property become crew task lists; crew time sheets roll into weekly payroll with rates and overtime; material/supply lists with purchase records and reorder flags": [
-            "src/generated/chunk-0.ts",
-            "src/generated/create-flip-project.ts",
-            "src/generated/compute-rent-roll.ts",
-            "src/generated/check-reorder-flags.ts"
-          ],
-          "Cross-domain flows: work-order hours feed payroll and job cost; showings on flip or rental properties create CRM buyer leads; deals, flips, leases, and work orders accumulate on the shared ledger record": [
-            "src/generated/chunk-0.ts",
-            "src/generated/create-flip-project.ts",
-            "src/generated/compute-rent-roll.ts",
-            "src/generated/check-reorder-flags.ts"
-          ]
+        "covered": {},
+        "missing": [
+          "One shared Property Ledger record per property (ownership, address, status, full history) across brokerage, flipping, rentals, and field services",
+          "Real-estate CRM: contacts, buyer and seller leads, and a deal pipeline with stages",
+          "Showing slots (private showings and open houses) publishable from any listing, flip, or rental property; buyers book with email confirmation, reminders, calendar-sync stub, and per-property showing history with buyer feedback",
+          "Flip manager: acquisitions, renovation budgets with line items, contractor bids, flip project phases, job costing per property",
+          "Rental portfolio: leases, tenants, rent roll with payment records, maintenance requests, vacancy tracking, lease-renewal reminders",
+          "Field-ops suite: work orders raised from any property become crew task lists; crew time sheets roll into weekly payroll with rates and overtime; material/supply lists with purchase records and reorder flags",
+          "Cross-domain flows: work-order hours feed payroll and job cost; showings on flip or rental properties create CRM buyer leads; deals, flips, leases, and work orders accumulate on the shared ledger record"
+        ]
+      },
+      "trial": 1,
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\coffeehouse2home-property-ledger",
+      "grader": {
+        "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\coffeehouse2home-property-ledger.grader.json",
+        "hash": "241571966",
+        "barChars": 234,
+        "requiredIdentifiers": 14,
+        "requiredCapabilities": 7
+      },
+      "acceptance": {
+        "filesOk": false,
+        "missingFiles": [
+          "package.json",
+          "index.html",
+          "README.md"
+        ],
+        "contentOk": false,
+        "failedContent": [
+          "package.json: file absent"
+        ],
+        "checked": {
+          "expectedFiles": 3,
+          "expectedContent": 1
         },
-        "missing": []
+        "pass": false
+      },
+      "graderLeak": {
+        "scanned": 23,
+        "leaked": false,
+        "hits": []
       },
       "notes": {
         "approvedGates": [
           "P4",
-          "P5"
+          "P5",
+          "P8",
+          "P9"
         ],
         "treeRunOk": false,
-        "journey": "failed",
-        "stall": "drain iteration cap reached without a terminal state",
+        "journey": "keyless",
+        "stall": null,
+        "emitError": "foreign files in emit dir (pass --force to keep): src/generated/check-reorder-flags.ts, src/generated/chunk-0.ts, src/generated/compute-rent-roll.ts, src/generated/create-flip-project.ts, src/jobs/publish.ts",
+        "p6Refused": false
+      },
+      "durationSec": 0.3,
+      "rowSource": "trial-1",
+      "trials": {
+        "trials": 1,
+        "passes": 0,
+        "failed": 1,
+        "k": 1,
+        "kEffective": 1,
+        "passAt1": 0,
+        "passAtK": 0,
+        "passAllTrials": 0,
+        "observedPassRate": 0,
+        "flaky": false,
+        "flakinessMeasurable": false,
+        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+      },
+      "perTrial": [
+        {
+          "trial": 1,
+          "status": "complete",
+          "total": 3,
+          "mean": 0.3333,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\coffeehouse2home-property-ledger",
+          "durationSec": 0.3,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": false,
+            "missingFiles": [
+              "package.json",
+              "index.html",
+              "README.md"
+            ],
+            "contentOk": false,
+            "failedContent": [
+              "package.json: file absent"
+            ],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        }
+      ]
+    },
+    {
+      "slug": "field-ops-suite",
+      "name": "Field-Ops Suite",
+      "domain": "construction",
+      "domainMatch": 1,
+      "kind": "webapp",
+      "status": "complete",
+      "mode": "keyless",
+      "criteria": {
+        "M1": {
+          "score": 0,
+          "evidence": "no generatedTree (0 file(s)) and 5 expectedCapabilities uncovered; single-module pass needs a library kind (got \"webapp\")"
+        },
+        "M2": {
+          "score": 1,
+          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\field-ops-suite; tests 11 pass / 0 fail)"
+        },
+        "M3": {
+          "score": 0,
+          "evidence": "no iteration convergence: P6 gate recorded FAIL (Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored))"
+        },
+        "M4": {
+          "score": 0,
+          "evidence": "machine verification missing: lastTest label=\"unlabeled\" + NO evidenceHash"
+        },
+        "M5": {
+          "score": 1,
+          "evidence": "2 red gate record(s) (P6, P7) surfaced loudly: sealedWithFailures flag + census log + warn gate.verdict"
+        },
+        "M6": {
+          "score": 1,
+          "evidence": "handover dir emitted with DEPLOY.md + oracle spec (6755b)"
+        },
+        "M7": {
+          "score": 1,
+          "evidence": "M1+M2+M3 1 ≥ prior same-domain 1 (m1 0/m2 1/m3 0)"
+        },
+        "M8": {
+          "score": 1,
+          "evidence": "journey used 0/3 cycle(s) — inside budget · cycle count only (no measured token usage)"
+        },
+        "M9": {
+          "score": 1,
+          "evidence": "run stopped on time, no refusal — nothing to shout"
+        }
+      },
+      "total": 6,
+      "mean": 0.6667,
+      "baseline": "delivery ≈ 1/10 (interim — journey parked at P8 on a human gate at the agent cap; seam fixes work, P6 still never ships a module) (dossier 98_make_5)",
+      "coverage": {
+        "covered": {},
+        "missing": [
+          "Projects with phases and budgets",
+          "Daily task lists per crew member",
+          "Time sheets that roll into weekly payroll with rates and overtime",
+          "Material and supply lists with purchase tracking and reorder flags",
+          "Job costing by project"
+        ]
+      },
+      "trial": 1,
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\field-ops-suite",
+      "grader": {
+        "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\field-ops-suite.grader.json",
+        "hash": "1531375993",
+        "barChars": 269,
+        "requiredIdentifiers": 14,
+        "requiredCapabilities": 5
+      },
+      "acceptance": {
+        "filesOk": true,
+        "missingFiles": [],
+        "contentOk": true,
+        "failedContent": [],
+        "checked": {
+          "expectedFiles": 3,
+          "expectedContent": 1
+        },
+        "pass": false
+      },
+      "graderLeak": {
+        "scanned": 15,
+        "leaked": false,
+        "hits": []
+      },
+      "notes": {
+        "approvedGates": [
+          "P4",
+          "P5",
+          "P8",
+          "P9"
+        ],
+        "treeRunOk": true,
+        "journey": "keyless",
+        "stall": null,
         "emitError": null,
-        "p6Refused": true,
-        "synthesisSucceeded": true
-      }
+        "p6Refused": false
+      },
+      "durationSec": 2.2,
+      "rowSource": "trial-1",
+      "trials": {
+        "trials": 1,
+        "passes": 0,
+        "failed": 1,
+        "k": 1,
+        "kEffective": 1,
+        "passAt1": 0,
+        "passAtK": 0,
+        "passAllTrials": 0,
+        "observedPassRate": 0,
+        "flaky": false,
+        "flakinessMeasurable": false,
+        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+      },
+      "perTrial": [
+        {
+          "trial": 1,
+          "status": "complete",
+          "total": 6,
+          "mean": 0.6667,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\field-ops-suite",
+          "durationSec": 2.2,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        }
+      ]
+    },
+    {
+      "slug": "house-flip-manager",
+      "name": "House-Flipping Manager",
+      "domain": "real-estate",
+      "domainMatch": 0,
+      "kind": "webapp",
+      "status": "complete",
+      "mode": "keyless",
+      "criteria": {
+        "M1": {
+          "score": 0,
+          "evidence": "no generatedTree (0 file(s)) and 6 expectedCapabilities uncovered; single-module pass needs a library kind (got \"webapp\")"
+        },
+        "M2": {
+          "score": 1,
+          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\house-flip-manager; tests 15 pass / 0 fail)"
+        },
+        "M3": {
+          "score": 0,
+          "evidence": "no iteration convergence: P6 gate recorded FAIL (Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored))"
+        },
+        "M4": {
+          "score": 0,
+          "evidence": "machine verification missing: lastTest label=\"unlabeled\" + NO evidenceHash"
+        },
+        "M5": {
+          "score": 1,
+          "evidence": "2 red gate record(s) (P6, P7) surfaced loudly: sealedWithFailures flag + census log + warn gate.verdict"
+        },
+        "M6": {
+          "score": 1,
+          "evidence": "handover dir emitted with DEPLOY.md + oracle spec (9225b)"
+        },
+        "M7": {
+          "score": 1,
+          "evidence": "M1+M2+M3 1 ≥ prior same-domain 1 (m1 0/m2 1/m3 0)"
+        },
+        "M8": {
+          "score": 1,
+          "evidence": "journey used 0/3 cycle(s) — inside budget · cycle count only (no measured token usage)"
+        },
+        "M9": {
+          "score": 1,
+          "evidence": "run stopped on time, no refusal — nothing to shout"
+        }
+      },
+      "total": 6,
+      "mean": 0.6667,
+      "baseline": "delivery ≈ 2/10 — honesty 10/10, delivery ~0; 13/13 phases complete with ~zero product (dossier 98_make_2)",
+      "coverage": {
+        "covered": {},
+        "missing": [
+          "Property acquisition tracker",
+          "Renovation budgets by line item",
+          "Contractor bids and invoices",
+          "Rehab timeline with milestones",
+          "ARV (after-repair-value) estimator",
+          "Flip P&L dashboard"
+        ]
+      },
+      "trial": 1,
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\house-flip-manager",
+      "grader": {
+        "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\house-flip-manager.grader.json",
+        "hash": "1586094404",
+        "barChars": 225,
+        "requiredIdentifiers": 11,
+        "requiredCapabilities": 6
+      },
+      "acceptance": {
+        "filesOk": true,
+        "missingFiles": [],
+        "contentOk": true,
+        "failedContent": [],
+        "checked": {
+          "expectedFiles": 3,
+          "expectedContent": 1
+        },
+        "pass": false
+      },
+      "graderLeak": {
+        "scanned": 19,
+        "leaked": false,
+        "hits": []
+      },
+      "notes": {
+        "approvedGates": [
+          "P4",
+          "P5",
+          "P8",
+          "P9"
+        ],
+        "treeRunOk": true,
+        "journey": "keyless",
+        "stall": null,
+        "emitError": null,
+        "p6Refused": false
+      },
+      "durationSec": 2.4,
+      "rowSource": "trial-1",
+      "trials": {
+        "trials": 1,
+        "passes": 0,
+        "failed": 1,
+        "k": 1,
+        "kEffective": 1,
+        "passAt1": 0,
+        "passAtK": 0,
+        "passAllTrials": 0,
+        "observedPassRate": 0,
+        "flaky": false,
+        "flakinessMeasurable": false,
+        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+      },
+      "perTrial": [
+        {
+          "trial": 1,
+          "status": "complete",
+          "total": 6,
+          "mean": 0.6667,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\house-flip-manager",
+          "durationSec": 2.4,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        }
+      ]
+    },
+    {
+      "slug": "real-estate-crm",
+      "name": "Real-Estate CRM",
+      "domain": "real-estate",
+      "domainMatch": 1,
+      "kind": "webapp",
+      "status": "complete",
+      "mode": "keyless",
+      "criteria": {
+        "M1": {
+          "score": 0,
+          "evidence": "no generatedTree (0 file(s)) and 6 expectedCapabilities uncovered; single-module pass needs a library kind (got \"webapp\")"
+        },
+        "M2": {
+          "score": 0,
+          "evidence": "no treeRun verdict supplied"
+        },
+        "M3": {
+          "score": 0,
+          "evidence": "no iteration convergence: P6 gate recorded FAIL (Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored))"
+        },
+        "M4": {
+          "score": 0,
+          "evidence": "machine verification missing: lastTest label=\"unlabeled\" + NO evidenceHash"
+        },
+        "M5": {
+          "score": 1,
+          "evidence": "2 red gate record(s) (P6, P7) surfaced loudly: sealedWithFailures flag + census log + warn gate.verdict"
+        },
+        "M6": {
+          "score": 0,
+          "evidence": "no emitted handover dir — foreign files in emit dir (pass --force to keep): src/jobs/follow_up.ts"
+        },
+        "M7": {
+          "score": 0,
+          "evidence": "M1+M2+M3 0 < prior same-domain 1 — regression (m1 0/m2 1/m3 0)"
+        },
+        "M8": {
+          "score": 1,
+          "evidence": "journey used 0/3 cycle(s) — inside budget · cycle count only (no measured token usage)"
+        },
+        "M9": {
+          "score": 1,
+          "evidence": "run stopped on time, no refusal — nothing to shout"
+        }
+      },
+      "total": 3,
+      "mean": 0.3333,
+      "baseline": "delivery 1/10 — RenamePro bar met: governed spec record + engine-boilerplate artifacts, NOT a CRM web app; no runnable app code (dossier 98_make_1, verdict ≈ 1/10)",
+      "coverage": {
+        "covered": {},
+        "missing": [
+          "Manage buyer and seller contacts",
+          "Lead pipeline with stages new, contacted, qualified, showing-booked, offer-made, closed-won, closed-lost",
+          "Property listings with address, list price, beds/baths/sqft and status",
+          "Per-property showing notes",
+          "Follow-up task scheduling with due dates and completion",
+          "Email-to-lead capture that parses an inbound email into a contact and a pipeline lead"
+        ]
+      },
+      "trial": 1,
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\real-estate-crm",
+      "grader": {
+        "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\real-estate-crm.grader.json",
+        "hash": "2774804183",
+        "barChars": 232,
+        "requiredIdentifiers": 9,
+        "requiredCapabilities": 6
+      },
+      "acceptance": {
+        "filesOk": false,
+        "missingFiles": [
+          "package.json",
+          "index.html",
+          "README.md"
+        ],
+        "contentOk": false,
+        "failedContent": [
+          "package.json: file absent"
+        ],
+        "checked": {
+          "expectedFiles": 3,
+          "expectedContent": 1
+        },
+        "pass": false
+      },
+      "graderLeak": {
+        "scanned": 16,
+        "leaked": false,
+        "hits": []
+      },
+      "notes": {
+        "approvedGates": [
+          "P4",
+          "P5",
+          "P8",
+          "P9"
+        ],
+        "treeRunOk": false,
+        "journey": "keyless",
+        "stall": null,
+        "emitError": "foreign files in emit dir (pass --force to keep): src/jobs/follow_up.ts",
+        "p6Refused": false
+      },
+      "durationSec": 0.1,
+      "rowSource": "trial-1",
+      "trials": {
+        "trials": 1,
+        "passes": 0,
+        "failed": 1,
+        "k": 1,
+        "kEffective": 1,
+        "passAt1": 0,
+        "passAtK": 0,
+        "passAllTrials": 0,
+        "observedPassRate": 0,
+        "flaky": false,
+        "flakinessMeasurable": false,
+        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+      },
+      "perTrial": [
+        {
+          "trial": 1,
+          "status": "complete",
+          "total": 3,
+          "mean": 0.3333,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\real-estate-crm",
+          "durationSec": 0.1,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": false,
+            "missingFiles": [
+              "package.json",
+              "index.html",
+              "README.md"
+            ],
+            "contentOk": false,
+            "failedContent": [
+              "package.json: file absent"
+            ],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        }
+      ]
+    },
+    {
+      "slug": "rental-portfolio",
+      "name": "Rental Portfolio Manager",
+      "domain": "real-estate",
+      "domainMatch": 1,
+      "kind": "webapp",
+      "status": "complete",
+      "mode": "keyless",
+      "criteria": {
+        "M1": {
+          "score": 0,
+          "evidence": "no generatedTree (0 file(s)) and 7 expectedCapabilities uncovered; single-module pass needs a library kind (got \"webapp\")"
+        },
+        "M2": {
+          "score": 1,
+          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\rental-portfolio; tests 14 pass / 0 fail)"
+        },
+        "M3": {
+          "score": 0,
+          "evidence": "no iteration convergence: P6 gate recorded FAIL (Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored))"
+        },
+        "M4": {
+          "score": 0,
+          "evidence": "machine verification missing: lastTest label=\"unlabeled\" + NO evidenceHash"
+        },
+        "M5": {
+          "score": 1,
+          "evidence": "2 red gate record(s) (P6, P7) surfaced loudly: sealedWithFailures flag + census log + warn gate.verdict"
+        },
+        "M6": {
+          "score": 1,
+          "evidence": "handover dir emitted with DEPLOY.md + oracle spec (8636b)"
+        },
+        "M7": {
+          "score": 1,
+          "evidence": "M1+M2+M3 1 ≥ prior same-domain 1 (m1 0/m2 1/m3 0)"
+        },
+        "M8": {
+          "score": 1,
+          "evidence": "journey used 0/3 cycle(s) — inside budget · cycle count only (no measured token usage)"
+        },
+        "M9": {
+          "score": 1,
+          "evidence": "run stopped on time, no refusal — nothing to shout"
+        }
+      },
+      "total": 6,
+      "mean": 0.6667,
+      "baseline": "delivery ≈ 1/10, process ≈ 9/10 — make_1-3 seam verdicts fixed (P6 fires, product-shaped bodies, L3/L5 lessons land) but product bar unchanged (dossier 98_make_4)",
+      "coverage": {
+        "covered": {},
+        "missing": [
+          "Properties with units",
+          "Tenants with leases and rent schedules",
+          "Rent collection tracking with payment status",
+          "Maintenance requests with vendor work orders",
+          "Vacancy pipeline for marketing available units",
+          "Portfolio cash-flow dashboard",
+          "Lease-renewal reminders"
+        ]
+      },
+      "trial": 1,
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\rental-portfolio",
+      "grader": {
+        "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\rental-portfolio.grader.json",
+        "hash": "1482050544",
+        "barChars": 285,
+        "requiredIdentifiers": 11,
+        "requiredCapabilities": 7
+      },
+      "acceptance": {
+        "filesOk": true,
+        "missingFiles": [],
+        "contentOk": true,
+        "failedContent": [],
+        "checked": {
+          "expectedFiles": 3,
+          "expectedContent": 1
+        },
+        "pass": false
+      },
+      "graderLeak": {
+        "scanned": 18,
+        "leaked": false,
+        "hits": []
+      },
+      "notes": {
+        "approvedGates": [
+          "P4",
+          "P5",
+          "P8",
+          "P9"
+        ],
+        "treeRunOk": true,
+        "journey": "keyless",
+        "stall": null,
+        "emitError": null,
+        "p6Refused": false
+      },
+      "durationSec": 2.5,
+      "rowSource": "trial-1",
+      "trials": {
+        "trials": 1,
+        "passes": 0,
+        "failed": 1,
+        "k": 1,
+        "kEffective": 1,
+        "passAt1": 0,
+        "passAtK": 0,
+        "passAllTrials": 0,
+        "observedPassRate": 0,
+        "flaky": false,
+        "flakinessMeasurable": false,
+        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+      },
+      "perTrial": [
+        {
+          "trial": 1,
+          "status": "complete",
+          "total": 6,
+          "mean": 0.6667,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\rental-portfolio",
+          "durationSec": 2.5,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        }
+      ]
+    },
+    {
+      "slug": "showing-booking",
+      "name": "House Showing Scheduler",
+      "domain": "real-estate",
+      "domainMatch": 1,
+      "kind": "webapp",
+      "status": "complete",
+      "mode": "keyless",
+      "criteria": {
+        "M1": {
+          "score": 0,
+          "evidence": "no generatedTree (0 file(s)) and 7 expectedCapabilities uncovered; single-module pass needs a library kind (got \"webapp\")"
+        },
+        "M2": {
+          "score": 1,
+          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\showing-booking; tests 14 pass / 0 fail)"
+        },
+        "M3": {
+          "score": 0,
+          "evidence": "no iteration convergence: P6 gate recorded FAIL (Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored))"
+        },
+        "M4": {
+          "score": 0,
+          "evidence": "machine verification missing: lastTest label=\"unlabeled\" + NO evidenceHash"
+        },
+        "M5": {
+          "score": 1,
+          "evidence": "2 red gate record(s) (P6, P7) surfaced loudly: sealedWithFailures flag + census log + warn gate.verdict"
+        },
+        "M6": {
+          "score": 1,
+          "evidence": "handover dir emitted with DEPLOY.md + oracle spec (8631b)"
+        },
+        "M7": {
+          "score": 1,
+          "evidence": "M1+M2+M3 1 ≥ prior same-domain 1 (m1 0/m2 1/m3 0)"
+        },
+        "M8": {
+          "score": 1,
+          "evidence": "journey used 0/3 cycle(s) — inside budget · cycle count only (no measured token usage)"
+        },
+        "M9": {
+          "score": 1,
+          "evidence": "run stopped on time, no refusal — nothing to shout"
+        }
+      },
+      "total": 6,
+      "mean": 0.6667,
+      "baseline": "delivery 1/10, process ~9/10 — 13/13 phases with a live key, zero lines of showing software shipped (dossier 98_make_3)",
+      "coverage": {
+        "covered": {},
+        "missing": [
+          "Agents publish open-house and private-showing slots",
+          "Buyers book slots",
+          "Email confirmation for bookings",
+          "Reminders",
+          "Calendar sync stub",
+          "Showing feedback form",
+          "Per-property showing history"
+        ]
+      },
+      "trial": 1,
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\showing-booking",
+      "grader": {
+        "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\showing-booking.grader.json",
+        "hash": "3214874927",
+        "barChars": 252,
+        "requiredIdentifiers": 11,
+        "requiredCapabilities": 7
+      },
+      "acceptance": {
+        "filesOk": true,
+        "missingFiles": [],
+        "contentOk": true,
+        "failedContent": [],
+        "checked": {
+          "expectedFiles": 3,
+          "expectedContent": 1
+        },
+        "pass": false
+      },
+      "graderLeak": {
+        "scanned": 18,
+        "leaked": false,
+        "hits": []
+      },
+      "notes": {
+        "approvedGates": [
+          "P4",
+          "P5",
+          "P8",
+          "P9"
+        ],
+        "treeRunOk": true,
+        "journey": "keyless",
+        "stall": null,
+        "emitError": null,
+        "p6Refused": false
+      },
+      "durationSec": 2.5,
+      "rowSource": "trial-1",
+      "trials": {
+        "trials": 1,
+        "passes": 0,
+        "failed": 1,
+        "k": 1,
+        "kEffective": 1,
+        "passAt1": 0,
+        "passAtK": 0,
+        "passAllTrials": 0,
+        "observedPassRate": 0,
+        "flaky": false,
+        "flakinessMeasurable": false,
+        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+      },
+      "perTrial": [
+        {
+          "trial": 1,
+          "status": "complete",
+          "total": 6,
+          "mean": 0.6667,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\showing-booking",
+          "durationSec": 2.5,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        }
+      ]
     }
   ],
   "summary": {
-    "entries": 1,
-    "meanTotal": 0.4444
+    "entries": 6,
+    "meanTotal": 0.5555666666666667,
+    "trials": 1,
+    "cases": 6,
+    "passAtK": {
+      "k": 1,
+      "cases": 6,
+      "passed": 0,
+      "passedSlugs": [],
+      "meanPassAt1": 0
+    },
+    "flakyCases": [],
+    "graderLeaks": [],
+    "skipped": 1,
+    "skips": [
+      {
+        "slug": null,
+        "kind": "unreadable-corpus-entry",
+        "reason": "README.md: not a corpus fixture (no YAML frontmatter fence) — skipped as documentation"
+      }
+    ]
   }
 }

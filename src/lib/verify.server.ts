@@ -34,7 +34,8 @@
 // the compiled module exposes no callable name at all (109 C-01: machine
 // verification must never be vacuous).
 // ---------------------------------------------------------------------------
-import { completeDeepSeek, isDeepSeekConfigured } from "./deepseek.server.ts";
+import { isDeepSeekConfigured } from "./deepseek.server.ts";
+import { callModel } from "./llm/providers/registry.ts";
 import { countLooseEquals, stripStringsAndComments } from "./bench.ts";
 import { briefNounHits, identifierHits } from "./sandbox.ts";
 import { failureLessonFromRecord, verifyOutcomeLesson } from "./knowledge.ts";
@@ -793,7 +794,10 @@ export async function generateCases(
   }
   const contract = (signatureNames ?? []).filter((s): s is string => typeof s === "string");
   const prompt = buildOracleCasesPrompt({ source: src, brief: br, signatureNames: contract, seeds });
-  const res = await completeDeepSeek(prompt, { model: "deepseek-v4-flash", json: true });
+  // T-107.2 (fixes/216p): role-tiered call — `weak` = the cheapest tier for
+  // short structured envelopes (flash + json; thinking disabled). Same
+  // request shape the legacy `completeDeepSeek(…, "deepseek-v4-flash")` sent.
+  const res = await callModel("weak", prompt, { json: true });
   if (!res.ok) {
     return res.reason === "not-configured"
       ? { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" }
@@ -803,13 +807,14 @@ export async function generateCases(
   if (cases === null) {
     // audit-88 (A3): one bounded repair retry — a single malformed payload
     // should not fail the whole verify run when the model can self-correct.
-    const retry = await completeDeepSeek(
+    const retry = await callModel(
+      "weak",
       [
         "Your previous reply was not valid JSON with a {cases: [...]} array. Repair it now.",
         "Return JSON ONLY: {\"cases\": [{\"id\": \"case-1\", \"expression\": \"<boolean expression>\"}]}.",
         "Same rules as before: single boolean expressions, no semicolons/declarations/assignments.",
       ].join("\n"),
-      { model: "deepseek-v4-flash", json: true },
+      { json: true },
     );
     if (!retry.ok) {
       return { ok: false, reason: "error", error: "model returned an unparseable oracle payload", code: "RT_E_INTERNAL" };
@@ -830,14 +835,15 @@ export async function generateCases(
   if (pinned.length > 0) {
     const missing = droppedPinnedOracleIds(cases.map((c) => c.id), pinned);
     if (missing.length > 0) {
-      const retry = await completeDeepSeek(
+      const retry = await callModel(
+        "weak",
         [
           "Your previous reply dropped pinned A7 oracle rows.",
           `Repair it now: reproduce EVERY pinned id exactly once in the case list: ${missing.join(", ")}.`,
           'Return JSON ONLY: {"cases": [{"id": "case-1", "expression": "<boolean expression>"}]}.',
           "Same rules as before: single boolean expressions, no semicolons/declarations/assignments.",
         ].join("\n"),
-        { model: "deepseek-v4-flash", json: true },
+        { json: true },
       );
       if (retry.ok) {
         const repaired = parseOracleJson(retry.text);
@@ -1011,7 +1017,8 @@ export async function verifyAndFixServer(
       .filter((r) => !r.pass)
       .map((f) => `${f.id}: ${f.detail}`)
       .join("; ");
-    const fix = await completeDeepSeek(
+    const fix = await callModel(
+      "weak",
       [
         "The following module failed machine-run verification cases.",
         `Failing cases: ${failures || "compile failure"}`,
@@ -1021,7 +1028,6 @@ export async function verifyAndFixServer(
         "Current source:",
         current.slice(0, 6000),
       ].join("\n"),
-      { model: "deepseek-v4-flash" },
     );
     if (fix.ok) {
       const cleaned = fix.text.replace(/^```[a-zA-Z0-9+_-]*\s*\n?/, "").replace(/\n?```\s*$/, "").trim();

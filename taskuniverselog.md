@@ -91,8 +91,21 @@ size, where it lives, and what the next wave should pick up.
   + rt-client fix + gate.sh step all landed/green (verify.server 19/19, report-intake 23/23);
   `216i` half-filled; L4 ✅ **COMPLETE** (`cmd-palette.tsx` + `runtime-timeline-pane.tsx`,
   additive, typecheck+eslint 0); L5 ⚠️ T-14 pins green (packet 47, gates 85) + 5 mop-up edits
-  on disk (verified green by the parent sweep); T-15 guard + harvest cap tests owed. **Next:
-  docs audit + README/remaining-waves push, then W5 (§4).**
+ on disk (verified green by the parent sweep); T-15 guard + harvest cap tests owed. **Next:
+ docs audit + README/remaining-waves push, then W5 (§4).**
+ - **WAVE 5 `deleg_eb3b8b86` CLOSED (2026-09-16 ~21:42) — boundary `gate.sh`: `{"ok":true}`.**
+ Sweep: `typecheck 0` · `lint 0` · gaps 0 · scripts **235/235** + src **1811/1811** · build 0.
+ **Lane outcomes:** L1 ⚠️ TA-15 partial — `orderTreeChunks` landed + full design in 216k (D1/D2/D3);
+ the caller broke arity mid-edit and the PARENT restored it (compile-only; rewire = W6-L1);
+ L2 ✅ **COMPLETE** (harvest cap+zero-budget tests, T-15 determinism guard +teeth, 216i/216j
+ bodies, doc counts verified); L3 ⚠️ approvals routed through `policy.ts` at all three sites
+ (seats byte-identical; headless 84/84; dod 85/85) — bypass pins + 216o owed → W6-L2;
+ L4 ⚠️ registry landed (`src/lib/llm/providers/*`, roles main/reasoning/weak, unknown-id
+ refusal, seams switched; all suites green) — tests + 216p + doctor surfacing → W6-L3;
+ L5 ⚠️ run-side graders + trials/pass@k landed; keyless eval recorded (6 cases, **0 grader
+ leaks**, new results.json shape) — 216q body + `--trials=2` evidence → W6-L4. **Parent
+ repairs:** caller restore (compile), pass@k expectation old→new (0.5→1, standard formula —
+ the TEST was wrong), stale results.json regenerated, duplicate-key removed.
 - **Wave-start gate baseline (reproduced 2026-09-16 19:11–19:13, no writers active):**
   typecheck **0** · lint **0 errors / 1 warning** (the warning IS the census defect — assigned to L1)
   · `npm test` **scripts 195/195 + src 1662/1662, 0 fail** · build **0**.
@@ -156,7 +169,7 @@ size, where it lives, and what the next wave should pick up.
 | TA-12 | Error-handling audit (signal 10) as its own task | S | ❌ | Phase 3 |
 | TA-13 | Split T3.3 into named signals; defer the rest explicitly | S | ❌ | plan hygiene |
 | TA-14 | Cross-family, order-swapped judge protocol | S/M | ❌ | Phase 3, needs T1.5 |
-| **TA-15** | **Emit a REAL multi-job product (P0-04)** | **M/L** | **❌ → W5-L1** | **Fully DESIGNED by W4-L1 with real probes: corpus binds record=5/flip=2/show=2, track=0/publish=0, 16 leftover → plan = 3 job files + 2 generated chunks; rewire + scaffold bridge/census + oracle-ctx still UNWIRED. Done-when unchanged. Maker-test critical path.** |
+| **TA-15** | **Emit a REAL multi-job product (P0-04)** | **M/L** | **❌ → W6-L1** | **Design + `orderTreeChunks` landed (W5); caller restored to legacy by parent. W6 completes: definition rewire → scaffold bridge allow-list/count → oracle job-row ctx → engine shortfall log → tests → census probe. Done-when unchanged.** |
 | TA-16 | `verify-kind`: scratch copy + install + claim strikes (C1) | S/M | ❌ | same commit as T4.1 |
 | TA-17 | Git landing detail: `.gitignore`, init, A4 dependency | S | ❌ | inside T4.2 |
 | TA-18 | Apply-patch: preservation + conflict semantics | S | ❌ | inside T4.3 |
@@ -218,7 +231,7 @@ size, where it lives, and what the next wave should pick up.
 
 ### 2.6 Wave H — competitor steals (`107_competitors_agentic.md`, `108_competitors_app_generators.md`; 18 tasks)
 
-🔄 W4-L2 landed the pure cores ✅ (`patch.ts` 21 tests + `policy.ts` 27 tests, 48/48); integration halves + T-107.2/T-107.5 → W5+. Named highlights: **T-107.1** `str_replace` patch primitive (unique-match refusal + graded fuzzy) · **T-107.2** provider registry + role tiers · **T-107.3** one-seam policy engine · **T-107.5** run-side acceptance fixtures + pass@k · **T-107.9** compaction constants · **T-107.10** sub-agent contract + mock-LLM E2E · **108-T1** in-place edit verb (dry-run + ledger attribution) · **108-T2** export registry → synthesis · **108-T3** precondition-vs-failure RT_E split · **108-T5** repair-budget + coded exhausted error · **108-T7** E2E-vs-running-instance feasibility spike. (11 named here; the rest live in the dossiers.)
+🔄 W5: T-107.3 **routed** (approvals → policy seam; pins owed) · T-107.2 **landed** (registry + roles + seam switches; tests owed) · T-107.5 **landed** (run-side graders + trials/pass@k + leak scan; keyless run recorded). W4 cores: `patch.ts` + `policy.ts` 48/48. Named highlights: **T-107.1** `str_replace` patch primitive (unique-match refusal + graded fuzzy) · **T-107.2** provider registry + role tiers · **T-107.3** one-seam policy engine · **T-107.5** run-side acceptance fixtures + pass@k · **T-107.9** compaction constants · **T-107.10** sub-agent contract + mock-LLM E2E · **108-T1** in-place edit verb (dry-run + ledger attribution) · **108-T2** export registry → synthesis · **108-T3** precondition-vs-failure RT_E split · **108-T5** repair-budget + coded exhausted error · **108-T7** E2E-vs-running-instance feasibility spike. (11 named here; the rest live in the dossiers.)
 
 ### 2.7 UI (`110_ui_audit_vs_competitors.md`, `111_ui_design_research.md`)
 
@@ -241,9 +254,12 @@ size, where it lives, and what the next wave should pick up.
 | `fixes/216f_synthesis_honesty.md` | ⚠️ text owed → W3-L1 |
 | `fixes/216g_judgment_learning.md` | ✅ complete |
 | `fixes/216h_ui_wave.md` | ✅ complete |
-| `fixes/216i_knowledge_integration.md` | ⚠️ pins ✅; body sections owed → W5-L2 |
-| `fixes/216j_honesty_tooling.md` | ⚠️ pins ✅; body owed → W5-L2 |
-| `fixes/216k_multi_job_emission.md` | ⚠️ recon+design ✅; body owed → W5-L1 |
+| `fixes/216i_knowledge_integration.md` | ✅ COMPLETE (W5-L2) |
+| `fixes/216j_honesty_tooling.md` | ✅ COMPLETE (W5-L2) |
+| `fixes/216k_multi_job_emission.md` | ⚠️ recon+design ✅; body finalize → W6-L1 |
+| `fixes/216o_policy_integration.md` | ⚠️ skeleton → W6-L2 |
+| `fixes/216p_provider_registry.md` | ⚠️ skeleton → W6-L3 |
+| `fixes/216q_eval_fixtures.md` | ⚠️ skeleton → W6-L4 |
 | `fixes/216l_tree_run_build_test.md` | ✅ WRITTEN (W3-L2, 14.4 KB) |
 | `fixes/216m_ui_wave2.md` | ✅ COMPLETE (W4-L4) |
 | `fixes/216n_wave_h_primitives.md` | ✅ COMPLETE (W4-L2) |
@@ -277,20 +293,16 @@ size, where it lives, and what the next wave should pick up.
 > Ownership is only valid once every W1 lane has stopped. Re-grep anchors before briefing.
 > Keep ≤5 lanes, disjoint files, flash-only, §3.0 guardrails verbatim, skeleton-first.
 
-> **W3 CLOSED (§1). W4 DISPATCHED 2026-09-16 ~20:50 — "product + Wave H primitives" (5 lanes;
-> each dispatch brief orders the lane to read its own `wave_plans/W4/lane-N.md` notes file FIRST —
-> parent-analyzed mini-task plans + anchors + traps + copy-paste verify commands).**
-1. **W4-L1 — TA-15 rewire + T-13 (THE product blocker)** (`codegen.server.ts`+test, `scaffold.ts`+test,
-   `doctor.ts`+test, `engine.ts`; log `fixes/216k`). Done-when: `reexports: 0, stubs: 0, real ≥ 3`
-   + ≥3 job modules pass their own oracle rows.
-2. **W4-L2 — Wave H primitives, cores only** (NEW `src/lib/patch.ts` = T-107.1 str_replace;
-   NEW `src/lib/policy.ts` = T-107.3; log `fixes/216n`). Integration halves → W5.
-3. **W4-L3 — lesson-loop pins + T-17 wiring** (`verify.server.test.ts`, `report-intake.test.ts`,
-   `rt-client.test.ts:121` fix, `scripts/gate.sh` step; completes `216i`).
-4. **W4-L4 — UI finish** (TASK-10 cmdk palette + TASK-11 timeline-pane wiring in `console.tsx`;
-   completes `216m`).
-5. **W4-L5 — T-14 pins + 109 mop-up ×5** (`packet.test.ts` pins; algorithms/algo-tools/harvest/
-   knowledge fixes; completes `216j`).
+> **W4 CLOSED + W5 CLOSED (see §1). W6 DISPATCHED 2026-09-16 ~21:55 — "TA-15 completion + W5
+> tails" (5 lanes; every brief orders the lane to read its own `wave_plans/W6/lane-N.md` FIRST).**
+1. **W6-L1 — TA-15 COMPLETION (THE product blocker)** (`codegen.server.ts`+test, `scaffold.ts`+test,
+   `engine.ts`, `fixes/216k`). Done-when: census probe → `reexports: 0, stubs: 0, real ≥ 3` + ≥3 job
+   modules pass their own oracle rows.
+2. **W6-L2 — policy tail** (bypass pins + `fixes/216o`; ledger provenance via `types.ts`+`headless.ts`+
+   `scripts/rapidtool-cli.mjs`).
+3. **W6-L3 — registry tail** (registry + migration tests, `fixes/216p`; `doctor.ts` provider surfacing).
+4. **W6-L4 — eval tail** (`fixes/216q` body, `--trials=2` keyless evidence, README/remainingwaves sync).
+5. **W6-L5 — TA-1 + TA-21** (verify the four lane-reported blockers; hygiene sweep).
 
 > **W3 sketch (after W2):** TA-15 + T-13 (multi-job — THE product blocker; files free after R1/R3)
 > · T-18 (tree-run builds+tests; after R2) · T-11 · T4 hops · UI remainder (TASK-01/06/10/11) ·
@@ -364,3 +376,9 @@ Deferred to W3+: 105 standalones (TA-1/TA-3/TA-21/TA-23), 112 T5/T9/T11/T12, Wav
   Parent boundary: exec.test.ts flake fixed (45s grace, T-18 rationale), all four gates GREEN
   (0 / 0 / 220+1803 / 0) + **gate.sh first-ever GREEN run**. Next: codebase audit + README/
   remaining-waves docs + push, then W5 dispatch.
+- **2026-09-16 (wave 5 close)** — W5 `deleg_eb3b8b86` verified: L2 ✅ complete; L3 approvals
+  routed through the policy seam (seats byte-identical); L4 registry landed (roles +
+  unknown-id refusal); L5 run-side graders + trials/pass@k + leak scan, keyless run recorded
+  (0 leaks); L1 TA-15 partial (orderTreeChunks + design; caller restored by parent). Parent
+  repairs: compile restore, pass@k test fix (0.5→1 — standard formula; the TEST was wrong),
+  stale results.json regenerated, dedupe. **`gate.sh {"ok":true}`** — scripts 235 + src 1811.

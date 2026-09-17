@@ -1,0 +1,46 @@
+{
+  "graderVersion": 1,
+  "slug": "rental-portfolio",
+  "caseName": "Rental Portfolio Manager",
+  "authority": "RUN-SIDE GRADER (W5-L5 / T-107.5) — the acceptance bar for this eval case. Declared before the run; read ONLY by scripts/run-eval.mjs; never copied into research/eval-out; the emitted project tree must neither contain nor reference it (scripts/run-eval.mjs graderLeakScan + scripts/run-eval.test.mjs pin that).",
+  "movedFrom": "research/eval-corpus/rental-portfolio.md frontmatter (acceptance / expectedNouns / expectedCapabilities) — the corpus fixture stays the documented D3 brief contract; this file is the grading source of truth and the driver no longer grades from the frontmatter copy.",
+  "acceptanceBar": "A landlord can add a property with units, lease units to tenants with rent schedules, record payments and maintenance requests with vendor work orders, market vacant units through the vacancy pipeline, and see portfolio cash flow plus lease-renewal reminders — in one runnable web app.",
+  "requiredIdentifiers": [
+    "property",
+    "unit",
+    "tenant",
+    "lease",
+    "rentSchedule",
+    "rentPayment",
+    "maintenanceRequest",
+    "workOrder",
+    "vacancy",
+    "cashFlow",
+    "leaseRenewalReminder"
+  ],
+  "requiredCapabilities": [
+    "Properties with units",
+    "Tenants with leases and rent schedules",
+    "Rent collection tracking with payment status",
+    "Maintenance requests with vendor work orders",
+    "Vacancy pipeline for marketing available units",
+    "Portfolio cash-flow dashboard",
+    "Lease-renewal reminders"
+  ],
+  "expectedFiles": [
+    "package.json",
+    "index.html",
+    "README.md"
+  ],
+  "expectedContent": [
+    {
+      "file": "package.json",
+      "contains": "\"test\""
+    }
+  ],
+  "passWhen": {
+    "meanAtLeast": 1,
+    "requireExpectedFiles": true,
+    "requireExpectedContent": true
+  }
+}

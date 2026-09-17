@@ -70,3 +70,79 @@ _(where persisted + where printed)_
 ## Verification
 
 _(commands + real observed output; filled at the end)_
+
+---
+
+# W5 · L1 landing (TA-15 rewire — this session)
+
+**Status: in-progress.** Skeleton-first (rule 8). Section bodies are filled as edits land;
+every claim below is a command actually run this session.
+
+## W5-L1 design decisions (deliberate, with the two subtleties)
+
+### D1 — consumption order (subtlety 1: "reverse signature-index chunk consumption")
+
+- `treeChunkPlan` (W4) maps job-keyed chunks first (graph order), then the unbound leftover
+  chunks. The corpus fixture binds record=[0,7,14,21,23], flip=[8,11], show=[5,6],
+  leftoverA=[1,2,3,4,9,10,12,13], leftoverB=[15..20,22,24] (expand indices).
+- The chunk-prompt contract is "a later file may call an earlier file's exports by name"
+  (bound as IIFE parameters on the assembled entry, imported on the materialized ESM).
+  Consuming the plan in graph order would synthesize `src/jobs/record.ts` FIRST (no prior
+  context) while the leftovers containing the earlier signatures (1..13) — the ledger
+  helpers record's job functions legitimately wrap — materialize AFTER it. A call from
+  record's functions into those helpers would then be a FORWARD CALL: not imported by
+  record.ts, ReferenceError when the oracle row calls the real function.
+- **Decision:** `orderTreeChunks()` — in a job-keyed plan, consume the unbound leftover
+  chunks FIRST (their plan/expand order kept), then the job chunks in REVERSE PLAN ORDER
+  (latest-bound first … earliest last). Every job module is thus synthesized with every
+  earlier-signature chunk already in its prior context; the module whose signatures span
+  the widest range (record) gets the fullest context. Within one job, sibling chunks
+  (`-2/-3`) keep signature order (k=0 first) — that is the order in which "sibling chunks
+  import earlier files IN ORDER" holds. Zero-job plans keep their exact plan order
+  (pre-216k byte parity).
+- **Recorded residual tension:** with label-keyed binding no total order can make every
+  interleaved pair call-safe (record's set {0,…,23} interleaves with every other chunk).
+  The chosen order is the best-achievable for the fixture's three job modules
+  (record/flip/show all fully precede-contexted); the residual risk is confined to
+  leftover chunks whose signatures interleave with later job chunks (LB), and to
+  hypothetical calls from a job module into a chunk bound AFTER it under the reversal
+  (flip → record's 0/7). Documented, not hidden.
+
+### D2 — oracle spec cast (subtlety 2: typed-cast, no assertion weakened)
+
+- Tree ESMs export NAMED symbols (`export { a, b };`); a namespace import has a statically
+  known key set, so indexing it with a spec-derived name fails the emitted tsconfig's
+  typecheck (TS7053) and the pre-216k row set could not pin function names at all.
+- **Decision:** job rows import the JOB module namespace and cast it once —
+  `const <slug> = <module> as unknown as Record<string, (...a: never[]) => unknown>;` —
+  then assert the module's real export names resolve to functions and CALL the real
+  function in a guarded probe; a ReferenceError (a missing cross-file binding = exactly the
+  forward-call class D1 removes) fails the row. No assertion is weakened: the old state was
+  `test.skip("<id> — NOT IMPLEMENTED")`; the new state is a real, failable assertion.
+
+### D3 — no re-export substitute at job paths (bridge policy)
+
+- A tree-mode node file the tree does not own is a bridge (re-export of the tree entry).
+  For a **job** path that is fatal to TA-15's own acceptance: `doctor --tree` counts any
+  `src/jobs/*.ts` re-export as a leftover job, so a bridged `src/jobs/track.ts` would keep
+  `reexports > 0` (and the factory latch false) no matter how real the other job modules
+  are — exactly the artifact TA-15 removes.
+- **Decision:** in tree mode a spec-graph JOB node the plan did not map gets NO file: it is
+  counted + surfaced (warning + README line) as an unmaterialised job node. Non-job nodes
+  (schema/api/store/…) keep the (now counted + surfaced) bridge. Never silent.
+
+## W5-L1 work log
+
+_(per-file, with line refs, as patches land — this session)_
+
+## W5-L1 pinned-byte changes (old → new, deliberate)
+
+_(each one with the reason)_
+
+## W5-L1 evidence (commands + real observed output)
+
+_(probe OUTSIDE the repo + suites; no invented output)_
+
+## W5-L1 not-done
+
+_(honest list if budget dies)_

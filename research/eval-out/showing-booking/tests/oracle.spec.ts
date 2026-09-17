@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // tests/oracle.spec.ts — acceptance tests from the A7 oracle (project.oracle)
-// machine-generated from RapidTool packet 8f046a94-f71d-4940-9d36-413af5751d31; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet 65b49c32-febc-4388-8b8e-1c33ccb349fb; regenerate, don't hand-edit.
 // REAL assertions, no todo stubs (fixes/135). Row ids are PINNED: the verify
 // harness seeds + pins orc-* ids across runs (E-08) — never rename or drop
 // one. Each test asserts what the emitted modules ACTUALLY do today:
@@ -10,6 +10,10 @@
 //   * an oracle row whose target seam is a TODO(E-15) stub asserts the seam
 //     rejects — that test FAILS the moment the seam is implemented, which is
 //     the signal to replace it with the row's real acceptance assertion;
+//   * an oracle row with NO emitted module surface to assert against (106
+//     T-08 / F-05) is a visibly-marked test.skip("<id> — NOT IMPLEMENTED") —
+//     never an always-true assertion; node:test reports it as skipped (never
+//     a pass) and the README counts it separately from the assertable rows;
 //   * nothing here pretends a stub satisfies its brief.
 // Run: node --experimental-strip-types --test tests/oracle.spec.ts
 // ---------------------------------------------------------------------------
@@ -90,7 +94,9 @@ test("api.endpoints — ENDPOINTS matches the A6 contract endpoints", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Oracle rows (A7) — one test per row under its PINNED id.
+// 4. Oracle rows (A7) — one test per row under its PINNED id; a row with no
+// emitted module surface is a visible test.skip("<id> — NOT IMPLEMENTED")
+// (fixes/216b) — skipped, never green, and counted by the README census.
 // ---------------------------------------------------------------------------
 
 test("orc-1", async () => {

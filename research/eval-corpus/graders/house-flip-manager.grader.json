@@ -1,0 +1,45 @@
+{
+  "graderVersion": 1,
+  "slug": "house-flip-manager",
+  "caseName": "House-Flipping Manager",
+  "authority": "RUN-SIDE GRADER (W5-L5 / T-107.5) — the acceptance bar for this eval case. Declared before the run; read ONLY by scripts/run-eval.mjs; never copied into research/eval-out; the emitted project tree must neither contain nor reference it (scripts/run-eval.mjs graderLeakScan + scripts/run-eval.test.mjs pin that).",
+  "movedFrom": "research/eval-corpus/house-flip-manager.md frontmatter (acceptance / expectedNouns / expectedCapabilities) — the corpus fixture stays the documented D3 brief contract; this file is the grading source of truth and the driver no longer grades from the frontmatter copy.",
+  "acceptanceBar": "A flipper can log an acquisition, budget the rehab by line item, record contractor bids and invoices against timeline milestones, estimate after-repair value, and see a flip P&L dashboard — end to end in one runnable web app.",
+  "requiredIdentifiers": [
+    "acquisition",
+    "property",
+    "budget",
+    "lineItem",
+    "contractorBid",
+    "invoice",
+    "milestone",
+    "timeline",
+    "arv",
+    "flip",
+    "pnl"
+  ],
+  "requiredCapabilities": [
+    "Property acquisition tracker",
+    "Renovation budgets by line item",
+    "Contractor bids and invoices",
+    "Rehab timeline with milestones",
+    "ARV (after-repair-value) estimator",
+    "Flip P&L dashboard"
+  ],
+  "expectedFiles": [
+    "package.json",
+    "index.html",
+    "README.md"
+  ],
+  "expectedContent": [
+    {
+      "file": "package.json",
+      "contains": "\"test\""
+    }
+  ],
+  "passWhen": {
+    "meanAtLeast": 1,
+    "requireExpectedFiles": true,
+    "requireExpectedContent": true
+  }
+}

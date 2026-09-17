@@ -1,0 +1,49 @@
+{
+  "graderVersion": 1,
+  "slug": "coffeehouse2home-property-ledger",
+  "caseName": "Coffeehouse2Home Property Ledger",
+  "authority": "RUN-SIDE GRADER (W5-L5 / T-107.5) — the acceptance bar for this eval case. Declared before the run; read ONLY by scripts/run-eval.mjs; never copied into research/eval-out; the emitted project tree must neither contain nor reference it (scripts/run-eval.mjs graderLeakScan + scripts/run-eval.test.mjs pin that).",
+  "movedFrom": "research/eval-corpus/coffeehouse2home-property-ledger.md frontmatter (acceptance / expectedNouns / expectedCapabilities) — the corpus fixture stays the documented D3 brief contract; this file is the grading source of truth and the driver no longer grades from the frontmatter copy.",
+  "acceptanceBar": "One shared ledger record per property accumulates its deals, flips, leases, and work orders while CRM leads, showings, rentals, and field-ops payroll all operate across the five domains from that single record — as one runnable suite.",
+  "requiredIdentifiers": [
+    "propertyLedger",
+    "property",
+    "ownership",
+    "buyerLead",
+    "showing",
+    "booking",
+    "lease",
+    "tenant",
+    "rentRoll",
+    "workOrder",
+    "payroll",
+    "jobCost",
+    "acquisition",
+    "flip"
+  ],
+  "requiredCapabilities": [
+    "One shared Property Ledger record per property (ownership, address, status, full history) across brokerage, flipping, rentals, and field services",
+    "Real-estate CRM: contacts, buyer and seller leads, and a deal pipeline with stages",
+    "Showing slots (private showings and open houses) publishable from any listing, flip, or rental property; buyers book with email confirmation, reminders, calendar-sync stub, and per-property showing history with buyer feedback",
+    "Flip manager: acquisitions, renovation budgets with line items, contractor bids, flip project phases, job costing per property",
+    "Rental portfolio: leases, tenants, rent roll with payment records, maintenance requests, vacancy tracking, lease-renewal reminders",
+    "Field-ops suite: work orders raised from any property become crew task lists; crew time sheets roll into weekly payroll with rates and overtime; material/supply lists with purchase records and reorder flags",
+    "Cross-domain flows: work-order hours feed payroll and job cost; showings on flip or rental properties create CRM buyer leads; deals, flips, leases, and work orders accumulate on the shared ledger record"
+  ],
+  "expectedFiles": [
+    "package.json",
+    "index.html",
+    "README.md"
+  ],
+  "expectedContent": [
+    {
+      "file": "package.json",
+      "contains": "\"test\""
+    }
+  ],
+  "passWhen": {
+    "meanAtLeast": 1,
+    "requireExpectedFiles": true,
+    "requireExpectedContent": true
+  }
+}

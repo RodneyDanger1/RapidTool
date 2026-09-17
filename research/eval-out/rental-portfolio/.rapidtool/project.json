@@ -1,89 +1,90 @@
 {
-  "id": "5587eca3-156b-4c57-9ea4-23879f548cb5",
+  "id": "e0451662-7106-402f-aa2c-9a456861b3e5",
   "name": "Rental Portfolio Manager",
   "brief": "a rental portfolio manager: properties with units, tenants with leases and rent schedules, rent collection tracking with payment status, maintenance requests with vendor work orders, vacancy pipeline for marketing available units, portfolio cash-flow dashboard, lease-renewal reminders",
   "domain": "real-estate",
-  "createdAt": 1789018168183,
+  "createdAt": 1789612898625,
   "status": "complete",
   "currentPhase": 12,
+  "kind": "app",
   "phases": [
     {
       "id": 0,
       "status": "complete",
-      "startedAt": 1789018168184,
-      "completedAt": 1789018168185,
+      "startedAt": 1789612898626,
+      "completedAt": 1789612898627,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "3269632901",
-        "checkedAt": 1789018168187
+        "checkedAt": 1789612898629
       }
     },
     {
       "id": 1,
       "status": "complete",
-      "startedAt": 1789018168188,
-      "completedAt": 1789018168188,
+      "startedAt": 1789612898630,
+      "completedAt": 1789612898630,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "1050713914",
-        "checkedAt": 1789018168189
+        "checkedAt": 1789612898631
       }
     },
     {
       "id": 2,
       "status": "complete",
-      "startedAt": 1789018168190,
-      "completedAt": 1789018168191,
+      "startedAt": 1789612898632,
+      "completedAt": 1789612898634,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "1845537766",
-        "checkedAt": 1789018168192
+        "checkedAt": 1789612898635
       }
     },
     {
       "id": 3,
       "status": "complete",
-      "startedAt": 1789018168192,
-      "completedAt": 1789018168193,
+      "startedAt": 1789612898636,
+      "completedAt": 1789612898636,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "1638292844",
-        "checkedAt": 1789018168195
+        "checkedAt": 1789612898637
       }
     },
     {
       "id": 4,
       "status": "complete",
-      "startedAt": 1789018168196,
-      "completedAt": 1789018168198,
+      "startedAt": 1789612898638,
+      "completedAt": 1789612898644,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "3527188654",
-        "checkedAt": 1789018168199
+        "checkedAt": 1789612898646
       }
     },
     {
       "id": 5,
       "status": "complete",
-      "startedAt": 1789018168200,
-      "completedAt": 1789018168202,
+      "startedAt": 1789612898647,
+      "completedAt": 1789612898649,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "2951452883",
-        "checkedAt": 1789018168203
+        "checkedAt": 1789612898650
       }
     },
     {
       "id": 6,
       "status": "complete",
-      "startedAt": 1789018168204,
-      "completedAt": 1789018168210,
+      "startedAt": 1789612898651,
+      "completedAt": 1789612898652,
       "gate": {
         "passed": false,
         "unmet": [
@@ -91,81 +92,81 @@
           "Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)"
         ],
         "evidenceHash": "552477142",
-        "checkedAt": 1789018168212
+        "checkedAt": 1789612898654
       }
     },
     {
       "id": 7,
       "status": "complete",
-      "startedAt": 1789018168213,
-      "completedAt": 1789018168214,
+      "startedAt": 1789612898655,
+      "completedAt": 1789612898656,
       "gate": {
         "passed": false,
         "unmet": [
           "Live research corpus exists for P7 (≥1 fetched finding)"
         ],
         "evidenceHash": "425504246",
-        "checkedAt": 1789018168215
+        "checkedAt": 1789612898658
       }
     },
     {
       "id": 8,
       "status": "complete",
-      "startedAt": 1789018168216,
-      "completedAt": 1789018168219,
+      "startedAt": 1789612898659,
+      "completedAt": 1789612898664,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "606175358",
-        "checkedAt": 1789018168220
+        "checkedAt": 1789612898665
       }
     },
     {
       "id": 9,
       "status": "complete",
-      "startedAt": 1789018168221,
-      "completedAt": 1789018168225,
+      "startedAt": 1789612898667,
+      "completedAt": 1789612898670,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "3030540723",
-        "checkedAt": 1789018168226
+        "checkedAt": 1789612898671
       }
     },
     {
       "id": 10,
       "status": "complete",
-      "startedAt": 1789018168228,
-      "completedAt": 1789018168229,
+      "startedAt": 1789612898672,
+      "completedAt": 1789612898673,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "3218462335",
-        "checkedAt": 1789018168230
+        "checkedAt": 1789612898674
       }
     },
     {
       "id": 11,
       "status": "complete",
-      "startedAt": 1789018168231,
-      "completedAt": 1789018168232,
+      "startedAt": 1789612898675,
+      "completedAt": 1789612898676,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "1663625674",
-        "checkedAt": 1789018168233
+        "checkedAt": 1789612898677
       }
     },
     {
       "id": 12,
       "status": "complete",
-      "startedAt": 1789018168234,
-      "completedAt": 1789018168235,
+      "startedAt": 1789612898678,
+      "completedAt": 1789612898679,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "3530055408",
-        "checkedAt": 1789018168236
+        "checkedAt": 1789612898681
       }
     }
   ],
@@ -264,14 +265,14 @@
       "phase": 0,
       "kind": "scorecard",
       "title": "Feasibility & Architecture Scorecard",
-      "body": "# Rental Portfolio Manager — Phase 0 scorecard\n\nDomain: real-estate\nOverall: 7.2 / 10 — proceed-with-guards\nLattice jobs: rent, schedule, track, lease\nEntities: portfolio, manager, tenant, dashboard, rental, work-order, vendor\nConstraints: none\n\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\n\n## Bottlenecks\n- Long-running tools must stream over WebSocket MCP.\n- HITL rejection without a qualitative note is illegal.\n\n## Attack vectors\n- Prompt injection via ingested competitor pages.\n- Tool-call privilege escalation if OAuth scopes are inherited.\n- Sandbox escape if generated exec has network.\n\n## Recommended libraries\n- TanStack Start: Typed app shell and file routes\n- Zod: Schema lock on generated artifacts\n- MLS / property-data API: Listings, comps, and ARV inputs"
+      "body": "# Rental Portfolio Manager — Phase 0 scorecard\n\nDomain: real-estate\nOverall: 7.2 / 10 — proceed-with-guards\nLattice jobs: lease, rent, schedule, track\nEntities: portfolio, manager, tenant, dashboard, rental, vendor, work-order\nConstraints: none\n\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\n\n## Bottlenecks\n- Long-running tools must stream over WebSocket MCP.\n- HITL rejection without a qualitative note is illegal.\n\n## Attack vectors\n- Prompt injection via ingested competitor pages.\n- Tool-call privilege escalation if OAuth scopes are inherited.\n- Sandbox escape if generated exec has network.\n\n## Recommended libraries\n- TanStack Start: Typed app shell and file routes\n- Zod: Schema lock on generated artifacts\n- MLS / property-data API: Listings, comps, and ARV inputs"
     },
     {
       "id": "0-algorithm-intent-lattice-a1",
       "phase": 0,
       "kind": "algorithm",
       "title": "Intent Lattice (A1)",
-      "body": "{\n  \"domain\": \"real-estate\",\n  \"jobs\": [\n    \"rent\",\n    \"schedule\",\n    \"track\",\n    \"lease\"\n  ],\n  \"entities\": [\n    \"portfolio\",\n    \"manager\",\n    \"tenant\",\n    \"dashboard\",\n    \"rental\",\n    \"work-order\",\n    \"vendor\"\n  ],\n  \"constraints\": [],\n  \"nodes\": [\n    {\n      \"kind\": \"job\",\n      \"label\": \"rent\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"portfolio\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"manager\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"tenant\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"schedule\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"track\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"lease\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"dashboard\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"rental\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"work-order\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"vendor\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"risk\",\n      \"label\": \"payment\",\n      \"weight\": 0.55\n    }\n  ],\n  \"complexity\": 8.4,\n  \"vague\": false\n}",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"jobs\": [\n    \"lease\",\n    \"rent\",\n    \"schedule\",\n    \"track\"\n  ],\n  \"entities\": [\n    \"portfolio\",\n    \"manager\",\n    \"tenant\",\n    \"dashboard\",\n    \"rental\",\n    \"vendor\",\n    \"work-order\"\n  ],\n  \"constraints\": [],\n  \"nodes\": [\n    {\n      \"kind\": \"job\",\n      \"label\": \"lease\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"rent\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"portfolio\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"manager\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"tenant\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"schedule\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"track\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"dashboard\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"rental\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"vendor\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"risk\",\n      \"label\": \"payment\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"work-order\",\n      \"weight\": 0.35\n    }\n  ],\n  \"complexity\": 8.4,\n  \"vague\": false\n}",
       "language": "json"
     },
     {
@@ -287,7 +288,7 @@
       "phase": 1,
       "kind": "graph",
       "title": "Execution topology (this build)",
-      "body": "Sequential pipeline: rent → schedule → track → lease\nState entities: portfolio, manager, tenant, dashboard, rental, work-order, vendor\n\nEach step advances a portfolio through its lifecycle in the real estate domain — the flow is the brief's own verbs, the state its own nouns (P0 lattice).\n\n> Derivation: a single sequential flow over portfolios; no parallel, event, or failover topology is claimed beyond what the brief states.",
+      "body": "Sequential pipeline: lease → rent → schedule → track\nState entities: portfolio, manager, tenant, dashboard, rental, vendor, work-order\n\nEach step advances a portfolio through its lifecycle in the real estate domain — the flow is the brief's own verbs, the state its own nouns (P0 lattice).\n\n> Derivation: a single sequential flow over portfolios; no parallel, event, or failover topology is claimed beyond what the brief states.",
       "language": "text"
     },
     {
@@ -303,7 +304,7 @@
       "phase": 2,
       "kind": "memory",
       "title": "Data model & retrieval",
-      "body": "Records: portfolio, manager, tenant, dashboard, rental, work-order, vendor\nOperations: rent, schedule, track, lease\n\nEach portfolio is the unit of state; rent steps read and write that state in order.\n\n> Persistence is shaped by the brief's own nouns — no specific database or durable store is claimed beyond the brief."
+      "body": "Records: portfolio, manager, tenant, dashboard, rental, vendor, work-order\nOperations: lease, rent, schedule, track\n\nEach portfolio is the unit of state; lease steps read and write that state in order.\n\n> Persistence is shaped by the brief's own nouns — no specific database or durable store is claimed beyond the brief."
     },
     {
       "id": "gate-p2-18455377",
@@ -334,7 +335,7 @@
       "phase": 4,
       "kind": "security",
       "title": "Security & authorization policy",
-      "body": "Protected data: portfolio, manager, tenant, dashboard, rental, work-order (the brief's own entities).\nAccess model: manager, tenant — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the portfolios its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive portfolio data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty)."
+      "body": "Protected data: portfolio, manager, tenant, dashboard, rental, vendor (the brief's own entities).\nAccess model: manager, tenant — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the portfolios its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive portfolio data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty)."
     },
     {
       "id": "gate-p4-35271886",
@@ -364,7 +365,7 @@
       "phase": 6,
       "kind": "code",
       "title": "P6 placeholder module (deterministic template)",
-      "body": "const JOBS = [\"rent\", \"schedule\", \"track\", \"lease\"];\nconst REJECTION = \"\";\nfunction synthesize(spec) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Rental Portfolio Manager\", phase: 6, job: \"rent\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"rent\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"rent\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"rent\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+      "body": "const JOBS = [\"lease\", \"rent\", \"schedule\", \"track\"];\nconst REJECTION = \"\";\nfunction synthesize(spec) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Rental Portfolio Manager\", phase: 6, job: \"lease\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"lease\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"lease\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"lease\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
       "language": "javascript"
     },
     {
@@ -403,7 +404,7 @@
       "phase": 8,
       "kind": "ui",
       "title": "Interface contract (client UI)",
-      "body": "Screens derived from the brief's product surfaces (one distinct entity-management responsibility each — never one screen per verb):\nScreen: portfolio\n  Responsibility: portfolio management\n  Actions: track\n  State: portfolio\nScreen: manager\n  Responsibility: manager management\n  Actions: track\n  State: manager\nScreen: tenant\n  Responsibility: tenant management\n  Actions: rent, schedule, track, lease\n  State: tenant\nScreen: dashboard\n  Responsibility: dashboard management\n  Actions: track\n  State: dashboard\nScreen: rental\n  Responsibility: rental management\n  Actions: track\n  State: rental\nScreen: work-order\n  Responsibility: work-order management\n  Actions: track\n  State: work-order\n\n> prototype pending — no UI code generated; this contract is a declaration (deterministic template), not an implementation (B-18 honesty)."
+      "body": "Screens derived from the brief's product surfaces (one distinct entity-management responsibility each — never one screen per verb):\nScreen: portfolio\n  Responsibility: portfolio management\n  Actions: track\n  State: portfolio\nScreen: manager\n  Responsibility: manager management\n  Actions: track\n  State: manager\nScreen: tenant\n  Responsibility: tenant management\n  Actions: lease, rent, schedule, track\n  State: tenant\nScreen: dashboard\n  Responsibility: dashboard management\n  Actions: track\n  State: dashboard\nScreen: rental\n  Responsibility: rental management\n  Actions: track\n  State: rental\nScreen: vendor\n  Responsibility: vendor management\n  Actions: track\n  State: vendor\n\n> prototype pending — no UI code generated; this contract is a declaration (deterministic template), not an implementation (B-18 honesty)."
     },
     {
       "id": "gate-p8-60617535",
@@ -441,7 +442,7 @@
       "phase": 10,
       "kind": "edge",
       "title": "Local compute & inference",
-      "body": "Compute model: rent, schedule, track, lease run as deterministic local steps over portfolio.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model."
+      "body": "Compute model: lease, rent, schedule, track run as deterministic local steps over portfolio.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model."
     },
     {
       "id": "gate-p10-32184623",
@@ -472,7 +473,7 @@
       "phase": 12,
       "kind": "docs",
       "title": "Architecture Decision Records",
-      "body": "# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, work-order, vendor derived from the brief (P0 lattice).\n\n# ADR-002 rent pipeline\n\nStatus: accepted\nDecision: The product runs a sequential rent → schedule → track → lease pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.",
+      "body": "# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, vendor, work-order derived from the brief (P0 lattice).\n\n# ADR-002 lease pipeline\n\nStatus: accepted\nDecision: The product runs a sequential lease → rent → schedule → track pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.",
       "language": "markdown"
     },
     {
@@ -480,7 +481,7 @@
       "phase": 12,
       "kind": "docs",
       "title": "OpenAPI 3.1",
-      "body": "openapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok",
+      "body": "openapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok",
       "language": "yaml"
     },
     {
@@ -496,7 +497,7 @@
       "phase": 12,
       "kind": "packet",
       "title": "Agent packet (A4)",
-      "body": "# RapidTool Agent Packet v3 — Rental Portfolio Manager\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-10T05:29:28.238Z\nproject_id: 5587eca3-156b-4c57-9ea4-23879f548cb5\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-10T05:29:28.238Z\",\n  \"project_id\": \"5587eca3-156b-4c57-9ea4-23879f548cb5\",\n  \"name\": \"Rental Portfolio Manager\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018168197,\n      \"decided_at\": 1789018168198\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018168201,\n      \"decided_at\": 1789018168202\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018168217,\n      \"decided_at\": 1789018168219\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018168222,\n      \"decided_at\": 1789018168225\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ]\n}\n```\n\n## Mission\na rental portfolio manager: properties with units, tenants with leases and rent schedules, rent collection tracking with payment status, maintenance requests with vendor work orders, vacancy pipeline for marketing available units, portfolio cash-flow dashboard, lease-renewal reminders\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: rent, schedule, track, lease\nEntities: portfolio, manager, tenant, dashboard, rental, work-order, vendor\nConstraints: none declared\nComplexity: 8.4 / 10\n\n## Scheduler (A3)\nTightness 8.6 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for rent, schedule, track before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/rent.ts — Implement job “rent” against the contract\n- [implementer] src/jobs/schedule.ts — Implement job “schedule” against the contract\n- [implementer] src/jobs/track.ts — Implement job “track” against the contract\n- [implementer] src/jobs/lease.ts — Implement job “lease” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Portfolio: id:ulid, status:enum, updatedAt:datetime\n- Manager: id:ulid, status:enum, updatedAt:datetime\n- Tenant: id:ulid, status:enum, updatedAt:datetime\n- Dashboard: id:ulid, status:enum, updatedAt:datetime\n- Rental: id:ulid, status:enum, updatedAt:datetime\n- WorkOrder: id:ulid, title:string, status:enum, note:string\n- POST /v1/rent (rent)\n- POST /v1/schedule (schedule)\n- GET /v1/track (track)\n- POST /v1/lease (lease)\n\n## Oracle (A7)\n- job.rent.happy: Authorized operator submits “rent” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.schedule.happy: Authorized operator submits “schedule” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.track.happy: Authorized operator submits “track” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.lease.happy: Authorized operator submits “lease” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · human · 2026-09-10T05:29:28.198Z\n- P5 · approve · human · 2026-09-10T05:29:28.202Z\n- P8 · approve · human · 2026-09-10T05:29:28.219Z\n- P9 · approve · human · 2026-09-10T05:29:28.225Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.332] Data model written for Rental Portfolio Manager: portfolio, manager, tenant, dashboard, rental, work-order, vendor.\n2. [procedural 0.311] Rental Portfolio Manager executes as one sequential real estate pipeline.\n3. [semantic 0.282] Domain real-estate; jobs rent, schedule, track, lease.\n4. [procedural 0.277] HITL reject requires a written reason.\n5. [episodic 0.275] Ingested brief for Rental Portfolio Manager in real-estate.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.2/10 (proceed-with-guards)\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: rent, schedule, track, lease run as deterministic local steps over portfolio.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"real-estate\",\n  \"surfaces\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, work-order, vendor derived from the brief (P0 lattice).\n\n# ADR-002 rent pipeline\n\nStatus: accepted\nDecision: The product runs a sequential rent → schedule → track → lease pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, work-order, vendor derived from the brief (P0 lattice).\n\n# ADR-002 rent pipeline\n\nStatus: accepted\nDecision: The product runs a sequential rent → schedule → track → lease pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+      "body": "# RapidTool Agent Packet v3 — Rental Portfolio Manager\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-17T02:41:38.682Z\nproject_id: e0451662-7106-402f-aa2c-9a456861b3e5\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-17T02:41:38.682Z\",\n  \"project_id\": \"e0451662-7106-402f-aa2c-9a456861b3e5\",\n  \"name\": \"Rental Portfolio Manager\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789612898640,\n      \"decided_at\": 1789612898644\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789612898648,\n      \"decided_at\": 1789612898649\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789612898661,\n      \"decided_at\": 1789612898664\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789612898668,\n      \"decided_at\": 1789612898670\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 13,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 14\n  }\n}\n```\n\n## Mission\na rental portfolio manager: properties with units, tenants with leases and rent schedules, rent collection tracking with payment status, maintenance requests with vendor work orders, vacancy pipeline for marketing available units, portfolio cash-flow dashboard, lease-renewal reminders\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: lease, rent, schedule, track\nEntities: portfolio, manager, tenant, dashboard, rental, vendor, work-order\nConstraints: none declared\nComplexity: 8.4 / 10\n\n## Scheduler (A3)\nTightness 8.6 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for lease, rent, schedule before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/lease.ts — Implement job “lease” against the contract\n- [implementer] src/jobs/rent.ts — Implement job “rent” against the contract\n- [implementer] src/jobs/schedule.ts — Implement job “schedule” against the contract\n- [implementer] src/jobs/track.ts — Implement job “track” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Portfolio: id:ulid, status:enum, updatedAt:datetime\n- Manager: id:ulid, status:enum, updatedAt:datetime\n- Tenant: id:ulid, status:enum, updatedAt:datetime\n- Dashboard: id:ulid, status:enum, updatedAt:datetime\n- Rental: id:ulid, status:enum, updatedAt:datetime\n- Vendor: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/lease (lease)\n- POST /v1/rent (rent)\n- POST /v1/schedule (schedule)\n- GET /v1/track (track)\n\n## Oracle (A7)\n- job.lease.happy: Authorized operator submits “lease” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.rent.happy: Authorized operator submits “rent” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.schedule.happy: Authorized operator submits “schedule” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.track.happy: Authorized operator submits “track” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nPhase coverage: 13 of 13 phases executed / 14 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · autopilot · 2026-09-17T02:41:38.644Z\n- P5 · approve · autopilot · 2026-09-17T02:41:38.649Z\n- P8 · approve · autopilot · 2026-09-17T02:41:38.664Z\n- P9 · approve · autopilot · 2026-09-17T02:41:38.670Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.332] Data model written for Rental Portfolio Manager: portfolio, manager, tenant, dashboard, rental, vendor, work-order.\n2. [procedural 0.311] Rental Portfolio Manager executes as one sequential real estate pipeline.\n3. [semantic 0.282] Domain real-estate; jobs lease, rent, schedule, track.\n4. [procedural 0.277] HITL reject requires a written reason.\n5. [episodic 0.275] Ingested brief for Rental Portfolio Manager in real-estate.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.2/10 (proceed-with-guards)\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: lease, rent, schedule, track run as deterministic local steps over portfolio.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"real-estate\",\n  \"surfaces\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, vendor, work-order derived from the brief (P0 lattice).\n\n# ADR-002 lease pipeline\n\nStatus: accepted\nDecision: The product runs a sequential lease → rent → schedule → track pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, vendor, work-order derived from the brief (P0 lattice).\n\n# ADR-002 lease pipeline\n\nStatus: accepted\nDecision: The product runs a sequential lease → rent → schedule → track pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
       "language": "markdown"
     }
   ],
@@ -542,7 +543,7 @@
       "source": "engine"
     },
     {
-      "id": "lesson-template-emission-1a5cba7c",
+      "id": "lesson-template-emission-4a375107",
       "kind": "episodic",
       "phase": 7,
       "text": "unmet: Live research corpus exists for P7 (≥1 fetched finding)",
@@ -563,7 +564,7 @@
       "source": "engine"
     },
     {
-      "id": "lesson-template-emission-b90f22a6",
+      "id": "lesson-template-emission-25f9d888",
       "kind": "episodic",
       "phase": 6,
       "text": "unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)",
@@ -611,7 +612,7 @@
       "id": "2-semantic-0.94",
       "kind": "semantic",
       "phase": 2,
-      "text": "Data model written for Rental Portfolio Manager: portfolio, manager, tenant, dashboard, rental, work-order, vendor.",
+      "text": "Data model written for Rental Portfolio Manager: portfolio, manager, tenant, dashboard, rental, vendor, work-order.",
       "score": 0.94,
       "source": "engine"
     },
@@ -643,7 +644,7 @@
       "id": "boot-sem",
       "kind": "semantic",
       "phase": 0,
-      "text": "Domain real-estate; jobs rent, schedule, track, lease.",
+      "text": "Domain real-estate; jobs lease, rent, schedule, track.",
       "score": 0.8,
       "source": "engine"
     },
@@ -679,357 +680,357 @@
   ],
   "logs": [
     {
-      "ts": 1789018168183,
+      "ts": 1789612898625,
       "phase": 0,
       "level": "info",
       "event": "project.created",
       "detail": "real-estate"
     },
     {
-      "ts": 1789018168185,
+      "ts": 1789612898627,
       "phase": 0,
       "level": "info",
       "event": "phase.enter",
       "detail": "P0 Deep Research & Feasibility"
     },
     {
-      "ts": 1789018168186,
+      "ts": 1789612898628,
       "phase": 0,
       "level": "info",
       "event": "scorecard.ready",
       "detail": "overall=7.2 verdict=proceed-with-guards"
     },
     {
-      "ts": 1789018168185,
+      "ts": 1789612898627,
       "phase": 0,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168187,
+      "ts": 1789612898629,
       "phase": 0,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 32696329"
     },
     {
-      "ts": 1789018168188,
+      "ts": 1789612898630,
       "phase": 1,
       "level": "info",
       "event": "phase.enter",
       "detail": "P1 Core Orchestration & State Graph"
     },
     {
-      "ts": 1789018168188,
+      "ts": 1789612898630,
       "phase": 1,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168189,
+      "ts": 1789612898631,
       "phase": 1,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 10507139"
     },
     {
-      "ts": 1789018168191,
+      "ts": 1789612898634,
       "phase": 2,
       "level": "info",
       "event": "phase.enter",
       "detail": "P2 Memory & Context Consolidation"
     },
     {
-      "ts": 1789018168191,
+      "ts": 1789612898634,
       "phase": 2,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168192,
+      "ts": 1789612898635,
       "phase": 2,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 18455377"
     },
     {
-      "ts": 1789018168193,
+      "ts": 1789612898636,
       "phase": 3,
       "level": "info",
       "event": "phase.enter",
       "detail": "P3 Tool Integration & Interoperability"
     },
     {
-      "ts": 1789018168193,
+      "ts": 1789612898637,
       "phase": 3,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168195,
+      "ts": 1789612898637,
       "phase": 3,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 16382928"
     },
     {
-      "ts": 1789018168197,
+      "ts": 1789612898640,
       "phase": 4,
       "level": "info",
       "event": "phase.enter",
       "detail": "P4 Security, Isolation & Authorization"
     },
     {
-      "ts": 1789018168197,
+      "ts": 1789612898640,
       "phase": 4,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168198,
+      "ts": 1789612898644,
       "phase": 4,
       "level": "info",
       "event": "hitl.approved",
       "detail": "Security, Isolation & Authorization"
     },
     {
-      "ts": 1789018168199,
+      "ts": 1789612898646,
       "phase": 4,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 35271886"
     },
     {
-      "ts": 1789018168201,
+      "ts": 1789612898648,
       "phase": 5,
       "level": "info",
       "event": "phase.enter",
       "detail": "P5 Validation, HITL & Self-Learning"
     },
     {
-      "ts": 1789018168201,
+      "ts": 1789612898648,
       "phase": 5,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168202,
+      "ts": 1789612898649,
       "phase": 5,
       "level": "info",
       "event": "hitl.approved",
       "detail": "Validation, HITL & Self-Learning"
     },
     {
-      "ts": 1789018168203,
+      "ts": 1789612898650,
       "phase": 5,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 29514528"
     },
     {
-      "ts": 1789018168209,
+      "ts": 1789612898652,
       "phase": 6,
       "level": "info",
       "event": "phase.enter",
       "detail": "P6 Code Generation, Testing & Deployment"
     },
     {
-      "ts": 1789018168211,
+      "ts": 1789612898654,
       "phase": 6,
       "level": "info",
       "event": "tests.pass",
       "detail": "tests.pass"
     },
     {
-      "ts": 1789018168210,
+      "ts": 1789612898652,
       "phase": 6,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168210,
+      "ts": 1789612898653,
       "phase": 6,
       "level": "info",
       "event": "lesson.capture",
-      "detail": "L2 template-emission lesson-template-emission-b90f22a6 (P6 sealed with unmet DoD: p6-verified, p6-brief-fit)"
+      "detail": "L2 template-emission lesson-template-emission-25f9d888 (P6 sealed with unmet DoD: p6-verified, p6-brief-fit)"
     },
     {
-      "ts": 1789018168212,
+      "ts": 1789612898654,
       "phase": 6,
       "level": "warn",
       "event": "gate.verdict",
       "detail": "FAIL · 2 unmet · 55247714"
     },
     {
-      "ts": 1789018168214,
+      "ts": 1789612898656,
       "phase": 7,
       "level": "info",
       "event": "phase.enter",
       "detail": "P7 Domain & Market Research"
     },
     {
-      "ts": 1789018168214,
+      "ts": 1789612898656,
       "phase": 7,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168214,
+      "ts": 1789612898656,
       "phase": 7,
       "level": "info",
       "event": "lesson.capture",
-      "detail": "L2 template-emission lesson-template-emission-1a5cba7c (P7 sealed with unmet DoD: p7-research)"
+      "detail": "L2 template-emission lesson-template-emission-4a375107 (P7 sealed with unmet DoD: p7-research)"
     },
     {
-      "ts": 1789018168215,
+      "ts": 1789612898658,
       "phase": 7,
       "level": "warn",
       "event": "gate.verdict",
       "detail": "FAIL · 1 unmet · 42550424"
     },
     {
-      "ts": 1789018168217,
+      "ts": 1789612898660,
       "phase": 8,
       "level": "info",
       "event": "phase.enter",
       "detail": "P8 Dynamic UI/UX Prototyping"
     },
     {
-      "ts": 1789018168217,
+      "ts": 1789612898661,
       "phase": 8,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168219,
+      "ts": 1789612898664,
       "phase": 8,
       "level": "info",
       "event": "hitl.approved",
       "detail": "Dynamic UI/UX Prototyping"
     },
     {
-      "ts": 1789018168220,
+      "ts": 1789612898665,
       "phase": 8,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 60617535"
     },
     {
-      "ts": 1789018168222,
+      "ts": 1789612898668,
       "phase": 9,
       "level": "info",
       "event": "phase.enter",
       "detail": "P9 CI/CD & Cloud Deployment Routing"
     },
     {
-      "ts": 1789018168222,
+      "ts": 1789612898668,
       "phase": 9,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168225,
+      "ts": 1789612898670,
       "phase": 9,
       "level": "info",
       "event": "hitl.approved",
       "detail": "CI/CD & Cloud Deployment Routing"
     },
     {
-      "ts": 1789018168226,
+      "ts": 1789612898671,
       "phase": 9,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 30305407"
     },
     {
-      "ts": 1789018168229,
+      "ts": 1789612898673,
       "phase": 10,
       "level": "info",
       "event": "phase.enter",
       "detail": "P10 Local Agent & Edge Inference"
     },
     {
-      "ts": 1789018168229,
+      "ts": 1789612898673,
       "phase": 10,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168230,
+      "ts": 1789612898674,
       "phase": 10,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 32184623"
     },
     {
-      "ts": 1789018168232,
+      "ts": 1789612898676,
       "phase": 11,
       "level": "info",
       "event": "phase.enter",
       "detail": "P11 Real-Time Web & Tool Augmentation"
     },
     {
-      "ts": 1789018168232,
+      "ts": 1789612898676,
       "phase": 11,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168233,
+      "ts": 1789612898677,
       "phase": 11,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 16636256"
     },
     {
-      "ts": 1789018168235,
+      "ts": 1789612898679,
       "phase": 12,
       "level": "info",
       "event": "phase.enter",
       "detail": "P12 Documentation & Technical Specs"
     },
     {
-      "ts": 1789018168238,
+      "ts": 1789612898682,
       "phase": 12,
       "level": "warn",
       "event": "delivery.complete",
       "detail": "All 13 phases sealed. 2 failed gates: P6, P7"
     },
     {
-      "ts": 1789018168235,
+      "ts": 1789612898679,
       "phase": 12,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1789018168236,
+      "ts": 1789612898681,
       "phase": 12,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 35300554"
     },
     {
-      "ts": 1789018168237,
+      "ts": 1789612898683,
       "phase": 12,
       "level": "warn",
       "event": "run.complete.with.failed.gates",
       "detail": "sealed complete with 2 failed DoD gate(s): P6(Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash),Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)); P7(Live research corpus exists for P7 (≥1 fetched finding))"
     },
     {
-      "ts": 1789018168237,
+      "ts": 1789612898683,
       "phase": 12,
       "level": "info",
       "event": "lesson.capture",
@@ -1039,40 +1040,44 @@
   "hitl": null,
   "decisions": [
     {
-      "id": "hitl-4-1789018168198",
+      "id": "hitl-4-1789612898644",
       "phase": 4,
       "title": "Approve isolation policy",
       "decision": "approve",
-      "decidedBy": "human",
-      "requestedAt": 1789018168197,
-      "decidedAt": 1789018168198
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1789612898640,
+      "decidedAt": 1789612898644
     },
     {
-      "id": "hitl-5-1789018168202",
+      "id": "hitl-5-1789612898649",
       "phase": 5,
       "title": "Approve validation contract",
       "decision": "approve",
-      "decidedBy": "human",
-      "requestedAt": 1789018168201,
-      "decidedAt": 1789018168202
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1789612898648,
+      "decidedAt": 1789612898649
     },
     {
-      "id": "hitl-8-1789018168219",
+      "id": "hitl-8-1789612898664",
       "phase": 8,
       "title": "Approve interface contract",
       "decision": "approve",
-      "decidedBy": "human",
-      "requestedAt": 1789018168217,
-      "decidedAt": 1789018168219
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1789612898661,
+      "decidedAt": 1789612898664
     },
     {
-      "id": "hitl-9-1789018168225",
+      "id": "hitl-9-1789612898670",
       "phase": 9,
       "title": "Approve production routing",
       "decision": "approve",
-      "decidedBy": "human",
-      "requestedAt": 1789018168222,
-      "decidedAt": 1789018168225
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1789612898668,
+      "decidedAt": 1789612898670
     }
   ],
   "modelRoute": "deterministic",
@@ -1082,15 +1087,15 @@
     "timeoutS": 30,
     "isolated": false
   },
-  "openapi": "openapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok",
-  "adr": "# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, work-order, vendor derived from the brief (P0 lattice).\n\n# ADR-002 rent pipeline\n\nStatus: accepted\nDecision: The product runs a sequential rent → schedule → track → lease pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.",
+  "openapi": "openapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok",
+  "adr": "# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, vendor, work-order derived from the brief (P0 lattice).\n\n# ADR-002 lease pipeline\n\nStatus: accepted\nDecision: The product runs a sequential lease → rent → schedule → track pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.",
   "lattice": {
     "domain": "real-estate",
     "jobs": [
+      "lease",
       "rent",
       "schedule",
-      "track",
-      "lease"
+      "track"
     ],
     "entities": [
       "portfolio",
@@ -1098,11 +1103,16 @@
       "tenant",
       "dashboard",
       "rental",
-      "work-order",
-      "vendor"
+      "vendor",
+      "work-order"
     ],
     "constraints": [],
     "nodes": [
+      {
+        "kind": "job",
+        "label": "lease",
+        "weight": 0.75
+      },
       {
         "kind": "job",
         "label": "rent",
@@ -1134,11 +1144,6 @@
         "weight": 0.55
       },
       {
-        "kind": "job",
-        "label": "lease",
-        "weight": 0.55
-      },
-      {
         "kind": "object",
         "label": "dashboard",
         "weight": 0.55
@@ -1150,11 +1155,6 @@
       },
       {
         "kind": "object",
-        "label": "work-order",
-        "weight": 0.55
-      },
-      {
-        "kind": "object",
         "label": "vendor",
         "weight": 0.55
       },
@@ -1162,6 +1162,11 @@
         "kind": "risk",
         "label": "payment",
         "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "work-order",
+        "weight": 0.35
       }
     ],
     "complexity": 8.4,
@@ -1182,53 +1187,53 @@
     {
       "id": "A1",
       "name": "Intent Lattice",
-      "ranAt": 1789018168237,
+      "ranAt": 1789612898682,
       "summary": "12 nodes · complexity 8.4"
     },
     {
       "id": "A2",
       "name": "FusionRank",
-      "ranAt": 1789018168237,
+      "ranAt": 1789612898682,
       "summary": "ranked 19 memory rows for the packet"
     },
     {
       "id": "A3",
       "name": "Constraint Scheduler",
-      "ranAt": 1789018168237,
+      "ranAt": 1789612898682,
       "summary": "tightness 8.6 · sec+1"
     },
     {
       "id": "A4",
       "name": "Agent Packet",
-      "ranAt": 1789018168237,
+      "ranAt": 1789612898682,
       "summary": "compiled P12 packet"
     },
     {
       "id": "A5",
       "name": "Spec Graph",
-      "ranAt": 1789018168237,
+      "ranAt": 1789612898682,
       "summary": "9 files · order schema → api → store"
     },
     {
       "id": "A6",
       "name": "Contract Synth",
-      "ranAt": 1789018168237,
+      "ranAt": 1789612898682,
       "summary": "6 entities · 4 endpoints"
     },
     {
       "id": "A7",
       "name": "Test Oracle",
-      "ranAt": 1789018168237,
+      "ranAt": 1789612898682,
       "summary": "5 cases"
     },
     {
       "id": "A8",
       "name": "Crew Router",
-      "ranAt": 1789018168237,
+      "ranAt": 1789612898682,
       "summary": "airt · 7300 tok"
     }
   ],
-  "packet": "# RapidTool Agent Packet v3 — Rental Portfolio Manager\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-10T05:29:28.238Z\nproject_id: 5587eca3-156b-4c57-9ea4-23879f548cb5\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-10T05:29:28.238Z\",\n  \"project_id\": \"5587eca3-156b-4c57-9ea4-23879f548cb5\",\n  \"name\": \"Rental Portfolio Manager\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018168197,\n      \"decided_at\": 1789018168198\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018168201,\n      \"decided_at\": 1789018168202\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018168217,\n      \"decided_at\": 1789018168219\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018168222,\n      \"decided_at\": 1789018168225\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ]\n}\n```\n\n## Mission\na rental portfolio manager: properties with units, tenants with leases and rent schedules, rent collection tracking with payment status, maintenance requests with vendor work orders, vacancy pipeline for marketing available units, portfolio cash-flow dashboard, lease-renewal reminders\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: rent, schedule, track, lease\nEntities: portfolio, manager, tenant, dashboard, rental, work-order, vendor\nConstraints: none declared\nComplexity: 8.4 / 10\n\n## Scheduler (A3)\nTightness 8.6 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for rent, schedule, track before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/rent.ts — Implement job “rent” against the contract\n- [implementer] src/jobs/schedule.ts — Implement job “schedule” against the contract\n- [implementer] src/jobs/track.ts — Implement job “track” against the contract\n- [implementer] src/jobs/lease.ts — Implement job “lease” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Portfolio: id:ulid, status:enum, updatedAt:datetime\n- Manager: id:ulid, status:enum, updatedAt:datetime\n- Tenant: id:ulid, status:enum, updatedAt:datetime\n- Dashboard: id:ulid, status:enum, updatedAt:datetime\n- Rental: id:ulid, status:enum, updatedAt:datetime\n- WorkOrder: id:ulid, title:string, status:enum, note:string\n- POST /v1/rent (rent)\n- POST /v1/schedule (schedule)\n- GET /v1/track (track)\n- POST /v1/lease (lease)\n\n## Oracle (A7)\n- job.rent.happy: Authorized operator submits “rent” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.schedule.happy: Authorized operator submits “schedule” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.track.happy: Authorized operator submits “track” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.lease.happy: Authorized operator submits “lease” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · human · 2026-09-10T05:29:28.198Z\n- P5 · approve · human · 2026-09-10T05:29:28.202Z\n- P8 · approve · human · 2026-09-10T05:29:28.219Z\n- P9 · approve · human · 2026-09-10T05:29:28.225Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.332] Data model written for Rental Portfolio Manager: portfolio, manager, tenant, dashboard, rental, work-order, vendor.\n2. [procedural 0.311] Rental Portfolio Manager executes as one sequential real estate pipeline.\n3. [semantic 0.282] Domain real-estate; jobs rent, schedule, track, lease.\n4. [procedural 0.277] HITL reject requires a written reason.\n5. [episodic 0.275] Ingested brief for Rental Portfolio Manager in real-estate.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.2/10 (proceed-with-guards)\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: rent, schedule, track, lease run as deterministic local steps over portfolio.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"real-estate\",\n  \"surfaces\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, work-order, vendor derived from the brief (P0 lattice).\n\n# ADR-002 rent pipeline\n\nStatus: accepted\nDecision: The product runs a sequential rent → schedule → track → lease pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, work-order, vendor derived from the brief (P0 lattice).\n\n# ADR-002 rent pipeline\n\nStatus: accepted\nDecision: The product runs a sequential rent → schedule → track → lease pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "packet": "# RapidTool Agent Packet v3 — Rental Portfolio Manager\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-17T02:41:38.682Z\nproject_id: e0451662-7106-402f-aa2c-9a456861b3e5\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-17T02:41:38.682Z\",\n  \"project_id\": \"e0451662-7106-402f-aa2c-9a456861b3e5\",\n  \"name\": \"Rental Portfolio Manager\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789612898640,\n      \"decided_at\": 1789612898644\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789612898648,\n      \"decided_at\": 1789612898649\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789612898661,\n      \"decided_at\": 1789612898664\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789612898668,\n      \"decided_at\": 1789612898670\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 13,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 14\n  }\n}\n```\n\n## Mission\na rental portfolio manager: properties with units, tenants with leases and rent schedules, rent collection tracking with payment status, maintenance requests with vendor work orders, vacancy pipeline for marketing available units, portfolio cash-flow dashboard, lease-renewal reminders\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: lease, rent, schedule, track\nEntities: portfolio, manager, tenant, dashboard, rental, vendor, work-order\nConstraints: none declared\nComplexity: 8.4 / 10\n\n## Scheduler (A3)\nTightness 8.6 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for lease, rent, schedule before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/lease.ts — Implement job “lease” against the contract\n- [implementer] src/jobs/rent.ts — Implement job “rent” against the contract\n- [implementer] src/jobs/schedule.ts — Implement job “schedule” against the contract\n- [implementer] src/jobs/track.ts — Implement job “track” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Portfolio: id:ulid, status:enum, updatedAt:datetime\n- Manager: id:ulid, status:enum, updatedAt:datetime\n- Tenant: id:ulid, status:enum, updatedAt:datetime\n- Dashboard: id:ulid, status:enum, updatedAt:datetime\n- Rental: id:ulid, status:enum, updatedAt:datetime\n- Vendor: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/lease (lease)\n- POST /v1/rent (rent)\n- POST /v1/schedule (schedule)\n- GET /v1/track (track)\n\n## Oracle (A7)\n- job.lease.happy: Authorized operator submits “lease” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.rent.happy: Authorized operator submits “rent” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.schedule.happy: Authorized operator submits “schedule” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- job.track.happy: Authorized operator submits “track” with a valid portfolio ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nPhase coverage: 13 of 13 phases executed / 14 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · autopilot · 2026-09-17T02:41:38.644Z\n- P5 · approve · autopilot · 2026-09-17T02:41:38.649Z\n- P8 · approve · autopilot · 2026-09-17T02:41:38.664Z\n- P9 · approve · autopilot · 2026-09-17T02:41:38.670Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.332] Data model written for Rental Portfolio Manager: portfolio, manager, tenant, dashboard, rental, vendor, work-order.\n2. [procedural 0.311] Rental Portfolio Manager executes as one sequential real estate pipeline.\n3. [semantic 0.282] Domain real-estate; jobs lease, rent, schedule, track.\n4. [procedural 0.277] HITL reject requires a written reason.\n5. [episodic 0.275] Ingested brief for Rental Portfolio Manager in real-estate.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.2/10 (proceed-with-guards)\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: lease, rent, schedule, track run as deterministic local steps over portfolio.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"real-estate\",\n  \"surfaces\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, vendor, work-order derived from the brief (P0 lattice).\n\n# ADR-002 lease pipeline\n\nStatus: accepted\nDecision: The product runs a sequential lease → rent → schedule → track pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around portfolio, manager, tenant, dashboard, rental, vendor, work-order derived from the brief (P0 lattice).\n\n# ADR-002 lease pipeline\n\nStatus: accepted\nDecision: The product runs a sequential lease → rent → schedule → track pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Rental Portfolio Manager API\n  version: \"1.0.0\"\npaths:\n  /v1/lease:\n    post:\n      summary: lease\n      responses:\n        \"200\":\n          description: ok\n  /v1/rent:\n    post:\n      summary: rent\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
   "specGraph": {
     "nodes": [
       {
@@ -1258,6 +1263,16 @@
       },
       {
         "id": "job-0",
+        "file": "src/jobs/lease.ts",
+        "purpose": "Implement job “lease” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-1",
         "file": "src/jobs/rent.ts",
         "purpose": "Implement job “rent” against the contract",
         "dependsOn": [
@@ -1267,7 +1282,7 @@
         "owner": "implementer"
       },
       {
-        "id": "job-1",
+        "id": "job-2",
         "file": "src/jobs/schedule.ts",
         "purpose": "Implement job “schedule” against the contract",
         "dependsOn": [
@@ -1277,19 +1292,9 @@
         "owner": "implementer"
       },
       {
-        "id": "job-2",
+        "id": "job-3",
         "file": "src/jobs/track.ts",
         "purpose": "Implement job “track” against the contract",
-        "dependsOn": [
-          "api",
-          "store"
-        ],
-        "owner": "implementer"
-      },
-      {
-        "id": "job-3",
-        "file": "src/jobs/lease.ts",
-        "purpose": "Implement job “lease” against the contract",
         "dependsOn": [
           "api",
           "store"
@@ -1420,28 +1425,29 @@
         ]
       },
       {
-        "name": "WorkOrder",
+        "name": "Vendor",
         "fields": [
           {
             "name": "id",
             "type": "ulid"
           },
           {
-            "name": "title",
-            "type": "string"
-          },
-          {
             "name": "status",
             "type": "enum"
           },
           {
-            "name": "note",
-            "type": "string"
+            "name": "updatedAt",
+            "type": "datetime"
           }
         ]
       }
     ],
     "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/lease",
+        "job": "lease"
+      },
       {
         "method": "POST",
         "path": "/v1/rent",
@@ -1456,42 +1462,37 @@
         "method": "GET",
         "path": "/v1/track",
         "job": "track"
-      },
-      {
-        "method": "POST",
-        "path": "/v1/lease",
-        "job": "lease"
       }
     ]
   },
   "oracle": [
     {
       "id": "orc-1",
+      "name": "job.lease.happy",
+      "given": "Authorized operator submits “lease” with a valid portfolio",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "lease"
+    },
+    {
+      "id": "orc-2",
       "name": "job.rent.happy",
       "given": "Authorized operator submits “rent” with a valid portfolio",
       "expect": "200 + persisted entity + checkpoint written",
       "job": "rent"
     },
     {
-      "id": "orc-2",
+      "id": "orc-3",
       "name": "job.schedule.happy",
       "given": "Authorized operator submits “schedule” with a valid portfolio",
       "expect": "200 + persisted entity + checkpoint written",
       "job": "schedule"
     },
     {
-      "id": "orc-3",
+      "id": "orc-4",
       "name": "job.track.happy",
       "given": "Authorized operator submits “track” with a valid portfolio",
       "expect": "200 + persisted entity + checkpoint written",
       "job": "track"
-    },
-    {
-      "id": "orc-4",
-      "name": "job.lease.happy",
-      "given": "Authorized operator submits “lease” with a valid portfolio",
-      "expect": "200 + persisted entity + checkpoint written",
-      "job": "lease"
     },
     {
       "id": "orc-phase",
@@ -1504,7 +1505,7 @@
   "crew": [
     {
       "role": "architect",
-      "mandate": "Lock schema and routes for rent, schedule, track before code.",
+      "mandate": "Lock schema and routes for lease, rent, schedule before code.",
       "tools": [
         "read_repo",
         "write_spec",
@@ -1550,7 +1551,7 @@
     }
   ],
   "notes": "",
-  "generatedSource": "const JOBS = [\"rent\", \"schedule\", \"track\", \"lease\"];\nconst REJECTION = \"\";\nfunction synthesize(spec) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Rental Portfolio Manager\", phase: 6, job: \"rent\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"rent\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"rent\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"rent\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+  "generatedSource": "const JOBS = [\"lease\", \"rent\", \"schedule\", \"track\"];\nconst REJECTION = \"\";\nfunction synthesize(spec) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Rental Portfolio Manager\", phase: 6, job: \"lease\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"lease\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"lease\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"lease\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
   "lastTest": {
     "ok": true,
     "detail": "tests.pass"

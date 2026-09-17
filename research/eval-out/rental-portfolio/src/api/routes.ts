@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // src/api/routes.ts — HTTP contracts bound to jobs
-// machine-generated from RapidTool packet 5587eca3-156b-4c57-9ea4-23879f548cb5; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet e0451662-7106-402f-aa2c-9a456861b3e5; regenerate, don't hand-edit.
 // HTTP contracts bound to jobs. TODO(E-15) stub: implement each endpoint
 // against the store stubs; tests/oracle.spec.ts names the oracle expectations.
 // ---------------------------------------------------------------------------
@@ -9,10 +9,10 @@ export type EndpointMethod = "GET" | "POST" | "PATCH";
 export type Endpoint = { method: EndpointMethod; path: string; job: string };
 
 export const ENDPOINTS: Endpoint[] = [
+  { method: "POST", path: "/v1/lease", job: "lease" },
   { method: "POST", path: "/v1/rent", job: "rent" },
   { method: "POST", path: "/v1/schedule", job: "schedule" },
   { method: "GET", path: "/v1/track", job: "track" },
-  { method: "POST", path: "/v1/lease", job: "lease" },
 ];
 
 export async function route(

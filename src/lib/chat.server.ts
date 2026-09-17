@@ -10,7 +10,8 @@
  * `./chat.ts`; this module must never be imported from client code.
  */
 
-import { completeDeepSeek, isDeepSeekConfigured, cutMarked } from "./deepseek.server.ts";
+import { isDeepSeekConfigured, cutMarked } from "./deepseek.server.ts";
+import { callModel } from "./llm/providers/registry.ts";
 import { PHASES } from "./phases.ts";
 import { dualChannelFailDetail, type ErrorCode } from "./errors.ts";
 import type { PhaseRecord, Project } from "./types.ts";
@@ -557,9 +558,10 @@ export async function chatOnceServer(
       return { role: t.role, content: cutMarked(text, CHAT_HISTORY_TURN_MAX_CHARS) };
     });
 
-  const res = await completeDeepSeek(userMessage, {
-    // FLASH tier → thinking disabled + the fast 20s timeout (deepseek.server.ts).
-    model: "deepseek-v4-flash",
+  const res = await callModel("main", userMessage, {
+    // `main` = the flash workhorse (thinking disabled + the fast 20s timeout,
+    // registry-roled — T-107.2 / fixes/216p): the same shape the legacy
+    // completeDeepSeek("deepseek-v4-flash") call sent.
     system: `${COPILOT_SYSTEM_PROMPT}\n\n${context}`,
     maxTokens: 768,
     history: turns,

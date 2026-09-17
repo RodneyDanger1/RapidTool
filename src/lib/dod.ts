@@ -19,8 +19,9 @@
 //
 // Run: node --experimental-strip-types --test src/lib/gates.test.ts
 // ---------------------------------------------------------------------------
-import type { Artifact, OracleTest, PhaseId, Project } from "./types.ts";
+import type { Artifact, HitlDecision, OracleTest, PhaseId, Project } from "./types.ts";
 import { canonicalStem, fnv1a } from "./algorithms.ts";
+import { evaluatePolicy, type PolicySeat } from "./policy.ts";
 import {
   BRIEF_STOPWORDS,
   briefNounHits,
@@ -50,12 +51,79 @@ const hasArtifact = (p: Project, phase: number, kind: string): boolean =>
  *  person, the test was about a record (the self-referential-criteria bug).
  *  This reads the DECISION LEDGER and returns who actually approved, so a
  *  criterion can assert exactly what was verified. Strictly stronger than the
- *  record check: a completed phase with no ledger row now fails. */
+ *  record check: a completed phase with no ledger row now fails.
+ *
+ *  216o (T-107.3 · P0-02/P0-06 · W5-L3): the read now re-asks the ONE policy
+ *  seam (`evaluatePolicy`, src/lib/policy.ts) whether the row records a
+ *  decision the seam permits for `hitl.approve` on this gate — instead of
+ *  trusting the `decidedBy` string alone. See `policyConsistentApproval`. */
+
+/** The recorded out-of-band evidence marker `headless.approve` writes into the
+ *  ledger note ONLY after the token pair verified (the 216 TA-2 note contract). */
+const HUMAN_SEAT_EVIDENCE_RE = /RT_HUMAN_SEAT_TOKEN verified/;
+
+/** The human branch's stand-in the probe presents to the seam: the probe holds
+ *  no out-of-band secret (it is gone by verify time), so it presents the ROW's
+ *  recorded token-path marker as both sides of the check. The call therefore
+ *  verifies "the row records a verified-human decision" — stated plainly, not
+ *  overclaimed as re-running the token match (impossible offline). */
+const RECORDED_TOKEN_PATH = "recorded:RT_HUMAN_SEAT_TOKEN-verified";
+
+/** What a ledger row's seat tag claims (the 216 TA-2 `[seat <label>]` note). */
+type RowSeatClaim =
+  | { kind: "seat"; seat: PolicySeat }
+  | { kind: "tagged-unknown" }
+  | { kind: "untagged" };
+
+/**
+ * Classify a ledger row's recorded seat. A tag that does not name a registered
+ * PolicySeat matching the row's `decidedBy` is `tagged-unknown` — an
+ * edited/forged record fails closed. A row with no tag is `untagged` (legacy
+ * direct `approveHitl` records: engine autopilot steps, testing fixtures,
+ * store-level approvals).
+ */
+const classifyRowSeat = (row: HitlDecision): RowSeatClaim => {
+  const tag = /\[seat ([^\]]+)\]/.exec(row.note ?? "")?.[1];
+  if (tag === undefined) return { kind: "untagged" };
+  if (tag === "human-cli-i-am-human" && row.decidedBy === "human") {
+    return { kind: "seat", seat: { decidedBy: "human", seat: "human-cli-i-am-human" } };
+  }
+  if ((tag === "harness" || tag === "autopilot") && row.decidedBy === "autopilot") {
+    return { kind: "seat", seat: { decidedBy: "autopilot", seat: tag } };
+  }
+  return { kind: "tagged-unknown" };
+};
+
+/**
+ * 216o (T-107.3 · P0-02/P0-06): does this ledger row record a decision the
+ * policy seam permits? A TAGGED row must be policy-consistent or it fails
+ * closed: an autopilot tag passes the seam's Rule A; a human tag must carry
+ * the recorded out-of-band evidence too — without it the seam denies
+ * (`human-seat-unverified`, fallback `human-seat-token`) and the criterion
+ * fails. An UNTAGGED row keeps the 216 T0.8 rule (a recorded actor exists);
+ * that tolerance is deliberate: the writers that could forge a human row (the
+ * headless seam, the CLI verb) are both routed through the seam, and pre-216o
+ * payloads carry no tag to test.
+ */
+const policyConsistentApproval = (row: HitlDecision, phase: number): boolean => {
+  const claim = classifyRowSeat(row);
+  if (claim.kind === "tagged-unknown") return false;
+  if (claim.kind === "untagged") return true;
+  const recorded = HUMAN_SEAT_EVIDENCE_RE.test(row.note ?? "");
+  const verdict = evaluatePolicy("hitl.approve", `gate:P${phase}`, {
+    actor: claim.seat,
+    humanSeatToken: recorded ? RECORDED_TOKEN_PATH : undefined,
+    expectedHumanSeatToken: recorded ? RECORDED_TOKEN_PATH : undefined,
+  });
+  return verdict.decision === "allow";
+};
+
 const approvalActor = (p: Project, phase: number): "human" | "autopilot" | null => {
   const row = (p.decisions ?? []).find(
     (d) => d.phase === phase && d.decision === "approve",
   );
-  return row ? row.decidedBy : null;
+  if (!row) return null;
+  return policyConsistentApproval(row, phase) ? row.decidedBy : null;
 };
 const approved = (p: Project, phase: number): boolean => approvalActor(p, phase) !== null;
 
@@ -345,6 +413,11 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       probe: (p) => hasArtifact(p, 4, "security"),
     },
     {
+      // 216o (T-107.3 · P0-02/P0-06 · W5-L3): the four "decision ledger records
+      // the approver" criteria (p4-approved / p5-complete / p8-complete /
+      // p9-approved) re-ask the ONE policy seam via `approved()` →
+      // `policyConsistentApproval` — a tagged row must be a policy-allow for
+      // hitl.approve on its gate, or the criterion fails (see the helper above).
       id: "p4-approved",
       criterion: "P4 approved — decision ledger records the approver (human or autopilot)",
       probe: (p) => approved(p, 4),

@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // tests/oracle.spec.ts — acceptance tests from the A7 oracle (project.oracle)
-// machine-generated from RapidTool packet 5587eca3-156b-4c57-9ea4-23879f548cb5; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet e0451662-7106-402f-aa2c-9a456861b3e5; regenerate, don't hand-edit.
 // REAL assertions, no todo stubs (fixes/135). Row ids are PINNED: the verify
 // harness seeds + pins orc-* ids across runs (E-08) — never rename or drop
 // one. Each test asserts what the emitted modules ACTUALLY do today:
@@ -10,6 +10,10 @@
 //   * an oracle row whose target seam is a TODO(E-15) stub asserts the seam
 //     rejects — that test FAILS the moment the seam is implemented, which is
 //     the signal to replace it with the row's real acceptance assertion;
+//   * an oracle row with NO emitted module surface to assert against (106
+//     T-08 / F-05) is a visibly-marked test.skip("<id> — NOT IMPLEMENTED") —
+//     never an always-true assertion; node:test reports it as skipped (never
+//     a pass) and the README counts it separately from the assertable rows;
 //   * nothing here pretends a stub satisfies its brief.
 // Run: node --experimental-strip-types --test tests/oracle.spec.ts
 // ---------------------------------------------------------------------------
@@ -17,14 +21,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CheckpointStore } from "../src/state/store.ts";
 import { ENDPOINTS, route } from "../src/api/routes.ts";
-import { JOBS, REJECTION, synthesize } from "../src/jobs/rent.ts";
+import { JOBS, REJECTION, synthesize } from "../src/jobs/lease.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Module truth — the hosted P6 module (project.generatedSource), verbatim.
 // ---------------------------------------------------------------------------
 
 test("module.jobs — the P6 module lists the lattice jobs in order", () => {
-  assert.deepEqual(JOBS, ["rent","schedule","track","lease"]);
+  assert.deepEqual(JOBS, ["lease","rent","schedule","track"]);
 });
 
 test("module.synthesize — a valid phase + known job returns ok", () => {
@@ -86,20 +90,22 @@ test("store.checkpoint — a later write for a phase replaces the earlier one", 
 // ---------------------------------------------------------------------------
 
 test("api.endpoints — ENDPOINTS matches the A6 contract endpoints", () => {
-  assert.deepEqual(ENDPOINTS, [{"method":"POST","path":"/v1/rent","job":"rent"},{"method":"POST","path":"/v1/schedule","job":"schedule"},{"method":"GET","path":"/v1/track","job":"track"},{"method":"POST","path":"/v1/lease","job":"lease"}]);
+  assert.deepEqual(ENDPOINTS, [{"method":"POST","path":"/v1/lease","job":"lease"},{"method":"POST","path":"/v1/rent","job":"rent"},{"method":"POST","path":"/v1/schedule","job":"schedule"},{"method":"GET","path":"/v1/track","job":"track"}]);
 });
 
 // ---------------------------------------------------------------------------
-// 4. Oracle rows (A7) — one test per row under its PINNED id.
+// 4. Oracle rows (A7) — one test per row under its PINNED id; a row with no
+// emitted module surface is a visible test.skip("<id> — NOT IMPLEMENTED")
+// (fixes/216b) — skipped, never green, and counted by the README census.
 // ---------------------------------------------------------------------------
 
 test("orc-1", async () => {
-  // A7 row "orc-1" "job.rent.happy" — Authorized operator submits “rent” with a valid portfolio => 200 + persisted entity + checkpoint written
-  // Target seam: rent (POST /v1/rent). Today it is a TODO(E-15) stub —
+  // A7 row "orc-1" "job.lease.happy" — Authorized operator submits “lease” with a valid portfolio => 200 + persisted entity + checkpoint written
+  // Target seam: lease (POST /v1/lease). Today it is a TODO(E-15) stub —
   // the route rejects instead of returning "200 + persisted entity + checkpoint written". Asserting that real
-  // current behavior: this test FAILS the moment rent is implemented,
+  // current behavior: this test FAILS the moment lease is implemented,
   // which is the signal to replace it with the row's real acceptance assert.
-  const ep = ENDPOINTS.find((e) => e.job === "rent");
+  const ep = ENDPOINTS.find((e) => e.job === "lease");
   assert.ok(ep, "endpoint for the row's job must exist (contract drift)");
   await assert.rejects(route(ep.method, ep.path, {}), /TODO\(E-15\) stub/);
   // The "200 + persisted entity + checkpoint written" row expects a checkpoint write — the one part the real
@@ -110,8 +116,8 @@ test("orc-1", async () => {
 });
 
 test("orc-2", async () => {
-  // A7 row "orc-2" "job.schedule.happy" — Authorized operator submits “schedule” with a valid portfolio => 200 + persisted entity + checkpoint written
-  // Leftover job schedule re-exports the hosted P6 module (fixes/196).
+  // A7 row "orc-2" "job.rent.happy" — Authorized operator submits “rent” with a valid portfolio => 200 + persisted entity + checkpoint written
+  // Leftover job rent re-exports the hosted P6 module (fixes/196).
   // Not a TODO(E-15) stub and not an invented job body. Executable
   // rule today: the hosted module's phase bookkeeping.
   assert.throws(() => synthesize({ name: "x", phase: 13, job: JOBS[0] }), /invalid phase/);
@@ -119,8 +125,8 @@ test("orc-2", async () => {
 });
 
 test("orc-3", async () => {
-  // A7 row "orc-3" "job.track.happy" — Authorized operator submits “track” with a valid portfolio => 200 + persisted entity + checkpoint written
-  // Leftover job track re-exports the hosted P6 module (fixes/196).
+  // A7 row "orc-3" "job.schedule.happy" — Authorized operator submits “schedule” with a valid portfolio => 200 + persisted entity + checkpoint written
+  // Leftover job schedule re-exports the hosted P6 module (fixes/196).
   // Not a TODO(E-15) stub and not an invented job body. Executable
   // rule today: the hosted module's phase bookkeeping.
   assert.throws(() => synthesize({ name: "x", phase: 13, job: JOBS[0] }), /invalid phase/);
@@ -128,8 +134,8 @@ test("orc-3", async () => {
 });
 
 test("orc-4", async () => {
-  // A7 row "orc-4" "job.lease.happy" — Authorized operator submits “lease” with a valid portfolio => 200 + persisted entity + checkpoint written
-  // Leftover job lease re-exports the hosted P6 module (fixes/196).
+  // A7 row "orc-4" "job.track.happy" — Authorized operator submits “track” with a valid portfolio => 200 + persisted entity + checkpoint written
+  // Leftover job track re-exports the hosted P6 module (fixes/196).
   // Not a TODO(E-15) stub and not an invented job body. Executable
   // rule today: the hosted module's phase bookkeeping.
   assert.throws(() => synthesize({ name: "x", phase: 13, job: JOBS[0] }), /invalid phase/);

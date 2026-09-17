@@ -1,0 +1,46 @@
+{
+  "graderVersion": 1,
+  "slug": "showing-booking",
+  "caseName": "House Showing Scheduler",
+  "authority": "RUN-SIDE GRADER (W5-L5 / T-107.5) — the acceptance bar for this eval case. Declared before the run; read ONLY by scripts/run-eval.mjs; never copied into research/eval-out; the emitted project tree must neither contain nor reference it (scripts/run-eval.mjs graderLeakScan + scripts/run-eval.test.mjs pin that).",
+  "movedFrom": "research/eval-corpus/showing-booking.md frontmatter (acceptance / expectedNouns / expectedCapabilities) — the corpus fixture stays the documented D3 brief contract; this file is the grading source of truth and the driver no longer grades from the frontmatter copy.",
+  "acceptanceBar": "An agent publishes an open-house or private-showing slot, a buyer books it and receives email confirmation, reminders and the calendar-sync stub fire, feedback is captured, and the property's full showing history is available — in one runnable web app.",
+  "requiredIdentifiers": [
+    "agent",
+    "showing",
+    "openHouse",
+    "slot",
+    "booking",
+    "buyer",
+    "emailConfirmation",
+    "reminder",
+    "calendarSync",
+    "feedback",
+    "showingHistory"
+  ],
+  "requiredCapabilities": [
+    "Agents publish open-house and private-showing slots",
+    "Buyers book slots",
+    "Email confirmation for bookings",
+    "Reminders",
+    "Calendar sync stub",
+    "Showing feedback form",
+    "Per-property showing history"
+  ],
+  "expectedFiles": [
+    "package.json",
+    "index.html",
+    "README.md"
+  ],
+  "expectedContent": [
+    {
+      "file": "package.json",
+      "contains": "\"test\""
+    }
+  ],
+  "passWhen": {
+    "meanAtLeast": 1,
+    "requireExpectedFiles": true,
+    "requireExpectedContent": true
+  }
+}

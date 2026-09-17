@@ -970,6 +970,9 @@ function jobSiblingPath(nodePath: string, k: number, taken: ReadonlySet<string>)
  * the pre-216k index-keyed mapping (chunk 0 = TREE_ENTRY_PATH, later chunks
  * slugged under src/generated/) — every job-less spec graph is unaffected.
  * Pure + deterministic: same project + signatures ⇒ same plan.
+ *
+ * This is the MAP, not the consumption order: the driver consumes the plan via
+ * orderTreeChunks (below) — see its doc for the forward-call rule.
  */
 export function treeChunkPlan(
   project:
@@ -1007,6 +1010,49 @@ export function treeChunkPlan(
     jobChunks.push({ path, signatures: g });
   }
   return jobChunks;
+}
+
+/**
+ * fixes/216k (TA-15, W5-L1 subtlety 1): the order the driver CONSUMES a plan
+ * in — the forward-call rule.
+ *
+ * The chunk-prompt contract is "a later file may call an earlier file's
+ * exports by name" (assembled entry: earlier exports bound as IIFE
+ * parameters; materialized ESM: earlier files imported). A chunk whose
+ * functions can only call what its prompt's prior list carried must therefore
+ * see every chunk it may legitimately depend on BEFORE it is synthesized.
+ *
+ * Job binding is label-keyed, not contiguity-keyed: in the corpus fixture
+ * `record` owns signatures at expand indices [0,7,14,21,23] while the
+ * leftover chunks hold [1..13] and [15..24]. The plan's graph order would
+ * synthesize `src/jobs/record.ts` FIRST — with an EMPTY prior list — and
+ * materialize the leftover chunks AFTER it, so a call from record's job
+ * functions into the ledger helpers (indices 1..13, earlier in expand order —
+ * the natural call direction) would be a FORWARD CALL: not imported by
+ * record.ts, a ReferenceError the moment the oracle row calls the real
+ * function.
+ *
+ * Rule: in a job-keyed plan, consume the unbound LEFTOVER chunks first (their
+ * plan/expand order kept), then the job chunks in REVERSE PLAN ORDER
+ * (latest-bound target first … earliest last) so the widest-spanning job
+ * module is synthesized last, with every earlier-signature chunk already in
+ * its prior context. Within one job, sibling chunks stay in signature order
+ * (k=0 → `-2` → `-3`): that is the order in which "sibling chunks import
+ * earlier files IN ORDER" holds — as with the pre-job plan, a chunk never
+ * needs a forward import for its own sibling overflow.
+ *
+ * Zero-job plans are returned in EXACT plan order (pre-216k byte parity: the
+ * legacy index-keyed mapping and its chunk-prompt chain are untouched).
+ * Pure + deterministic; never mutates its input.
+ */
+export function orderTreeChunks(plan: readonly TreeChunk[]): TreeChunk[] {
+  const rows = (Array.isArray(plan) ? plan : []).filter(
+    (c): c is TreeChunk => c !== null && typeof c === "object" && Array.isArray(c.signatures),
+  );
+  const jobChunks = rows.filter((c) => typeof c.nodeId === "string" && c.nodeId.length > 0);
+  if (jobChunks.length === 0) return [...rows];
+  const leftover = rows.filter((c) => !(typeof c.nodeId === "string" && c.nodeId.length > 0));
+  return [...leftover, ...[...jobChunks].reverse()];
 }
 
 /**
@@ -1907,6 +1953,10 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   if (singleModuleLibraryKind(project) && chunkGroups.length <= 1) {
     return synthesizeSingleModule(project, brief, specRecord, signatureNames, complete, verify, treeFailure);
   }
+  // W5-L1 handoff (parent boundary repair, 2026-09-16): the TA-15 rewire is fully
+  // DESIGNED (fixes/216k D1/D2/D3) and `orderTreeChunks` is landed, but the chunked
+  // driver rewire was NOT finished — this call site was mid-edit and broke the arity.
+  // Restored to the legacy pairing so the tree compiles; W6-L1 completes the rewire.
   return synthesizeChunkedTree(project, brief, specRecord, chunkGroups, complete, treeFailure);
 }
 

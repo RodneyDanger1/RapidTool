@@ -1,6 +1,6 @@
 # DEPLOY.md — Field-Ops Suite
 
-> machine-generated from RapidTool packet 1bf0e807-f549-4335-938e-25dd71643cc2; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet 4a1e6b41-4a7f-4c19-9f9d-4089f5df79c8; regenerate, don't hand-edit.
 > > template derived from P9/P12 artifacts — verify credentials before any deploy
 
 ## What this is

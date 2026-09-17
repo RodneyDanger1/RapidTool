@@ -26,12 +26,25 @@
  * missing list is printed LOUDLY. maker-score stays pure: it only exposes the
  * probes; the driver owns the report.
  *
+ * RUN-SIDE GRADERS + TRIALS/pass@k (W5-L5 T-107.5, `wave_plans/W5/lane-5.md`; steal #5/#8 of
+ * `research/multiagent/107_competitors_agentic.md`). The per-case acceptance bar is NOT
+ * taken from the agent-writable corpus fixture anymore: it lives in a run-side grader file
+ * `research/eval-corpus/graders/<slug>.grader.json`, read ONLY by this driver. Graders are
+ * never handed to createProject/emitProject and never copied into the emit dir, so the
+ * emitted tree can neither read nor game them — and every emitted tree is scanned for grader
+ * leaks at emit time (`graderLeakScan`, pinned by scripts/run-eval.test.mjs). Each case is
+ * run `--trials=N` times (default 1 = the legacy single-run contract) in a FRESH project per
+ * trial; the honest metrics per case are pass@k / pass^k / flakiness (a case that flips
+ * between trials is FLAKY, never averaged into a fabricated pass). A case with no valid
+ * run-side grader is SKIPPED with a reason — never graded against an undeclared bar.
+ *
  * Results are DATA, not failures: the script exits 0 always (missing corpus
  * dir, unparseable entries, red scores — all printed and recorded, never
  * thrown as process failures). Keyless = the honest regression leg.
  *
  * Run: npm run eval            (keyless)
  *      npm run eval -- --keyed (one bounded keyed entry when the key is set)
+ *      npm run eval -- --trials=3 [--all|--limit=N]   (trials + pass@k)
  */
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { join, dirname, basename, resolve } from "node:path";
@@ -45,6 +58,7 @@ import {
 } from "../src/lib/headless.ts";
 import { treeRun } from "../src/lib/compile-check.server.ts";
 import { scoreMaker, capabilityCoverage, treeFilesOf } from "../src/lib/maker-score.ts";
+import { fnv1a } from "../src/lib/algorithms.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -56,6 +70,13 @@ const CORPUS_DIR = process.env.EVAL_CORPUS_DIR ? resolve(process.env.EVAL_CORPUS
 const OUT_DIR = process.env.EVAL_OUT_DIR ? resolve(process.env.EVAL_OUT_DIR) : join(ROOT, "research", "eval-out");
 const RESULTS_PATH = join(OUT_DIR, "results.json");
 const HISTORY_PATH = join(OUT_DIR, "history.json");
+/** RUN-SIDE GRADER DIR (W5-L5 / T-107.5). Per-case acceptance bars live in
+ *  `<corpus>/graders/<slug>.grader.json` — run-side files read ONLY by this
+ *  driver (EVAL_GRADER_DIR overrides for scratch/test corpora). They are never
+ *  passed to createProject/emitProject and never written under OUT_DIR, so the
+ *  emitted tree cannot read them; every emitted tree is additionally scanned
+ *  for grader leaks after emit (`graderLeakScan`). */
+const GRADER_DIR = process.env.EVAL_GRADER_DIR ? resolve(process.env.EVAL_GRADER_DIR) : join(CORPUS_DIR, "graders");
 
 const JOURNEY_BUDGET = 3;
 const KEYED = process.argv.includes("--keyed");
@@ -63,6 +84,24 @@ const KEYED_OK = KEYED && Boolean(process.env.DEEPSEEK_API_KEY);
 const EVAL_ALL = process.argv.includes("--all");
 const LIMIT_ARG = process.argv.find((a) => a.startsWith("--limit="));
 const EVAL_LIMIT = LIMIT_ARG ? Number(LIMIT_ARG.slice("--limit=".length)) : NaN;
+/** W5-L5 T-107.5 — trials per corpus case. Default 1 keeps the legacy
+ *  single-run contract byte-identical (pass@1 == the one observed trial);
+ *  `--trials=N` (2..MAX_TRIALS) enables pass@k + flakiness accounting. An
+ *  invalid value falls back to 1 with an honest note below, never a throw. */
+const MAX_TRIALS = 9;
+const TRIALS_ARG = process.argv.find((a) => a.startsWith("--trials="));
+const TRIALS_REQUESTED = TRIALS_ARG ? Number(TRIALS_ARG.slice("--trials=".length)) : 1;
+const TRIALS =
+  Number.isFinite(TRIALS_REQUESTED) && TRIALS_REQUESTED >= 1
+    ? Math.min(Math.floor(TRIALS_REQUESTED), MAX_TRIALS)
+    : 1;
+/** Which k the reported pass@k uses (additive `--k=N`; default 1 = the
+ *  standard single-trial success probability). pass@k with k = n is trivially
+ *  1 whenever any trial passed — the honest small-k / pass^n pair is what
+ *  separates "solved it once" from "solves it reliably". */
+const K_ARG = process.argv.find((a) => a.startsWith("--k="));
+const K_REQUESTED = K_ARG ? Number(K_ARG.slice("--k=".length)) : 1;
+const K = Number.isFinite(K_REQUESTED) && K_REQUESTED >= 1 ? Math.floor(K_REQUESTED) : 1;
 
 // ---------------------------------------------------------------------------
 // Corpus frontmatter (tolerant, zero-dep: scalars / quoted / | block / lists).
@@ -206,6 +245,117 @@ function listCorpusEntries() {
 }
 
 // ---------------------------------------------------------------------------
+// Run-side graders (W5-L5 / T-107.5): the acceptance bar, frozen OUTSIDE the
+// agent-writable corpus fixture and outside the emitted tree.
+//
+// A grader file (`<GRADER_DIR>/<slug>.grader.json`) is the grading source of
+// truth for its case: acceptance bar text, required identifiers, required
+// capabilities, run-side file/content assertions (SWE-agent-style
+// expectedFiles / expectedContent, 107 §8) and the pass threshold. The corpus
+// frontmatter keeps its copies as the documented D3 schema; this driver no
+// longer grades from them (`scoringCorpusFor` pins that in the tests).
+// ---------------------------------------------------------------------------
+
+/** Path of the run-side grader for one corpus slug. */
+export function graderFileFor(slug, graderDir = GRADER_DIR) {
+  return join(graderDir, `${slug}.grader.json`);
+}
+
+/** Parse + validate one grader document text. Returns `{ ok: true, grader }`
+ *  or `{ ok: false, error }` — a grader that cannot be trusted never grades. */
+export function parseGrader(raw, slug) {
+  let doc;
+  try {
+    doc = JSON.parse(raw);
+  } catch (e) {
+    return { ok: false, error: `unparseable grader JSON: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return { ok: false, error: "grader is not a JSON object" };
+  const strList = (v) =>
+    Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim().length > 0).map((s) => s.trim()) : null;
+  const bar = typeof doc.acceptanceBar === "string" ? doc.acceptanceBar.trim() : "";
+  if (bar.length === 0) return { ok: false, error: "grader carries no acceptanceBar (never grade against an undeclared bar)" };
+  const identifiers = strList(doc.requiredIdentifiers);
+  if (identifiers === null) return { ok: false, error: "requiredIdentifiers must be a string array" };
+  const capabilities = strList(doc.requiredCapabilities);
+  if (capabilities === null) return { ok: false, error: "requiredCapabilities must be a string array" };
+  const pw = doc.passWhen && typeof doc.passWhen === "object" ? doc.passWhen : {};
+  const meanAtLeast = typeof pw.meanAtLeast === "number" && pw.meanAtLeast > 0 && pw.meanAtLeast <= 1 ? pw.meanAtLeast : 1;
+  const expectedFiles = strList(doc.expectedFiles) ?? [];
+  const expectedContent = Array.isArray(doc.expectedContent)
+    ? doc.expectedContent
+        .filter((c) => c && typeof c.file === "string" && typeof c.contains === "string")
+        .map((c) => ({ file: c.file, contains: c.contains }))
+    : [];
+  const graderSlug = typeof doc.slug === "string" && doc.slug.trim() ? doc.slug.trim() : slug;
+  if (slug && graderSlug !== slug) {
+    return { ok: false, error: `grader slug "${graderSlug}" does not match corpus slug "${slug}"` };
+  }
+  return {
+    ok: true,
+    grader: {
+      slug: graderSlug,
+      graderVersion: typeof doc.graderVersion === "number" ? doc.graderVersion : 1,
+      caseName: typeof doc.caseName === "string" ? doc.caseName : "",
+      authority: typeof doc.authority === "string" ? doc.authority : "",
+      movedFrom: typeof doc.movedFrom === "string" ? doc.movedFrom : "",
+      acceptanceBar: bar,
+      requiredIdentifiers: identifiers,
+      requiredCapabilities: capabilities,
+      expectedFiles,
+      expectedContent,
+      passWhen: {
+        meanAtLeast,
+        requireExpectedFiles: pw.requireExpectedFiles !== false,
+        requireExpectedContent: pw.requireExpectedContent !== false,
+      },
+    },
+  };
+}
+
+/** Load + validate the run-side grader for one slug. `{ ok:false, error }`
+ *  carries the honest skip reason (missing file, bad JSON, undeclared bar). */
+export function loadGrader(slug, graderDir = GRADER_DIR) {
+  const path = graderFileFor(slug, graderDir);
+  let raw;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return { ok: false, path, error: `no run-side grader at ${path} — case SKIPPED (never graded against an undeclared bar)` };
+  }
+  const parsed = parseGrader(raw, slug);
+  if (!parsed.ok) return { ok: false, path, error: `run-side grader ${path} rejected: ${parsed.error} — case SKIPPED` };
+  return { ok: true, path, grader: parsed.grader };
+}
+
+/** Split corpus entries into runnable `{entry, grader}` targets and honest
+ *  skips. `graderFor(slug)` is injected so the plan is pure + testable. */
+export function planTargets(entries, graderFor) {
+  const targets = [];
+  const skips = [];
+  for (const entry of entries) {
+    const g = graderFor(entry.slug);
+    if (!g || g.ok !== true) {
+      skips.push({ slug: entry.slug, kind: "no-grader", reason: g ? g.error : "no grader resolver" });
+      continue;
+    }
+    targets.push({ entry, grader: g.grader, graderPath: g.path });
+  }
+  return { targets, skips };
+}
+
+/** The corpus object handed to scoreMaker: identifiers + capabilities come
+ *  from the RUN-SIDE grader only (the frontmatter copies are documentation). */
+export function scoringCorpusFor(entry, grader) {
+  return {
+    kind: entry.kind,
+    brief: entry.brief,
+    expectedNouns: grader.requiredIdentifiers,
+    expectedCapabilities: grader.requiredCapabilities,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // History (M7 prior evidence) + helpers.
 // ---------------------------------------------------------------------------
 
@@ -263,6 +413,231 @@ function treeRunToEvidence(outcome) {
     testsFail: specFail,
     detail,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Trials, pass@k / pass^k / flakiness + the grader leak scan (W5-L5 T-107.5).
+// All pure except `checkAcceptance` / `treeTextFiles` / `graderLeakScan`,
+// which only read files. Nothing here writes into an emitted tree.
+// ---------------------------------------------------------------------------
+
+const round4 = (x) => Math.round(x * 10_000) / 10_000;
+
+/** Binomial coefficient C(n, k); 0 when out of range. Exact for the small n
+ *  this driver sees (trials ≤ 9) because the float product is rounded back. */
+export function choose(n, k) {
+  if (!Number.isInteger(n) || !Number.isInteger(k) || n < 0 || k < 0 || k > n) return 0;
+  let r = 1;
+  for (let i = 1; i <= k; i += 1) r = (r * (n - k + i)) / i;
+  return Math.round(r);
+}
+
+/** pass@k (OpenAI human-eval reading, 107 §5): P(at least 1 of k trials passes),
+ *  estimated from the observed n trials with c passes as 1 - C(n-c,k)/C(n,k).
+ *  `null` when the inputs are not a real trial record (never a fabricated 0). */
+export function passAtK(n, c, k = n) {
+  if (!Number.isInteger(n) || n < 1) return null;
+  if (!Number.isInteger(c) || c < 0 || c > n) return null;
+  const kk = Math.min(Math.max(1, Math.floor(Number.isFinite(k) ? k : n)), n);
+  const denom = choose(n, kk);
+  if (denom === 0) return null;
+  return round4(1 - choose(n - c, kk) / denom);
+}
+
+/** pass^k: P(all k of the k trials pass), estimated as C(c,k)/C(n,k) — the
+ *  reliability bar ("solves it reliably", not "solved it once"). */
+export function passCaretK(n, c, k = n) {
+  if (!Number.isInteger(n) || n < 1) return null;
+  if (!Number.isInteger(c) || c < 0 || c > n) return null;
+  const kk = Math.min(Math.max(1, Math.floor(Number.isFinite(k) ? k : n)), n);
+  const denom = choose(n, kk);
+  if (denom === 0) return null;
+  return round4(choose(c, kk) / denom);
+}
+
+/** Honest trials accounting for one case: a case that flips between trials is
+ *  FLAKY (never averaged into a pass). With 1 trial flakiness is not measurably
+ *  zero — it is UNMEASURABLE, and the block says so. */
+export function trialsSummary(outcomes, opts = {}) {
+  const list = Array.isArray(outcomes) ? outcomes.map((o) => o === true) : [];
+  const n = list.length;
+  const c = list.filter(Boolean).length;
+  // Default k = 1 (single-trial success probability). k is clamped to the
+  // observed trial count and BOTH are reported — never a silent substitution.
+  const kRequested = Number.isFinite(opts.k) && opts.k >= 1 ? Math.floor(opts.k) : 1;
+  if (n === 0) {
+    return {
+      trials: 0,
+      passes: 0,
+      failed: 0,
+      k: null,
+      kEffective: null,
+      passAt1: null,
+      passAtK: null,
+      passAllTrials: null,
+      observedPassRate: null,
+      flaky: null,
+      flakinessMeasurable: false,
+      note: "no trials recorded",
+    };
+  }
+  const k = Math.min(Math.max(1, kRequested), n);
+  return {
+    trials: n,
+    passes: c,
+    failed: n - c,
+    k: kRequested,
+    kEffective: k,
+    passAt1: round4(c / n),
+    passAtK: passAtK(n, c, k),
+    passAllTrials: passCaretK(n, c, n),
+    observedPassRate: round4(c / n),
+    flaky: n >= 2 ? c > 0 && c < n : false,
+    flakinessMeasurable: n >= 2,
+    note: n >= 2 ? null : "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)",
+  };
+}
+
+/** Run-side acceptance assertions (107 §8 steal): the grader's declared
+ *  expectedFiles / expectedContent checked against the EMITTED tree by the
+ *  driver — declared before the run, applied from outside the tree. */
+export function checkAcceptance(grader, emittedDir, emittedFiles) {
+  const files = Array.isArray(emittedFiles) ? emittedFiles.map((f) => String(f).replace(/\\/g, "/")) : [];
+  const missingFiles = [];
+  if (grader.passWhen.requireExpectedFiles) {
+    for (const want of grader.expectedFiles) {
+      const hit = files.some((f) => f === want || f.endsWith(`/${want}`));
+      if (!hit) missingFiles.push(want);
+    }
+  }
+  const failedContent = [];
+  if (grader.passWhen.requireExpectedContent) {
+    for (const want of grader.expectedContent) {
+      const rel = files.find((f) => f === want.file || f.endsWith(`/${want.file}`));
+      if (!rel) {
+        failedContent.push(`${want.file}: file absent`);
+        continue;
+      }
+      let text = "";
+      try {
+        const st = statSync(join(emittedDir, rel));
+        text = st.size <= 2_000_000 ? readFileSync(join(emittedDir, rel), "utf8") : "";
+      } catch {
+        text = "";
+      }
+      if (!text.includes(want.contains)) failedContent.push(`${want.file}: missing ${JSON.stringify(want.contains)}`);
+    }
+  }
+  return {
+    filesOk: missingFiles.length === 0,
+    missingFiles,
+    contentOk: failedContent.length === 0,
+    failedContent,
+    checked: { expectedFiles: grader.expectedFiles.length, expectedContent: grader.expectedContent.length },
+  };
+}
+
+/** Path of one trial's emit dir. 1 trial = the legacy `<out>/<slug>/` path
+ *  (byte-identical for every existing consumer); N > 1 trials emit to FRESH
+ *  sibling workspaces `<out>/<slug>--trial-<i>/` so no trial can inherit
+ *  another's tree. */
+export function trialEmitDir(outDir, slug, trial, trials) {
+  return trials <= 1 ? join(outDir, slug) : join(outDir, `${slug}--trial-${trial}`);
+}
+
+const LEAK_SKIP_DIRS = new Set(["node_modules", ".git"]);
+
+/** Every text file of an emitted tree (relative posix paths), bounded. */
+export function treeTextFiles(dir, opts = {}) {
+  const maxFiles = Number.isFinite(opts.maxFiles) ? opts.maxFiles : 500;
+  const maxBytes = Number.isFinite(opts.maxBytes) ? opts.maxBytes : 512 * 1024;
+  const out = [];
+  const walk = (abs, rel) => {
+    if (out.length >= maxFiles) return;
+    let names;
+    try {
+      names = readdirSync(abs, "utf8");
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (out.length >= maxFiles) return;
+      if (LEAK_SKIP_DIRS.has(name)) continue;
+      const absChild = join(abs, name);
+      const relChild = rel ? `${rel}/${name}` : name;
+      let st;
+      try {
+        st = statSync(absChild);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) {
+        walk(absChild, relChild);
+        continue;
+      }
+      if (!st.isFile() || st.size > maxBytes) continue;
+      let text;
+      try {
+        text = readFileSync(absChild, "utf8");
+      } catch {
+        continue;
+      }
+      if (text.includes("\u0000")) continue; // binary
+      out.push(relChild);
+    }
+  };
+  walk(dir, "");
+  return out;
+}
+
+/** The strings a run-side grader must never leave inside an emitted tree:
+ *  its acceptance bar and its own path/file name. (Required identifiers /
+ *  capabilities are NOT markers — the tree is supposed to contain them.) */
+export function graderLeakMarkers(grader) {
+  const markers = [];
+  const bar = typeof grader.acceptanceBar === "string" ? grader.acceptanceBar.trim() : "";
+  if (bar.length >= 24) markers.push({ label: "acceptanceBar", text: bar });
+  markers.push({ label: "graderPath", text: `eval-corpus/graders/${grader.slug}.grader.json` });
+  markers.push({ label: "graderFile", text: `${grader.slug}.grader.json` });
+  return markers;
+}
+
+/** Scan an emitted tree for grader leaks. The emitted project must not be able
+ *  to read or reference its run-side grader; `leaked === true` is recorded
+ *  loudly in the run evidence, never silently swallowed. */
+export function graderLeakScan(emittedDir, grader, opts = {}) {
+  const markers = graderLeakMarkers(grader);
+  const files = treeTextFiles(emittedDir, opts);
+  const hits = [];
+  for (const file of files) {
+    let text;
+    try {
+      text = readFileSync(join(emittedDir, file), "utf8");
+    } catch {
+      continue;
+    }
+    for (const m of markers) {
+      if (text.includes(m.text)) hits.push({ file, marker: m.label });
+    }
+  }
+  return { scanned: files.length, markers: markers.map((m) => m.label), hits, leaked: hits.length > 0 };
+}
+
+/** Honest mode notices: what a keyless run does NOT do (and what a `--keyed`
+ *  request degrades into without the key). Structurally key-free — only
+ *  booleans enter, so the key value can never be printed. */
+export function keylessSkipNotices({ keyedRequested, hasKey }) {
+  const notices = [];
+  if (keyedRequested && !hasKey) {
+    notices.push("--keyed requested but DEEPSEEK_API_KEY is unset — falling back to the keyless floor (the key value is never read into any output and never printed)");
+  }
+  if (!hasKey) {
+    notices.push("keyless floor: no model calls and no live synthesis — M1..M4 score the deterministic scaffold + the P6 floor journey; no language-model claim is made and no model text is fabricated");
+  }
+  if (keyedRequested && !hasKey) {
+    notices.push("keyed-only stages SKIPPED (not failed, not faked): live P6 synthesis + keyed journey verdict");
+  }
+  return notices;
 }
 
 // ---------------------------------------------------------------------------
@@ -368,7 +743,11 @@ function attemptLogOutcomeIsOk(detail) {
   return Boolean(m && m[1] === "ok");
 }
 
-async function evaluateEntry(entry, mode) {
+/** ONE trial of the full pipeline: fresh project → drain → emit → tree-run →
+ *  score. W5-L5 T-107.5: the emit dir is per-trial, and every grading input
+ *  (identifiers, capabilities, acceptance assertions, pass threshold) comes
+ *  from the RUN-SIDE `grader` passed in — never from the corpus frontmatter. */
+async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   const { slug } = entry;
   // fixes/215: corpus `kind` is the delivery contract ("webapp"/"tool"/"game"/
   // "cli-tool"/"library"/"service"). Map it onto Project.kind ("app"|"tool"|
@@ -427,7 +806,6 @@ async function evaluateEntry(entry, mode) {
   //    benchmark, but it must NOT emit silently either: the emitted README.md
   //    is stamped with the unmissable red-tree banner and the honest
   //    `redTreeBanner` metric rides handover evidence below.
-  const emitDir = join(OUT_DIR, slug);
   const emitResult = await emitProject(finalProject, emitDir, { redTree: "banner" });
   let handoverEv = null;
   let treeEv = null;
@@ -470,6 +848,25 @@ async function evaluateEntry(entry, mode) {
     };
   }
 
+  // 3b) RUN-SIDE ACCEPTANCE (W5-L5 / T-107.5): the grader's declared
+  //     expectedFiles / expectedContent are checked against the emitted tree
+  //     from OUTSIDE it, and the tree is scanned for grader leaks — the
+  //     emitted project must neither contain nor reference its grader. Both
+  //     land in the run evidence; a leak is printed LOUDLY, never swallowed.
+  const acceptance = checkAcceptance(
+    grader,
+    emitDir,
+    emitResult && Array.isArray(emitResult.files) ? emitResult.files : [],
+  );
+  const graderLeak = graderLeakScan(emitDir, grader);
+  if (graderLeak.leaked) {
+    console.log("");
+    console.log(`!!!!! GRADER LEAK — emitted tree of ${slug} (trial ${trial}) carries run-side grader content:`);
+    for (const h of graderLeak.hits.slice(0, 10)) console.log(`      ${h.marker} in ${h.file}`);
+    console.log(`      grader file: ${graderPath}`);
+    console.log("");
+  }
+
   // 4) Score with the pure rubric.
   const logs = Array.isArray(finalProject.logs) ? finalProject.logs : [];
   const refusedSignal =
@@ -500,12 +897,9 @@ async function evaluateEntry(entry, mode) {
       : null;
   const card = scoreMaker({
     project: finalProject,
-    corpus: {
-      kind: entry.kind,
-      brief: entry.brief,
-      expectedNouns: entry.expectedNouns,
-      expectedCapabilities: entry.expectedCapabilities,
-    },
+    // W5-L5 T-107.5: grading inputs come from the RUN-SIDE grader
+    // (scoringCorpusFor) — the corpus frontmatter copies are documentation.
+    corpus: scoringCorpusFor(entry, grader),
     treeRun: treeEv,
     journey: journeyEv,
     run: { sealedWithFailures: sealedFlag || logs.some((l) => l && l.event === "run.complete.with.failed.gates") },
@@ -528,7 +922,7 @@ async function evaluateEntry(entry, mode) {
   //    its coverage; when a KEYED journey CONVERGED but M1=0, the missing
   //    capability list is printed LOUDLY (a converged run that shipped no
   //    identifier for a demanded capability = divergence #1 in the flesh).
-  const coverage = capabilityCoverage(finalProject, entry.expectedCapabilities);
+  const coverage = capabilityCoverage(finalProject, grader.requiredCapabilities);
   // fixes/154 (F1): when synthesisSucceeded === false the floor gate forced
   // M1=0 regardless of coverage — that zero is the "no LLM software exists"
   // statement, NOT a divergence-1 mapping gap, so the alarm below must not
@@ -546,7 +940,7 @@ async function evaluateEntry(entry, mode) {
     );
     console.log("");
     console.log("!!!!! M1=0 ON A CONVERGED KEYED JOURNEY (divergence-1 capability coverage) —", slug);
-    console.log(`      expectedCapabilities=${entry.expectedCapabilities.length} · tree files=${treeFilesOf(finalProject).length}`);
+    console.log(`      expectedCapabilities=${grader.requiredCapabilities.length} · tree files=${treeFilesOf(finalProject).length}`);
     for (const line of coveredLines) console.log(line);
     if (coverage.missing.length > 0) {
       console.log(`      MISSING (no identifier in any tree file):`);
@@ -557,6 +951,10 @@ async function evaluateEntry(entry, mode) {
     console.log("");
   }
 
+  // W5-L5 T-107.5: grader provenance + run-side acceptance evidence ride the
+  // row (additive keys). `graderHash` pins the effective bar that graded this
+  // trial; `graderLeak` proves the emitted tree never carried the grader.
+  const graderHash = String(fnv1a(JSON.stringify(grader)));
   const entryRow = {
     slug,
     name: entry.name,
@@ -570,6 +968,21 @@ async function evaluateEntry(entry, mode) {
     mean: Number(card.mean.toFixed(4)),
     baseline: entry.baseline,
     coverage,
+    // --- W5-L5 additive keys ---
+    trial,
+    emitDir,
+    grader: {
+      path: graderPath,
+      hash: graderHash,
+      // The bar TEXT stays in the run-side grader file only — the evidence
+      // records its hash + length, never a second copy.
+      barChars: grader.acceptanceBar.length,
+      requiredIdentifiers: grader.requiredIdentifiers.length,
+      requiredCapabilities: grader.requiredCapabilities.length,
+    },
+    acceptance: { ...acceptance, pass: false }, // `pass` filled per-trial by evaluateEntry
+    graderLeak: { scanned: graderLeak.scanned, leaked: graderLeak.leaked, hits: graderLeak.hits },
+    // --- end W5-L5 additive keys ---
     notes: {
       approvedGates: drain.approved,
       treeRunOk: treeEv ? treeEv.ok : false,
@@ -583,7 +996,82 @@ async function evaluateEntry(entry, mode) {
       synthesisSucceeded,
     },
   };
-  return { entryRow, card };
+  return { entryRow, card, acceptance };
+}
+
+/** W5-L5 T-107.5 — the run-side pass predicate for one trial: the rubric met
+ *  the grader's threshold AND every declared run-side file/content assertion
+ *  held. A crash/missing mean is a FAIL, never a default pass. */
+export function passesAcceptance(row, acceptance, grader) {
+  if (!row || typeof row.mean !== "number" || !Number.isFinite(row.mean)) return false;
+  if (row.mean < grader.passWhen.meanAtLeast) return false;
+  if (grader.passWhen.requireExpectedFiles && acceptance.filesOk !== true) return false;
+  if (grader.passWhen.requireExpectedContent && acceptance.contentOk !== true) return false;
+  return true;
+}
+
+/** W5-L5 T-107.5 — run TRIALS fresh trials of one case (fresh project + fresh
+ *  emit workspace per trial) and summarize honestly. The returned row keeps
+ *  trial 1's rubric card (`rowSource: "trial-1"` — documented, never an
+ *  average) and carries the `trials` block: pass@1 / pass@k / pass^k /
+ *  flakiness over every trial's own run-side pass verdict. */
+async function evaluateEntry(entry, mode, grader, graderPath) {
+  const trialRows = [];
+  const acceptances = [];
+  let firstCard = null;
+  for (let trial = 1; trial <= TRIALS; trial += 1) {
+    const emitDir = trialEmitDir(OUT_DIR, entry.slug, trial, TRIALS);
+    const t0 = Date.now();
+    const r = await runTrial(entry, mode, grader, { trial, emitDir, graderPath });
+    const durationSec = Number(((Date.now() - t0) / 1000).toFixed(1));
+    const pass = passesAcceptance(r.entryRow, r.acceptance, grader);
+    r.entryRow.acceptance.pass = pass;
+    r.entryRow.durationSec = durationSec;
+    trialRows.push(r.entryRow);
+    acceptances.push({ ...r.acceptance, pass });
+    if (trial === 1) firstCard = r.card;
+    const shortfalls = [
+      ...r.acceptance.missingFiles.map((f) => `missing ${f}`),
+      ...r.acceptance.failedContent.slice(0, 2),
+    ];
+    console.log(
+      `     trial ${trial}/${TRIALS}: ${r.entryRow.status} · ${r.entryRow.total}/9 (mean ${r.entryRow.mean.toFixed(2)}) · pass=${pass ? "yes" : "no"}` +
+        (shortfalls.length > 0 ? ` · acceptance: ${shortfalls.slice(0, 3).join("; ")}` : "") +
+        ` · ${durationSec}s`,
+    );
+  }
+  const outcomes = trialRows.map((row) => row.acceptance.pass === true);
+  const trialsBlock = trialsSummary(outcomes, { k: K });
+  const row = {
+    ...trialRows[0],
+    rowSource: "trial-1",
+    trials: trialsBlock,
+    acceptance: acceptances[0],
+    graderLeak: {
+      scanned: trialRows.reduce((a, r) => a + (r.graderLeak.scanned || 0), 0),
+      leaked: trialRows.some((r) => r.graderLeak.leaked === true),
+      hits: trialRows.flatMap((r) => (r.graderLeak.hits || []).map((h) => ({ ...h, trial: r.trial }))),
+    },
+    perTrial: trialRows.map((r, i) => ({
+      trial: r.trial,
+      status: r.status,
+      total: r.total,
+      mean: r.mean,
+      pass: r.acceptance.pass === true,
+      emitDir: r.emitDir,
+      durationSec: r.durationSec,
+      graderLeak: r.graderLeak.leaked === true,
+      acceptance: acceptances[i],
+    })),
+  };
+  if (trialsBlock.flaky === true) {
+    console.log("");
+    console.log(`!!!!! FLAKY CASE — ${entry.slug}: ${trialsBlock.passes}/${trialsBlock.trials} trials passed`);
+    console.log(`      pass@1=${trialsBlock.passAt1} · pass@${trialsBlock.kEffective}=${trialsBlock.passAtK} · passAllTrials=${trialsBlock.passAllTrials}`);
+    console.log("      a case that flips between trials is FLAKY — never averaged into a pass");
+    console.log("");
+  }
+  return { entryRow: row, card: firstCard, trialRows, trialsBlock };
 }
 
 // ---------------------------------------------------------------------------
@@ -596,59 +1084,124 @@ function pad(s, n) {
 }
 
 function printTable(rows) {
-  const header = ["slug", "dm", "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "total", "baseline"];
+  const header = ["slug", "dm", "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "total", "baseline", "n", "pass@k"];
   const widths = {
     slug: Math.max(8, ...rows.map((r) => String(r.entryRow.slug).length + 2)),
   };
-  const line = (cells) => cells.map((c, i) => (i === 0 ? pad(c, widths.slug) : pad(c, i === 11 ? 6 : i === 12 ? 12 : 3))).join(" ");
-  console.log(line(header));
-  console.log("-".repeat(widths.slug + 3 * 9 + 7 + 6 + 12 + 10));
+  const line = (cells) =>
+    cells
+      .map((c, i) => (i === 0 ? pad(c, widths.slug) : pad(c, i === 11 ? 6 : i === 12 ? 12 : i === 13 ? 2 : i === 14 ? 7 : 3)))
+      .join(" ");
+  const headerLine = line(header);
+  console.log(headerLine);
+  console.log("-".repeat(headerLine.length));
   for (const { entryRow } of rows) {
     const dm = entryRow.domainMatch === null ? "·" : String(entryRow.domainMatch);
+    const tb = entryRow.trials;
     const cells = [
       entryRow.slug,
       dm,
       ...["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"].map((m) => String(entryRow.criteria[m].score)),
       entryRow.mean.toFixed(2),
       String(entryRow.baseline).slice(0, 12),
+      tb ? String(tb.trials) : "·",
+      tb && typeof tb.passAtK === "number" ? tb.passAtK.toFixed(2) : "·",
     ];
     console.log(line(cells));
   }
 }
 
-function persist(rows, mode) {
+/** The effective k actually used by the recorded trials blocks (min(k, trials)). */
+function trialsKEffective(rows) {
+  const hit = rows.find((r) => r.entryRow.trials && typeof r.entryRow.trials.kEffective === "number");
+  return hit ? hit.entryRow.trials.kEffective : null;
+}
+
+/** W5-L5 T-107.5 — trials/pass@k summary lines (honest: flaky cases named,
+ *  unmeasurable flakiness at 1 trial stated, grader leaks surfaced). */
+function printTrialsSummary(rows) {
+  if (rows.length === 0) return;
+  const flaky = rows.filter((r) => r.entryRow.trials && r.entryRow.trials.flaky === true).map((r) => r.entryRow.slug);
+  const leaked = rows.filter((r) => r.entryRow.graderLeak && r.entryRow.graderLeak.leaked === true).map((r) => r.entryRow.slug);
+  const withTrials = rows.filter((r) => r.entryRow.trials && typeof r.entryRow.trials.passAtK === "number");
+  const meanPassAt1 = withTrials.length
+    ? withTrials.reduce((a, r) => a + (r.entryRow.trials.passAt1 ?? 0), 0) / withTrials.length
+    : 0;
+  console.log(
+    `trials: ${TRIALS} per case · k=${K} (effective ≤ trials) · pass@${trialsKEffective(rows) ?? K}: ` +
+      withTrials.map((r) => `${r.entryRow.slug}=${r.entryRow.trials.passAtK.toFixed(2)}`).join(" ") +
+      ` · pass^n(all trials): ` +
+      withTrials.map((r) => `${r.entryRow.slug}=${r.entryRow.trials.passAllTrials.toFixed(2)}`).join(" "),
+  );
+  console.log(`trials: pass@1 mean=${meanPassAt1.toFixed(3)} · flaky=${flaky.length > 0 ? flaky.join(",") : "none"} · grader leaks=${leaked.length > 0 ? leaked.join(",") : "none"}`);
+  if (TRIALS < 2) {
+    console.log("trials note: flakiness is UNMEASURABLE at 1 trial (pass@1 only) — use --trials=N ≥ 2 for pass@k + flakiness");
+  }
+}
+
+/** W5-L5 T-107.5 — additive JSON summary block. The legacy keys
+ *  (`entries`, `meanTotal`) keep their meaning; everything here is new. */
+export function buildSummary(rows, skips = [], trials = TRIALS) {
+  const cases = rows.length;
+  const flaky = rows.filter((r) => r.entryRow.trials && r.entryRow.trials.flaky === true).map((r) => r.entryRow.slug);
+  const leaked = rows.filter((r) => r.entryRow.graderLeak && r.entryRow.graderLeak.leaked === true).map((r) => r.entryRow.slug);
+  const passed = rows.filter((r) => r.entryRow.trials && r.entryRow.trials.passes === r.entryRow.trials.trials).map((r) => r.entryRow.slug);
+  const withTrials = rows.filter((r) => r.entryRow.trials && typeof r.entryRow.trials.passAt1 === "number");
+  const meanPassAt1 = withTrials.length ? round4(withTrials.reduce((a, r) => a + r.entryRow.trials.passAt1, 0) / withTrials.length) : 0;
+  return {
+    trials,
+    cases,
+    passAtK: { k: trials, cases, passed: passed.length, passedSlugs: passed, meanPassAt1 },
+    flakyCases: flaky,
+    graderLeaks: leaked,
+    skipped: skips.length,
+    skips,
+  };
+}
+
+function persist(rows, mode, skips = []) {
   mkdirSync(OUT_DIR, { recursive: true });
   const results = {
     generatedAt: new Date().toISOString(),
     mode,
     corpusDir: CORPUS_DIR,
+    // W5-L5 additive: where the run-side acceptance bars came from.
+    graderDir: GRADER_DIR,
     entries: rows.map((r) => r.entryRow),
     summary: {
       entries: rows.length,
       meanTotal: rows.length ? rows.reduce((a, r) => a + r.entryRow.mean, 0) / rows.length : 0,
+      ...buildSummary(rows, skips),
     },
   };
   writeFileSync(RESULTS_PATH, JSON.stringify(results, null, 2), "utf8");
 
   const history = readJson(HISTORY_PATH, []);
   const at = new Date().toISOString();
-  for (const { entryRow } of rows) {
-    history.push({
-      at,
-      mode,
-      slug: entryRow.slug,
-      m1: entryRow.criteria.M1.score,
-      m2: entryRow.criteria.M2.score,
-      m3: entryRow.criteria.M3.score,
-      m4: entryRow.criteria.M4.score,
-      m5: entryRow.criteria.M5.score,
-      m6: entryRow.criteria.M6.score,
-      m7: entryRow.criteria.M7.score,
-      m8: entryRow.criteria.M8.score,
-      m9: entryRow.criteria.M9.score,
-      total: entryRow.total,
-      mean: entryRow.mean,
-    });
+  for (const row of rows) {
+    const trialRows = Array.isArray(row.trialRows) && row.trialRows.length > 0 ? row.trialRows : [row.entryRow];
+    for (const t of trialRows) {
+      history.push({
+        at,
+        mode,
+        slug: t.slug,
+        // W5-L5 additive: which trial of how many produced this row.
+        trial: typeof t.trial === "number" ? t.trial : 1,
+        trials: TRIALS,
+        pass: t.acceptance ? t.acceptance.pass === true : null,
+        m1: t.criteria.M1.score,
+        m2: t.criteria.M2.score,
+        m3: t.criteria.M3.score,
+        m4: t.criteria.M4.score,
+        m5: t.criteria.M5.score,
+        m6: t.criteria.M6.score,
+        m7: t.criteria.M7.score,
+        m8: t.criteria.M8.score,
+        m9: t.criteria.M9.score,
+        total: t.total,
+        mean: t.mean,
+      });
+    }
   }
   writeFileSync(HISTORY_PATH, JSON.stringify(history, null, 2), "utf8");
   return results;
@@ -661,33 +1214,75 @@ function persist(rows, mode) {
 async function main() {
   const mode = KEYED_OK ? "keyed" : "keyless";
   console.log(`rapidtool eval · mode=${mode}${KEYED && !KEYED_OK ? " (--keyed requested but DEEPSEEK_API_KEY unset — falling back to keyless)" : ""} · corpus=${CORPUS_DIR}`);
+  console.log(
+    `graders: run-side acceptance bars under ${GRADER_DIR} (read by this driver only — never emitted into a project tree) · trials=${TRIALS}` +
+      (TRIALS !== TRIALS_REQUESTED ? ` (--trials=${TRIALS_REQUESTED} invalid or over max ${MAX_TRIALS} → ${TRIALS})` : ""),
+  );
+  for (const notice of keylessSkipNotices({ keyedRequested: KEYED, hasKey: Boolean(process.env.DEEPSEEK_API_KEY) })) {
+    console.log(`note: ${notice}`);
+  }
+  if (TRIALS < 2) {
+    console.log("note: trials=1 — the legacy single-run contract; pass@1 is recorded and flakiness is UNMEASURABLE (use --trials=N ≥ 2)");
+  } else if (mode === "keyed") {
+    console.log(`note: keyed × trials=${TRIALS} multiplies live model cost — the keyed cost guard below still bounds the target count`);
+  }
 
   const found = listCorpusEntries();
   const entries = found.filter((f) => f.entry !== null).map((f) => f.entry);
-  const skipped = found.filter((f) => f.entry === null);
-  for (const s of skipped) console.log(`note: skipping unreadable corpus entry: ${s.error}`);
+  const skipped = found
+    .filter((f) => f.entry === null)
+    .map((s) => ({ slug: null, kind: "unreadable-corpus-entry", reason: s.error }));
+  for (const s of skipped) console.log(`note: skipping unreadable corpus entry: ${s.reason}`);
 
   if (entries.length === 0) {
     console.log("note: no corpus entries present at research/eval-corpus — D3 parallel corpus writes may not have landed yet; nothing to evaluate. Results are data, exit 0.");
     mkdirSync(OUT_DIR, { recursive: true });
-    writeFileSync(RESULTS_PATH, JSON.stringify({ generatedAt: new Date().toISOString(), mode, entries: [], summary: { entries: 0, meanTotal: 0 } }, null, 2), "utf8");
+    writeFileSync(
+      RESULTS_PATH,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          mode,
+          graderDir: GRADER_DIR,
+          entries: [],
+          summary: { entries: 0, meanTotal: 0, ...buildSummary([], skipped) },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
     process.exit(0);
   }
 
+  // W5-L5 T-107.5 — the RUN-SIDE grader decides what is gradeable. A case with
+  // no valid grader file is SKIPPED with a reason (recorded in the summary),
+  // never scored against an undeclared bar.
+  const plan = planTargets(entries, (slug) => loadGrader(slug));
+  const skips = [...skipped, ...plan.skips];
+  for (const s of plan.skips) console.log(`skip ${s.slug}: ${s.reason}`);
+  const targets = plan.targets;
+
   // Keyed default: ONE entry (cost guard). `--all` or `--limit=N` lifts it.
-  const cap = EVAL_ALL ? entries.length : Number.isFinite(EVAL_LIMIT) && EVAL_LIMIT > 0 ? EVAL_LIMIT : mode === "keyed" ? 1 : entries.length;
-  const targets = entries.slice(0, cap);
-  if (mode === "keyed" && targets.length < entries.length) {
-    console.log(`note: keyed leg bounded to ${targets.length} corpus entry (${targets[0].slug}); pass --all or --limit=N for more; budget per P6 journey = ${JOURNEY_BUDGET} cycle(s)`);
+  const cap = EVAL_ALL ? targets.length : Number.isFinite(EVAL_LIMIT) && EVAL_LIMIT > 0 ? EVAL_LIMIT : mode === "keyed" ? 1 : targets.length;
+  const selected = targets.slice(0, cap);
+  if (mode === "keyed" && selected.length < targets.length) {
+    console.log(`note: keyed leg bounded to ${selected.length} corpus entry (${selected[0].entry.slug}); pass --all or --limit=N for more; budget per P6 journey = ${JOURNEY_BUDGET} cycle(s)`);
   }
 
   const rows = [];
-  for (const entry of targets) {
+  if (selected.length === 0) {
+    console.log("note: nothing gradeable — every corpus entry was skipped above (results recorded with the skip reasons, exit 0)");
+  }
+  for (const { entry, grader, graderPath } of selected) {
     try {
       const t0 = Date.now();
-      const { entryRow, card } = await evaluateEntry(entry, mode);
-      rows.push({ entryRow, card });
-      console.log(`ok   ${entry.slug}: ${entryRow.status} · ${entryRow.total}/9 (mean ${entryRow.mean.toFixed(2)}) · ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+      const { entryRow, card, trialRows } = await evaluateEntry(entry, mode, grader, graderPath);
+      rows.push({ entryRow, card, trialRows });
+      const tb = entryRow.trials;
+      console.log(
+        `ok   ${entry.slug}: ${entryRow.status} · ${entryRow.total}/9 (mean ${entryRow.mean.toFixed(2)}) · ${tb.trials} trial(s) · pass@${tb.kEffective}=${tb.passAtK}${tb.flaky ? " · FLAKY" : ""} · ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+      );
     } catch (e) {
       // An entry that blows up is recorded as data, never a process failure.
       const msg = e instanceof Error ? e.message : String(e);
@@ -705,31 +1300,50 @@ async function main() {
           total: 0,
           mean: 0,
           baseline: entry.baseline,
-          coverage: { covered: {}, missing: [...entry.expectedCapabilities] },
-          notes: { error: msg.slice(0, 300) },
+          coverage: { covered: {}, missing: [...grader.requiredCapabilities] },
+          // W5-L5: a crash is a FAILED trial, never a hidden one.
+          trials: trialsSummary(Array.from({ length: TRIALS }, () => false), { k: TRIALS }),
+          grader: { path: graderPath, hash: String(fnv1a(JSON.stringify(grader))) },
+          perTrial: [],
+          notes: { error: msg.slice(0, 300), trialsCrashed: true },
         },
         card: null,
+        trialRows: [],
       });
     }
   }
 
   console.log("");
   printTable(rows);
-  const results = persist(rows, mode);
+  printTrialsSummary(rows);
+  const results = persist(rows, mode, skips);
   console.log(`\nwrote ${RESULTS_PATH} · ${results.entries.length} entr${results.entries.length === 1 ? "y" : "ies"} · history appended to ${HISTORY_PATH}`);
+  if (skips.length > 0) console.log(`skips recorded: ${skips.length} — ${skips.map((s) => s.slug ?? "corpus").join(", ")}`);
   console.log("exit 0 — results are data, not failures");
   process.exit(0);
 }
 
-main().catch((e) => {
-  // The driver itself failing is still data-shaped, but it IS a real crash:
-  // print + exit 0 per the results-are-data contract, after recording it.
+/** Run the driver only when executed directly (`npm run eval`) — importing this
+ *  module (scripts/run-eval.test.mjs) must never start an eval run. W5-L5. */
+const isMainModule = (() => {
   try {
-    mkdirSync(OUT_DIR, { recursive: true });
-    writeFileSync(RESULTS_PATH, JSON.stringify({ generatedAt: new Date().toISOString(), mode: KEYED_OK ? "keyed" : "keyless", entries: [], error: e instanceof Error ? e.message : String(e) }, null, 2), "utf8");
+    return Boolean(process.argv[1]) && resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
   } catch {
-    /* nowhere to write */
+    return false;
   }
-  console.error(`eval driver crashed: ${e instanceof Error ? e.stack : String(e)}`);
-  process.exit(0);
-});
+})();
+
+if (isMainModule) {
+  main().catch((e) => {
+    // The driver itself failing is still data-shaped, but it IS a real crash:
+    // print + exit 0 per the results-are-data contract, after recording it.
+    try {
+      mkdirSync(OUT_DIR, { recursive: true });
+      writeFileSync(RESULTS_PATH, JSON.stringify({ generatedAt: new Date().toISOString(), mode: KEYED_OK ? "keyed" : "keyless", entries: [], error: e instanceof Error ? e.message : String(e) }, null, 2), "utf8");
+    } catch {
+      /* nowhere to write */
+    }
+    console.error(`eval driver crashed: ${e instanceof Error ? e.stack : String(e)}`);
+    process.exit(0);
+  });
+}

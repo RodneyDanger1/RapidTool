@@ -1,10 +1,10 @@
 // ---------------------------------------------------------------------------
 // src/jobs/track.ts — Implement job “track” against the contract
-// machine-generated from RapidTool packet 5587eca3-156b-4c57-9ea4-23879f548cb5; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet e0451662-7106-402f-aa2c-9a456861b3e5; regenerate, don't hand-edit.
 // fixes/144 (M2) tree bridge: the generated tree ships no file at this spec-graph
-// path, so this module re-exports the tree ENTRY module (src/jobs/rent.ts) verbatim —
+// path, so this module re-exports the tree ENTRY module (src/jobs/lease.ts) verbatim —
 // real generated code, not a TODO stub. Align this node's file with a tree path
 // (or regenerate the tree) to replace the bridge.
 // ---------------------------------------------------------------------------
 
-export * from "./rent.ts";
+export * from "./lease.ts";
