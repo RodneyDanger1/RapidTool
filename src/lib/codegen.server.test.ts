@@ -19,11 +19,19 @@ import {
   materializeImportableTree,
   nondeterministicPrimitiveHit,
   parseSynthesisEnvelope,
+  parseSynthesisPatchEnvelope,
+  patchExcerptWindows,
   pathSlugFromNames,
+  PATCH_REPAIR_DIFF_MAX,
+  PATCH_REPAIR_MAX_WINDOWS,
+  PATCH_REPAIR_WINDOW_MAX_LINES,
   p6SynthesisBriefFitRepairPrompt,
   p6SynthesisChunkUserPrompt,
   p6SynthesisExportRepairPrompt,
   p6SynthesisForbiddenRepairPrompt,
+  p6SynthesisNondeterministicRepairPrompt,
+  p6SynthesisPatchRepairPrompt,
+  p6SynthesisProseRepairPrompt,
   p6SynthesisRepairPrompt,
   p6SynthesisSignatureRepairPrompt,
   p6SynthesisSystemPrompt,
@@ -35,6 +43,7 @@ import {
   singleModuleLibraryKind,
   stripCjsExportAssignments,
   toGeneratedTreeFile,
+  tokenLineNumbers,
   treePathForChunk,
   TREE_CHUNK0_RELOCATED_PATH,
   TREE_ENTRY_PATH,
@@ -44,6 +53,7 @@ import {
   p6TokenCapFromEnv,
   proseLineHits,
   type ChunkPriorFile,
+  type P6SynthesisDeps,
 } from "./codegen.server.ts";
 import { applyPhaseResult, emptyProject } from "./engine.ts";
 import { buildPhase6Module } from "./sandbox.ts";
@@ -1857,6 +1867,359 @@ describe("216f T-10 — prompt contract: signature ceiling vs requirement duty",
       nondeterministicPrimitiveHit(maskLiteralsAndComments("const id = Math.random();")) !== null,
       "the advertised token is the one the validator matches",
     );
+  });
+});
+
+// --- 216r T-107.1 (W8-L5): the patch (str_replace) repair level ----------------
+// The W7-L1 wiring (codegen.server.ts patch-repair section; liveP6Synthesis
+// deps.patchRepairs) gets the tests it shipped without. Three contracts:
+//   (a) a unique-match delta applies via applyStrReplace + revalidates;
+//   (b) ambiguous / no-match / no-op deltas REFUSE coded, and the legacy
+//       full-rewrite repair that follows stays byte-identical;
+//   (c) with no patch in play (level off, or a non-patchable defect class)
+//       every existing prompt/module byte is unchanged.
+
+/** 216r fixture: KANBAN_MODULE + the 216f leaked prose blob. The PROSE defect
+ *  class carries raw line numbers end-to-end, so this fixture exercises the
+ *  wired patch level (the token classes need a comment-free module — see the
+ *  JSDoc'd-shape defect recorded in fixes/216r §3). */
+const PROSE_REFUSED_ENVELOPE = {
+  module: `${KANBAN_MODULE}\n${LEAKED_BLOB_PROSE}`,
+  exports: KANBAN_ENVELOPE.exports,
+  reqTrace: KANBAN_ENVELOPE.reqTrace,
+};
+
+/** 216r fixture: comment-free kanban module carrying Math.random() — raw and
+ *  masked line numbers align only when no block comment precedes the defect. */
+const NOCOMMENT_NONDET_MODULE = [
+  "function createBoard(name) {",
+  '  return { id: "b-" + Math.random(), name: name, columns: [] };',
+  "}",
+  "function addColumn(board, columns) { board.columns = columns || []; return board; }",
+  "function dragCard(cards) { return cards; }",
+  "function kanbanBoard(columns) { return { columns: columns }; }",
+  "module.exports.createBoard = createBoard;",
+  "module.exports.addColumn = addColumn;",
+  "module.exports.dragCard = dragCard;",
+  "module.exports.kanbanBoard = kanbanBoard;",
+].join("\n");
+
+/** Classifies one recorded synthesis call by the prompt family it belongs to. */
+function patchCallKind(prompt: string): string {
+  if (prompt.includes("TYPE SIGNATURES (must export")) return "synthesis";
+  if (prompt.includes("ONE bounded replacement instead of rewriting the module")) return "patch";
+  if (prompt.includes("Your previous reply was not code: it contained English prose sentences")) return "legacy-prose";
+  if (prompt.includes("Your module used a non-deterministic primitive:")) return "legacy-nondeterministic";
+  if (prompt.includes("Your module used a forbidden primitive:")) return "legacy-forbidden";
+  if (prompt.includes("claimed exports that are not actually bound")) return "legacy-export-binding";
+  if (prompt.includes("missing functions the brief's typeSignatures require")) return "legacy-missing-signature";
+  if (prompt.includes("Your previous reply was not valid JSON with the required envelope")) return "envelope-repair";
+  return "other";
+}
+
+/** 216r harness: prompt-recording fake `complete` (replies[n-1] answers call n;
+ *  the last one repeats) + a `verify` seam that ECHOES the source it received,
+ *  so the ACCEPTED module stays observable byte-for-byte. `patchRepairs`
+ *  mirrors the liveP6Synthesis opt-in. */
+function patchHarness(
+  replies: ((prompt: string, n: number) => LlmResult)[],
+  opts: { patchRepairs?: boolean } = {},
+): { prompts: string[]; kinds: string[]; deps: P6SynthesisDeps } {
+  const prompts: string[] = [];
+  const kinds: string[] = [];
+  const complete = async (prompt: string): Promise<LlmResult> => {
+    kinds.push(patchCallKind(prompt));
+    prompts.push(prompt);
+    return replies[Math.min(prompts.length - 1, replies.length - 1)]!(prompt, prompts.length);
+  };
+  const deps: P6SynthesisDeps = {
+    complete,
+    expand: async (): Promise<ExpandBriefResult> => ({ ok: true, spec: KANBAN_SPEC }),
+    verify: async (source: string): Promise<VerifyOutcome> => ({
+      status: "passed",
+      iterations: 1,
+      evidence: "w8-l5 harness echo verify",
+      finalSource: source,
+      cases: [],
+    }),
+  };
+  if (opts.patchRepairs) deps.patchRepairs = true;
+  return { prompts, kinds, deps };
+}
+
+/** A model delta reply — the patch envelope's FIRST FORM. */
+function patchReply(oldStr: string, newStr: string): string {
+  return JSON.stringify({ patch: { oldStr, newStr } });
+}
+
+describe("216r patch primitives (W8-L5 pins)", () => {
+  it("parseSynthesisPatchEnvelope: parses the delta form (fences, empty newStr deletion, fuzzy passthrough)", () => {
+    const e = parseSynthesisPatchEnvelope(JSON.stringify({ patch: { oldStr: "a", newStr: "b" } }));
+    assert.deepEqual(e, { oldStr: "a", newStr: "b" });
+    const fenced = parseSynthesisPatchEnvelope(
+      "```json\n" + JSON.stringify({ patch: { oldStr: "a", newStr: "" } }) + "\n```",
+    );
+    assert.deepEqual(fenced, { oldStr: "a", newStr: "" }, "empty newStr is a legal DELETE, never null");
+    const fuzzy = parseSynthesisPatchEnvelope(
+      JSON.stringify({ patch: { oldStr: "a", newStr: "b", fuzzy: { threshold: 0.2 } } }),
+    );
+    assert.deepEqual(fuzzy, { oldStr: "a", newStr: "b", fuzzy: { threshold: 0.2 } }, "fuzzy rides through verbatim");
+  });
+
+  it("parseSynthesisPatchEnvelope: every non-delta reply is null — the legacy path stays available", () => {
+    assert.equal(parseSynthesisPatchEnvelope("not json {{{"), null);
+    assert.equal(parseSynthesisPatchEnvelope(42), null);
+    assert.equal(parseSynthesisPatchEnvelope(JSON.stringify({ module: "x", exports: [] })), null, "legacy module envelope is NOT a delta");
+    assert.equal(parseSynthesisPatchEnvelope(JSON.stringify({ patch: { oldStr: "", newStr: "x" } })), null, "empty needle");
+    assert.equal(parseSynthesisPatchEnvelope(JSON.stringify({ patch: { oldStr: "x" } })), null, "missing newStr");
+    assert.equal(parseSynthesisPatchEnvelope(JSON.stringify({ patch: { oldStr: "x", newStr: 7 } })), null, "non-string newStr");
+    assert.equal(parseSynthesisPatchEnvelope("[]"), null);
+  });
+
+  it("patchExcerptWindows / tokenLineNumbers: verbatim whole lines, merging, caps, total on garbage", () => {
+    const src = ["alpha", "beta", "gamma", "delta", "epsilon"].join("\n");
+    assert.deepEqual(tokenLineNumbers(src, "gamma"), [3]);
+    assert.deepEqual(tokenLineNumbers(src, "zzz"), []);
+    assert.deepEqual(tokenLineNumbers(src, ""), [], "empty needle is total");
+    const w = patchExcerptWindows(src, [3]);
+    assert.deepEqual(w, { windows: [{ firstLine: 2, lastLine: 4, text: "beta\ngamma\ndelta" }], omittedLines: 0 });
+    const merged = patchExcerptWindows(src, [2, 4]);
+    assert.equal(merged.windows.length, 1, "adjacent windows merge");
+    assert.equal(merged.windows[0]!.text, src, "the merged window is the source's own lines, verbatim");
+    const many = Array.from({ length: 60 }, (_, i) => `line-${i + 1}`).join("\n");
+    const capped = patchExcerptWindows(many, [5, 15, 25, 35, 45]);
+    assert.equal(capped.windows.length, PATCH_REPAIR_MAX_WINDOWS, "window count capped");
+    assert.equal(capped.omittedLines, 2, "omitted windows are counted honestly");
+    assert.equal(capped.windows[0]!.firstLine, 4);
+    assert.ok(
+      capped.windows.every((win) => win.lastLine - win.firstLine + 1 <= PATCH_REPAIR_WINDOW_MAX_LINES),
+      "line cap respected",
+    );
+    assert.deepEqual(patchExcerptWindows(42, [1]), { windows: [], omittedLines: 0 }, "garbage source is total");
+    assert.deepEqual(patchExcerptWindows(src, [0, 99, 1.5]), { windows: [], omittedLines: 0 }, "garbage lines never fabricate a window");
+  });
+
+  it("p6SynthesisPatchRepairPrompt: names the defect, quotes verbatim windows, offers BOTH reply forms, carries the tree-failure tail", () => {
+    const windows = [
+      { firstLine: 3, lastLine: 4, text: "beta\ngamma" },
+      { firstLine: 9, lastLine: 9, text: "epsilon" },
+    ];
+    const p = p6SynthesisPatchRepairPrompt("the module uses a forbidden primitive: `fetch`", windows);
+    assert.ok(
+      p.startsWith("Your previous module was refused by the deterministic validator: the module uses a forbidden primitive: `fetch`."),
+    );
+    assert.ok(p.includes("--- lines 3-4 (line numbers are for orientation only — they are NOT part of the text) ---\nbeta\ngamma\n--- end lines 3-4 ---"));
+    assert.ok(p.includes("--- lines 9-9 (line numbers are for orientation only — they are NOT part of the text) ---\nepsilon\n--- end lines 9-9 ---"));
+    assert.ok(p.includes('FIRST FORM (preferred): {"patch":{"oldStr"'), "delta offered first");
+    assert.ok(p.includes('SECOND FORM, only if one unique replacement cannot fix the defect: {"module"'), "full-rewrite envelope is the alternative");
+    assert.ok(!p.includes("Tree-run failure context"), "no treeFailure → no context block (legacy bytes)");
+    const withTree = p6SynthesisPatchRepairPrompt("d", windows, "src/jobs/rent.ts — tests fail: boom");
+    assert.ok(withTree.endsWith("Tree-run failure context (failing file + first not-ok tail):\nsrc/jobs/rent.ts — tests fail: boom"));
+  });
+});
+
+describe("216r patch repair through liveP6Synthesis (W8-L5 pins)", () => {
+  it("(a) a unique-match delta applies via applyStrReplace, revalidates, and the patch re-prompt is offered FIRST", async () => {
+    const base = p6Base();
+    const h = patchHarness(
+      [
+        // 1 synthesis (prose defect), 2 the patch delta (unique match, DELETE),
+        // any later call gets non-JSON so nothing overwrites the landed delta.
+        () => ({ ok: true, text: JSON.stringify(PROSE_REFUSED_ENVELOPE), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: patchReply(LEAKED_BLOB_PROSE, ""), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: "no json — the model never answers a follow-up", model: "deepseek-v4-flash" }),
+      ],
+      { patchRepairs: true },
+    );
+    const q = await liveP6Synthesis(base, h.deps);
+
+    assert.equal(h.kinds[0], "synthesis");
+    assert.equal(h.kinds[1], "patch", "patch-first: the delta re-prompt is the FIRST repair call");
+    assert.ok(
+      h.prompts[1]!.includes(LEAKED_BLOB_PROSE),
+      "the patch prompt quotes the exact current source (character-for-character copyable)",
+    );
+    assert.ok(h.prompts[1]!.includes("--- lines 38-41 "), "the quoted window carries its 1-based line markers");
+
+    const deltas = (q.logs ?? []).filter((l) => l.event === "p6.repair.delta");
+    assert.equal(deltas.length, 1, "exactly one landed-delta record");
+    const rec = JSON.parse(deltas[0]!.detail) as {
+      path: string;
+      kind: string;
+      score: number;
+      threshold: number | null;
+      matches: number;
+      removedLines: number;
+      addedLines: number;
+      unified: string;
+    };
+    assert.equal(rec.path, TREE_ENTRY_PATH);
+    assert.equal(rec.kind, "exact", "the wire requires an exact unique match — no fuzzy guessing");
+    assert.equal(rec.score, 1);
+    assert.equal(rec.threshold, null, "fuzzy was never opted in on this wire");
+    assert.equal(rec.matches, 1);
+    assert.equal(rec.removedLines, 3);
+    assert.equal(rec.addedLines, 1);
+    assert.ok(rec.unified.startsWith("@@ -39,3 +39,1 @@\n-Given the constraints"), "bounded unified hunk, start line named");
+    assert.ok(rec.unified.includes("-Maybe the generator expects"));
+    assert.ok(rec.unified.length <= PATCH_REPAIR_DIFF_MAX, "diff record is capped");
+
+    // The delta's own output IS the accepted module (prose deleted byte-exactly)…
+    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
+    assert.ok(!(q.generatedSource ?? "").includes("I'll write the code now."), "the prose blob is GONE, not paraphrased");
+    // …and the result revalidates under the SAME deterministic validator (the
+    // acceptance path; a patched module that still failed would be refused).
+    assert.ok(validateSynthesisModule(q.generatedSource ?? "", KANBAN_ENVELOPE.exports, ["createBoard", "addColumn"]).ok);
+    assert.equal((q.generatedTree ?? [])[0]?.source, KANBAN_MODULE.trim(), "the one-file tree carries the patched bytes");
+    assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"), "no refusal — the patched module was accepted");
+  });
+
+  it("(a) the non-deterministic class lands its delta too (comment-free module: raw↔masked lines align)", async () => {
+    const base = p6Base();
+    const h = patchHarness(
+      [
+        () => ({ ok: true, text: JSON.stringify({ module: NOCOMMENT_NONDET_MODULE, exports: KANBAN_ENVELOPE.exports, reqTrace: KANBAN_ENVELOPE.reqTrace }), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: patchReply("Math.random()", "name"), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: "still no json", model: "deepseek-v4-flash" }),
+      ],
+      { patchRepairs: true },
+    );
+    const q = await liveP6Synthesis(base, h.deps);
+
+    assert.equal(h.kinds[1], "patch");
+    const rec = JSON.parse((q.logs ?? []).find((l) => l.event === "p6.repair.delta")!.detail) as {
+      kind: string;
+      matches: number;
+      unified: string;
+    };
+    assert.equal(rec.kind, "exact");
+    assert.equal(rec.matches, 1);
+    assert.equal(rec.unified, "@@ -2,1 +2,1 @@\n-Math.random()\n+name", "single-line hunk, exact bytes");
+    assert.ok(!(q.generatedSource ?? "").includes("Math.random"), "the determinism defect is gone");
+    assert.ok(validateSynthesisModule(q.generatedSource ?? "", KANBAN_ENVELOPE.exports, ["createBoard", "addColumn"]).ok);
+  });
+
+  it("(b) an AMBIGUOUS delta refuses coded; the legacy full-rewrite repair follows byte-identical and still fixes", async () => {
+    const base = p6Base();
+    const h = patchHarness(
+      [
+        () => ({ ok: true, text: JSON.stringify(PROSE_REFUSED_ENVELOPE), model: "deepseek-v4-flash" }),
+        // "module.exports." occurs 4× → the unique-match contract refuses.
+        () => ({ ok: true, text: patchReply("module.exports.", "module.exportsX."), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" }),
+      ],
+      { patchRepairs: true },
+    );
+    const q = await liveP6Synthesis(base, h.deps);
+
+    assert.deepEqual(h.kinds, ["synthesis", "patch", "legacy-prose"], "patch attempt first, then the legacy repair");
+    const refusal = (q.logs ?? []).find((l) => l.event === "p6.repair.patch.refused");
+    assert.ok(refusal, "the refusal is recorded");
+    assert.equal(
+      refusal!.detail,
+      "src/generated.ts · RT_E_VALIDATION · oldStr matches 4 times — refusing; a unique match is required (candidate lines: 34, 35, 36, 37).",
+    );
+    assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.repair.delta"), "a refused delta never stamps a delta record");
+    // The legacy path is byte-identical — same prompt the builder produces.
+    assert.equal(h.prompts[2], p6SynthesisProseRepairPrompt(proseLineHits(PROSE_REFUSED_ENVELOPE.module)));
+    // …and it still lands: the legacy repair's reply is the accepted module.
+    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
+    assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"));
+  });
+
+  it("(b) a NO-MATCH delta refuses coded; the legacy repair bytes and outcome are unchanged", async () => {
+    const base = p6Base();
+    const h = patchHarness(
+      [
+        () => ({ ok: true, text: JSON.stringify(PROSE_REFUSED_ENVELOPE), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: patchReply("NOT PRESENT ANYWHERE()", "x"), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" }),
+      ],
+      { patchRepairs: true },
+    );
+    const q = await liveP6Synthesis(base, h.deps);
+
+    assert.deepEqual(h.kinds, ["synthesis", "patch", "legacy-prose"]);
+    const refusal = (q.logs ?? []).find((l) => l.event === "p6.repair.patch.refused");
+    assert.ok(refusal);
+    assert.equal(
+      refusal!.detail,
+      "src/generated.ts · RT_E_VALIDATION · no exact match for oldStr (0 occurrences) — refusing; a unique match is required.",
+    );
+    assert.equal(h.prompts[2], p6SynthesisProseRepairPrompt(proseLineHits(PROSE_REFUSED_ENVELOPE.module)));
+    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
+  });
+
+  it("(b) a NO-OP delta (oldStr === newStr) refuses coded; the legacy repair bytes and outcome are unchanged", async () => {
+    const base = p6Base();
+    const h = patchHarness(
+      [
+        () => ({ ok: true, text: JSON.stringify(PROSE_REFUSED_ENVELOPE), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: patchReply("I'll write the code now.", "I'll write the code now."), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" }),
+      ],
+      { patchRepairs: true },
+    );
+    const q = await liveP6Synthesis(base, h.deps);
+
+    assert.deepEqual(h.kinds, ["synthesis", "patch", "legacy-prose"]);
+    const refusal = (q.logs ?? []).find((l) => l.event === "p6.repair.patch.refused");
+    assert.ok(refusal);
+    assert.equal(
+      refusal!.detail,
+      "src/generated.ts · RT_E_VALIDATION · oldStr and newStr are identical — a no-op is not an edit; refusing to report one.",
+    );
+    assert.equal(h.prompts[2], p6SynthesisProseRepairPrompt(proseLineHits(PROSE_REFUSED_ENVELOPE.module)));
+    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
+  });
+
+  it("(c) with the patch level OFF, the T-15 repair prompt and the accepted module stay byte-identical", async () => {
+    const base = p6Base();
+    const broken = KANBAN_MODULE.replace(
+      'return { id: "b-" + name, name: name, columns: [] };',
+      'return { id: "b-" + Math.random(), name: name, columns: [] };',
+    );
+    const envelope = { module: broken, exports: KANBAN_ENVELOPE.exports, reqTrace: KANBAN_ENVELOPE.reqTrace };
+    const h = patchHarness([
+      () => ({ ok: true, text: JSON.stringify(envelope), model: "deepseek-v4-flash" }),
+      () => ({ ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" }),
+    ]); // no patchRepairs → the legacy level
+    const q = await liveP6Synthesis(base, h.deps);
+
+    assert.deepEqual(h.kinds, ["synthesis", "legacy-nondeterministic"], "no patch call when the level is off");
+    assert.equal(h.prompts[1], p6SynthesisNondeterministicRepairPrompt("Math.random"), "legacy repair prompt byte-identical to its builder");
+    assert.ok(!(q.logs ?? []).some((l) => l.event.startsWith("p6.repair")), "no patch records when the level is off");
+    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "the accepted module bytes are the legacy repair's, unchanged");
+  });
+
+  it("(c) a non-patchable defect keeps the legacy prompt/module bytes with the level ON and OFF", async () => {
+    const envelope = { ...KANBAN_ENVELOPE, exports: ["createBoard", "addColumn", "ghost"] };
+    const run = async (patchRepairs: boolean) => {
+      const h = patchHarness(
+        [
+          () => ({ ok: true, text: JSON.stringify(envelope), model: "deepseek-v4-flash" }),
+          () => ({ ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" }),
+        ],
+        { patchRepairs },
+      );
+      const q = await liveP6Synthesis(p6Base(), h.deps);
+      return { h, q };
+    };
+    const off = await run(false);
+    const on = await run(true);
+
+    for (const r of [off, on]) {
+      assert.deepEqual(r.h.kinds, ["synthesis", "legacy-export-binding"], "an unbound-export defect never takes a patch call");
+      assert.equal(r.h.prompts[1], p6SynthesisExportRepairPrompt(["ghost"]), "legacy repair prompt byte-identical to its builder");
+      assert.ok(
+        !(r.q.logs ?? []).some((l) => l.event === "p6.repair.delta" || l.event === "p6.repair.patch.refused"),
+        "no patch records for a non-patchable defect",
+      );
+      assert.equal(r.q.generatedSource, KANBAN_MODULE.trim(), "accepted module bytes unchanged");
+    }
+    assert.equal(on.h.prompts[1], off.h.prompts[1], "the level ON changes no prompt byte when no patch is in play");
+    assert.deepEqual(on.h.kinds, off.h.kinds, "call sequence unchanged when no patch is in play");
+    assert.equal(on.q.generatedSource, off.q.generatedSource);
   });
 });
 

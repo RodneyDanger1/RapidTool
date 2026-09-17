@@ -132,6 +132,18 @@ size, where it lives, and what the next wave should pick up.
   emit still `reexports: 5, real: 0`; oracle rows all skip; no `p6.jobs.shortfall` producer),
   1 defect (`headless.ts:1467` moduleEmbedded on empty generatedSource), determinism =
   path/log identity only (sha1 withheld). Evidence + falsification record: `fixes/216u`.
+- **WAVE 8 `deleg_7335199d` CLOSED (2026-09-17 ~09:45) — TA-15 ACCEPTANCE MET. Boundary
+  `gate.sh`: `{"ok":true}`** — typecheck 0 · lint 0 · gaps 0 · build 0 · scripts **238/238** +
+  src **1905/1905**. **Lane outcomes:** L1 ⚠️ died mid-edit (scaffold.ts non-compiling; TDZ +
+  missing types); L2 ✅ **216o+216p+216v written**; L3 ⚠️ edit arm + T5 arms + 3 tests landed —
+  README-cli section/count left red (parent fixed); L4 ✅ **T-107.10 CLOSED** (E2E verified,
+  216t complete); L5 ⚠️ 216r tests landed (+11, 97/97) + 2 codegen DEFECT repros (216r §2) —
+  log written by parent. **Parent repairs:** scaffold completion (type members, D2 import map +
+  guarded row emission, D3 census/README wiring, 2 double-escaped regexes, TDZ hoist + README
+  order), 3 stale scaffold pins, README-cli `## Edit` section + count 35, CLI no-dupe-keys
+  (`rowsOk`), 216r/216k bodies. **ACCEPTANCE (real runs):** corpus-shaped emit → scaffold →
+  **census `{stubs: 0, reexports: 0, real: 3}`**; track/record/lease never-bridged (counted +
+  surfaced); spec carries `jobMod_rent` + guarded call; **`orc-4` real**; §3 shortfall log → W9-L1.
 - **Wave-start gate baseline (reproduced 2026-09-16 19:11–19:13, no writers active):**
   typecheck **0** · lint **0 errors / 1 warning** (the warning IS the census defect — assigned to L1)
   · `npm test` **scripts 195/195 + src 1662/1662, 0 fail** · build **0**.
@@ -195,7 +207,7 @@ size, where it lives, and what the next wave should pick up.
 | TA-12 | Error-handling audit (signal 10) as its own task | S | ❌ | Phase 3 |
 | TA-13 | Split T3.3 into named signals; defer the rest explicitly | S | ❌ | plan hygiene |
 | TA-14 | Cross-family, order-swapped judge protocol | S/M | ❌ | Phase 3, needs T1.5 |
-| **TA-15** | **Emit a REAL multi-job product (P0-04)** | **M/L** | **⚠️ PARTIAL — W8-L1** | **TREE half REAL (W6 probe: `reexports: 0, stubs: 0, real: 3` on a directly-written tree; rewire at codegen :1981-1984/:2237/:2277). SCAFFOLD half + D2 oracle ctx + T-13 log NOT LANDED — L5-W7 falsified W5/W6 claims vs bytes (scaffold.ts untouched since 673e349; corpus emit path still bridged: `reexports: 5, real: 0`; 5/5 oracle rows `test.skip`). W8-L1 completes per fixes/216u.** |
+| **TA-15** | **Emit a REAL multi-job product (P0-04)** | **M/L** | **✅ VERIFIED (W8) — §3 tail → W9-L1** | **End-to-end through the SCAFFOLD: census `{stubs: 0, reexports: 0, real: 3}` (`src/jobs/rent*.ts`); D3 job nodes never bridged (counted + surfaced: warnings + README); D2 spec imports the job module (`jobMod_rent` + guarded call, ReferenceError fails the row) and `orc-4` is a REAL oracle test. Residual: `p6.jobs.shortfall` engine log (§3) → W9-L1.** |
 | TA-16 | `verify-kind`: scratch copy + install + claim strikes (C1) | S/M | ❌ | same commit as T4.1 |
 | TA-17 | Git landing detail: `.gitignore`, init, A4 dependency | S | ❌ | inside T4.2 |
 | TA-18 | Apply-patch: preservation + conflict semantics | S | ❌ | inside T4.3 |
@@ -286,11 +298,11 @@ size, where it lives, and what the next wave should pick up.
 | `fixes/216o_policy_integration.md` | ⏳ bodies → W8-L2 (code+pins ✅; suites verified) |
 | `fixes/216p_provider_registry.md` | ⏳ body → W8-L2 (registry 21/21 ✅) |
 | `fixes/216q_eval_fixtures.md` | ✅ COMPLETE (W6-L4) |
-| `fixes/216r_patch_integration.md` | ⏳ wiring ✅ (baseline held); tests + body → W8-L5 |
-| `fixes/216s_cli_wave.md` | ⏳ pre-written tests preserved in-log; arm + T5 verbs → W8-L3 |
-| `fixes/216t_subagent_contract.md` | ⏳ modules ✅ (22/22 + 12/12); body → W8-L4 |
+| `fixes/216r_patch_integration.md` | ✅ tests 97/97 + body (2 patch-path DEFECTS → W9-L2) |
+| `fixes/216s_cli_wave.md` | ⏳ arm + 3 tests + README section ✅; behavior suites → W9-L3 |
+| `fixes/216t_subagent_contract.md` | ✅ COMPLETE (W8-L4) |
 | `fixes/216u_w7_e2e_verification.md` | ✅ WRITTEN (parent-assembled; carries the falsification record) |
-| `fixes/216v_compaction_constants.md` | ⏳ to write → W8-L2 (module + tests ✅ 19/19) |
+| `fixes/216v_compaction_constants.md` | ✅ WRITTEN (W8-L2) |
 | `fixes/216l_tree_run_build_test.md` | ✅ WRITTEN (W3-L2, 14.4 KB) |
 | `fixes/216m_ui_wave2.md` | ✅ COMPLETE (W4-L4) |
 | `fixes/216n_wave_h_primitives.md` | ✅ COMPLETE (W4-L2) |
@@ -324,17 +336,19 @@ size, where it lives, and what the next wave should pick up.
 > Ownership is only valid once every W1 lane has stopped. Re-grep anchors before briefing.
 > Keep ≤5 lanes, disjoint files, flash-only, §3.0 guardrails verbatim, skeleton-first.
 
-> **W7 CLOSED (§1 — TA-15 status CORRECTED: tree half real, scaffold half open). W8 DISPATCHED
-> 2026-09-17 ~09:00 — "scaffold completion + closures" (5 lanes; every brief orders the lane to
-> read its own `wave_plans/W8/lane-N.md` FIRST).**
-1. **W8-L1 — TA-15 completion (THE blocker)**: scaffold D3 bridge policy for real (job nodes never
-   bridged; counted + surfaced), D2 oracle job-row ctx, `p6.jobs.shortfall` production log + caller,
-   `moduleEmbedded` empty-string fix (`scaffold.ts`+test, `headless.ts`+test, `engine.ts`; per `fixes/216u`).
-2. **W8-L2 — logs lane**: `fixes/216o` + `216p` + `216v` bodies (verified numbers only).
-3. **W8-L3 — CLI wave (redo)**: re-land the 3 preserved tests + `verbArmSource` helper + `edit` arm
-   + `lesson --advise/--verify` (`scripts/*`).
-4. **W8-L4 — T-107.10 closure**: `fixes/216t` body + mock E2E completion/verification.
-5. **W8-L5 — patch-integration tests + `216r` body** (`codegen.server.test.ts` only).
+> **W8 CLOSED (§1 — TA-15 ACCEPTANCE MET). W9 DISPATCHED 2026-09-17 ~09:50 — "engine truth +
+> patch-path + CLI tails" (5 lanes; every brief orders the lane to read its own
+> `wave_plans/W9/lane-N.md` FIRST).**
+1. **W9-L1 — §3 shortfall log + T-11** (`engine.ts`+test: `p6.jobs.shortfall` caller for
+   `doctor.jobScopeShortfall`; lesson capture gated on a green seal + probe id).
+2. **W9-L2 — patch-path DEFECTS** (`codegen.server.ts`+test: masked↔raw line mapping;
+   post-patch short-circuit — repros in `fixes/216r` §2).
+3. **W9-L3 — CLI behavior suites** (`edit` dry-run-never-writes / refusal / write+ledger pins;
+   T5 suites; `scripts/*` + `fixes/216s` §1-4).
+4. **W9-L4 — T-107.6 token ledger** to the verify/chat/crew/node-runner seams
+   (`token-ledger.ts` + those seams; codegen seam DEFERRED — W9-L2 owns that file).
+5. **W9-L5 — T-11 verify + 108-T7 spike** (lesson-capture gating evidence; E2E-vs-running-
+   instance feasibility + isolation-boundary decision doc).
 
 > **W3 sketch (after W2):** TA-15 + T-13 (multi-job — THE product blocker; files free after R1/R3)
 > · T-18 (tree-run builds+tests; after R2) · T-11 · T4 hops · UI remainder (TASK-01/06/10/11) ·
@@ -428,3 +442,8 @@ Deferred to W3+: 105 standalones (TA-1/TA-3/TA-21/TA-23), 112 T5/T9/T11/T12, Wav
   673e349; corpus emit `reexports: 5`) → TA-15 status corrected to PARTIAL; `fixes/216u`
   written with the full falsification record. **`gate.sh {"ok":true}`** — scripts 235 +
   src **1894** (+53 new tests). W8 dispatched: scaffold completion + closures.
+- **2026-09-17 (wave 8 close)** — **TA-15 ACCEPTANCE MET through the real scaffold path**
+  (census `{0,0,3}`; D3 never-bridge + counted/surfaced; D2 guarded job-module rows; orc-4
+  real). L2 ✅ logs; L4 ✅ T-107.10 closed; L5's patch tests 97/97 + 2 documented patch-path
+  defects (→ W9-L2). Parent budget: the big scaffold completion + 3 stale pins + README-cli +
+  `rowsOk` lint. **`gate.sh {"ok":true}`** — scripts 238 + src **1905**. W9 dispatched.

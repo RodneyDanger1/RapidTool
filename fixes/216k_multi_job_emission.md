@@ -186,3 +186,63 @@ every claim below is a command actually run this session.
   emission) still censuses `reexports: 5` — it re-materialises only via a fresh KEYED run
   (user-owned T0.10).
 - End-to-end keyless pipeline run (brief → emit → census) = W7-L5's verification lane.
+
+## W8 parent completion + evidence (2026-09-17 — TA-15 ACCEPTANCE MET)
+
+- W8-L1 landed the D3 bridge policy + D2 job-module ctx as patches but died MID-EDIT leaving
+  `scaffold.ts` non-compiling (TDZ on the census arrays + missing type members). The PARENT
+  completed the repair: type members (OracleRowKind "tree-job", OracleRowSurface.jobModules,
+  OracleSurfaceCtx.treeJobModules), input+population, the classification branch, the spec-side
+  import map + `tree-job` row emission (guarded probe: calls one real export; ONLY a
+  ReferenceError — a missing cross-file binding — fails the row), the census arrays hoisted
+  above their use + README pushed after the node loop with `files.unshift(files.pop())` (order
+  preserved), the boundaries rendering (via the existing `censusIds` helper), and two
+  double-escaped `/\\.ts$/` regexes corrected to `/\.ts$/` (the V4A literal-escape trap that
+  made both D2 filters match nothing). Deviations recorded: the emitted cast uses
+  `(...a: unknown[])` (callable) instead of `(...a: never[])` (uncallable); the D2 row branch
+  emits a loud assert.fail on the unreachable no-import case.
+- Two stale scaffold pins updated old→new (warnings now correctly carry the 3 counted
+  unmaterialised-job rows beside the refusal; refusal stays FIRST).
+- **ACCEPTANCE (real runs):** corpus-shaped injected-model emit → scaffold → **census
+  `{"stubs": 0, "reexports": 0, "real": 3}`** (`src/jobs/rent.ts` + `rent-2` + `rent-3`);
+  track/record/lease = **no file** + 3 verbatim warnings + README lines; spec carries
+  `import * as jobMod_rent` + `jm_rent` guarded block and **`orc-4` (job "rent") is a REAL
+  test** (track/record/lease rows remain honest skips — unmaterialised). Suites: scaffold
+  36/36 · headless 90/90 · codegen 97/97 · typecheck 0.
+- **NOT done (§3, carried to W9-L1):** the production `p6.jobs.shortfall` engine log + caller
+  (design in W8-L1's recon: applyPhaseResult P6 branch ~engine.ts :1489-1493; must not import
+  codegen.server.ts — mirror the pure label helper).
+- New defect register for W9-L2 (patch path): masked↔raw line-number mismatch + post-patch
+  legacy overwrite — full repros in `fixes/216r` §2.
+
+---
+
+# W8 · L1 landing (TA-15 completion — this session)
+
+**Status: in-progress.** Skeleton-first (rule 8). Section bodies fill as edits land; every
+claim below = a command actually run this session (no invented output).
+
+## W8-L1 what changed (per-file, with line refs)
+
+_(filled as patches land)_
+
+## W8-L1 pinned-byte changes (old → new, deliberate)
+
+_(each with the reason; never weaken an assertion)_
+
+## W8-L1 evidence (commands + real observed output)
+
+_(filled as I go)_
+
+## W8-L1 D2 oracle rows — the ≥3 job-module rows and their failability probe
+
+_(filled at the end: green run + broken-binding run)_
+
+## W8-L1 done-when checklist
+
+- [ ] corpus-shaped emit through the scaffold → `doctor --tree` = `reexports: 0, stubs: 0, real >= 3`
+- [ ] job nodes never bridged: counted + surfaced (warnings + README line); non-job bridges counted
+- [ ] D2: ≥3 job modules get real failable rows (proved failable)
+- [ ] `p6.jobs.shortfall` production log from the engine when declared > materialised
+- [ ] `moduleEmbedded` false on empty generatedSource
+- [ ] typecheck 0; scaffold/headless/engine/doctor suites green

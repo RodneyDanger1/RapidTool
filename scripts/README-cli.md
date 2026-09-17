@@ -7,27 +7,28 @@ and dynamically imports the vault (`vault.ts`), crew (`crew.server.ts`),
 verify (`verify.server.ts`), design (`design.ts`) and diagram (`diagram.ts`)
 modules when their subcommands run.
 
-**34 subcommands** (verified on disk: `grep -c 'case "' scripts/rapidtool-cli.mjs` = 34):
+**35 subcommands** (verified on disk: `grep -c 'case "' scripts/rapidtool-cli.mjs` = 35):
 `create` `run` `gate` `approve` `reject` `retry` `ingest` `packet` `export` `emit`
-`tree-run` `repair` `summary` `vault` `search` `crew` `verify` `check` `design`
+`tree-run` `repair` `edit` `summary` `vault` `search` `crew` `verify` `check` `design`
 `diagram` `artifacts` `doctor` `diagnose` `harvest` `swarm` `prompt` `bench`
 `mine` `knowledge` `lesson` `wild` `chat` `deepen` `fixtures` — from brief to verified artifact,
 design tokens + SVG diagrams, an Obsidian-style knowledge vault, the
 runnable-scaffold writer (`emit`), per-file compile checks (`check`), telemetry
 diagnosis (`diagnose`), a bounded live-source harvester, the advisory
 swarm/prompt/bench pillar tools, a cross-project pattern store, the human-gated
-lesson family (`list`/`propose`/`accept`/`supersede`/`refute`), wild-mode
+lesson family (`list`/`propose`/`accept`/`supersede`/`refute`/`advise`/`verify`), wild-mode
 macro-runs (enable/start/pause/resume/stop), a grounded copilot turn, the E-13
 research-deepen recovery, a capability pre-flight, the brief-fixture
 drafter/approver (`fixtures` `--draft` / `--approve` — drafted cases stay
-pending until a human approves), and the emit→edit→re-emit
+pending until a human approves), the in-place edit verb (`edit` — dry-run by
+default, row #34 below), and the emit→edit→re-emit
 continuation verbs `tree-run` + `repair` (rows #31–32 below).
 
-> **`tree-run` + `repair` shipped (fixes/150 G1); `emit --verify-kind` is in
+> **`tree-run` + `repair` + `edit` shipped (fixes/150 G1 + 216s); `emit --verify-kind` is in
 > flight.** The dir-based continuation verbs are callable today — rows #31–32
 > below and the [Tree-run and repair (landed); emit verify-kind (in flight)](#tree-run-and-repair-landed-emit-verify-kind-in-flight)
-> section describe their real envelopes. `emit --verify-kind` has **NOT landed as
-> a documented verb**: `grep -c 'case "'` reads 34 and none of the 34 case arms is
+> section describe their real envelopes (`edit`'s own section: [Edit (`edit`)](#edit-edit)). `emit --verify-kind` has **NOT landed as
+> a documented verb**: `grep -c 'case "'` reads 35 and none of the 35 case arms is
 > `verify-kind` — the flag rides inside `emit` (`rapidtool-cli.mjs:768`, over
 > `verifyKindDir` at `compile-check.server.ts:770`) and the scratch-copy + install
 > leg is still open (TA-16) — treat its row as the
@@ -344,12 +345,32 @@ emit refusal → exit 1 (`RT_E_PROJECT_MISSING` / `RT_E_VALIDATION`).
 > **In flight (fixes/149 P1-2):** opt-in `--verify-kind` — a bounded
 > `npm install` + `vite build` leg for webapp/game kinds in a temp dir (never
 > mutating the emitted dir), asserting the kind's declared build actually runs.
-> NOT proven at this write — none of the 34 case arms is `verify-kind`
-> (`grep -c 'case "' scripts/rapidtool-cli.mjs` reads 34); the flag rides inside
+> NOT proven at this write — none of the 35 case arms is `verify-kind`
+> (`grep -c 'case "' scripts/rapidtool-cli.mjs` reads 35); the flag rides inside
 > `emit` (`rapidtool-cli.mjs:768` → `verifyKindDir`), whose scratch-copy + install
 > leg is still open (TA-16); see the
 > [Tree-run and repair (landed); emit verify-kind (in flight)](#tree-run-and-repair-landed-emit-verify-kind-in-flight)
 > section before relying on it.
+
+## Edit (`edit`)
+
+In-place `str_replace` on ONE emitted tree file (`src/lib/patch.ts` primitive —
+unique match required, never a silent fuzzy). **DRY-RUN is the default**: the
+would-be diff + before/after hashes are returned and NOTHING is written.
+`--write` (requires `--project <file.json>`) applies atomically (write-then-rename,
+with a containment check on `--file`) only after the ONE policy seam
+(`src/lib/policy.ts` `evaluatePolicy("repair.apply", \`tree:<dir>\`)`) allows the
+seat, then lands ONE attributed ledger row — actor + `decidedVia` provenance +
+the patch + before/after hashes. Ambiguous / missing / no-op matches are coded
+refusals (`RT_E_VALIDATION`, exit 1); write or ledger failures exit 4. Dry-run
+needs no `--project` and never writes.
+
+```bash
+# dry-run (default) — prints the diff, writes nothing:
+node --experimental-strip-types scripts/rapidtool-cli.mjs edit --dir <dir> --file <relpath> --find "<old>" --replace "<new>"
+# apply + attribute (atomic; policy-gated):
+node --experimental-strip-types scripts/rapidtool-cli.mjs edit --dir <dir> --file <relpath> --find "<old>" --replace "<new>" --write --project <file.json>
+```
 
 ## Check (`check`)
 
@@ -364,9 +385,9 @@ a missing `--dir` argument → exit 1 (`RT_E_VALIDATION`); internal error → ex
 ## Tree-run and repair (landed); emit verify-kind (in flight)
 
 > **Status at this write: `tree-run --dir` and `repair --dir` SHIPPED (fixes/150
-> G1, case arms present, `grep -c 'case "'` = 34). `emit --verify-kind` is IN
+> G1, case arms present, `grep -c 'case "'` = 35). `emit --verify-kind` is IN
 > FLIGHT — the fixes/149 P1-2 contract below describes what will land, but none
-> of the 34 case arms is `verify-kind` (the flag rides inside `emit`) and the
+> of the 35 case arms is `verify-kind` (the flag rides inside `emit`) and the
 > scratch-copy + install leg is still open (TA-16).
 > Re-check before calling it.**
 

@@ -143,3 +143,54 @@ test("TASK-06: no README line argues from a stale `grep -c 'case \"'` count", ()
   });
   assert.ok(checked.length >= 1, "the count command is quoted nowhere in README-cli.md");
 });
+
+/**
+ * W7-L3 (re-landed by W8-L3, fixes/216s §5): extract ONE dispatcher arm's
+ * source — `case "<verb>": { … }` — so a contract test can assert on the
+ * implementation the README describes (the doc binds to the arm, not to the
+ * whole 2200-line file, so a match elsewhere cannot fake it).
+ *
+ * Brace-depth scan from the arm's opening `{` to its matching `}`. Arm bodies
+ * keep their braces balanced inside strings/comments too (the file's style),
+ * so the scan needs no tokenizer; a missing arm returns null and the caller's
+ * `assert.ok(arm, …)` names the gap.
+ */
+function verbArmSource(src, verb) {
+  const marker = `case "${verb}"`;
+  const at = src.indexOf(marker);
+  if (at === -1) return null;
+  const open = src.indexOf("{", at);
+  if (open === -1) return null;
+  let depth = 0;
+  for (let i = open; i < src.length; i += 1) {
+    const ch = src[i];
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return src.slice(at, i + 1);
+    }
+  }
+  return null;
+}
+
+test("W7-L3: the `edit` arm exists, reads the documented dry-run/write flags", () => {
+  const arm = verbArmSource(cliText, "edit");
+  assert.ok(arm, 'rapidtool-cli.mjs has no `case "edit"` arm — the README documents one');
+  assert.match(arm, /flag\(args,\s*"write"\)/, "the edit arm must read the documented --write flag (dry-run is the default)");
+  assert.match(arm, /dry-run/i, "the edit arm must name its dry-run default");
+});
+
+test("W7-L3: the `edit` write path reuses the str_replace primitive + the ONE policy seam", () => {
+  const arm = verbArmSource(cliText, "edit");
+  assert.ok(arm, 'rapidtool-cli.mjs has no `case "edit"` arm');
+  assert.match(arm, /applyStrReplace/, "the edit arm must use the T-107.1 str_replace primitive (src/lib/patch.ts)");
+  assert.match(arm, /evaluatePolicy\(\s*"repair\.apply"/, 'the edit write path must consult evaluatePolicy("repair.apply", `tree:<dir>`)');
+  assert.match(arm, /decidedVia/, "the edit write path must record the W6 decidedVia provenance shape");
+});
+
+test("W7-L3: the README documents the `edit` verb's dry-run default + --write flag", () => {
+  assert.match(readmeText, /^## Edit \(`edit`\)/m, "README-cli.md must carry a `## Edit (`edit`)` section");
+  assert.match(readmeText, /--write/, "the edit section must document the --write flag");
+  assert.match(readmeText, /dry-run/i, "the edit section must state the dry-run default");
+  assert.match(readmeText, /repair\.apply/, "the edit section must name the policy action its write is routed through");
+});

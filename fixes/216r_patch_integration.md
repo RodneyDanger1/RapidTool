@@ -90,7 +90,43 @@ artifacts", `107_competitors_agentic.md:206`):**
 
 ## 2. Verification (real command output)
 
-_(filled after the edits land)_
+**Work log (W7-L1 + W8-L5 + parent boundary, 2026-09-17):** the wiring landed in W7-L1
+(codegen delta-producer target + headless `repairTreeDir` surface; baselines held). W8-L5 then
+pinned the behavior with 11 new tests and produced the TWO defect repros below; the parent ran
+the boundary sweep that closed this file.
+
+**W8-L5 test results (verbatim):**
+- `node --experimental-strip-types --test src/lib/codegen.server.test.ts` → **# tests 97 / # pass
+  97 / # fail 0** (baseline 86 — grew by 11; none weakened/deleted). New suites: "216r patch
+  primitives (W8-L5 pins)" (4) + "216r patch repair through liveP6Synthesis (W8-L5 pins)" (7).
+- (a) unique-match: patch re-prompt offered FIRST; delta record exact (kind 'exact' / score 1 /
+  threshold null / matches 1 / removedLines 3 / addedLines 1 / unified `@@ -39,3 +39,1 @@`),
+  patched module === KANBAN_MODULE.trim(), revalidates, tree[0].source = patched bytes.
+- (b) refusals: ambiguous (4 matches) / no-match (0) / no-op each log `p6.repair.patch.refused`
+  with the coded RT_E_VALIDATION string; the following legacy prompt is asserted BYTE-IDENTICAL
+  to `p6SynthesisProseRepairPrompt(proseLineHits(module))`; legacy reply still accepted.
+- (c) no-patch byte-parity: level OFF → `p6SynthesisNondeterministicRepairPrompt('Math.random')`
+  exactly, zero p6.repair* records; non-patchable class ON vs OFF → identical prompts/kinds/bytes.
+- Parent boundary re-run: codegen 97/97 · headless 90/90 · typecheck 0 on the repaired tree.
+
+**DEFECTS (report-only, carried to W9-L2 — codegen.server.ts was read-only for W8-L5):**
+1. **Masked↔raw line-number mismatch kills the patch path for JSDoc'd modules (the common case
+   — the system prompt mandates JSDoc).** `maskLiteralsAndComments` replaces a `/* … */` span
+   with `" ".repeat(stop - i)`, destroying the newlines inside the comment (raw 37 lines → masked
+   26); `patchableDefect` then gets MASKED line numbers, filters them against RAW source lines
+   (`.filter((n) => (srcLines[n-1] ?? "").includes(token))`), the list empties, and
+   `attemptPatchRepair` never fires. Repro: `probe-w8l5b.ts` (deleted; see transcript
+   deleg_7335199d/task-4.log): hit "Math.random", tokenLineNumbers [4], filtered [], windows 0;
+   call kinds ['SYNTH','LEGACY-NONDET'] with no patch call. Suggested shape: derive candidates
+   from raw source, or map masked→raw line numbers before filtering/excerpting.
+2. **A landed delta does not short-circuit the legacy repair block.** The guards at :2473
+   (single-module) and :2792 (chunked) are evaluated from the ORIGINAL defect values, so the
+   legacy full-rewrite re-prompt still fires after a successful patch; a parseable reply
+   OVERWRITES the patched envelope (:2485-2489 / :2804-2808) and the landed delta is silently
+   discarded. Repro: `probe-w8l5e.ts` OVERWRITE case — `p6.repair.delta` logged, then the run
+   ends `p6.synthesis.refused :: RT_E_VALIDATION · prose-in-code…` although a valid patched
+   module already existed. W8-L5's tests pin the CURRENT behavior honestly (post-patch legacy
+   replies made unparseable) rather than asserting the buggy overwrite as correct.
 
 ## 3. What is NOT done / bounds
 

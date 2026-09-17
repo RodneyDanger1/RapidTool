@@ -929,6 +929,10 @@ type OracleSurfaceCtx = {
   apiPath?: string | null;
   /** path hosting generatedSource (template-shaped modules get an export tail). */
   hostPath?: string | null;
+  /** fixes/216k D2: tree-covered job modules (label + .ts path) whose real
+   *  export surface the job-keyed oracle rows assert. Absent/empty ⇒ the spec
+   *  is byte-identical to pre-216k output. */
+  treeJobModules?: { label: string; path: string }[];
   /**
    * fixes/144 (M2): tree assembly mode — path of the generatedTree ENTRY
    * module (the file at the path the legacy P6 host would have used). When
@@ -979,6 +983,7 @@ type OracleRowKind =
   | "endpoint-stub"
   | "bridged-host"
   | "phase-bookkeeping"
+  | "tree-job"
   | "not-implemented";
 
 /**
@@ -994,6 +999,8 @@ type OracleRowSurface = {
   hostOk: boolean;
   /** leftover job labels bridged to the hosted module — never assert the stub. */
   bridged: ReadonlySet<string>;
+  /** fixes/216k D2: tree-covered job labels whose REAL module is importable. */
+  jobModules: ReadonlySet<string>;
   /** A6 contract endpoints (the row's job → a routable seam). */
   endpoints: { method: string; path: string; job: string }[];
 };
@@ -1010,6 +1017,8 @@ function oracleRowSurface(input: {
   template: boolean;
   /** leftover job labels bridged to the hosted module (fixes/196). */
   bridged?: Iterable<string>;
+  /** fixes/216k D2: tree-covered job modules (label + path) — .ts only. */
+  jobModules?: { label: string; path: string }[];
   /** A6 contract endpoints recorded on the project. */
   endpoints?: { method: string; path: string; job: string }[];
 }): OracleRowSurface {
@@ -1022,6 +1031,11 @@ function oracleRowSurface(input: {
       /\.ts$/.test(input.hostPath) &&
       input.template,
     bridged: new Set<string>(input.bridged ? [...input.bridged] : []),
+    jobModules: new Set<string>(
+      (input.jobModules ?? [])
+        .filter((m) => m && typeof m.label === "string" && /\.ts$/.test(String(m.path)))
+        .map((m) => m.label),
+    ),
     endpoints: Array.isArray(input.endpoints) ? input.endpoints : [],
   };
 }
@@ -1032,6 +1046,10 @@ function oracleRowSurface(input: {
  * that re-exports the hosted module is a bridge, not a stub to reject.
  */
 function oracleRowKind(row: { job?: unknown }, surface: OracleRowSurface): OracleRowKind {
+  // fixes/216k D2 (parent boundary repair): a tree-covered job module is a REAL
+  // importable surface — it wins over the legacy classifications (tree mode
+  // disables api/host/bridged anyway, so no pre-216k behavior changes).
+  if (surface.jobModules.has(String(row.job))) return "tree-job";
   const bridged = surface.bridged.has(String(row.job));
   const hasEndpoint = surface.endpoints.some((e) => e.job === row.job);
   if (bridged) return surface.hostOk ? "bridged-host" : "not-implemented";
@@ -1214,6 +1232,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       hostPath: ctx.hostPath,
       template,
       bridged: ctx.bridgedJobLabels,
+      jobModules: ctx.treeJobModules,
       endpoints,
     });
   const storeOk =
@@ -1238,6 +1257,33 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
           : []
       : [];
   const capSection = capDemands.length > 0 && capScanPaths.length > 0;
+
+  // fixes/216k D2 (parent boundary repair): tree-covered job modules the spec
+  // imports so the job-keyed A7 rows assert the REAL module (never a skip).
+  // Deterministic names (sanitized label, collision-suffixed); .ts only
+  // (strip-types cannot load .tsx). Empty ⇒ byte-identical pre-216k output.
+  const treeJobImport = new Map<string, { importName: string; slug: string; path: string }>();
+  if (treeEntryOk) {
+    const usedNames = new Set<string>(["treeModule"]);
+    for (const m of Array.isArray(ctx.treeJobModules) ? ctx.treeJobModules : []) {
+      if (!m || typeof m.label !== "string" || typeof m.path !== "string") continue;
+      if (!/\.ts$/.test(m.path)) continue;
+      if (treeJobImport.has(m.label)) continue; // first wins — graph order, deterministic
+      const stem = m.label.replace(/[^A-Za-z0-9_$]/g, "_") || "mod";
+      let importName = `jobMod_${stem}`;
+      let k = 2;
+      while (usedNames.has(importName)) {
+        importName = `jobMod_${stem}_${k}`;
+        k += 1;
+      }
+      usedNames.add(importName);
+      treeJobImport.set(m.label, {
+        importName,
+        slug: importName.replace(/^jobMod_/, "jm_"),
+        path: m.path,
+      });
+    }
+  }
 
   const lines = [
     "// ---------------------------------------------------------------------------",
@@ -1287,6 +1333,11 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     ...(hostOk ? [`import { JOBS, REJECTION, synthesize } from ${jstr(tsImportPath("tests", ctx.hostPath as string))};`] : []),
     ...(treeEntryOk
       ? [`import * as treeModule from ${jstr(tsImportPath("tests", ctx.treeEntryPath as string))};`]
+      : []),
+    ...(treeEntryOk
+      ? [...treeJobImport.values()].map(
+          (v) => `import * as ${v.importName} from ${jstr(tsImportPath("tests", v.path))};`,
+        )
       : []),
     "",
   ];
@@ -1495,6 +1546,33 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
           `  const s = new CheckpointStore();`,
           `  s.write({ phase: 6, status: "sealed", updatedAt: ${jstr(SEAL_DATE)} });`,
           `  assert.equal(s.read(6)?.status, "sealed");`,
+        );
+      }
+    } else if (kind === "tree-job") {
+      const jm = treeJobImport.get(String(row.job));
+      if (jm) {
+        lines.push(
+          `  // fixes/216k D2 (TA-15): the tree materialised this job as a REAL`,
+          `  // module (never a bridge) — assert its export surface and CALL one`,
+          `  // real function in a guarded probe. A ReferenceError here is a missing`,
+          `  // cross-file binding (a forward call into a later chunk) and fails this`,
+          `  // row; any other throw is the real function behaving. Pre-D2: a skip.`,
+          `  const ${jm.slug} = ${jm.importName} as unknown as Record<string, (...a: unknown[]) => unknown>;`,
+          `  const names = Object.keys(${jm.slug});`,
+          `  assert.ok(names.length > 0, "job module exports real names: " + names.join(", "));`,
+          `  for (const n of names) assert.equal(typeof ${jm.slug}[n], "function", n + " must be a real function");`,
+          `  const first = names[0] ?? "";`,
+          `  try {`,
+          `    (${jm.slug}[first] as (...a: unknown[]) => unknown)({ payment: 1 });`,
+          `  } catch (e) {`,
+          `    if (e instanceof ReferenceError) throw e;`,
+          `  }`,
+        );
+      } else {
+        lines.push(
+          `  // fixes/216k D2 defensive: classified tree-job with no mapped import`,
+          `  // (unreachable — the kind derives from the same map). Fail loudly.`,
+          `  assert.fail(${jstr(`${id} is NOT IMPLEMENTED — replace this skip with the row's real acceptance assertion`)});`,
         );
       }
     } else if (kind === "phase-bookkeeping") {
@@ -1847,6 +1925,19 @@ function commandBlock(
   return base.map((l) => `  ${l}`);
 }
 
+/**
+ * fixes/216k (TA-15 done-when 2): the tree-mode job-scope / bridge census the
+ * shipped README renders under "Honest boundaries" — the unmaterialised
+ * spec-graph job nodes (NEVER bridged: the tree ships no file at their path)
+ * and the surviving non-job bridges (thin re-exports of the tree entry, bytes
+ * unchanged — now COUNTED). Both lines render only when their list is
+ * non-empty, so zero-count emissions stay byte-identical to pre-216k output.
+ */
+type ReadmeJobScope = {
+  unmaterialisedJobs?: { id: string; file: string; label: string | null }[];
+  bridgedPaths?: string[];
+};
+
 function readmeBody(
   project: Project,
   kind: ProjectKind,
@@ -1854,6 +1945,7 @@ function readmeBody(
   treeRows: [string, string][] = [],
   oracleCensus: OracleRowCensus | null = null,
   treeRefusals: string[] = [],
+  jobScope: ReadmeJobScope = {},
 ): string {
   const files: [string, string][] = [
     ["README.md", "this file — mission + commands"],
@@ -1912,6 +2004,22 @@ function readmeBody(
     treeRefusals.length === 0
       ? null
       : `- **${treeRefusals.length} generated tree row(s) were REFUSED and are NOT on disk** (never a silent drop — each declared file below is absent from this scaffold): ${censusIds(treeRefusals)}.`;
+  // fixes/216k (TA-15): the tree-mode job-scope / bridge census lines — rendered
+  // only when non-empty, so zero-count emissions stay byte-identical to the
+  // pre-216k output. Never silent: an unmaterialised job node is named.
+  const jobScopeLines: string[] = [];
+  if ((jobScope.unmaterialisedJobs?.length ?? 0) > 0) {
+    const jobs = jobScope.unmaterialisedJobs as { id: string; file: string; label: string | null }[];
+    jobScopeLines.push(
+      `- ${jobs.length} declared spec-graph job node(s) were NOT materialised by the generated tree (never bridged — a re-export at a job path would read as a leftover job): ${censusIds(jobs.map((j) => j.file))}.`,
+    );
+  }
+  if ((jobScope.bridgedPaths?.length ?? 0) > 0) {
+    const paths = jobScope.bridgedPaths as string[];
+    jobScopeLines.push(
+      `- ${paths.length} non-job module(s) are thin bridges to the tree entry (counted, never silent): ${censusIds(paths)}.`,
+    );
+  }
   const body = [
     `# ${mdLine(project.name, 120)}`,
     "",
@@ -1950,6 +2058,7 @@ function readmeBody(
     coreLine,
     oracleRowLine,
     refusalLine,
+    ...jobScopeLines,
     "- `src/ui/` is a contract-level shell (P8 interface contract), not a finished UI.",
     "- Deploy templates from P9/P12 are recorded artifacts only — see DEPLOY.md; nothing here deploys by itself.",
     "- `assets/` and `public/` are expected at the emitted scaffold and are NOT engine-generated.",
@@ -2292,26 +2401,54 @@ export function scaffoldProject(project: Project): ScaffoldResult {
    * literal "../generated.ts", which the allow-list refused ⇒ dangling.
    */
   const generatedEntryPath: string | null = treeMode ? treeEntryPath : plannedHostPath;
+  /**
+   * fixes/216k D2 (TA-15): the JOB modules the generated tree actually
+   * materialised — spec-graph job-* nodes whose sanitized path a tree file
+   * covers, in graph order, importable (.ts) only (node strip-types cannot
+   * load .tsx). Each entry keys its A7 oracle row (row.job === label) to the
+   * REAL module file, so the row asserts that module's real export surface
+   * instead of skipping. Empty in legacy mode and for uncovered job nodes —
+   * both keep byte-identical pre-216k output.
+   */
+  const treeJobModules: { label: string; path: string }[] = treeMode
+    ? ordered
+        .filter(({ node, index }) => {
+          if (!node.id.startsWith("job-")) return false;
+          const path = safeNodePath(node.file, node.id, index);
+          return treeByPath.has(path) && /\.ts$/.test(path);
+        })
+        .map(({ node, index }) => ({
+          label: jobLabelOf(node) ?? node.id,
+          path: safeNodePath(node.file, node.id, index),
+        }))
+    : [];
   // The surface the spec's row loop switches on (mirrors the ctx it receives:
-  // tree mode imports only the tree entry, so api/host/bridge surfaces are off).
+  // tree mode imports only the tree entry — plus, per D2, each tree-covered
+  // job module — so api/host/bridge surfaces are off there).
   const oracleSurface = oracleRowSurface({
     treeEntryOk: treeMode && typeof treeEntryPath === "string" && /\.ts$/.test(treeEntryPath),
     apiPath: treeMode ? null : apiPath,
     hostPath: treeMode ? null : plannedHostPath,
     template: isTemplateModule(generated),
     bridged: treeMode ? [] : plannedBridgedLabels,
+    jobModules: treeJobModules,
     endpoints:
       project.contracts && Array.isArray(project.contracts.endpoints)
         ? project.contracts.endpoints
         : [],
   });
   const oracleCensus = proj.oracle.length ? censusOracleRows(proj.oracle, oracleSurface) : null;
+  /** fixes/216k D3: tree-mode job nodes the tree did not cover — never bridged
+   *  (a bridged job path would keep doctor's census `reexports > 0` forever).
+   *  Filled by the spec-graph node loop below; rendered by readmeBody + warnings. */
+  const unmaterialisedJobs: { id: string; file: string; label: string | null }[] = [];
+  /** fixes/216k: tree-mode non-job nodes bridged to the tree entry (now counted). */
+  const bridgedNonJobPaths: string[] = [];
 
   // --- Root documents + skeleton files -------------------------------------
-  push(
-    "README.md",
-    readmeBody(proj, kind, specRows, treeDocRows, oracleCensus, treeRefusals),
-  );
+  // (fixes/216k parent boundary repair: the README push moved BELOW the
+  // spec-graph node loop — it renders the job-scope/bridge census arrays the
+  // loop fills; emitting it here ran before the loop: TDZ + empty counts.)
   push("DEPLOY.md", deplyNotes(proj));
   push(".env.example", envExample(kind));
   push("package.json", packageJson(kind, proj, proj.oracle.length > 0));
@@ -2367,19 +2504,35 @@ export function scaffoldProject(project: Project): ScaffoldResult {
       // ENTRY module so the promised module surface still materializes and
       // resolves to real generated code (never a TODO stub beside it).
       if (treeByPath.has(path)) continue;
-      body =
-        node.id === "ui"
-          ? emitUi(
-              node,
-              proj,
-              kind,
-              generatedEntryPath ? { from: path, path: generatedEntryPath } : null,
-            )
-          : emitTreeBridge(
-              { file: path, purpose: node.purpose, id: node.id },
-              proj,
-              treeEntryPath as string,
-            );
+      // fixes/216k D3 (TA-15 / 106 F-10): a spec-graph JOB node the generated
+      // tree does not cover is NEVER bridged. `doctor --tree` classifies any
+      // `src/jobs/*.ts` re-export as a leftover job, so a bridged job path
+      // would keep `reexports > 0` (and the factory latch false) no matter how
+      // real the tree-covered job modules are — exactly the artifact TA-15
+      // removes. The node gets NO file; it is counted + surfaced (warnings +
+      // shipped README line) as an unmaterialised job node, never silently.
+      if (isJob) {
+        unmaterialisedJobs.push({ id: node.id, file: path, label: jobLabelOf(node) });
+        continue;
+      }
+      if (node.id === "ui") {
+        body = emitUi(
+          node,
+          proj,
+          kind,
+          generatedEntryPath ? { from: path, path: generatedEntryPath } : null,
+        );
+      } else {
+        body = emitTreeBridge(
+          { file: path, purpose: node.purpose, id: node.id },
+          proj,
+          treeEntryPath as string,
+        );
+        // fixes/216k: the surviving bridge policy — a NON-job uncovered node
+        // keeps its thin re-export byte-for-byte; the set is now COUNTED so
+        // the summary + shipped README can surface it (never silent either).
+        bridgedNonJobPaths.push(path);
+      }
       push(path, body);
       continue;
     }
@@ -2421,6 +2574,18 @@ export function scaffoldProject(project: Project): ScaffoldResult {
     }
     push(path, body);
   }
+
+  // fixes/216k (parent boundary repair): README is BUILT after the node loop
+  // (it renders the job-scope/bridge census those arrays fill) but ORDERED
+  // first, preserving the pre-216k emitted-file order byte-for-byte.
+  push(
+    "README.md",
+    readmeBody(proj, kind, specRows, treeDocRows, oracleCensus, treeRefusals, {
+      unmaterialisedJobs,
+      bridgedPaths: bridgedNonJobPaths,
+    }),
+  );
+  files.unshift(files.pop() as ScaffoldFile);
   if (!treeMode && generated && !hosted) {
     // Generated module exists but the graph has no job node to host it.
     hostPath = "src/generated.ts";
@@ -2443,7 +2608,9 @@ export function scaffoldProject(project: Project): ScaffoldResult {
   // names the sanitized modules the spec may import (store/api) and the path
   // hosting generatedSource (template modules gain an export surface). TREE
   // mode names the tree ENTRY module instead: the spec imports only the tree
-  // (store/api/template surfaces are generated content with unknown exports).
+  // (store/api/template surfaces are generated content with unknown exports)
+  // plus, per fixes/216k D2, each tree-covered JOB module so every job row can
+  // assert the real module the tree materialised for it.
   if (proj.oracle.length > 0 || ordered.some((o) => o.node.id === "tests")) {
     push(
       "tests/oracle.spec.ts",
@@ -2451,18 +2618,31 @@ export function scaffoldProject(project: Project): ScaffoldResult {
         ? emitOracleSpec(proj, {
             treeEntryPath,
             treePaths: treeAccepted.map((f) => f.path),
+            treeJobModules,
           })
         : emitOracleSpec(proj, { storePath, apiPath, hostPath, bridgedJobLabels }),
     );
   }
 
+  // fixes/216k (TA-15 done-when 2): the D3 count/surface for TREE mode —
+  // unmaterialised spec-graph job nodes (each NEVER bridged; one warning row
+  // apiece) and the surviving non-job bridges (bytes unchanged, now counted).
+  // Both render in the shipped README and the CLI-facing summary. Zero counts
+  // in both ⇒ byte-identical pre-216k output for every existing fixture.
+  const unmaterialisedWarnings = unmaterialisedJobs.map(
+    (j) =>
+      `specGraph:unmaterialised-job:${JSON.stringify(j.file)}:${
+        j.label ? `job ${JSON.stringify(j.label)}` : j.id
+      } has no generated tree file — tree mode NEVER bridges a job node (fixes/216k D3 / TA-15)`,
+  );
   const summary = treeMode
-    ? `${files.length} files · kind ${kind} · packet ${project.id || "unknown"} — tree files already on disk · generatedTree: ${treeAccepted.length} file${treeAccepted.length === 1 ? "" : "s"} assembled${treeRefusals.length ? `, ${treeRefusals.length} refused (see warnings)` : ""}`
+    ? `${files.length} files · kind ${kind} · packet ${project.id || "unknown"} — tree files already on disk · generatedTree: ${treeAccepted.length} file${treeAccepted.length === 1 ? "" : "s"} assembled${treeRefusals.length ? `, ${treeRefusals.length} refused (see warnings)` : ""}${unmaterialisedJobs.length ? `, ${unmaterialisedJobs.length} job node${unmaterialisedJobs.length === 1 ? "" : "s"} unmaterialised (never bridged — see warnings)` : ""}${bridgedNonJobPaths.length ? `, ${bridgedNonJobPaths.length} non-job bridge${bridgedNonJobPaths.length === 1 ? "" : "s"}` : ""}`
     : `${files.length} files · kind ${kind} · packet ${project.id || "unknown"} — write them to disk with the emit command`;
+  const warnings = [...treeRefusals, ...unmaterialisedWarnings];
   return {
     ok: true,
     files,
     summary,
-    ...(treeRefusals.length ? { warnings: treeRefusals } : {}),
+    ...(warnings.length ? { warnings } : {}),
   };
 }

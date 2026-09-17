@@ -24,6 +24,7 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs emit    --project build.json [--out <dir>] [--check] [--run]   # default: <home>/RapidTool Software/<slug>/; --check = per-file compile verdicts; --run = compile + tests + entry smoke (TreeRunOutcome)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir <dir> [--project build.json]                  # fixes/149 P0-1: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits, never clobbers (exit 1 on red with the first not-ok tail); --project adds the hash-checked dirDirty divergence report
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs repair  --dir <dir> --project build.json [--budget N]        # fixes/149 P0-1: hash-checked dir→ledger re-import + bounded repair cycle against the dir (treeRun → red tail → synthesis w/ deps.treeFailure → apply → re-import → treeRun); green → tested-mint + converged (exit 0); budget exhausted → honest failed (exit 1, RT_E_REPAIR_FAILED)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs edit    --dir <dir> --file <relpath> --find "<old>" --replace "<new>" [--write] [--project build.json]   # 216s (108-T1): in-place str_replace on ONE emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, NOTHING is written); --write (requires --project) applies atomically only after evaluatePolicy("repair.apply", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs search  --project build.json --query "..." [--limit N]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs crew    --project build.json [--max-steps N]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs verify  --project build.json [--apply]
@@ -46,11 +47,13 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --accept --project build.json --out lessons.json [--actor NAME] [--limit N]  # THE human-gated cross-project lesson write (top FusionRank rows → knowledge store)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --supersede --knowledge-file lessons.json --id K1a2b3c4d [--evidence "…"]  # append-only supersede (new row + markSuperseded)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --refute --knowledge-file lessons.json --id K1a2b3c4d [--evidence "…"]   # counter-evidence bump (decay/retire)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --advise (--project build.json | --knowledge-file lessons.json) [--brief "…"] [--phase N] [--limit N]   # 216s (112 T5): read-only pre-flight — ranked FAIL-class lesson rows (fusionRank vs --brief, else score-desc) with the live telemetry the rows actually carry (reproducedCount / counterEvidence)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --verify (--knowledge-file lessons.json | --project build.json) --anchor <path> [--mark-stale] [--limit N]   # 216s (112 T5): re-hash the anchor's current bytes against each row's recorded evidenceHash= token → ok | stale | anchor-missing; READ-ONLY unless --mark-stale (store counterEvidence telemetry only, never content)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs packet  --project build.json [--knowledge lessons.json]        # tier-1: seed Ranked memory with accepted cross-project lessons
 // ---------------------------------------------------------------------------
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // E-25: every result object carries schema_version + cmd + exit_code.
@@ -1109,6 +1112,308 @@ async function main() {
         return;
       }
 
+      case "edit": {
+        // 216s (108-T1 · W7-L3 redo): the in-place edit verb — ONE textual
+        // str_replace against a file of an emitted tree dir. DRY-RUN BY
+        // DEFAULT: the would-be diff is returned and nothing is written; only
+        // an explicit --write applies. The write path does not bypass the
+        // governance seams — it consults the ONE policy seam (evaluatePolicy,
+        // src/lib/policy.ts) for `repair.apply` on `tree:<dir>` and refuses
+        // with a coded envelope when the seam denies the seat; it applies
+        // through the T-107.1 applyStrReplace primitive (unique-match
+        // contract: ambiguous / missing / no-op edits are coded refusals,
+        // never guesses); and every applied write lands ONE attributed ledger
+        // row on the --project file (actor + seat + decidedVia provenance +
+        // patch + before/after hashes) — 108 §"mechanisms missing" #1: an
+        // edit that is not attributed would claim provenance the audit trail
+        // does not have. Existing verb exit codes are untouched:
+        // dry-run/applied 0, refusal 1, internal 4.
+        const dirArg = requireArg(args, "dir", "edit");
+        if (dirArg.error) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
+        const dirPath = resolve(dirArg.value);
+        if (!existsSync(dirPath)) {
+          return respond(
+            {
+              ok: false,
+              error: `edit: --dir ${JSON.stringify(dirArg.value)} does not exist — nothing to edit.`,
+              code: "RT_E_VALIDATION",
+              dir: dirPath,
+            },
+            1,
+          );
+        }
+        const fileArg = requireArg(args, "file", "edit");
+        if (fileArg.error) return respond({ ok: false, error: fileArg.error, code: "RT_E_VALIDATION" }, 1);
+        // Containment: the target must resolve INSIDE --dir (relative path, no
+        // drive/absolute prefix, no `..` segment) — an edit verb must never
+        // write outside the tree it names, whatever the caller passes.
+        const relFile = fileArg.value.replace(/\\/g, "/").trim();
+        const relSafe =
+          relFile !== "" &&
+          !relFile.startsWith("/") &&
+          !/^[A-Za-z]:/.test(relFile) &&
+          !relFile.split("/").some((seg) => seg === "..") &&
+          (resolve(dirPath, relFile) + sep).startsWith(dirPath + sep);
+        if (!relSafe) {
+          return respond(
+            {
+              ok: false,
+              error: `edit: --file ${JSON.stringify(fileArg.value)} must be a relative path inside --dir (no absolute path, no '..' segment).`,
+              code: "RT_E_VALIDATION",
+              dir: dirPath,
+            },
+            1,
+          );
+        }
+        const targetPath = resolve(dirPath, relFile);
+        const findArg = requireArg(args, "find", "edit");
+        if (findArg.error) {
+          return respond(
+            {
+              ok: false,
+              error: `${findArg.error} (the str_replace needle; the edit refuses an empty --find)`,
+              code: "RT_E_VALIDATION",
+            },
+            1,
+          );
+        }
+        // --replace may be EMPTY (a legal deletion: --replace="" or --replace
+        // ""); a missing flag is refused, an empty value is honored.
+        if (typeof args.replace !== "string") {
+          return respond(
+            {
+              ok: false,
+              error: 'edit: missing required --replace (pass the replacement text; --replace="" deletes the matched block)',
+              code: "RT_E_VALIDATION",
+            },
+            1,
+          );
+        }
+        let source;
+        try {
+          source = readFileSync(targetPath, "utf8");
+        } catch (err) {
+          return respond(
+            {
+              ok: false,
+              error: `edit: cannot read ${JSON.stringify(targetPath)} — ${err instanceof Error ? err.message : String(err)}`,
+              code: "RT_E_VALIDATION",
+              dir: dirPath,
+              file: relFile,
+            },
+            1,
+          );
+        }
+        const wantWrite = flag(args, "write");
+        // Policy seam FIRST — dry-run consults it too, so the pre-flight answer
+        // (would --write be allowed?) is exactly what the write then enforces
+        // (one rule, no divergence). The env read stays HERE: policy.ts is a
+        // pure leaf and never reads env (its purity test pins that).
+        const { evaluatePolicy, seatLabel } = await import("../src/lib/policy.ts");
+        const actor = flag(args, "i-am-human")
+          ? { decidedBy: "human", seat: "human-cli-i-am-human" }
+          : { decidedBy: "autopilot", seat: "harness" };
+        const resource = `tree:${dirPath}`;
+        const verdict = evaluatePolicy("repair.apply", resource, {
+          actor,
+          humanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN,
+          expectedHumanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN,
+        });
+        if (verdict.decision !== "allow") {
+          return respond(
+            {
+              ok: false,
+              action: "edit",
+              mode: wantWrite ? "write" : "dry-run",
+              written: false,
+              error: `edit: refused by the policy seam — ${verdict.reason} (sanctioned fallback: ${verdict.fallback})`,
+              code: "RT_E_VALIDATION",
+              dir: dirPath,
+              file: relFile,
+              policy: { action: "repair.apply", resource, decision: "deny", reason: verdict.reason, fallback: verdict.fallback },
+            },
+            1,
+          );
+        }
+        const { applyStrReplace } = await import("../src/lib/patch.ts");
+        const patchResult = applyStrReplace(source, { oldStr: findArg.value, newStr: args.replace });
+        if (patchResult.ok !== true) {
+          // Coded refusal from the primitive (0 matches / ambiguous / no-op /
+          // garbage input); nothing was written.
+          return respond(
+            {
+              ok: false,
+              action: "edit",
+              mode: wantWrite ? "write" : "dry-run",
+              written: false,
+              error: `edit: ${patchResult.error}`,
+              code: "RT_E_VALIDATION",
+              dir: dirPath,
+              file: relFile,
+              patch: {
+                kind: patchResult.kind,
+                matches: patchResult.matches,
+                lines: patchResult.lines,
+                bestScore: patchResult.bestScore,
+                bestLine: patchResult.bestLine,
+              },
+            },
+            1,
+          );
+        }
+        const { fnv1a } = await import("../src/lib/algorithms.ts");
+        const hashBefore = String(fnv1a(source));
+        const hashAfter = String(fnv1a(patchResult.text));
+        const decidedVia = {
+          action: "repair.apply",
+          resource,
+          reason: verdict.reason,
+          label: seatLabel(actor),
+          tokenPath: verdict.reason.split(" — ")[0] === "human-seat-token-verified",
+        };
+        const policyEcho = {
+          action: "repair.apply",
+          resource,
+          decision: "allow",
+          reason: verdict.reason,
+          label: decidedVia.label,
+          tokenPath: decidedVia.tokenPath,
+        };
+        if (!wantWrite) {
+          // DRY-RUN (the default): the honest pre-flight — the diff, the
+          // would-be hashes and the seat/policy verdict — and NOTHING written.
+          return respond(
+            {
+              ok: true,
+              action: "edit",
+              mode: "dry-run",
+              written: false,
+              dir: dirPath,
+              file: relFile,
+              path: targetPath,
+              kind: patchResult.kind,
+              score: patchResult.score,
+              matches: patchResult.matches,
+              diff: patchResult.diff,
+              hashBefore,
+              hashAfter,
+              policy: policyEcho,
+              ledger: null,
+              note: "dry-run (the default) — nothing was written; re-run with --write --project <file.json> to apply and attribute the edit in the ledger",
+            },
+            0,
+          );
+        }
+        // --write: attribution is a PRECONDITION, not an afterthought — the
+        // applied edit needs the ledger it lands in (108-T1: actor + patch +
+        // resulting hash).
+        const projArg = requireArg(args, "project", "edit --write");
+        if (projArg.error) {
+          return respond(
+            {
+              ok: false,
+              error: `${projArg.error} — an applied edit must be attributed in the ledger (actor + patch + resulting hash); dry-run (the default) needs no --project.`,
+              code: "RT_E_VALIDATION",
+              written: false,
+              dir: dirPath,
+              file: relFile,
+            },
+            1,
+          );
+        }
+        const project = loadProjectFor("edit --write");
+        const projectPath = requireProjectPath(args, "edit --write");
+        // Atomic write-then-rename (the repo's write discipline): a crash can
+        // never leave a truncated artifact behind.
+        try {
+          const tmp = `${targetPath}.edit-${process.pid}-${Date.now()}.tmp`;
+          writeFileSync(tmp, patchResult.text, "utf8");
+          renameSync(tmp, targetPath);
+        } catch (err) {
+          return respond(
+            {
+              ok: false,
+              error: `edit: write failed — ${err instanceof Error ? err.message : String(err)}`,
+              ...errCode(err, "RT_E_INTERNAL"),
+              written: false,
+              dir: dirPath,
+              file: relFile,
+            },
+            4,
+          );
+        }
+        // Ledger attribution — ONE append-only JsonLog row on the project the
+        // dir belongs to (capped at 200 rows, the lessonLog convention):
+        // event `edit.apply`, JSON detail carrying the actor seat, the
+        // decidedVia provenance envelope (the same W6 shape the approve path
+        // stamps) and the patch + before/after hashes.
+        const logs = Array.isArray(project.logs) ? project.logs : [];
+        const row = {
+          ts: Date.now(),
+          phase: project.currentPhase,
+          level: "info",
+          event: "edit.apply",
+          detail: JSON.stringify({
+            file: relFile,
+            kind: patchResult.kind,
+            score: patchResult.score,
+            matches: patchResult.matches,
+            startLine: patchResult.diff.startLine,
+            endLine: patchResult.diff.endLine,
+            removedLines: patchResult.diff.removedLines,
+            addedLines: patchResult.diff.addedLines,
+            hashBefore,
+            hashAfter,
+            actor: { decidedBy: actor.decidedBy, seat: actor.seat },
+            decidedVia,
+          }),
+        };
+        const nextProject = { ...project, logs: [...logs, row].slice(-200) };
+        try {
+          h.saveProject(projectPath, nextProject);
+        } catch (err) {
+          return respond(
+            {
+              ok: false,
+              error: `edit: the file was written but the ledger row could not be persisted — ${err instanceof Error ? err.message : String(err)}`,
+              ...errCode(err, "RT_E_INTERNAL"),
+              written: true,
+              ledgerSaved: false,
+              dir: dirPath,
+              file: relFile,
+              path: targetPath,
+            },
+            4,
+          );
+        }
+        return respond(
+          {
+            ok: true,
+            action: "edit",
+            mode: "write",
+            written: true,
+            dir: dirPath,
+            file: relFile,
+            path: targetPath,
+            kind: patchResult.kind,
+            score: patchResult.score,
+            matches: patchResult.matches,
+            diff: patchResult.diff,
+            hashBefore,
+            hashAfter,
+            policy: policyEcho,
+            ledger: {
+              path: projectPath,
+              event: "edit.apply",
+              rows: Math.min(logs.length + 1, 200),
+              decidedVia,
+            },
+            note: "the dir is the artifact; the ledger now carries the attributed edit row — run `tree-run --dir <dir> --project <file.json>` (or `repair` with the same flags) to re-check the edited tree",
+          },
+          0,
+        );
+      }
+
       case "summary": {
         const project = loadProjectFor("summary");
         respond({ ok: true, summary: h.summary(project) }, 0);
@@ -1554,12 +1859,18 @@ async function main() {
         // Store telemetry writers (append-only rows / counters, never deletes):
         //   --supersede a newer row declares an old entry dead (append + mark)
         //   --refute    one counter-evidence unit against an entry (decay)
-        const actions = ["list", "propose", "accept", "supersede", "refute"].filter((a) => flag(args, a));
+        // 216s (112 T5) — the read-only consult + proof-check arms:
+        //   --advise    ranked FAIL-class lesson rows for a brief (pre-flight)
+        //   --verify    anchor re-hash → ok | stale | anchor-missing
+        //               (read-only unless --mark-stale: store telemetry only)
+        const actions = ["list", "propose", "accept", "supersede", "refute", "advise", "verify"].filter(
+          (a) => flag(args, a),
+        );
         if (actions.length !== 1) {
           return respond(
             {
               ok: false,
-              error: `lesson: pass exactly one of --list|--propose|--accept|--supersede|--refute (got ${actions.length})`,
+              error: `lesson: pass exactly one of --list|--propose|--accept|--supersede|--refute|--advise|--verify (got ${actions.length})`,
               code: "RT_E_VALIDATION",
             },
             1,
@@ -1824,6 +2135,364 @@ async function main() {
                 evidence: reasonText === "(no reason recorded)" ? null : reasonText,
                 by,
                 note: "supersede is an append — the old row remains on disk (audit) but is filtered from read-back",
+              },
+              0,
+            );
+            return;
+          }
+          if (action === "advise") {
+            // 216s (112 T5 · §4.4 consult-before-failing): read-only ranked
+            // pre-flight. The fail-class lesson rows of ONE source — the
+            // --project's memory or a --knowledge-file store — are ranked
+            // against --brief (fusionRank; a blank/absent project brief
+            // degrades to score-desc) and optionally phase-filtered
+            // (--phase N, project rows only — store rows carry no phase).
+            // The live telemetry the rows actually carry is printed as-is.
+            // HONEST LIMIT (declare-or-strike): dossier 112 §3.1's
+            // verdict/scope/stale fields are NOT part of the row schema on
+            // disk — nothing here fabricates them; the note names the live
+            // signals (reproducedCount / counterEvidence) instead.
+            const ADVISE_FAIL_CLASSES = ["vague-brief", "template-emission", "verify-failure", "drift", "run-summary"];
+            const ADVISE_FAIL_RE = /(vague-brief|template-emission|verify-failure|drift|run-summary|harvest-[a-z-]+)/i;
+            const failClassOf = (tags, text) => {
+              const list = Array.isArray(tags) ? tags.filter((t) => typeof t === "string") : [];
+              const byTag = list.find((t) => ADVISE_FAIL_CLASSES.includes(t) || t.startsWith("harvest-"));
+              if (byTag) return byTag;
+              const m = typeof text === "string" ? text.match(ADVISE_FAIL_RE) : null;
+              return m ? m[1].toLowerCase() : null;
+            };
+            const hasProject = typeof args.project === "string" && args.project.trim() !== "";
+            const hasStore =
+              typeof args["knowledge-file"] === "string" && args["knowledge-file"].trim() !== "";
+            if (hasProject === hasStore) {
+              return respond(
+                {
+                  ok: false,
+                  error:
+                    "lesson advise: pass exactly one source — --project <file.json> (project-local lessons) or --knowledge-file <store.json> (cross-project lessons)",
+                  code: "RT_E_VALIDATION",
+                },
+                1,
+              );
+            }
+            const limit =
+              typeof args.limit === "string" && /^\d+$/.test(args.limit) ? parseInt(args.limit, 10) : 5;
+            if (!Number.isInteger(limit) || limit < 1) {
+              return respond(
+                {
+                  ok: false,
+                  error: `lesson advise: --limit must be a positive integer (got ${String(args.limit)})`,
+                  code: "RT_E_VALIDATION",
+                },
+                1,
+              );
+            }
+            const phaseFilter =
+              typeof args.phase === "string" && /^\d+$/.test(args.phase) ? parseInt(args.phase, 10) : null;
+            if (args.phase !== undefined && (phaseFilter === null || phaseFilter > 12)) {
+              return respond(
+                {
+                  ok: false,
+                  error: `lesson advise: --phase must be an integer 0..12 (got ${String(args.phase)})`,
+                  code: "RT_E_VALIDATION",
+                },
+                1,
+              );
+            }
+            const briefText = typeof args.brief === "string" ? args.brief.trim() : "";
+            const adviseRow = (m) => ({
+              id: m.id,
+              class: failClassOf(m.tags, m.text),
+              level: (Array.isArray(m.tags) ? m.tags : []).find((t) => /^L[1-5]$/.test(t)) ?? null,
+              phase: m.phase,
+              score: m.score,
+              reproducedCount: Number.isFinite(m.reproducedCount) ? m.reproducedCount : 0,
+              counterEvidence: Number.isFinite(m.counterEvidence) ? m.counterEvidence : 0,
+              source: m.source ?? null,
+              evidence: m.text,
+            });
+            if (hasProject) {
+              const project = loadProjectFor("lesson advise");
+              const lessonRows = (project.memory ?? []).filter(
+                (m) => m && typeof m === "object" && Array.isArray(m.tags) && m.tags.includes("lesson"),
+              );
+              const failRows = lessonRows.filter(
+                (m) =>
+                  failClassOf(m.tags, m.text) !== null && (phaseFilter === null || m.phase === phaseFilter),
+              );
+              const rows = k.topLessonRows(failRows, briefText, limit).map(adviseRow);
+              respond(
+                {
+                  ok: true,
+                  action: "advise",
+                  source: "project",
+                  project: project.name,
+                  readOnly: true,
+                  brief: briefText || project.brief,
+                  rankedBy: briefText ? "fusion-rank" : "score-desc",
+                  phase: phaseFilter,
+                  count: rows.length,
+                  rows,
+                  note: "read-only pre-flight (consult BEFORE failing) — nothing was written; ranking is deterministic; telemetry is printed as-is: reproducedCount + counterEvidence are the live lesson-row fields on disk today (112 §3.1's verdict/scope/stale fields are not in the row schema — never fabricated here)",
+                },
+                0,
+              );
+              return;
+            }
+            if (!briefText) {
+              return respond(
+                {
+                  ok: false,
+                  error:
+                    "lesson advise: --knowledge-file needs --brief to rank store rows (the store carries no score field — ranking is lexical; a blank brief has nothing to rank against). Use --project for the score-desc fallback.",
+                  code: "RT_E_VALIDATION",
+                },
+                1,
+              );
+            }
+            if (phaseFilter !== null) {
+              return respond(
+                {
+                  ok: false,
+                  error:
+                    "lesson advise: --phase filters project-memory rows only — store entries carry no phase field; refusing to pretend the filter applied.",
+                  code: "RT_E_VALIDATION",
+                },
+                1,
+              );
+            }
+            const storePath = resolve(args["knowledge-file"]);
+            const store = new k.KnowledgeStore(storePath);
+            const found = store.findPatterns(briefText, Math.max(limit * 4, 20));
+            const rows = found
+              .map((match) => ({ match, cls: failClassOf(match.entry.tags, match.entry.body) }))
+              .filter((x) => x.cls !== null)
+              .slice(0, limit)
+              .map(({ match, cls }) => ({
+                id: match.entry.id,
+                class: cls,
+                level:
+                  (Array.isArray(match.entry.tags) ? match.entry.tags : []).find((t) => /^L[1-5]$/.test(t)) ??
+                  null,
+                project: match.entry.project,
+                title: match.entry.title,
+                score: match.score,
+                counterEvidence: Number.isFinite(match.entry.counterEvidence) ? match.entry.counterEvidence : 0,
+                supersededBy: Array.isArray(match.entry.supersededBy) ? match.entry.supersededBy : [],
+                advice: match.entry.body.replace(/\s+/g, " ").slice(0, 180),
+              }));
+            respond(
+              {
+                ok: true,
+                action: "advise",
+                source: "store",
+                store: storePath,
+                readOnly: true,
+                brief: briefText,
+                rankedBy: "fusion-rank",
+                phase: null,
+                count: rows.length,
+                rows,
+                note: "read-only pre-flight over the cross-project store — findPatterns excludes superseded/retired rows by default; nothing was written",
+              },
+              0,
+            );
+            return;
+          }
+          if (action === "verify") {
+            // 216s (112 T5 · §3.3 proof-carrying lessons): re-hash the
+            // artifact named by --anchor and compare it against every lesson
+            // row's recorded evidenceHash= token → ok | stale | anchor-missing.
+            // READ-ONLY by default; the ONLY mutating form is --mark-stale,
+            // which writes the store's existing counterEvidence telemetry
+            // (content fields untouched, append-only discipline kept) and is
+            // refused for project rows, which have no telemetry writer.
+            const anchorArg = requireArg(args, "anchor", "lesson verify");
+            if (anchorArg.error) {
+              return respond(
+                {
+                  ok: false,
+                  error: `${anchorArg.error} (the artifact whose current bytes the recorded evidenceHash= tokens are re-hashed against)`,
+                  code: "RT_E_VALIDATION",
+                },
+                1,
+              );
+            }
+            const hasProject = typeof args.project === "string" && args.project.trim() !== "";
+            const hasStore =
+              typeof args["knowledge-file"] === "string" && args["knowledge-file"].trim() !== "";
+            if (hasProject === hasStore) {
+              return respond(
+                {
+                  ok: false,
+                  error:
+                    "lesson verify: pass exactly one source — --knowledge-file <store.json> (cross-project rows; the only source --mark-stale can write telemetry to) or --project <file.json> (project-local rows)",
+                  code: "RT_E_VALIDATION",
+                },
+                1,
+              );
+            }
+            const markStale = flag(args, "mark-stale");
+            if (markStale && !hasStore) {
+              return respond(
+                {
+                  ok: false,
+                  error:
+                    "lesson verify: --mark-stale needs --knowledge-file — the store's counterEvidence bump is the only machine telemetry writer; project-memory rows have none (refusing to pretend a write happened).",
+                  code: "RT_E_VALIDATION",
+                },
+                1,
+              );
+            }
+            const limit =
+              typeof args.limit === "string" && /^\d+$/.test(args.limit) ? parseInt(args.limit, 10) : null;
+            if (limit !== null && (!Number.isInteger(limit) || limit < 1)) {
+              return respond(
+                {
+                  ok: false,
+                  error: `lesson verify: --limit must be a positive integer (got ${String(args.limit)})`,
+                  code: "RT_E_VALIDATION",
+                },
+                1,
+              );
+            }
+            const anchorPath = resolve(anchorArg.value);
+            let anchorText = null;
+            try {
+              anchorText = readFileSync(anchorPath, "utf8");
+            } catch {
+              anchorText = null; // an unresolved anchor is a REPORTED outcome, not an internal error
+            }
+            const { fnv1a } = await import("../src/lib/algorithms.ts");
+            const anchorHash =
+              anchorText === null
+                ? null
+                : { decimal: String(fnv1a(anchorText)), hex: fnv1a(anchorText).toString(16).padStart(8, "0") };
+            const evidenceHashOf = (text) => {
+              const m = typeof text === "string" ? text.match(/evidenceHash=([0-9a-fA-F]+)/) : null;
+              return m ? m[1].toLowerCase() : null;
+            };
+            const check = (recorded) => {
+              if (recorded === null) {
+                return {
+                  status: "anchor-missing",
+                  reason: "row records no evidenceHash= token — nothing to re-hash against",
+                };
+              }
+              if (anchorHash === null) {
+                return {
+                  status: "anchor-missing",
+                  reason: `--anchor ${anchorPath} does not resolve to a readable file`,
+                };
+              }
+              if (recorded === anchorHash.decimal || recorded === anchorHash.hex) {
+                return { status: "ok", reason: "the anchor's current hash matches the row's recorded evidenceHash" };
+              }
+              return {
+                status: "stale",
+                reason: `the anchor's current hash (hex ${anchorHash.hex} / decimal ${anchorHash.decimal}) differs from the recorded ${recorded} — the proof no longer holds for these bytes`,
+              };
+            };
+            const counts = { ok: 0, stale: 0, "anchor-missing": 0 };
+            if (hasStore) {
+              const storePath = resolve(args["knowledge-file"]);
+              const store = new k.KnowledgeStore(storePath);
+              const entries = store
+                .entries()
+                .filter((e) => Array.isArray(e.tags) && e.tags.includes("lesson"));
+              const capped = limit === null ? entries : entries.slice(0, limit);
+              const staleIds = [];
+              const rows = capped.map((e) => {
+                const recorded = evidenceHashOf(e.body);
+                const outcome = check(recorded);
+                counts[outcome.status] += 1;
+                if (outcome.status === "stale") staleIds.push(e.id);
+                return {
+                  id: e.id,
+                  source: "store",
+                  title: e.title,
+                  project: e.project,
+                  recordedHash: recorded,
+                  status: outcome.status,
+                  reason: outcome.reason,
+                  counterEvidence: Number.isFinite(e.counterEvidence) ? e.counterEvidence : 0,
+                  supersededBy: Array.isArray(e.supersededBy) ? e.supersededBy : [],
+                };
+              });
+              let marked = null;
+              if (markStale) {
+                marked = staleIds.map((id) => {
+                  const updated = store.bumpCounterEvidence(id);
+                  return {
+                    id,
+                    marked: updated !== null,
+                    counterEvidence:
+                      updated && Number.isFinite(updated.counterEvidence) ? updated.counterEvidence : null,
+                  };
+                });
+              }
+              respond(
+                {
+                  ok: true,
+                  action: "verify",
+                  source: "store",
+                  store: storePath,
+                  readOnly: !markStale,
+                  anchor: anchorPath,
+                  anchorPresent: anchorHash !== null,
+                  anchorHash,
+                  count: rows.length,
+                  rowsOk: counts.ok,
+                  stale: counts.stale,
+                  anchorMissing: counts["anchor-missing"],
+                  rows,
+                  marked,
+                  note: markStale
+                    ? `telemetry-only write — counterEvidence bumped on ${marked.filter((m) => m.marked).length} stale store row(s); content fields untouched (append-only discipline kept)`
+                    : "read-only report — nothing was written (pass --mark-stale to bump counterEvidence on stale store rows; telemetry only)",
+                },
+                0,
+              );
+              return;
+            }
+            const project = loadProjectFor("lesson verify");
+            const lessonRows = (project.memory ?? []).filter(
+              (m) => m && typeof m === "object" && Array.isArray(m.tags) && m.tags.includes("lesson"),
+            );
+            const capped = limit === null ? lessonRows : lessonRows.slice(0, limit);
+            const rows = capped.map((m) => {
+              const recorded = evidenceHashOf(m.text);
+              const outcome = check(recorded);
+              counts[outcome.status] += 1;
+              return {
+                id: m.id,
+                source: "project",
+                phase: m.phase,
+                recordedHash: recorded,
+                status: outcome.status,
+                reason: outcome.reason,
+                reproducedCount: Number.isFinite(m.reproducedCount) ? m.reproducedCount : 0,
+                counterEvidence: Number.isFinite(m.counterEvidence) ? m.counterEvidence : 0,
+                evidence: m.text,
+              };
+            });
+            respond(
+              {
+                ok: true,
+                action: "verify",
+                source: "project",
+                project: project.name,
+                readOnly: true,
+                anchor: anchorPath,
+                anchorPresent: anchorHash !== null,
+                anchorHash,
+                count: rows.length,
+                rowsOk: counts.ok,
+                stale: counts.stale,
+                anchorMissing: counts["anchor-missing"],
+                rows,
+                marked: null,
+                note: "read-only report over project-memory rows — --mark-stale is refused for this source (no machine telemetry writer); nothing was written",
               },
               0,
             );
@@ -2222,6 +2891,7 @@ const USAGE = {
     fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR human-approve selected/all ids — never auto-approves",
     "tree-run": "tree-run --dir <dir> [--project <file.json>]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0; red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
     repair: "repair --dir <dir> --project <file.json> [--budget N]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (path→content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun → red tail → one bounded synthesis repair call with deps.treeFailure → apply repaired files in place → re-import → treeRun again); green → tested-equivalent mint + honest P6 gate + converged (0); budget exhausted → honest failed (1, RT_E_REPAIR_FAILED); the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
+    edit: "edit --dir <dir> --file <relpath> --find <old> --replace <new> [--write] [--project <file.json>]  # 216s (108-T1): ONE in-place str_replace on an emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, nothing is written); --write (requires --project) applies atomically only after evaluatePolicy(\"repair.apply\", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes); ambiguous / missing / no-op matches are coded refusals",
     summary: "summary --project <file.json>",
     vault: "vault --project <file.json> [--out <dir>]   # one .md per note + _index.md MOC (default <home>/RapidTool Software/<slug>/vault)",
     search: "search --project <file.json> --query <text> [--limit <n>]  # token-overlap vault search",
@@ -2238,7 +2908,7 @@ const USAGE = {
     bench: "bench --project <file.json>                  # synthetic estimates: tokens/time/complexity/failure points",
     mine: "mine --dir <path> [--limit N]                # bounded structural codebase map + convention map",
     knowledge: "knowledge --store <file.json> (--save <json>|--find <query>) [--limit N]  # cross-project pattern store",
-    lesson: "lesson (--list --project <file.json> [--brief <text>] [--limit N] | --propose --brief <text> [--title <t>] [--kind fix|pattern|note] [--tags a,b] [--project <name>] | --accept --project <file.json> --out <knowledge.json> [--actor <name>] [--limit N] | --supersede --knowledge-file <knowledge.json> --id <K...> [--evidence <text>|--reason <text>] [--by human|machine] | --refute --knowledge-file <knowledge.json> --id <K...> [--evidence <text>])  # lesson family: list rows read-only (fusionRank vs --brief, else score-desc) / propose = bounded flash DRAFT, never writes (keyless drafts labeled 'draft (keyless)') / accept = THE human-gated cross-project write, actor recorded per row, idempotent per actor / supersede + refute = store telemetry (append-only rows + counters, never deletes)",
+    lesson: "lesson (--list --project <file.json> [--brief <text>] [--limit N] | --propose --brief <text> [--title <t>] [--kind fix|pattern|note] [--tags a,b] [--project <name>] | --accept --project <file.json> --out <knowledge.json> [--actor <name>] [--limit N] | --supersede --knowledge-file <knowledge.json> --id <K...> [--evidence <text>|--reason <text>] [--by human|machine] | --refute --knowledge-file <knowledge.json> --id <K...> [--evidence <text>] | --advise (--project <file.json> | --knowledge-file <knowledge.json>) [--brief <text>] [--phase N] [--limit N] | --verify (--knowledge-file <knowledge.json> | --project <file.json>) --anchor <path> [--mark-stale] [--limit N])  # lesson family: list rows read-only (fusionRank vs --brief, else score-desc) / propose = bounded flash DRAFT, never writes (keyless drafts labeled 'draft (keyless)') / accept = THE human-gated cross-project write, actor recorded per row, idempotent per actor / supersede + refute = store telemetry (append-only rows + counters, never deletes) / advise = read-only ranked FAIL-class pre-flight (reproducedCount + counterEvidence printed as-is) / verify = anchor re-hash → ok | stale | anchor-missing (read-only unless --mark-stale: store counterEvidence telemetry only)",
     wild: "wild --project <file.json> [--start|--pause|--resume|--stop] [--steps N]  # wild-mode macro-run; --start enables + begins a run",
     chat: "chat --project <file.json> --ask <text> [--history <json-array>]  # grounded copilot turn; slash tools /status /gate /packet /fixtures /ls /read /help work keyless; free-text needs DEEPSEEK_API_KEY",
     deepen: "deepen --project <file.json> [--phase N]    # re-run live research over a completed research phase (0/7/11)",

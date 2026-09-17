@@ -795,8 +795,17 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
     );
     assert.deepEqual(
       mixed.ok ? mixed.warnings : [],
-      [expected],
-      "warnings[] still carries the single refusal in the mixed tree",
+      [
+        expected,
+        // Parent boundary update (W8, fixes/216k D3): in tree mode the fixture's
+        // three uncovered job nodes are now COUNTED + surfaced (pre-D3 they were
+        // silently bridged). Verdict order: refusal first, then graph order.
+        ...(["dispatch", "reroute", "scan"] as const).map(
+          (label) =>
+            `specGraph:unmaterialised-job:"src/jobs/${label}.ts":job "${label}" has no generated tree file — tree mode NEVER bridges a job node (fixes/216k D3 / TA-15)`,
+        ),
+      ],
+      "warnings[] carries the refusal verdict verbatim + the three counted unmaterialised job nodes",
     );
   });
 
@@ -818,10 +827,17 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
     );
     assert.equal(entry!.body, entrySrc, "tree files are emitted verbatim — no scaffold wrapper");
     const warnings = result.ok ? (result.warnings ?? []) : [];
-    assert.equal(warnings.length, 1, "exactly the look-alike is refused");
+    // Parent boundary update (W8, fixes/216k D3): tree mode now surfaces the
+    // fixture's three unmaterialised job nodes alongside the single refusal —
+    // pre-D3 they were silently bridged. The refusal must stay FIRST.
+    assert.equal(warnings.length, 4, "the look-alike refusal + the three unmaterialised job nodes");
     assert.ok(
       warnings[0]!.includes('generatedTree:refused:"src/generated.ts.bak"'),
       "the exact-match widening cannot admit a look-alike prefix",
+    );
+    assert.ok(
+      warnings.slice(1).every((w) => w.includes("specGraph:unmaterialised-job:")),
+      "every other warning is the counted unmaterialised-job surfacing (never silent)",
     );
     assert.ok(
       !files.some((f) => f.path === "src/generated.ts.bak"),
