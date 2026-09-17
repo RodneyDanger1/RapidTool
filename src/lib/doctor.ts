@@ -23,6 +23,9 @@ import {
   type IsolationClaim,
 } from "./sandbox-policy.ts";
 import { tokenCapFromEnv } from "./token-ledger.ts";
+// W6-L3 provider surfacing: TYPE-ONLY import — erased at compile, so the
+// client-safe runtime surface (sandbox-policy + token-ledger) is unchanged.
+import type { RapidToolModelRole } from "./llm/providers/registry.ts";
 
 /** Evidence bag the latch reads. Absent fields default to RapidTool-now (not a factory). */
 export type FactoryEvidence = {
@@ -263,4 +266,99 @@ export function doctorFactory(
 /** Isolation advertisement the doctor must emit (frozen non-sandbox). */
 export function doctorIsolation(): IsolationClaim {
   return runnerIsolationClaim();
+}
+
+// ---------------------------------------------------------------------------
+// T-107.2 (fixes/216p, W6 · L3) — provider-team surfacing
+// ---------------------------------------------------------------------------
+
+/** One registered provider as the doctor reports it. Carries the env VAR NAME
+ *  (never its value) and the honest configured probe for that key. */
+export type DoctorProviderEntry = {
+  id: string;
+  label: string;
+  /** The env var that holds this provider's key — the configured probe reads
+   *  exactly this name; the value itself never enters this envelope. */
+  apiKeyEnv: string;
+  configured: boolean;
+};
+
+/** One role tier as the doctor reports it: which provider serves the role and
+ *  the model id the registry would actually SEND (env pin applied). */
+export type DoctorProviderTier = {
+  role: RapidToolModelRole;
+  provider: string | null;
+  /** The `<PREFIX>_MODEL_<ROLE>` pin var, when the role's provider is known. */
+  envKey: string | null;
+  /** The RESOLVED request model id (pin applied); null when resolution refuses. */
+  model: string | null;
+  /** True when the resolved id came from the env pin (not the tier default). */
+  pinned: boolean;
+  /** The coded refusal reason when resolution fails (unknown pin/source);
+   *  null on success. Never a silent default. */
+  error: string | null;
+};
+
+/** The provider team as the doctor reports it: providers + per-role resolved
+ *  model ids + the configured state. Keyless stays honestly not-configured. */
+export type DoctorProviderTeam = {
+  /** True when at least one registered provider has its key env var set. */
+  configured: boolean;
+  /** Status label (keyless: byte-identical to the historical
+   *  `not configured (set DEEPSEEK_API_KEY)` string). */
+  label: string;
+  /** One-line rendering for CLI/log surfaces (`providerTeam: …`). */
+  line: string;
+  providers: DoctorProviderEntry[];
+  tiers: DoctorProviderTier[];
+};
+
+/**
+ * Read-only provider-team field for the doctor surfaces (T-107.2, fixes/216p):
+ * the registered providers, every role tier's REAL resolved model id (env pins
+ * applied — an unknown pin surfaces as a refusal, never a substituted id), and
+ * the honest configured boolean for the passed env.
+ *
+ * The registry is loaded through a lazy `import()` seam exactly like the other
+ * server-only reads in `headless.doctorStatus` — this module's STATIC graph
+ * stays `sandbox-policy` + `token-ledger` (client-safe, no `node:fs`, no key
+ * read at import time). The API-key VALUE is never read into this envelope —
+ * only `Boolean(env[apiKeyEnv]?.trim())`.
+ */
+export async function doctorProviderTeam(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): Promise<DoctorProviderTeam> {
+  const registry = await import("./llm/providers/registry.ts");
+  const providers: DoctorProviderEntry[] = registry.PROVIDERS.map((p) => ({
+    id: p.id,
+    label: p.label,
+    apiKeyEnv: p.apiKeyEnv,
+    configured: Boolean(env[p.apiKeyEnv]?.trim()),
+  }));
+  const tiers: DoctorProviderTier[] = registry.RAPIDTOOL_MODEL_ROLES.map((role) => {
+    const tier = registry.ROLE_TIERS[role];
+    const provider = registry.getProvider(tier.provider);
+    const envKey = registry.roleModelEnvKey(role);
+    const resolved = registry.resolveRoleModel(role, { env: env as NodeJS.ProcessEnv });
+    return {
+      role,
+      provider: provider ? provider.id : null,
+      envKey,
+      model: resolved.ok ? resolved.model : null,
+      pinned: Boolean(envKey && env[envKey]?.trim()),
+      error: resolved.ok ? null : resolved.error,
+    };
+  });
+  const configured = providers.some((p) => p.configured);
+  const label = configured
+    ? `${providers.map((p) => p.label).join(", ")} (configured)`
+    : `not configured (set ${providers.map((p) => p.apiKeyEnv).join(", ")})`;
+  const segments = tiers.map((t) => `${t.role}=${t.model ?? "refused"}`).join(" ");
+  return {
+    configured,
+    label,
+    line: `providerTeam: ${label} — ${segments}`,
+    providers,
+    tiers,
+  };
 }

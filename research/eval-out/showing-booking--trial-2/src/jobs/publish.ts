@@ -1,0 +1,10 @@
+// ---------------------------------------------------------------------------
+// src/jobs/publish.ts — Implement job “publish” against the contract
+// machine-generated from RapidTool packet 808d1a16-587b-4f55-94c8-c4ef83a80d88; regenerate, don't hand-edit.
+// fixes/144 (M2) tree bridge: the generated tree ships no file at this spec-graph
+// path, so this module re-exports the tree ENTRY module (src/jobs/show.ts) verbatim —
+// real generated code, not a TODO stub. Align this node's file with a tree path
+// (or regenerate the tree) to replace the bridge.
+// ---------------------------------------------------------------------------
+
+export * from "./show.ts";

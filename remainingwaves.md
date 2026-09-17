@@ -6,10 +6,10 @@ lanes, the exact tasks, the files each touches, the done-when, the tests require
 known risks. Pair it with `taskuniverselog.md` (live per-task status board) and
 `RESUME.md` (hard rules + settled decisions).
 
-**Current state (2026-09-16, post-Wave-4).** `bash scripts/gate.sh` → `ok:true` (typecheck 0,
-lint 0, assertion-gap lint 0, tests 220 scripts + 1803 src, build 0). Factory honest but
-incomplete: `doctor` → `autonomousSoftwareFactory: false`; emitted tree census on the
-reference corpus: `{stubs: 0, reexports: 5, real: 0}` (THE blocker, TA-15).
+**Current state (2026-09-16, post-Wave-5).** `bash scripts/gate.sh` → `ok:true` (typecheck 0,
+lint 0, assertion-gap lint 0, tests 235 scripts + 1811 src, build 0; second green run). Factory
+honest but incomplete: `doctor` → `autonomousSoftwareFactory: false`; emitted tree census on the
+reference corpus: `{stubs: 0, reexports: 5, real: 0}` (THE blocker, TA-15 → W6-L1).
 
 **Wave conventions (from RESUME §3 / board §6).** ≤5 lanes; `deepseek-v4-flash` only (never
 Pro); disjoint file ownership; §3.0 guardrail block verbatim in every brief; skeleton-first
@@ -24,16 +24,26 @@ verify landings vs bytes → attribute any red by mtime → parent repairs → f
 
 | Milestone | Meaning | Distance |
 |---|---|---|
-| **M-A · Maker test** | A real, friend-usable Coffeehouse2Home/Property-Ledger app emitted: `reexports: 0, stubs: 0, real ≥ 3` + ≥3 job modules pass their own oracle rows + a keyed end-to-end run | **W5** (rewire) + 1 keyed run |
+| **M-A · Maker test** | A real, friend-usable Coffeehouse2Home/Property-Ledger app emitted: `reexports: 0, stubs: 0, real ≥ 3` + ≥3 job modules pass their own oracle rows + a keyed end-to-end run | **W6** (TA-15 completion) + 1 keyed run |
 | **M-B · Doctor latch** | `doctor` reports `autonomousSoftwareFactory: true` with no `gaps[]` fabrications | ≈W8–W10 (needs Phases 1–4 honest + TA-15) |
 | **M-C · Full clear** | Every task in `taskuniverselog.md` done/verified or explicitly deferred-as-product-decision | ≈W11–W12 |
 
-Rough arithmetic: ~7 waves remain (W5→W11) + a buffer wave. Each ≈1–3h of wall time with 5
+Rough arithmetic: ~6 waves remain (W6→W11) + a buffer wave. Each ≈1–3h of wall time with 5
 flash lanes; parent boundary work ≈30–60 min per wave.
 
 ---
 
-## W5 — "TA-15 rewire + integration starts" (next; ≈1.5–2h)
+## W5 — "TA-15 rewire + integration starts" (CLOSED 2026-09-16 — outcome below; ≈1.5–2h planned)
+
+**W5 OUTCOME (closed 2026-09-16 ~21:42 — `gate.sh {"ok":true}`; typecheck 0 · lint 0 · gaps 0 ·
+scripts 235/235 + src 1811/1811 · build 0):** L1 ⚠️ partial — TA-15: `orderTreeChunks` + full
+design landed in `216k`; the caller was restored to the legacy pairing by the parent (rewire →
+**W6-L1**) · L2 ✅ complete (harvest cap + zero-budget tests, T-15 determinism guard, `216i`/`216j`
+bodies, doc counts verified) · L3 ⚠️ approvals routed through `policy.ts` at all three sites
+(seats byte-identical) — bypass pins + `216o` → **W6-L2** · L4 ⚠️ provider registry + role tiers
+landed — tests + `216p` + `doctor` surfacing → **W6-L3** · L5 ⚠️ run-side graders + trials/pass@k
++ leak scan landed; keyless run recorded (6 cases, 0 grader leaks) — `216q` body + `--trials=2`
+evidence → **W6-L4**.
 
 **Theme:** land the multi-job emission (THE product blocker), close the W4 tails, start the
 Wave-H integrations, and finish the honesty-doc bodies. 5 lanes, all files free post-W4.
@@ -115,28 +125,44 @@ Wave-H integrations, and finish the honesty-doc bodies. 5 lanes, all files free 
 - **Risks:** eval harness is the maker-test path — don't break its CLI contract; corpus
   fixtures feed TA-15's probe (coordinate wording with W5-L1's census expectations).
 
-**W5 boundary:** verify vs bytes (parent), four gates + `scripts/gate.sh`, board update,
-push to GitHub, then W6.
+**W5 boundary (DONE 2026-09-16):** verified vs bytes (parent) → four gates + `scripts/gate.sh`
+`{"ok":true}`; board updated; W5 landed as commit `e97e72d` on `main`, then W6 dispatched.
 
 ---
 
-## W6 — "Wave H integrations + honesty leftovers" (≈1.5–2h)
+## W6 — "TA-15 completion + W5 tails" (DISPATCHED 2026-09-16 ~21:55; 5 lanes, ≈1.5–2h)
 
-- **L1 — patch.ts integration (T-107.1 suite):** wire `applyStrReplace` into the P6 emit
-  path (per-file deltas) in `codegen.server.ts` + `headless.ts repairTreeDir` so repair
-  attempts produce diffs-as-results; pins that a >1-match edit REFUSES end-to-end.
-- **L2 — T-11 + T4 hops (engine):** gate lesson capture on a green seal; tag lessons with the
-  target probe; thread store rows into the expansion prompt (`opts.proven` plumbing: codegen
-  ×3 + `engine.ts:600-603`). Files: `engine.ts`, `codegen.server.ts`, `knowledge.ts` tests.
-- **L3 — T-107.9 compaction constants:** adopt the `SUMMARY_TEMPLATE` + compaction constants
-  (new `src/lib/compaction.ts`), verify compaction BY EFFECT (3-outcome enum). Files: engine.ts
-  helper + codegen caller.
-- **L4 — 108-T3 + T-107.10:** precondition-vs-failure `RT_E` split; sub-agent contract +
-  claim lifecycle for `crew.server.ts` + a deterministic mock-LLM E2E in the scripts leg.
-- **L5 — doctor surfacing + TA-1/TA-21:** provider-team surfacing in `doctor.ts`; verify the
-  four lane-reported blockers (TA-1); hygiene items (TA-21).
-- **Boundary risks:** codegen.ts becomes the contention point this wave — serialize via lane
-  notes (L1 owns codegen; L2/L3 report instead of editing).
+Re-scoped at dispatch: W4–W5 landed the **cores** this section originally sketched
+(`patch.ts` + `policy.ts` 48/48, provider registry + roles, run-side eval graders), so W6
+finishes **TA-15** (THE product blocker) and closes the five W5 lane tails. Each lane reads its
+own `wave_plans/W6/lane-N.md` FIRST.
+
+- **L1 — TA-15 COMPLETION (THE product blocker):** finish the chunked-tree rewire W4 designed /
+  W5 began (`orderTreeChunks` + full design landed in `216k`; the caller was restored to the
+  legacy pairing so the tree compiles) — per-job emission → scaffold bridge allow-list/count →
+  oracle job-row ctx → engine shortfall log → tests → census probe. Files: `codegen.server.ts`
+  + test, `scaffold.ts` + test, `engine.ts`, `fixes/216k`. Done-when: probe (outside the repo) on
+  a corpus-shaped fixture → `reexports: 0, stubs: 0, real ≥ 3` AND ≥3 job modules each pass their
+  OWN oracle row (no shared hash).
+- **L2 — policy tail:** bypass pins (a denied action is un-bypassable by BOTH seats; `hitl.force`
+  cannot self-approve) + ledger provenance (seat label + token-path bool on the `HitlDecision`
+  shape). Files: `types.ts` (one additive field), `headless.ts` + test, `rapidtool-cli.mjs`
+  (approve path), `dod.ts` + pins, `fixes/216o`.
+- **L3 — registry tail:** provider-registry unit tests + one migration test per switched seam;
+  `doctor` provider-team surfacing (keyless ⇒ honestly not-configured); `fixes/216p` — the
+  `codegen.server.ts` seam hop stays DEFERRED to L1's file (do not edit codegen).
+- **L4 — eval tail:** `fixes/216q` body + the keyless `npm run eval -- --trials=2` evidence +
+  README/`remainingwaves.md` sync.
+- **L5 — TA-1 + TA-21 + `216f`:** verify (or strike, with evidence) the four `[lane-reported]`
+  blockers from `100:37-41`; TA-21 hygiene items fixed or explicitly deferred; complete the
+  `216f` log body.
+- **Carried past W6** (pre-dispatch sketch items not in this dispatch; disk check 2026-09-16:
+  `applyStrReplace` has no production caller, `src/lib/compaction.ts` does not exist, no provider
+  surfacing in `doctor.ts`, `opts.proven` not plumbed): patch.ts integration into the P6 emit
+  path / `repairTreeDir`, T-11 green-seal lesson gating + T4 `opts.proven` prompt hops, T-107.9
+  compaction constants, T-107.6 token-ledger rollout.
+- **Boundary risk:** `codegen.server.ts` is the contention point — L1 owns it; L2/L3 report
+  instead of editing. Boundary = `gate.sh` + the board update.
 
 ## W7 — "108 steals + ledger" (≈2h)
 

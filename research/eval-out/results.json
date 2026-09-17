@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-17T02:41:43.608Z",
+  "generatedAt": "2026-09-17T02:49:36.070Z",
   "mode": "keyless",
   "corpusDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus",
   "graderDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders",
@@ -18,8 +18,8 @@
           "evidence": "no generatedTree (0 file(s)) and 7 expectedCapabilities uncovered; single-module pass needs a library kind (got \"webapp\")"
         },
         "M2": {
-          "score": 0,
-          "evidence": "no treeRun verdict supplied"
+          "score": 1,
+          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\coffeehouse2home-property-ledger--trial-1; tests 15 pass / 0 fail)"
         },
         "M3": {
           "score": 0,
@@ -34,12 +34,12 @@
           "evidence": "2 red gate record(s) (P6, P7) surfaced loudly: sealedWithFailures flag + census log + warn gate.verdict"
         },
         "M6": {
-          "score": 0,
-          "evidence": "no emitted handover dir — foreign files in emit dir (pass --force to keep): src/generated/check-reorder-flags.ts, src/generated/chunk-0.ts, src/generated/compute-rent-roll.ts, src/genera"
+          "score": 1,
+          "evidence": "handover dir emitted with DEPLOY.md + oracle spec (9273b)"
         },
         "M7": {
-          "score": 0,
-          "evidence": "M1+M2+M3 0 < prior same-domain 1 — regression (m1 1/m2 0/m3 0)"
+          "score": 1,
+          "evidence": "M1+M2+M3 1 ≥ prior same-domain 0 (m1 0/m2 0/m3 0)"
         },
         "M8": {
           "score": 1,
@@ -50,8 +50,8 @@
           "evidence": "run stopped on time, no refusal — nothing to shout"
         }
       },
-      "total": 3,
-      "mean": 0.3333,
+      "total": 6,
+      "mean": 0.6667,
       "baseline": "delivery ≈ 1/10, process ≈ 8/10 — 0 shipped modules across all six journeys; learning loop fires on a real keyed run for the first time (L2/L4/L5) but lesson content stays hollow (dossier 99)",
       "coverage": {
         "covered": {},
@@ -66,7 +66,7 @@
         ]
       },
       "trial": 1,
-      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\coffeehouse2home-property-ledger",
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\coffeehouse2home-property-ledger--trial-1",
       "grader": {
         "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\coffeehouse2home-property-ledger.grader.json",
         "hash": "241571966",
@@ -75,16 +75,10 @@
         "requiredCapabilities": 7
       },
       "acceptance": {
-        "filesOk": false,
-        "missingFiles": [
-          "package.json",
-          "index.html",
-          "README.md"
-        ],
-        "contentOk": false,
-        "failedContent": [
-          "package.json: file absent"
-        ],
+        "filesOk": true,
+        "missingFiles": [],
+        "contentOk": true,
+        "failedContent": [],
         "checked": {
           "expectedFiles": 3,
           "expectedContent": 1
@@ -92,7 +86,7 @@
         "pass": false
       },
       "graderLeak": {
-        "scanned": 23,
+        "scanned": 38,
         "leaked": false,
         "hits": []
       },
@@ -103,18 +97,18 @@
           "P8",
           "P9"
         ],
-        "treeRunOk": false,
+        "treeRunOk": true,
         "journey": "keyless",
         "stall": null,
-        "emitError": "foreign files in emit dir (pass --force to keep): src/generated/check-reorder-flags.ts, src/generated/chunk-0.ts, src/generated/compute-rent-roll.ts, src/generated/create-flip-project.ts, src/jobs/publish.ts",
+        "emitError": null,
         "p6Refused": false
       },
-      "durationSec": 0.3,
+      "durationSec": 13.5,
       "rowSource": "trial-1",
       "trials": {
-        "trials": 1,
+        "trials": 2,
         "passes": 0,
-        "failed": 1,
+        "failed": 2,
         "k": 1,
         "kEffective": 1,
         "passAt1": 0,
@@ -122,30 +116,45 @@
         "passAllTrials": 0,
         "observedPassRate": 0,
         "flaky": false,
-        "flakinessMeasurable": false,
-        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+        "flakinessMeasurable": true,
+        "note": null
       },
       "perTrial": [
         {
           "trial": 1,
           "status": "complete",
-          "total": 3,
-          "mean": 0.3333,
+          "total": 6,
+          "mean": 0.6667,
           "pass": false,
-          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\coffeehouse2home-property-ledger",
-          "durationSec": 0.3,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\coffeehouse2home-property-ledger--trial-1",
+          "durationSec": 13.5,
           "graderLeak": false,
           "acceptance": {
-            "filesOk": false,
-            "missingFiles": [
-              "package.json",
-              "index.html",
-              "README.md"
-            ],
-            "contentOk": false,
-            "failedContent": [
-              "package.json: file absent"
-            ],
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        },
+        {
+          "trial": 2,
+          "status": "complete",
+          "total": 6,
+          "mean": 0.6667,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\coffeehouse2home-property-ledger--trial-2",
+          "durationSec": 11.5,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
             "checked": {
               "expectedFiles": 3,
               "expectedContent": 1
@@ -170,7 +179,7 @@
         },
         "M2": {
           "score": 1,
-          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\field-ops-suite; tests 11 pass / 0 fail)"
+          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\field-ops-suite--trial-1; tests 11 pass / 0 fail)"
         },
         "M3": {
           "score": 0,
@@ -215,7 +224,7 @@
         ]
       },
       "trial": 1,
-      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\field-ops-suite",
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\field-ops-suite--trial-1",
       "grader": {
         "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\field-ops-suite.grader.json",
         "hash": "1531375993",
@@ -235,7 +244,7 @@
         "pass": false
       },
       "graderLeak": {
-        "scanned": 15,
+        "scanned": 30,
         "leaked": false,
         "hits": []
       },
@@ -252,12 +261,12 @@
         "emitError": null,
         "p6Refused": false
       },
-      "durationSec": 2.2,
+      "durationSec": 8.6,
       "rowSource": "trial-1",
       "trials": {
-        "trials": 1,
+        "trials": 2,
         "passes": 0,
-        "failed": 1,
+        "failed": 2,
         "k": 1,
         "kEffective": 1,
         "passAt1": 0,
@@ -265,8 +274,8 @@
         "passAllTrials": 0,
         "observedPassRate": 0,
         "flaky": false,
-        "flakinessMeasurable": false,
-        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+        "flakinessMeasurable": true,
+        "note": null
       },
       "perTrial": [
         {
@@ -275,8 +284,29 @@
           "total": 6,
           "mean": 0.6667,
           "pass": false,
-          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\field-ops-suite",
-          "durationSec": 2.2,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\field-ops-suite--trial-1",
+          "durationSec": 8.6,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        },
+        {
+          "trial": 2,
+          "status": "complete",
+          "total": 6,
+          "mean": 0.6667,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\field-ops-suite--trial-2",
+          "durationSec": 6.2,
           "graderLeak": false,
           "acceptance": {
             "filesOk": true,
@@ -307,7 +337,7 @@
         },
         "M2": {
           "score": 1,
-          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\house-flip-manager; tests 15 pass / 0 fail)"
+          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\house-flip-manager--trial-1; tests 15 pass / 0 fail)"
         },
         "M3": {
           "score": 0,
@@ -353,7 +383,7 @@
         ]
       },
       "trial": 1,
-      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\house-flip-manager",
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\house-flip-manager--trial-1",
       "grader": {
         "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\house-flip-manager.grader.json",
         "hash": "1586094404",
@@ -373,7 +403,7 @@
         "pass": false
       },
       "graderLeak": {
-        "scanned": 19,
+        "scanned": 38,
         "leaked": false,
         "hits": []
       },
@@ -390,12 +420,12 @@
         "emitError": null,
         "p6Refused": false
       },
-      "durationSec": 2.4,
+      "durationSec": 6.7,
       "rowSource": "trial-1",
       "trials": {
-        "trials": 1,
+        "trials": 2,
         "passes": 0,
-        "failed": 1,
+        "failed": 2,
         "k": 1,
         "kEffective": 1,
         "passAt1": 0,
@@ -403,8 +433,8 @@
         "passAllTrials": 0,
         "observedPassRate": 0,
         "flaky": false,
-        "flakinessMeasurable": false,
-        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+        "flakinessMeasurable": true,
+        "note": null
       },
       "perTrial": [
         {
@@ -413,8 +443,29 @@
           "total": 6,
           "mean": 0.6667,
           "pass": false,
-          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\house-flip-manager",
-          "durationSec": 2.4,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\house-flip-manager--trial-1",
+          "durationSec": 6.7,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        },
+        {
+          "trial": 2,
+          "status": "complete",
+          "total": 6,
+          "mean": 0.6667,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\house-flip-manager--trial-2",
+          "durationSec": 7,
           "graderLeak": false,
           "acceptance": {
             "filesOk": true,
@@ -444,8 +495,8 @@
           "evidence": "no generatedTree (0 file(s)) and 6 expectedCapabilities uncovered; single-module pass needs a library kind (got \"webapp\")"
         },
         "M2": {
-          "score": 0,
-          "evidence": "no treeRun verdict supplied"
+          "score": 1,
+          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\real-estate-crm--trial-1; tests 15 pass / 0 fail)"
         },
         "M3": {
           "score": 0,
@@ -460,12 +511,12 @@
           "evidence": "2 red gate record(s) (P6, P7) surfaced loudly: sealedWithFailures flag + census log + warn gate.verdict"
         },
         "M6": {
-          "score": 0,
-          "evidence": "no emitted handover dir — foreign files in emit dir (pass --force to keep): src/jobs/follow_up.ts"
+          "score": 1,
+          "evidence": "handover dir emitted with DEPLOY.md + oracle spec (9292b)"
         },
         "M7": {
-          "score": 0,
-          "evidence": "M1+M2+M3 0 < prior same-domain 1 — regression (m1 0/m2 1/m3 0)"
+          "score": 1,
+          "evidence": "M1+M2+M3 1 ≥ prior same-domain 0 (m1 0/m2 0/m3 0)"
         },
         "M8": {
           "score": 1,
@@ -476,8 +527,8 @@
           "evidence": "run stopped on time, no refusal — nothing to shout"
         }
       },
-      "total": 3,
-      "mean": 0.3333,
+      "total": 6,
+      "mean": 0.6667,
       "baseline": "delivery 1/10 — RenamePro bar met: governed spec record + engine-boilerplate artifacts, NOT a CRM web app; no runnable app code (dossier 98_make_1, verdict ≈ 1/10)",
       "coverage": {
         "covered": {},
@@ -491,7 +542,7 @@
         ]
       },
       "trial": 1,
-      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\real-estate-crm",
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\real-estate-crm--trial-1",
       "grader": {
         "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\real-estate-crm.grader.json",
         "hash": "2774804183",
@@ -500,16 +551,10 @@
         "requiredCapabilities": 6
       },
       "acceptance": {
-        "filesOk": false,
-        "missingFiles": [
-          "package.json",
-          "index.html",
-          "README.md"
-        ],
-        "contentOk": false,
-        "failedContent": [
-          "package.json: file absent"
-        ],
+        "filesOk": true,
+        "missingFiles": [],
+        "contentOk": true,
+        "failedContent": [],
         "checked": {
           "expectedFiles": 3,
           "expectedContent": 1
@@ -517,7 +562,7 @@
         "pass": false
       },
       "graderLeak": {
-        "scanned": 16,
+        "scanned": 38,
         "leaked": false,
         "hits": []
       },
@@ -528,18 +573,18 @@
           "P8",
           "P9"
         ],
-        "treeRunOk": false,
+        "treeRunOk": true,
         "journey": "keyless",
         "stall": null,
-        "emitError": "foreign files in emit dir (pass --force to keep): src/jobs/follow_up.ts",
+        "emitError": null,
         "p6Refused": false
       },
-      "durationSec": 0.1,
+      "durationSec": 4.1,
       "rowSource": "trial-1",
       "trials": {
-        "trials": 1,
+        "trials": 2,
         "passes": 0,
-        "failed": 1,
+        "failed": 2,
         "k": 1,
         "kEffective": 1,
         "passAt1": 0,
@@ -547,30 +592,45 @@
         "passAllTrials": 0,
         "observedPassRate": 0,
         "flaky": false,
-        "flakinessMeasurable": false,
-        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+        "flakinessMeasurable": true,
+        "note": null
       },
       "perTrial": [
         {
           "trial": 1,
           "status": "complete",
-          "total": 3,
-          "mean": 0.3333,
+          "total": 6,
+          "mean": 0.6667,
           "pass": false,
-          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\real-estate-crm",
-          "durationSec": 0.1,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\real-estate-crm--trial-1",
+          "durationSec": 4.1,
           "graderLeak": false,
           "acceptance": {
-            "filesOk": false,
-            "missingFiles": [
-              "package.json",
-              "index.html",
-              "README.md"
-            ],
-            "contentOk": false,
-            "failedContent": [
-              "package.json: file absent"
-            ],
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        },
+        {
+          "trial": 2,
+          "status": "complete",
+          "total": 6,
+          "mean": 0.6667,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\real-estate-crm--trial-2",
+          "durationSec": 6.8,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
             "checked": {
               "expectedFiles": 3,
               "expectedContent": 1
@@ -595,7 +655,7 @@
         },
         "M2": {
           "score": 1,
-          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\rental-portfolio; tests 14 pass / 0 fail)"
+          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\rental-portfolio--trial-1; tests 14 pass / 0 fail)"
         },
         "M3": {
           "score": 0,
@@ -642,7 +702,7 @@
         ]
       },
       "trial": 1,
-      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\rental-portfolio",
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\rental-portfolio--trial-1",
       "grader": {
         "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\rental-portfolio.grader.json",
         "hash": "1482050544",
@@ -662,7 +722,7 @@
         "pass": false
       },
       "graderLeak": {
-        "scanned": 18,
+        "scanned": 36,
         "leaked": false,
         "hits": []
       },
@@ -679,12 +739,12 @@
         "emitError": null,
         "p6Refused": false
       },
-      "durationSec": 2.5,
+      "durationSec": 15.6,
       "rowSource": "trial-1",
       "trials": {
-        "trials": 1,
+        "trials": 2,
         "passes": 0,
-        "failed": 1,
+        "failed": 2,
         "k": 1,
         "kEffective": 1,
         "passAt1": 0,
@@ -692,8 +752,8 @@
         "passAllTrials": 0,
         "observedPassRate": 0,
         "flaky": false,
-        "flakinessMeasurable": false,
-        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+        "flakinessMeasurable": true,
+        "note": null
       },
       "perTrial": [
         {
@@ -702,8 +762,29 @@
           "total": 6,
           "mean": 0.6667,
           "pass": false,
-          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\rental-portfolio",
-          "durationSec": 2.5,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\rental-portfolio--trial-1",
+          "durationSec": 15.6,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        },
+        {
+          "trial": 2,
+          "status": "complete",
+          "total": 6,
+          "mean": 0.6667,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\rental-portfolio--trial-2",
+          "durationSec": 8.5,
           "graderLeak": false,
           "acceptance": {
             "filesOk": true,
@@ -734,7 +815,7 @@
         },
         "M2": {
           "score": 1,
-          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\showing-booking; tests 14 pass / 0 fail)"
+          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\showing-booking--trial-1; tests 14 pass / 0 fail)"
         },
         "M3": {
           "score": 0,
@@ -781,7 +862,7 @@
         ]
       },
       "trial": 1,
-      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\showing-booking",
+      "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\showing-booking--trial-1",
       "grader": {
         "path": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders\\showing-booking.grader.json",
         "hash": "3214874927",
@@ -801,7 +882,7 @@
         "pass": false
       },
       "graderLeak": {
-        "scanned": 18,
+        "scanned": 36,
         "leaked": false,
         "hits": []
       },
@@ -818,12 +899,12 @@
         "emitError": null,
         "p6Refused": false
       },
-      "durationSec": 2.5,
+      "durationSec": 8.8,
       "rowSource": "trial-1",
       "trials": {
-        "trials": 1,
+        "trials": 2,
         "passes": 0,
-        "failed": 1,
+        "failed": 2,
         "k": 1,
         "kEffective": 1,
         "passAt1": 0,
@@ -831,8 +912,8 @@
         "passAllTrials": 0,
         "observedPassRate": 0,
         "flaky": false,
-        "flakinessMeasurable": false,
-        "note": "1 trial — flakiness unmeasurable (pass@1 only; use --trials=N ≥ 2)"
+        "flakinessMeasurable": true,
+        "note": null
       },
       "perTrial": [
         {
@@ -841,8 +922,29 @@
           "total": 6,
           "mean": 0.6667,
           "pass": false,
-          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\showing-booking",
-          "durationSec": 2.5,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\showing-booking--trial-1",
+          "durationSec": 8.8,
+          "graderLeak": false,
+          "acceptance": {
+            "filesOk": true,
+            "missingFiles": [],
+            "contentOk": true,
+            "failedContent": [],
+            "checked": {
+              "expectedFiles": 3,
+              "expectedContent": 1
+            },
+            "pass": false
+          }
+        },
+        {
+          "trial": 2,
+          "status": "complete",
+          "total": 6,
+          "mean": 0.6667,
+          "pass": false,
+          "emitDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\showing-booking--trial-2",
+          "durationSec": 7.1,
           "graderLeak": false,
           "acceptance": {
             "filesOk": true,
@@ -861,11 +963,11 @@
   ],
   "summary": {
     "entries": 6,
-    "meanTotal": 0.5555666666666667,
-    "trials": 1,
+    "meanTotal": 0.6667,
+    "trials": 2,
     "cases": 6,
     "passAtK": {
-      "k": 1,
+      "k": 2,
       "cases": 6,
       "passed": 0,
       "passedSlugs": [],

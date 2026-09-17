@@ -38,6 +38,7 @@ import {
 import type { ApproveActor, P6JourneyCycleContext } from "./headless.ts";
 import { runGate } from "./dod.ts";
 import { importProject } from "./io.ts";
+import { evaluatePolicy } from "./policy.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
 import type { PhaseId, Project } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
@@ -1413,6 +1414,139 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
         assert.equal(row?.decidedBy, "human", "the CLI --i-am-human + token path mints the human seat");
         assert.match(String(row?.note), /RT_HUMAN_SEAT_TOKEN verified/);
         assert.equal(raw.status, "running", "the approval advanced the edge");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("216o / W6-L2 — the seam's DENY is un-bypassable by both seats; approve() rows record provenance", () => {
+    const HUMAN_ACTOR: ApproveActor = { decidedBy: "human", seat: "human-cli-i-am-human" };
+    /** A project parked at a fabricated force-human P6 gate — the strongest bypass target. */
+    const forceHumanGate = (): Project => {
+      const base = parkAt(createProject({ brief: FIXTURE_BRIEF }), 6);
+      return { ...base, hitl: { ...base.hitl!, phase: 6, forceHuman: true } };
+    };
+    /** Run `fn` with RT_HUMAN_SEAT_TOKEN deleted (the machine default), restoring it after. */
+    const withoutToken = (fn: () => void): void => {
+      const saved = process.env.RT_HUMAN_SEAT_TOKEN;
+      try {
+        delete process.env.RT_HUMAN_SEAT_TOKEN;
+        fn();
+      } finally {
+        if (saved === undefined) delete process.env.RT_HUMAN_SEAT_TOKEN;
+        else process.env.RT_HUMAN_SEAT_TOKEN = saved;
+      }
+    };
+
+    it("PIN — a policy DENY is un-bypassable by BOTH seats: an unregistered action denies even with a verified token", () => {
+      // approve() derives its action from `force` (never caller-supplied), so no
+      // approve() input can present an unregistered action; pin the default-deny
+      // at the seam this file consumes — deny for the autopilot seat AND for the
+      // human seat even WITH a matching token. Evidence never beats the
+      // default-deny, so no seat combination can bypass a denied action.
+      for (const actor of [HUMAN_ACTOR, HARNESS_APPROVE_ACTOR] as const) {
+        const verdict = evaluatePolicy("hitl.bypass", "gate:P4", {
+          actor,
+          humanSeatToken: "seat-token",
+          expectedHumanSeatToken: "seat-token",
+        });
+        assert.equal(verdict.decision, "deny", `hitl.bypass must deny under the ${actor.decidedBy} seat`);
+        if (verdict.decision === "deny") {
+          assert.match(verdict.reason, /^unknown-action —/, "the refusal names the unknown-action id");
+          assert.equal(verdict.fallback, "none", "an unknown action has no sanctioned fallback");
+        }
+      }
+    });
+
+    it("PIN — hitl.force cannot self-approve: the autopilot seat's force is refused, coded, and mints nothing", () => {
+      const p = forceHumanGate();
+      const before = p.decisions.length;
+      let caught: (Error & { code?: string }) | undefined;
+      try {
+        approve(p, { force: true }); // the autopilot default seat, forcing hard
+      } catch (err) {
+        caught = err as Error & { code?: string };
+      }
+      assert.ok(caught, "an autopilot force must be refused — never silently allowed");
+      assert.equal(caught.code, "RT_E_VALIDATION", "the refusal keeps the coded shape");
+      assert.match(caught.message, /force-requires-human-seat/, "the verdict names the rule");
+      assert.match(caught.message, /human-seat-token/, "the refusal names the sanctioned fallback");
+      assert.equal(p.decisions.length, before, "no ledger row may be minted by a refused force");
+      assert.equal(p.status, "awaiting_hitl", "the gate stays parked");
+    });
+
+    it("PIN — hitl.force via the human seat WITHOUT the out-of-band token is refused too (deny for BOTH seats)", () => {
+      const p = forceHumanGate();
+      const before = p.decisions.length;
+      withoutToken(() => {
+        assert.throws(
+          () => approve(p, { force: true, actor: HUMAN_ACTOR, humanSeatToken: "not-the-token" }),
+          /human-seat-unverified|RT_HUMAN_SEAT_TOKEN/,
+          "a human-seat force without the matching token must throw, never mint",
+        );
+        assert.throws(
+          () => approve(p, { force: true, actor: HUMAN_ACTOR }),
+          /RT_HUMAN_SEAT_TOKEN/,
+          "no presented token at all must throw as well",
+        );
+      });
+      assert.equal(p.decisions.length, before, "refused forces mint nothing");
+      assert.equal(p.status, "awaiting_hitl", "still parked at the gate");
+    });
+
+    it("POSITIVE CONTROL — the human seat WITH the token may force, and the row records the token path", () => {
+      const p = forceHumanGate();
+      const saved = process.env.RT_HUMAN_SEAT_TOKEN;
+      try {
+        process.env.RT_HUMAN_SEAT_TOKEN = "test-seat-token";
+        const out = approve(p, { force: true, actor: HUMAN_ACTOR, humanSeatToken: "test-seat-token" });
+        const row = out.decisions.at(-1);
+        assert.equal(row?.decision, "approve");
+        assert.equal(row?.decidedBy, "human");
+        assert.match(String(row?.note), /\[seat human-cli-i-am-human\]/, "the 216 note tag is unchanged");
+        assert.equal(row?.decidedVia?.action, "hitl.force");
+        assert.equal(row?.decidedVia?.resource, "gate:P6");
+        assert.equal(row?.decidedVia?.label, "human/human-cli-i-am-human");
+        assert.equal(row?.decidedVia?.tokenPath, true, "the verified token path is recorded");
+        assert.match(String(row?.decidedVia?.reason), /^human-seat-token-verified — hitl\.force on gate:P6/);
+      } finally {
+        if (saved === undefined) delete process.env.RT_HUMAN_SEAT_TOKEN;
+        else process.env.RT_HUMAN_SEAT_TOKEN = saved;
+      }
+    });
+
+    it("the default approve records provenance: hitl.approve, autopilot/harness, no token path", async () => {
+      let p = createProject({ brief: FIXTURE_BRIEF });
+      p = (await runUntilGate(p)).project; // parked at P4
+      const out = approve(p);
+      const row = out.decisions.at(-1);
+      assert.equal(row?.decidedBy, "autopilot");
+      assert.equal(row?.decidedVia?.action, "hitl.approve");
+      assert.equal(row?.decidedVia?.resource, "gate:P4");
+      assert.equal(row?.decidedVia?.label, "autopilot/harness");
+      assert.equal(row?.decidedVia?.tokenPath, false, "the machine seat never claims the token path");
+      assert.match(String(row?.decidedVia?.reason), /^autopilot-seat — hitl\.approve on gate:P4/);
+    });
+
+    it("CLI — an approve landed by the CLI carries the provenance on the row it mints", () => {
+      const dir = tempDir();
+      try {
+        const path = join(dir, "cli-provenance.json");
+        saveProject(path, parkAt(createProject({ brief: FIXTURE_BRIEF }), 4));
+        const ap = runCli(["approve", "--project", path, "--i-am-human"], {
+          env: { RT_HUMAN_SEAT_TOKEN: "test-seat-token" },
+        });
+        assert.equal(ap.code, 0, `CLI approve must succeed; stderr: ${ap.stderr.slice(0, 300)}`);
+        const raw = JSON.parse(readFileSync(path, "utf8")) as {
+          decisions?: Array<{ decidedBy?: string; note?: string; decidedVia?: Record<string, unknown> }>;
+        };
+        const row = (raw.decisions ?? []).at(-1);
+        assert.equal(row?.decidedBy, "human");
+        assert.equal(row?.decidedVia?.action, "hitl.approve");
+        assert.equal(row?.decidedVia?.resource, "gate:P4");
+        assert.equal(row?.decidedVia?.label, "human/human-cli-i-am-human");
+        assert.equal(row?.decidedVia?.tokenPath, true);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

@@ -629,3 +629,68 @@ describe("216i (112 T1/T2) — verify lesson loop (refusal · signature id · ac
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// T-107.2 (fixes/216p, W6 · L3) — REGISTRY MIGRATION PIN (verify seam).
+//
+// W5 switched `generateCases` from the legacy `completeDeepSeek(prompt, {json})`
+// binding to `callModel("weak", prompt, {json})` (llm/providers/registry.ts).
+// This pin proves BOTH halves:
+//   1. the same fetch stub is reached with the SAME request shape the
+//      pre-registry call sent (url/method/model/thinking/max_tokens/
+//      response_format/stream/messages), and
+//   2. the REGISTRY resolution is genuinely the code in the path — a
+//      `DEEPSEEK_MODEL_WEAK` env pin changes the requested model id, which the
+//      legacy binding (a hardcoded flash default) could never have honored.
+// ---------------------------------------------------------------------------
+describe("216p T-107.2 — registry migration pin (verify seam)", () => {
+  it("generateCases reaches the same fetch shape, and the `weak` registry role is the code in the path", async () => {
+    const restoreKey = withFakeKey();
+    const realFetch = globalThis.fetch;
+    const savedPin = process.env.DEEPSEEK_MODEL_WEAK;
+    const calls: Array<{ url: string; method?: string; body: Record<string, unknown> }> = [];
+    try {
+      globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+        calls.push({
+          url: String(url),
+          method: init?.method,
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return chatReply(allPinned);
+      }) as typeof fetch;
+
+      // (1) No pin: the exact pre-registry request shape.
+      delete process.env.DEEPSEEK_MODEL_WEAK;
+      const first = await generateCases(SOURCE, BRIEF, [], SEEDS, ORACLE_IDS);
+      assert.equal(first.ok, true);
+      assert.equal(calls.length, 1, "one generation call, no repair retry");
+      const plain = calls[0]!;
+      assert.equal(plain.url, "https://api.deepseek.com/chat/completions");
+      assert.equal(plain.method, "POST");
+      assert.equal(plain.body.model, "deepseek-v4-flash", "the `weak` tier model — the id the legacy call sent");
+      assert.deepEqual(plain.body.thinking, { type: "disabled" });
+      assert.deepEqual(plain.body.response_format, { type: "json_object" });
+      assert.equal(plain.body.stream, false);
+      assert.equal(plain.body.max_tokens, 1024, "flash default max_tokens");
+      const messages = plain.body.messages as Array<{ role?: string; content?: string }>;
+      assert.equal(messages[0]?.role, "system", "json:true still prepends the JSON instruction");
+      assert.equal(messages[messages.length - 1]?.role, "user");
+
+      // (2) A role env pin changes the requested id ⇒ the registry resolved it.
+      process.env.DEEPSEEK_MODEL_WEAK = "deepseek-v4-pro";
+      const second = await generateCases(SOURCE, BRIEF, [], SEEDS, ORACLE_IDS);
+      assert.equal(second.ok, true);
+      assert.equal(calls.length, 2);
+      assert.equal(
+        calls[1]!.body.model,
+        "deepseek-v4-pro",
+        "the registry env pin is honored — the legacy hardcoded binding could not do this",
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+      if (savedPin === undefined) delete process.env.DEEPSEEK_MODEL_WEAK;
+      else process.env.DEEPSEEK_MODEL_WEAK = savedPin;
+      restoreKey();
+    }
+  });
+});

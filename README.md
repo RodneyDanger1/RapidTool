@@ -95,8 +95,8 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
 | HITL seats: no machine path can mint `decidedBy:"human"` | ✅ | TA-2 (Wave 2): `ApproveActor` + out-of-band token |
 | Lesson loop: failure signatures, refusal rows, accrual | ✅ wired+pinned | 112 T1/T2 (Waves 3–4); `knowledge.ts`/`engine.ts`/`verify.server.ts` |
 | Assertion-gap lint (tautology detection repo-wide) | ✅ | `scripts/check-assertion-gaps.mjs`; wired into `gate.sh`; 0 findings |
-| `str_replace` patch primitive (unique-match + graded fuzzy) | ✅ core | `src/lib/patch.ts` (21 tests). **Not yet wired into P6/repair — W6** |
-| One-seam policy engine (default-deny approvals) | ✅ core | `src/lib/policy.ts` (27 tests). **Routing not yet wired — W5** |
+| `str_replace` patch primitive (unique-match + graded fuzzy) | ✅ core | `src/lib/patch.ts` (21 tests). **Not yet wired into P6/repair — carried past W6 (see `remainingwaves.md`)** |
+| One-seam policy engine (default-deny approvals) | ✅ core | `src/lib/policy.ts` (27 tests). **Routing wired in W5** (all 3 sites, seats byte-identical; bypass pins → W6-L2) |
 | UI: console, phase rail, HITL dock, runtime log, **command palette (⌘K)**, typed timeline | ✅ | `console.tsx` + `cmd-palette.tsx` + `runtime-timeline-pane.tsx` |
 | Headless CLI: 34 verbs, JSON output, doctor, eval harness | ✅ | `scripts/rapidtool-cli.mjs`; `README-cli.md` (doc-contract tested) |
 | Stability gate with flake detection | ✅ | `bash scripts/gate.sh [--double]` (first green run 2026-09-16) |
@@ -107,8 +107,9 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
    The headline open item (TA-15). On the reference corpus,
    `doctor --tree research/eval-out/coffeehouse2home-property-ledger` → `{stubs: 0,
    reexports: 5, real: 0}`: every `src/jobs/*.ts` re-exports the single hosted module. The
-   rewire is fully designed (Wave 4) and lands in **W5** — until then, RapidTool does **not**
-   emit a real multi-job product, and it must not be claimed to.
+   rewire is fully designed (Wave 4) and lands in **W6** (W5 shipped `orderTreeChunks` + the
+   design; the caller rewire is W6-L1) — until then, RapidTool does **not** emit a real
+   multi-job product, and it must not be claimed to.
 2. **P7–P12 phases often produce no artifacts.** The engine reports this honestly now
    ("Phase coverage: N of 13 / M artifacts from P7–P12" in every packet). Unblocking them is
    roadmap, not reality.
@@ -123,19 +124,21 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
 6. **Chat is grounded tools + one-shot model text.** No shell, no disk patch, no agents from
    chat.
 7. **Verification is deep but local.** 2000+ tests run on this machine; CI wiring, cross-machine
-   reproducibility, and pass@k eval statistics are roadmap (T-107.5).
+   reproducibility, and *keyed* eval evidence are roadmap (the run-side graders + trials/pass@k
+   harness shipped in W5; a keyed run still needs a live `DEEPSEEK_API_KEY` — T0.10).
 
 ## Progress so far (the paper trail)
 
-Four multi-agent waves ran 2026-09-16 (20 flash subagents, ~4h wall, every wave closed with
-`gate.sh`-class green): W1 corruption-class fixes → W2 repair/consolidation (T-07/TA-2, gates
-wired) → W3 tree-run builds+tests (T-18), lesson-loop wiring, UI wave → W4 Wave-H cores +
-UI finish + T-14 pins + gate.sh's first green run. **Every landing is verified against bytes
-and logged:**
+Five multi-agent waves ran 2026-09-16 (25 flash subagents, every wave closed with `gate.sh`-class
+green): W1 corruption-class fixes → W2 repair/consolidation (T-07/TA-2, gates wired) → W3
+tree-run builds+tests (T-18), lesson-loop wiring, UI wave → W4 Wave-H cores + UI finish + T-14
+pins + gate.sh's first green run → W5 policy routing through the approval seam, provider registry
++ role tiers, run-side eval graders with trials/pass@k — test counts now scripts **235/235** +
+src **1811/1811**, second `gate.sh` green. **Every landing is verified against bytes and logged:**
 
 - `taskuniverselog.md` — the live board: every task, status, and what remains, per dossier.
 - `fixes/216b…216n_*.md` — per-workstream landing logs (what/why/file:line/evidence).
-- `wave_plans/W4/lane-*.md` — the per-lane dispatch plans the agents actually followed.
+- `wave_plans/W4–W6/lane-*.md` — the per-lane dispatch plans the agents actually followed.
 - `RESUME.md` — full session handoff + hard rules + settled decisions.
 - `research/multiagent/*.md` (36 dossiers) — the analysis program behind all of it.
 - **`remainingwaves.md` — every remaining wave, task by task, with the files each touches,

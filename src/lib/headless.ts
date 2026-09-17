@@ -41,7 +41,7 @@ import { runSummaryLesson, templateEmissionLesson } from "./knowledge.ts";
 import { exportPacketText, exportProjectJson, importProject, slugName } from "./io.ts";
 import { applyReportResult, validateReport, type ReportApplyReason } from "./report-intake.ts";
 import { canEnter, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
-import { evaluatePolicy } from "./policy.ts";
+import { evaluatePolicy, seatLabel } from "./policy.ts";
 import { applyWrite, rollback, snapshotPaths } from "./write-set.ts";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -51,6 +51,7 @@ import type { TreeRunOutcome } from "./compile-check.server.ts";
 import type {
   ArtifactKind,
   GeneratedTreeFile,
+  HitlDecision,
   ModelRoute,
   PhaseId,
   PhaseStatus,
@@ -734,6 +735,36 @@ export type ApproveActor =
  *  `decidedBy: "human"` (that needs the token path below). */
 export const HARNESS_APPROVE_ACTOR: ApproveActor = { decidedBy: "autopilot", seat: "harness" };
 
+/**
+ * 216o (T-107.3 · P0-02 · W6-L2): stamp the policy verdict onto the ledger row
+ * the approval just minted, as `HitlDecision.decidedVia` (types.ts). The mint
+ * itself stays where it always lived (`approveHitl`, engine.ts) — this is the
+ * additive provenance tail for THIS file's path: `approve()` writes every row
+ * with the seam verdict that allowed it (action/resource/reason), the seat
+ * label in the same `policy.seatLabel` vocabulary the `[seat …]` note tag
+ * uses, and whether the out-of-band token path verified a human seat.
+ *
+ * Only a FRESHLY appended row is touched — identified by its id not existing
+ * on the input project — so a defensive no-op approval (no pending gate, or a
+ * drifted edge) and every pre-existing row pass through byte-identical. The
+ * field is optional by construction: rows minted elsewhere (engine autopilot
+ * steps, store approvals, fixtures) simply never carry it.
+ */
+function stampDecidedVia(
+  project: Project,
+  before: Project,
+  decidedVia: NonNullable<HitlDecision["decidedVia"]>,
+): Project {
+  const row = project.decisions.at(-1);
+  if (row === undefined || row.decision !== "approve") return project;
+  if (row.phase !== before.currentPhase) return project;
+  if (before.decisions.some((d) => d.id === row.id)) return project; // nothing minted
+  return {
+    ...project,
+    decisions: project.decisions.map((d) => (d.id === row.id ? { ...d, decidedVia } : d)),
+  };
+}
+
 /** Approve the pending HITL gate on the current edge (pass `force` to override
  *  a forceHuman gate such as a failed P6 sandbox). Throws when there is no
  *  pending gate on the CURRENT edge (store.approve parity — a stale gate must
@@ -754,7 +785,14 @@ export const HARNESS_APPROVE_ACTOR: ApproveActor = { decidedBy: "autopilot", sea
  *  (`evaluatePolicy`, src/lib/policy.ts) with `hitl.force` when `force` is set
  *  (a machine may never force past a human gate) and `hitl.approve` otherwise.
  *  A denied verdict throws a coded `RT_E_VALIDATION` refusal naming the
- *  sanctioned fallback; there is no seat combination that can bypass it. */
+ *  sanctioned fallback; there is no seat combination that can bypass it.
+ *
+ *  216o (W6-L2 · ledger provenance): an ALLOWED decision also stamps the
+ *  minted row's optional `decidedVia` field (types.ts) with the allowing
+ *  verdict — action, resource, reason, seat label (the `seatLabel` vocabulary),
+ *  and the token-path bool — so the ledger records WHERE the decision came
+ *  from, not just that it happened; `dod.ts` cross-checks the field against
+ *  the row's own tag when present. */
 export function approve(
   project: Project,
   opts: { force?: boolean; actor?: ApproveActor; humanSeatToken?: string } = {},
@@ -803,7 +841,25 @@ export function approve(
     actor.decidedBy === "human"
       ? `[seat ${actor.seat}] out-of-band RT_HUMAN_SEAT_TOKEN verified`
       : `[seat ${actor.seat}] autopilot seat — no human decision claimed`;
-  const base = approveHitl(project, { decidedBy: actor.decidedBy, force: opts.force, note });
+  // 216o (T-107.3 · P0-02 · W6-L2 — ledger PROVENANCE): the row this approval
+  // mints also records the ALLOWING verdict as `decidedVia` (types.ts): the
+  // action/resource/reason the seam covered, the seat label in the SAME
+  // `policy.seatLabel` vocabulary the note tag uses, and the token path —
+  // branched on the reason id ("human-seat-token-verified"), the documented
+  // policy.ts reason contract. The mint itself stays in approveHitl; the
+  // stamp is additive and touches only the freshly appended row.
+  const decidedVia: NonNullable<HitlDecision["decidedVia"]> = {
+    action: policyAction,
+    resource: policyResource,
+    reason: verdict.reason,
+    label: seatLabel(actor),
+    tokenPath: verdict.reason.split(" — ")[0] === "human-seat-token-verified",
+  };
+  const base = stampDecidedVia(
+    approveHitl(project, { decidedBy: actor.decidedBy, force: opts.force, note }),
+    project,
+    decidedVia,
+  );
   // E-02 (store.approve parity): record the just-approved phase's DoD gate —
   // approveHitl sets PhaseRecord.gate inline but the gate artifact + log are
   // recordGateInto's, and the packet is re-stamped after the verdict so its

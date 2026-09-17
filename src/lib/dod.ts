@@ -21,7 +21,7 @@
 // ---------------------------------------------------------------------------
 import type { Artifact, HitlDecision, OracleTest, PhaseId, Project } from "./types.ts";
 import { canonicalStem, fnv1a } from "./algorithms.ts";
-import { evaluatePolicy, type PolicySeat } from "./policy.ts";
+import { evaluatePolicy, seatLabel, type PolicySeat } from "./policy.ts";
 import {
   BRIEF_STOPWORDS,
   briefNounHits,
@@ -95,19 +95,43 @@ const classifyRowSeat = (row: HitlDecision): RowSeatClaim => {
 };
 
 /**
+ * 216o (T-107.3 · P0-02 · W6-L2): when a row records `decidedVia` provenance
+ * (minted by the headless approval path), the field must AGREE with what the
+ * row itself claims — the seat tag's label, this gate (resource), a registered
+ * action, and the token path. The seam only ever allows a human-seat allow
+ * through the verified out-of-band token path, so a human-labeled row can
+ * never carry `tokenPath: false` (and an autopilot row can never carry
+ * `tokenPath: true`); any contradiction fails closed. A legacy row WITHOUT the
+ * field (pre-216o payloads, direct `approveHitl` writers) keeps the pre-W6
+ * tolerance — the check adds teeth, it never invents provenance for old rows.
+ */
+const provenanceConsistent = (row: HitlDecision, seat: PolicySeat, phase: number): boolean => {
+  const via = row.decidedVia;
+  if (via === undefined) return true; // legacy row: nothing recorded to cross-check
+  if (via.resource !== `gate:P${phase}`) return false;
+  if (via.action !== "hitl.approve" && via.action !== "hitl.force") return false;
+  if (via.label !== seatLabel(seat)) return false;
+  if (typeof via.reason !== "string" || !via.reason.includes(" — ")) return false;
+  return via.tokenPath === (seat.decidedBy === "human");
+};
+
+/**
  * 216o (T-107.3 · P0-02/P0-06): does this ledger row record a decision the
  * policy seam permits? A TAGGED row must be policy-consistent or it fails
  * closed: an autopilot tag passes the seam's Rule A; a human tag must carry
  * the recorded out-of-band evidence too — without it the seam denies
  * (`human-seat-unverified`, fallback `human-seat-token`) and the criterion
- * fails. An UNTAGGED row keeps the 216 T0.8 rule (a recorded actor exists);
- * that tolerance is deliberate: the writers that could forge a human row (the
- * headless seam, the CLI verb) are both routed through the seam, and pre-216o
- * payloads carry no tag to test.
+ * fails. A tagged row whose optional `decidedVia` provenance contradicts the
+ * tag (W6-L2: wrong gate, unregistered action, forged label, impossible token
+ * path) also fails closed via `provenanceConsistent`. An UNTAGGED row keeps
+ * the 216 T0.8 rule (a recorded actor exists); that tolerance is deliberate:
+ * the writers that could forge a human row (the headless seam, the CLI verb)
+ * are both routed through the seam, and pre-216o payloads carry no tag to test.
  */
 const policyConsistentApproval = (row: HitlDecision, phase: number): boolean => {
   const claim = classifyRowSeat(row);
   if (claim.kind === "tagged-unknown") return false;
+  if (claim.kind === "seat" && !provenanceConsistent(row, claim.seat, phase)) return false;
   if (claim.kind === "untagged") return true;
   const recorded = HUMAN_SEAT_EVIDENCE_RE.test(row.note ?? "");
   const verdict = evaluatePolicy("hitl.approve", `gate:P${phase}`, {
@@ -418,6 +442,8 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       // p9-approved) re-ask the ONE policy seam via `approved()` →
       // `policyConsistentApproval` — a tagged row must be a policy-allow for
       // hitl.approve on its gate, or the criterion fails (see the helper above).
+      // W6-L2: a row that carries `decidedVia` provenance must additionally
+      // AGREE with its tag (label, gate, action, token path) or it fails closed.
       id: "p4-approved",
       criterion: "P4 approved — decision ledger records the approver (human or autopilot)",
       probe: (p) => approved(p, 4),

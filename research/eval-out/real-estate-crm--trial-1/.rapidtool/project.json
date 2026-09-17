@@ -1,0 +1,1631 @@
+{
+  "id": "30d7dd17-e3f7-4e6a-a93c-c28a38c14dae",
+  "name": "Real-Estate CRM",
+  "brief": "A real estate agent CRM web app: manage buyer and seller contacts; a lead pipeline with stages (new, contacted, qualified, showing-booked, offer-made, closed-won, closed-lost); property listings with address, list price, beds/baths/sqft and status; per-property showing notes; follow-up task scheduling with due dates and completion; and an email-to-lead capture placeholder that parses an inbound email into a contact and a pipeline lead.",
+  "domain": "real-estate",
+  "createdAt": 1789613325052,
+  "status": "complete",
+  "currentPhase": 12,
+  "kind": "app",
+  "phases": [
+    {
+      "id": 0,
+      "status": "complete",
+      "startedAt": 1789613325060,
+      "completedAt": 1789613325093,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3269632901",
+        "checkedAt": 1789613325105
+      }
+    },
+    {
+      "id": 1,
+      "status": "complete",
+      "startedAt": 1789613325109,
+      "completedAt": 1789613325112,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1050713914",
+        "checkedAt": 1789613325114
+      }
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "startedAt": 1789613325116,
+      "completedAt": 1789613325118,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1845537766",
+        "checkedAt": 1789613325121
+      }
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "startedAt": 1789613325123,
+      "completedAt": 1789613325126,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1638292844",
+        "checkedAt": 1789613325128
+      }
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "startedAt": 1789613325130,
+      "completedAt": 1789613325142,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3527188654",
+        "checkedAt": 1789613325144
+      }
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "startedAt": 1789613325147,
+      "completedAt": 1789613325153,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "2951452883",
+        "checkedAt": 1789613325157
+      }
+    },
+    {
+      "id": 6,
+      "status": "complete",
+      "startedAt": 1789613325159,
+      "completedAt": 1789613325162,
+      "gate": {
+        "passed": false,
+        "unmet": [
+          "Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)",
+          "Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)"
+        ],
+        "evidenceHash": "552477142",
+        "checkedAt": 1789613325167
+      }
+    },
+    {
+      "id": 7,
+      "status": "complete",
+      "startedAt": 1789613325170,
+      "completedAt": 1789613325172,
+      "gate": {
+        "passed": false,
+        "unmet": [
+          "Live research corpus exists for P7 (≥1 fetched finding)"
+        ],
+        "evidenceHash": "425504246",
+        "checkedAt": 1789613325174
+      }
+    },
+    {
+      "id": 8,
+      "status": "complete",
+      "startedAt": 1789613325185,
+      "completedAt": 1789613325213,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "606175358",
+        "checkedAt": 1789613325216
+      }
+    },
+    {
+      "id": 9,
+      "status": "complete",
+      "startedAt": 1789613325218,
+      "completedAt": 1789613325225,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3030540723",
+        "checkedAt": 1789613325228
+      }
+    },
+    {
+      "id": 10,
+      "status": "complete",
+      "startedAt": 1789613325230,
+      "completedAt": 1789613325232,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3218462335",
+        "checkedAt": 1789613325243
+      }
+    },
+    {
+      "id": 11,
+      "status": "complete",
+      "startedAt": 1789613325246,
+      "completedAt": 1789613325248,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "1663625674",
+        "checkedAt": 1789613325250
+      }
+    },
+    {
+      "id": 12,
+      "status": "complete",
+      "startedAt": 1789613325252,
+      "completedAt": 1789613325255,
+      "gate": {
+        "passed": true,
+        "unmet": [],
+        "evidenceHash": "3530055408",
+        "checkedAt": 1789613325257
+      }
+    }
+  ],
+  "scorecard": {
+    "overall": 7.2,
+    "verdict": "proceed-with-guards",
+    "axes": [
+      {
+        "key": "feasibility",
+        "label": "Technical feasibility",
+        "score": 3,
+        "note": "Typed contracts + sequential graph."
+      },
+      {
+        "key": "scale",
+        "label": "Scale headroom",
+        "score": 9,
+        "note": "Stateless workers + durable checkpoints."
+      },
+      {
+        "key": "security",
+        "label": "Security posture",
+        "score": 9,
+        "note": "Scheduler Δ1."
+      },
+      {
+        "key": "api",
+        "label": "API / rate-limit risk",
+        "score": 7,
+        "note": "Live-tool Δ1."
+      },
+      {
+        "key": "delivery",
+        "label": "Delivery confidence",
+        "score": 8,
+        "note": "Phased graph prevents skipped work."
+      }
+    ],
+    "bottlenecks": [
+      "Long-running tools must stream over WebSocket MCP.",
+      "HITL rejection without a qualitative note is illegal."
+    ],
+    "attackVectors": [
+      "Prompt injection via ingested competitor pages.",
+      "Tool-call privilege escalation if OAuth scopes are inherited.",
+      "Sandbox escape if generated exec has network."
+    ],
+    "libraries": [
+      {
+        "name": "TanStack Start",
+        "role": "Typed app shell and file routes"
+      },
+      {
+        "name": "Zod",
+        "role": "Schema lock on generated artifacts"
+      },
+      {
+        "name": "MLS / property-data API",
+        "role": "Listings, comps, and ARV inputs"
+      }
+    ]
+  },
+  "competitors": [
+    {
+      "name": "DealMachine / PropStream",
+      "class": "REI deal flow",
+      "strength": "Driving-for-dollars + comps",
+      "gap": "No flip/renovation lifecycle or ARV grounding",
+      "source": "illustrative"
+    },
+    {
+      "name": "Follow Up Boss",
+      "class": "Agent CRM",
+      "strength": "Lead nurture",
+      "gap": "Not a governed delivery graph; no escrow/title handoff",
+      "source": "illustrative"
+    },
+    {
+      "name": "Cursor",
+      "class": "IDE-attached agent",
+      "strength": "Repo-aware multi-file edits",
+      "gap": "No agency lifecycle or HITL graph",
+      "source": "illustrative"
+    },
+    {
+      "name": "v0 / Bolt / Lovable",
+      "class": "Prompt-to-app",
+      "strength": "Fast UI scaffolds",
+      "gap": "Skips isolation policy and ADR trail",
+      "source": "illustrative"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "0-scorecard-feasibility-architecture-scoreca",
+      "phase": 0,
+      "kind": "scorecard",
+      "title": "Feasibility & Architecture Scorecard",
+      "body": "# Real-Estate CRM — Phase 0 scorecard\n\nDomain: real-estate\nOverall: 7.2 / 10 — proceed-with-guards\nLattice jobs: close, show, schedule, parse, stage, follow-up\nEntities: lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft\nConstraints: none\n\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\n\n## Bottlenecks\n- Long-running tools must stream over WebSocket MCP.\n- HITL rejection without a qualitative note is illegal.\n\n## Attack vectors\n- Prompt injection via ingested competitor pages.\n- Tool-call privilege escalation if OAuth scopes are inherited.\n- Sandbox escape if generated exec has network.\n\n## Recommended libraries\n- TanStack Start: Typed app shell and file routes\n- Zod: Schema lock on generated artifacts\n- MLS / property-data API: Listings, comps, and ARV inputs"
+    },
+    {
+      "id": "0-algorithm-intent-lattice-a1",
+      "phase": 0,
+      "kind": "algorithm",
+      "title": "Intent Lattice (A1)",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"jobs\": [\n    \"close\",\n    \"show\",\n    \"schedule\",\n    \"parse\",\n    \"stage\",\n    \"follow-up\"\n  ],\n  \"entities\": [\n    \"lead\",\n    \"listing\",\n    \"property\",\n    \"showing\",\n    \"buyer\",\n    \"seller\",\n    \"manager\",\n    \"agent\",\n    \"task\",\n    \"estate\",\n    \"beds\",\n    \"baths\",\n    \"sqft\"\n  ],\n  \"constraints\": [],\n  \"nodes\": [\n    {\n      \"kind\": \"object\",\n      \"label\": \"lead\",\n      \"weight\": 0.9500000000000001\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"close\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"show\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"listing\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"property\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"showing\",\n      \"weight\": 0.75\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"buyer\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"seller\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"manager\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"actor\",\n      \"label\": \"agent\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"schedule\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"parse\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"job\",\n      \"label\": \"stage\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"task\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"estate\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"beds\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"baths\",\n      \"weight\": 0.55\n    },\n    {\n      \"kind\": \"object\",\n      \"label\": \"sqft\",\n      \"weight\": 0.55\n    }\n  ],\n  \"complexity\": 10,\n  \"vague\": false\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p0-32696329",
+      "phase": 0,
+      "kind": "gate",
+      "title": "DoD gate — P0",
+      "body": "# DoD gate — P0\n\n**Result: PASS**\n\nAll criteria met for phase 0.\n\nEvidence hash: 3269632901",
+      "language": "markdown"
+    },
+    {
+      "id": "1-graph-dispatcher-topology",
+      "phase": 1,
+      "kind": "graph",
+      "title": "Dispatcher topology",
+      "body": "Sequential pipeline: close → show → schedule → parse → stage → follow-up\nState entities: lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft\n\nEach step advances a lead through its lifecycle in the real estate domain — the flow is the brief's own verbs, the state its own nouns (P0 lattice).\n\n> Derivation: a single sequential flow over leads; no parallel, event, or failover topology is claimed beyond what the brief states.",
+      "language": "text"
+    },
+    {
+      "id": "gate-p1-10507139",
+      "phase": 1,
+      "kind": "gate",
+      "title": "DoD gate — P1",
+      "body": "# DoD gate — P1\n\n**Result: PASS**\n\nAll criteria met for phase 1.\n\nEvidence hash: 1050713914",
+      "language": "markdown"
+    },
+    {
+      "id": "2-memory-data-model-retrieval",
+      "phase": 2,
+      "kind": "memory",
+      "title": "Data model & retrieval",
+      "body": "Records: lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft\nOperations: close, show, schedule, parse, stage, follow-up\n\nEach lead is the unit of state; close steps read and write that state in order.\n\n> Persistence is shaped by the brief's own nouns — no specific database or durable store is claimed beyond the brief."
+    },
+    {
+      "id": "gate-p2-18455377",
+      "phase": 2,
+      "kind": "gate",
+      "title": "DoD gate — P2",
+      "body": "# DoD gate — P2\n\n**Result: PASS**\n\nAll criteria met for phase 2.\n\nEvidence hash: 1845537766",
+      "language": "markdown"
+    },
+    {
+      "id": "3-mcp-integration-surface-declared",
+      "phase": 3,
+      "kind": "mcp",
+      "title": "Integration surface (declared)",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"surface\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Integration surface derived from the brief's domain — declarations, not implemented bindings (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p3-16382928",
+      "phase": 3,
+      "kind": "gate",
+      "title": "DoD gate — P3",
+      "body": "# DoD gate — P3\n\n**Result: PASS**\n\nAll criteria met for phase 3.\n\nEvidence hash: 1638292844",
+      "language": "markdown"
+    },
+    {
+      "id": "4-security-security-authorization-policy",
+      "phase": 4,
+      "kind": "security",
+      "title": "Security & authorization policy",
+      "body": "Protected data: lead, listing, property, showing, buyer, seller (the brief's own entities).\nAccess model: buyer, seller, manager, agent — least privilege per role.\n\nAuthorization:\n  • Each actor may act only on the leads its role owns.\n  • Elevated actions outside an actor's scope are refused.\n  • Sensitive lead data (identity, financial) is never logged in the clear.\n\n> Policy above is a declaration derived from the brief's domain; the implemented isolation boundary is confirmed at the gate below (B-18 honesty)."
+    },
+    {
+      "id": "gate-p4-35271886",
+      "phase": 4,
+      "kind": "gate",
+      "title": "DoD gate — P4",
+      "body": "# DoD gate — P4\n\n**Result: PASS**\n\nAll criteria met for phase 4.\n\nEvidence hash: 3527188654",
+      "language": "markdown"
+    },
+    {
+      "id": "5-validation-validation-hitl-contract",
+      "phase": 5,
+      "kind": "validation",
+      "title": "Validation + HITL contract",
+      "body": "Validation contract (the HITL rules the engine actually enforces):\n  1. Rejections require ≥12 characters of qualitative feedback (ADR-002).\n  2. forceHuman gates (reframe, failed sandbox) can never be autopilot-approved.\n  3. Phases execute strictly in order — the linear 0→12 graph.\n  4. Every approval lands in the append-only decision journal.\n\nRejection policy: qualitative feedback is mandatory.\nDiagnostics: one JSON event per orchestration step.\n\n> - learning: IMPLEMENTED none | DECLARED self-learning-loop — P5 self-learning title only — no loop behind it (90 §10); write-back is M-08/G-25 roadmap."
+    },
+    {
+      "id": "gate-p5-29514528",
+      "phase": 5,
+      "kind": "gate",
+      "title": "DoD gate — P5",
+      "body": "# DoD gate — P5\n\n**Result: PASS**\n\nAll criteria met for phase 5.\n\nEvidence hash: 2951452883",
+      "language": "markdown"
+    },
+    {
+      "id": "6-code-p6-placeholder-module-determinis",
+      "phase": 6,
+      "kind": "code",
+      "title": "P6 placeholder module (deterministic template)",
+      "body": "const JOBS = [\"close\", \"show\", \"schedule\", \"parse\", \"stage\"];\nconst REJECTION = \"\";\nfunction synthesize(spec) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Real-Estate CRM\", phase: 6, job: \"close\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"close\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"close\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"close\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+      "language": "javascript"
+    },
+    {
+      "id": "6-code-sandbox-result",
+      "phase": 6,
+      "kind": "code",
+      "title": "Sandbox result",
+      "body": "{\n  \"ok\": true,\n  \"detail\": \"tests.pass\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p6-55247714",
+      "phase": 6,
+      "kind": "gate",
+      "title": "DoD gate — P6",
+      "body": "# DoD gate — P6\n\n**Result: FAIL**\n\nUnmet criteria:\n- Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)\n- Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)\n\nEvidence hash: 552477142",
+      "language": "markdown"
+    },
+    {
+      "id": "7-research-competitive-analysis-matrix",
+      "phase": 7,
+      "kind": "research",
+      "title": "Competitive analysis matrix",
+      "body": "# Market position — Real-Estate CRM\n\n> Illustrative competitor templates (source: illustrative — NOT live research). Verify before citing.\n\n## DealMachine / PropStream (REI deal flow)\nSource: illustrative template\nStrength: Driving-for-dollars + comps\nGap RapidTool exploits: No flip/renovation lifecycle or ARV grounding\n## Follow Up Boss (Agent CRM)\nSource: illustrative template\nStrength: Lead nurture\nGap RapidTool exploits: Not a governed delivery graph; no escrow/title handoff\n## Cursor (IDE-attached agent)\nSource: illustrative template\nStrength: Repo-aware multi-file edits\nGap RapidTool exploits: No agency lifecycle or HITL graph\n## v0 / Bolt / Lovable (Prompt-to-app)\nSource: illustrative template\nStrength: Fast UI scaffolds\nGap RapidTool exploits: Skips isolation policy and ADR trail\n\nArchitectural advantage: deterministic 0–12 graph with HITL, MCP/A2A, and ADRs — generators skip this; IDEs leave it to the human."
+    },
+    {
+      "id": "gate-p7-42550424",
+      "phase": 7,
+      "kind": "gate",
+      "title": "DoD gate — P7",
+      "body": "# DoD gate — P7\n\n**Result: FAIL**\n\nUnmet criteria:\n- Live research corpus exists for P7 (≥1 fetched finding)\n\nEvidence hash: 425504246",
+      "language": "markdown"
+    },
+    {
+      "id": "8-ui-interface-contract-client-ui",
+      "phase": 8,
+      "kind": "ui",
+      "title": "Interface contract (client UI)",
+      "body": "Screens derived from the brief's product surfaces (one distinct entity-management responsibility each — never one screen per verb):\nScreen: lead\n  Responsibility: lead management\n  Actions: close, schedule, parse, stage, follow-up\n  State: lead\nScreen: listing\n  Responsibility: listing management\n  Actions: close, schedule, follow-up\n  State: listing\nScreen: property\n  Responsibility: property management\n  Actions: close, show, schedule, follow-up\n  State: property\nScreen: showing\n  Responsibility: showing management\n  Actions: close, show, schedule, follow-up\n  State: showing\nScreen: buyer\n  Responsibility: buyer management\n  Actions: close, schedule, follow-up\n  State: buyer\nScreen: seller\n  Responsibility: seller management\n  Actions: close, schedule, follow-up\n  State: seller\n\n> prototype pending — no UI code generated; this contract is a declaration (deterministic template), not an implementation (B-18 honesty)."
+    },
+    {
+      "id": "gate-p8-60617535",
+      "phase": 8,
+      "kind": "gate",
+      "title": "DoD gate — P8",
+      "body": "# DoD gate — P8\n\n**Result: PASS**\n\nAll criteria met for phase 8.\n\nEvidence hash: 606175358",
+      "language": "markdown"
+    },
+    {
+      "id": "9-cicd-github-actions-workflow",
+      "phase": 9,
+      "kind": "cicd",
+      "title": "GitHub Actions workflow",
+      "body": "name: rapidtool-gate\non: [pull_request]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n      - run: npm ci\n      - run: npm run typecheck\n      - run: npm test",
+      "language": "yaml"
+    },
+    {
+      "id": "9-cicd-iac-sketch",
+      "phase": 9,
+      "kind": "cicd",
+      "title": "IaC sketch",
+      "body": "# GCP + Firebase hosting\nhosting: firebase preview channels\nworkers: cloud run, scale-to-zero\ngpu: provision only for local-edge promotion jobs"
+    },
+    {
+      "id": "gate-p9-30305407",
+      "phase": 9,
+      "kind": "gate",
+      "title": "DoD gate — P9",
+      "body": "# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723",
+      "language": "markdown"
+    },
+    {
+      "id": "10-edge-local-compute-inference",
+      "phase": 10,
+      "kind": "edge",
+      "title": "Local compute & inference",
+      "body": "Compute model: close, show, schedule, parse, stage, follow-up run as deterministic local steps over lead.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model."
+    },
+    {
+      "id": "gate-p10-32184623",
+      "phase": 10,
+      "kind": "gate",
+      "title": "DoD gate — P10",
+      "body": "# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335",
+      "language": "markdown"
+    },
+    {
+      "id": "11-tools-live-data-tool-surfaces",
+      "phase": 11,
+      "kind": "tools",
+      "title": "Live data & tool surfaces",
+      "body": "{\n  \"domain\": \"real-estate\",\n  \"surfaces\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}",
+      "language": "json"
+    },
+    {
+      "id": "gate-p11-16636256",
+      "phase": 11,
+      "kind": "gate",
+      "title": "DoD gate — P11",
+      "body": "# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674",
+      "language": "markdown"
+    },
+    {
+      "id": "12-docs-architecture-decision-records",
+      "phase": 12,
+      "kind": "docs",
+      "title": "Architecture Decision Records",
+      "body": "# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft derived from the brief (P0 lattice).\n\n# ADR-002 close pipeline\n\nStatus: accepted\nDecision: The product runs a sequential close → show → schedule → parse → stage → follow-up pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.",
+      "language": "markdown"
+    },
+    {
+      "id": "12-docs-openapi-3-1",
+      "phase": 12,
+      "kind": "docs",
+      "title": "OpenAPI 3.1",
+      "body": "openapi: 3.1.0\ninfo:\n  title: Real-Estate CRM API\n  version: \"1.0.0\"\npaths:\n  /v1/close:\n    post:\n      summary: close\n      responses:\n        \"200\":\n          description: ok\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/parse:\n    post:\n      summary: parse\n      responses:\n        \"200\":\n          description: ok\n  /v1/stage:\n    post:\n      summary: stage\n      responses:\n        \"200\":\n          description: ok\n  /v1/follow-up:\n    post:\n      summary: follow-up\n      responses:\n        \"200\":\n          description: ok",
+      "language": "yaml"
+    },
+    {
+      "id": "gate-p12-35300554",
+      "phase": 12,
+      "kind": "gate",
+      "title": "DoD gate — P12",
+      "body": "# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408",
+      "language": "markdown"
+    },
+    {
+      "id": "packet-12",
+      "phase": 12,
+      "kind": "packet",
+      "title": "Agent packet (A4)",
+      "body": "# RapidTool Agent Packet v3 — Real-Estate CRM\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-17T02:48:45.258Z\nproject_id: 30d7dd17-e3f7-4e6a-a93c-c28a38c14dae\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-17T02:48:45.258Z\",\n  \"project_id\": \"30d7dd17-e3f7-4e6a-a93c-c28a38c14dae\",\n  \"name\": \"Real-Estate CRM\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789613325132,\n      \"decided_at\": 1789613325142\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789613325148,\n      \"decided_at\": 1789613325153\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789613325200,\n      \"decided_at\": 1789613325213\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789613325220,\n      \"decided_at\": 1789613325225\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 13,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 14\n  }\n}\n```\n\n## Mission\nA real estate agent CRM web app: manage buyer and seller contacts; a lead pipeline with stages (new, contacted, qualified, showing-booked, offer-made, closed-won, closed-lost); property listings with address, list price, beds/baths/sqft and status; per-property showing notes; follow-up task scheduling with due dates and completion; and an email-to-lead capture placeholder that parses an inbound email into a contact and a pipeline lead.\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: close, show, schedule, parse, stage, follow-up\nEntities: lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft\nConstraints: none declared\nComplexity: 10.0 / 10\n\n## Scheduler (A3)\nTightness 9 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for close, show, schedule before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/close.ts — Implement job “close” against the contract\n- [implementer] src/jobs/show.ts — Implement job “show” against the contract\n- [implementer] src/jobs/schedule.ts — Implement job “schedule” against the contract\n- [implementer] src/jobs/parse.ts — Implement job “parse” against the contract\n- [implementer] src/jobs/stage.ts — Implement job “stage” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Lead: id:ulid, status:enum, updatedAt:datetime\n- Listing: id:ulid, status:enum, updatedAt:datetime\n- Property: id:ulid, status:enum, updatedAt:datetime\n- Showing: id:ulid, status:enum, updatedAt:datetime\n- Buyer: id:ulid, status:enum, updatedAt:datetime\n- Seller: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/close (close)\n- POST /v1/show (show)\n- POST /v1/schedule (schedule)\n- POST /v1/parse (parse)\n- POST /v1/stage (stage)\n- POST /v1/follow-up (follow-up)\n\n## Oracle (A7)\n- job.close.happy: Authorized operator submits “close” with a valid lead ⇒ 200 + persisted entity + checkpoint written\n- job.show.happy: Authorized operator submits “show” with a valid lead ⇒ 200 + persisted entity + checkpoint written\n- job.schedule.happy: Authorized operator submits “schedule” with a valid lead ⇒ 200 + persisted entity + checkpoint written\n- job.parse.happy: Authorized operator submits “parse” with a valid lead ⇒ 200 + persisted entity + checkpoint written\n- job.stage.happy: Authorized operator submits “stage” with a valid lead ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nPhase coverage: 13 of 13 phases executed / 14 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · autopilot · 2026-09-17T02:48:45.142Z\n- P5 · approve · autopilot · 2026-09-17T02:48:45.153Z\n- P8 · approve · autopilot · 2026-09-17T02:48:45.213Z\n- P9 · approve · autopilot · 2026-09-17T02:48:45.225Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.345] Data model written for Real-Estate CRM: lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft.\n2. [procedural 0.301] Real-Estate CRM executes as one sequential real estate pipeline.\n3. [semantic 0.293] Domain real-estate; jobs close, show, schedule, parse.\n4. [procedural 0.276] Integration surface for real estate declared from domain vocabulary.\n5. [semantic 0.273] ADRs capture the product's entity model and pipeline decisions.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.2/10 (proceed-with-guards)\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: close, show, schedule, parse, stage, follow-up run as deterministic local steps over lead.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"real-estate\",\n  \"surfaces\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft derived from the brief (P0 lattice).\n\n# ADR-002 close pipeline\n\nStatus: accepted\nDecision: The product runs a sequential close → show → schedule → parse → stage → follow-up pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Real-Estate CRM API\n  version: \"1.0.0\"\npaths:\n  /v1/close:\n    post:\n      summary: close\n      responses:\n        \"200\":\n          description: ok\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/parse:\n    post:\n      summary: parse\n      responses:\n        \"200\":\n          description: ok\n  /v1/stage:\n    post:\n      summary: stage\n      responses:\n        \"200\":\n          description: ok\n  /v1/follow-up:\n    post:\n      summary: follow-up\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft derived from the brief (P0 lattice).\n\n# ADR-002 close pipeline\n\nStatus: accepted\nDecision: The product runs a sequential close → show → schedule → parse → stage → follow-up pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Real-Estate CRM API\n  version: \"1.0.0\"\npaths:\n  /v1/close:\n    post:\n      summary: close\n      responses:\n        \"200\":\n          description: ok\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/parse:\n    post:\n      summary: parse\n      responses:\n        \"200\":\n          description: ok\n  /v1/stage:\n    post:\n      summary: stage\n      responses:\n        \"200\":\n          description: ok\n  /v1/follow-up:\n    post:\n      summary: follow-up\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+      "language": "markdown"
+    }
+  ],
+  "memory": [
+    {
+      "id": "12-semantic-0.97",
+      "kind": "semantic",
+      "phase": 12,
+      "text": "ADRs capture the product's entity model and pipeline decisions.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "11-episodic-0.87",
+      "kind": "episodic",
+      "phase": 11,
+      "text": "Live data surfaces declared from domain vocabulary; no runtime binding.",
+      "score": 0.87,
+      "source": "engine"
+    },
+    {
+      "id": "10-procedural-0.9",
+      "kind": "procedural",
+      "phase": 10,
+      "text": "Product logic runs locally and deterministically; no remote model is claimed.",
+      "score": 0.9,
+      "source": "engine"
+    },
+    {
+      "id": "9-procedural-0.96",
+      "kind": "procedural",
+      "phase": 9,
+      "text": "PRs cannot merge without typecheck + tests.",
+      "score": 0.96,
+      "source": "engine"
+    },
+    {
+      "id": "8-procedural-0.92",
+      "kind": "procedural",
+      "phase": 8,
+      "text": "Client UI contract written — screens bound to briefed entities; flows listed as actions.",
+      "score": 0.92,
+      "source": "engine"
+    },
+    {
+      "id": "lesson-template-emission-4a375107",
+      "kind": "episodic",
+      "phase": 7,
+      "text": "unmet: Live research corpus exists for P7 (≥1 fetched finding)",
+      "score": 0.7,
+      "source": "engine",
+      "tags": [
+        "L2",
+        "lesson",
+        "template-emission"
+      ]
+    },
+    {
+      "id": "7-semantic-0.95",
+      "kind": "semantic",
+      "phase": 7,
+      "text": "Generators ship UI fast; RapidTool ships a governed lifecycle.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "lesson-template-emission-25f9d888",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "unmet: Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash), Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)",
+      "score": 0.7,
+      "source": "engine",
+      "tags": [
+        "L2",
+        "lesson",
+        "template-emission"
+      ]
+    },
+    {
+      "id": "6-episodic-0.86",
+      "kind": "episodic",
+      "phase": 6,
+      "text": "Sandbox passed: tests.pass",
+      "score": 0.86,
+      "source": "engine"
+    },
+    {
+      "id": "5-procedural-0.99",
+      "kind": "procedural",
+      "phase": 5,
+      "text": "HITL reject requires a written reason.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "4-procedural-0.98",
+      "kind": "procedural",
+      "phase": 4,
+      "text": "Product data is protected by least-privilege role access.",
+      "score": 0.98,
+      "source": "engine"
+    },
+    {
+      "id": "3-procedural-0.93",
+      "kind": "procedural",
+      "phase": 3,
+      "text": "Integration surface for real estate declared from domain vocabulary.",
+      "score": 0.93,
+      "source": "engine"
+    },
+    {
+      "id": "2-semantic-0.94",
+      "kind": "semantic",
+      "phase": 2,
+      "text": "Data model written for Real-Estate CRM: lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft.",
+      "score": 0.94,
+      "source": "engine"
+    },
+    {
+      "id": "1-procedural-0.99",
+      "kind": "procedural",
+      "phase": 1,
+      "text": "Real-Estate CRM executes as one sequential real estate pipeline.",
+      "score": 0.99,
+      "source": "engine"
+    },
+    {
+      "id": "0-episodic-0.91",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Ingested brief for Real-Estate CRM in real-estate.",
+      "score": 0.91,
+      "source": "engine"
+    },
+    {
+      "id": "0-semantic-0.97",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Scorecard must exist before any code node fires.",
+      "score": 0.97,
+      "source": "engine"
+    },
+    {
+      "id": "boot-sem",
+      "kind": "semantic",
+      "phase": 0,
+      "text": "Domain real-estate; jobs close, show, schedule, parse.",
+      "score": 0.8,
+      "source": "engine"
+    },
+    {
+      "id": "boot-proc",
+      "kind": "procedural",
+      "phase": 0,
+      "text": "Graph is sequential 0–12. HITL on P4, P5, P8, P9. Rejection needs ≥12 characters.",
+      "score": 0.95,
+      "source": "engine"
+    },
+    {
+      "id": "boot-epi",
+      "kind": "episodic",
+      "phase": 0,
+      "text": "Constraints declared: none.",
+      "score": 0.7,
+      "source": "engine"
+    },
+    {
+      "id": "lesson-run-summary-d9355806",
+      "kind": "episodic",
+      "phase": 12,
+      "text": "L5 run-summary: run completed with gate FAIL P6,P7; reconcile the failed gates and lesson rows before reuse.",
+      "score": 0.6,
+      "source": "engine",
+      "tags": [
+        "L5",
+        "lesson",
+        "run-summary"
+      ]
+    }
+  ],
+  "logs": [
+    {
+      "ts": 1789613325052,
+      "phase": 0,
+      "level": "info",
+      "event": "project.created",
+      "detail": "real-estate"
+    },
+    {
+      "ts": 1789613325093,
+      "phase": 0,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P0 Deep Research & Feasibility"
+    },
+    {
+      "ts": 1789613325094,
+      "phase": 0,
+      "level": "info",
+      "event": "scorecard.ready",
+      "detail": "overall=7.2 verdict=proceed-with-guards"
+    },
+    {
+      "ts": 1789613325093,
+      "phase": 0,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325105,
+      "phase": 0,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32696329"
+    },
+    {
+      "ts": 1789613325112,
+      "phase": 1,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P1 Core Orchestration & State Graph"
+    },
+    {
+      "ts": 1789613325112,
+      "phase": 1,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325114,
+      "phase": 1,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 10507139"
+    },
+    {
+      "ts": 1789613325118,
+      "phase": 2,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P2 Memory & Context Consolidation"
+    },
+    {
+      "ts": 1789613325118,
+      "phase": 2,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325121,
+      "phase": 2,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 18455377"
+    },
+    {
+      "ts": 1789613325126,
+      "phase": 3,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P3 Tool Integration & Interoperability"
+    },
+    {
+      "ts": 1789613325126,
+      "phase": 3,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325128,
+      "phase": 3,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16382928"
+    },
+    {
+      "ts": 1789613325132,
+      "phase": 4,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P4 Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1789613325132,
+      "phase": 4,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325142,
+      "phase": 4,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Security, Isolation & Authorization"
+    },
+    {
+      "ts": 1789613325144,
+      "phase": 4,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35271886"
+    },
+    {
+      "ts": 1789613325148,
+      "phase": 5,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P5 Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1789613325148,
+      "phase": 5,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325153,
+      "phase": 5,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Validation, HITL & Self-Learning"
+    },
+    {
+      "ts": 1789613325157,
+      "phase": 5,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 29514528"
+    },
+    {
+      "ts": 1789613325162,
+      "phase": 6,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P6 Code Generation, Testing & Deployment"
+    },
+    {
+      "ts": 1789613325164,
+      "phase": 6,
+      "level": "info",
+      "event": "tests.pass",
+      "detail": "tests.pass"
+    },
+    {
+      "ts": 1789613325162,
+      "phase": 6,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325163,
+      "phase": 6,
+      "level": "info",
+      "event": "lesson.capture",
+      "detail": "L2 template-emission lesson-template-emission-25f9d888 (P6 sealed with unmet DoD: p6-verified, p6-brief-fit)"
+    },
+    {
+      "ts": 1789613325167,
+      "phase": 6,
+      "level": "warn",
+      "event": "gate.verdict",
+      "detail": "FAIL · 2 unmet · 55247714"
+    },
+    {
+      "ts": 1789613325172,
+      "phase": 7,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P7 Domain & Market Research"
+    },
+    {
+      "ts": 1789613325172,
+      "phase": 7,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325172,
+      "phase": 7,
+      "level": "info",
+      "event": "lesson.capture",
+      "detail": "L2 template-emission lesson-template-emission-4a375107 (P7 sealed with unmet DoD: p7-research)"
+    },
+    {
+      "ts": 1789613325174,
+      "phase": 7,
+      "level": "warn",
+      "event": "gate.verdict",
+      "detail": "FAIL · 1 unmet · 42550424"
+    },
+    {
+      "ts": 1789613325199,
+      "phase": 8,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P8 Dynamic UI/UX Prototyping"
+    },
+    {
+      "ts": 1789613325200,
+      "phase": 8,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325213,
+      "phase": 8,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "Dynamic UI/UX Prototyping"
+    },
+    {
+      "ts": 1789613325216,
+      "phase": 8,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 60617535"
+    },
+    {
+      "ts": 1789613325220,
+      "phase": 9,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P9 CI/CD & Cloud Deployment Routing"
+    },
+    {
+      "ts": 1789613325220,
+      "phase": 9,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325225,
+      "phase": 9,
+      "level": "info",
+      "event": "hitl.approved",
+      "detail": "CI/CD & Cloud Deployment Routing"
+    },
+    {
+      "ts": 1789613325228,
+      "phase": 9,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 30305407"
+    },
+    {
+      "ts": 1789613325232,
+      "phase": 10,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P10 Local Agent & Edge Inference"
+    },
+    {
+      "ts": 1789613325233,
+      "phase": 10,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325243,
+      "phase": 10,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 32184623"
+    },
+    {
+      "ts": 1789613325248,
+      "phase": 11,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P11 Real-Time Web & Tool Augmentation"
+    },
+    {
+      "ts": 1789613325248,
+      "phase": 11,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325250,
+      "phase": 11,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 16636256"
+    },
+    {
+      "ts": 1789613325255,
+      "phase": 12,
+      "level": "info",
+      "event": "phase.enter",
+      "detail": "P12 Documentation & Technical Specs"
+    },
+    {
+      "ts": 1789613325258,
+      "phase": 12,
+      "level": "warn",
+      "event": "delivery.complete",
+      "detail": "All 13 phases sealed. 2 failed gates: P6, P7"
+    },
+    {
+      "ts": 1789613325255,
+      "phase": 12,
+      "level": "info",
+      "event": "algo.run",
+      "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
+    },
+    {
+      "ts": 1789613325257,
+      "phase": 12,
+      "level": "info",
+      "event": "gate.verdict",
+      "detail": "PASS · 0 unmet · 35300554"
+    },
+    {
+      "ts": 1789613325260,
+      "phase": 12,
+      "level": "warn",
+      "event": "run.complete.with.failed.gates",
+      "detail": "sealed complete with 2 failed DoD gate(s): P6(Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash),Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)); P7(Live research corpus exists for P7 (≥1 fetched finding))"
+    },
+    {
+      "ts": 1789613325260,
+      "phase": 12,
+      "level": "info",
+      "event": "lesson.capture",
+      "detail": "L5 run-summary lesson-run-summary-d9355806 (run completed with failure signals)"
+    }
+  ],
+  "hitl": null,
+  "decisions": [
+    {
+      "id": "hitl-4-1789613325142",
+      "phase": 4,
+      "title": "Approve isolation policy",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1789613325132,
+      "decidedAt": 1789613325142
+    },
+    {
+      "id": "hitl-5-1789613325153",
+      "phase": 5,
+      "title": "Approve validation contract",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1789613325148,
+      "decidedAt": 1789613325153
+    },
+    {
+      "id": "hitl-8-1789613325213",
+      "phase": 8,
+      "title": "Approve interface contract",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1789613325200,
+      "decidedAt": 1789613325213
+    },
+    {
+      "id": "hitl-9-1789613325225",
+      "phase": 9,
+      "title": "Approve production routing",
+      "decision": "approve",
+      "note": "[seat harness] autopilot seat — no human decision claimed",
+      "decidedBy": "autopilot",
+      "requestedAt": 1789613325220,
+      "decidedAt": 1789613325225
+    }
+  ],
+  "modelRoute": "deterministic",
+  "sandbox": {
+    "runtime": "sync-template",
+    "ramMb": null,
+    "timeoutS": 30,
+    "isolated": false
+  },
+  "openapi": "openapi: 3.1.0\ninfo:\n  title: Real-Estate CRM API\n  version: \"1.0.0\"\npaths:\n  /v1/close:\n    post:\n      summary: close\n      responses:\n        \"200\":\n          description: ok\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/parse:\n    post:\n      summary: parse\n      responses:\n        \"200\":\n          description: ok\n  /v1/stage:\n    post:\n      summary: stage\n      responses:\n        \"200\":\n          description: ok\n  /v1/follow-up:\n    post:\n      summary: follow-up\n      responses:\n        \"200\":\n          description: ok",
+  "adr": "# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft derived from the brief (P0 lattice).\n\n# ADR-002 close pipeline\n\nStatus: accepted\nDecision: The product runs a sequential close → show → schedule → parse → stage → follow-up pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.",
+  "lattice": {
+    "domain": "real-estate",
+    "jobs": [
+      "close",
+      "show",
+      "schedule",
+      "parse",
+      "stage",
+      "follow-up"
+    ],
+    "entities": [
+      "lead",
+      "listing",
+      "property",
+      "showing",
+      "buyer",
+      "seller",
+      "manager",
+      "agent",
+      "task",
+      "estate",
+      "beds",
+      "baths",
+      "sqft"
+    ],
+    "constraints": [],
+    "nodes": [
+      {
+        "kind": "object",
+        "label": "lead",
+        "weight": 0.9500000000000001
+      },
+      {
+        "kind": "job",
+        "label": "close",
+        "weight": 0.75
+      },
+      {
+        "kind": "job",
+        "label": "show",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "listing",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "property",
+        "weight": 0.75
+      },
+      {
+        "kind": "object",
+        "label": "showing",
+        "weight": 0.75
+      },
+      {
+        "kind": "actor",
+        "label": "buyer",
+        "weight": 0.55
+      },
+      {
+        "kind": "actor",
+        "label": "seller",
+        "weight": 0.55
+      },
+      {
+        "kind": "actor",
+        "label": "manager",
+        "weight": 0.55
+      },
+      {
+        "kind": "actor",
+        "label": "agent",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "schedule",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "parse",
+        "weight": 0.55
+      },
+      {
+        "kind": "job",
+        "label": "stage",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "task",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "estate",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "beds",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "baths",
+        "weight": 0.55
+      },
+      {
+        "kind": "object",
+        "label": "sqft",
+        "weight": 0.55
+      }
+    ],
+    "complexity": 10,
+    "vague": false
+  },
+  "schedule": {
+    "securityDelta": 1,
+    "apiDelta": 1,
+    "tightness": 9,
+    "extraHitl": [],
+    "notes": [
+      "Standard isolate policy.",
+      "Default API budget.",
+      "Stock HITL set (P4, P5, P8, P9)."
+    ]
+  },
+  "traces": [
+    {
+      "id": "A1",
+      "name": "Intent Lattice",
+      "ranAt": 1789613325259,
+      "summary": "18 nodes · complexity 10.0"
+    },
+    {
+      "id": "A2",
+      "name": "FusionRank",
+      "ranAt": 1789613325259,
+      "summary": "ranked 19 memory rows for the packet"
+    },
+    {
+      "id": "A3",
+      "name": "Constraint Scheduler",
+      "ranAt": 1789613325259,
+      "summary": "tightness 9 · sec+1"
+    },
+    {
+      "id": "A4",
+      "name": "Agent Packet",
+      "ranAt": 1789613325259,
+      "summary": "compiled P12 packet"
+    },
+    {
+      "id": "A5",
+      "name": "Spec Graph",
+      "ranAt": 1789613325259,
+      "summary": "10 files · order schema → api → store"
+    },
+    {
+      "id": "A6",
+      "name": "Contract Synth",
+      "ranAt": 1789613325259,
+      "summary": "6 entities · 6 endpoints"
+    },
+    {
+      "id": "A7",
+      "name": "Test Oracle",
+      "ranAt": 1789613325259,
+      "summary": "6 cases"
+    },
+    {
+      "id": "A8",
+      "name": "Crew Router",
+      "ranAt": 1789613325259,
+      "summary": "airt · 7300 tok"
+    }
+  ],
+  "packet": "# RapidTool Agent Packet v3 — Real-Estate CRM\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-17T02:48:45.258Z\nproject_id: 30d7dd17-e3f7-4e6a-a93c-c28a38c14dae\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-17T02:48:45.258Z\",\n  \"project_id\": \"30d7dd17-e3f7-4e6a-a93c-c28a38c14dae\",\n  \"name\": \"Real-Estate CRM\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789613325132,\n      \"decided_at\": 1789613325142\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789613325148,\n      \"decided_at\": 1789613325153\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789613325200,\n      \"decided_at\": 1789613325213\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"autopilot\",\n      \"note\": \"[seat harness] autopilot seat — no human decision claimed\",\n      \"requested_at\": 1789613325220,\n      \"decided_at\": 1789613325225\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ],\n  \"phase_coverage\": {\n    \"executed\": 13,\n    \"total\": 13,\n    \"artifacts_from_p7_p12\": 14\n  }\n}\n```\n\n## Mission\nA real estate agent CRM web app: manage buyer and seller contacts; a lead pipeline with stages (new, contacted, qualified, showing-booked, offer-made, closed-won, closed-lost); property listings with address, list price, beds/baths/sqft and status; per-property showing notes; follow-up task scheduling with due dates and completion; and an email-to-lead capture placeholder that parses an inbound email into a contact and a pipeline lead.\n\n## Intent lattice (A1)\nDomain: real-estate\nJobs: close, show, schedule, parse, stage, follow-up\nEntities: lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft\nConstraints: none declared\nComplexity: 10.0 / 10\n\n## Scheduler (A3)\nTightness 9 · security Δ1 · api Δ1\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (1800 tok): Lock schema and routes for close, show, schedule before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (3200 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (900 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/real_estate.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/close.ts — Implement job “close” against the contract\n- [implementer] src/jobs/show.ts — Implement job “show” against the contract\n- [implementer] src/jobs/schedule.ts — Implement job “schedule” against the contract\n- [implementer] src/jobs/parse.ts — Implement job “parse” against the contract\n- [implementer] src/jobs/stage.ts — Implement job “stage” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Lead: id:ulid, status:enum, updatedAt:datetime\n- Listing: id:ulid, status:enum, updatedAt:datetime\n- Property: id:ulid, status:enum, updatedAt:datetime\n- Showing: id:ulid, status:enum, updatedAt:datetime\n- Buyer: id:ulid, status:enum, updatedAt:datetime\n- Seller: id:ulid, status:enum, updatedAt:datetime\n- POST /v1/close (close)\n- POST /v1/show (show)\n- POST /v1/schedule (schedule)\n- POST /v1/parse (parse)\n- POST /v1/stage (stage)\n- POST /v1/follow-up (follow-up)\n\n## Oracle (A7)\n- job.close.happy: Authorized operator submits “close” with a valid lead ⇒ 200 + persisted entity + checkpoint written\n- job.show.happy: Authorized operator submits “show” with a valid lead ⇒ 200 + persisted entity + checkpoint written\n- job.schedule.happy: Authorized operator submits “schedule” with a valid lead ⇒ 200 + persisted entity + checkpoint written\n- job.parse.happy: Authorized operator submits “parse” with a valid lead ⇒ 200 + persisted entity + checkpoint written\n- job.stage.happy: Authorized operator submits “stage” with a valid lead ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nPhase coverage: 13 of 13 phases executed / 14 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · autopilot · 2026-09-17T02:48:45.142Z\n- P5 · approve · autopilot · 2026-09-17T02:48:45.153Z\n- P8 · approve · autopilot · 2026-09-17T02:48:45.213Z\n- P9 · approve · autopilot · 2026-09-17T02:48:45.225Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.345] Data model written for Real-Estate CRM: lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft.\n2. [procedural 0.301] Real-Estate CRM executes as one sequential real estate pipeline.\n3. [semantic 0.293] Domain real-estate; jobs close, show, schedule, parse.\n4. [procedural 0.276] Integration surface for real estate declared from domain vocabulary.\n5. [semantic 0.273] ADRs capture the product's entity model and pipeline decisions.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.2/10 (proceed-with-guards)\n- Technical feasibility: 3/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 9/10 — Scheduler Δ1.\n- API / rate-limit risk: 7/10 — Live-tool Δ1.\n- Delivery confidence: 8/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: close, show, schedule, parse, stage, follow-up run as deterministic local steps over lead.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"real-estate\",\n  \"surfaces\": [\n    \"listing/MLS data\",\n    \"comps + ARV inputs\",\n    \"escrow & title status\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft derived from the brief (P0 lattice).\n\n# ADR-002 close pipeline\n\nStatus: accepted\nDecision: The product runs a sequential close → show → schedule → parse → stage → follow-up pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Real-Estate CRM API\n  version: \"1.0.0\"\npaths:\n  /v1/close:\n    post:\n      summary: close\n      responses:\n        \"200\":\n          description: ok\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/parse:\n    post:\n      summary: parse\n      responses:\n        \"200\":\n          description: ok\n  /v1/stage:\n    post:\n      summary: stage\n      responses:\n        \"200\":\n          description: ok\n  /v1/follow-up:\n    post:\n      summary: follow-up\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 real estate entity model\n\nStatus: accepted\nDecision: The product's state is modeled around lead, listing, property, showing, buyer, seller, manager, agent, task, estate, beds, baths, sqft derived from the brief (P0 lattice).\n\n# ADR-002 close pipeline\n\nStatus: accepted\nDecision: The product runs a sequential close → show → schedule → parse → stage → follow-up pipeline over its entities.\n\n# ADR-003 real estate integration boundaries\n\nStatus: accepted\nDecision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Real-Estate CRM API\n  version: \"1.0.0\"\npaths:\n  /v1/close:\n    post:\n      summary: close\n      responses:\n        \"200\":\n          description: ok\n  /v1/show:\n    post:\n      summary: show\n      responses:\n        \"200\":\n          description: ok\n  /v1/schedule:\n    post:\n      summary: schedule\n      responses:\n        \"200\":\n          description: ok\n  /v1/parse:\n    post:\n      summary: parse\n      responses:\n        \"200\":\n          description: ok\n  /v1/stage:\n    post:\n      summary: stage\n      responses:\n        \"200\":\n          description: ok\n  /v1/follow-up:\n    post:\n      summary: follow-up\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "specGraph": {
+    "nodes": [
+      {
+        "id": "schema",
+        "file": "src/domain/real_estate.ts",
+        "purpose": "Typed entities from the lattice",
+        "dependsOn": [],
+        "owner": "architect"
+      },
+      {
+        "id": "api",
+        "file": "src/api/routes.ts",
+        "purpose": "HTTP contracts bound to jobs",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "architect"
+      },
+      {
+        "id": "store",
+        "file": "src/state/store.ts",
+        "purpose": "Checkpointed client/server state",
+        "dependsOn": [
+          "schema"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-0",
+        "file": "src/jobs/close.ts",
+        "purpose": "Implement job “close” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-1",
+        "file": "src/jobs/show.ts",
+        "purpose": "Implement job “show” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-2",
+        "file": "src/jobs/schedule.ts",
+        "purpose": "Implement job “schedule” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-3",
+        "file": "src/jobs/parse.ts",
+        "purpose": "Implement job “parse” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "job-4",
+        "file": "src/jobs/stage.ts",
+        "purpose": "Implement job “stage” against the contract",
+        "dependsOn": [
+          "api",
+          "store"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "ui",
+        "file": "src/ui/console.tsx",
+        "purpose": "Operator surfaces bound to store fields",
+        "dependsOn": [
+          "store",
+          "job-0",
+          "job-1",
+          "job-2",
+          "job-3",
+          "job-4"
+        ],
+        "owner": "implementer"
+      },
+      {
+        "id": "tests",
+        "file": "tests/oracle.spec.ts",
+        "purpose": "Acceptance tests from the oracle",
+        "dependsOn": [
+          "api",
+          "ui"
+        ],
+        "owner": "tester"
+      }
+    ],
+    "order": [
+      "schema",
+      "api",
+      "store",
+      "job-0",
+      "job-1",
+      "job-2",
+      "job-3",
+      "job-4",
+      "ui",
+      "tests"
+    ]
+  },
+  "contracts": {
+    "entities": [
+      {
+        "name": "Lead",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Listing",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Property",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Showing",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Buyer",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      },
+      {
+        "name": "Seller",
+        "fields": [
+          {
+            "name": "id",
+            "type": "ulid"
+          },
+          {
+            "name": "status",
+            "type": "enum"
+          },
+          {
+            "name": "updatedAt",
+            "type": "datetime"
+          }
+        ]
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/close",
+        "job": "close"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/show",
+        "job": "show"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/schedule",
+        "job": "schedule"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/parse",
+        "job": "parse"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/stage",
+        "job": "stage"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/follow-up",
+        "job": "follow-up"
+      }
+    ]
+  },
+  "oracle": [
+    {
+      "id": "orc-1",
+      "name": "job.close.happy",
+      "given": "Authorized operator submits “close” with a valid lead",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "close"
+    },
+    {
+      "id": "orc-2",
+      "name": "job.show.happy",
+      "given": "Authorized operator submits “show” with a valid lead",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "show"
+    },
+    {
+      "id": "orc-3",
+      "name": "job.schedule.happy",
+      "given": "Authorized operator submits “schedule” with a valid lead",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "schedule"
+    },
+    {
+      "id": "orc-4",
+      "name": "job.parse.happy",
+      "given": "Authorized operator submits “parse” with a valid lead",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "parse"
+    },
+    {
+      "id": "orc-5",
+      "name": "job.stage.happy",
+      "given": "Authorized operator submits “stage” with a valid lead",
+      "expect": "200 + persisted entity + checkpoint written",
+      "job": "stage"
+    },
+    {
+      "id": "orc-phase",
+      "name": "graph.no-skip",
+      "given": "Agent requests P9 while P4 is open",
+      "expect": "Illegal transition; no deploy artifacts",
+      "job": "graph"
+    }
+  ],
+  "crew": [
+    {
+      "role": "architect",
+      "mandate": "Lock schema and routes for close, show, schedule before code.",
+      "tools": [
+        "read_repo",
+        "write_spec",
+        "mcp.search"
+      ],
+      "budgetTokens": 1800,
+      "handoff": "Pass Spec Graph order + contracts to implementer. Do not write feature code.",
+      "active": false
+    },
+    {
+      "role": "implementer",
+      "mandate": "Write files in Spec Graph order. Current edge: Documentation & Technical Specs.",
+      "tools": [
+        "edit_file",
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 3200,
+      "handoff": "Stop when oracle tests fail twice; hand traceback to reviewer.",
+      "active": false
+    },
+    {
+      "role": "reviewer",
+      "mandate": "Diff against contracts. Reject invented endpoints and leaked PHI/PII.",
+      "tools": [
+        "read_diff",
+        "comment_pr"
+      ],
+      "budgetTokens": 1400,
+      "handoff": "Approve only if A6 endpoints and A7 oracle are green.",
+      "active": true
+    },
+    {
+      "role": "tester",
+      "mandate": "Run oracle + one adversarial case per constraint.",
+      "tools": [
+        "run_tests",
+        "sandbox.exec"
+      ],
+      "budgetTokens": 900,
+      "handoff": "Constraints in scope: none.",
+      "active": false
+    }
+  ],
+  "notes": "",
+  "generatedSource": "const JOBS = [\"close\", \"show\", \"schedule\", \"parse\", \"stage\"];\nconst REJECTION = \"\";\nfunction synthesize(spec) {\n  if (spec.phase < 0 || spec.phase > 12) throw new Error(\"invalid phase\");\n  if (JOBS.indexOf(spec.job) === -1) throw new Error(\"unknown job\");\n  if (REJECTION && spec.phase === 9) throw new Error(\"deploy blocked until rejection addressed\");\n  return { ok: true, name: spec.name, job: spec.job, addressed: REJECTION ? true : false };\n}\nfunction test_happy() {\n  var out = synthesize({ name: \"Real-Estate CRM\", phase: 6, job: \"close\" });\n  if (!out.ok) throw new Error(\"expected ok\");\n  if (out.job !== \"close\") throw new Error(\"job mismatch\");\n}\nfunction test_no_skip() {\n  var threw = false;\n  try { synthesize({ name: \"x\", phase: -1, job: \"close\" }); } catch (e) { threw = true; }\n  if (!threw) throw new Error(\"should reject illegal phase\");\n}\nfunction test_rejection_addressed() {\n  var out = synthesize({ name: \"x\", phase: 6, job: \"close\" });\n  if (REJECTION && !out.addressed) throw new Error(\"rejection not addressed\");\n}",
+  "lastTest": {
+    "ok": true,
+    "detail": "tests.pass"
+  },
+  "enforceDod": false,
+  "wildMode": false,
+  "wildRun": null,
+  "chatLog": [],
+  "_v": 2
+}

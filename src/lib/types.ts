@@ -177,6 +177,33 @@ export type HitlDecision = {
   decidedBy: "human" | "autopilot";
   requestedAt: number;
   decidedAt: number;
+  /**
+   * 216o (T-107.3 · P0-02/P0-06 · W6-L2): WHERE this decision came from — the
+   * ONE policy seam's (`src/lib/policy.ts`) verdict that allowed it, recorded at
+   * mint time by the headless approval path (`headless.ts` `approve`). ADDITIVE
+   * and optional: rows minted before this field (engine autopilot steps, store
+   * approvals, fixtures, pre-216o payloads) parse and stay readable — `dod.ts`
+   * cross-checks the field against the row's own `[seat …]` tag when present and
+   * fails closed on a contradiction, never inventing provenance for old rows.
+   *
+   *   · `action`    — the registered policy action the verdict covered
+   *                   (`hitl.approve` or `hitl.force`).
+   *   · `resource`  — the resource it covered (`gate:P<phase>`).
+   *   · `reason`    — the verdict's reason (`"<kebab-id> — <clause>"`, per the
+   *                   policy.ts reason contract).
+   *   · `label`     — the seat label in `policy.seatLabel` vocabulary
+   *                   (`human/human-cli-i-am-human`, `autopilot/harness`, …).
+   *   · `tokenPath` — true iff the out-of-band `RT_HUMAN_SEAT_TOKEN` path
+   *                   verified the human seat (the seam only ever allows a
+   *                   human-seat allow through that path).
+   */
+  decidedVia?: {
+    action: string;
+    resource: string;
+    reason: string;
+    label: string;
+    tokenPath: boolean;
+  };
 };
 
 export type PhaseRecord = {

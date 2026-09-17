@@ -542,6 +542,14 @@ async function main() {
         // env-free leaf — its purity test pins that it never reads env). The
         // non-TTY guard above stays deliberately STRICTER than the seam: an
         // unattended process must name the human seat explicitly.
+        //
+        // W6-L2 (ledger PROVENANCE): the row this verb lands is minted by
+        // h.approve below, whose seam verdict stamps `decidedVia` onto the row
+        // (seat label + action/resource/reason + token-path bool, types.ts) —
+        // this verb's consult above and the driver's re-check derive from the
+        // same actor/flags/env in one process, so the recorded provenance is
+        // exactly this verb's enforced verdict. No response-shape change: the
+        // approve JSON contract + exit codes stay byte-identical.
         const { evaluatePolicy } = await import("../src/lib/policy.ts");
         const policyVerdict = evaluatePolicy(
           flag(args, "force") ? "hitl.force" : "hitl.approve",

@@ -8,6 +8,9 @@ import {
   CREW_ROLE_BY_PHASE,
   buildAgentContext,
   ROLE_SPECS,
+  crewRegistryCompleter,
+  crewRoleForModel,
+  runCrewServer,
 } from "./crew.server.ts";
 import type { CrewCompleter, CrewSearcher } from "./crew.server.ts";
 import type { CrewRole, CrewSession } from "./crew.ts";
@@ -848,5 +851,98 @@ describe("185-H1 crew dual-channel + RT_E stamps", () => {
       code: "RT_E_LLM_NOT_CONFIGURED",
     });
     assert.equal(calls, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-107.2 (fixes/216p, W6 · L3) — REGISTRY MIGRATION PIN (crew seam).
+//
+// The crew's DEFAULT backend (`runCrewServer` → `defaultCrew` →
+// `crewRegistryCompleter`) now routes every turn through `callModel(role, …)`
+// (llm/providers/registry.ts) instead of the legacy `completeDeepSeek` binding.
+// This pin proves three things on the REAL default path:
+//   1. the same fetch stub is reached with the same request shape the legacy
+//      binding sent (url/method/model/thinking/stream/messages);
+//   2. the crew tier mapping is the registry's (pro ⇒ `reasoning`, everything
+//      else ⇒ `main`) and a `DEEPSEEK_MODEL_*` pin is honored;
+//   3. an unknown explicit id is REFUSED (RT_E_VALIDATION) BEFORE the network —
+//      registry-only behavior the legacy binding could never have.
+// ---------------------------------------------------------------------------
+describe("216p T-107.2 — registry migration pin (crew seam)", () => {
+  it("the real default crew path reaches the same fetch shape, and the registry rules the ids", async () => {
+    const KEY = "DEEPSEEK_API_KEY";
+    const savedKey = process.env[KEY];
+    const savedPin = process.env.DEEPSEEK_MODEL_REASONING;
+    const realFetch = globalThis.fetch;
+    const calls: Array<{ url: string; method?: string; body: Record<string, unknown> }> = [];
+    try {
+      process.env[KEY] = "sk-crew-registry-test";
+      delete process.env.DEEPSEEK_MODEL_REASONING;
+      globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+        calls.push({
+          url: String(url),
+          method: init?.method,
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: '{"type":"code","content":"turn done","artifacts":[]}' } }],
+            model: "deepseek-v4-flash",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }) as typeof fetch;
+
+      // (1) The real default path (runCrewServer → defaultCrew → registry completer).
+      const res = await runCrewServer(seededProject(), { phase: 6, live: false, maxSteps: 2 });
+      assert.equal(res.ok, true);
+      assert.ok(calls.length >= 1, "the crew reached the fetch stub through the registry");
+      for (const call of calls) {
+        assert.equal(call.url, "https://api.deepseek.com/chat/completions");
+        assert.equal(call.method, "POST");
+        assert.equal(call.body.model, "deepseek-v4-flash", "every ROLE_SPECS seat is the flash/main tier");
+        assert.deepEqual(call.body.thinking, { type: "disabled" });
+        assert.equal(call.body.stream, false);
+        const messages = call.body.messages as Array<{ role?: string; content?: string }>;
+        assert.equal(messages[0]?.role, "system", "the role-scoped system prompt is still first");
+        assert.equal(messages[messages.length - 1]?.role, "user");
+      }
+
+      // (2) The tier mapping + the registry pin, through the exported completer.
+      assert.equal(crewRoleForModel(undefined), "main");
+      assert.equal(crewRoleForModel("deepseek-v4-flash"), "main");
+      assert.equal(crewRoleForModel("deepseek-v4-pro"), "reasoning");
+      const before = calls.length;
+      const pro = await crewRegistryCompleter("reasoning turn", { model: "deepseek-v4-pro" });
+      assert.equal(pro.ok, true);
+      assert.equal(calls.length, before + 1);
+      assert.equal(calls[before]!.body.model, "deepseek-v4-pro");
+      assert.deepEqual(calls[before]!.body.thinking, { type: "enabled" }, "the pro tier shape follows the resolved id");
+
+      process.env.DEEPSEEK_MODEL_REASONING = "deepseek-v4-flash";
+      const pinned = await crewRegistryCompleter("pinned turn", { model: "deepseek-v4-pro" });
+      assert.equal(pinned.ok, true, "a call-site id beats the env pin (precedence)");
+      assert.equal(
+        calls[calls.length - 1]!.body.model,
+        "deepseek-v4-pro",
+        "call-site model wins over the DEEPSEEK_MODEL_REASONING pin",
+      );
+
+      // (3) Unknown explicit ids never leave the process.
+      const countBeforeRefusal = calls.length;
+      const refused = await crewRegistryCompleter("bad turn", { model: "gpt-9" as never });
+      assert.equal(refused.ok, false);
+      if (!refused.ok) {
+        assert.equal(refused.reason, "error");
+        assert.equal(refused.code, "RT_E_VALIDATION");
+      }
+      assert.equal(calls.length, countBeforeRefusal, "refused before any network I/O");
+    } finally {
+      globalThis.fetch = realFetch;
+      if (savedKey === undefined) delete process.env[KEY];
+      else process.env[KEY] = savedKey;
+      if (savedPin === undefined) delete process.env.DEEPSEEK_MODEL_REASONING;
+      else process.env.DEEPSEEK_MODEL_REASONING = savedPin;
+    }
   });
 });

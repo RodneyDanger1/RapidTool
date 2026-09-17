@@ -1052,7 +1052,31 @@ export function orderTreeChunks(plan: readonly TreeChunk[]): TreeChunk[] {
   const jobChunks = rows.filter((c) => typeof c.nodeId === "string" && c.nodeId.length > 0);
   if (jobChunks.length === 0) return [...rows];
   const leftover = rows.filter((c) => !(typeof c.nodeId === "string" && c.nodeId.length > 0));
-  return [...leftover, ...[...jobChunks].reverse()];
+  // W6-L1 correction (the landed W5 body reversed the FLAT list, which also
+  // reversed one job's own sibling overflow — contradicting the rule above):
+  // reverse the job GROUPS (targets) and keep each group's chunks in plan
+  // order, so a >8-signature job is still consumed `…ts` → `…-2.ts` → `…-3.ts`
+  // and a later sibling's prompt carries the earlier sibling's exports (the
+  // pre-job sibling contract). Blocks are grouped by nodeId in first-seen
+  // order — treeChunkPlan emits one contiguous block per target.
+  const order: string[] = [];
+  const byNode = new Map<string, TreeChunk[]>();
+  for (const c of jobChunks) {
+    const key = c.nodeId as string;
+    const bucket = byNode.get(key);
+    if (bucket === undefined) {
+      byNode.set(key, [c]);
+      order.push(key);
+    } else {
+      bucket.push(c);
+    }
+  }
+  const reversed: TreeChunk[] = [];
+  for (let i = order.length - 1; i >= 0; i--) {
+    const bucket = byNode.get(order[i]!)!;
+    for (const c of bucket) reversed.push(c);
+  }
+  return [...leftover, ...reversed];
 }
 
 /**
@@ -1953,11 +1977,12 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   if (singleModuleLibraryKind(project) && chunkGroups.length <= 1) {
     return synthesizeSingleModule(project, brief, specRecord, signatureNames, complete, verify, treeFailure);
   }
-  // W5-L1 handoff (parent boundary repair, 2026-09-16): the TA-15 rewire is fully
-  // DESIGNED (fixes/216k D1/D2/D3) and `orderTreeChunks` is landed, but the chunked
-  // driver rewire was NOT finished — this call site was mid-edit and broke the arity.
-  // Restored to the legacy pairing so the tree compiles; W6-L1 completes the rewire.
-  return synthesizeChunkedTree(project, brief, specRecord, chunkGroups, complete, treeFailure);
+  // fixes/216k (105 TA-15, W6-L1): the chunked driver computes its own
+  // chunk→file plan (treeChunkPlan) and consumption order (orderTreeChunks)
+  // INSIDE — the caller no longer passes a flat grouping. Job-keyed chunks land
+  // at their spec-graph `src/jobs/*.ts` paths; a job-less graph keeps the
+  // pre-216k index-keyed mapping byte-for-byte (treeChunkPlan's legacy branch).
+  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure);
 }
 
 /**
@@ -2164,12 +2189,22 @@ async function synthesizeSingleModule(
  * a p6.synthesis.refused log names the refused chunk index. No machine
  * verify here — per-file deterministic validation is the mechanical floor;
  * the tree machine-run is the tree-run lane's step (never a fabricated pass).
+ *
+ * fixes/216k (105 TA-15 / 106 F-03 F-06 F-10, W6-L1): the chunk→file map is
+ * computed HERE, per call, from the project's own spec graph —
+ * `treeChunkPlan` keys each chunk to the spec-graph node it implements
+ * (`src/jobs/record.ts` …), and the driver consumes the ORDERED plan
+ * (`orderTreeChunks`, D1: leftovers first, then job chunks in reverse plan
+ * order) so every job module is synthesized with every earlier-signature chunk
+ * already in its prior context (no forward calls). Each accepted chunk lands at
+ * its planned `chunk.path` — never `treePathForChunk` for a planned chunk. A
+ * graph with no keyable job node keeps the pre-216k index-keyed mapping and
+ * chunk-prompt chain byte-for-byte.
  */
 async function synthesizeChunkedTree(
   project: Project,
   brief: string,
   specRecord: NonNullable<Project["implementationSpec"]>,
-  groups: string[][],
   complete: P6SynthesisDeps["complete"],
   treeFailure?: string,
 ): Promise<Project> {
@@ -2193,39 +2228,55 @@ async function synthesizeChunkedTree(
   };
   const accepted: { path: string; source: string; exports: string[]; reqTrace: Record<string, string> }[] = [];
   const prior: ChunkPriorFile[] = [];
-  const chunkNames = groups.map((g) => signatureFunctionNames(g));
+  // fixes/216k (105 TA-15, W6-L1 D1/D3): the chunk→file plan + its consumption
+  // order are computed here from the project's own spec graph. `plan[i].path`
+  // IS the file path (a job node's `src/jobs/<label>.ts` for job-keyed chunks);
+  // zero job nodes ⇒ treeChunkPlan's legacy branch ⇒ identical paths, identical
+  // per-chunk prompts (pre-216k byte parity). `plan.length` is the honest chunk
+  // total: every plan row is exactly one synthesis call.
+  const plan = orderTreeChunks(treeChunkPlan(project, specRecord.typeSignatures));
   // fixes/153 (P1): per-attempt p6.synthesis.attempt journal — the observer
   // closure carries the chunk context so every model call of chunk i reports
   // chunk (i+1)/total + a sequential per-chunk attempt number.
   const attemptLogs: JsonLog[] = [...(project.logs ?? [])];
 
-  for (let i = 0; i < groups.length; i++) {
+  for (let i = 0; i < plan.length; i++) {
+    const chunk = plan[i]!;
     const lessonLines = lessonLinesForBrief(
       brief,
       selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
       { limit: EXPAND_LESSON_RANK_LIMIT },
     );
-    const user = p6SynthesisChunkUserPrompt(brief, specRecord, groups[i], prior, lessonLines);
-    const chunk = await synthesizeChunkEnvelope(complete, user, opts, chunkNames[i], treeFailure, (attempt, res) => {
-      pushAttemptLog(
-        attemptLogs,
-        synthAttemptLogEntry({ chunkIndex: i, chunkTotal: groups.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
-      );
-    });
-    if (!chunk.ok) {
+    const user = p6SynthesisChunkUserPrompt(brief, specRecord, chunk.signatures, prior, lessonLines);
+    const synth = await synthesizeChunkEnvelope(
+      complete,
+      user,
+      opts,
+      signatureFunctionNames(chunk.signatures),
+      treeFailure,
+      (attempt, res) => {
+        pushAttemptLog(
+          attemptLogs,
+          synthAttemptLogEntry({ chunkIndex: i, chunkTotal: plan.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
+        );
+      },
+    );
+    if (!synth.ok) {
       return partialTreeRefuse(
         withAttemptLogs(project, attemptLogs),
         accepted,
         i,
-        groups.length,
-        chunk.code,
-        chunk.error,
+        plan.length,
+        synth.code,
+        synth.error,
       );
     }
-    const taken = new Set(accepted.map((f) => f.path));
-    const path = treePathForChunk(i, chunkNames[i], taken);
-    accepted.push({ path, source: chunk.envelope.module, exports: [...chunk.envelope.exports], reqTrace: { ...chunk.envelope.reqTrace } });
-    prior.push({ path, exports: [...chunk.envelope.exports], reqTrace: { ...chunk.envelope.reqTrace } });
+    // D1/D3: consume the plan row's path directly (no treePathForChunk for a
+    // planned chunk — the plan already de-duped every path, job siblings
+    // included via jobSiblingPath).
+    const path = chunk.path;
+    accepted.push({ path, source: synth.envelope.module, exports: [...synth.envelope.exports], reqTrace: { ...synth.envelope.reqTrace } });
+    prior.push({ path, exports: [...synth.envelope.exports], reqTrace: { ...synth.envelope.reqTrace } });
   }
 
   // All chunks accepted → assemble the entry and run the TREE-LEVEL brief-fit
@@ -2238,7 +2289,7 @@ async function synthesizeChunkedTree(
       withAttemptLogs(project, attemptLogs),
       accepted,
       -1,
-      groups.length,
+      plan.length,
       "RT_E_VALIDATION",
       `assembled tree does not implement the brief's required vocabulary (missing: ${fit.missing.slice(0, 12).join(", ")}; tree-level p6-brief-fit after all chunks accepted)`,
     );

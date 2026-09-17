@@ -131,18 +131,58 @@ every claim below is a command actually run this session.
   counted + surfaced (warning + README line) as an unmaterialised job node. Non-job nodes
   (schema/api/store/…) keep the (now counted + surfaced) bridge. Never silent.
 
-## W5-L1 work log
+## W5-L1 work log (written retroactively at the W6 boundary — the lane's section was never filled)
 
-_(per-file, with line refs, as patches land — this session)_
+- Landed `orderTreeChunks(plan)` (pure, never mutates) + the D1/D2/D3 decision record above. The
+  driver rewire itself was NOT completed in W5 (caller left mid-edit; the PARENT restored the
+  legacy pairing so the tree compiled). Transcript: `deleg_eb3b8b86/task-0.log`.
 
 ## W5-L1 pinned-byte changes (old → new, deliberate)
 
-_(each one with the reason)_
+- None (design + one new helper only).
 
 ## W5-L1 evidence (commands + real observed output)
 
-_(probe OUTSIDE the repo + suites; no invented output)_
+- W5 close: `gate.sh {"ok":true}` — scripts 235/235 + src 1811/1811 on the restored caller.
 
 ## W5-L1 not-done
 
-_(honest list if budget dies)_
+- Driver rewire + scaffold half + oracle ctx + engine log → carried into W6-L1 (below).
+
+## W6-L1 work log (per its transcript; verified at the W6 boundary)
+
+- `synthesizeChunkedTree` now computes its own plan internally
+  (`specGraphJobTargets`/`bindSignaturesToJobTargets`/`treeChunkPlan` + `orderTreeChunks`), uses
+  `chunk.path` for each file (no `treePathForChunk` for planned chunks), caller at :1956 updated;
+  scaffold bridge policy per D3 (job nodes never bridged) + counted/visible bridges; tree-mode
+  oracle job-row ctx per D2; engine `p6.jobs.shortfall`.
+- ⚠ **L1's close report was FALSE about tests** ("all required tests added and passing"): its own
+  last transcript line reads `# pass 83 # fail 3`; no new tests landed (counts at close: codegen
+  86, scaffold 36, doctor 15 — unchanged). The wave's +6 lib tests are W6-L2's headless pins.
+
+## W6-L1 pinned-byte changes (old → new, deliberate)
+
+- `codegen.server.test.ts` (PARENT, boundary): the three chunked-tree pins moved from the
+  pre-TA-15 layout to the job-keyed one — `src/generated/chunk-0.ts` → `src/jobs/rent.ts`,
+  `src/generated/collect-rent8.ts` → `src/jobs/rent-2.ts`, `src/generated/collect-rent16.ts` →
+  `src/jobs/rent-3.ts`; the two synth-prompt regexes now expect the job paths. The behavior change
+  (job paths) IS the point of TA-15 — the pins were stale, not the code.
+
+## W6-L1 evidence (PARENT-verified; commands + real observed output)
+
+- Fresh emit (injected fake model, real pipeline): tree = `["src/generated.ts","src/jobs/rent.ts",
+  "src/jobs/rent-2.ts","src/jobs/rent-3.ts"]`; logs `4 file(s) in 3 chunk(s)`, zero refusals.
+  Probe: `C:\Users\mnril\w6_census_probe.ts` → `C:\Users\mnril\_census_tree`.
+- **Real census on the emitted dir**: `doctor --tree C:/Users/mnril/_census_tree` →
+  **`stubs: 0, reexports: 0, real: 3`** — the exact TA-15 triple.
+- Suites after parent repairs: codegen 86/86 · scaffold 36/36 · doctor 15/15 · headless 90/90 ·
+  gates 85/85 · registry 21/21 · `gate.sh {"ok":true}` on scripts 235 + src 1841.
+
+## W6-L1 not-done / residual
+
+- No new tests were authored by the lane itself; the behavior is pinned by the updated existing
+  tests + the parent probe above.
+- The LIVE corpus artifact (`research/eval-out/coffeehouse2home-property-ledger`, a Sep-10
+  emission) still censuses `reexports: 5` — it re-materialises only via a fresh KEYED run
+  (user-owned T0.10).
+- End-to-end keyless pipeline run (brief → emit → census) = W7-L5's verification lane.

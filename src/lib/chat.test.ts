@@ -1166,3 +1166,66 @@ describe("slash tools (keyless, no LLM)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// T-107.2 (fixes/216p, W6 · L3) — REGISTRY MIGRATION PIN (chat seam).
+//
+// `chatOnceServer` now calls `callModel("main", …)` (llm/providers/registry.ts)
+// instead of the legacy `completeDeepSeek(…, {model:"deepseek-v4-flash"})`.
+// This pin proves the same fetch stub is reached with the same request shape,
+// and that the registry's `main` role resolution is the code in the path —
+// a `DEEPSEEK_MODEL_MAIN` env pin changes the requested model id, which the
+// legacy hardcoded binding could never honor.
+// ---------------------------------------------------------------------------
+describe("216p T-107.2 — registry migration pin (chat seam)", () => {
+  it("chatOnceServer reaches the same fetch shape, and the `main` registry role is the code in the path", async () => {
+    process.env[KEY] = "sk-test";
+    const savedPin = process.env.DEEPSEEK_MODEL_MAIN;
+    const calls: Array<{
+      url: string;
+      body: {
+        model?: unknown;
+        thinking?: unknown;
+        max_tokens?: unknown;
+        stream?: unknown;
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+    }> = [];
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return okResponse({ model: "deepseek-v4-flash", choices: [{ message: { content: "ok" } }] });
+    }) as typeof fetch;
+    try {
+      // (1) No pin: the exact pre-registry request shape.
+      delete process.env.DEEPSEEK_MODEL_MAIN;
+      const res = await chatOnceServer(fixture(), "What phase are we on?");
+      assert.equal(res.ok, true);
+      assert.equal(calls.length, 1, "one call, no retry");
+      const plain = calls[0]!;
+      assert.equal(plain.url, "https://api.deepseek.com/chat/completions");
+      assert.equal(plain.body.model, "deepseek-v4-flash", "the `main` tier model — the id the legacy call sent");
+      assert.deepEqual(plain.body.thinking, { type: "disabled" });
+      assert.equal(plain.body.max_tokens, 768, "the copilot's own maxTokens (unchanged)");
+      assert.equal(plain.body.stream, false);
+      const messages = plain.body.messages ?? [];
+      assert.equal(messages[0]?.role, "system");
+      assert.match(messages[0]?.content ?? "", /RapidTool Copilot/);
+      assert.equal(messages[messages.length - 1]?.content, "What phase are we on?");
+
+      // (2) A role env pin changes the requested id ⇒ the registry resolved it.
+      process.env.DEEPSEEK_MODEL_MAIN = "deepseek-v4-pro";
+      const pinned = await chatOnceServer(fixture(), "again");
+      assert.equal(pinned.ok, true);
+      assert.equal(calls.length, 2);
+      assert.equal(
+        calls[1]!.body.model,
+        "deepseek-v4-pro",
+        "the registry env pin is honored — the legacy hardcoded binding could not do this",
+      );
+    } finally {
+      if (savedPin === undefined) delete process.env.DEEPSEEK_MODEL_MAIN;
+      else process.env.DEEPSEEK_MODEL_MAIN = savedPin;
+      globalThis.fetch = realFetch;
+    }
+  });
+});

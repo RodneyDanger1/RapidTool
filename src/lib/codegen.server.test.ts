@@ -1051,13 +1051,13 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     assert.ok(synthPrompts[2]!.includes("collectRent8"), "chunk-2 prompt carries chunk-1 exports");
     assert.match(
       synthPrompts[1]!,
-      /- src\/generated\.ts exports: collectRent0, collectRent1/,
-      "earlier-file context lists paths + exports",
+      /- src\/jobs\/rent\.ts exports: collectRent0, collectRent1/,
+      "earlier-file context lists paths + exports (216k W6: chunk-0 file is the JOB file)",
     );
     assert.match(
       synthPrompts[2]!,
-      /- src\/generated\/collect-rent8\.ts exports: collectRent8/,
-      "second chunk file listed with its path",
+      /- src\/jobs\/rent-2\.ts exports: collectRent8/,
+      "second chunk file listed with its path (216k W6: sibling -2 file)",
     );
     for (const p of synthPrompts) {
       assert.ok(p.includes(LEDGER_BRIEF), "shared brief in every chunk prompt");
@@ -1074,7 +1074,7 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     assert.equal(tree.length, 4, "barrel + 3 chunks");
     assert.deepEqual(
       tree.map((t) => t.path),
-      [TREE_ENTRY_PATH, TREE_CHUNK0_RELOCATED_PATH, "src/generated/collect-rent8.ts", "src/generated/collect-rent16.ts"],
+      [TREE_ENTRY_PATH, "src/jobs/rent.ts", "src/jobs/rent-2.ts", "src/jobs/rent-3.ts"],
     );
     for (const t of tree) {
       assert.equal(t.hash, String(fnv1a(t.source)), "content-addressed hash");
@@ -1083,9 +1083,9 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     }
     const barrel = tree[0]!;
     assert.equal(q.generatedSource, barrel.source, "generatedSource is the ESM barrel (what treeRun/oracle import)");
-    assert.ok(barrel.source.includes(`export * from "./generated/chunk-0.ts";`));
-    assert.ok(barrel.source.includes(`export * from "./generated/collect-rent8.ts";`));
-    assert.ok(barrel.source.includes(`export * from "./generated/collect-rent16.ts";`));
+    assert.ok(barrel.source.includes(`export * from "./jobs/rent.ts";`));
+    assert.ok(barrel.source.includes(`export * from "./jobs/rent-2.ts";`));
+    assert.ok(barrel.source.includes(`export * from "./jobs/rent-3.ts";`));
     assert.ok(!barrel.source.includes("module.exports"), "entry is ESM, not IIFE-concat");
     const later = tree[2]!;
     assert.ok(later.source.includes("import {"), "later chunk imports prior exports");
@@ -1130,11 +1130,11 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     assert.equal(tree.length, 3, "A0 barrel + prior chunks' files stay real");
     assert.deepEqual(
       tree.map((t) => t.path),
-      [TREE_ENTRY_PATH, TREE_CHUNK0_RELOCATED_PATH, "src/generated/collect-rent8.ts"],
+      [TREE_ENTRY_PATH, "src/jobs/rent.ts", "src/jobs/rent-2.ts"],
     );
     assert.equal(q.generatedSource, tree[0]!.source, "partial entry is the ESM barrel over accepted chunks");
-    assert.ok(q.generatedSource.includes(`export * from "./generated/chunk-0.ts";`));
-    assert.ok(q.generatedSource.includes(`export * from "./generated/collect-rent8.ts";`));
+    assert.ok(q.generatedSource.includes(`export * from "./jobs/rent.ts";`));
+    assert.ok(q.generatedSource.includes(`export * from "./jobs/rent-2.ts";`));
     assert.ok(!q.generatedSource.includes("collect-rent16"), "refused chunk 2 is absent from the barrel");
     assert.equal(q.modelRoute, "deepseek-flash");
     assert.equal(q.lastTest, base.lastTest, "no verified claim on a partial");
