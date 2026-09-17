@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   createCrew,
+  createCrewRuntime,
   rolesForPhase,
   parseAgentOutput,
   CREW_ROLE_BY_PHASE,
@@ -237,7 +238,11 @@ describe("runCrew plan-act mode", () => {
       return notConfigured();
     });
     const res = await crew.runCrew(seededProject(), { mode: "plan-act", phase: 6 });
-    assert.deepEqual(res, { ok: false, reason: "not-configured" });
+    assert.deepEqual(res, {
+      ok: false,
+      reason: "not-configured",
+      code: "RT_E_LLM_NOT_CONFIGURED",
+    });
     assert.equal(calls, 1); // no step turns, no fabricated transcript
   });
 
@@ -318,7 +323,11 @@ describe("runCrew default mode regression", () => {
   it("stays honestly not-configured when the very first dispatch fails", async () => {
     const crew = createCrew(notConfigured);
     const res = await crew.runCrew(seededProject(), { phase: 6 });
-    assert.deepEqual(res, { ok: false, reason: "not-configured" });
+    assert.deepEqual(res, {
+      ok: false,
+      reason: "not-configured",
+      code: "RT_E_LLM_NOT_CONFIGURED",
+    });
   });
 });
 
@@ -788,5 +797,56 @@ describe("treeReviewContext (diff-aware review context)", () => {
     assert.match(none, /No generated artifact yet/);
     const single = treeReviewContext({ generatedSource: "export const x = 1" } as never);
     assert.match(single, /Single module \(no generated tree\)/);
+  });
+});
+
+describe("185-H1 crew dual-channel + RT_E stamps", () => {
+  it("ok:true runs never carry an error channel", async () => {
+    const crew = createCrew(routedCompleter({}));
+    const res = await crew.runCrew(seededProject(), { phase: 6, live: false });
+    assert.equal(res.ok, true);
+    if (res.ok) {
+      assert.equal("error" in res, false, "ok:true must not carry an error channel");
+    }
+  });
+
+  it("hostile dual-channel completer fail-closes with RT_E_INTERNAL", async () => {
+    const dual = async (): Promise<LlmResult> =>
+      ({
+        ok: true,
+        text: JSON.stringify({
+          type: "code",
+          content: "should not land",
+          artifacts: [],
+        }),
+        model: "deepseek-v4-flash",
+        error: "already complete",
+      }) as LlmResult;
+    const crew = createCrew(dual);
+    const res = await crew.runCrew(seededProject(), { phase: 6, live: false });
+    assert.equal(res.ok, false);
+    if (!res.ok) {
+      assert.equal(res.reason, "error");
+      assert.equal(res.code, "RT_E_INTERNAL");
+      assert.match(res.error ?? "", /already complete/);
+    }
+  });
+
+  it("configured:false gate stamps RT_E_LLM_NOT_CONFIGURED before any dispatch", async () => {
+    let calls = 0;
+    const crew = createCrewRuntime({
+      complete: async () => {
+        calls++;
+        return { ok: true, text: "nope", model: "x" };
+      },
+      configured: () => false,
+    });
+    const res = await crew.runCrew(seededProject(), { phase: 6 });
+    assert.deepEqual(res, {
+      ok: false,
+      reason: "not-configured",
+      code: "RT_E_LLM_NOT_CONFIGURED",
+    });
+    assert.equal(calls, 0);
   });
 });

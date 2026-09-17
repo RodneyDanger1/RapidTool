@@ -26,8 +26,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { fnv1a } from "./algorithms.ts";
 import { recordGateInto } from "./dod.ts";
-import { stampPacket } from "./engine.ts";
-import type { Artifact, ArtifactKind, MemoryEntry, PhaseId, Project } from "./types.ts";
+import { accrueReproducedCounts, isLessonMemoryId, stampPacket } from "./engine.ts";
+import type { Artifact, ArtifactKind, JsonLog, MemoryEntry, PhaseId, Project } from "./types.ts";
 import type { VerifyOutcome } from "./verify.server.ts";
 
 export type { VerifyOutcome } from "./verify.server.ts";
@@ -104,6 +104,11 @@ export type VerifyOutcomeShape = {
   /** L3 (failed/error) or L4 (passed) lesson row minted by verify.server.ts's
    *  outcome seam — applyVerifyOutcome appends it to project memory. */
   lesson?: MemoryEntry;
+  /** 216i (112 §4.3 — T2): the counterexample-or-nothing refusal envelope
+   *  (verify.server.ts's `LessonRefusal`, structurally). NO lesson row exists
+   *  on this path; applyVerifyOutcome appends `log` to project.logs as the
+   *  visible `lesson.refused` row — never a silent no-op. */
+  lessonRefused?: VerifyOutcome["lessonRefused"];
 };
 
 /**
@@ -134,6 +139,12 @@ export function withCommonJsExports(source: string): string {
  *   evidence. NO labels are minted (an untested verdict must never look like a
  *   machine pass).
  * - `not-configured` → no artifact, no state change (returns the same reference).
+ *
+ * 216i (112 T1/T2): `outcome.lesson`'s L3 row is appended once and a repeated
+ * identical failure accrues `reproducedCount` on the ONE stored row
+ * (`lesson.reproduced`); `outcome.lessonRefused` (the §4.3 refusal envelope)
+ * appends its visible `lesson.refused` row to project.logs instead — a refusal
+ * is never a silent no-op.
  *
  * P0-09 convergence: a PASSED machine verify converges the recorded state —
  * stored `generatedSource` becomes the machine-verified source, and when P6 is
@@ -196,15 +207,45 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
   // L3/L4 lesson capture (fixes/98 §2.3 writer 2(c)/3): append the lesson row
   // minted at verify.server.ts's outcome seam to project memory. Idempotent:
   // the id is content-addressed and an existing twin is dropped (H43-P2-1).
+  // 216i (112 §4.2 — T1): a repeated identical failure re-derives the SAME
+  // signature-based id — the honest record is ONE row whose `reproducedCount`
+  // accrues (with a visible `lesson.reproduced` ledger row), never a dropped
+  // occurrence and never a forked twin.
   const lesson = outcome.lesson as MemoryEntry | undefined;
-  const hasLesson = !!lesson && (project.memory ?? []).some((m) => m.id === lesson.id);
+  const memoryRows = project.memory ?? [];
+  const hasLesson = !!lesson && memoryRows.some((m) => m.id === lesson.id);
+  const reproduced = hasLesson && !!lesson && isLessonMemoryId(lesson.id);
+  const memory =
+    reproduced && lesson
+      ? accrueReproducedCounts([lesson, ...memoryRows]).slice(-80)
+      : lesson && !hasLesson
+        ? [...memoryRows, lesson].slice(-80)
+        : memoryRows;
+  const accrued =
+    reproduced && lesson
+      ? (memory.find((m) => m.id === lesson.id)?.reproducedCount ?? 0)
+      : 0;
+  // 216i (112 §4.3 — T2): the counterexample-or-nothing refusal. A refused L3
+  // mint produced NO lesson row; its visible record is the `lesson.refused`
+  // payload verify.server.ts put on the outcome — appended here so a real run
+  // can never swallow the refusal silently (112 §2.4).
+  const refusal = outcome.lessonRefused;
+  const refusalRow: JsonLog | null =
+    refusal && refusal.log && typeof refusal.log.detail === "string" && refusal.log.detail !== ""
+      ? {
+          ts: now,
+          phase: 6 as PhaseId,
+          level: refusal.log.level,
+          event: "lesson.refused",
+          detail: refusal.log.detail,
+        }
+      : null;
   const updated: Project = {
     ...project,
     lastTest,
     ...(finalSource !== null ? { generatedSource: finalSource } : {}),
     artifacts: [...(project.artifacts ?? []), artifact],
-    memory:
-      lesson && !hasLesson ? [...(project.memory ?? []), lesson].slice(-80) : project.memory,
+    memory,
     logs: [
       ...(project.logs ?? []),
       {
@@ -214,7 +255,7 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
         event: passed ? "verify.pass" : "verify.fail",
         detail: `${outcome.status} · ${evidence.slice(0, 160) || "(no evidence text)"}`,
       },
-      ...(lesson
+      ...(lesson && !hasLesson
         ? [
             {
               ts: now,
@@ -225,6 +266,18 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
             },
           ]
         : []),
+      ...(reproduced && lesson
+        ? [
+            {
+              ts: now,
+              phase: 6 as PhaseId,
+              level: "info" as const,
+              event: "lesson.reproduced",
+              detail: `${passed ? "L4 verified-procedure" : "L3 verify-failure"} ${lesson.id} reproduced (verify ${outcome.status} again; reproducedCount=${accrued})`,
+            },
+          ]
+        : []),
+      ...(refusalRow ? [refusalRow] : []),
     ].slice(-200),
   };
   if (!passed) return updated;

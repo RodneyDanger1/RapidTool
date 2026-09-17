@@ -326,11 +326,15 @@ function defaultOutputDir(h, project, ...sub) {
   const target = join(homedir(), "RapidTool Software", slug, ...sub);
   try {
     mkdirSync(target, { recursive: true });
-    return target;
-  } catch {
+    return { path: target, fallback: false, error: null };
+  } catch (err) {
     const fallback = resolve(slug, ...sub);
     mkdirSync(fallback, { recursive: true });
-    return fallback;
+    return {
+      path: fallback,
+      fallback: true,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -510,17 +514,24 @@ async function main() {
             1,
           );
         }
-        if (flag(args, "force") && process.stdin.isTTY !== true && !flag(args, "i-am-human")) {
+        // 216 (T0.7 — actor-seam fix): this guard used to cover ONLY --force,
+        // so an agent calling `approve` non-interactively WITHOUT --force
+        // silently minted decidedBy:"human" — no TTY, no note, no seat
+        // evidence (the reproduced forged-advance path). The human seat is now
+        // required for EVERY non-TTY approval. An unattended process must use
+        // the autopilot gate; it may not impersonate the human seat by default.
+        if (process.stdin.isTTY !== true && !flag(args, "i-am-human")) {
           return respond(
             {
               ok: false,
-              error: "approve --force from a non-TTY requires --i-am-human (never mint decidedBy:human from an agent)",
+              error:
+                "approve from a non-TTY requires --i-am-human (never mint decidedBy:human from an agent; use the autopilot gate for machine approval)",
               code: "RT_E_VALIDATION",
             },
             1,
           );
         }
-        const updated = h.approve(project, { force: flag(args, "force") });
+        const updated = h.approve(project, { force: flag(args, "force"), actor: flag(args, "i-am-human") ? { decidedBy: "human", seat: "human-cli-i-am-human" } : undefined, humanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN });
         h.saveProject(requireProjectPath(args, "approve"), updated);
         respond({ ok: true, path: requireProjectPath(args, "approve"), summary: h.summary(updated) }, 0);
         return;
@@ -719,7 +730,14 @@ async function main() {
           // --out keeps overriding. headless.emitProject mkdirSync(recursive)s
           // the target AND every file's parent before writeFileSync (headless.ts
           // emitProject) — no extra mkdir needed here.
-          const dir = typeof args.out === "string" ? args.out : defaultOutputDir(h, project);
+          if (args.out === true) {
+            return respond(
+              { ok: false, error: "emit --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+              1,
+            );
+          }
+          const dest = typeof args.out === "string" ? { path: args.out, fallback: false, error: null } : defaultOutputDir(h, project);
+          const dir = dest.path;
           const target = resolve(dir);
           // fixes/144 (M1): a second emit must overwrite cleanly and SAY so —
           // never a silent merge. Snapshot pre-existing content BEFORE writing
@@ -737,6 +755,11 @@ async function main() {
             moduleEmbedded: res.moduleEmbedded,
             summary: res.summary,
           };
+          if (dest.fallback) {
+            payload.fallback = true;
+            payload.warning =
+              `Home emit dir was unwritable (${dest.error ?? "unknown"}) — wrote under CWD instead: ${res.dir}`;
+          }
           if (preExisting) {
             payload.overwritten = true;
             payload.warning =
@@ -1056,9 +1079,20 @@ async function main() {
         try {
           // fixes/144 (M1): default = <home>/RapidTool Software/<slug>/vault —
           // same parent as the emitted software, per-project (--out overrides).
-          const dir = typeof args.out === "string" ? args.out : defaultOutputDir(h, project, "vault");
-          const res = await h.writeVault(project, resolve(dir));
-          respond({ ok: true, count: res.count, dir: res.dir }, 0);
+          if (args.out === true) {
+            return respond(
+              { ok: false, error: "vault --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+              1,
+            );
+          }
+          const dest = typeof args.out === "string" ? { path: args.out, fallback: false, error: null } : defaultOutputDir(h, project, "vault");
+          const res = await h.writeVault(project, resolve(dest.path));
+          const envelope = { ok: true, count: res.count, dir: res.dir };
+          if (dest.fallback) {
+            envelope.fallback = true;
+            envelope.warning = `Home vault dir was unwritable (${dest.error ?? "unknown"}) — wrote under CWD instead: ${res.dir}`;
+          }
+          respond(envelope, 0);
         } catch (err) {
           // Missing vault module / write failure → clean exit 1 (documented).
           respond(
@@ -1670,17 +1704,32 @@ async function main() {
             const store = new k.KnowledgeStore(resolve(out.value));
             const promoted = top.map((row) => {
               const res = store.savePattern(k.acceptedLessonEntry({ project: project.name, actor, row }));
-              return { entryId: res.entry.id, appended: res.appended, lessonRow: row.id, title: res.entry.title };
+              return {
+                entryId: res.entry.id,
+                appended: res.appended,
+                refused: res.refused === true,
+                reason: res.reason ?? null,
+                lessonRow: row.id,
+                title: res.entry.title,
+              };
             });
+            const appendedCount = promoted.filter((r) => r.appended).length;
+            const refusedCount = promoted.filter((r) => r.refused).length;
             respond(
               {
                 ok: true,
                 action: "accept",
                 store: resolve(out.value),
                 actor,
-                promoted: promoted.length,
+                // 209 honesty: promoted = newly appended rows, not attempt count
+                promoted: appendedCount,
+                attempted: promoted.length,
+                refused: refusedCount,
                 rows: promoted,
-                note: "append-only store — the promoted rows carry actor + source-row provenance; re-accept of identical rows is an idempotent no-op (appended:false)",
+                note:
+                  refusedCount > 0
+                    ? `append-only store — ${appendedCount} appended, ${refusedCount} refused (eval-gate or duplicate). Human accept carries actor provenance; identical re-accept is appended:false.`
+                    : "append-only store — the promoted rows carry actor + source-row provenance; re-accept of identical rows is an idempotent no-op (appended:false)",
               },
               0,
             );
@@ -1848,7 +1897,8 @@ async function main() {
               steps: res.steps,
               changed,
               summary: h.summary(res.project),
-              ...(res.error ? { error: res.error } : {}),
+              // 185-H1: never dual-channel ok:true + error — detail rides as `note`.
+              ...(res.note ? { note: res.note } : {}),
             },
             0,
           );
@@ -1982,8 +2032,10 @@ async function main() {
 
       case "doctor": {
         // E-25: capability pre-flight — no project required. Never throws.
+        // 214: optional --tree scans leftover job files (never invents bodies).
         try {
-          const status = await h.doctorStatus();
+          const tree = typeof args.tree === "string" && args.tree.trim() ? args.tree.trim() : "";
+          const status = await h.doctorStatus(tree ? { treeDir: tree } : undefined);
           respond({ ok: true, ...status }, 0);
         } catch (err) {
           respond(
@@ -2007,16 +2059,48 @@ async function main() {
           const rows = rtServer
             ? rtServer.readRtTail(rtServer.resolveLogDir(CLI_PROJECT), 200)
             : [];
+          let persistHealth = { ok: true, lastError: null };
+          let name = null;
+          let status = null;
+          let currentPhase = null;
+          let wildRun = null;
+          if (typeof CLI_PROJECT === "string" && CLI_PROJECT.trim()) {
+            try {
+              const p = h.loadProject(CLI_PROJECT);
+              name = typeof p.name === "string" ? p.name : null;
+              status = typeof p.status === "string" ? p.status : null;
+              currentPhase = typeof p.currentPhase === "number" ? p.currentPhase : null;
+              const wr = p.wildRun;
+              if (wr && typeof wr === "object") {
+                const lastAutoAt = typeof wr.lastAutoAt === "number" ? wr.lastAutoAt : null;
+                wildRun = {
+                  active: wr.active === true,
+                  pause: wr.pause === true,
+                  phase: typeof wr.phase === "number" ? wr.phase : null,
+                  startedAt: typeof wr.startedAt === "number" ? wr.startedAt : null,
+                  lastAutoAt,
+                  lastAutoLog: typeof wr.lastAutoLog === "string" ? wr.lastAutoLog : null,
+                  stoppedAt: typeof wr.stoppedAt === "number" ? wr.stoppedAt : null,
+                  overdueMs: lastAutoAt != null ? Date.now() - lastAutoAt : null,
+                };
+              }
+            } catch (loadErr) {
+              persistHealth = {
+                ok: false,
+                lastError: loadErr instanceof Error ? loadErr.message : String(loadErr),
+              };
+            }
+          }
           const diagnosis = rtDiag.buildDiagnosis({
             source: "cli",
             now: Date.now(),
             session: { sessionId: rtSessionId, host: "cli", href: "", ua: "" },
             project: {
               ref: CLI_PROJECT,
-              name: null,
-              status: null,
-              currentPhase: null,
-              wildRun: null,
+              name,
+              status,
+              currentPhase,
+              wildRun,
             },
             errors: rows.filter((r) => r.level === "error" || r.level === "critical"),
             timeline: rows.slice(-50).map((r) => ({
@@ -2043,7 +2127,7 @@ async function main() {
               },
               counts: {},
             },
-            persistHealth: { ok: true, lastError: null },
+            persistHealth,
             crashSnapshot: null,
           });
           respond({ ok: true, ...diagnosis }, 0);
@@ -2094,6 +2178,7 @@ const USAGE = {
     packet: "packet --project <file.json> [--out <file.md>] [--knowledge <store.json>]  # --knowledge seeds the Ranked-memory section with cross-project accepted lesson rows (tier-1, advisory)",
     export: "export --project <file.json> [--out <file.json>]",
     emit: "emit --project <file.json> [--out <dir>] [--check] [--run]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok",
+    fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR human-approve selected/all ids — never auto-approves",
     "tree-run": "tree-run --dir <dir> [--project <file.json>]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0; red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
     repair: "repair --dir <dir> --project <file.json> [--budget N]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (path→content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun → red tail → one bounded synthesis repair call with deps.treeFailure → apply repaired files in place → re-import → treeRun again); green → tested-equivalent mint + honest P6 gate + converged (0); budget exhausted → honest failed (1, RT_E_REPAIR_FAILED); the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
     summary: "summary --project <file.json>",
@@ -2105,7 +2190,7 @@ const USAGE = {
     design: "design --project <file.json> [--html <out.html>]  # design tokens (+ standalone HTML when --html)",
     diagram: "diagram --project <file.json> --kind phases|architecture|flow [--out <file.svg>]  # SVG diagram",
     artifacts: "artifacts --project <file.json>           # index of project artifacts (id/phase/kind/title/bytes)",
-    doctor: "doctor                                     # capability pre-flight (llm/research/runner/node)",
+    doctor: "doctor [--tree <dir>]                       # capability pre-flight (llm/research/runner/node/factory)",
     harvest: "harvest --project <file.json>               # bounded live-source harvest (repos/license/snippets) for the brief",
     swarm: "swarm --project <file.json>                  # deterministic advisory swarm critique of the current phase",
     prompt: "prompt --project <file.json> [--policies a,b]  # hyper-prompt expansion (needs DEEPSEEK_API_KEY)",
@@ -2114,7 +2199,7 @@ const USAGE = {
     knowledge: "knowledge --store <file.json> (--save <json>|--find <query>) [--limit N]  # cross-project pattern store",
     lesson: "lesson (--list --project <file.json> [--brief <text>] [--limit N] | --propose --brief <text> [--title <t>] [--kind fix|pattern|note] [--tags a,b] [--project <name>] | --accept --project <file.json> --out <knowledge.json> [--actor <name>] [--limit N] | --supersede --knowledge-file <knowledge.json> --id <K...> [--evidence <text>|--reason <text>] [--by human|machine] | --refute --knowledge-file <knowledge.json> --id <K...> [--evidence <text>])  # lesson family: list rows read-only (fusionRank vs --brief, else score-desc) / propose = bounded flash DRAFT, never writes (keyless drafts labeled 'draft (keyless)') / accept = THE human-gated cross-project write, actor recorded per row, idempotent per actor / supersede + refute = store telemetry (append-only rows + counters, never deletes)",
     wild: "wild --project <file.json> [--start|--pause|--resume|--stop] [--steps N]  # wild-mode macro-run; --start enables + begins a run",
-    chat: "chat --project <file.json> --ask <text> [--history <json-array>]  # grounded copilot turn (needs DEEPSEEK_API_KEY)",
+    chat: "chat --project <file.json> --ask <text> [--history <json-array>]  # grounded copilot turn; slash tools /status /gate /packet /fixtures /ls /read /help work keyless; free-text needs DEEPSEEK_API_KEY",
     deepen: "deepen --project <file.json> [--phase N]    # re-run live research over a completed research phase (0/7/11)",
   },
 };

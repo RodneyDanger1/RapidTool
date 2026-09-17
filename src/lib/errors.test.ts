@@ -9,7 +9,9 @@ import {
   ERROR_CODE_DOC,
   classifyError,
   codeError,
+  dualChannelFailDetail,
 } from "./errors.ts";
+import { SessionBudgetExceeded } from "./token-ledger.ts";
 
 function reportRejectedError(message: string): Error {
   return Object.assign(new Error(message), { name: "ReportRejectedError" });
@@ -35,6 +37,25 @@ describe("codeError", () => {
     assert.equal(r.ok, false);
     assert.equal(typeof r.error, "string");
     assert.equal(typeof r.code, "string");
+  });
+});
+
+describe("dualChannelFailDetail (185-H1)", () => {
+  it("returns null on clean ok:true (no error channel)", () => {
+    assert.equal(dualChannelFailDetail({ ok: true }), null);
+    assert.equal(dualChannelFailDetail({ ok: true, text: "hi" }), null);
+    assert.equal(dualChannelFailDetail({ ok: true, error: "" }), null);
+    assert.equal(dualChannelFailDetail({ ok: true, error: "   " }), null);
+  });
+
+  it("returns the error prose when ok:true carries a non-empty error", () => {
+    assert.equal(dualChannelFailDetail({ ok: true, error: "already complete" }), "already complete");
+    assert.equal(dualChannelFailDetail({ ok: true, error: "  poisoned  " }), "poisoned");
+  });
+
+  it("returns null on ok:false (callers handle failures separately)", () => {
+    assert.equal(dualChannelFailDetail({ ok: false, error: "nope" }), null);
+    assert.equal(dualChannelFailDetail({ ok: false }), null);
   });
 });
 
@@ -95,6 +116,10 @@ describe("classifyError", () => {
     // Even wrapped in a fetch-style cause chain, the coded link wins once reached.
     const wrapped = Object.assign(new Error("fetch failed"), { cause: err });
     assert.equal(classifyError(wrapped, "RT_E_INTERNAL"), "RT_E_PHASE_ILLEGAL");
+  });
+
+  it("classifies SessionBudgetExceeded via thrown RT_E_BUDGET_EXHAUSTED .code", () => {
+    assert.equal(classifyError(new SessionBudgetExceeded(10, 10)), "RT_E_BUDGET_EXHAUSTED");
   });
 
   it("walks the cause chain of wrapper errors", () => {
@@ -258,5 +283,14 @@ describe("ERROR_CODE_DOC", () => {
       assert.match(code, /^RT_E_[A-Z_]+$/);
     }
     assert.equal(new Set(ERROR_CODES).size, ERROR_CODES.length);
+  });
+
+  it("RT_E_BUSY and RT_E_FOREIGN_FILES stay in ERROR_CODES + ERROR_CODE_DOC", () => {
+    assert.ok((ERROR_CODES as readonly string[]).includes("RT_E_BUSY"));
+    assert.ok((ERROR_CODES as readonly string[]).includes("RT_E_FOREIGN_FILES"));
+    assert.ok(ERROR_CODE_DOC.RT_E_BUSY.meaning.trim().length > 0);
+    assert.ok(ERROR_CODE_DOC.RT_E_FOREIGN_FILES.meaning.trim().length > 0);
+    assert.ok(ERROR_CODE_DOC.RT_E_BUSY.agentAction.trim().length > 0);
+    assert.ok(ERROR_CODE_DOC.RT_E_FOREIGN_FILES.agentAction.trim().length > 0);
   });
 });

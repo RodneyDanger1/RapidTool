@@ -30,6 +30,13 @@ import {
   proposeLessonFallback,
   buildSupersedeEntry,
   consolidatedRunNote,
+  topLessonRows,
+  acceptedLessonEntry,
+  failureSignature,
+  failureLessonFromRecord,
+  type FailureLessonOutcome,
+  provenRowsFromStore,
+  lessonLinesForBrief,
 } from "./knowledge.ts";
 import { seedProject } from "./testing/fixtures.ts";
 import type { HitlDecision, IntentLattice, PhaseId } from "./types.ts";
@@ -315,8 +322,11 @@ describe("KnowledgeStore — learning-loop telemetry (fixes/98 §4.2/§6.2)", ()
       tags: ["lesson", "supersede"],
       body: "v1 remedy failed; see the new approach.",
       supersedes: [fix.id],
+      // 185-U1: lesson-tagged writes require a numeric maker score to promote.
+      score: 0.6,
     });
     assert.equal(note.appended, true);
+    assert.equal(note.refused, undefined);
     const def = store.findPatterns("debounce watcher fix");
     assert.ok(!def.some((m) => m.entry.id === fix.id), "superseded row excluded by default");
     assert.ok(def.length >= 1, "the superseding row itself still matches");
@@ -452,6 +462,132 @@ describe("M-tier lesson surface (fixes/98 §2/§3)", () => {
     assert.equal(shouldPromoteLesson(0.4, 0.4), true);
     assert.equal(shouldPromoteLesson(0.4, 0.5), true);
     assert.equal(shouldPromoteLesson(0.5, 0.4), false);
+    assert.equal(shouldPromoteLesson(0.5, Number.NaN), false);
+    assert.equal(shouldPromoteLesson(Number.NaN, 0.4), true, "NaN prior is unknown; numeric next is first card");
+  });
+
+  it("185-U1: savePattern gates lesson writes — regression refuses; first scored lesson promotes; non-lesson unchanged", () => {
+    const file = tempStorePath();
+    const store = new KnowledgeStore(file);
+
+    // Non-lesson: byte-identical path — no score required, no refused flag.
+    const pattern = store.savePattern(BASE);
+    assert.equal(pattern.appended, true);
+    assert.equal(pattern.refused, undefined);
+    assert.equal(store.count(), 1);
+
+    // First lesson with a numeric score promotes (no prior).
+    const first = store.savePattern({
+      project: "alpha",
+      kind: "note",
+      title: "Debounce lesson v1",
+      tags: [LESSON_TAG, "verified-procedure"],
+      body: "Coalesce watcher events before handling.",
+      score: 0.5,
+    });
+    assert.equal(first.appended, true);
+    assert.equal(first.refused, undefined);
+    assert.equal(first.entry.score, 0.5);
+    assert.equal(store.count(), 2);
+    const countAfterFirst = store.count();
+
+    // Same-title lesson with worse score → refuse, no append, prior intact.
+    const worse = store.savePattern({
+      project: "alpha",
+      kind: "note",
+      title: "Debounce lesson v1",
+      tags: [LESSON_TAG, "verified-procedure"],
+      body: "Weaker restatement of the same lesson.",
+      score: 0.3,
+    });
+    assert.equal(worse.appended, false);
+    assert.equal(worse.refused, true);
+    assert.equal(worse.reason, "eval-gated-regression");
+    assert.equal(worse.code, "RT_E_VALIDATION");
+    assert.equal(worse.entry.id, first.entry.id, "envelope surfaces the prior row");
+    assert.equal(store.count(), countAfterFirst, "append-only: refuse never deletes or grows");
+    assert.deepEqual(
+      store.entries().map((e) => e.id),
+      [pattern.entry.id, first.entry.id],
+      "prior rows untouched",
+    );
+
+    // Missing next score → refuse (predicate false when next unknown).
+    const missing = store.savePattern({
+      project: "alpha",
+      kind: "note",
+      title: "Brand new lesson title",
+      tags: [LESSON_TAG],
+      body: "No maker card on this candidate.",
+    });
+    assert.equal(missing.appended, false);
+    assert.equal(missing.refused, true);
+    assert.equal(missing.reason, "eval-gated-regression");
+    assert.equal(missing.code, "RT_E_VALIDATION");
+    assert.equal(store.count(), countAfterFirst);
+
+    // Equal or better same-title score promotes (append-only new row).
+    const better = store.savePattern({
+      project: "alpha",
+      kind: "note",
+      title: "Debounce lesson v1",
+      tags: [LESSON_TAG, "verified-procedure"],
+      body: "Stronger restatement with a higher maker card.",
+      score: 0.7,
+    });
+    assert.equal(better.appended, true);
+    assert.equal(better.refused, undefined);
+    assert.equal(store.count(), countAfterFirst + 1);
+    assert.ok(store.entries().some((e) => e.id === first.entry.id), "prior lesson still present");
+
+    cleanup(file);
+  });
+
+  it("185-U1: equal maker score still promotes; NaN score refuses (savePattern remains the gate)", () => {
+    const file = tempStorePath();
+    const store = new KnowledgeStore(file);
+
+    const first = store.savePattern({
+      project: "alpha",
+      kind: "note",
+      title: "Equal-score lesson",
+      tags: [LESSON_TAG],
+      body: "First scored lesson body.",
+      score: 0.5,
+    });
+    assert.equal(first.appended, true);
+    assert.equal(store.count(), 1);
+
+    // Equal score, different body → fingerprint differs → append (191: better/equal promotes).
+    const equal = store.savePattern({
+      project: "alpha",
+      kind: "note",
+      title: "Equal-score lesson",
+      tags: [LESSON_TAG],
+      body: "Restatement at the same maker card.",
+      score: 0.5,
+    });
+    assert.equal(equal.appended, true);
+    assert.equal(equal.refused, undefined);
+    assert.equal(store.count(), 2);
+    assert.ok(store.entries().some((e) => e.id === first.entry.id), "prior lesson still present");
+
+    // NaN is not a numeric maker card — shouldPromoteLesson(next=NaN) is false.
+    const nan = store.savePattern({
+      project: "alpha",
+      kind: "note",
+      title: "NaN-score lesson",
+      tags: [LESSON_TAG],
+      body: "Junk maker card must not promote.",
+      score: Number.NaN,
+    });
+    assert.equal(nan.appended, false);
+    assert.equal(nan.refused, true);
+    assert.equal(nan.reason, "eval-gated-regression");
+    assert.equal(nan.code, "RT_E_VALIDATION");
+    assert.equal(store.count(), 2, "NaN refuse never appends");
+
+    cleanup(file);
   });
 
   it("class builders L1-L5 + drift emit the 98 §2.3 shapes with bounded texts", () => {
@@ -568,5 +704,338 @@ describe("M-tier lesson surface (fixes/98 §2/§3)", () => {
     assert.equal(note?.kind, "note");
     assert.equal(note?.title, "Run lessons P6 verify-failure");
     assert.ok(note?.body.includes("a") && note?.body.includes("b") && note?.body.includes("c"));
+  });
+
+  it("topLessonRows + acceptedLessonEntry — lesson accept pure core (C remainder / 209)", () => {
+    const brief = "dispatch HVAC board field service";
+    const a = manualLesson({
+      classShort: "verify-failure",
+      level: "L3",
+      kind: "episodic",
+      phase: 6,
+      text: "HVAC dispatch board needs field service ranking",
+      score: 0.9,
+    });
+    const b = manualLesson({
+      classShort: "pattern",
+      level: "L2",
+      kind: "semantic",
+      phase: 4,
+      text: "unrelated cooking recipe tips",
+      score: 0.95,
+    });
+    // blank brief → score-desc floor (b first)
+    assert.deepEqual(
+      topLessonRows([a, b], "", 2).map((r) => r.id),
+      [b.id, a.id],
+    );
+    // brief ranks HVAC-relevant first
+    const ranked = topLessonRows([a, b], brief, 1);
+    assert.equal(ranked.length, 1);
+    assert.equal(ranked[0]!.id, a.id);
+    assert.deepEqual(topLessonRows([], brief, 5), []);
+    assert.deepEqual(topLessonRows([a], brief, 0), []);
+
+    const entry = acceptedLessonEntry({ project: "HVAC Dispatch", actor: "test-human", row: a });
+    assert.equal(entry.kind, "note");
+    assert.ok(entry.tags.includes(LESSON_TAG));
+    assert.ok(entry.tags.includes("accepted"));
+    assert.ok(entry.tags.includes("actor:test-human"));
+    assert.ok(entry.body.includes("HVAC Dispatch"));
+    assert.ok(entry.body.includes("test-human"));
+    assert.ok(entry.sourcePath?.startsWith("lesson:"));
+
+    // same actor re-accept is content-identical → KnowledgeStore idempotent
+    const file = tempStorePath();
+    try {
+      const store = new KnowledgeStore(file);
+      const first = store.savePattern(entry);
+      assert.equal(first.appended, true);
+      const second = store.savePattern(
+        acceptedLessonEntry({ project: "HVAC Dispatch", actor: "test-human", row: a }),
+      );
+      assert.equal(second.appended, false, "same actor+row is idempotent");
+      assert.equal(store.entries().length, 1);
+      // different actor is a different row
+      const other = store.savePattern(
+        acceptedLessonEntry({ project: "HVAC Dispatch", actor: "other-human", row: a }),
+      );
+      assert.equal(other.appended, true);
+      assert.equal(store.entries().length, 2);
+
+      // 209: human accept without maker score still appends (CLI flag is the gate)
+      const noScoreRow = {
+        ...a,
+        id: "m-noscore",
+        score: undefined as unknown as number,
+        text: "human accepted lesson without maker card",
+      };
+      const noScore = store.savePattern(
+        acceptedLessonEntry({ project: "HVAC Dispatch", actor: "scoreless-human", row: noScoreRow }),
+      );
+      assert.equal(noScore.appended, true, "human accepted+actor bypasses missing score");
+      assert.equal(noScore.refused, undefined);
+    } finally {
+      cleanup(file);
+    }
+  });
+
+  it("topLessonRows + acceptedLessonEntry edge cases (212 residual)", () => {
+    const a = manualLesson({
+      classShort: "verify-failure",
+      level: "L3",
+      kind: "episodic",
+      phase: 6,
+      text: "HVAC dispatch board needs field service ranking",
+      score: 0.9,
+    });
+    assert.deepEqual(topLessonRows(null as never, "x", 5), []);
+    assert.deepEqual(topLessonRows([a], "x", Number.NaN), []);
+    assert.deepEqual(topLessonRows([a], "x", Number.POSITIVE_INFINITY), []);
+    assert.deepEqual(topLessonRows([a], "x", -3), []);
+    const mixed = topLessonRows([null as never, { id: 1 } as never, a], "dispatch HVAC", 3);
+    assert.equal(mixed.length, 1);
+    assert.equal(mixed[0]!.id, a.id);
+
+    const junkScore = { ...a, id: "m-junk-score", score: Number.NaN };
+    assert.doesNotThrow(() => topLessonRows([junkScore], "", 1));
+    assert.equal(topLessonRows([junkScore], "", 1).length, 1);
+
+    const blankActor = acceptedLessonEntry({ project: "HVAC", actor: "   ", row: a });
+    assert.ok(blankActor.tags.includes("actor:cli-human"));
+    const missingRow = acceptedLessonEntry({ project: "HVAC", actor: "x", row: null as never });
+    assert.ok(missingRow.body.includes("empty lesson text"));
+    assert.ok(missingRow.body.includes("unknown"));
+
+    const file = tempStorePath();
+    try {
+      const store = new KnowledgeStore(file);
+      // `accepted` without `actor:*` is NOT the human-CLI gate — still eval-gated.
+      const gated = store.savePattern({
+        project: "alpha",
+        kind: "note",
+        title: "Not a human accept",
+        tags: [LESSON_TAG, "accepted"],
+        body: "accepted tag without actor is still eval-gated",
+      });
+      assert.equal(gated.appended, false);
+      assert.equal(gated.refused, true);
+      assert.equal(gated.reason, "eval-gated-regression");
+      assert.equal(gated.code, "RT_E_VALIDATION");
+    } finally {
+      cleanup(file);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 216g (112 §4.1–§4.4 — T1/T2/T4): failure signatures, the counterexample
+// floor, and the store → expansion-prompt resolver.
+// ---------------------------------------------------------------------------
+describe("216g / 112 T1 — deterministic failure-signature ids (no per-run fork)", () => {
+  it("failureSignature is deterministic and collapses per-run noise (digits, hex refs, line refs)", () => {
+    const a = failureSignature({
+      kind: "verify-failed",
+      phase: 6,
+      detailTail: "cases 1,2 failed after 3 iterations; evidenceHash=deadbeef12 in /tmp/x/build/case.ts:41:7",
+    });
+    const b = failureSignature({
+      kind: "verify-failed",
+      phase: 6,
+      detailTail: "cases 1,2 failed after 7 iterations; evidenceHash=feedface99 in /tmp/y/build/case.ts:88:2",
+    });
+    assert.equal(a, b, "same failure, different tail numbers/hex/paths → ONE signature");
+    assert.match(a, /^verify-failed\|p6\|none\|tail:/);
+
+    // Anchors are the counterexample: sorted, de-duped, and the tail is
+    // excluded entirely once they exist (§4.2 rules 1 + 4).
+    const c = failureSignature({ kind: "verify-failed", phase: 6, anchors: ["case-2", "case-1"], detailTail: "first tail" });
+    const d = failureSignature({ kind: "verify-failed", phase: 6, anchors: ["case-1", "case-2"], detailTail: "totally different tail" });
+    assert.equal(c, d, "anchor order is canonicalized and the tail can no longer fork the identity");
+    assert.equal(c, "verify-failed|p6|none|anchors:case-1,case-2");
+    assert.notEqual(c, a, "an anchored signature is never the unanchored fallback");
+    assert.notEqual(
+      failureSignature({ kind: "verify-failed", phase: 6, anchors: ["case-1"] }),
+      failureSignature({ kind: "verify-failed", phase: 6, anchors: ["case-2"] }),
+      "different case ids stay different failures",
+    );
+    assert.notEqual(
+      failureSignature({ kind: "gate-unmet", phase: 6, anchors: ["p6-test"], classCode: "RT_E_VALIDATION" }),
+      failureSignature({ kind: "gate-unmet", phase: 6, anchors: ["p6-test"], classCode: "RT_E_INTERNAL" }),
+      "the RT_E class participates in the signature",
+    );
+    assert.equal(
+      failureSignature({ kind: "gate-unmet", phase: 6, anchors: ["src/lib/thing.ts:12"] }),
+      failureSignature({ kind: "gate-unmet", phase: 6, anchors: ["thing.ts"] }),
+      "anchors are canonicalized to basenames without line refs",
+    );
+  });
+
+  it("the class builders route their id through the signature: recurrence maps to ONE row", () => {
+    const p = seedProject();
+
+    // L3: the verified fork mechanism — free-text tail + iteration count.
+    const a = verifyFailureLesson(p, 6, "cases failed: a b c", 3, undefined, { anchors: ["case-b", "case-a"] });
+    const b = verifyFailureLesson(p, 6, "cases failed: a b c — model refused the patch", 7, undefined, { anchors: ["case-a", "case-b"] });
+    assert.equal(a.id, b.id, "same anchors + phase + class → same row id, no fork");
+    assert.match(a.id, /^lesson-verify-failure-[0-9a-f]{8}$/, "id shape unchanged");
+    assert.notEqual(a.text, b.text, "the volatile tail stays human-readable in the text");
+    assert.ok(a.text.includes("after 3 iteration(s)"));
+
+    // L2 seal: unmet criterion ids are identity; noun list + evidence hash are noise.
+    const e1 = templateEmissionLesson(p, 3, ["p3-mcp", "p3-extra"], ["kanban"], "aaaa1111");
+    const e2 = templateEmissionLesson(p, 3, ["p3-extra", "p3-mcp"], [], "bbbb2222");
+    assert.equal(e1.id, e2.id, "criterion ids are canonicalized; nouns + hash do not fork");
+    assert.match(e1.id, /^lesson-template-emission-[0-9a-f]{8}$/);
+
+    // drift: the phase pair is identity; the old→new hash pair is not.
+    const d1 = driftLesson(p, 9, 3, "aaaa1111", "bbbb2222", ["p3-mcp"]);
+    const d2 = driftLesson(p, 9, 3, "cccc3333", "dddd4444", ["p3-mcp"]);
+    assert.equal(d1.id, d2.id, "a re-detected drift maps to the existing row");
+    assert.notEqual(
+      d1.id,
+      driftLesson(p, 9, 4, "aaaa1111", "bbbb2222", ["p3-mcp"]).id,
+      "a different phase pair is a different drift",
+    );
+
+    // Legacy callers (no proof arg) still get a deterministic, noise-collapsed id.
+    const legacy1 = verifyFailureLesson(p, 6, "cases still failing after 3 iterations", 3);
+    const legacy2 = verifyFailureLesson(p, 6, "cases still failing after 9 iterations", 9);
+    assert.equal(legacy1.id, legacy2.id, "iteration count is process noise, not identity");
+    assert.notEqual(
+      legacy1.id,
+      verifyFailureLesson(p, 6, "a completely different failure", 3).id,
+      "distinct unanchored failures stay distinct",
+    );
+  });
+});
+
+describe("216g / 112 T2 — counterexample-or-nothing (no anchor ⇒ refuse:no-proof)", () => {
+  const refusalOf = (outcome: FailureLessonOutcome) => {
+    if (outcome.refused !== true) throw new Error(`expected a refusal envelope, got ${outcome.verdict}`);
+    return outcome;
+  };
+  const lessonOf = (outcome: FailureLessonOutcome) => {
+    if (outcome.refused !== false) throw new Error(`expected a lesson, got ${outcome.verdict}`);
+    return outcome.lesson;
+  };
+
+  it("an anchor-less fail record mints NO row and returns the visible lesson.refused payload", () => {
+    const bare = failureLessonFromRecord(
+      { kind: "verify-failed", phase: 6, detailTail: "cases failed: a b c" },
+      { iterations: 2 },
+    );
+    assert.equal(bare.verdict, "refuse:no-proof");
+    assert.equal(bare.lesson, null, "no lesson row without a counterexample");
+    assert.equal(bare.code, "RT_E_VALIDATION");
+    const refused = refusalOf(bare);
+    assert.equal(refused.log.event, "lesson.refused", "the refusal is recorded, never a silent no-op");
+    assert.equal(refused.log.level, "warn");
+    assert.ok(refused.log.detail.includes("verify-failed") && refused.log.detail.includes("P6"));
+    assert.ok(refused.reason.includes("no anchor"));
+
+    const blank = failureLessonFromRecord({ kind: "verify-failed", phase: 6, anchors: ["  ", ""] });
+    assert.equal(blank.verdict, "refuse:no-proof", "whitespace anchors are not anchors");
+
+    const unmapped = failureLessonFromRecord({ kind: "harvest-degraded", phase: 7, anchors: ["rate-limit"] });
+    const refusedUnmapped = refusalOf(unmapped);
+    assert.ok(refusedUnmapped.reason.includes("no builder registered"), "the gap is named, not hidden");
+  });
+
+  it("a case-id-anchored record mints the row, and the record path converges with the direct path", () => {
+    const p = seedProject();
+    const anchored = failureLessonFromRecord(
+      { kind: "verify-failed", phase: 6, anchors: ["case-a"], classCode: "RT_E_LLM_REJECTED", detailTail: "case a returned the wrong type" },
+      { iterations: 1 },
+    );
+    const lesson = lessonOf(anchored);
+    assert.equal(anchored.verdict, "fail:deterministic");
+    assert.match(lesson.id, /^lesson-verify-failure-[0-9a-f]{8}$/);
+    assert.equal(
+      lesson.id,
+      verifyFailureLesson(p, 6, "case a returned the wrong type", 1, undefined, {
+        anchors: ["case-a"],
+        classCode: "RT_E_LLM_REJECTED",
+      }).id,
+      "one failure derives ONE id on every path (98 §3 anti-noise (b))",
+    );
+
+    // gate-unmet: the unmet criterion ids are the anchors.
+    const gated = lessonOf(failureLessonFromRecord({ kind: "gate-unmet", phase: 6, anchors: ["p6-test"] }, { project: p }));
+    assert.equal(gated.id, templateEmissionLesson(p, 6, ["p6-test"]).id);
+    // …and without the project the row cannot be reproduced → refuse, not invent.
+    assert.equal(failureLessonFromRecord({ kind: "gate-unmet", phase: 6, anchors: ["p6-test"] }).verdict, "refuse:no-proof");
+  });
+
+  it("the permanent store still has no machine writer (112 §3.4 P1 invariant)", () => {
+    // The refusal path builds no row; the store's only append seam remains
+    // savePattern, which the human `lesson --accept` CLI path calls.
+    const file = tempStorePath();
+    try {
+      const store = new KnowledgeStore(file);
+      const refused = refusalOf(failureLessonFromRecord({ kind: "verify-failed", phase: 6, detailTail: "unanchored" }));
+      assert.equal(refused.lesson, null);
+      assert.equal(store.count(), 0, "a refusal never writes anything anywhere");
+      // The human-gated accept remains the one path that appends a lesson row.
+      const accepted = store.savePattern(
+        acceptedLessonEntry({
+          project: "alpha",
+          actor: "test-human",
+          row: manualLesson({ classShort: "verify-failure", level: "L3", kind: "episodic", phase: 6, text: "accepted", score: 0.7 }),
+        }),
+      );
+      assert.equal(accepted.appended, true);
+      assert.equal(store.count(), 1);
+    } finally {
+      cleanup(file);
+    }
+  });
+});
+
+describe("216g / 112 T4 — KnowledgeStore rows into the expansion prompt (opts.proven)", () => {
+  it("resolves accepted cross-project rows; absent store is byte-identical; a corrupt store is visible", () => {
+    const file = tempStorePath();
+    try {
+      const store = new KnowledgeStore(file);
+      const saved = store.savePattern({
+        project: "Other Co",
+        kind: "note",
+        title: "Lesson L3 verify-failure HVAC dispatch ranking",
+        tags: [LESSON_TAG, "accepted", "actor:test-human", "L3", "verify-failure"],
+        body: "HVAC dispatch board needs field service ranking before publish.",
+        sourcePath: "lesson:lesson-verify-failure-00a1b2c3",
+        score: 0.7,
+      });
+      assert.equal(saved.appended, true, "premise: the human-gated accept appended a row");
+
+      const resolved = provenRowsFromStore(file, "hvac dispatch");
+      assert.equal(resolved.degraded, false);
+      assert.equal(resolved.rows.length, 1, "the accepted cross-project row resolves");
+      const row = resolved.rows[0]!;
+      assert.equal(row.source, "research", "E-18 cited provenance is retained for the ranker");
+      assert.ok(row.id.startsWith("proven-"));
+
+      // The resolver's output IS what the expansion-prompt ranking consumes.
+      const lines = lessonLinesForBrief("hvac dispatch board", [], { limit: 3, proven: resolved.rows });
+      assert.equal(lines.length, 1);
+      assert.match(lines[0]!, /^\[semantic /);
+      assert.ok(lines[0]!.includes("HVAC dispatch board needs field service ranking"));
+
+      // Absent store ⇒ the caller keeps the legacy prompt byte-for-byte.
+      assert.deepEqual(lessonLinesForBrief("hvac dispatch board", []), [], "no proven rows ⇒ no lesson block");
+      assert.deepEqual(provenRowsFromStore(null, "hvac dispatch"), { rows: [], degraded: false });
+      assert.deepEqual(provenRowsFromStore("   ", "hvac dispatch"), { rows: [], degraded: false });
+
+      // A configured-but-corrupt store is surfaced, never swallowed as "none".
+      writeFileSync(file, "{ not json");
+      const corrupt = provenRowsFromStore(file, "hvac dispatch");
+      assert.equal(corrupt.degraded, true);
+      assert.deepEqual(corrupt.rows, []);
+      assert.equal(corrupt.code, "RT_E_VALIDATION");
+      assert.ok((corrupt.reason ?? "").includes("not valid JSON"));
+      assert.equal(readFileSync(file, "utf8"), "{ not json", "read-only: the resolver never rewrites the store");
+    } finally {
+      cleanup(file);
+    }
   });
 });

@@ -37,7 +37,8 @@
 import type { Project } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 import { canonicalStem } from "./algorithms.ts";
-import { briefNounHits, identifierHits } from "./sandbox.ts";
+import { isStubSource } from "./dod.ts";
+import { BRIEF_STOPWORDS, briefNounHits, identifierHits } from "./sandbox.ts";
 
 // ---------------------------------------------------------------------------
 // Evidence types (driver-gathered; the scorer only reads).
@@ -60,7 +61,21 @@ export type MakerTreeRunEvidence = {
   testsPass?: number;
   testsFail?: number;
   detail?: string;
+  /** Honest skip — never treated as a product-complete run (skip ≠ green). */
+  skipped?: boolean;
+  /** Kind-entry smoke verdict when the driver lifted a TreeRunOutcome. */
+  entryRun?: string;
 } | null;
+
+/** M2 scores 1 only when assertions actually ran and passed — skip is not green. */
+export function treeRunLooksSkipped(tr: NonNullable<MakerTreeRunEvidence>): boolean {
+  if (tr.skipped === true) return true;
+  const pass = typeof tr.testsPass === "number" ? tr.testsPass : 0;
+  const fail = typeof tr.testsFail === "number" ? tr.testsFail : 0;
+  if (pass <= 0 && fail <= 0) return true;
+  if (tr.entryRun === "skip" && pass <= 0) return true;
+  return false;
+}
 
 /** A4: lift TreeRunOutcome TAP into MakerTreeRunEvidence (oracle.spec only). */
 export function treeRunToMakerEvidence(tr: TreeRunOutcome): MakerTreeRunEvidence {
@@ -71,12 +86,20 @@ export function treeRunToMakerEvidence(tr: TreeRunOutcome): MakerTreeRunEvidence
   const used = spec ? [spec] : rows;
   const testsPass = used.reduce((s, t) => s + (t.tests?.pass ?? 0), 0);
   const testsFail = used.reduce((s, t) => s + (t.tests?.fail ?? 0), 0);
+  const entryRun = tr.run?.run;
+  const specsAllSkip = used.length > 0 && used.every((t) => t.run === "skip");
+  const skipped =
+    specsAllSkip ||
+    (testsPass === 0 && testsFail === 0) ||
+    (entryRun === "skip" && testsPass === 0);
   return {
-    ok: tr.ok === true,
+    ok: tr.ok === true && !skipped && testsPass > 0 && testsFail === 0,
     dir: tr.dir,
     compileOk: tr.compile?.ok,
     testsPass,
     testsFail,
+    skipped,
+    entryRun,
     detail: spec && spec.run !== "pass" ? spec.detail : undefined,
   };
 }
@@ -206,16 +229,25 @@ function isLibraryKind(kind: string | undefined): boolean {
 }
 
 /** Identifier-search forms for one capability label: the whole label, its
- *  tokens, and their canonical stems — identifierHits matches any form as a
- *  (case-insensitive) sub-identifier, mirroring dod's p6-arch reqTrace. */
+ *  substantive tokens, and their canonical stems — identifierHits matches any
+ *  form as a (case-insensitive) sub-identifier, mirroring dod's p6-arch reqTrace.
+ *
+ *  fixes/215c: tokens pass through BRIEF_STOPWORDS (the SAME stoplist the
+ *  p6-brief-fit probe uses via briefNounHits). Without it a capability label's
+ *  function words became match forms — `and` matched `handleStandardNotice`
+ *  ("st-AND-ard"), `per` matched `property` — so ANY module with ordinary
+ *  identifiers "covered" 5/7 real-estate capabilities. That is a fake-green
+ *  leak in M1: the stoplist keeps a label's substance tokens only. */
 function formsForCapability(capability: string): string[] {
   const raw = capability.toLowerCase();
-  const tokens = raw.split(/[^a-z0-9_$]+/).filter((t) => t.length > 1);
+  const tokens = raw
+    .split(/[^a-z0-9_$]+/)
+    .filter((t) => t.length > 1 && !BRIEF_STOPWORDS.has(t));
   const out = [raw];
   for (const t of tokens) {
     if (!out.includes(t)) out.push(t);
     const st = canonicalStem(t);
-    if (st && st.length > 1 && !out.includes(st)) out.push(st);
+    if (st && st.length > 1 && !out.includes(st) && !BRIEF_STOPWORDS.has(st)) out.push(st);
   }
   return out;
 }
@@ -264,7 +296,8 @@ export function capabilityCoverage(
   project: Project,
   capabilities: string[],
 ): CapabilityCoverage {
-  const files = treeFilesOf(project);
+  // Stub/reexport files never cover a capability (skip ≠ substance).
+  const files = treeFilesOf(project).filter((f) => !isStubSource(f.source));
   const covered: Record<string, string[]> = {};
   const missing: string[] = [];
   for (const cap of capabilities) {
@@ -318,22 +351,32 @@ export function m1Substance(input: MakerScoreInput): MakerCriterion {
   const genSrc = typeof project.generatedSource === "string" ? project.generatedSource : "";
 
   if (files.length > 0) {
+    const stubFiles = files.filter((f) => isStubSource(f.source));
+    const realFiles = files.filter((f) => !isStubSource(f.source));
+    // TREE MODE: leftover TODO(E-15) / reexport-only jobs are not substance.
+    // All-stub trees cannot vacuous-pass and cannot be rescued by single-module.
+    if (realFiles.length === 0) {
+      return {
+        score: 0,
+        evidence: `tree ${files.length} file(s) are stubs/reexports — not product substance`,
+      };
+    }
     // TREE MODE: every expected capability must map to ≥1 real tree file
     // (identifier-stem hit in the file's code, or its path).
     if (caps.length === 0) {
       return {
         score: 1,
-        evidence: `tree ${files.length} file(s), no expectedCapabilities demanded — substance vacuously satisfied`,
+        evidence: `tree ${realFiles.length} real file(s)${stubFiles.length ? ` (${stubFiles.length} stub ignored)` : ""}, no expectedCapabilities demanded — substance vacuously satisfied`,
       };
     }
     const cov = capabilityCoverage(project, caps);
     const covered = Object.entries(cov.covered).map(([cap, paths]) => `${cap}->${paths.join(",")}`);
     if (cov.missing.length === 0) {
-      return { score: 1, evidence: `tree ${files.length} file(s); reqTrace: ${covered.join(" | ")}` };
+      return { score: 1, evidence: `tree ${realFiles.length} file(s); reqTrace: ${covered.join(" | ")}` };
     }
     return {
       score: 0,
-      evidence: `tree ${files.length} file(s) but capability mapping missing: ${cov.missing.join(", ")} (covered: ${covered.join(" | ") || "none"})`,
+      evidence: `tree ${realFiles.length} file(s) but capability mapping missing: ${cov.missing.join(", ")} (covered: ${covered.join(" | ") || "none"})`,
     };
   }
 
@@ -376,7 +419,13 @@ export function m2Runs(input: MakerScoreInput): MakerCriterion {
     }
     return { score: 0, evidence: "no behavioral assertion ran" };
   }
-  if (tr.ok === true) {
+  if (treeRunLooksSkipped(tr)) {
+    return {
+      score: 0,
+      evidence: `treeRun skip is not green${tr.detail ? ` — ${tr.detail.slice(0, 220)}` : " (no assertions ran / skipped)"}`,
+    };
+  }
+  if (tr.ok === true && (tr.testsPass ?? 0) > 0 && (tr.testsFail ?? 0) === 0) {
     const base = `treeRun ok (${tr.dir ?? "?"}${typeof tr.testsPass === "number" ? `; tests ${tr.testsPass} pass / ${tr.testsFail ?? 0} fail` : ""})`;
     // fixes/150 (G3, P2-3): when the scored run's P6 journey FAILED (the
     // results entry's journey marker; refusal included), a green treeRun is

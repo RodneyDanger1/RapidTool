@@ -13,8 +13,8 @@
 //     padded prose);
 //   - an unparseable verdict payload is an error, never a guessed approve;
 //   - the review context is built ONLY from real project content (artifacts,
-//     phase title, DoD verdict, lastTest) — the model is never shown invented
-//     evidence.
+//     phase title, unmet DoD criteria, lastTest) — the model is never shown
+//     invented evidence. No pre-chewed PASS/FAIL DoD machine verdict is injected.
 //
 // The name carries the .server suffix because this is the network-capable
 // side of Wild Mode (it talks to the configured LLM backend); like llm-tasks.ts
@@ -24,9 +24,8 @@
 // ---------------------------------------------------------------------------
 import { complete, llmStatus } from "./llm.ts";
 import type { LlmModel, LlmResult } from "./llm.ts";
+import { dualChannelFailDetail, type ErrorCode } from "./errors.ts";
 import { phaseDef } from "./phases.ts";
-import { EXPAND_LESSON_RANK_LIMIT, lessonLinesForBrief } from "./prompt-engine.ts";
-import { selectLessons } from "./knowledge.ts";
 import type { PhaseId, Project } from "./types.ts";
 
 /** The Auto-Review Supervisor model tier (deepseek-v4-flash per Pillar 13). */
@@ -52,7 +51,13 @@ export type WildReviewContext = {
 
 export type WildClassifierResult =
   | { ok: true; verdict: "approve" | "reject"; feedback: string; model: string }
-  | { ok: false; reason: "not-configured" | "error"; error?: string };
+  | {
+      ok: false;
+      reason: "not-configured" | "error";
+      error?: string;
+      /** Present on every classifier failure we mint (optional so parent stubs stay assignable). */
+      code?: ErrorCode;
+    };
 
 export type WildCompleter = (
   prompt: string,
@@ -120,7 +125,8 @@ export function buildWildReviewPrompt(ctx: WildReviewContext): string {
     `Phase under review: ${def.code} ${def.title} — ${def.summary}`,
     `Review reason: ${ctx.reason === "gate" ? "an approval gate is open for this phase" : "this phase just executed; decide whether the loop may leave it"}`,
     ``,
-    `Machine-checkable DoD verdict: ${ctx.gate.pass ? "PASS" : "FAIL"}`,
+    // Blinded judge (185-U8): do NOT inject a pre-chewed PASS/FAIL DoD machine
+    // verdict. The model must weigh unmet criteria + artifacts itself.
     `Unmet DoD criteria:\n${unmet}`,
     ``,
     artifacts ? `Phase artifacts:\n${artifacts}` : "Phase artifacts: (none)",
@@ -255,7 +261,7 @@ export function createWildClassifier(
       configured = false;
     }
     // Configured-only honesty: no backend, no machine judgment.
-    if (!configured) return { ok: false, reason: "not-configured" };
+    if (!configured) return { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" };
     const res = await completeFn(buildWildReviewPrompt(ctx), {
       model: WILD_CLASSIFIER_MODEL,
       system: WILD_SYSTEM,
@@ -263,8 +269,23 @@ export function createWildClassifier(
     });
     if (!res.ok) {
       return res.reason === "not-configured"
-        ? { ok: false, reason: "not-configured" }
-        : { ok: false, reason: "error", error: res.error ?? "Auto-Review completion failed" };
+        ? { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" }
+        : {
+            ok: false,
+            reason: "error",
+            error: res.error ?? "Auto-Review completion failed",
+            code: res.code ?? "RT_E_INTERNAL",
+          };
+    }
+    // 185-H1: hostile/stub dual-channel `{ ok:true, error }` is never a review.
+    const dual = dualChannelFailDetail(res);
+    if (dual) {
+      return {
+        ok: false,
+        reason: "error",
+        error: `Auto-Review dual-channel response (${dual}) — never treat ok:true+error as a verdict`,
+        code: "RT_E_INTERNAL",
+      };
     }
     const parsed = parseWildReview(res.text);
     if (!parsed) {
@@ -272,6 +293,7 @@ export function createWildClassifier(
         ok: false,
         reason: "error",
         error: "Auto-Review returned an unparseable verdict payload",
+        code: "RT_E_INTERNAL",
       };
     }
     if (parsed.feedback.length < WILD_FEEDBACK_MIN) {
@@ -280,6 +302,7 @@ export function createWildClassifier(
         ok: false,
         reason: "error",
         error: `Auto-Review feedback too short (${parsed.feedback.length} chars < ${WILD_FEEDBACK_MIN}) to log honestly`,
+        code: "RT_E_VALIDATION",
       };
     }
     // Rubber-stamp guard: an APPROVE without any specific evidence is an
@@ -298,6 +321,7 @@ export function createWildClassifier(
           reason: "error",
           error:
             "Auto-Review approve is vacuous: feedback cites no specific artifact, criterion, or evidence — honest error, never a rubber-stamp approval",
+          code: "RT_E_VALIDATION",
         };
       }
     }

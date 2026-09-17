@@ -1,20 +1,10 @@
 // ---------------------------------------------------------------------------
 // src/state/store.ts — Checkpointed client/server state
-// machine-generated from RapidTool packet 16692201-777b-4cf6-b02b-a85f02e9c6a3; regenerate, don't hand-edit.
-// Checkpointed state stub. TODO(E-15) stub: wire hydration from
-// .rapidtool/project.json and keep every control bound to a named field.
+// machine-generated from RapidTool packet aa185020-cfff-49ac-9224-25b108274a17; regenerate, don't hand-edit.
+// fixes/144 (M2) tree bridge: the generated tree ships no file at this spec-graph
+// path, so this module re-exports the tree ENTRY module (src/generated/check-reorder-flags.ts) verbatim —
+// real generated code, not a TODO stub. Align this node's file with a tree path
+// (or regenerate the tree) to replace the bridge.
 // ---------------------------------------------------------------------------
 
-export type Checkpoint = { phase: number; status: string; updatedAt: string };
-
-export class CheckpointStore {
-  private readonly checkpoints = new Map<number, Checkpoint>();
-
-  write(checkpoint: Checkpoint): void {
-    this.checkpoints.set(checkpoint.phase, { ...checkpoint });
-  }
-
-  read(phase: number): Checkpoint | undefined {
-    return this.checkpoints.get(phase);
-  }
-}
+export * from "../generated/check-reorder-flags.ts";

@@ -249,3 +249,54 @@ test("buildDiagnosis floors missing errors/timeline arrays and nullish message",
   assert.ok(typeof diag.mostLikelyCause.summary === "string");
   assert.deepEqual(diag.timeline, []);
 });
+
+test("honesty: error rows that miss named heuristics are unclassified-errors, never none-detected", () => {
+  const diag = buildDiagnosis(
+    baseInput({
+      errors: [
+        rtRow({
+          scope: "sys",
+          event: "sys.uncaught_error",
+          code: "RT_E_INTERNAL",
+          message: "boom",
+        }),
+      ],
+    }),
+  );
+  assert.equal(diag.mostLikelyCause.class, "unclassified-errors");
+  assert.equal(/No error rows in window/.test(diag.mostLikelyCause.summary), false);
+  assert.ok(diag.mostLikelyCause.evidence.includes("errors[0]"));
+  assert.ok(diag.actions.some((a) => /do not treat diagnose as none-detected/.test(a)));
+  assert.equal(diag.ok, true);
+  assert.equal(diag.exit_code, 0);
+});
+
+test("honesty: a single llm-call error is unclassified (rule 3 still requires >=2)", () => {
+  const diag = buildDiagnosis(
+    baseInput({
+      now: 1_000_000,
+      errors: [
+        rtRow({
+          scope: "llm-call",
+          event: "llm.timeout",
+          ts: 950_000,
+          code: "RT_E_LLM_TIMEOUT",
+          message: "one timeout",
+        }),
+      ],
+    }),
+  );
+  assert.equal(diag.mostLikelyCause.class, "unclassified-errors");
+  assert.notEqual(diag.mostLikelyCause.class, "llm-unavailable");
+  assert.notEqual(diag.mostLikelyCause.class, "none-detected");
+});
+
+test("honesty: hydrate.repaired (engine live event) is unclassified, not none-detected", () => {
+  const diag = buildDiagnosis(
+    baseInput({
+      errors: [rtRow({ scope: "hydrate", event: "hydrate.repaired", message: "hole-in-phases clamped" })],
+    }),
+  );
+  assert.equal(diag.mostLikelyCause.class, "unclassified-errors");
+  assert.ok(diag.mostLikelyCause.evidence.includes("errors[0]"));
+});

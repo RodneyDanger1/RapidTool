@@ -1,13 +1,13 @@
 # Field-Ops Suite
 
-> machine-generated from RapidTool packet 4cd56084-1d37-42f5-b025-b7e1304f8e31; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet 1bf0e807-f549-4335-938e-25dd71643cc2; regenerate, don't hand-edit.
 
 a field-ops suite for a small construction company: projects with phases + budgets, daily task lists per crew member, time sheets that roll into weekly payroll with rates + overtime, material/supply lists with purchase tracking + reorder flags, job costing by project
 
 ## Status
 - **Kind:** webapp — web app (kind webapp (inferred from brief/domain — no declared kind yet))
 - **Status:** complete · **Current phase:** P12 · **Model route:** deterministic
-- **Created:** 2026-09-08T13:38:45.987Z
+- **Created:** 2026-09-10T05:29:25.294Z
 
 ## What ships in this scaffold
 

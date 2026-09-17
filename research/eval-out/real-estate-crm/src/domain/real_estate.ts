@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // src/domain/real_estate.ts — Typed entities from the lattice
-// machine-generated from RapidTool packet fff84028-8b4b-4820-8562-e17e5d4af790; regenerate, don't hand-edit.
-// Typed entities from the A6 data contract. TODO(E-15 stub): extend fields,
+// machine-generated from RapidTool packet 8dbb64d5-d6c9-411c-849c-60fdcde47f4b; regenerate, don't hand-edit.
+// Typed entities from the A6 data contract. TODO(E-15) stub: extend fields,
 // add per-entity invariants, and keep in sync with the store + api stubs.
 // ---------------------------------------------------------------------------
 

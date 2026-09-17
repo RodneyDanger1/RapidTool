@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // src/jobs/flip.ts — Implement job “flip” against the contract
-// machine-generated from RapidTool packet adc7806b-02cc-4859-bdcb-9455f6412ecb; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet 4207cef0-e4ea-4436-b2e2-5ac48ab8138c; regenerate, don't hand-edit.
 // This file hosts the machine-verified P6 synthesis module (project.generatedSource),
 // verbatim below. Its self-tests ran inside the engine isolate at P6 — keep them
 // green when you implement the surrounding jobs.

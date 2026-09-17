@@ -1,13 +1,13 @@
 # Rental Portfolio Manager
 
-> machine-generated from RapidTool packet 75285bd4-ced2-42be-9d00-caf3f9f243a7; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet 5587eca3-156b-4c57-9ea4-23879f548cb5; regenerate, don't hand-edit.
 
 a rental portfolio manager: properties with units, tenants with leases and rent schedules, rent collection tracking with payment status, maintenance requests with vendor work orders, vacancy pipeline for marketing available units, portfolio cash-flow dashboard, lease-renewal reminders
 
 ## Status
 - **Kind:** webapp — web app (kind webapp (inferred from brief/domain — no declared kind yet))
 - **Status:** complete · **Current phase:** P12 · **Model route:** deterministic
-- **Created:** 2026-09-08T13:38:48.822Z
+- **Created:** 2026-09-10T05:29:28.183Z
 
 ## What ships in this scaffold
 

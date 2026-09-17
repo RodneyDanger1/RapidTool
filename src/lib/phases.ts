@@ -86,7 +86,7 @@ export const PHASES: PhaseDef[] = [
     code: "P10",
     title: "Local Agent & Edge Inference",
     summary:
-      "Inference routing — deepseek-v4-flash / deepseek-v4-pro are the only configured routes; no Ollama/local-edge handoff.",
+      "Inference routing — the two DeepSeek tiers are the only configured routes (request ids deepseek-v4-flash, served as `deepseek-flash`, and deepseek-v4-pro, served as `deepseek-v4-pro`; live-verified 2026-09-16); no Ollama/local-edge handoff.",
     hitl: false,
   },
   {
@@ -149,3 +149,82 @@ export function priorsSealed(phases: { id: number; status: string }[], target: P
 
 export const HITL_PHASES = PHASES.filter((p) => p.hitl).map((p) => p.id);
 export const STOCK_HITL = [4, 5, 8, 9] as const;
+
+/**
+ * T-14 (research/multiagent/106 §6, finding F-11): first id of the post-P6
+ * tail. The graph is strictly linear (`canEnter` = `from + 1` only), so these
+ * phases are reachable ONLY after a green P6 — in the shipped end-to-end
+ * artifact census P7–P12 produced 0 artifacts while the "13-phase pipeline"
+ * claim sat next to it.
+ */
+export const PHASE_TAIL_START: PhaseId = 7;
+
+/**
+ * T-14: honest phase-coverage census — a pure function of the persisted graph
+ * state (phase records + artifact rows), never a hard-coded "all 13 ran".
+ */
+export type PhaseCoverage = {
+  /** Real phases (0..12) whose record status is "complete". */
+  executed: number;
+  /** Real phases in the graph today (PHASES.length — 13). */
+  total: number;
+  /** Artifact rows contributed by the tail window P{tailStart}..P{last}.
+   *  The packet's own bookkeeping row (kind "packet") is excluded — see
+   *  phaseCoverage. */
+  tailArtifacts: number;
+  /** First id of the tail window `tailArtifacts` counts. */
+  tailStart: PhaseId;
+};
+
+/**
+ * T-14 (106 §6, finding F-11): compute the honest coverage census. The graph
+ * is strictly linear, so a run stopped at P6 executed 7 of 13 phases and the
+ * tail P7–P12 produced 0 artifacts — every surface must say exactly that and
+ * never imply all 13 ran. Pure: derived from the given records + artifact
+ * rows only, and defensive against sparse/hand-built payloads:
+ *
+ *  - records are matched by id (like `priorsSealed`, never by array
+ *    position), so an unsorted/sparse status array can not mis-count;
+ *  - foreign or non-integer phase ids never inflate the artifact census;
+ *  - the packet's own artifact row (kind "packet") is NOT a phase
+ *    deliverable — `sealPacketArtifact` re-stamps it at whatever phase the
+ *    run stopped at, so counting it would attribute the packet to P7+ in a
+ *    partial run. The packet's "## Artifacts (trimmed)" section hides it for
+ *    the same reason; the census stays consistent with what is shown.
+ */
+export function phaseCoverage(
+  phases: readonly { id: number; status: string }[],
+  artifacts: readonly { phase: number; kind?: string }[],
+): PhaseCoverage {
+  const records = Array.isArray(phases) ? phases : [];
+  const rows = Array.isArray(artifacts) ? artifacts : [];
+  // First-wins per id, mirroring priorsSealed's `.find` semantics.
+  const statusById = new Map<number, string>();
+  for (const r of records) {
+    if (r && !statusById.has(r.id)) statusById.set(r.id, r.status);
+  }
+  let executed = 0;
+  for (const def of PHASES) {
+    if (statusById.get(def.id) === "complete") executed += 1;
+  }
+  let tailArtifacts = 0;
+  for (const a of rows) {
+    if (!a || typeof a.phase !== "number" || !Number.isInteger(a.phase)) continue;
+    if (a.phase < PHASE_TAIL_START || a.phase >= PHASES.length) continue;
+    if (a.kind === "packet") continue;
+    tailArtifacts += 1;
+  }
+  return { executed, total: PHASES.length, tailArtifacts, tailStart: PHASE_TAIL_START };
+}
+
+/**
+ * T-14: the one deterministic coverage line every surface shares, e.g.
+ * "7 of 13 phases executed / 0 artifacts from P7–P12". Built from the real
+ * census (never templated), so a full run honestly reports its own numbers.
+ */
+export function phaseCoverageLine(coverage: PhaseCoverage): string {
+  const from = PHASES[coverage.tailStart]?.code ?? "P7";
+  const to = PHASES[PHASES.length - 1]?.code ?? "P12";
+  const noun = coverage.tailArtifacts === 1 ? "artifact" : "artifacts";
+  return `${coverage.executed} of ${coverage.total} phases executed / ${coverage.tailArtifacts} ${noun} from ${from}–${to}`;
+}

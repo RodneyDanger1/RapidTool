@@ -317,6 +317,38 @@ describe("applyReport — learning-loop lesson capture (fixes/98)", () => {
     );
   });
 
+  it("accrues reproducedCount on the ONE stored L2 row when a later complete report re-mints the same signature id (216i T1)", () => {
+    const first = applyReportResult(seedProject(), completeReport);
+    assert.equal(first.applied, true);
+    const original = first.project.memory.find((m) => m.id.startsWith("lesson-template-emission-"));
+    assert.ok(original, "the first complete report minted the L2 row");
+    const lessonId = original.id;
+    assert.equal(original.reproducedCount, undefined, "a first landing carries no reproduction count");
+    // A DIFFERENT complete claim (different fingerprint, so not the E-09
+    // duplicate) landing on the SAME unmet P3 gate re-mints the same
+    // signature id — the stored row must accrue, never fork a twin.
+    const secondReport: AgentReport = {
+      phase: 3,
+      status: "complete",
+      summary: "shipped the contracts module, second pass",
+      artifacts: [{ title: "module v2", body: "exports.contracts = [];" }],
+    };
+    const second = applyReportResult(first.project, secondReport);
+    assert.equal(second.applied, true, "a different claim is not the E-09 duplicate");
+    const rows = second.project.memory.filter((m) => m.id === lessonId);
+    assert.equal(rows.length, 1, "ONE stored row — the re-mint never forks a twin");
+    assert.equal(rows[0]?.reproducedCount, 1, "the reproduction accrues on the stored row");
+    assert.ok(
+      second.project.logs.some(
+        (l) =>
+          l.event === "lesson.reproduced" &&
+          l.detail.includes(lessonId) &&
+          l.detail.includes("reproducedCount=1"),
+      ),
+      "the visible lesson.reproduced ledger row names the row + count",
+    );
+  });
+
   it("blocked/partial reports mint no lesson rows (advisory capture only on complete claims)", () => {
     const partial: AgentReport = { phase: 3, status: "partial", summary: "half built" };
     const out = applyReport(seedProject(), partial);

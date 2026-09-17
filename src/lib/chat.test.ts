@@ -15,11 +15,16 @@ import {
   chatContextVersion,
   chatProvenance,
   provenanceVersion,
+  parseChatTool,
+  packetRelPath,
+  runChatTool,
+  CHAT_READ_MAX,
+  CHAT_TOOLS,
 } from "./chat.server.ts";
 import { chatHistoryTurns, chatStampVersion, failedSendPrompt } from "./chat.ts";
 import { emptyProject } from "./engine.ts";
 import type { ChatTurn } from "./chat.server.ts";
-import type { ChatLogRow, Project } from "./types.ts";
+import type { Project } from "./types.ts";
 
 const KEY = "DEEPSEEK_API_KEY";
 const realFetch = globalThis.fetch;
@@ -112,7 +117,11 @@ describe("buildChatContext", () => {
 
   it("carries lastTest and the open HITL prompt", () => {
     const ctx = buildChatContext(fixture());
-    assert.match(ctx, /lastTest: ok=true label=self-test: 2\/2 tests passed/);
+    // fixes/186: self-test carries the floor honesty tag (not tree-run proven).
+    assert.match(
+      ctx,
+      /lastTest: ok=true label=self-test \(deterministic floor — not tree-run\): 2\/2 tests passed/,
+    );
     assert.match(ctx, /hitl: P4 "Security gate": Approve the isolation story\? \[forceHuman\]/);
   });
 
@@ -123,6 +132,10 @@ describe("buildChatContext", () => {
     assert.match(ctx, /lastGate: none/);
     assert.match(ctx, /lastTest: none/);
     assert.match(ctx, /hitl: none/);
+    // fixes/186: absent additive fields stay OMITTED (byte-identical legacy).
+    assert.ok(!/^notes:/m.test(ctx), "empty notes must not emit a notes: line");
+    assert.ok(!/^fixtures:/m.test(ctx), "absent acceptanceFixtures must not emit fixtures:");
+    assert.ok(!/^synthesis:/m.test(ctx), "no lastTest/tree ⇒ no synthesis: line");
   });
 
   it("never throws on null or hostile project payloads (deterministic shell context)", () => {
@@ -211,7 +224,7 @@ describe("chatOnceServer", () => {
     assert.deepEqual(res, {
       ok: false,
       reason: "not-configured",
-      error: "DeepSeek is not configured — add DEEPSEEK_API_KEY to use the copilot.",
+      error: "DeepSeek is not configured — add DEEPSEEK_API_KEY to use the copilot. Slash tools /status /gate /packet /fixtures /ls /read /help work keyless.",
       code: "RT_E_LLM_NOT_CONFIGURED",
     });
   });
@@ -585,6 +598,189 @@ describe("COPILOT_SYSTEM_PROMPT — action-honesty disclosure (156 E2)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// fixes/186 — notes · fixtures · lastTest floor · synthesis/tree-run honesty
+// ---------------------------------------------------------------------------
+describe("buildChatContext — grounding honesty (fixes/186)", () => {
+  it("emits operator notes only when non-empty (clip ≤240; empty = omit)", () => {
+    const bare = emptyProject({ name: "N", brief: "b" });
+    bare.notes = "";
+    const noNotes = buildChatContext(bare);
+    assert.ok(!/^notes:/m.test(noNotes));
+    assert.equal(noNotes, buildChatContext(structuredClone(bare)));
+
+    const withNotes = emptyProject({ name: "N", brief: "b" });
+    withNotes.notes = "  Always name modules domain.ts — IE11 floor.  ";
+    const ctx = buildChatContext(withNotes);
+    assert.match(ctx, /^notes: Always name modules domain\.ts — IE11 floor\.$/m);
+    assert.equal(ctx, buildChatContext(structuredClone(withNotes)));
+
+    const hostile = emptyProject({ name: "N", brief: "b" });
+    hostile.notes = "N".repeat(10_000);
+    const h = buildChatContext(hostile);
+    assert.ok(h.length <= CHAT_CONTEXT_MAX_CHARS);
+    const notesLine = h.split("\n").find((l) => l.startsWith("notes:")) ?? "";
+    assert.ok(notesLine.length <= "notes: ".length + 240);
+    assert.match(notesLine, /…$/);
+  });
+
+  it("emits fixtures pending/approved counts only when acceptanceFixtures is present", () => {
+    const bare = emptyProject({ name: "F", brief: "b" });
+    const noFx = buildChatContext(bare);
+    assert.ok(!/^fixtures:/m.test(noFx), "legacy absence stays omit");
+
+    const p = emptyProject({ name: "F", brief: "b" });
+    p.acceptanceFixtures = [
+      {
+        id: "orc-1",
+        requirementId: "req-1",
+        capability: "create",
+        name: "create ok",
+        given: {},
+        expect: { kind: "shape", value: { id: "x" } },
+        kind: "pure",
+        source: "a7",
+        approval: "pending",
+      },
+      {
+        id: "orc-2",
+        requirementId: "req-2",
+        capability: "list",
+        name: "list ok",
+        given: {},
+        expect: { kind: "shape", value: { id: "y" } },
+        kind: "pure",
+        source: "a7",
+        approval: "approved",
+      },
+      {
+        id: "orc-3",
+        requirementId: "req-3",
+        capability: "delete",
+        name: "delete ok",
+        given: {},
+        expect: { kind: "throws", messagePattern: "missing" },
+        kind: "effect",
+        source: "a7",
+        approval: "pending",
+      },
+    ];
+    const ctx = buildChatContext(p);
+    assert.match(
+      ctx,
+      /^fixtures: total=3 approved=1 pending=2 \(pending — not functional\)$/m,
+    );
+    assert.equal(ctx, buildChatContext(structuredClone(p)));
+  });
+
+  it("tags all-approved fixtures without the pending marker", () => {
+    const p = emptyProject({ name: "F", brief: "b" });
+    p.acceptanceFixtures = [
+      {
+        id: "a1",
+        requirementId: "r1",
+        capability: "c",
+        name: "n",
+        given: {},
+        expect: { kind: "shape", value: { ok: true } },
+        kind: "pure",
+        source: "human",
+        approval: "approved",
+      },
+    ];
+    const ctx = buildChatContext(p);
+    assert.match(ctx, /^fixtures: total=1 approved=1 pending=0$/m);
+    assert.ok(!ctx.includes("not functional"));
+  });
+
+  it("tags empty fixture arrays as not functional", () => {
+    const p = emptyProject({ name: "F", brief: "b" });
+    p.acceptanceFixtures = [];
+    const ctx = buildChatContext(p);
+    assert.match(ctx, /^fixtures: total=0 approved=0 pending=0 \(pending — not functional\)$/m);
+  });
+
+  it("marks self-test lastTest as deterministic floor and synthesisSucceeded=false", () => {
+    const p = fixture();
+    // fixture() already stamps lastTest label=self-test with no generatedTree.
+    const ctx = buildChatContext(p);
+    assert.match(ctx, /label=self-test \(deterministic floor — not tree-run\)/);
+    assert.match(
+      ctx,
+      /^synthesis: floor \(synthesisSucceeded=false — deterministic template, not LLM tree\)$/m,
+    );
+    // Copilot must not be able to treat green self-test as shipped software.
+    assert.ok(!ctx.includes("synthesis: tree"));
+  });
+
+  it("reports generatedTree file count and tested label without floor tag", () => {
+    const p = fixture();
+    p.lastTest = { ok: true, detail: "treeRun green", label: "tested" };
+    p.generatedTree = [
+      { path: "src/index.ts", source: "export {}", hash: "h1", attempt: 0 },
+      { path: "src/lib/a.ts", source: "export const a = 1", hash: "h2", attempt: 0 },
+    ];
+    const ctx = buildChatContext(p);
+    assert.match(ctx, /lastTest: ok=true label=tested: treeRun green/);
+    assert.ok(!ctx.includes("deterministic floor"), "tested is not the floor");
+    assert.match(ctx, /^synthesis: tree 2 files; lastTest label=tested$/m);
+    assert.equal(ctx, buildChatContext(structuredClone(p)));
+  });
+
+  it("tree + self-test still admits the tree is not tree-run proven", () => {
+    const p = fixture();
+    p.generatedTree = [
+      { path: "src/index.ts", source: "export {}", hash: "h0", attempt: 0 },
+    ];
+    const ctx = buildChatContext(p);
+    assert.match(
+      ctx,
+      /^synthesis: tree 1 files; lastTest label=self-test \(tree present — not tree-run proven\)$/m,
+    );
+  });
+
+  it("keeps bare legacy context free of notes/fixtures/synthesis (byte-stable shape)", () => {
+    const p = emptyProject({ name: "Legacy", brief: "old payload" });
+    const ctx = buildChatContext(p);
+    const lines = ctx.split("\n");
+    assert.ok(!lines.some((l) => l.startsWith("notes:")));
+    assert.ok(!lines.some((l) => l.startsWith("fixtures:")));
+    assert.ok(!lines.some((l) => l.startsWith("synthesis:")));
+    // Fixed core lines still present.
+    assert.ok(lines.includes("lastTest: none"));
+    assert.ok(lines.includes("hitl: none"));
+  });
+
+  it("stays within the raised CHAT_CONTEXT_MAX_CHARS budget with all honesty lines", () => {
+    const p = fixture();
+    p.notes = "Steer: " + "x".repeat(300);
+    p.acceptanceFixtures = Array.from({ length: 8 }, (_, i) => ({
+      id: `orc-${i}`,
+      requirementId: `req-${i}`,
+      capability: "cap",
+      name: `case ${i}`,
+      given: {},
+      expect: { kind: "shape" as const, value: { i } },
+      kind: "pure" as const,
+      source: "a7" as const,
+      approval: (i % 2 === 0 ? "pending" : "approved") as "pending" | "approved",
+    }));
+    p.generatedTree = Array.from({ length: 12 }, (_, i) => ({
+      path: `src/f${i}.ts`,
+      source: `export const n${i} = ${i}`,
+      hash: `h${i}`,
+      attempt: 0,
+    }));
+    p.lastTest = { ok: true, detail: "12 files treeRun", label: "tested" };
+    const ctx = buildChatContext(p);
+    assert.ok(ctx.length <= CHAT_CONTEXT_MAX_CHARS, `budget ${ctx.length}`);
+    assert.match(ctx, /^notes:/m);
+    assert.match(ctx, /^fixtures:/m);
+    assert.match(ctx, /^synthesis: tree 12 files/m);
+    assert.match(ctx, /hitl: P4/);
+  });
+});
+
 describe("buildChatContext — instruction-tail truncation protection (156 E2)", () => {
   it("keeps the open HITL line and lastTest intact under oversized hostile fields", () => {
     const p = fixture();
@@ -602,7 +798,10 @@ describe("buildChatContext — instruction-tail truncation protection (156 E2)",
     assert.ok(ctx.length <= CHAT_CONTEXT_MAX_CHARS, `budget kept (${ctx.length})`);
     // The tail — the open gate's human instruction — survived verbatim.
     assert.match(ctx, /hitl: P4 "Security gate": Approve the isolation story\? \[forceHuman\]/);
-    assert.match(ctx, /lastTest: ok=true label=self-test: 2\/2 tests passed/);
+    assert.match(
+      ctx,
+      /lastTest: ok=true label=self-test \(deterministic floor — not tree-run\): 2\/2 tests passed/,
+    );
     // The giant values were clipped, not passed through.
     assert.ok(!ctx.includes("x".repeat(200)), "phase statuses are bounded");
     assert.ok(!ctx.includes("S".repeat(200)), "project status is bounded");
@@ -714,5 +913,256 @@ describe("failedSendPrompt — honest retry restores the failed PROMPT (156 E2)"
       null,
       "hostile rows never surface as a retry prompt",
     );
+  });
+});
+
+describe("slash tools (keyless, no LLM)", () => {
+  it("parseChatTool recognizes /status /gate /packet /fixtures /help /ls /read only", () => {
+    assert.equal(parseChatTool("/status"), "status");
+    assert.equal(parseChatTool("/GATE extra"), "gate");
+    assert.equal(parseChatTool("/packet"), "packet");
+    assert.equal(parseChatTool("/fixtures"), "fixtures");
+    assert.equal(parseChatTool("/help"), "help");
+    assert.equal(parseChatTool("/ls"), "ls");
+    assert.equal(parseChatTool("/read src/generated.ts"), "read");
+    assert.equal(parseChatTool("status"), null);
+    assert.equal(parseChatTool("/rm -rf"), null);
+    assert.equal(parseChatTool("/rm"), null);
+    assert.equal(parseChatTool("/exec rm"), null);
+    assert.equal(parseChatTool("/helper"), null);
+  });
+
+  it("chatOnceServer /help works keyless (not RT_E_LLM_NOT_CONFIGURED)", async () => {
+    delete process.env[KEY];
+    const r = await chatOnceServer(fixture(), "/help");
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.ok(r.reply.includes("/status"));
+      assert.equal(r.grounded, true);
+      assert.equal("error" in r, false, "ok:true must not carry an error channel");
+    }
+  });
+
+  it("chatOnceServer /status /gate /packet /fixtures work keyless", async () => {
+    delete process.env[KEY];
+    const p = fixture();
+    for (const cmd of ["/status", "/gate", "/packet", "/fixtures"] as const) {
+      const r = await chatOnceServer(p, cmd);
+      assert.equal(r.ok, true, `${cmd} keyless`);
+      if (r.ok) {
+        assert.equal(r.grounded, true);
+        assert.equal("error" in r, false, `${cmd} ok:true dual-channel`);
+      }
+    }
+  });
+
+  it("chatOnceServer /status returns lastTest from context keyless", async () => {
+    const r = await chatOnceServer(fixture(), "/status");
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.ok(r.reply.includes("lastTest:"));
+    }
+  });
+
+  it("runChatTool fixtures is honest when the field is absent", () => {
+    const p = emptyProject({ name: "L", brief: "old" });
+    const ctx = buildChatContext(p);
+    const body = runChatTool("fixtures", p, ctx);
+    assert.ok(body.includes("absent") || body.startsWith("fixtures:"));
+  });
+
+  it("hostile /rm is not a tool and stays refused keyless (no shell execution)", async () => {
+    delete process.env[KEY];
+    const r = await chatOnceServer(fixture(), "/rm -rf /");
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.reason, "not-configured");
+      assert.equal(r.code, "RT_E_LLM_NOT_CONFIGURED");
+    }
+  });
+
+  it("empty message is RT_E_VALIDATION even keyless (sweep73)", async () => {
+    delete process.env[KEY];
+    const r = await chatOnceServer(fixture(), "   ");
+    assert.deepEqual(r, {
+      ok: false,
+      reason: "error",
+      error: "Copilot message is empty.",
+      code: "RT_E_VALIDATION",
+    });
+  });
+
+  it("missing project is RT_E_VALIDATION even keyless — including /help", async () => {
+    delete process.env[KEY];
+    const missing = await chatOnceServer(null as unknown as Project, "hello");
+    assert.equal(missing.ok, false);
+    if (!missing.ok) {
+      assert.equal(missing.reason, "error");
+      assert.equal(missing.code, "RT_E_VALIDATION");
+    }
+    const helpMissing = await chatOnceServer(null as unknown as Project, "/help");
+    assert.equal(helpMissing.ok, false);
+    if (!helpMissing.ok) {
+      assert.equal(helpMissing.code, "RT_E_VALIDATION");
+    }
+  });
+
+  it("/ls on an unsynthesized packet is honest (not a disk listing)", async () => {
+    delete process.env[KEY];
+    const r = await chatOnceServer(fixture(), "/ls");
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.ok(r.reply.includes("no generated files"));
+      assert.equal("error" in r, false);
+    }
+  });
+
+  it("/ls and /read see generatedTree on the packet, refuse .. and disk", async () => {
+    delete process.env[KEY];
+    const p = fixture();
+    p.generatedSource = "export const host = 1;\n";
+    p.generatedTree = [
+      { path: "src/jobs/track.ts", source: "export function track() { return 1; }\n", hash: "h", attempt: 0 },
+    ];
+    const ls = await chatOnceServer(p, "/ls");
+    assert.equal(ls.ok, true);
+    if (ls.ok) {
+      assert.ok(ls.reply.includes("src/jobs/track.ts"));
+      assert.ok(ls.reply.includes("src/generated.ts"));
+      assert.equal("error" in ls, false, "185-H1: /ls ok:true has no error channel");
+    }
+    const rd = await chatOnceServer(p, "/read src/jobs/track.ts");
+    assert.equal(rd.ok, true);
+    if (rd.ok) {
+      assert.ok(rd.reply.includes("export function track"));
+      assert.equal("error" in rd, false);
+    }
+    const host = await chatOnceServer(p, "/read src/generated.ts");
+    assert.equal(host.ok, true);
+    if (host.ok) assert.ok(host.reply.includes("export const host"));
+    const trav = await chatOnceServer(p, "/read ../secrets.env");
+    assert.equal(trav.ok, true);
+    if (trav.ok) assert.ok(trav.reply.includes("need a repo-relative path"));
+    const missing = await chatOnceServer(p, "/read src/jobs/flip.ts");
+    assert.equal(missing.ok, true);
+    if (missing.ok) assert.ok(missing.reply.includes("not on this packet"));
+  });
+
+  it("packetRelPath refuses traversal, absolute, home, dot, control — allows packet-relative only", () => {
+    assert.equal(packetRelPath("src/jobs/track.ts"), "src/jobs/track.ts");
+    assert.equal(packetRelPath("  src/a.ts  "), "src/a.ts");
+    assert.equal(packetRelPath("src\\jobs\\track.ts"), "src/jobs/track.ts");
+    // Refusals (null → /read honest path message).
+    assert.equal(packetRelPath(".."), null);
+    assert.equal(packetRelPath("../secrets.env"), null);
+    assert.equal(packetRelPath("src/../../etc/passwd"), null);
+    assert.equal(packetRelPath("/etc/passwd"), null);
+    assert.equal(packetRelPath("C:\\Windows\\system.ini"), null);
+    assert.equal(packetRelPath("D:/x"), null);
+    assert.equal(packetRelPath("~/secrets"), null);
+    assert.equal(packetRelPath("./src/a.ts"), null);
+    assert.equal(packetRelPath("src/./a.ts"), null);
+    assert.equal(packetRelPath(""), null);
+    assert.equal(packetRelPath("   "), null);
+    assert.equal(packetRelPath("src/a.ts\0.txt"), null);
+    assert.equal(packetRelPath("a".repeat(201)), null);
+    assert.equal(packetRelPath(null as unknown as string), null);
+    assert.equal(packetRelPath(42 as unknown as string), null);
+  });
+
+  it("/read size-caps packet body at CHAT_READ_MAX (no full dump)", async () => {
+    delete process.env[KEY];
+    const p = fixture();
+    const body = "export const big = 1;\n" + "Z".repeat(CHAT_READ_MAX + 500);
+    p.generatedTree = [{ path: "src/big.ts", source: body, hash: "hb", attempt: 0 }];
+    const r = await chatOnceServer(p, "/read src/big.ts");
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.ok(r.reply.includes("… truncated"));
+      assert.ok(r.reply.includes(`cap ${CHAT_READ_MAX}`));
+      assert.ok(r.reply.length <= CHAT_READ_MAX + 80, "truncation marker only past cap");
+      assert.equal("error" in r, false);
+    }
+  });
+
+  it("/read refuses absolute/win/tilde/dot paths keyless (honest reply, not shell)", async () => {
+    delete process.env[KEY];
+    const p = fixture();
+    p.generatedTree = [{ path: "src/a.ts", source: "export const a = 1;\n", hash: "h", attempt: 0 }];
+    for (const cmd of [
+      "/read /etc/passwd",
+      "/read C:\\Windows\\system.ini",
+      "/read ~/secrets",
+      "/read ./src/a.ts",
+      "/read ..",
+      "/read",
+    ] as const) {
+      const r = await chatOnceServer(p, cmd);
+      assert.equal(r.ok, true, `${cmd} stays ok:true tool reply`);
+      if (r.ok) {
+        assert.match(r.reply, /need a repo-relative path/);
+        assert.equal("error" in r, false, `${cmd} dual-ok`);
+      }
+    }
+  });
+
+  it("/help lists all CHAT_TOOLS and discloses no shell / no disk walk", async () => {
+    delete process.env[KEY];
+    const r = await chatOnceServer(fixture(), "/help");
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      for (const t of CHAT_TOOLS) {
+        assert.ok(r.reply.includes(`/${t}`), `help lists /${t}`);
+      }
+      assert.match(r.reply, /no shell/i);
+      assert.match(r.reply, /no disk walk/i);
+      assert.match(r.reply, /size-capped/i);
+      assert.equal("error" in r, false);
+    }
+  });
+
+  it("/ls dedupes duplicate generatedTree paths", async () => {
+    delete process.env[KEY];
+    const p = fixture();
+    p.generatedTree = [
+      { path: "src/a.ts", source: "a", hash: "1", attempt: 0 },
+      { path: "src/a.ts", source: "a2", hash: "2", attempt: 1 },
+      { path: "src/b.ts", source: "b", hash: "3", attempt: 0 },
+    ];
+    const r = await chatOnceServer(p, "/ls");
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.match(r.reply, /^ls: 2 packet file\(s\)/m);
+      assert.equal((r.reply.match(/src\/a\.ts/g) ?? []).length, 1);
+    }
+  });
+
+  it("slash tools never call fetch (zero network) even with a key present", async () => {
+    process.env[KEY] = "sk-test";
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return okResponse({ model: "deepseek-v4-flash", choices: [{ message: { content: "x" } }] });
+    }) as typeof fetch;
+    for (const cmd of ["/help", "/ls", "/status", "/gate", "/packet", "/fixtures", "/read src/x.ts"]) {
+      const r = await chatOnceServer(fixture(), cmd);
+      assert.equal(r.ok, true, cmd);
+    }
+    assert.equal(called, false, "slash tools must never hit the network");
+  });
+
+  it("keyless free-text still RT_E_LLM_NOT_CONFIGURED with slash-tool pin (no dual-ok)", async () => {
+    delete process.env[KEY];
+    const r = await chatOnceServer(fixture(), "What phase are we on?");
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.reason, "not-configured");
+      assert.equal(r.code, "RT_E_LLM_NOT_CONFIGURED");
+      assert.match(r.error ?? "", /\/ls/);
+      assert.match(r.error ?? "", /\/read/);
+      assert.match(r.error ?? "", /work keyless/);
+      assert.equal("reply" in r, false, "ok:false must not carry reply");
+      assert.equal("grounded" in r, false);
+    }
   });
 });

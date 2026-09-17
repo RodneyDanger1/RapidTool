@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // src/api/routes.ts — HTTP contracts bound to jobs
-// machine-generated from RapidTool packet adc7806b-02cc-4859-bdcb-9455f6412ecb; regenerate, don't hand-edit.
-// HTTP contracts bound to jobs. TODO(E-15 stub): implement each endpoint
+// machine-generated from RapidTool packet 4207cef0-e4ea-4436-b2e2-5ac48ab8138c; regenerate, don't hand-edit.
+// HTTP contracts bound to jobs. TODO(E-15) stub: implement each endpoint
 // against the store stubs; tests/oracle.spec.ts names the oracle expectations.
 // ---------------------------------------------------------------------------
 
@@ -22,5 +22,5 @@ export async function route(
   input: unknown,
 ): Promise<{ ok: boolean }> {
   void input;
-  throw new Error(`TODO(E-15 stub): implement ${method} ${path}`);
+  throw new Error(`TODO(E-15) stub: implement ${method} ${path}`);
 }

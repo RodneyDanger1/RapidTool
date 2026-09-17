@@ -42,7 +42,7 @@ export type ApproveResult = { ok: true } | { ok: false; error: string };
 export type RunStopReason = "hitl" | "complete" | "blocked" | "error" | "cap" | "dod" | null;
 
 export type RunResult =
-  | { ok: true; ran: number; stoppedReason: RunStopReason; error?: string }
+  | { ok: true; ran: number; stoppedReason: RunStopReason; note?: string }
   | { ok: false; ran: number; stoppedReason: RunStopReason; error: string };
 
 /**
@@ -66,7 +66,7 @@ export type P6JourneySurface = {
  */
 export type WildRunResult =
   | { ok: true; ran: number; stoppedReason: "paused" | "complete" | "cap" | null; code?: ErrorCode }
-  | { ok: false; ran: number; stoppedReason: "paused" | "cap" | null; error: string; code?: ErrorCode };
+  | { ok: false; ran: number; stoppedReason: "paused" | "complete" | "cap" | null; error: string; code?: ErrorCode };
 
 export type ImportProjectResult =
   | { ok: true; id: string; name: string; replaced: boolean }
@@ -111,14 +111,17 @@ type RapidState = {
   // PB-03 (E-13): deepen a completed research phase (P0/P7/P11) with live/web
   // research and re-record its gate. Name is in the console's DEEPEN_ACTION_NAMES
   // probe list, so the "Run live research (P7)" affordance resolves to this.
-  deepenResearch: (id: string, phase: PhaseId) => Promise<{ ok: boolean; error?: string }>;
+  deepenResearch: (
+    id: string,
+    phase: PhaseId,
+  ) => Promise<{ ok: true } | { ok: false; error: string; code?: string }>;
   /** fixes/135: run the machine-verify loop on the project's P6 module (UI path). */
-  runVerifyAsync: (id: string) => Promise<{
-    ok: boolean;
-    status?: string;
-    iterations?: number;
-    error?: string;
-  }>;
+  runVerifyAsync: (
+    id: string,
+  ) => Promise<
+    | { ok: true; status?: string; iterations?: number; note?: string }
+    | { ok: false; error: string; status?: string; iterations?: number }
+  >;
   /** fixes/150 (M4 ms4 — watchdog mirror): async UI face of the keyed P6
    *  journey (headless.driveP6Journey). Keyless runs are honest no-ops
    *  (outcome "keyless", nothing committed); converged/failed commit the
@@ -142,16 +145,27 @@ type RapidState = {
     | { ok: true; outcome: "keyless" | "converged" | "failed"; cycles: number; budget: number; gate: P6JourneySurface["gate"] }
     | { ok: false; error: string }
   >;
-  runModuleReal: (id: string) => Promise<{ ok: boolean; result: unknown; error?: string }>;
-  ingestReport: (id: string, raw: unknown) => {
-    ok: boolean;
-    error?: string;
-    /** E-09: false when the identical report was already applied (no-op). */
-    applied?: boolean;
-    reason?: ReportApplyReason;
-    /** E-16: unmet DoD criterion ids for a "complete" claim (advisory). */
-    gate_unmet?: string[];
-  };
+  runModuleReal: (
+    id: string,
+  ) => Promise<{ ok: true; result: unknown } | { ok: false; result: unknown; error: string }>;
+  ingestReport: (
+    id: string,
+    raw: unknown,
+  ) =>
+    | {
+        ok: true;
+        applied?: boolean;
+        reason?: ReportApplyReason;
+        gate_unmet?: string[];
+        note?: string;
+      }
+    | {
+        ok: false;
+        error: string;
+        applied?: boolean;
+        reason?: ReportApplyReason;
+        gate_unmet?: string[];
+      };
   hasProject: (id: string) => boolean;
   // P10: per-project hard-DoD opt-in (off by default — advisory behavior unchanged).
   setEnforceDod: (id: string, on: boolean) => void;
@@ -854,7 +868,7 @@ export const useRapid = create<RapidState>()(
       deepenResearch: async (id: string, phase: PhaseId) =>
         serialized(id, async () => {
         const p = get().projects.find((x) => x.id === id);
-        if (!p) return { ok: false, error: "Project not found." };
+        if (!p) return { ok: false, error: "Project not found.", code: "RT_E_PROJECT_MISSING" };
         try {
           const next = await deepenResearchEngine(p, phase);
           set((s) => ({
@@ -867,7 +881,7 @@ export const useRapid = create<RapidState>()(
       }),
       runVerifyAsync: async (id: string) => {
         const p = get().projects.find((x) => x.id === id);
-        if (!p) return { ok: false, error: "Project not found." };
+        if (!p) return { ok: false, error: "Project not found.", code: "RT_E_PROJECT_MISSING" };
         const source = p.generatedSource ?? "";
         if (typeof source !== "string" || source.trim().length === 0) {
           return {
@@ -908,7 +922,7 @@ export const useRapid = create<RapidState>()(
       // user-owned fields (name/notes/chatLog/toggles) survive the commit.
       runP6Journey: async (id, opts) => {
         const p = byId(get().projects, id);
-        if (!p) return { ok: false, error: "Project not found." };
+        if (!p) return { ok: false, error: "Project not found.", code: "RT_E_PROJECT_MISSING" };
         // fixes/150 (integration): headless.ts statically imports node:fs and is
         // server-only — it must NEVER enter the browser bundle (the H2 crash
         // class + the import-protection build guard). The spec is assembled at
@@ -1018,7 +1032,14 @@ export const useRapid = create<RapidState>()(
           // fall through: resumed run — the started block below re-stamps the
           // active surface and keeps startedAt/lastAutoAt (PA-01).
         }
-        if (p.status === "complete") return { ok: true, ran: 0, stoppedReason: "complete" };
+        if (p.status === "complete")
+          return {
+            ok: false,
+            ran: 0,
+            stoppedReason: "complete",
+            error: "Project already complete.",
+            code: "RT_E_PHASE_ILLEGAL",
+          };
         // PA-01: a paused active run resumes its own epoch (runRef stability
         // for telemetry correlation = String(wildRun.startedAt)); a fresh or
         // stopped run mints a new one.
@@ -1231,8 +1252,9 @@ export const useRapid = create<RapidState>()(
         // waiting on a gate, blocked, complete, or errored on entry) reports ok:false with the
         // honest stoppedReason + error; partial runs (>=1 phase advanced) stay ok:true even when
         // the stop was an error or the defensive cap.
+        // 185-H1 / 204: ok:true never carries `error` — surface stop detail as `note`.
         const progressed = ran > 0;
-        if (progressed) return { ok: true, ran, stoppedReason, ...(error ? { error } : {}) };
+        if (progressed) return { ok: true, ran, stoppedReason, ...(error ? { note: error } : {}) };
         return { ok: false, ran, stoppedReason, error: error ?? "Run made no progress." };
       },
       // LLM-GAP-1 (async engine path): await the live engine when configured,
@@ -1242,7 +1264,7 @@ export const useRapid = create<RapidState>()(
       executeAsync: (id) =>
         serialized(id, async () => {
           const project = byId(get().projects, id);
-          if (!project) return { ok: false, error: "Project missing." };
+          if (!project) return { ok: false, error: "Project missing.", code: "RT_E_PROJECT_MISSING" };
           const configured = get().llmStatus.configured || get().researchStatus.configured;
           const next = await advanceOnceAsync(project, get().autopilot, configured);
           if (next.error && (next.project === project || next.gateDenied || next.dodBlocked)) {
@@ -1328,7 +1350,8 @@ export const useRapid = create<RapidState>()(
             };
           });
           const progressed = ran > 0;
-          if (progressed) return { ok: true, ran, stoppedReason, ...(error ? { error } : {}) };
+          // 185-H1 / 204: ok:true never carries `error` — stop detail is `note`.
+          if (progressed) return { ok: true, ran, stoppedReason, ...(error ? { note: error } : {}) };
           return { ok: false, ran, stoppedReason, error: error ?? "Run made no progress." };
         }),
       // Real bounded execution of the P6 generated module (opt-in; the runner is

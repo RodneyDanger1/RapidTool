@@ -12,7 +12,7 @@ import type { CrewSeat, HitlDecision, Project } from "./types.ts";
  * still uses extensionless relative imports (parent-owned, converted at
  * integration), so its load fails — the tests then fall back to a faithful
  * local replica of emptyProject's post-R4 shape: 13 phase records, sandbox
- * {runtime:"sync-template", ramMb:null, timeoutS:30, isolated:true}, and the
+ * {runtime:"sync-template", ramMb:null, timeoutS:30, isolated:false}, and the
  * packet compiled AFTER memory is populated (R4/B-05) so a fresh packet never
  * claims "(empty — treat Phase 0 research as first write)".
  */
@@ -54,7 +54,7 @@ function replicaProject(input: { name: string; brief: string }): Project {
     hitl: null,
     decisions: [],
     modelRoute: "deterministic",
-    sandbox: { runtime: "sync-template", ramMb: null, timeoutS: 30, isolated: true },
+    sandbox: { runtime: "sync-template", ramMb: null, timeoutS: 30, isolated: false },
     openapi: "",
     adr: "",
     lattice: null,
@@ -451,6 +451,80 @@ test("ST-1: approveHitl records the DoD gate before compiling — gate_passed is
     "boolean",
     "gate_passed for the just-approved phase is a boolean (ST-1), never null",
   );
+});
+
+// ---------------------------------------------------------------------------
+// T-14 (106 §6, finding F-11) — phase-coverage honesty: the rail line and the
+// System JSON envelope must state the REAL census. Verified by probe (W4-L5):
+// fresh project = 0 of 13 / 0 tail artifacts; a 7-phase prefix (stopped run) =
+// 7 of 13 / 0; a full 13-phase fixture run = 13 of 13 / 8 tail artifacts
+// (P7–P12 rows EXCLUDING the stored kind "packet" row — phaseCoverage's own
+// documented exclusion, so the number here is the helper's real arithmetic,
+// not the probe's raw row count).
+// ---------------------------------------------------------------------------
+
+test("T-14: fresh project rail carries the honest 0-of-13 coverage line", () => {
+  const p = makeProject();
+  assert.ok(
+    p.packet.includes(
+      "Phase coverage: 0 of 13 phases executed / 0 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).",
+    ),
+    `fresh packet must carry the 0-of-13 rail line (got ${JSON.stringify(
+      p.packet.match(/Phase coverage: [^\n]*/)?.[0] ?? null,
+    )})`,
+  );
+  assert.ok(p.packet.includes("## Current edge"), "coverage line lands under the Current edge rail");
+  assert.ok(!p.packet.includes("13 of 13"), "a fresh project never prints the all-ran claim");
+});
+
+test("T-14: fresh project System JSON carries the same census under phase_coverage", () => {
+  const p = makeProject();
+  const env = parseSystemJson(p.packet);
+  assert.deepEqual(
+    env.phase_coverage,
+    { executed: 0, total: 13, artifacts_from_p7_p12: 0 },
+    "machine consumers read the same 0-of-13 arithmetic as the rail",
+  );
+});
+
+test("T-14: a stopped 7-phase run reports 7 of 13 / 0 — never implies all 13 ran", async () => {
+  const fixtures = await import("./testing/fixtures.ts");
+  const stopped = fixtures.runHeadless(fixtures.seedProject(), fixtures.ALL_PHASES.slice(0, 7));
+  assert.equal(
+    stopped.phases.filter((r) => r.status === "complete").length,
+    7,
+    "fixture really stopped after the P0–P6 prefix",
+  );
+  const out = compileAgentPacket(stopped);
+  assert.ok(
+    out.includes(
+      "Phase coverage: 7 of 13 phases executed / 0 artifacts from P7–P12 — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).",
+    ),
+    `stopped run must report 7 of 13 (got ${JSON.stringify(
+      out.match(/Phase coverage: [^\n]*/)?.[0] ?? null,
+    )})`,
+  );
+  const env = parseSystemJson(out);
+  assert.deepEqual(env.phase_coverage, { executed: 7, total: 13, artifacts_from_p7_p12: 0 });
+});
+
+test("T-14: a completed 13-phase run reports its real 13 of 13 / 8 — matching the artifact rows", async () => {
+  const fixtures = await import("./testing/fixtures.ts");
+  const done = fixtures.runHeadless(fixtures.seedProject(), fixtures.ALL_PHASES);
+  assert.equal(done.status, "complete");
+  const out = compileAgentPacket(done);
+  assert.ok(
+    out.includes("Phase coverage: 13 of 13 phases executed / 8 artifacts from P7–P12"),
+    `full run census (got ${JSON.stringify(out.match(/Phase coverage: [^\n]*/)?.[0] ?? null)})`,
+  );
+  // Independent cross-check: recount the same fact straight off the artifact
+  // rows the helper consumes — the rail line may never drift from the data.
+  const tail = done.artifacts.filter(
+    (a) => a.phase >= 7 && a.kind !== "packet",
+  ).length;
+  assert.equal(tail, 8, "artifact rows independently agree with the 8 the rail reports");
+  const env = parseSystemJson(out);
+  assert.deepEqual(env.phase_coverage, { executed: 13, total: 13, artifacts_from_p7_p12: 8 });
 });
 
 test("runPhaseAsync returns a valid deterministic result for P0 (async entry does not throw)", async () => {

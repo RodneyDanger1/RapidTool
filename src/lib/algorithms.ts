@@ -369,8 +369,16 @@ export function intentLattice(brief: string, domain: string): IntentLattice {
       // R7/B-15: freq counts bag tokens whose stem equals the term's stem —
       // no substring in either direction ("scanning" feeds `scan`; "tech"
       // never feeds "technology" or vice versa).
-      const termStem = tokenizeWords(term)[0] ?? term;
-      const freq = bag.filter((t) => stemToken(t) === termStem).length;
+      //
+      // 109 T-07: canonical-stem BOTH sides (fixed point). The old pair
+      // stemmed each bag token ONCE (stemToken) while the term went through
+      // tokenizeWords → canonicalStem — so a brief's `listings` (single-pass
+      // "listing") never matched the term `listing` (fixed-point "list") and
+      // the node was under-weighted (0.35 vs 0.55 for the same mention count).
+      // Both sides now iterate to the same fixed point, so singular/plural
+      // inflections weight a node identically.
+      const termStem = canonicalStem(term);
+      const freq = bag.filter((t) => canonicalStem(t) === termStem).length;
       nodes.push({
         kind,
         label: term,
@@ -441,13 +449,31 @@ function overlap(a: string[], b: string[]): number {
  * "approval workflow invoice"). Competitor retrieval treats exact-phrase
  * presence as a first-class signal (Obsidian-style token search boosts it;
  * Claude Code/Devin recall targeted, whole-item context — see fixes/106).
+ *
+ * T8 (112 F3): "longest contiguous run" IS "length of the longest prefix of
+ * `q` that occurs as a contiguous substring of `row`", so one KMP pass
+ * (O(|q| + |row|)) replaces the old restart scan, whose degenerate inputs
+ * (row = the q token repeated) were O(|row|·|q|). Output is identical by
+ * construction — the maximum KMP match state IS the old `best`. Exported for
+ * the differential property test that proves it against the naive reference
+ * (algorithms.test.ts).
  */
-function contiguousRun(q: string[], row: string[]): number {
+export function contiguousRun(q: string[], row: string[]): number {
+  if (q.length === 0 || row.length === 0) return 0;
+  // Failure table: fail[i] = length of the longest proper prefix of q[0..i]
+  // that is also a suffix of q[0..i] (standard KMP preprocessing).
+  const fail = new Array<number>(q.length).fill(0);
+  for (let i = 1, k = 0; i < q.length; i++) {
+    while (k > 0 && q[i] !== q[k]) k = fail[k - 1]!;
+    if (q[i] === q[k]) k++;
+    fail[i] = k;
+  }
   let best = 0;
-  for (let i = 0; i < row.length; i++) {
-    let j = 0;
-    while (j < q.length && i + j < row.length && q[j] === row[i + j]) j++;
-    if (j > best) best = j;
+  for (let i = 0, k = 0; i < row.length; i++) {
+    while (k > 0 && row[i] !== q[k]) k = fail[k - 1]!;
+    if (row[i] === q[k]) k++;
+    if (k === q.length) return q.length; // the whole query is a phrase here
+    if (k > best) best = k;
   }
   return best;
 }
@@ -518,14 +544,20 @@ export function fusionRank(
     const kindSize = byKind[kind].length;
     if (!kindSize) return;
     const priorOf = (m: MemoryEntry): number => (Number.isFinite(m.score) ? m.score : 0);
-    const ranked = [...byKind[kind]].sort((a, b) => {
-      const sa = overlap(q, tokenizeWords(a.text)) + priorOf(a) * 0.15;
-      const sb = overlap(q, tokenizeWords(b.text)) + priorOf(b) * 0.15;
+    // T8 (112 F2): tokenize each row ONCE into a parallel {row, tokens} list.
+    // The old comparator re-tokenized BOTH sides on every comparison
+    // (O(k log k · L) tokenizations per kind for k rows of length L) and the
+    // scoring pass tokenized a third time. tokenizeWords is pure and
+    // deterministic, so the cached tokens are score- and order-identical
+    // (frozen golden in algorithms.test.ts).
+    const prepared = byKind[kind].map((m) => ({ m, tokens: tokenizeWords(m.text) }));
+    prepared.sort((a, b) => {
+      const sa = overlap(q, a.tokens) + priorOf(a.m) * 0.15;
+      const sb = overlap(q, b.tokens) + priorOf(b.m) * 0.15;
       return sb - sa;
     });
-    ranked.forEach((item, i) => {
+    prepared.forEach(({ m: item, tokens: itemTokens }, i) => {
       const rrf = 1 / (60 + (i + 1) + kindSize * 0.5);
-      const itemTokens = tokenizeWords(item.text);
       const ox = overlap(q, itemTokens);
       const ce =
         0.55 * ox + 0.25 * priorOf(item) + 0.2 * (kind === "procedural" ? 0.9 : kind === "semantic" ? 0.7 : 0.5);
@@ -1062,15 +1094,24 @@ export function runAlgorithms(project: Pick<Project, "brief" | "domain" | "memor
  * ships a browser tokenizer). Empty/whitespace-only input → 0 (the old
  * max(1, …) floor is gone). tokensLo/tokensHi frame an honest ±15% band
  * around the estimate; the console chip renders `≈{tokensEst} tok`. Results
- * are memoized in a module-level LRU keyed by fnv1a(text) (cap 100) so an
+ * are memoized in a module-level LRU keyed by the TEXT itself (cap 100) so an
  * unchanged packet never re-encodes on re-render.
+ *
+ * T7 (112 F1): the old key was fnv1a(text) — a 32-bit hash. Distinct texts
+ * that collide on it returned EACH OTHER's count: reproduced with
+ * fnv1a("rjmr") === fnv1a("lasipzafzrmsnlpmtfnstxtvfmtmnet") === 933450742,
+ * which reported the 31-char string as 3 tokens (5.3x low) when the short
+ * word was estimated first — the direction that lets a prompt pass the
+ * enforceTokenBudget truncation guard while materially over budget
+ * (crew.server.ts). The text itself is the key: collision is impossible, and
+ * the 100-entry cap bounds retained text to the same recent inputs the caller
+ * just handed in.
  */
-const tokenEstimateCache = new Map<number, number>();
+const tokenEstimateCache = new Map<string, number>();
 
 export function estimateTokens(text: string): { tokensEst: number; tokensLo: number; tokensHi: number } {
   if (!text.trim()) return { tokensEst: 0, tokensLo: 0, tokensHi: 0 };
-  const key = fnv1a(text);
-  let tokensEst = tokenEstimateCache.get(key);
+  let tokensEst = tokenEstimateCache.get(text);
   if (tokensEst === undefined) {
     tokensEst = encode(text).length;
     if (tokenEstimateCache.size >= 100) {
@@ -1078,9 +1119,9 @@ export function estimateTokens(text: string): { tokensEst: number; tokensLo: num
       if (oldest !== undefined) tokenEstimateCache.delete(oldest);
     }
   } else {
-    tokenEstimateCache.delete(key); // refresh LRU recency
+    tokenEstimateCache.delete(text); // refresh LRU recency
   }
-  tokenEstimateCache.set(key, tokensEst);
+  tokenEstimateCache.set(text, tokensEst);
   return {
     tokensEst,
     tokensLo: Math.round(tokensEst * 0.85),

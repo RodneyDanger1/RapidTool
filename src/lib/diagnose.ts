@@ -11,7 +11,8 @@
 // Ranking rules (ordered, first match wins — §6.2):
 //   1. wild-step-timeout   2. wild-paused-error   3. llm-unavailable
 //   4. persist-failure     5. corrupt-recovery    6. runner-failing
-//   7. mainthread-stall    8. freeze-pre-capture  9. none-detected
+//   7. mainthread-stall    8. freeze-pre-capture
+//   9. unclassified-errors (errors exist, no named rule)  10. none-detected
 //
 // EXPORT SURFACE (compile against these — do not rename):
 //   buildDiagnosis · type DiagnosisInput · type DiagnosisJson ·
@@ -282,6 +283,21 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisJson {
     });
   }
 
+  // Honest floor when rows exist but no named heuristic matched.
+  // Claiming "No error rows in window" while errors.length > 0 is a lie
+  // (lone llm-call, hydrate.repaired, sys.uncaught_error, RT_E_GATES_FAILED, …).
+  if (matches.length === 0 && errors.length > 0) {
+    const n = errors.length;
+    matches.push({
+      class: "unclassified-errors",
+      summary: `${n} error/critical row(s) in window did not match a named heuristic — not a clean bill of health.`,
+      evidence: rowRefs(
+        "errors",
+        errors.map((_, i) => i),
+      ),
+    });
+  }
+
   const ordered = matches.length > 0 ? matches : [NONE_DETECTED];
   const mostLikelyCause: DiagnosisCause = { rank: 1, ...ordered[0] };
   const candidates: DiagnosisCause[] = ordered.slice(1, 4).map((m, i) => ({ rank: i + 2, ...m }));
@@ -314,6 +330,9 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisJson {
     ],
     "freeze-pre-capture": [
       "Inspect the imported `sys.previous_session_crash` tail to reconstruct what froze before this session.",
+    ],
+    "unclassified-errors": [
+      "Read errors[].event and errors[].code — a named heuristic did not rank these rows; do not treat diagnose as none-detected.",
     ],
     "none-detected": ["No action — nothing ranks; re-check after reproducing the incident with the runtime tab open."],
   };

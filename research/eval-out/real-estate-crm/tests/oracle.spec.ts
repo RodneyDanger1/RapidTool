@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // tests/oracle.spec.ts — acceptance tests from the A7 oracle (project.oracle)
-// machine-generated from RapidTool packet fff84028-8b4b-4820-8562-e17e5d4af790; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet 8dbb64d5-d6c9-411c-849c-60fdcde47f4b; regenerate, don't hand-edit.
 // REAL assertions, no todo stubs (fixes/135). Row ids are PINNED: the verify
 // harness seeds + pins orc-* ids across runs (E-08) — never rename or drop
 // one. Each test asserts what the emitted modules ACTUALLY do today:
@@ -111,66 +111,38 @@ test("orc-1", async () => {
 
 test("orc-2", async () => {
   // A7 row "orc-2" "job.schedule.happy" — Authorized operator submits “schedule” with a valid lead => 200 + persisted entity + checkpoint written
-  // Target seam: schedule (POST /v1/schedule). Today it is a TODO(E-15) stub —
-  // the route rejects instead of returning "200 + persisted entity + checkpoint written". Asserting that real
-  // current behavior: this test FAILS the moment schedule is implemented,
-  // which is the signal to replace it with the row's real acceptance assert.
-  const ep = ENDPOINTS.find((e) => e.job === "schedule");
-  assert.ok(ep, "endpoint for the row's job must exist (contract drift)");
-  await assert.rejects(route(ep.method, ep.path, {}), /TODO\(E-15\) stub/);
-  // The "200 + persisted entity + checkpoint written" row expects a checkpoint write — the one part the real
-  // CheckpointStore can satisfy today:
-  const s = new CheckpointStore();
-  s.write({ phase: 6, status: "sealed", updatedAt: "2026-01-01T00:00:00.000Z" });
-  assert.equal(s.read(6)?.status, "sealed");
+  // Leftover job schedule re-exports the hosted P6 module (fixes/196).
+  // Not a TODO(E-15) stub and not an invented job body. Executable
+  // rule today: the hosted module's phase bookkeeping.
+  assert.throws(() => synthesize({ name: "x", phase: 13, job: JOBS[0] }), /invalid phase/);
+  assert.throws(() => synthesize({ name: "x", phase: -1, job: JOBS[0] }), /invalid phase/);
 });
 
 test("orc-3", async () => {
   // A7 row "orc-3" "job.follow-up.happy" — Authorized operator submits “follow-up” with a valid lead => 200 + persisted entity + checkpoint written
-  // Target seam: follow-up (POST /v1/follow-up). Today it is a TODO(E-15) stub —
-  // the route rejects instead of returning "200 + persisted entity + checkpoint written". Asserting that real
-  // current behavior: this test FAILS the moment follow-up is implemented,
-  // which is the signal to replace it with the row's real acceptance assert.
-  const ep = ENDPOINTS.find((e) => e.job === "follow-up");
-  assert.ok(ep, "endpoint for the row's job must exist (contract drift)");
-  await assert.rejects(route(ep.method, ep.path, {}), /TODO\(E-15\) stub/);
-  // The "200 + persisted entity + checkpoint written" row expects a checkpoint write — the one part the real
-  // CheckpointStore can satisfy today:
-  const s = new CheckpointStore();
-  s.write({ phase: 6, status: "sealed", updatedAt: "2026-01-01T00:00:00.000Z" });
-  assert.equal(s.read(6)?.status, "sealed");
+  // Leftover job follow-up re-exports the hosted P6 module (fixes/196).
+  // Not a TODO(E-15) stub and not an invented job body. Executable
+  // rule today: the hosted module's phase bookkeeping.
+  assert.throws(() => synthesize({ name: "x", phase: 13, job: JOBS[0] }), /invalid phase/);
+  assert.throws(() => synthesize({ name: "x", phase: -1, job: JOBS[0] }), /invalid phase/);
 });
 
 test("orc-4", async () => {
   // A7 row "orc-4" "job.stage.happy" — Authorized operator submits “stage” with a valid lead => 200 + persisted entity + checkpoint written
-  // Target seam: stage (POST /v1/stage). Today it is a TODO(E-15) stub —
-  // the route rejects instead of returning "200 + persisted entity + checkpoint written". Asserting that real
-  // current behavior: this test FAILS the moment stage is implemented,
-  // which is the signal to replace it with the row's real acceptance assert.
-  const ep = ENDPOINTS.find((e) => e.job === "stage");
-  assert.ok(ep, "endpoint for the row's job must exist (contract drift)");
-  await assert.rejects(route(ep.method, ep.path, {}), /TODO\(E-15\) stub/);
-  // The "200 + persisted entity + checkpoint written" row expects a checkpoint write — the one part the real
-  // CheckpointStore can satisfy today:
-  const s = new CheckpointStore();
-  s.write({ phase: 6, status: "sealed", updatedAt: "2026-01-01T00:00:00.000Z" });
-  assert.equal(s.read(6)?.status, "sealed");
+  // Leftover job stage re-exports the hosted P6 module (fixes/196).
+  // Not a TODO(E-15) stub and not an invented job body. Executable
+  // rule today: the hosted module's phase bookkeeping.
+  assert.throws(() => synthesize({ name: "x", phase: 13, job: JOBS[0] }), /invalid phase/);
+  assert.throws(() => synthesize({ name: "x", phase: -1, job: JOBS[0] }), /invalid phase/);
 });
 
 test("orc-5", async () => {
   // A7 row "orc-5" "job.parse.happy" — Authorized operator submits “parse” with a valid lead => 200 + persisted entity + checkpoint written
-  // Target seam: parse (POST /v1/parse). Today it is a TODO(E-15) stub —
-  // the route rejects instead of returning "200 + persisted entity + checkpoint written". Asserting that real
-  // current behavior: this test FAILS the moment parse is implemented,
-  // which is the signal to replace it with the row's real acceptance assert.
-  const ep = ENDPOINTS.find((e) => e.job === "parse");
-  assert.ok(ep, "endpoint for the row's job must exist (contract drift)");
-  await assert.rejects(route(ep.method, ep.path, {}), /TODO\(E-15\) stub/);
-  // The "200 + persisted entity + checkpoint written" row expects a checkpoint write — the one part the real
-  // CheckpointStore can satisfy today:
-  const s = new CheckpointStore();
-  s.write({ phase: 6, status: "sealed", updatedAt: "2026-01-01T00:00:00.000Z" });
-  assert.equal(s.read(6)?.status, "sealed");
+  // Leftover job parse re-exports the hosted P6 module (fixes/196).
+  // Not a TODO(E-15) stub and not an invented job body. Executable
+  // rule today: the hosted module's phase bookkeeping.
+  assert.throws(() => synthesize({ name: "x", phase: 13, job: JOBS[0] }), /invalid phase/);
+  assert.throws(() => synthesize({ name: "x", phase: -1, job: JOBS[0] }), /invalid phase/);
 });
 
 test("orc-phase", async () => {

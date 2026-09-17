@@ -153,10 +153,14 @@ describe("scratch-dir cleanup (node-runner)", () => {
     // Sibling files (tree-run, journey-driver suites) legitimately hold
     // short-lived scratch dirs while their own children are mid-flight — a
     // single instant scan would false-positive on them. Every runNodeBounded
-    // cleans its own dir at finish, so poll for the diff to clear; a dir that
-    // persists ~10s (a full driver cycle's worth of sibling activity) past
-    // its run IS a genuine leak and still fails the test.
-    while (leftover.length > 0 && waited < 10_000) {
+    // cleans its own dir at finish, so poll for the diff to clear.
+    // 45s (boundary fix, 216l era): T-18's tree-run suites spawn real
+    // `npm run typecheck` / `npm test` children on emitted micro-trees and
+    // legitimately hold their own rapidtool-run-* scratch dirs for tens of
+    // seconds under full-suite parallelism (gate.sh's first real run exposed
+    // this with the old 10s grace — run 4 of 4 failed there, passed in the
+    // lighter sweeps). A dir that survives a full 45s IS a genuine leak.
+    while (leftover.length > 0 && waited < 45_000) {
       await new Promise((r) => setTimeout(r, 250));
       waited += 250;
       after = list();

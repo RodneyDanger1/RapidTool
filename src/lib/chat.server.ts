@@ -12,7 +12,7 @@
 
 import { completeDeepSeek, isDeepSeekConfigured, cutMarked } from "./deepseek.server.ts";
 import { PHASES } from "./phases.ts";
-import type { ErrorCode } from "./errors.ts";
+import { dualChannelFailDetail, type ErrorCode } from "./errors.ts";
 import type { PhaseRecord, Project } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -46,8 +46,10 @@ export type ChatResult =
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Hard cap for the grounded context block (characters). */
-export const CHAT_CONTEXT_MAX_CHARS = 2500;
+/** Hard cap for the grounded context block (characters).
+ *  fixes/186: raised 2500→3200 (≤4000) so notes + fixtures + synthesis/
+ *  tree-run honesty lines fit without eating the HITL tail. */
+export const CHAT_CONTEXT_MAX_CHARS = 3200;
 
 /** History is capped to the last N turns before the current message. */
 export const CHAT_HISTORY_LIMIT = 6;
@@ -111,11 +113,15 @@ function clip(s: string | undefined | null, max: number): string {
 type GatedRecord = PhaseRecord & { gate: NonNullable<PhaseRecord["gate"]> };
 
 /**
- * Deterministic ≤2500-char compaction of the whole project: name/domain/kind/
- * currentPhase/status, per-phase statuses, last gate verdict + unmet gates,
- * packet one-liner, memory count + top 3 rows, research corpus count,
- * lastTest verdict, and the open HITL prompt. Same input → same string:
- * field order is fixed and every sort has a total tiebreak.
+ * Deterministic ≤CHAT_CONTEXT_MAX_CHARS compaction of the whole project:
+ * name/domain/kind/currentPhase/status, per-phase statuses, last gate verdict
+ * + unmet gates, packet one-liner, memory count + top 3 rows, optional
+ * operator notes, research corpus count, optional acceptance-fixture
+ * pending/approved counts, lastTest verdict (with floor honesty), optional
+ * synthesis/tree-run honesty, and the open HITL prompt. Same input → same
+ * string: field order is fixed and every sort has a total tiebreak.
+ * Additive fields (notes / fixtures / synthesis) are OMITTED when absent so
+ * legacy projects stay byte-identical (fixes/186).
  */
 export function buildChatContext(project: Project): string {
   // Null/partial projects (hostile server-fn payloads) must never throw:
@@ -127,7 +133,7 @@ export function buildChatContext(project: Project): string {
   // belt-and-braces guard, NOT the truncation policy — a hostile oversized
   // kind/status/phase-status must never eat the context TAIL, because the
   // tail ends with the current HITL line (the human's open instruction) and
-  // lastTest. Bounded fields keep the joined context ≤ ~2.3k chars, so the
+  // lastTest. Bounded fields keep the joined context under the cap, so the
   // instruction-critical lines always survive.
   const kind = clip(p?.kind, 40) || "unspecified";
 
@@ -209,12 +215,82 @@ export function buildChatContext(project: Project): string {
         )
       : null;
 
+  // fixes/186 + 168A-1: operator notes (standing human steering). Emit ONLY
+  // when non-empty after trim — empty/absent stays byte-identical to legacy.
+  const notesRaw = typeof p.notes === "string" ? p.notes.trim() : "";
+  const notesLine = notesRaw ? `notes: ${clip(notesRaw, 240)}` : null;
+
   const researchLine = String((Array.isArray(p.research) ? p.research : []).length);
+
+  // fixes/186: acceptanceFixtures pending/approved counts. Additive field —
+  // ABSENCE on legacy payloads (never []). Emit ONLY when the array is present
+  // so bare projects stay byte-identical. Pending or empty ⇒ not functional.
+  let fixturesLine: string | null = null;
+  if (Array.isArray(p.acceptanceFixtures)) {
+    let approved = 0;
+    let pending = 0;
+    for (const c of p.acceptanceFixtures) {
+      if (c && typeof c === "object" && (c as { approval?: unknown }).approval === "approved") {
+        approved += 1;
+      } else {
+        pending += 1;
+      }
+    }
+    const total = p.acceptanceFixtures.length;
+    const notFunctional = pending > 0 || total === 0;
+    fixturesLine = clip(
+      `fixtures: total=${total} approved=${approved} pending=${pending}${
+        notFunctional ? " (pending — not functional)" : ""
+      }`,
+      120,
+    );
+  }
+
+  // generatedTree length — synthesisSucceeded is NOT on Project; derive an
+  // honest compact signal so the copilot cannot invent "LLM software shipped".
+  const treeArr = Array.isArray(p.generatedTree) ? p.generatedTree : null;
+  const treeCount = treeArr ? treeArr.length : 0;
+  const hasTree = treeCount > 0;
 
   let testLine = "none";
   const lastTest = p.lastTest;
-  if (lastTest) {
-    testLine = `ok=${String(lastTest.ok)} label=${clip(lastTest.label, 24) || "none"}: ${clip(lastTest.detail, 120) || "no detail"}`;
+  let testLabel = "";
+  if (lastTest && typeof lastTest === "object") {
+    testLabel =
+      typeof lastTest.label === "string" ? clip(lastTest.label, 24) : "";
+    // Floor honesty: self-test (and unlabeled template runs with no tree) are
+    // the deterministic engine floor — NOT tree-run / machine-verified proof.
+    const isFloorLabel =
+      testLabel === "self-test" ||
+      (!testLabel && !hasTree);
+    const floorTag = isFloorLabel ? " (deterministic floor — not tree-run)" : "";
+    testLine = `ok=${String(!!lastTest.ok)} label=${testLabel || "none"}${floorTag}: ${
+      clip(typeof lastTest.detail === "string" ? lastTest.detail : "", 120) || "no detail"
+    }`;
+  }
+
+  // fixes/186: synthesis / tree-run honesty line. Omitted on bare legacy
+  // (no lastTest, no tree) for byte-identical parity. Never fabricates success.
+  let synthesisLine: string | null = null;
+  if (hasTree || lastTest) {
+    if (hasTree) {
+      const labelBit = testLabel ? `; lastTest label=${testLabel}` : "";
+      const proven =
+        testLabel === "tested" || testLabel === "real-run"
+          ? ""
+          : testLabel === "self-test" || !testLabel
+            ? " (tree present — not tree-run proven)"
+            : "";
+      synthesisLine = clip(`synthesis: tree ${treeCount} files${labelBit}${proven}`, 160);
+    } else if (testLabel === "tested") {
+      synthesisLine = "synthesis: tested-equivalent (no generatedTree on project)";
+    } else if (testLabel === "real-run") {
+      synthesisLine = "synthesis: real-run (no generatedTree on project)";
+    } else {
+      // self-test / unlabeled / other → floor; synthesisSucceeded effectively false
+      synthesisLine =
+        "synthesis: floor (synthesisSucceeded=false — deterministic template, not LLM tree)";
+    }
   }
 
   let hitlLine = "none";
@@ -236,8 +312,11 @@ export function buildChatContext(project: Project): string {
     `lastGate: ${gateLine}`,
     `packet: ${packetLine}`,
     `memory: ${memoryLine}`,
+    ...(notesLine ? [notesLine] : []),
     `researchEntries: ${researchLine}`,
+    ...(fixturesLine ? [fixturesLine] : []),
     `lastTest: ${testLine}`,
+    ...(synthesisLine ? [synthesisLine] : []),
     `hitl: ${hitlLine}`,
   ];
   return parts.join("\n").slice(0, CHAT_CONTEXT_MAX_CHARS);
@@ -275,35 +354,140 @@ export function chatProvenance(
 }
 
 // ---------------------------------------------------------------------------
+// Local slash tools (no LLM). Work keyless. Facts only from project + context.
+// ---------------------------------------------------------------------------
+
+export const CHAT_TOOLS = ["status", "gate", "packet", "fixtures", "help", "ls", "read"] as const;
+export type ChatToolName = (typeof CHAT_TOOLS)[number];
+
+/** Cap for `/read` packet body (chars). Size-capped; never a full disk dump. */
+export const CHAT_READ_MAX = 8000;
+
+const KEYLESS_TOOLS =
+  "Slash tools /status /gate /packet /fixtures /ls /read /help work keyless.";
+
+/** Honest keyless free-text refusal (also used if the LLM path races not-configured). */
+const KEYLESS_FREE_TEXT_ERROR =
+  `DeepSeek is not configured — add DEEPSEEK_API_KEY to use the copilot. ${KEYLESS_TOOLS}`;
+
+/** Parse recognized slash verbs. Null if not a tool (never treats /rm as a tool). */
+export function parseChatTool(userText: string): ChatToolName | null {
+  const m = /^\/(status|gate|packet|fixtures|help|ls|read)(?:\s|$)/i.exec(
+    typeof userText === "string" ? userText.trim() : "",
+  );
+  return m ? (m[1]!.toLowerCase() as ChatToolName) : null;
+}
+
+/**
+ * Packet-relative path only. Refuses traversal, absolute, home, UNC, control
+ * chars, empty segments, and `.` / `..` — never a disk walk key.
+ */
+export function packetRelPath(raw: string): string | null {
+  if (typeof raw !== "string") return null;
+  const p = raw.trim().replace(/\\/g, "/");
+  if (!p || p.length > 200) return null;
+  // Control chars / NUL — never a path key into the packet map (charCode; no control-regex).
+  for (let i = 0; i < p.length; i++) {
+    const c = p.charCodeAt(i);
+    if (c <= 0x1f || c === 0x7f) return null;
+  }
+  if (p.startsWith("/") || p.startsWith("~") || /^[a-zA-Z]:/.test(p)) return null;
+  if (p.split("/").some((seg) => seg === ".." || seg === "." || seg === "")) return null;
+  return p;
+}
+
+function packetFileSource(project: Project, rel: string): string | null {
+  const tree = Array.isArray(project.generatedTree) ? project.generatedTree : [];
+  const hit = tree.find((f) => f && f.path === rel && typeof f.source === "string");
+  if (hit) return hit.source as string;
+  if (
+    rel === "src/generated.ts" &&
+    typeof project.generatedSource === "string" &&
+    project.generatedSource.trim()
+  ) {
+    return project.generatedSource;
+  }
+  return null;
+}
+
+/**
+ * Deterministic tool body. Never calls the network. Never shells. /ls and
+ * /read see the PACKET (generatedTree / generatedSource), not the disk.
+ * Returns a plain string — callers wrap as `{ ok: true, reply }` with no
+ * dual-channel `error` field (185-H1).
+ */
+export function runChatTool(name: ChatToolName, project: Project, context: string, arg = ""): string {
+  const line = (prefix: string): string => {
+    const hit = context.split("\n").find((l) => l.startsWith(prefix));
+    return hit ?? `${prefix} (absent)`;
+  };
+  if (name === "help") {
+    return [
+      "Local tools (no LLM, work keyless, no shell, no disk walk):",
+      "/status    lastTest + synthesis + hitl",
+      "/gate      lastGate + open HITL prompt",
+      "/packet    packet line from grounded context",
+      "/fixtures  acceptance fixture pending/approved",
+      "/ls        generatedTree paths on this packet",
+      "/read <p>  packet file body (generatedTree / generatedSource only; size-capped)",
+      "/help      this list",
+    ].join("\n");
+  }
+  if (name === "status") {
+    return [line("lastTest:"), line("synthesis:"), line("hitl:"), line("status:")].join("\n");
+  }
+  if (name === "gate") {
+    return [line("lastGate:"), line("hitl:"), line("currentPhase:")].join("\n");
+  }
+  if (name === "packet") {
+    return line("packet:");
+  }
+  if (name === "ls") {
+    const tree = Array.isArray(project.generatedTree) ? project.generatedTree : [];
+    const paths = [
+      ...new Set(
+        tree
+          .map((f) => (f && typeof f.path === "string" ? f.path : ""))
+          .filter((p) => p.length > 0),
+      ),
+    ].sort();
+    const host =
+      typeof project.generatedSource === "string" && project.generatedSource.trim().length > 0;
+    if (paths.length === 0 && !host) {
+      return "ls: no generated files on this packet (not yet synthesized — not a disk listing)";
+    }
+    const lines = [...paths];
+    if (host && !lines.includes("src/generated.ts")) lines.unshift("src/generated.ts");
+    return `ls: ${lines.length} packet file(s)\n${lines.join("\n")}`;
+  }
+  if (name === "read") {
+    const rel = packetRelPath(arg);
+    if (!rel) return "read: need a repo-relative path (no .., no absolute, no disk walk)";
+    const src = packetFileSource(project, rel);
+    if (src == null) {
+      return `read: ${rel} is not on this packet (generatedTree / generatedSource only — no disk, no shell)`;
+    }
+    if (src.length <= CHAT_READ_MAX) return src;
+    return `${src.slice(0, CHAT_READ_MAX)}\n… truncated (${src.length} bytes, cap ${CHAT_READ_MAX})`;
+  }
+  const fx = context.split("\n").find((l) => l.startsWith("fixtures:"));
+  return fx ?? "fixtures: (none on this project — field absent, not empty)";
+}
+
+// ---------------------------------------------------------------------------
 // Grounded chat (server-only entry)
 // ---------------------------------------------------------------------------
 
 /**
- * One grounded copilot turn. Never fabricates: without a DeepSeek key it
- * returns the honest not-configured shape before any network work; failures
- * carry a machine-readable `code`.
- *
- * @param project  Full project state — the copilot's only source of facts.
- * @param userText The user's message.
- * @param history  Prior turns (optional), capped to the last CHAT_HISTORY_LIMIT.
+ * One grounded copilot turn. Slash tools run keyless. Free-text still needs
+ * DeepSeek; without a key that path is not-configured (never fabricated).
  */
 export async function chatOnceServer(
   project: Project,
   userText: string,
   history?: ChatTurn[],
-  /** Injectable clock — the provenance stamp records the CONTEXT SNAPSHOT
-   *  time (when buildChatContext ran), NOT reply-assembly time: a slow
-   *  round-trip must not overstate how fresh the grounded state was (C2). */
   now: () => Date = () => new Date(),
 ): Promise<ChatResult> {
-  if (!isDeepSeekConfigured()) {
-    return {
-      ok: false,
-      reason: "not-configured",
-      error: "DeepSeek is not configured — add DEEPSEEK_API_KEY to use the copilot.",
-      code: "RT_E_LLM_NOT_CONFIGURED",
-    };
-  }
   if (!project || typeof project !== "object") {
     return {
       ok: false,
@@ -319,6 +503,25 @@ export async function chatOnceServer(
       reason: "error",
       error: "Copilot message is empty.",
       code: "RT_E_VALIDATION",
+    };
+  }
+  const tool = parseChatTool(text);
+  if (tool) {
+    const context = buildChatContext(project);
+    const arg = text.replace(/^\/\S+\s*/, "").trim();
+    return {
+      ok: true,
+      reply: runChatTool(tool, project, context, arg),
+      grounded: true,
+      provenance: chatProvenance(project, context, now()),
+    };
+  }
+  if (!isDeepSeekConfigured()) {
+    return {
+      ok: false,
+      reason: "not-configured",
+      error: KEYLESS_FREE_TEXT_ERROR,
+      code: "RT_E_LLM_NOT_CONFIGURED",
     };
   }
   // Cap the current message — a huge paste must not blow the context budget.
@@ -363,6 +566,16 @@ export async function chatOnceServer(
   });
 
   if (res.ok) {
+    // 185-H1: ok:true carries reply + provenance only — never a dual-channel error.
+    const dual = dualChannelFailDetail(res);
+    if (dual) {
+      return {
+        ok: false,
+        reason: "error",
+        error: `Copilot dual-channel response (${dual}) — never treat ok:true+error as a reply`,
+        code: "RT_E_INTERNAL",
+      };
+    }
     return {
       ok: true,
       reply: res.text,
@@ -370,14 +583,22 @@ export async function chatOnceServer(
       provenance: chatProvenance(project, context, contextAt),
     };
   }
-  return res.reason === "not-configured"
-    ? { ok: false, reason: "not-configured", code: res.code ?? "RT_E_INTERNAL" }
-    : {
-        ok: false,
-        reason: "error",
-        error: res.error,
-        // LlmResult documents code as always-present on provider failures; a
-        // missing code here is contract drift — internal, never prose-guessed.
-        code: res.code ?? "RT_E_INTERNAL",
-      };
+  // Race / mid-flight key loss: same honest keyless envelope as the early check
+  // (includes slash-tool pin — free-text still needs a key).
+  if (res.reason === "not-configured") {
+    return {
+      ok: false,
+      reason: "not-configured",
+      error: KEYLESS_FREE_TEXT_ERROR,
+      code: res.code ?? "RT_E_LLM_NOT_CONFIGURED",
+    };
+  }
+  return {
+    ok: false,
+    reason: "error",
+    error: res.error,
+    // LlmResult documents code as always-present on provider failures; a
+    // missing code here is contract drift — internal, never prose-guessed.
+    code: res.code ?? "RT_E_INTERNAL",
+  };
 }

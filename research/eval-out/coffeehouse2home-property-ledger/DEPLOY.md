@@ -1,6 +1,6 @@
 # DEPLOY.md — Coffeehouse2Home Property Ledger
 
-> machine-generated from RapidTool packet 16692201-777b-4cf6-b02b-a85f02e9c6a3; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet aa185020-cfff-49ac-9224-25b108274a17; regenerate, don't hand-edit.
 > > template derived from P9/P12 artifacts — verify credentials before any deploy
 
 ## What this is
@@ -55,97 +55,4 @@ No deployment is configured, wired or implied by this repository. Concretely:
 
 ## Recorded pipeline templates (P9/P12)
 
-Verbatim from the project artifacts — recorded, never executed:
-
-### P9 CI template — GitHub Actions workflow
-
-```text
-name: rapidtool-gate
-on: [pull_request]
-jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-```
-
-### P9 IaC sketch — IaC sketch
-
-```text
-# GCP + Firebase hosting
-hosting: firebase preview channels
-workers: cloud run, scale-to-zero
-gpu: provision only for local-edge promotion jobs
-```
-
-### P12 ADR — Architecture Decision Records
-
-```text
-# ADR-001 real estate entity model
-
-Status: accepted
-Decision: The product's state is modeled around buyer, flipper, property, rental, listing, work-order, manager, crew, lead, ledger, task, showing, payroll, job-cost, seller, tenant, contractor, item, house, estate, calendar, portfolio, material, supply, budget derived from the brief (P0 lattice).
-
-# ADR-002 track pipeline
-
-Status: accepted
-Decision: The product runs a sequential track → record → flip → show → publish → sync → lease → stage → rent → bid pipeline over its entities.
-
-# ADR-003 real estate integration boundaries
-
-Status: accepted
-Decision: External surfaces are listing/MLS data, comps + ARV inputs, escrow & title status — declarations, not runtime bindings.
-```
-
-### P12 OpenAPI — OpenAPI 3.1
-
-```text
-openapi: 3.1.0
-info:
-  title: Coffeehouse2Home Property Ledger API
-  version: "1.0.0"
-paths:
-  /v1/track:
-    get:
-      summary: track
-      responses:
-        "200":
-          description: ok
-  /v1/record:
-    post:
-      summary: record
-      responses:
-        "200":
-          description: ok
-  /v1/flip:
-    post:
-      summary: flip
-      responses:
-        "200":
-          description: ok
-  /v1/show:
-    post:
-      summary: show
-      responses:
-        "200":
-          description: ok
-  /v1/publish:
-    post:
-      summary: publish
-      responses:
-        "200":
-          description: ok
-  /v1/sync:
-    post:
-      summary: sync
-      responses:
-        "200":
-          description: ok
-```
-
+_None yet — the project has not reached the P9/P12 phases that record CI/IaC/ADR/OpenAPI templates._

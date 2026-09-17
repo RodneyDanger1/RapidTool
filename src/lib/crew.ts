@@ -16,6 +16,7 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
+import { classifyError, dualChannelFailDetail, type ErrorCode } from "./errors.ts";
 import type { Project } from "./types.ts";
 
 /** Live crew roles — a superset of the packet's four static seats (A8):
@@ -132,7 +133,14 @@ export type CrewRunResult =
       plan?: CrewPlanStep[] | null;
       critique?: CrewCritique | null;
     }
-  | { ok: false; reason: "not-configured" | "error"; error?: string };
+  | {
+      ok: false;
+      reason: "not-configured" | "error";
+      error?: string;
+      /** Machine-readable failure class (errors.ts). Stamped on every failure
+       *  path the server mints (185-H1 residual / RT_E parity with chat/wild). */
+      code?: ErrorCode;
+    };
 
 /** Public run options (the full orchestrator options live server-side). */
 export type CrewRunOptions = {
@@ -169,12 +177,25 @@ export async function runCrew(
   opts?: CrewRunOptions,
 ): Promise<CrewRunResult> {
   try {
-    return await runCrewServer({ data: { project, opts } });
+    const res = await runCrewServer({ data: { project, opts } });
+    // 185-H1 residual: server already fail-closes completer dual-channel, but
+    // a hostile/wrapped ok:true+error must never land as a usable crew run.
+    const dual = dualChannelFailDetail(res as { ok?: unknown; error?: unknown });
+    if (dual) {
+      return {
+        ok: false,
+        reason: "error",
+        error: `Crew dual-channel response (${dual}) — never treat ok:true+error as a run`,
+        code: "RT_E_INTERNAL",
+      };
+    }
+    return res;
   } catch (err) {
     return {
       ok: false,
       reason: "error",
       error: err instanceof Error ? err.message : String(err),
+      code: classifyError(err, "RT_E_INTERNAL"),
     };
   }
 }

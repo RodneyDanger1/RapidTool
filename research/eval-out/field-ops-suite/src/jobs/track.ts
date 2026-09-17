@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // src/jobs/track.ts — Implement job “track” against the contract
-// machine-generated from RapidTool packet 4cd56084-1d37-42f5-b025-b7e1304f8e31; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet 1bf0e807-f549-4335-938e-25dd71643cc2; regenerate, don't hand-edit.
 // This file hosts the machine-verified P6 synthesis module (project.generatedSource),
 // verbatim below. Its self-tests ran inside the engine isolate at P6 — keep them
 // green when you implement the surrounding jobs.

@@ -34,7 +34,7 @@ import { researchQueryText } from "./engine.ts";
 import { compileAgentPacket } from "./packet.ts";
 import { PHASES, phaseDef } from "./phases.ts";
 import { createPlanning } from "./planning.ts";
-import { classifyError } from "./errors.ts";
+import { classifyError, dualChannelFailDetail } from "./errors.ts";
 import type { ErrorCode } from "./errors.ts";
 import type { PlanCritique, PlanStep } from "./planning.ts";
 import type { LlmModel, LlmResult } from "./llm.ts";
@@ -650,6 +650,16 @@ function normalizeSearch(raw: unknown): SearchOutcome | null {
   const str = (v: unknown): string | undefined =>
     typeof v === "string" && v.trim() ? v.trim() : undefined;
   if (o.ok === true && Array.isArray(o.items)) {
+    // 185-H1: dual-channel `{ ok:true, error }` is never usable search success.
+    const dual = dualChannelFailDetail(o);
+    if (dual) {
+      return {
+        ok: false,
+        reason: "error",
+        error: dual,
+        code: "RT_E_INTERNAL",
+      };
+    }
     const items: ResearchItem[] = [];
     for (const it of o.items.slice(0, 5)) {
       if (!isPlainObject(it)) continue;
@@ -859,7 +869,19 @@ async function completeCrewTurn(
   for (let attempt = 0; attempt < CREW_TURN_MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, CREW_TURN_BACKOFF_MS));
     const res = await complete(prompt, { ...opts, timeoutMs: DEEPSEEK_LONG_TIMEOUT_MS });
-    if (res.ok) return res;
+    if (res.ok) {
+      // 185-H1: hostile dual-channel never counts as a completed turn.
+      const dual = dualChannelFailDetail(res);
+      if (dual) {
+        return {
+          ok: false,
+          reason: "error",
+          error: dual,
+          code: "RT_E_INTERNAL",
+        };
+      }
+      return res;
+    }
     if (res.code !== "RT_E_LLM_TIMEOUT") return res;
     last = res;
   }
@@ -886,13 +908,19 @@ export function createCrewRuntime(deps: {
   async function runCrew(project: Project, opts: CrewRunOptions = {}): Promise<CrewRunResult> {
     // Config gate FIRST — no key, no web search, no dispatch, no fabrication.
     if (deps.configured && !deps.configured()) {
-      return { ok: false, reason: "not-configured" };
+      return { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" };
     }
     const phase = normalizePhase(opts.phase ?? project.currentPhase);
     // Roles override is validated up front — an unknown role is an honest
     // error before any dispatch, garbage non-arrays fall back to the table.
     const override = resolveRolesOverride(opts.roles);
-    if (override.error) return { ok: false, reason: "error", error: override.error };
+    if (override.error)
+      return {
+        ok: false,
+        reason: "error",
+        error: override.error,
+        code: "RT_E_VALIDATION",
+      };
     const roles = override.roles ?? rolesForPhase(phase);
     const startedAt = Date.now();
     const session: CrewSession = {
@@ -997,8 +1025,13 @@ export function createCrewRuntime(deps: {
         session.status = res.reason === "not-configured" ? "stopped-no-key" : "error";
         session.endedAt = Date.now();
         return res.reason === "not-configured"
-          ? { ok: false, reason: "not-configured" }
-          : { ok: false, reason: "error", error: res.error ?? "crew agent call failed" };
+          ? { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" }
+          : {
+              ok: false,
+              reason: "error",
+              error: res.error ?? "crew agent call failed",
+              code: res.code ?? "RT_E_INTERNAL",
+            };
       }
 
       // 4) Collect the structured message (findings ride along as artifacts).
@@ -1090,8 +1123,13 @@ export function createCrewRuntime(deps: {
       session.status = planRes.reason === "not-configured" ? "stopped-no-key" : "error";
       session.endedAt = Date.now();
       return planRes.reason === "not-configured"
-        ? { ok: false, reason: "not-configured" }
-        : { ok: false, reason: "error", error: planRes.error ?? "plan steps call failed" };
+        ? { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" }
+        : {
+            ok: false,
+            reason: "error",
+            error: planRes.error ?? "plan steps call failed",
+            code: "RT_E_INTERNAL",
+          };
     }
     const planned = planRes.steps; // full machine plan (≤ maxPlanSteps, ≤ 8)
     if (session.artifacts.length < maxArtifacts) {
@@ -1183,8 +1221,25 @@ export function createCrewRuntime(deps: {
         session.status = res.reason === "not-configured" ? "stopped-no-key" : "error";
         session.endedAt = Date.now();
         return res.reason === "not-configured"
-          ? { ok: false, reason: "not-configured" }
-          : { ok: false, reason: "error", error: res.error ?? "crew step call failed" };
+          ? { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" }
+          : {
+              ok: false,
+              reason: "error",
+              error: res.error ?? "crew step call failed",
+              code: res.code ?? "RT_E_INTERNAL",
+            };
+      }
+      // 185-H1: plan-act path uses deps.complete directly — dual-channel fail-close.
+      const dual = dualChannelFailDetail(res);
+      if (dual) {
+        session.status = "error";
+        session.endedAt = Date.now();
+        return {
+          ok: false,
+          reason: "error",
+          error: dual,
+          code: "RT_E_INTERNAL",
+        };
       }
 
       const msg = parseAgentOutput(role, res.text);

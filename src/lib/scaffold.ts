@@ -12,6 +12,12 @@
 // for game projects — a placeholder game-asset manifest. Nothing touches the
 // filesystem: callers (CLI emit, UI) write the returned {path, body} pairs.
 //
+// fixes/216b (106 T-08 / F-05): no emitted assertion may be unable to fail.
+// An A7 row the emitted modules give no surface to assert against is emitted
+// as a visibly-marked test.skip("<id> — NOT IMPLEMENTED") — never the old
+// always-true `"<id>".length > 0` pair — and the README counts those rows
+// separately from the rows that carry a real assertion.
+//
 // Pure + deterministic: same Project in ⇒ byte-identical files out. No
 // Date.now(), no fs, no randomness; every timestamp is derived from project
 // fields. All dynamic inserts are escaped (JSON stringify for code, single-
@@ -31,6 +37,11 @@
 // reserved / duplicate tree rows are refused loudly (result.warnings). An
 // empty or absent tree ⇒ the legacy single-module embed, byte-identical to
 // pre-M2 output.
+//
+// fixes/196: leftover job-* nodes after the first hosted generatedSource
+// module re-export that host (emitTreeBridge) — never a TODO(E-15) throw stub
+// and never invented job bodies. No generatedSource ⇒ leftover jobs stay
+// emitJobStub (byte-identical keyless floor). Tree-covered paths still skip.
 //
 // Honest local-only framing (E-27): DEPLOY.md is a template derived from the
 // P9/P12 artifacts recorded in the project; it states that the pipeline never
@@ -190,6 +201,20 @@ const TREE_ALLOWED_ROOTS = [
   "tests/",
 ];
 
+/**
+ * Exact repo-relative paths a generatedTree file may be assembled at even
+ * though they sit outside every TREE_ALLOWED_ROOTS prefix.
+ *
+ * fixes/216d (106 T-04 / F-03): the engine's own tree ENTRY barrel is written
+ * at `src/generated.ts` (codegen.server.ts `TREE_ENTRY_PATH`) — a path that
+ * starts with NO allowed root ("src/generated/" needs the trailing slash), so
+ * the allow-list refused the declared entry BY CONSTRUCTION: the barrel was
+ * dropped and the entry silently degraded to the alphabetically-first tree
+ * file. Exact match (never a prefix) so the widening cannot admit look-alikes
+ * such as `src/generated.ts.bak`.
+ */
+const TREE_ALLOWED_FILES = new Set(["src/generated.ts"]);
+
 /** Scaffold-owned files a tree may never overwrite (tests/oracle.spec.ts is
  * the machine-verified acceptance contract — fixes/135 — always emitted by
  * the scaffold itself; boot entries live outside the allowed roots). */
@@ -219,7 +244,10 @@ function treePathRefusal(raw: unknown): string | null {
     return `path ${JSON.stringify(p)} contains an empty or traversal (..) segment`;
   if (parts.some((seg) => !TREE_SEGMENT.test(seg)))
     return `path ${JSON.stringify(p)} contains an unsafe segment (allowed: [A-Za-z0-9._-])`;
-  if (!TREE_ALLOWED_ROOTS.some((root) => p.startsWith(root)))
+  if (
+    !TREE_ALLOWED_ROOTS.some((root) => p.startsWith(root)) &&
+    !TREE_ALLOWED_FILES.has(p)
+  )
     return `path ${JSON.stringify(p)} is outside the scaffold's src/ subdirs and tests/`;
   return null;
 }
@@ -330,6 +358,12 @@ function tsImportPath(fromDir: string, toPath: string): string {
   const hadExt = /\.[A-Za-z0-9]+$/.test(String(toPath ?? ""));
   const ext = hadExt ? String(toPath).match(/\.[A-Za-z0-9]+$/)?.[0] ?? "" : ".ts";
   return `${relSpecifier(fromDir, toPath)}${ext}`;
+}
+
+/** Directory part of an emitted (sanitized) repo-relative path ("." at root). */
+function dirOf(path: string): string {
+  const slash = String(path ?? "").lastIndexOf("/");
+  return slash > 0 ? String(path).slice(0, slash) : ".";
 }
 
 /**
@@ -774,20 +808,28 @@ function emitTreeBridge(
   ].join("\n");
 }
 
-/** ui node: kind-appropriate shell (webapp → React; game → canvas; else CLI-ish TS). */
+/**
+ * ui node: kind-appropriate shell (webapp → React; game → canvas; else CLI-ish TS).
+ *
+ * fixes/216d (106 T-05 / F-03): a shell that surfaces generated exports imports
+ * the module the emitter ACTUALLY writes as the generated entry — `genEntry.path`
+ * (the tree ENTRY in tree mode, else the hosted P6 module), resolved relative to
+ * the emitted UI file (`genEntry.from`) — never the literal "../generated.ts",
+ * which the path allow-list refuses and nothing ever wrote (a guaranteed
+ * dangling specifier in every tree-mode webapp). `genEntry === null` ⇒ no
+ * generated substance at all ⇒ no generated import in the shell.
+ */
 function emitUi(
   node: { file: string; purpose: string },
   project: Project,
   kind: ProjectKind,
+  genEntry: { from: string; path: string } | null,
 ): string {
   if (kind === "webapp") {
-    const hasGenerated =
-      (typeof project.generatedSource === "string" && project.generatedSource.trim().length > 0) ||
-      (Array.isArray(project.generatedTree) && project.generatedTree.length > 0);
-    const genImport = hasGenerated
-      ? [`import * as generated from "../generated.ts";`, ""]
+    const genImport = genEntry
+      ? [`import * as generated from ${jstr(tsImportPath(dirOf(genEntry.from), genEntry.path))};`, ""]
       : [];
-    const genBody = hasGenerated
+    const genBody = genEntry
       ? [
           `  const exported = Object.keys(generated);`,
           `  return (`,
@@ -811,9 +853,10 @@ function emitUi(
     return [
       ...sourceHeader(node.file, node.purpose, project, [
         "// Operator surfaces bound to generated modules (P8). Not a stub wall:",
-        "// the barrel at src/generated.ts is imported when P6 produced a module.",
+        "// the generated entry module (the file this emitter wrote) is imported",
+        "// when P6 produced one — never a path nothing writes.",
       ]),
-      ...(hasGenerated ? [] : [`import { useState } from "react";`]),
+      ...(genEntry ? [] : [`import { useState } from "react";`]),
       ...genImport,
       `export function Console() {`,
       ...genBody,
@@ -896,7 +939,133 @@ type OracleSurfaceCtx = {
   treeEntryPath?: string | null;
   /** Sorted accepted tree paths (for the emitted file-list comment). */
   treePaths?: string[];
+  /**
+   * leftover job-* labels whose nodes re-export the hosted generatedSource
+   * module (fixes/196). Oracle rows for these jobs must NOT assert the
+   * TODO(E-15) throw — they are bridges, not stubs. Stub leftover jobs
+   * (no generatedSource) are omitted here and MAY still assert throw.
+   */
+  bridgedJobLabels?: Iterable<string>;
+  /**
+   * fixes/216b (106 T-08 / F-05): the row-classification surface, built ONCE
+   * per scaffold so the emitted rows and the README census cannot disagree
+   * about which rows carry a real assertion. scaffoldProject passes the same
+   * object it counts; when absent, emitOracleSpec derives it from the paths
+   * above (byte-identical — the same rules, one place).
+   */
+  rowSurface?: OracleRowSurface;
 };
+
+// ---------------------------------------------------------------------------
+// fixes/216b (106 T-08 / F-05) — no emitted assertion may be unable to fail.
+//
+// The scaffold emits one test per A7 oracle row. Rows the emitted modules give
+// a surface to assert against carry a REAL assertion (the seam rejection / the
+// template's phase bookkeeping / the endpoint contract). Rows they do not were
+// previously emitted as an always-true pair —
+//   assert.ok("<id>".length > 0, "row id is pinned");
+//   assert.ok("<prose>".length >= 0, "row prose recorded");
+// which cannot fail under any change to any file, so `npm test` printed the six
+// rows that matter as green while the product's contract had zero coverage.
+// The verdict for those rows is now "not-implemented": a visibly-marked
+// `test.skip("<id> — NOT IMPLEMENTED")` (node:test reports it as skipped, never
+// as a pass) that the README counts separately from the assertable rows. The
+// classification lives here ONCE — the emitted spec and the README census both
+// call oracleRowKind(), so a counted row and an emitted row can never drift.
+// ---------------------------------------------------------------------------
+
+/** Which honest assertion one A7 oracle row can carry today. */
+type OracleRowKind =
+  | "endpoint-stub"
+  | "bridged-host"
+  | "phase-bookkeeping"
+  | "not-implemented";
+
+/**
+ * The emitted-module surface the oracle rows are classified against: the api
+ * module's route() (endpoint truth), the hosted template module's phase
+ * bookkeeping, and the leftover-job bridges (fixes/196). Only .ts modules are
+ * ever importable (node:test strip-types cannot load .tsx/JSX).
+ */
+type OracleRowSurface = {
+  /** api node module is importable (non-tree mode, .ts path). */
+  apiOk: boolean;
+  /** the hosted generatedSource module is importable AND is the template. */
+  hostOk: boolean;
+  /** leftover job labels bridged to the hosted module — never assert the stub. */
+  bridged: ReadonlySet<string>;
+  /** A6 contract endpoints (the row's job → a routable seam). */
+  endpoints: { method: string; path: string; job: string }[];
+};
+
+/** Build the row surface from the emitter's paths (one derivation, no drift). */
+function oracleRowSurface(input: {
+  /** fixes/144 M2: tree assembly mode ⇒ only the tree entry is importable. */
+  treeEntryOk: boolean;
+  /** sanitized api node path (null/absent when the graph has no api node). */
+  apiPath?: string | null;
+  /** path hosting generatedSource (only the template shape is importable). */
+  hostPath?: string | null;
+  /** true when the hosted module is the deterministic P6 template. */
+  template: boolean;
+  /** leftover job labels bridged to the hosted module (fixes/196). */
+  bridged?: Iterable<string>;
+  /** A6 contract endpoints recorded on the project. */
+  endpoints?: { method: string; path: string; job: string }[];
+}): OracleRowSurface {
+  return {
+    apiOk:
+      !input.treeEntryOk && typeof input.apiPath === "string" && /\.ts$/.test(input.apiPath),
+    hostOk:
+      !input.treeEntryOk &&
+      typeof input.hostPath === "string" &&
+      /\.ts$/.test(input.hostPath) &&
+      input.template,
+    bridged: new Set<string>(input.bridged ? [...input.bridged] : []),
+    endpoints: Array.isArray(input.endpoints) ? input.endpoints : [],
+  };
+}
+
+/**
+ * Classify ONE A7 oracle row (see the block comment above). `bridge` wins over
+ * the endpoint seam exactly as the pre-fix branch order did: a leftover job
+ * that re-exports the hosted module is a bridge, not a stub to reject.
+ */
+function oracleRowKind(row: { job?: unknown }, surface: OracleRowSurface): OracleRowKind {
+  const bridged = surface.bridged.has(String(row.job));
+  const hasEndpoint = surface.endpoints.some((e) => e.job === row.job);
+  if (bridged) return surface.hostOk ? "bridged-host" : "not-implemented";
+  if (surface.apiOk && hasEndpoint) return "endpoint-stub";
+  return surface.hostOk ? "phase-bookkeeping" : "not-implemented";
+}
+
+/** The row census the README prints: assertable rows vs NOT IMPLEMENTED rows. */
+type OracleRowCensus = {
+  /** rows that emit a test (non-object rows are skipped by the emitter). */
+  total: number;
+  /** rows whose emitted test carries a real, failable assertion. */
+  assertable: number;
+  /** ids emitted as visibly-marked `test.skip("<id> — NOT IMPLEMENTED")`. */
+  notImplemented: string[];
+};
+
+/** Classify every oracle row once — the emitted spec + the README share this. */
+function censusOracleRows(
+  rows: ReadonlyArray<Project["oracle"][number]>,
+  surface: OracleRowSurface,
+): OracleRowCensus {
+  const notImplemented: string[] = [];
+  let assertable = 0;
+  for (const row of rows) {
+    if (row === null || typeof row !== "object") continue;
+    if (oracleRowKind(row, surface) === "not-implemented") {
+      notImplemented.push(typeof row.id === "string" && row.id ? row.id : "(unnamed row)");
+    } else {
+      assertable += 1;
+    }
+  }
+  return { total: assertable + notImplemented.length, assertable, notImplemented };
+}
 
 // ---------------------------------------------------------------------------
 // fixes/150 (G2) — capability-presence demands (SEMANTIC-FAILURE REPAIR).
@@ -1012,6 +1181,10 @@ export function capabilityDemands(project: Project): CapabilityDemand[] {
  *     seam REJECTS — an honest statement of the current surface that FAILS
  *     the moment the seam is implemented (that is the signal to replace it
  *     with the row's real acceptance assertion);
+ *   - a row with NO emitted module surface to assert against is emitted as a
+ *     visibly-marked test.skip("<id> — NOT IMPLEMENTED") (fixes/216b — 106
+ *     T-08 / F-05): never an always-true assertion, reported by node:test as
+ *     skipped (never as a pass), and counted separately by the README census;
  *   - nothing here pretends a stub satisfies its brief.
  */
 function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
@@ -1029,12 +1202,24 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   // legacy host import rule; .tsx tree files stay emitted but never imported).
   const treeEntryOk =
     typeof ctx.treeEntryPath === "string" && /\.ts$/.test(ctx.treeEntryPath);
+  // fixes/216b (106 T-08 / F-05): the classification surface the row loop below
+  // switches on. scaffoldProject passes the very object it counts for the
+  // README census; a direct call derives it from the same fields with the same
+  // rules (oracleRowSurface), so the two can never disagree.
+  const surface: OracleRowSurface =
+    ctx.rowSurface ??
+    oracleRowSurface({
+      treeEntryOk,
+      apiPath: ctx.apiPath,
+      hostPath: ctx.hostPath,
+      template,
+      bridged: ctx.bridgedJobLabels,
+      endpoints,
+    });
   const storeOk =
     !treeEntryOk && typeof ctx.storePath === "string" && /\.ts$/.test(ctx.storePath);
-  const apiOk =
-    !treeEntryOk && typeof ctx.apiPath === "string" && /\.ts$/.test(ctx.apiPath);
-  const hostOk =
-    !treeEntryOk && typeof ctx.hostPath === "string" && /\.ts$/.test(ctx.hostPath) && template;
+  const apiOk = surface.apiOk;
+  const hostOk = surface.hostOk;
   // Mirror the engine's P6 module build: lattice jobs (≤5) or ["core"].
   const expectedJobs = latticeJobs.length ? latticeJobs.slice(0, 5) : ["core"];
   const expectedJson = (v: unknown): string => JSON.stringify(v);
@@ -1067,6 +1252,10 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     "//   * an oracle row whose target seam is a TODO(E-15) stub asserts the seam",
     "//     rejects — that test FAILS the moment the seam is implemented, which is",
     "//     the signal to replace it with the row's real acceptance assertion;",
+    "//   * an oracle row with NO emitted module surface to assert against (106",
+    "//     T-08 / F-05) is a visibly-marked test.skip(\"<id> — NOT IMPLEMENTED\") —",
+    "//     never an always-true assertion; node:test reports it as skipped (never",
+    "//     a pass) and the README counts it separately from the assertable rows;",
     "//   * nothing here pretends a stub satisfies its brief.",
     "// Run: node --experimental-strip-types --test tests/oracle.spec.ts",
     ...(treeEntryOk
@@ -1125,8 +1314,12 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       ...treePaths.map((p) => `//   ${p}${p === ctx.treeEntryPath ? "  (entry)" : ""}`),
       "",
       "test(\"tree.entry — the generated tree entry module loads and cross-file imports resolve\", () => {",
-      "  assert.ok(treeModule, \"entry namespace present after import\");",
-      "  assert.equal(typeof treeModule, \"object\");",
+      "  // The import at the top of this spec IS the load assertion: a missing entry",
+      "  // or an unresolvable cross-file import fails the spec before any test runs.",
+      "  // Export names are generated content — the one stable assertion is that the",
+      "  // namespace carries at least one real export. (106 T-08 / F-05: the pre-fix",
+      "  // `assert.ok(treeModule)` / `typeof === \"object\"` pair could never fail, so",
+      "  // it was removed rather than left to read as evidence.)",
       "  const names = Object.keys(treeModule);",
       '  assert.ok(names.length > 0, "entry exports real names: " + names.join(", "));',
       "});",
@@ -1231,16 +1424,24 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   }
 
   // --- 4. A7 oracle rows — pinned ids, honest current-surface assertions ----
+  // fixes/216b (106 T-08 / F-05): every row either asserts a real current
+  // behavior that can fail, or is a visibly-marked test.skip("<id> — NOT
+  // IMPLEMENTED") — never an always-true assertion.
   lines.push(
     "// ---------------------------------------------------------------------------",
-    "// 4. Oracle rows (A7) — one test per row under its PINNED id.",
+    "// 4. Oracle rows (A7) — one test per row under its PINNED id; a row with no",
+    "// emitted module surface is a visible test.skip(\"<id> — NOT IMPLEMENTED\")",
+    "// (fixes/216b) — skipped, never green, and counted by the README census.",
     "// ---------------------------------------------------------------------------",
     "",
   );
   if (!rows.length) {
+    // fixes/216b (106 T-08 / F-05): this row used to be assert.equal(true, true)
+    // — a test that cannot fail is not evidence. With no A7 rows there is
+    // nothing to assert, so the spec says exactly that with a visible skip.
     lines.push(
-      `test("no-oracle: project has no A7 rows yet — run the pipeline to P0/P1", () => {`,
-      `  assert.equal(true, true, "no oracle rows recorded — nothing to assert yet");`,
+      `test.skip("no-oracle: project has no A7 rows yet — run the pipeline to P0/P1", () => {`,
+      `  assert.fail("no A7 oracle rows recorded — nothing to assert yet (re-emit after P0/P1)");`,
       `});`,
       "",
     );
@@ -1255,11 +1456,29 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     const job = prose(row.job);
     const ep = endpoints.find((e) => e.job === row.job);
     const wantsCheckpoint = /checkpoint/i.test(expect);
+    const kind = oracleRowKind(row, surface);
+    // The head is decided from the classification: a row with a real surface
+    // keeps the bare pinned id as its test name (E-08 — verified rows match on
+    // it); a row without one appends the visible NOT IMPLEMENTED marker.
+    const skipRow = kind === "not-implemented" || (kind === "endpoint-stub" && !ep);
     lines.push(
-      `test(${jstr(id)}, async () => {`,
+      skipRow
+        ? `test.skip(${jstr(`${id} — NOT IMPLEMENTED`)}, () => {`
+        : `test(${jstr(id)}, async () => {`,
       `  // A7 row ${jstr(id)} ${name ? `"${name}"` : ""} — ${given} => ${expect}`,
     );
-    if (apiOk && ep) {
+    if (kind === "bridged-host") {
+      // leftover job-* re-exports the hosted P6 module (fixes/196) — not a
+      // TODO(E-15) stub and not an invented job body. Do not assert the
+      // TODO throw. Template host ⇒ same phase bookkeeping as the host.
+      lines.push(
+        `  // Leftover job ${job} re-exports the hosted P6 module (fixes/196).`,
+        `  // Not a TODO(E-15) stub and not an invented job body. Executable`,
+        `  // rule today: the hosted module's phase bookkeeping.`,
+        `  assert.throws(() => synthesize({ name: "x", phase: 13, job: JOBS[0] }), /invalid phase/);`,
+        `  assert.throws(() => synthesize({ name: "x", phase: -1, job: JOBS[0] }), /invalid phase/);`,
+      );
+    } else if (kind === "endpoint-stub" && ep) {
       lines.push(
         `  // Target seam: ${job} (${ep.method} ${ep.path}). Today it is a TODO(E-15) stub —`,
         `  // the route rejects instead of returning "${expect}". Asserting that real`,
@@ -1278,7 +1497,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
           `  assert.equal(s.read(6)?.status, "sealed");`,
         );
       }
-    } else if (hostOk) {
+    } else if (kind === "phase-bookkeeping") {
       lines.push(
         `  // Row targets ${job || "the phase graph"} — no HTTP endpoint exists for it. The`,
         `  // only executable rule today is the P6 module's phase bookkeeping: an`,
@@ -1287,12 +1506,20 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
         `  assert.throws(() => synthesize({ name: "x", phase: -1, job: JOBS[0] }), /invalid phase/);`,
       );
     } else {
+      // fixes/216b (106 T-08 / F-05): the tautological floor is gone. No emitted
+      // module surface targets this row (no HTTP endpoint seam, no P6 template
+      // host), so it can carry NO real assertion — a test that cannot fail is
+      // not evidence. The row is emitted as a VISIBLE skip instead: the pinned
+      // id is preserved, node:test reports it as skipped (never as a pass), and
+      // the README counts it separately from the assertable rows. The body
+      // fails loudly if it is ever un-skipped before the surface lands.
       lines.push(
-        `  // No emitted module surface targets this row yet (no endpoint, no P6`,
-        `  // template host). Honest floor: the pinned id + prose are recorded so a`,
-        `  // later emit (after P0/P1) upgrades this to a real assertion.`,
-        `  assert.ok(${jstr(id)}.length > 0, "row id is pinned");`,
-        `  assert.ok(${jstr(name || given || expect)}.length >= 0, "row prose recorded");`,
+        `  // NOT IMPLEMENTED: no emitted module surface targets this row yet (106`,
+        `  // T-08 / F-05). The pre-fix emission asserted ${jstr(`${id}`)}.length > 0 —`,
+        `  // which cannot fail, so it was not evidence; this row is skipped instead.`,
+        `  // Replace the skip with the row's real acceptance assertion when the`,
+        `  // seam (HTTP endpoint or P6 host) lands.`,
+        `  assert.fail(${jstr(`${id} is NOT IMPLEMENTED — replace this skip with the row's real acceptance assertion`)});`,
       );
     }
     lines.push(`});`, "");
@@ -1583,17 +1810,28 @@ function phaseRailRows(project: Project): string[] {
   return rows;
 }
 
-function commandBlock(kind: ProjectKind, project: Project): string[] {
+function commandBlock(
+  kind: ProjectKind,
+  project: Project,
+  census: OracleRowCensus | null,
+): string[] {
+  const notImplemented = census?.notImplemented.length ?? 0;
   const base = [
     "# install + verify the emitted tree (Node >= 22)",
     "npm install",
     "npm run typecheck",
     ...(project.oracle.length
       ? [
-          "# oracle spec = REAL assertions over the emitted modules (no todo stubs); green",
-          "# means the scaffold modules are intact + every oracle seam is still honestly",
-          "# stubbed — a seam test fails the moment that seam is implemented, which is",
-          "# the cue to replace it with the row's real acceptance assertion",
+          "# oracle spec = REAL assertions over the emitted modules (no todo stubs);",
+          "# green means the scaffold modules are intact + every oracle seam is still",
+          "# honestly stubbed — a seam test fails the moment that seam is implemented,",
+          "# which is the cue to replace it with the row's real acceptance assertion.",
+          ...(notImplemented
+            ? [
+                `# ${notImplemented} row(s) are NOT IMPLEMENTED and appear as skipped in this`,
+                "# run (never green) — see the oracle-row census under Honest boundaries",
+              ]
+            : []),
           "npm test",
         ]
       : ["# no oracle rows yet — run the pipeline to P0/P1, then re-emit"]),
@@ -1614,6 +1852,8 @@ function readmeBody(
   kind: ProjectKind,
   specRows: [string, string][],
   treeRows: [string, string][] = [],
+  oracleCensus: OracleRowCensus | null = null,
+  treeRefusals: string[] = [],
 ): string {
   const files: [string, string][] = [
     ["README.md", "this file — mission + commands"],
@@ -1647,6 +1887,31 @@ function readmeBody(
   const coreLine = treeRows.length
     ? "- The machine-verified substance is the generated tree under `src/` + `tests/` (project.generatedTree — fixes/144 M2): every file was emitted verbatim at its own repo-relative path and content-hashed at P6; `tests/oracle.spec.ts` imports the tree's ENTRY module (the file at the path the legacy P6 host would have used) so `npm test` executes the real tree. Scaffold infrastructure outside the tree is exactly that — infrastructure."
     : "- The machine-verified core is the generated P6 module under `src/` (project.generatedSource); everything else is a typed stub awaiting implementation.";
+  // fixes/216b (106 T-08 / F-05): the oracle-row census. A row the emitted
+  // modules give no surface to assert against is NOT IMPLEMENTED — emitted as a
+  // visibly-marked `test.skip("<id> — NOT IMPLEMENTED")` and counted HERE,
+  // separately from the rows that carry a real assertion, so a skipped row can
+  // never read as green evidence. Rendered only when the project has rows;
+  // backticks are stripped from ids so a hostile row id cannot break the line.
+  const censusIds = (ids: string[]): string =>
+    ids.map((raw) => `\`${prose(raw).replace(/`/g, "'")}\``).join(", ");
+  const oracleRowLine =
+    oracleCensus === null
+      ? null
+      : oracleCensus.notImplemented.length === 0
+        ? `- Oracle rows (\`tests/oracle.spec.ts\`): all ${oracleCensus.total} pinned row(s) assert the emitted modules' real current behavior — no NOT IMPLEMENTED skips.`
+        : `- Oracle rows (\`tests/oracle.spec.ts\`): ${oracleCensus.assertable} of ${oracleCensus.total} pinned row(s) assert the emitted modules' real current behavior; ${oracleCensus.notImplemented.length} are NOT IMPLEMENTED — emitted as visibly-marked \`test.skip("<id> — NOT IMPLEMENTED")\`, reported by \`npm test\` as skipped (never green): ${censusIds(oracleCensus.notImplemented)}.`;
+  // fixes/216d (106 T-04 / F-03): a refused generatedTree row is NEVER a silent
+  // drop. The reference to "the oracle-row census under Honest boundaries" in
+  // commandBlock is only true when oracleRowLine actually renders (inserted
+  // below); a refusal is recorded in the shipped README itself — declared path
+  // + reason — so the artifact says which declared file is absent and why.
+  // Every entry is single-line (refusal text JSON-escapes paths) and backticks
+  // are stripped, so a hostile row cannot break the markdown.
+  const refusalLine =
+    treeRefusals.length === 0
+      ? null
+      : `- **${treeRefusals.length} generated tree row(s) were REFUSED and are NOT on disk** (never a silent drop — each declared file below is absent from this scaffold): ${censusIds(treeRefusals)}.`;
   const body = [
     `# ${mdLine(project.name, 120)}`,
     "",
@@ -1672,7 +1937,7 @@ function readmeBody(
     "## Commands",
     "",
     "```text",
-    ...commandBlock(kind, project),
+    ...commandBlock(kind, project, oracleCensus),
     "```",
     "",
     "## Machine record",
@@ -1683,6 +1948,8 @@ function readmeBody(
     "## Honest boundaries",
     "",
     coreLine,
+    oracleRowLine,
+    refusalLine,
     "- `src/ui/` is a contract-level shell (P8 interface contract), not a finished UI.",
     "- Deploy templates from P9/P12 are recorded artifacts only — see DEPLOY.md; nothing here deploys by itself.",
     "- `assets/` and `public/` are expected at the emitted scaffold and are NOT engine-generated.",
@@ -1980,8 +2247,71 @@ export function scaffoldProject(project: Project): ScaffoldResult {
         )
     : [];
 
+  // --- fixes/216b (106 T-08 / F-05): oracle row census ----------------------
+  // Classified ONCE, here, BEFORE the README is rendered: the emitted spec and
+  // the README census must agree on which A7 rows carry a real assertion. The
+  // host the node loop below will write generatedSource to is deterministic
+  // (the FIRST job-* node in topo order, else the legacy src/generated.ts
+  // fallback — the same rule the loop applies), so it can be named up front.
+  const jobLabelOf = (node: { purpose: string }): string | null => {
+    const m = node.purpose.match(/["“]([^"”]+)["”]/);
+    return m ? collapse(m[1]) : null;
+  };
+  const generated = (project.generatedSource ?? "").trim();
+  /** Path the node loop below will host generatedSource at (null when none). */
+  const plannedHostPath: string | null =
+    treeMode || !generated
+      ? null
+      : (() => {
+          const firstJob = ordered.find((o) => o.node.id.startsWith("job-"));
+          return firstJob
+            ? safeNodePath(firstJob.node.file, firstJob.node.id, firstJob.index)
+            : "src/generated.ts";
+        })();
+  /** leftover job labels the loop bridges to that host (fixes/196). */
+  const plannedBridgedLabels = new Set<string>();
+  if (!treeMode && plannedHostPath) {
+    let seenHostJob = false;
+    for (const { node } of ordered) {
+      if (!node.id.startsWith("job-")) continue;
+      if (!seenHostJob) {
+        seenHostJob = true; // the host node itself is not a bridge
+        continue;
+      }
+      const label = jobLabelOf(node);
+      if (label) plannedBridgedLabels.add(label);
+    }
+  }
+  /**
+   * fixes/216d (106 T-05 / F-03): the module the emitter ACTUALLY writes as the
+   * generated entry — the tree ENTRY (tree mode) or the module hosting
+   * generatedSource (legacy mode), both resolved above from the same data the
+   * node loop consumes. The emitted webapp shell imports exactly this path
+   * (relative to its own emitted file); null ⇒ no generated substance at all,
+   * so the shell carries no generated import. Pre-fix the shell imported the
+   * literal "../generated.ts", which the allow-list refused ⇒ dangling.
+   */
+  const generatedEntryPath: string | null = treeMode ? treeEntryPath : plannedHostPath;
+  // The surface the spec's row loop switches on (mirrors the ctx it receives:
+  // tree mode imports only the tree entry, so api/host/bridge surfaces are off).
+  const oracleSurface = oracleRowSurface({
+    treeEntryOk: treeMode && typeof treeEntryPath === "string" && /\.ts$/.test(treeEntryPath),
+    apiPath: treeMode ? null : apiPath,
+    hostPath: treeMode ? null : plannedHostPath,
+    template: isTemplateModule(generated),
+    bridged: treeMode ? [] : plannedBridgedLabels,
+    endpoints:
+      project.contracts && Array.isArray(project.contracts.endpoints)
+        ? project.contracts.endpoints
+        : [],
+  });
+  const oracleCensus = proj.oracle.length ? censusOracleRows(proj.oracle, oracleSurface) : null;
+
   // --- Root documents + skeleton files -------------------------------------
-  push("README.md", readmeBody(proj, kind, specRows, treeDocRows));
+  push(
+    "README.md",
+    readmeBody(proj, kind, specRows, treeDocRows, oracleCensus, treeRefusals),
+  );
   push("DEPLOY.md", deplyNotes(proj));
   push(".env.example", envExample(kind));
   push("package.json", packageJson(kind, proj, proj.oracle.length > 0));
@@ -2014,14 +2344,14 @@ export function scaffoldProject(project: Project): ScaffoldResult {
 
   // --- Spec-graph modules in topo order (nodes/ordered computed above) -------
 
-  const jobLabelOf = (node: { purpose: string }): string | null => {
-    const m = node.purpose.match(/["“]([^"”]+)["”]/);
-    return m ? collapse(m[1]) : null;
-  };
-
-  const generated = (project.generatedSource ?? "").trim();
+  // 216b: `jobLabelOf` and `generated` are declared ONCE, above, in the oracle-row
+  // census block. This second pair was a duplicate in the SAME function scope
+  // (TS2451 — Cannot redeclare block-scoped variable), left behind when the census
+  // block was inserted ahead of it. Removed; the earlier declarations serve this
+  // code too (identical bodies, same `${project.generatedSource}` source).
   let hosted = false;
   let hostPath: string | null = null;
+  const bridgedJobLabels = new Set<string>();
   for (const { node, index } of ordered) {
     // The "tests" node materializes as tests/oracle.spec.ts below (single
     // emission); it is not a src module.
@@ -2039,7 +2369,12 @@ export function scaffoldProject(project: Project): ScaffoldResult {
       if (treeByPath.has(path)) continue;
       body =
         node.id === "ui"
-          ? emitUi(node, proj, kind)
+          ? emitUi(
+              node,
+              proj,
+              kind,
+              generatedEntryPath ? { from: path, path: generatedEntryPath } : null,
+            )
           : emitTreeBridge(
               { file: path, purpose: node.purpose, id: node.id },
               proj,
@@ -2059,11 +2394,28 @@ export function scaffoldProject(project: Project): ScaffoldResult {
         body = emitGeneratedHost(node, proj, generated);
         hosted = true;
         hostPath = path;
+      } else if (generated && hosted && hostPath) {
+        // leftover job-* after the hosted generatedSource: re-export the
+        // hosted module (fixes/196). Never a TODO throw stub and never an
+        // invented job body (flip/record/show/publish). Keyless (no
+        // generatedSource) leftover jobs stay emitJobStub below.
+        body = emitTreeBridge(
+          { file: path, purpose: node.purpose, id: node.id },
+          proj,
+          hostPath,
+        );
+        const label = jobLabelOf(node);
+        if (label) bridgedJobLabels.add(label);
       } else {
         body = emitJobStub(node, proj, jobLabelOf(node));
       }
     } else if (node.id === "ui") {
-      body = emitUi(node, proj, kind);
+      body = emitUi(
+        node,
+        proj,
+        kind,
+        generatedEntryPath ? { from: path, path: generatedEntryPath } : null,
+      );
     } else {
       body = emitJobStub(node, proj, jobLabelOf(node));
     }
@@ -2100,7 +2452,7 @@ export function scaffoldProject(project: Project): ScaffoldResult {
             treeEntryPath,
             treePaths: treeAccepted.map((f) => f.path),
           })
-        : emitOracleSpec(proj, { storePath, apiPath, hostPath }),
+        : emitOracleSpec(proj, { storePath, apiPath, hostPath, bridgedJobLabels }),
     );
   }
 

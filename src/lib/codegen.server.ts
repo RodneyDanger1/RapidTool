@@ -27,8 +27,9 @@
 //      delivery kind ("app" = webapp / "tool" / "game") and every >8-signature
 //      spec routes to the chunked tree REGARDLESS of signature count — a
 //      ≤8-signature webapp brief must never fall into the single-module path
-//      (fixes/145 M1=0 root cause); >8 signatures ⇒ one pro-tier call PER chunk
-//      (deepseek-v4-pro, json:true, thinking:false — fixes/156 E1: a
+//      (fixes/145 M1=0 root cause); >8 signatures ⇒ one call PER chunk
+//      (216 T0.1: the FLASH tier — fixes/125's "pro is stronger" premise is
+//      inverted by V4.1-Flash; json:true, thinking:false — fixes/156 E1: a
 //      structured json envelope needs OUTPUT budget, not chain-of-thought, so
 //      pro reasoning is DISABLED instead of out-budgeted; maxTokens 32 000)
 //      with the
@@ -65,8 +66,8 @@
 //      generatedSource = the verified module, lastTest {label:"tested",
 //      evidenceHash}, the kind-"code" artifact "Generated module (LLM,
 //      machine-verified)", a "verify" outcome artifact, the persisted
-//      implementationSpec, and modelRoute "deepseek-pro" (the pro-tier route
-//      that really synthesized it — expand/oracle stay flash). On ANY failure
+//      implementationSpec, and modelRoute "deepseek-flash" (the tier that
+//      really synthesized it — expand/oracle are flash too). On ANY failure
 //      (unparseable envelope ×2, validation, brief-fit, verify failed/error,
 //      chunk refusal) the deterministic floor stands and a `p6.synthesis.refused`
 //      warn log records the RT_E_* code — never a fabricated pass; a multi-chunk
@@ -98,6 +99,12 @@ import { selectLessons } from "./knowledge.ts";
 import { verifyAndFixServer, type VerifyOutcome } from "./verify.server.ts";
 import type { ErrorCode } from "./errors.ts";
 import type { LlmResult } from "./llm.ts";
+import {
+  emptyLedger,
+  recordSpend,
+  totalTokens,
+  type TokenLedger,
+} from "./token-ledger.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 import type { Artifact, ArtifactKind, GeneratedTreeFile, JsonLog, PhaseId, Project } from "./types.ts";
 
@@ -117,14 +124,18 @@ export const P6_MODULE_MAX_CHARS = 60_000;
 // envelope (output budget, not CoT), which also shortens the wall clock.
 export const P6_SYNTH_TIMEOUT_MS = 240_000;
 /**
- * fixes/125 (pro-tier synthesis, fixes/121 structural lever): the MAIN
- * synthesis call and its repair re-prompts run on deepseek-v4-pro — a
- * materially stronger coder for a ~20-function single-shot module. The cheap
- * calls (expandBrief in prompt-engine.ts, oracle generateCases in
- * verify.server.ts) stay on the flash tier. The route label (`modelRoute:
- * "deepseek-pro"`) is stamped by `upgraded()` the moment a pro synthesis ships.
+ * 216 (T0.1 — model-tier correction; supersedes fixes/125): the MAIN synthesis
+ * call and its repair re-prompts run on the FLASH tier. The original fixes/125
+ * rationale — "pro is a materially stronger coder" — is INVERTED as of
+ * DeepSeek-V4.1-Flash (model card, 2026-09-10): flash wins every
+ * agentic/coding axis against V4-Pro (DeepSWE v1.1 74.2 vs 62.7; Terminal-Bench
+ * 2.1 90.6 vs 87.9; TB 4.0 31.2 vs 12.4) at lower cost. The cheap calls
+ * (expandBrief in prompt-engine.ts, oracle generateCases in
+ * verify.server.ts) were already flash. The route label (`modelRoute:
+ * "deepseek-flash"`) is stamped by `upgraded()` the moment a synthesis ships —
+ * the tier that really served the call, never a stale tier name.
  */
-export const P6_SYNTH_MODEL = DEEPSEEK_MODELS.pro;
+export const P6_SYNTH_MODEL = DEEPSEEK_MODELS.flash;
 /** Brief budget in the synthesis user prompt (never silently cut — marked). */
 const P6_BRIEF_MAX_CHARS = 2_000;
 const TRUNCATION_MARK = "\n…[TRUNCATED — brief longer than the synthesis budget; the visible prefix governs]";
@@ -147,11 +158,261 @@ const FORBIDDEN_HARD = /\b(?:eval|Function|import)\b/;
 const FORBIDDEN_SOFT =
   /\b(?:process|require|globalThis|window|self|fetch|WebSocket|XMLHttpRequest|document|localStorage|indexedDB)\b/;
 
+/**
+ * fixes/215b: canonical display names of EVERY banned primitive — the single
+ * source the synthesis system prompt quotes. Drift-proof by test: each name is
+ * asserted to be matched by FORBIDDEN_HARD|FORBIDDEN_SOFT, and the system
+ * prompt is asserted to name them all. Root cause this closes: the prompt's
+ * rule 4 omitted `require`/`globalThis`/`self`/`XMLHttpRequest` while the
+ * validator enforced them — a keyed chunk 2/4 refused on exactly `globalThis`,
+ * a primative the model was never told to avoid.
+ */
+export const FORBIDDEN_PRIMITIVE_NAMES = [
+  "eval",
+  "Function",
+  "import",
+  "process",
+  "require",
+  "globalThis",
+  "window",
+  "self",
+  "fetch",
+  "WebSocket",
+  "XMLHttpRequest",
+  "document",
+  "localStorage",
+  "indexedDB",
+] as const;
+
 /** Classify a masked module for forbidden primitives (hard first). Pure. */
 export function forbiddenPrimitiveHit(maskedSource: string): { hard: string | null; soft: string | null } {
   const hard = typeof maskedSource === "string" ? maskedSource.match(FORBIDDEN_HARD)?.[0] ?? null : null;
   const soft = typeof maskedSource === "string" ? maskedSource.match(FORBIDDEN_SOFT)?.[0] ?? null : null;
   return { hard, soft };
+}
+
+/**
+ * 216f (T-15 / F-06): the non-determinism ban. The emitted
+ * `research/eval-out/coffeehouse2home-property-ledger/src/generated/compute-rent-roll.ts:35,40,55`
+ * minted entity ids with `Math.random()` inside a nominally deterministic
+ * system — two identical runs produce different entities, so nothing about the
+ * emitted product is reproducible. Matched against MASKED source (callers pass
+ * `maskLiteralsAndComments` output, the `forbiddenPrimitiveHit` contract), so
+ * the token inside a literal or comment is data, never a violation. Returns the
+ * matched token or null. Pure, deterministic.
+ */
+const NONDETERMINISTIC_PRIMITIVE = /\bMath\s*\.\s*random\b/;
+
+export function nondeterministicPrimitiveHit(maskedSource: string): string | null {
+  if (typeof maskedSource !== "string") return null;
+  return maskedSource.match(NONDETERMINISTIC_PRIMITIVE)?.[0] ?? null;
+}
+
+/** 216f (T-09): one prose line hit — 1-based line number + a bounded excerpt. */
+export type ProseLineHit = { line: number; text: string };
+
+/** Minimum whitespace-separated words a line needs to count as prose. */
+const PROSE_MIN_WORDS = 4;
+/** Minimum ASCII letters a line needs to count as prose (short interjections never trip). */
+const PROSE_MIN_LETTERS = 15;
+/** Parenthesised prose needs more signal (a call statement can look sentence-ish). */
+const PROSE_SENTENCE_MIN_WORDS = 6;
+const PROSE_SENTENCE_MIN_LETTERS = 30;
+/** Max chars of the offending line kept in the refusal detail. */
+const PROSE_EXCERPT_MAX = 80;
+/**
+ * Code-significant characters. A bare code-position line carrying ANY of these
+ * cannot be prose: `foo = bar`, `{-`, `//`, `@dec` etc. Deliberately excludes
+ * sentence punctuation (`. , : ; ! ? - ' "` are handled by the shape test) and
+ * digits ("requirements 5,6,7" is prose). A plain string, NOT a regex, so no
+ * escaping layer can widen the set by accident.
+ */
+const PROSE_CODE_CHARS = "()[]{}<>=|&+*_\\/@#$%^~";
+/** Sentence-shaped ASCII line; parentheses are admitted but gated separately. */
+const PROSE_LINE_SHAPE = /^[A-Za-z][A-Za-z0-9 ,.:;!?'"()-]*$/;
+
+/**
+ * 216f (T-09 / F-04): bare English prose written into a module body as code —
+ * the 23-line LLM-deliberation leak observed shipping at
+ * `research/eval-out/coffeehouse2home-property-ledger/src/generated/chunk-0.ts:340-362`
+ * ("I'll write the code now."). Detection is lexical, not a parser (the
+ * `typescript` devDep is not importable from this module — compile-check owns
+ * that seam): a line counts as prose when, with comment content and
+ * literal content blanked, it still carries ≥4 words / ≥15 letters of
+ * sentence-shaped ASCII text and no code-significant character at all. No
+ * legal top-level statement in the generated subset (functions, consts, object
+ * literals, `module.exports` assigns, `'use strict';`) can match that shape —
+ * prose-as-code always can.
+ *
+ * The masking here is deliberately LINE-SCOPED, not `maskLiteralsAndComments`:
+ * the leaked blob's own deliberation quotes (`"implement every one"`) leave
+ * stray quote characters in the text, and the module-global masker treats an
+ * unpaired quote as an open literal — blanking every following line and
+ * disarming the gate on the exact artifact it must catch (verified against
+ * `chunk-0.ts:340-362`). So: single/double-quoted spans are matched within
+ * their own line (an unpaired quote stays visible, matching the JS
+ * same-line-literal rule); block comments and template literals carry across
+ * lines because those are the only multi-line constructs legal in the emitted
+ * subset. Pure, deterministic; returns every hit (1-based line numbers, order
+ * kept).
+ */
+export function proseLineHits(source: string): ProseLineHit[] {
+  if (typeof source !== "string" || !source) return [];
+  const hits: ProseLineHit[] = [];
+  const lines = source.split("\n");
+  let inBlockComment = false;
+  let inTemplate = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    let visible = "";
+    let j = 0;
+    let block: boolean = inBlockComment;
+    let template: boolean = inTemplate;
+    while (j < line.length) {
+      const c = line[j]!;
+      const next = line[j + 1];
+      if (block) {
+        if (c === "*" && next === "/") {
+          block = false;
+          visible += "  ";
+          j += 2;
+          continue;
+        }
+        visible += " ";
+        j += 1;
+        continue;
+      }
+      if (template) {
+        if (c === "\\") {
+          visible += "  ";
+          j += 2;
+          continue;
+        }
+        if (c === "`") {
+          template = false;
+        }
+        visible += " ";
+        j += 1;
+        continue;
+      }
+      if (c === "/" && next === "/") {
+        visible += " ".repeat(line.length - j);
+        j = line.length;
+        continue;
+      }
+      if (c === "/" && next === "*") {
+        block = true;
+        visible += "  ";
+        j += 2;
+        continue;
+      }
+      if (c === "`") {
+        // Template literal: blank to the matching backtick on this line; no
+        // match means the literal runs on into the following lines.
+        let k = j + 1;
+        let closed = -1;
+        while (k < line.length) {
+          if (line[k] === "\\") {
+            k += 2;
+            continue;
+          }
+          if (line[k] === "`") {
+            closed = k;
+            break;
+          }
+          k += 1;
+        }
+        if (closed === -1) {
+          template = true;
+          visible += " ".repeat(line.length - j);
+          j = line.length;
+          continue;
+        }
+        visible += " ".repeat(closed + 1 - j);
+        j = closed + 1;
+        continue;
+      }
+      if (c === "\\") {
+        // Stray backslash in code position (legal code has none outside a
+        // literal): blank it, so escaped-quote deliberation (`\"…\"` in the
+        // leaked blob) reads as the prose it is instead of tripping the
+        // code-char gate on punctuation the model emitted BY MISTAKE.
+        visible += " ";
+        j += 1;
+        continue;
+      }
+      if (c === '"' || c === "'") {
+        let k = j + 1;
+        let closed = -1;
+        while (k < line.length) {
+          if (line[k] === "\\") {
+            k += 2;
+            continue;
+          }
+          if (line[k] === c) {
+            closed = k;
+            break;
+          }
+          k += 1;
+        }
+        if (closed === -1) {
+          // Unpaired quote — a same-line literal is impossible, so this is
+          // stray deliberation punctuation: keep it visible.
+          visible += c;
+          j += 1;
+          continue;
+        }
+        visible += " ".repeat(closed + 1 - j);
+        j = closed + 1;
+        continue;
+      }
+      visible += c;
+      j += 1;
+    }
+    inBlockComment = block;
+    inTemplate = template;
+    const t = visible.trim();
+    if (t.length === 0) continue;
+    const flat = t.replace(/([A-Za-z])'([A-Za-z])/g, "$1$2"); // "I'll write" → "Ill write"
+    const hasParens = flat.includes("(") || flat.includes(")");
+    const codeProbe = hasParens ? flat.replace(/[()]/g, "") : flat;
+    // 216f (W2·R3 tightening): every code-significant char vetoes a line as
+    // prose EXCEPT a bare slash. The real blob's residual evader (chunk-0.ts:342,
+    // "flip/rental/field ops") carries `/` between words and no other code char,
+    // so it slipped the old veto. A slash-only line now falls through to a
+    // STRICTER sentence branch below (shape checked on slash-stripped text plus
+    // sentence word/letter floors AND a sentence terminal) — no bare statement
+    // of the emitted subset ends in `.`/`?`/`!` with ≥6 words / ≥30 letters.
+    let codeHit = false;
+    let slashOnly = true;
+    for (const ch of codeProbe) {
+      if (PROSE_CODE_CHARS.includes(ch)) {
+        codeHit = true;
+        if (ch !== "/") {
+          slashOnly = false;
+          break;
+        }
+      }
+    }
+    if (codeHit && !slashOnly) continue;
+    // A slash never survives string/comment masking, so stripping it here can
+    // only strip a code-position slash; the shape test stays meaningful.
+    if (!PROSE_LINE_SHAPE.test(flat.replace(/\//g, ""))) continue;
+    const words = flat.split(/\s+/).filter((w) => w.length > 0);
+    const letters = (flat.match(/[A-Za-z]/g) ?? []).length;
+    if (hasParens || codeHit) {
+      // A call statement can look sentence-ish; require MORE signal and a
+      // sentence terminal (`.`/`?`/`!`) no call expression ends with.
+      if (words.length < PROSE_SENTENCE_MIN_WORDS) continue;
+      if (letters < PROSE_SENTENCE_MIN_LETTERS) continue;
+      if (!/[.?!]$/.test(flat)) continue;
+    } else {
+      if (words.length < PROSE_MIN_WORDS) continue;
+      if (letters < PROSE_MIN_LETTERS) continue;
+    }
+    hits.push({ line: i + 1, text: line.trim().slice(0, PROSE_EXCERPT_MAX) });
+  }
+  return hits;
 }
 
 /**
@@ -168,13 +429,26 @@ export function p6SynthesisSystemPrompt(): string {
     "Worked example (shape only — the content is yours):",
     '{"module":"function add(a, b) { return a + b; }\\nmodule.exports.add = add;","exports":["add"],"reqTrace":{"req-1":"add"}}',
     "RULES (all mandatory):",
-    "1. Export EXACTLY the functions the spec's typeSignatures name; nothing more, nothing less.",
-    "2. Zero imports, zero requires, zero external deps. Plain functions only. Assign module.exports.",
+    // 216f (T-10 / F-08): the export-ceiling rule and the requirement list must
+    // be CONSISTENT. The old pair ("export exactly these ... nothing more" +
+    // "implement every requirement") was unsatisfiable on multi-domain briefs —
+    // the model said so itself at chunk-0.ts:350. The ceiling now scopes every
+    // file to its OWN listed signatures, requirement duty is scoped to what
+    // those signatures cover, and hidden logic behind non-exported names is
+    // explicitly forbidden (that was the leak's failed workaround).
+    "1. Export EXACTLY the functions the spec's typeSignatures name — nothing more, nothing less. When the project is generated as several files, each file exports ONLY its own listed signatures: implement every requirement those listed signatures cover, never hide a requirement's logic behind non-exported helpers, and never add functions the list does not name.",
+    // 216f (T-15): the validator refuses Math.random — the prompt must advertise
+    // it (215b drift-proof principle: never enforce a rule the model was not told).
+    "2. Zero imports, zero requires, zero external deps. Plain functions only. Assign module.exports. Never use Math.random() or any other non-deterministic primitive (validator-enforced): ids and values must derive deterministically from the inputs so two identical runs produce identical results.",
     "3. Full JSDoc on every exported function.",
-    "4. Never reference process/window/fetch/WebSocket/eval/Function/import/document/localStorage/indexedDB.",
+    `4. Never reference these forbidden primitives anywhere in the module (validator-enforced): ${FORBIDDEN_PRIMITIVE_NAMES.join(", ")}.`,
     "5. Mark each requirement you implement with a \"// req-N\" comment on the implementing function.",
     "6. Never test rejection paths inside the module; guards are behavior, not bugs.",
     "7. Do not invent features the brief does not state. Do not soften or drop a stated requirement.",
+    // 216f (T-09): the prose-in-code refusal is advertised too — the leaked
+    // 23-line deliberation (F-04) shipped because nothing told the model that
+    // planning prose in the module body is a refusal, not a style choice.
+    "8. Write CODE only — never emit planning prose, deliberation, or \"I'll write the code now\" into the module (validator-enforced): every line must be a real JavaScript statement.",
   ].join("\n");
 }
 
@@ -242,6 +516,47 @@ export function p6SynthesisForbiddenRepairPrompt(token: string, treeFailure?: st
     "Rewrite it with plain functions only — no process/require/globalThis/window/self/fetch/WebSocket/XMLHttpRequest/document/localStorage/indexedDB/eval/Function/import.",
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports, zero imports, JSDoc, // req-N markers, no markdown fences.",
+  ].join("\n") + repairTreeFailureTail(treeFailure);
+}
+
+/**
+ * 216f (T-15 / F-06): repair re-prompt for a non-deterministic primitive the
+ * validator refused (`Math.random` and friends). Names the exact token so the
+ * model rewrites it deterministically (ids derived from inputs/counters).
+ * ONE bounded attempt, mirroring the soft-forbidden class; a repeat is refused.
+ */
+export function p6SynthesisNondeterministicRepairPrompt(token: string, treeFailure?: string): string {
+  return [
+    `Your module used a non-deterministic primitive: \`${token}\`.`,
+    "Rewrite it deterministically: derive ids/values from the inputs (caller-supplied ids, counters, stable hashes of input fields). Two identical runs must produce identical results — never mint randomness.",
+    'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
+    "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no markdown fences.",
+  ].join("\n") + repairTreeFailureTail(treeFailure);
+}
+
+/**
+ * 216f (T-09 / F-04): repair re-prompt for prose-in-code the validator refused
+ * — the module body carried sentence-shaped English (LLM deliberation),
+ * not code. Names the offending 1-based line numbers + a bounded excerpt so
+ * the model DELETES the prose rather than paraphrasing it into new prose. ONE
+ * bounded attempt; a repeat is refused (RT_E_VALIDATION).
+ */
+export function p6SynthesisProseRepairPrompt(hits: readonly ProseLineHit[], treeFailure?: string): string {
+  const rows = Array.isArray(hits) ? hits : [];
+  const lines: number[] = [];
+  for (const h of rows) {
+    if (h && typeof h.line === "number" && Number.isFinite(h.line) && !lines.includes(h.line)) {
+      lines.push(h.line);
+      if (lines.length >= 6) break;
+    }
+  }
+  const first = rows.find((h) => h && typeof h.text === "string" && h.text.trim() !== "");
+  return [
+    "Your previous reply was not code: it contained English prose sentences written into the module body — planning/deliberation text, not JavaScript.",
+    `Prose was detected at line(s): ${lines.join(", ") || "(unknown)"}${first ? ` — e.g. ${JSON.stringify(first.text)}` : ""}.`,
+    "Rewrite the module as CODE ONLY: delete every prose sentence entirely — do not rephrase it, do not move it into a comment or a string, do not explain. Every line of the module must be a real JavaScript statement.",
+    'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
+    "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
 }
 
@@ -348,8 +663,9 @@ export function p6SynthesisUserPrompt(
     dataFlow: string[];
     negativeConstraints: string[];
   },
+  lessons: readonly string[] = [],
 ): string {
-  return p6SynthesisChunkUserPrompt(brief, spec, spec.typeSignatures);
+  return p6SynthesisChunkUserPrompt(brief, spec, spec.typeSignatures, [], lessons);
 }
 
 /** One already-accepted earlier file of a chunked synthesis run (its exports
@@ -386,6 +702,7 @@ export function p6SynthesisChunkUserPrompt(
   },
   chunkSignatures: readonly string[],
   priorFiles: readonly ChunkPriorFile[] = [],
+  lessons: readonly string[] = [],
 ): string {
   const raw = typeof brief === "string" ? brief.trim() : "";
   const capped =
@@ -395,10 +712,15 @@ export function p6SynthesisChunkUserPrompt(
     "BRIEF:",
     capped || "(empty brief — implement the spec requirements only)",
     "",
-    "REQUIREMENTS (implement every one; mark the implementing function with the matching // req-N comment):",
+    // 216f (T-10 / F-08): scope the requirement duty to THIS file's signatures.
+    // "implement every one" read against a per-chunk signature list was the
+    // unsatisfiable half of the contradiction (chunk-0.ts:350).
+    "REQUIREMENTS (the project's complete list — implemented across ALL of its files; this file implements every one its TYPE SIGNATURES below cover, marking each implementing function with its // req-N comment. A requirement owned by another file is implemented THERE behind that file's own signatures — never hide its logic behind non-exported helpers here):",
     ...spec.requirements.map((r, i) => `${i + 1}. ${r}`),
     "",
-    "TYPE SIGNATURES (must export — exactly these names, nothing more, nothing less):",
+    // Keeps the literal marker "TYPE SIGNATURES (must export" (test-internal
+    // synthesis-prompt detector) while scoping the list to this file.
+    "TYPE SIGNATURES (must export — exactly these names, nothing more, nothing less; THIS file's share of the project — the project's other files export the remaining signatures):",
     ...sigs.map((s) => `- ${s}`),
     "",
     "NEGATIVE CONSTRAINTS (all mandatory):",
@@ -424,6 +746,13 @@ export function p6SynthesisChunkUserPrompt(
       const reqPart = covered.length > 0 ? ` · covers ${covered.join(", ")}` : "";
       lines.push(`- ${f.path} exports: ${(f.exports ?? []).join(", ") || "(none)"}${reqPart}`);
     }
+  }
+  if (Array.isArray(lessons) && lessons.length > 0) {
+    lines.push(
+      "",
+      "PRIOR LESSONS (advisory — obey the spec first; do not invent APIs from these):",
+      ...lessons.filter((l): l is string => typeof l === "string" && l.trim() !== "").map((l) => `- ${l}`),
+    );
   }
   return lines.join("\n");
 }
@@ -495,11 +824,189 @@ export function treePathForChunk(
   taken: ReadonlySet<string> = new Set<string>(),
 ): string {
   if (chunkIndex <= 0) return TREE_ENTRY_PATH;
+  return genericTreePath(chunkSignatureNames, taken);
+}
+
+/** fixes/216k (105 TA-15): slugged src/generated/ chunk path with a
+ *  deterministic `-2/-3` de-dupe walk — the index-independent half of
+ *  treePathForChunk, reused by the job-keyed plan for its leftover chunks
+ *  (which must never claim TREE_ENTRY_PATH: in a job-keyed tree that path is
+ *  the ESM barrel `materializeImportableTree` writes). */
+function genericTreePath(
+  chunkSignatureNames: readonly string[],
+  taken: ReadonlySet<string>,
+): string {
   const base = `src/generated/${pathSlugFromNames(chunkSignatureNames)}.ts`;
   if (!taken.has(base)) return base;
   let n = 2;
   while (taken.has(`src/generated/${pathSlugFromNames(chunkSignatureNames)}-${n}.ts`)) n += 1;
   return `src/generated/${pathSlugFromNames(chunkSignatureNames)}-${n}.ts`;
+}
+
+// ---------------------------------------------------------------------------
+// fixes/216k (105 TA-15 / 106 F-03 F-06 F-10, P0-04) — REAL per-job modules.
+//
+// The chunk→file mapping used to be index-keyed only: chunk 0 landed at
+// src/generated.ts and later chunks under src/generated/<slug>.ts, so the
+// spec-graph job paths (src/jobs/flip.ts …) were NEVER written by the tree
+// pass and every job node degraded to a re-export bridge of the tree entry —
+// ONE module wearing five filenames (`doctor --tree` → reexports:5, real:0).
+//
+// The mapping below keys each chunk to the spec-graph node it implements: a
+// job node's file path IS the chunk's tree path, so the scaffold's tree pass
+// emits the real synthesized module there and the bridge is reserved for
+// genuinely unmapped nodes (which the scaffold counts and prints — fixes/216k
+// also made bridged nodes visible, never a silent substitute).
+//
+// Binding is deterministic and evidence-based: a typeSignature binds to the
+// FIRST job node (graph order) whose label names it (`runFlip(…)` ← “flip”;
+// labels shorter than 3 chars never match). No LLM, no guessing: signatures
+// that bind to no node keep the legacy src/generated/ family, and a graph
+// with no keyable job node keeps the pre-216k mapping byte-for-byte.
+// ---------------------------------------------------------------------------
+
+/** One spec-graph job node the tree must materialise as a REAL module. */
+export type SpecGraphJobTarget = { id: string; label: string; path: string };
+
+/** Job label a spec-graph node purpose declares (`Implement job “flip” …`). */
+export function jobLabelFromPurpose(purpose: unknown): string | null {
+  const m = /[“"]([^”"]+)[”"]/.exec(typeof purpose === "string" ? purpose : "");
+  const label = m ? m[1].replace(/\s+/g, " ").trim() : "";
+  return label.length > 0 ? label : null;
+}
+
+/** Safe src/jobs/ tree path (mirrors scaffold's treePathRefusal for the job
+ *  family: repo-relative, `/`-separated, charset [A-Za-z0-9._-], no traversal). */
+function isJobTreeNodePath(p: unknown): p is string {
+  if (typeof p !== "string" || !p.startsWith("src/jobs/") || !p.endsWith(".ts")) return false;
+  return p
+    .split("/")
+    .every((seg) => seg !== "." && seg !== ".." && /^[A-Za-z0-9._-]+$/.test(seg));
+}
+
+/**
+ * Ordered spec-graph job nodes (id, label, path) — the file map the chunk plan
+ * keys on. A node without a parseable label or with a path outside src/jobs/
+ * is skipped (it cannot be keyed deterministically; never guess a path). The
+ * spec graph is the engine's own A5 output (planSpecGraph, algorithms.ts).
+ */
+export function specGraphJobTargets(
+  project:
+    | { specGraph?: { nodes?: readonly { id?: unknown; file?: unknown; purpose?: unknown }[] } | null }
+    | null
+    | undefined,
+): SpecGraphJobTarget[] {
+  const nodes = project?.specGraph?.nodes;
+  if (!Array.isArray(nodes)) return [];
+  const out: SpecGraphJobTarget[] = [];
+  const seen = new Set<string>();
+  for (const n of nodes) {
+    if (n === null || typeof n !== "object") continue;
+    const id = typeof n.id === "string" ? n.id : "";
+    if (!id.startsWith("job-")) continue;
+    const label = jobLabelFromPurpose(n.purpose);
+    if (label === null || label.length < 3 || !isJobTreeNodePath(n.file)) continue;
+    if (seen.has(n.file)) continue;
+    seen.add(n.file);
+    out.push({ id, label, path: n.file });
+  }
+  return out;
+}
+
+/**
+ * Deterministic signature→job binding. Each signature binds to the FIRST job
+ * target (graph order) whose label appears case-insensitively in the
+ * signature's function name; a signature with no parseable function name or no
+ * label hit stays in `leftover` (expand order kept end-to-end). `bound[i]`
+ * holds target i's own signatures in expand order.
+ */
+export function bindSignaturesToJobTargets(
+  typeSignatures: readonly string[],
+  targets: readonly SpecGraphJobTarget[],
+): { bound: string[][]; leftover: string[] } {
+  const bound: string[][] = targets.map(() => []);
+  const leftover: string[] = [];
+  for (const raw of typeSignatures ?? []) {
+    if (typeof raw !== "string" || !raw.trim()) continue;
+    const name = signatureFunctionNames([raw])[0] ?? null;
+    const idx = name === null
+      ? -1
+      : targets.findIndex((t) => name.toLowerCase().includes(t.label.toLowerCase()));
+    if (idx >= 0) bound[idx]!.push(raw);
+    else leftover.push(raw);
+  }
+  return { bound, leftover };
+}
+
+/** One planned synthesis chunk: its tree path + the signatures it must export. */
+export type TreeChunk = {
+  path: string;
+  signatures: string[];
+  /** Set when the chunk is keyed to a spec-graph job node (fixes/216k TA-15). */
+  nodeId?: string;
+  label?: string;
+};
+
+/** `src/jobs/flip.ts` → `src/jobs/flip-2.ts` (second chunk of the same job),
+ *  colliding further chunks walk `-3/-4…` deterministically. */
+function jobSiblingPath(nodePath: string, k: number, taken: ReadonlySet<string>): string {
+  const dot = nodePath.lastIndexOf(".");
+  const stem = dot > 0 ? nodePath.slice(0, dot) : nodePath;
+  const ext = dot > 0 ? nodePath.slice(dot) : ".ts";
+  let n = k + 1;
+  let path = `${stem}-${n}${ext}`;
+  while (taken.has(path)) {
+    n += 1;
+    path = `${stem}-${n}${ext}`;
+  }
+  return path;
+}
+
+/**
+ * The chunk→file plan (fixes/216k TA-15, P0-04). Job-keyed chunks come first
+ * (graph order: the node's own file is its first chunk, `-2/-3` siblings carry
+ * the overflow), then the unbound signatures keep the legacy src/generated/
+ * family. When NO signature binds to a job node the plan is byte-identical to
+ * the pre-216k index-keyed mapping (chunk 0 = TREE_ENTRY_PATH, later chunks
+ * slugged under src/generated/) — every job-less spec graph is unaffected.
+ * Pure + deterministic: same project + signatures ⇒ same plan.
+ */
+export function treeChunkPlan(
+  project:
+    | { specGraph?: { nodes?: readonly { id?: unknown; file?: unknown; purpose?: unknown }[] } | null }
+    | null
+    | undefined,
+  typeSignatures: readonly string[],
+  perChunk: number = P6_SYNTH_CHUNK_SIZE,
+): TreeChunk[] {
+  const sigs = (typeSignatures ?? []).filter((s): s is string => typeof s === "string" && s.trim().length > 0);
+  const taken = new Set<string>();
+  const targets = specGraphJobTargets(project);
+  const { bound, leftover } = targets.length > 0
+    ? bindSignaturesToJobTargets(sigs, targets)
+    : { bound: [] as string[][], leftover: sigs };
+  const jobChunks: TreeChunk[] = [];
+  targets.forEach((t, i) => {
+    chunkTypeSignatures(bound[i] ?? [], perChunk).forEach((g, k) => {
+      const path = k === 0 ? t.path : jobSiblingPath(t.path, k, taken);
+      taken.add(path);
+      jobChunks.push({ path, signatures: g, nodeId: t.id, label: t.label });
+    });
+  });
+  if (jobChunks.length === 0) {
+    // Legacy parity: no keyable job node carried a signature.
+    return chunkTypeSignatures(sigs, perChunk).map((g, i) => {
+      const path = treePathForChunk(i, signatureFunctionNames(g), taken);
+      taken.add(path);
+      return { path, signatures: g };
+    });
+  }
+  for (const g of chunkTypeSignatures(leftover, perChunk)) {
+    const path = genericTreePath(signatureFunctionNames(g), taken);
+    taken.add(path);
+    jobChunks.push({ path, signatures: g });
+  }
+  return jobChunks;
 }
 
 /**
@@ -577,14 +1084,60 @@ function isIdent(n: string): boolean {
   return IDENT_RE.test(n);
 }
 
-/** Drop CJS `module.exports.NAME = NAME` (and a whole-object assign) so a file can become ESM. */
+/** Net `{`/`[` depth contributed by one line, ignoring quoted strings and `//` comments.
+ *  Used to consume a whole-object CJS assign to its matching close. */
+function bracketDelta(line: string): number {
+  let d = 0;
+  let q: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (q !== null) {
+      if (c === "\\") i++;
+      else if (c === q) q = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      q = c;
+      continue;
+    }
+    if (c === "/" && line[i + 1] === "/") break;
+    if (c === "{" || c === "[") d++;
+    else if (c === "}" || c === "]") d--;
+  }
+  return d;
+}
+
+/** Drop CJS `module.exports.NAME = NAME` (and a whole-object assign) so a file can become ESM.
+ *
+ *  216 (T-01): a whole-object assign is now removed as a COMPLETE CONSTRUCT. The previous
+ *  implementation dropped only the line that *starts* with `module.exports =` and kept the
+ *  object literal's body, leaving a dangling `};` plus bare identifiers — so the stripped
+ *  module did not parse (`new Function(out)` throws), which is the corruption that traced to
+ *  431 tsc errors in the emitted tree. The brace depth opened by the assign is now followed to
+ *  its matching close, so the whole literal goes with it.
+ *
+ *  216 (T-16): the regression test feeds the MULTI-LINE form and asserts the output still
+ *  parses — the old test only fed `module.exports = { a };` (single line), which the old code
+ *  happened to handle, so a green suite could never see the bug. */
 export function stripCjsExportAssignments(source: string, names: readonly string[]): string {
   const want = new Set((names ?? []).filter((n) => typeof n === "string" && isIdent(n)));
   const lines = String(source ?? "").split("\n");
   const kept: string[] = [];
+  // >0 while consuming a multi-line `module.exports = {…}` construct.
+  let skipDepth = 0;
   for (const line of lines) {
     const t = line.trim();
-    if (t.startsWith("module.exports =")) continue;
+    if (skipDepth > 0) {
+      skipDepth += bracketDelta(line);
+      continue;
+    }
+    if (t.startsWith("module.exports =")) {
+      const delta = bracketDelta(line);
+      // Multi-line object literal: keep consuming until the literal closes.
+      // Single-line (delta <= 0): the one line IS the whole construct — dropped here.
+      if (delta > 0) skipDepth = delta;
+      continue;
+    }
     let drop = false;
     for (const n of want) {
       if (t === `module.exports.${n} = ${n};` || t === `module.exports.${n} = ${n}`) {
@@ -809,10 +1362,40 @@ export function validateSynthesisModule(
   if (/```/.test(module)) {
     return { ok: false, code: "RT_E_VALIDATION", error: "module contains markdown fences" };
   }
-  const hit = forbiddenPrimitiveHit(maskLiteralsAndComments(module));
+  const masked = maskLiteralsAndComments(module);
+  const hit = forbiddenPrimitiveHit(masked);
   if (hit.hard !== null || hit.soft !== null) {
     const token = hit.hard ?? hit.soft ?? "unknown";
     return { ok: false, code: "RT_E_VALIDATION", error: `forbidden primitive in generated module code (${token})` };
+  }
+  // 216f (T-15 / F-06): Math.random() in CODE — the emitted
+  // compute-rent-roll.ts minted random entity ids in a nominally deterministic
+  // system, so nothing about the product was reproducible. Masked source, so a
+  // doc mention or a string is data, never a violation. Refused; the bounded
+  // repair re-prompt upstream gets one chance to rewrite it deterministically.
+  const nondet = nondeterministicPrimitiveHit(masked);
+  if (nondet !== null) {
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error: `non-deterministic primitive in generated module code (${nondet}) — derive ids/values deterministically instead`,
+    };
+  }
+  // 216f (T-09 / F-04): prose-in-code — bare English deliberation written into
+  // the module body (the 23-line leak shipped at chunk-0.ts:340-362). Refused
+  // with the first offending line named (bounded excerpt). SCOPE: LLM-derived
+  // modules ONLY — the only callers are the synthesis paths
+  // (synthesizeSingleModule / synthesizeChunkEnvelope + their repair
+  // re-checks). Scaffold-authored files (src/main.tsx: it carries a prose
+  // header and an `import` line) NEVER pass through this validator.
+  const prose = proseLineHits(module);
+  if (prose.length > 0) {
+    const first = prose[0]!;
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error: `prose-in-code in generated module (${prose.length} prose line${prose.length === 1 ? "" : "s"}; first at line ${first.line}: ${JSON.stringify(first.text)})`,
+    };
   }
   const claimed = [...new Set(claimedExports)];
   const unbound = unboundExportNames(module, claimed);
@@ -917,18 +1500,50 @@ function isTransientSynthFailure(res: LlmResult): boolean {
   return res.ok === false && res.code === "RT_E_LLM_TIMEOUT";
 }
 
+/** Optional hard cap. Unset / 0 / NaN → unmetered (byte-identical). */
+export function p6TokenCapFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  const raw = env.RAPIDTOOL_TOKEN_CAP;
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+}
+
+function accountSynthUsage(ledger: TokenLedger, res: LlmResult, cap: number | undefined): LlmResult | null {
+  if (!res.ok || !res.usage) return null;
+  const next = recordSpend(ledger, {
+    promptTokens: res.usage.promptTokens,
+    completionTokens: res.usage.completionTokens,
+  });
+  ledger.promptTokens = next.promptTokens;
+  ledger.completionTokens = next.completionTokens;
+  ledger.calls = next.calls;
+  if (cap !== undefined && totalTokens(ledger) > cap) {
+    return {
+      ok: false,
+      reason: "error",
+      error: `Session token budget exhausted: spent ${totalTokens(ledger)} > cap ${cap}`,
+      code: "RT_E_BUDGET_EXHAUSTED",
+    };
+  }
+  return null;
+}
+
 export async function synthWithBackoff(
   complete: (prompt: string, opts?: DeepSeekCompleteOptions) => Promise<LlmResult>,
   prompt: string,
   opts: DeepSeekCompleteOptions,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+  ledger: TokenLedger = emptyLedger(),
+  cap: number | undefined = p6TokenCapFromEnv(),
 ): Promise<LlmResult> {
   let last: LlmResult | null = null;
   for (let attempt = 0; attempt < P6_SYNTH_MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(P6_SYNTH_BACKOFF_MS * 2 ** (attempt - 1));
     const res = await complete(prompt, opts);
+    const exhausted = accountSynthUsage(ledger, res, cap);
+    if (exhausted) return exhausted;
     if (res.ok) return res;
-    if (!isTransientSynthFailure(res)) return res; // not-configured / rejected → don't retry
+    if (!isTransientSynthFailure(res)) return res;
     last = res;
   }
   return (
@@ -1147,7 +1762,7 @@ function upgraded(project: Project, finalModule: string, outcome: VerifyOutcome,
     generatedSource: finalModule,
     lastTest: testedLastTest,
     implementationSpec: specRecord,
-    modelRoute: "deepseek-pro",
+    modelRoute: "deepseek-flash",
     memory,
     artifacts,
     logs: [
@@ -1318,7 +1933,12 @@ async function synthesizeSingleModule(
   treeFailure?: string,
 ): Promise<Project> {
   // --- Step 2 (legacy): synthesis (one call + one bounded repair re-prompt) --
-  const user = p6SynthesisUserPrompt(brief, specRecord);
+  const lessonLines = lessonLinesForBrief(
+    brief,
+    selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
+    { limit: EXPAND_LESSON_RANK_LIMIT },
+  );
+  const user = p6SynthesisUserPrompt(brief, specRecord, lessonLines);
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
     json: true,
@@ -1380,12 +2000,22 @@ async function synthesizeSingleModule(
     // returns the contract names; a module that omits them gets ONE bounded
     // re-prompt listing the exact missing functions (was an instant refusal).
     const missingSig = missingSignatureNames(envelope.exports, signatureNames);
-    if (unbound.length > 0 || repairableForbidden || missingSig.length > 0) {
+    // 216f (T-09/T-15): prose-in-code and a non-deterministic primitive are the
+    // FOURTH/FIFTH bounded repair classes — each gets ONE re-prompt carrying
+    // the exact defect (the prose line numbers / the offending token); a repeat
+    // is refused. A HARD forbidden primitive still refuses with no repair.
+    const nondet = nondeterministicPrimitiveHit(masked);
+    const prose = proseLineHits(envelope.module);
+    if (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
         : repairableForbidden
           ? p6SynthesisForbiddenRepairPrompt(hit.soft ?? "unknown", treeFailure)
-          : p6SynthesisSignatureRepairPrompt(missingSig, treeFailure);
+          : missingSig.length > 0
+            ? p6SynthesisSignatureRepairPrompt(missingSig, treeFailure)
+            : nondet !== null
+              ? p6SynthesisNondeterministicRepairPrompt(nondet, treeFailure)
+              : p6SynthesisProseRepairPrompt(prose, treeFailure);
       const repair = await completeCall(repairPrompt, opts);
       if (repair.ok) {
         const repaired = parseSynthesisEnvelope(repair.text);
@@ -1520,7 +2150,12 @@ async function synthesizeChunkedTree(
   const attemptLogs: JsonLog[] = [...(project.logs ?? [])];
 
   for (let i = 0; i < groups.length; i++) {
-    const user = p6SynthesisChunkUserPrompt(brief, specRecord, groups[i], prior);
+    const lessonLines = lessonLinesForBrief(
+      brief,
+      selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
+      { limit: EXPAND_LESSON_RANK_LIMIT },
+    );
+    const user = p6SynthesisChunkUserPrompt(brief, specRecord, groups[i], prior, lessonLines);
     const chunk = await synthesizeChunkEnvelope(complete, user, opts, chunkNames[i], treeFailure, (attempt, res) => {
       pushAttemptLog(
         attemptLogs,
@@ -1611,12 +2246,22 @@ async function synthesizeChunkEnvelope(
     const unbound = unboundExportNames(envelope.module, envelope.exports);
     const repairableForbidden = hit.soft !== null && hit.hard === null;
     const missingSig = missingSignatureNames(envelope.exports, signatureNames);
-    if (unbound.length > 0 || repairableForbidden || missingSig.length > 0) {
+    // 216f (T-09/T-15): same two new bounded repair classes as the single-module
+    // path — prose-in-code and Math.random each get ONE re-prompt naming the
+    // exact defect; a repeat is refused. This is the LLM CHUNK gate: the only
+    // modules that ever reach it are model-authored chunk envelopes.
+    const nondet = nondeterministicPrimitiveHit(masked);
+    const prose = proseLineHits(envelope.module);
+    if (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
         : repairableForbidden
           ? p6SynthesisForbiddenRepairPrompt(hit.soft ?? "unknown", treeFailure)
-          : p6SynthesisSignatureRepairPrompt(missingSig, treeFailure);
+          : missingSig.length > 0
+            ? p6SynthesisSignatureRepairPrompt(missingSig, treeFailure)
+            : nondet !== null
+              ? p6SynthesisNondeterministicRepairPrompt(nondet, treeFailure)
+              : p6SynthesisProseRepairPrompt(prose, treeFailure);
       const repair = await completeCall(repairPrompt, opts);
       if (repair.ok) {
         const repaired = parseSynthesisEnvelope(repair.text);
@@ -1663,7 +2308,7 @@ function partialTreeRefuse(
           ...project,
           generatedTree: materialized.files.map((f) => toGeneratedTreeFile(f.path, f.source)),
           generatedSource: materialized.entrySource,
-          modelRoute: "deepseek-pro",
+          modelRoute: "deepseek-flash",
         }
       : project;
   const where = chunkIndex < 0 ? `tree ${chunkTotal}/${chunkTotal} chunks accepted` : `chunk ${chunkIndex + 1}/${chunkTotal} refused`;
@@ -1726,8 +2371,16 @@ function treeUpgraded(
     ...project,
     generatedSource: entry,
     generatedTree: treeFiles,
+    // 216 (T-06 / F-02): the artifact just CHANGED, so any prior `tested` stamp
+    // describes a template that no longer exists. A stale green stamp outliving
+    // its artifact is exactly how a shipped packet came to record
+    // `lastTest.ok:true` while the shipped test exited 1. Invalidate here; the
+    // ONLY re-mint path is mintTreeRunTested() after a genuinely green tree-run.
+    // Over-conservative by design: an identical-tree synthesis also drops the
+    // stamp, which is the honest direction (never claim tested when unsure).
+    lastTest: null,
     implementationSpec: specRecord,
-    modelRoute: "deepseek-pro",
+    modelRoute: "deepseek-flash",
     memory,
     artifacts,
     logs: [

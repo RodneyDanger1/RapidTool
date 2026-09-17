@@ -44,6 +44,8 @@ export const ERROR_CODES = [
   "RT_E_VERIFY_KIND_FAILED",
   "RT_E_BUDGET_EXHAUSTED",
   "RT_E_ABORTED",
+  "RT_E_BUSY",
+  "RT_E_FOREIGN_FILES",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -54,6 +56,29 @@ export type CodedFailure = { ok: false; error: string; code: ErrorCode };
 /** Build a typed failure result for a known error class. */
 export function codeError(code: ErrorCode, detail: string): CodedFailure {
   return { ok: false, error: detail, code };
+}
+
+/**
+ * 185-H1 dual-channel detector.
+ *
+ * `{ ok: true, error: "…" }` is a lie: success must never carry an `error`
+ * channel (use `note` / `detail` for soft messages). Returns the trimmed
+ * error prose when the payload claims success while also stamping `error`,
+ * otherwise `null`. Callers fail-close the dual-channel shape onto their
+ * honest failure path (never treat it as usable success).
+ *
+ * Only a non-empty string `error` counts — empty/whitespace is not dual-channel.
+ */
+export function dualChannelFailDetail(res: {
+  ok?: unknown;
+  error?: unknown;
+  // Allow extra payload fields (LLM text, note, …) — only ok+error are inspected.
+  [key: string]: unknown;
+}): string | null {
+  if (res.ok !== true) return null;
+  if (typeof res.error !== "string") return null;
+  const err = res.error.trim();
+  return err.length > 0 ? err : null;
 }
 
 /**
@@ -294,5 +319,13 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
   RT_E_ABORTED: {
     meaning: "The process received SIGTERM/SIGINT and stamped acceptance:aborted before exit.",
     agentAction: "Resume from the persisted cursor if one exists; do not treat the run as accepted or failed.",
+  },
+  RT_E_BUSY: {
+    meaning: "Another writer holds the project file lock (saveProject O_EXCL).",
+    agentAction: "Wait and retry the save; do not overwrite or delete the .lock file while a writer is live.",
+  },
+  RT_E_FOREIGN_FILES: {
+    meaning: "emit refused because the target dir contains foreign files that are not leftover tests/.",
+    agentAction: "Pass --force only if you intend to overwrite, or emit into a clean directory.",
   },
 };

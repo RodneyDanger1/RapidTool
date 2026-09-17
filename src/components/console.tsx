@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import * as Tabs from "@radix-ui/react-tabs";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import {
   Activity,
   ArrowRight,
@@ -63,6 +64,11 @@ import { chatContextInfo, chatHistoryTurns, chatOnce, chatStampVersion, failedSe
 import { ERROR_CODE_DOC } from "@/lib/errors";
 import { buildClientDiagnosis, reportRt, rtSnapshot, setBusyProbe } from "@/lib/rt-client";
 import { WILD_STEP_BUDGET_MS } from "@/lib/rt-events";
+// 216m · 111 TASK-10 / TASK-11 (W4 · L4): the cmdk command palette and the
+// typed timeline sibling pane. Explicit extensions, per the in-repo convention
+// for cross-component imports (routes import "@/components/console.tsx").
+import { CmdPalette, type CmdPaletteEntry } from "@/components/cmd-palette.tsx";
+import { RuntimeTimelinePane } from "@/components/runtime-timeline-pane.tsx";
 
 /** One prior copilot turn — structural ChatTurn (chat.server.ts shape). */
 type ChatTurn = { role: "user" | "assistant"; text: string };
@@ -105,6 +111,69 @@ function PhaseGlyph({ status }: { status: PhaseStatus }) {
 }
 
 type RunTab = "artifacts" | "packet" | "spec" | "crew" | "oracle" | "design" | "diagram" | "chat" | "vault" | "runtime";
+
+/**
+ * Run-console destinations — ONE source for the tab strip, its aria-label and
+ * the progressive-disclosure tiers.
+ *
+ * 111 TASK-03: the strip's `aria-label` used to be a hand-written run-on
+ * sentence that named `design`/`diagram` and `vault` in an order the DOM did
+ * not use, so a screen reader announced a sequence the user would never Tab
+ * through. Both labels below are now *derived from this array*, so they cannot
+ * diverge from DOM order again.
+ *
+ * 111 TASK-05: ten peer tabs at equal visual weight is the owner's "LOTS OF
+ * INFO" complaint. NN/g progressive disclosure (111 §2 #1) says rank and
+ * defer, never delete — so all ten `RunTab` values stay reachable and every
+ * `Tabs.Content value=` block below is byte-unchanged. `tier: "primary"`
+ * renders on the strip; `"advanced"` is revealed by the "More panels" toggle.
+ * `purpose` is the one-line plain-language information-scent text from
+ * 111 §2 #9 — shown as adjacent content (not a tooltip), which is exactly the
+ * shape the in-file `DIAGRAM_KINDS` `{label, hint}` pattern already uses.
+ */
+const RUN_TABS: { id: RunTab; label: string; purpose: string; tier: "primary" | "advanced" }[] = [
+  { id: "artifacts", label: "Artifacts", purpose: "Every file this build produced", tier: "primary" },
+  { id: "packet", label: "Agent packet", purpose: "The prompt to paste into a coding agent", tier: "primary" },
+  { id: "chat", label: "Chat", purpose: "Ask questions about this build", tier: "primary" },
+  { id: "spec", label: "Spec graph", purpose: "Which role owns which file, in order", tier: "advanced" },
+  { id: "crew", label: "Crew", purpose: "Advisory agent roles for this phase", tier: "advanced" },
+  { id: "oracle", label: "Oracle", purpose: "Acceptance cases the build must meet", tier: "advanced" },
+  { id: "vault", label: "Vault", purpose: "Notes built from this run, searchable", tier: "advanced" },
+  { id: "design", label: "Design", purpose: "Colors, type and spacing from Phase 6", tier: "advanced" },
+  { id: "diagram", label: "Diagram", purpose: "A picture of how the build fits together", tier: "advanced" },
+  { id: "runtime", label: "Runtime log", purpose: "Operator log and diagnostics", tier: "advanced" },
+];
+
+/** aria-label for one rendered tablist slice — derived from the same array the
+ *  triggers render from (111 TASK-03), so announced order == DOM order always. */
+function tabListLabel(tier: "primary" | "advanced"): string {
+  const names = RUN_TABS.filter((t) => t.tier === tier)
+    .map((t) => t.label.toLowerCase())
+    .join(", ");
+  return tier === "primary" ? `Run console panels: ${names}` : `More panels, revealed on demand: ${names}`;
+}
+
+/** Shared trigger styling — the class string is byte-identical to the ten
+ *  inline copies it replaces, so the hover/active treatment is unchanged. */
+const TAB_TRIGGER_CLASS =
+  "rt-tab flex shrink-0 flex-col items-start px-3 pt-1.5 pb-2 text-sm text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg";
+
+/**
+ * One tab trigger: the noun label plus its plain-language purpose line
+ * (111 TASK-05). Radix `Tabs` requires triggers and contents to stay under the
+ * same `Tabs.Root` — both lists render inside this Root, which is why the
+ * tiering is a wrapper and not a separate component tree.
+ */
+function RunTabTrigger({ tab }: { tab: (typeof RUN_TABS)[number] }) {
+  return (
+    <Tabs.Trigger value={tab.id} title={tab.purpose} className={TAB_TRIGGER_CLASS}>
+      <span className="leading-tight whitespace-nowrap">{tab.label}</span>
+      <span className="mt-0.5 block max-w-[10.5rem] text-[10px] leading-tight whitespace-normal text-faint">
+        {tab.purpose}
+      </span>
+    </Tabs.Trigger>
+  );
+}
 
 /** One crew message rendered in the post-run panel (view over crew.ts CrewMessage). */
 type CrewMsgView = {
@@ -149,6 +218,203 @@ function lastTestCaption(lt: { ok: boolean; detail: string } | null): string | n
   const raw = (lt as LastTestWithLabel).label;
   const who = raw ? (LAST_TEST_LABEL_TEXT[raw] ?? `test (${raw})`) : "last test";
   return `${who} ${lt.ok ? "pass" : "fail"} · ${lt.detail}`;
+}
+
+/**
+ * 111 TASK-02 — the rendering half of 111's "three small changes with the
+ * largest effect". Shape mirrors the proposed `nextAction` envelope from
+ * 111 §3.4 (`kind · cmd · phase · why`) so this UI-side derivation can be
+ * repointed at the real `summary()` field once TASK-01 lands in
+ * `src/lib/headless.ts` (that file belongs to another lane in this wave — the
+ * envelope half is reported in fixes/216h_ui_wave.md, not enacted here).
+ */
+type UiNextAction = {
+  kind: "run" | "approve" | "retry" | "done" | "running" | "fix-gate" | "unknown";
+  /** The CLI verb that performs this action. The UI shows this exact word
+   *  next to the button, so the human and the agent never hold two
+   *  vocabularies (111 §2 #2, recognition over recall). */
+  cmd: string;
+  phase: PhaseId;
+  why: string;
+};
+
+/** OpenHands' shipped JSON-echo guard (`get-action-event-title.ts`, copied from
+ *  111 §3.2): a "human sentence" that is actually serialized JSON
+ *  (`field: {…}` / `field: […]`) is refused rather than rendered to a human. */
+const JSON_ECHO_RE = /^[a-z][a-z0-9_]*\s*:\s*[[{]/i;
+
+/** Documented generic sentence — used only when a `why` is refused by the
+ *  guard above or the state is unknown. Never a fabricated specific claim. */
+const GENERIC_NEXT_WHY = "Nothing is waiting on you — run the next phase to move the build forward.";
+
+/**
+ * HITL override predicate, single-sourced for the dock and the status panel
+ * (A02: a failed P6 sandbox is human-only — the operator must tick the
+ * override before Approve can pass; mirrors store.ts's guard).
+ */
+function hitlNeedsOverride(project: Project): boolean {
+  return (
+    Boolean(project.hitl?.forceHuman) &&
+    project.currentPhase === 6 &&
+    project.lastTest !== null &&
+    !project.lastTest.ok
+  );
+}
+
+/**
+ * 111 TASK-02: derive the ONE next action from state the console already
+ * holds. Pure — reads `project` only, writes nothing, invents nothing: every
+ * branch names a real CLI verb (gate / approve / retry / emit / status) and
+ * states only facts the engine recorded. Ordered so the most urgent fact wins
+ * (an in-flight phase outranks a stale gate verdict; a parked gate outranks a
+ * runnable phase), and the `unknown` arm is mandatory so it can never
+ * fabricate a specific claim.
+ */
+function uiNextAction(project: Project, running: boolean): UiNextAction {
+  const current = PHASES[project.currentPhase];
+  if (!project.phases.length) {
+    return { kind: "unknown", cmd: "status", phase: project.currentPhase, why: GENERIC_NEXT_WHY };
+  }
+  if (running) {
+    return {
+      kind: "running",
+      cmd: "gate",
+      phase: project.currentPhase,
+      why: `${current.code} is running — wait for it to finish or stop.`,
+    };
+  }
+  if (project.hitl) {
+    return {
+      kind: "approve",
+      cmd: "approve",
+      phase: project.currentPhase,
+      why: `Phase ${current.code} is finished — it's waiting for your approval.`,
+    };
+  }
+  if (project.status === "blocked") {
+    return {
+      kind: "retry",
+      cmd: "retry",
+      phase: project.currentPhase,
+      why: `${current.code} stopped — read the rejection notes below, then retry the phase.`,
+    };
+  }
+  if (project.status === "complete") {
+    return {
+      kind: "done",
+      cmd: "emit",
+      phase: project.currentPhase,
+      why: `All ${PHASES.length} phases are sealed — the build is complete.`,
+    };
+  }
+  const failedGate = project.phases.find((r) => r.gate && r.gate.passed === false);
+  if (failedGate) {
+    return {
+      kind: "fix-gate",
+      cmd: "gate",
+      phase: failedGate.id,
+      why: `A gate check on ${PHASES[failedGate.id].code} failed — review the gate record before continuing.`,
+    };
+  }
+  if (project.phases[project.currentPhase].status === "rejected") {
+    return {
+      kind: "run",
+      cmd: "gate",
+      phase: project.currentPhase,
+      why: `${current.code} was rejected — run it again after reviewing the notes.`,
+    };
+  }
+  return {
+    kind: "run",
+    cmd: "gate",
+    phase: project.currentPhase,
+    why: `Ready when you are — run ${current.code} (${current.title}).`,
+  };
+}
+
+/** True when a "human" sentence is actually serialized JSON — the OpenHands
+ *  fallback guard (111 §3.2); refused sentences fall back to GENERIC_NEXT_WHY. */
+function isJsonEchoSentence(s: string): boolean {
+  return JSON_ECHO_RE.test(s.trim());
+}
+
+/** Button label per next-action kind. `null` = the panel deliberately renders no
+ *  button for that state (the surrounding screen already owns that control, or
+ *  nothing is actionable yet) — never a duplicate primary affordance. */
+const NEXT_ACTION_BUTTON: Record<UiNextAction["kind"], string | null> = {
+  run: "Run to next gate",
+  approve: "Approve",
+  "fix-gate": "Run to next gate",
+  retry: null, // the "Retry phase with notes" button below the header owns this
+  done: null, // the export controls own this step
+  running: null,
+  unknown: null,
+};
+
+/**
+ * 111 TASK-02 / B1 — the always-visible "what's happening / what now" block,
+ * rendered top-left in the run view above the tab strip (the F-pattern's first
+ * sweep — 111 §2 #10). Three facts from state that already exists: where you
+ * are, what just happened, and the ONE next action as a plain sentence plus one
+ * button. Every button reuses an existing handler passed in by RunScreen — no
+ * second code path to run/approve (111 TASK-02's stated risk). The JSON-echo
+ * guard (OpenHands `isServerFallbackSummary`) refuses a `why` that is really
+ * serialized JSON and falls back to the documented generic sentence.
+ */
+function RunStatusPanel({
+  project,
+  action,
+  onPrimary,
+  primaryBlockedReason,
+}: {
+  project: Project;
+  action: UiNextAction;
+  /** Existing handler for the action's button — never a new one. */
+  onPrimary: (() => void) | null;
+  /** Set when the HITL override checkbox must be ticked first: the panel then
+   *  withholds its Approve button instead of minting a bypass path (110 UI-01). */
+  primaryBlockedReason?: string;
+}) {
+  const def = PHASES[project.currentPhase];
+  const done = project.phases.filter((r) => r.status === "complete").length;
+  const why = isJsonEchoSentence(action.why) ? GENERIC_NEXT_WHY : action.why;
+  const buttonLabel = NEXT_ACTION_BUTTON[action.kind];
+  const showButton = buttonLabel !== null && onPrimary !== null && !primaryBlockedReason;
+  const happened = lastTestCaption(project.lastTest);
+  return (
+    <section
+      className="border-b border-line bg-surface/60 px-5 py-4"
+      aria-label="What's happening and what to do next"
+    >
+      <p className="font-mono text-[10px] font-medium tracking-widest text-faint uppercase">
+        What&apos;s happening
+      </p>
+      <p className="mt-1.5 text-sm text-fg">
+        You&apos;re at{" "}
+        <span className="font-medium">
+          {def.code} · {def.title}
+        </span>
+        <span className="text-muted"> · step {done}/{PHASES.length} sealed</span>
+      </p>
+      {happened ? <p className="mt-0.5 text-sm text-muted">Last check: {happened}</p> : null}
+      <p className="mt-2 max-w-2xl text-base leading-relaxed">{why}</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {showButton ? (
+          <button
+            type="button"
+            onClick={onPrimary}
+            className="btn-solid inline-flex min-h-11 items-center gap-2 rounded-md bg-fg px-4 text-sm font-medium text-bg"
+          >
+            {buttonLabel}
+          </button>
+        ) : null}
+        <span className="font-mono text-[11px] text-faint" title="The CLI verb this action runs">
+          verb: {action.cmd}
+        </span>
+      </div>
+      {primaryBlockedReason ? <p className="mt-2 text-xs text-warn">{primaryBlockedReason}</p> : null}
+    </section>
+  );
 }
 
 /** Assemble the read-only evidence bundle shown before a HITL gate decision (E-102). */
@@ -976,6 +1242,9 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ["Ctrl", "Shift", "Enter"], label: "Run to next gate" },
   { keys: ["Ctrl", "Shift", "C"], label: "Copy agent packet" },
   { keys: ["Ctrl", "G"], label: "Toggle agent guide" },
+  // 216m · 111 TASK-10: additive row for the command palette (suspends the
+  // single-key shortcuts above while it is open).
+  { keys: ["Ctrl", "K"], label: "Open the command palette" },
 ];
 
 function Kbd({ children }: { children: ReactNode }) {
@@ -983,6 +1252,92 @@ function Kbd({ children }: { children: ReactNode }) {
     <kbd className="rounded-sm border border-border bg-raised px-1.5 py-0.5 font-mono text-[10px] text-fg">
       {children}
     </kbd>
+  );
+}
+
+/**
+ * 111 TASK-07 — glossary-in-place. Every definition here is a re-surfacing of
+ * copy that already exists (`GUIDE_SECTIONS[1]`/`[2]`, `scripts/README-cli.md`
+ * and the in-file toggle captions); nothing new is authored. The point is to
+ * put the definition where the jargon is used (NN/g "pull revelation" beats a
+ * glossary page nobody opens). Radix `Tooltip` (already a dependency) opens on
+ * hover AND keyboard focus, so the definition is not hover-only.
+ */
+const TERMS: Record<string, { short: string; long: string }> = {
+  hitl: {
+    short: "Human-in-the-loop: the run has stopped and is waiting for a person to decide.",
+    long: "When a phase finishes, the run parks at its gate until you approve (continue) or reject with 12+ characters of feedback (regenerate). Keys: a = approve, r = focus the rejection note.",
+  },
+  dod: {
+    short: "Definition of Done: the exit criteria a phase must meet before the run may move on.",
+    long: "Each phase records a machine-checked pass/fail plus its unmet criteria. Advisory gates record without blocking; enforced gates park the run. The sidebar toggle switches between the two.",
+  },
+  agentPacket: {
+    short: "The compiled prompt you paste into a coding agent — this build's contract, in one document.",
+    long: "Compiled from the brief, the phase artifacts and the constraints. Copy it (or download the .md), paste it into your agent session, then paste the agent's output back through the phase's Notes.",
+  },
+  oracle: {
+    short: "The build's acceptance cases — what “correct” means for this project.",
+    long: "Template-derived given/expect prose plus an executable machine-verify block. They describe acceptance; they do not run the product.",
+  },
+  vault: {
+    short: "Notes built from this run, kept as searchable markdown.",
+    long: "An Obsidian-style note set (map of content, wikilinks, tags) generated from the build. Copy or download individual notes as .md.",
+  },
+  crew: {
+    short: "A set of advisory agent roles for the current phase.",
+    long: "The crew proposes and critiques; it never overrides the gates. Spawn it from the action bar once a phase has run and a model key is configured.",
+  },
+};
+
+/**
+ * Inline term with its definition on hover/focus (111 TASK-07). Each instance
+ * carries its own `Tooltip.Provider` because the Provider is required by
+ * Radix's `Tooltip.Root` and this file cannot mount one at the app root
+ * (`src/routes/*` is outside this lane's file ownership).
+ *
+ * 216m (TASK-07 tail, the two remaining chips): `focusable` defaults to TRUE.
+ * Every free-standing term keeps a focusable trigger, which is what makes the
+ * definition reachable without a mouse (111's "hover AND keyboard focus"
+ * done-when). The one chip that lives INSIDE a `<button>` — the phase-rail
+ * tile, already one tab stop per phase — passes `false`: a nested `tabIndex=0`
+ * there would add a second, keyboard-bogus stop to every phase row and nest a
+ * focusable element inside a button. Hover still opens that definition, and the
+ * same definition is keyboard-reachable from the HITL dock chip and the Guide.
+ */
+function Term({
+  k,
+  children,
+  focusable = true,
+}: {
+  k: string;
+  children: ReactNode;
+  focusable?: boolean;
+}) {
+  const t = TERMS[k];
+  if (!t) return <>{children}</>;
+  return (
+    <Tooltip.Provider delayDuration={150}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <span
+            tabIndex={focusable ? 0 : undefined}
+            className="cursor-help underline decoration-dotted decoration-from-font underline-offset-2"
+          >
+            {children}
+          </span>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content
+            sideOffset={6}
+            className="z-50 max-w-xs rounded-md border border-border bg-surface px-3 py-2 text-xs leading-relaxed text-fg shadow-lg"
+          >
+            <span className="block">{t.short}</span>
+            <span className="mt-1 block text-muted">{t.long}</span>
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   );
 }
 
@@ -1150,6 +1505,13 @@ export function RunScreen({ id }: { id: string }) {
   const [copied, setCopied] = useState(false);
   const [copiedHandoff, setCopiedHandoff] = useState(false);
   const [tab, setTab] = useState<RunTab>("artifacts");
+  /** 111 TASK-05 "More panels" disclosure. A tab in the advanced tier forces
+   *  the tier open while it is the active panel, so collapsing the section can
+   *  never hide the trigger of the panel currently on screen. */
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const activeIsAdvanced = RUN_TABS.some((t) => t.id === tab && t.tier === "advanced");
+  const showAdvanced = advancedOpen || activeIsAdvanced;
+  const advancedTabCount = RUN_TABS.filter((t) => t.tier === "advanced").length;
   const [query, setQuery] = useState("");
   const [phaseFilter, setPhaseFilter] = useState<PhaseId | "all">("all");
   const [viewPhase, setViewPhase] = useState<PhaseId | null>(null);
@@ -1161,6 +1523,14 @@ export function RunScreen({ id }: { id: string }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  /**
+   * 216m · 111 TASK-10: the command palette's open state. It lives HERE (not in
+   * the palette) because the global key handler below must suspend itself while
+   * the palette is open — and that handler reads the ref, never this state, so
+   * its stale-closure-free [id]-only effect stays intact.
+   */
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const paletteOpenRef = useRef(false);
   const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [prevName, setPrevName] = useState<string | null>(null);
   const undoNameTimer = useRef<number | null>(null);
@@ -1182,10 +1552,26 @@ export function RunScreen({ id }: { id: string }) {
     };
   }, []);
 
+  // 216m · 111 TASK-10: mirror the palette's open state into a ref. The global
+  // key handler below deliberately depends only on `id`, so it must read the
+  // REF (never the state) to suspend shortcuts while the palette is open —
+  // otherwise the handler would close over a stale `false` forever.
+  useEffect(() => {
+    paletteOpenRef.current = paletteOpen;
+  }, [paletteOpen]);
+
   // Global keyboard shortcuts for the run loop (enhancement 3.1). Reads the store
   // directly so the handler stays free of stale closures and TDZ issues.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // 216m · 111 TASK-10: while the command palette is open, EVERY shortcut in
+      // this handler is suspended — a bare "e"/"g"/"a"/"r" press (or any mod
+      // chord) must never reach run()/onApprove() behind the palette (111's
+      // stated keyboard-collision risk). The palette owns the keyboard while
+      // open (cmdk/Radix handle arrows, Enter, Escape). A plain early return
+      // does not stop propagation, so the palette's own input keeps receiving
+      // every event normally.
+      if (paletteOpenRef.current) return;
       const t = e.target as HTMLElement | null;
       const typing =
         t &&
@@ -1213,6 +1599,13 @@ export function RunScreen({ id }: { id: string }) {
       } else if (mod && e.key.toLowerCase() === "g") {
         e.preventDefault();
         setGuideOpen((v) => !v);
+      } else if (mod && e.key.toLowerCase() === "k") {
+        // 216m · 111 TASK-10: open the command palette. This branch can only
+        // fire while the palette is CLOSED (the suspension return above runs
+        // first otherwise); the palette closes via Escape / click-outside
+        // through its own Radix dialog.
+        e.preventDefault();
+        setPaletteOpen(true);
       } else if (!mod && !e.altKey && !e.repeat) {
         // Single-key shortcuts (enhancement 10: additive, no regressions).
         // Ignored while typing and when a modifier is held.
@@ -1289,6 +1682,17 @@ export function RunScreen({ id }: { id: string }) {
   // don't carry the control-flow narrowing into their bodies — so capture a
   // plain `Project` alias for the helper functions below.
   const current = project;
+  // 111 TASK-02: one derived next action and its single primary handler. The
+  // handler is the SAME function the action bar uses — never a second path to
+  // run/approve (the stated risk of TASK-02).
+  const nextAction = uiNextAction(project, running);
+  const nextNeedsOverride = hitlNeedsOverride(project);
+  const nextPrimary =
+    nextAction.kind === "approve"
+      ? () => onApprove()
+      : nextAction.kind === "run" || nextAction.kind === "fix-gate"
+        ? () => void runUntil()
+        : null;
 
   function flashCopied(setter: (v: boolean) => void) {
     const my = ++copyTs.current;
@@ -1345,6 +1749,7 @@ export function RunScreen({ id }: { id: string }) {
     try {
       const res = await runUntilHitlAsync(projectId);
       if (!res.ok) setError(res.error);
+      else if (res.note) setNotice(res.note);
     } finally {
       busyRef.current = false;
       setBusyAction(null);
@@ -1587,6 +1992,104 @@ export function RunScreen({ id }: { id: string }) {
     void nav({ to: "/" });
   }
 
+  // 216m · 111 TASK-10: the command palette's entries. Every `run` below calls
+  // the SAME handler the dock / action bar / toolbar button calls — the palette
+  // adds a findable surface, never a second path to an action (111 TASK-02).
+  // The `verb` chip names the matching CLI verb ONLY where one really exists in
+  // scripts/rapidtool-cli.mjs; UI-only entries say so instead of inventing one.
+  const paletteEntries: CmdPaletteEntry[] = [
+    {
+      id: "approve",
+      group: "Run loop",
+      label: "Approve the waiting gate",
+      description: "Continue the run past the phase gate it is parked at.",
+      verb: "approve",
+      keywords: ["hitl", "gate", "continue", "accept"],
+      run: () => onApprove(),
+    },
+    {
+      id: "run-until",
+      group: "Run loop",
+      label: "Run to the next gate",
+      description: "Advance phase by phase until the run parks at a gate or finishes.",
+      verb: "gate",
+      keywords: ["run", "until", "next", "advance", "continue"],
+      run: () => void runUntil(),
+    },
+    {
+      id: "copy-packet",
+      group: "Copy & export",
+      label: "Copy the agent packet",
+      description: "Copy the full agent packet markdown for the current phase.",
+      verb: "packet",
+      keywords: ["clipboard", "markdown", "agent", "paste"],
+      run: () => void copyPacket(),
+    },
+    {
+      id: "download-packet",
+      group: "Copy & export",
+      label: "Download the agent packet (.md)",
+      description: "Save the agent packet markdown to a file.",
+      verb: "packet",
+      keywords: ["save", "file", "markdown", "agent"],
+      run: () => downloadPacket(),
+    },
+    {
+      id: "copy-project-json",
+      group: "Copy & export",
+      label: "Copy project JSON",
+      description: "Copy the whole project export to the clipboard.",
+      verb: "export",
+      keywords: ["clipboard", "backup", "json", "build"],
+      run: () => void copyProjectJson(),
+    },
+    {
+      id: "download-json",
+      group: "Copy & export",
+      label: "Download project JSON",
+      description: "Save the whole project export as a .json file.",
+      verb: "export",
+      keywords: ["save", "file", "backup", "json"],
+      run: () => downloadJson(),
+    },
+    {
+      id: "copy-handoff",
+      group: "Copy & export",
+      label: "Copy the phase handoff",
+      description: "Copy the handoff prompt that carries this phase into an external agent session.",
+      verb: null, // phaseHandoff (src/lib/handoff.ts) has no CLI verb today
+      keywords: ["handoff", "prompt", "phase", "agent", "external"],
+      run: () => void copyHandoff(),
+    },
+    {
+      id: "settings",
+      group: "Panels",
+      label: "Open settings",
+      description: "LLM / research backend status and where the keys live (server-side .env).",
+      verb: null,
+      keywords: ["keys", "env", "backend", "config"],
+      run: () => setSettingsOpen(true),
+    },
+    {
+      id: "shortcuts",
+      group: "Panels",
+      label: "Open keyboard shortcuts",
+      description: "Every single-key and Ctrl chord this screen listens for.",
+      verb: null,
+      keywords: ["keys", "keyboard", "hotkeys", "help"],
+      run: () => setShortcutsOpen(true),
+    },
+    {
+      id: "report",
+      group: "Panels",
+      label: "Toggle the agent-report panel",
+      description: "Paste a JSON agent report for the current phase — the console's ingest seam.",
+      verb: "ingest",
+      keywords: ["report", "ingest", "json", "paste", "agent"],
+      run: () => setReportOpen((v) => !v),
+    },
+  ];
+
   return (
     <div className="flex min-h-dvh flex-col bg-bg">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 sm:px-5">
@@ -1795,7 +2298,8 @@ export function RunScreen({ id }: { id: string }) {
                     type="button"
                     onClick={run}
                     disabled={running || busyAction !== null}
-                    className="btn-solid inline-flex min-h-11 items-center gap-2 rounded-md bg-fg px-4 text-sm font-medium text-bg disabled:opacity-40"
+                    title="Advanced — run only this phase, then stop"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-4 text-sm text-fg disabled:opacity-40"
                   >
                     {busyAction === "step" ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -1804,11 +2308,16 @@ export function RunScreen({ id }: { id: string }) {
                     )}
                     {busyAction === "step" ? "Running…" : `Execute ${PHASES[project.currentPhase].code}`}
                   </button>
+                  {/* 111 TASK-09: "Run to next gate" subsumes "Execute P#", so it
+                      is the primary treatment (Hick's Law: highlight the
+                      recommended option). Both buttons keep their handlers and
+                      the e/g shortcuts — styling only, no capability removed. */}
                   <button
                     type="button"
                     onClick={runUntil}
                     disabled={running || busyAction !== null}
-                    className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-4 text-sm text-fg disabled:opacity-40"
+                    title="Recommended — runs phases until something needs you"
+                    className="btn-solid inline-flex min-h-11 items-center gap-2 rounded-md bg-fg px-4 text-sm font-medium text-bg disabled:opacity-40"
                   >
                     {busyAction === "run" ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -2101,6 +2610,23 @@ export function RunScreen({ id }: { id: string }) {
             ) : null}
           </div>
 
+          {/* 111 TASK-02: status-first panel above the tab strip and the rail —
+              the top-left position both F-pattern sweeps land on (111 §2 #10).
+              Sentence and button derive from the same `nextAction`, so they
+              cannot disagree; the panel withholds its Approve button when the
+              failed-sandbox override must be ticked first (110 UI-01's class of
+              shortcut/button mismatch is deliberately not reproduced here). */}
+          <RunStatusPanel
+            project={project}
+            action={nextAction}
+            onPrimary={nextPrimary}
+            primaryBlockedReason={
+              nextAction.kind === "approve" && nextNeedsOverride
+                ? "Tick the override checkbox in the approval panel below before approving."
+                : undefined
+            }
+          />
+
           <PhaseProgressRail project={project} />
 
           <WildConsole project={project} />
@@ -2134,71 +2660,40 @@ export function RunScreen({ id }: { id: string }) {
           ) : null}
 
           <Tabs.Root value={tab} onValueChange={(v) => setTab(v as RunTab)}>
-            <Tabs.List
-              aria-label="Run console tabs: artifacts, agent packet, spec graph, crew, oracle, design, diagram, chat, vault, runtime log"
-              className="scroll-thin flex gap-1 overflow-x-auto border-b border-line px-5 pt-3"
-            >
-              <Tabs.Trigger
-                value="artifacts"
-                className="rt-tab shrink-0 min-h-10 px-3 text-sm whitespace-nowrap text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg"
-              >
-                Artifacts
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="packet"
-                className="rt-tab shrink-0 min-h-10 px-3 text-sm whitespace-nowrap text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg"
-              >
-                Agent packet
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="spec"
-                className="rt-tab shrink-0 min-h-10 px-3 text-sm whitespace-nowrap text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg"
-              >
-                Spec graph
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="crew"
-                className="rt-tab shrink-0 min-h-10 px-3 text-sm whitespace-nowrap text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg"
-              >
-                Crew
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="oracle"
-                className="rt-tab shrink-0 min-h-10 px-3 text-sm whitespace-nowrap text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg"
-              >
-                Oracle
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="vault"
-                className="rt-tab shrink-0 min-h-10 px-3 text-sm whitespace-nowrap text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg"
-              >
-                Vault
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="design"
-                className="rt-tab shrink-0 min-h-10 px-3 text-sm whitespace-nowrap text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg"
-              >
-                Design
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="diagram"
-                className="rt-tab shrink-0 min-h-10 px-3 text-sm whitespace-nowrap text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg"
-              >
-                Diagram
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="chat"
-                className="rt-tab shrink-0 min-h-10 px-3 text-sm whitespace-nowrap text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg"
-              >
-                Chat
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="runtime"
-                className="rt-tab shrink-0 min-h-10 px-3 text-sm whitespace-nowrap text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg"
-              >
-                Runtime log
-              </Tabs.Trigger>
-            </Tabs.List>
+            {/* 111 TASK-05: progressive disclosure — three primary panels on the
+                strip, the remaining seven behind "More panels". The panels
+                themselves (the ten `Tabs.Content value=` blocks below) are
+                byte-unchanged, and `RunTab` is untouched. The old strip used
+                `overflow-x-auto`, which pushed the right-hand tabs outside both
+                F-pattern sweeps (111 §2 #10); the row now wraps instead. */}
+            <div className="border-b border-line px-5 pt-3">
+              <div className="flex flex-wrap items-center gap-1">
+                <Tabs.List aria-label={tabListLabel("primary")} className="scroll-thin flex flex-wrap gap-1">
+                  {RUN_TABS.filter((t) => t.tier === "primary").map((t) => (
+                    <RunTabTrigger key={t.id} tab={t} />
+                  ))}
+                </Tabs.List>
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen((v) => !v)}
+                  aria-expanded={showAdvanced}
+                  className="ml-auto inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-muted hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  {showAdvanced ? "Fewer panels" : `More panels (${advancedTabCount})`}
+                  <ChevronRight
+                    aria-hidden="true"
+                    className={`h-3.5 w-3.5 transition-transform ${showAdvanced ? "rotate-90" : ""}`}
+                  />
+                </button>
+              </div>
+              {showAdvanced ? (
+                <Tabs.List aria-label={tabListLabel("advanced")} className="mt-1 flex flex-wrap gap-1">
+                  {RUN_TABS.filter((t) => t.tier === "advanced").map((t) => (
+                    <RunTabTrigger key={t.id} tab={t} />
+                  ))}
+                </Tabs.List>
+              ) : null}
+            </div>
 
             {/* forceMount keeps every panel mounted so future live streams survive tab switches. */}
             <Tabs.Content value="artifacts" forceMount className="data-[state=inactive]:hidden">
@@ -2237,9 +2732,29 @@ export function RunScreen({ id }: { id: string }) {
                 active={activeArt}
                 onSelect={setSelected}
                 empty={
-                  artifacts.length === 0
-                    ? undefined
-                    : "No artifacts match this filter."
+                  artifacts.length === 0 ? (
+                    /* 111 TASK-08 / B3: first-run empty state carries status +
+                       learnability + one direct pathway (NN/g empty-state
+                       guidelines), reusing the already-written Guide copy
+                       (`GUIDE_SECTIONS[0]`, 111 §4.2) instead of new prose. */
+                    <div className="max-w-2xl">
+                      <p className="text-sm text-fg">
+                        No files yet — every phase you run writes what it produced into this list.
+                      </p>
+                      <p className="mt-2 text-sm leading-relaxed text-muted">{GUIDE_SECTIONS[0].body}</p>
+                      {project.status !== "complete" && project.status !== "blocked" && !project.hitl ? (
+                        <button
+                          type="button"
+                          onClick={() => void runUntil()}
+                          className="btn-solid mt-3 inline-flex min-h-11 items-center gap-2 rounded-md bg-fg px-4 text-sm font-medium text-bg"
+                        >
+                          Run to next gate
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    "No artifacts match this filter."
+                  )
                 }
               />
             </Tabs.Content>
@@ -2295,18 +2810,30 @@ export function RunScreen({ id }: { id: string }) {
             </Tabs.Content>
 
             <Tabs.Content value="crew" forceMount className="data-[state=inactive]:hidden">
-              <div className="grid gap-3 px-5 py-4 sm:grid-cols-2">
-                {(project.crew ?? []).map((c) => (
-                  <div key={c.role} className="rounded-md border border-border bg-raised px-3 py-3">
-                    <p className="font-mono text-[11px] text-accent">
-                      {c.role}{c.active ? " · active" : ""} · {c.budgetTokens} tok
-                    </p>
-                    <p className="mt-2 text-sm">{c.mandate}</p>
-                    <p className="mt-2 text-xs text-muted">{c.handoff}</p>
-                    <p className="mt-2 font-mono text-[11px] text-faint">{c.tools.join(" · ")}</p>
-                  </div>
-                ))}
-              </div>
+              {/* 111 TASK-08 / 110 UI-05: this pane used to render an empty div
+                  when there was no crew — indistinguishable from a broken tab,
+                  while every sibling pane had an honest empty state. Same
+                  house pattern, plain words, and it says how one gets here. */}
+              {(project.crew ?? []).length === 0 ? (
+                <p className="m-4 rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted">
+                  No crew yet — a crew is the advisory set of agent roles for this phase.
+                  Spawn one from the action bar once a model key is configured.
+                </p>
+              ) : (
+                <div className="grid gap-3 px-5 py-4 sm:grid-cols-2">
+                  {(project.crew ?? []).map((c) => (
+                    <div key={c.role} className="rounded-md border border-border bg-raised px-3 py-3">
+                      <p className="font-mono text-[11px] text-accent">
+                        {c.role}
+                        {c.active ? " · active" : ""} · {c.budgetTokens} tok
+                      </p>
+                      <p className="mt-2 text-sm">{c.mandate}</p>
+                      <p className="mt-2 text-xs text-muted">{c.handoff}</p>
+                      <p className="mt-2 font-mono text-[11px] text-faint">{c.tools.join(" · ")}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Tabs.Content>
 
             <Tabs.Content value="oracle" forceMount className="data-[state=inactive]:hidden">
@@ -2352,6 +2879,12 @@ export function RunScreen({ id }: { id: string }) {
 
             <Tabs.Content value="runtime" forceMount className="data-[state=inactive]:hidden">
               <RuntimeLogPane project={project} />
+              {/* 216m · 111 TASK-11: typed timeline sibling. Additive — the raw
+                  ring list above renders byte-identically; this pane collapses to
+                  a one-line honest summary and expands to paired rows (starts
+                  with finishes), with the raw NDJSON reachable in a disclosure
+                  and via one-click copy. No store reads, no new data source. */}
+              <RuntimeTimelinePane />
             </Tabs.Content>
 
             <Tabs.Content value="design" forceMount className="data-[state=inactive]:hidden">
@@ -2452,6 +2985,12 @@ export function RunScreen({ id }: { id: string }) {
       />
       <GuideDialog open={guideOpen} onClose={() => setGuideOpen(false)} />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      {/* 216m · 111 TASK-10: the command palette — mounted additively as the last
+          child of the screen root, so no existing layout node changes. Its open
+          state is owned above; the global key handler suspends single-key (and
+          mod-chord) shortcuts while it is open (paletteOpenRef gate). Ctrl+K
+          opens it; Escape / click-outside close it via its Radix dialog. */}
+      <CmdPalette open={paletteOpen} onOpenChange={setPaletteOpen} entries={paletteEntries} />
     </div>
   );
 }
@@ -2461,6 +3000,34 @@ function PhaseProgressRail({ project }: { project: Project }) {
   const done = project.phases.filter((r) => r.status === "complete").length;
   const total = PHASES.length;
   const pct = Math.round((done / total) * 100);
+  // 111 TASK-04 / T-20: this component computed a status word for every one of
+  // the 13 segments and then hid it in `title=`/`aria-label=` (invisible to a
+  // sighted, mouse-less user). The words below are visible text, and the
+  // segment labels are raised above the old 9px.
+  const currentRec = project.phases.find((r) => r.id === project.currentPhase);
+  const currentWord =
+    project.status === "blocked"
+      ? "Blocked — review the notes"
+      : currentRec
+        ? PHASE_STATUS_META[currentRec.status].label
+        : "Not started yet";
+  const currentTone =
+    project.status === "blocked"
+      ? "text-danger"
+      : currentRec
+        ? PHASE_STATUS_META[currentRec.status].tone
+        : "text-faint";
+  const attention = PHASES.flatMap((p) => {
+    const rec = project.phases.find((r) => r.id === p.id);
+    const st = rec?.status ?? "locked";
+    if (st === "rejected" || st === "awaiting_hitl") {
+      return [{ code: p.code, word: PHASE_STATUS_META[st].label }];
+    }
+    if (project.status === "blocked" && p.id === project.currentPhase) {
+      return [{ code: p.code, word: "Blocked" }];
+    }
+    return [];
+  });
   return (
     <div className="border-b border-line px-5 py-3" aria-label="Phase progress">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2471,6 +3038,17 @@ function PhaseProgressRail({ project }: { project: Project }) {
           {done}/{total} sealed · {pct}%
         </p>
       </div>
+      <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+        <span className="text-faint">Now:</span>
+        <span className={`font-medium ${currentTone}`}>
+          {PHASES[project.currentPhase].code} · {currentWord}
+        </span>
+      </p>
+      {attention.length ? (
+        <p className="mt-1 font-mono text-[11px] leading-relaxed text-warn">
+          Needs you: {attention.map((a) => `${a.code} ${a.word}`).join(" · ")}
+        </p>
+      ) : null}
       <ol className="mt-2 flex gap-1">
         {PHASES.map((p) => {
           const rec = project.phases.find((r) => r.id === p.id);
@@ -2512,7 +3090,7 @@ function PhaseProgressRail({ project }: { project: Project }) {
                 className={`rail-seg block h-2 w-full rounded-full ${tone} ${isCurrent ? "rail-current" : ""}`}
               />
               <span
-                className={`rail-lbl ${lblTone} mt-1 block truncate text-center font-mono text-[9px] leading-none text-faint`}
+                className={`rail-lbl ${lblTone} mt-1 block truncate text-center font-mono text-[11px] leading-none text-faint`}
               >
                 {p.code}
               </span>
@@ -2558,7 +3136,16 @@ function PhaseRail({
               <span className="min-w-0">
                 <span className={`block font-mono text-[11px] ${meta.tone}`}>
                   {p.code}
-                  {p.hitl ? " · HITL" : ""}
+                  {p.hitl ? (
+                    <>
+                      {" · "}
+                      <Term k="hitl" focusable={false}>
+                        HITL
+                      </Term>
+                    </>
+                  ) : (
+                    ""
+                  )}
                 </span>
                 <span className="block truncate text-xs text-fg">{p.title}</span>
               </span>
@@ -2657,20 +3244,20 @@ function HitlDock({
   const h = project.hitl;
   if (!h) return null;
   const evidence = evidenceForGate(project);
-  // A02 (deep-audit-01): a failed P6 sandbox is human-only (forceHuman) — the operator
-  // must explicitly tick the override before Approve can pass (mirrors store.ts guard).
-  const needsOverride =
-    Boolean(h.forceHuman) &&
-    project.currentPhase === 6 &&
-    project.lastTest !== null &&
-    !project.lastTest.ok;
+  // A02 (deep-audit-01): a failed P6 sandbox is human-only (forceHuman) — the
+  // operator must explicitly tick the override before Approve can pass (mirrors
+  // store.ts's guard). Single-sourced with the status panel above so the two
+  // can never disagree about when the override is required (111 TASK-02).
+  const needsOverride = hitlNeedsOverride(project);
   // E-21: when autopilot parked on this gate because the DoD gate denied its
   // approval (E-20 logs autopilot.gate_denied with the unmet criteria), show
   // the machine-readable reason under the dock instead of a bare "waiting".
   const denial = latestAutopilotDenial(project);
   return (
     <div className="border-b border-line bg-raised px-5 py-5">
-      <p className="font-mono text-xs text-warn">HITL · {h.stakes}</p>
+      <p className="font-mono text-xs text-warn">
+        <Term k="hitl">HITL</Term> · {h.stakes}
+      </p>
       <h2 className="mt-1 text-lg font-medium">{h.title}</h2>
       <p className="mt-2 text-sm text-muted">{h.prompt}</p>
       <details open className="mt-4 rounded-md border border-border bg-bg px-3 py-2">
@@ -2825,7 +3412,10 @@ function ArtifactPane({
   artifacts: Artifact[];
   active: Artifact | null;
   onSelect: (id: string) => void;
-  empty?: string;
+  /** Empty-state content: a sentence, or (111 TASK-08) a richer
+   *  status + learnability + pathway block. The generic fallback below stays
+   *  for call sites that pass nothing. */
+  empty?: ReactNode;
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const copyTs = useRef(0);
@@ -5101,7 +5691,14 @@ function PhaseRecordView({
       <div className="border-b border-line px-5 py-5">
         <p className={`font-mono text-xs ${meta.tone}`}>
           {def.code}
-          {def.hitl ? " · HITL" : ""}
+          {def.hitl ? (
+            <>
+              {" · "}
+              <Term k="hitl">HITL</Term>
+            </>
+          ) : (
+            ""
+          )}
         </p>
         <h1 className="mt-1 text-2xl font-medium tracking-tight">{def.title}</h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">{def.summary}</p>
@@ -5117,7 +5714,7 @@ function PhaseRecordView({
             className="mt-3 rounded-md border border-border bg-raised px-3 py-2"
           >
             <summary className="cursor-pointer font-mono text-[11px] leading-relaxed select-none">
-              DoD{" "}
+              <Term k="dod">DoD</Term>{" "}
               {rec.gate.passed ? (
                 <span className="text-ok">PASS</span>
               ) : (
@@ -5216,10 +5813,12 @@ function EnforceDodToggle({
           className="mt-0.5 h-4 w-4"
         />
         <span>
-          <span className="font-medium">Enforce DoD gates</span>
+          <span className="font-medium">
+            Enforce <Term k="dod">DoD</Term> gates
+          </span>
           <span className="mt-0.5 block text-xs leading-relaxed text-muted">
             On by default when a DeepSeek key is configured. When on, a machine advance may not
-            leave a phase whose DoD gate failed — the run parks instead.
+            leave a phase whose <Term k="dod">DoD</Term> gate failed — the run parks instead.
           </span>
         </span>
       </label>

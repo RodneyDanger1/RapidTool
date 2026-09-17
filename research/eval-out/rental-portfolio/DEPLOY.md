@@ -1,6 +1,6 @@
 # DEPLOY.md — Rental Portfolio Manager
 
-> machine-generated from RapidTool packet 75285bd4-ced2-42be-9d00-caf3f9f243a7; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet 5587eca3-156b-4c57-9ea4-23879f548cb5; regenerate, don't hand-edit.
 > > template derived from P9/P12 artifacts — verify credentials before any deploy
 
 ## What this is

@@ -5,6 +5,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  contiguousRun,
   deriveTypeSignatures,
   estimateTokens,
   feasibilityScorecard,
@@ -165,6 +166,25 @@ describe("intentLattice word-boundary matching", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 109 T-07 — intentLattice frequency must canonical-stem BOTH sides. The old
+// pair stemmed bag tokens once (stemToken) but the term to a fixed point, so
+// a brief's `listings` under-weighted the `listing` node (freq 0 vs 1).
+// ---------------------------------------------------------------------------
+
+describe("109 T-07 — intentLattice plural/singular weight parity", () => {
+  it("a brief's `listings` weights the `listing` node the same as `listing`", () => {
+    const singular = intentLattice("Track listing status for the realtor dashboard", "real-estate");
+    const plural = intentLattice("Track listings status for the realtor dashboard", "real-estate");
+    const ws = singular.nodes.find((n) => n.label === "listing")?.weight;
+    const wp = plural.nodes.find((n) => n.label === "listing")?.weight;
+    assert.equal(typeof ws, "number", "singular brief surfaces the listing node");
+    assert.equal(typeof wp, "number", "plural brief surfaces the listing node");
+    assert.ok((ws ?? 0) >= 0.54, `stem-matched mention must carry the freq weight (got ${ws})`);
+    assert.equal(wp, ws, `plural inflection must not change the weight (${ws} vs ${wp})`);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // R2/B-02 — intentLattice.vague
 // ---------------------------------------------------------------------------
 
@@ -320,6 +340,127 @@ describe("fusionRank — E-18 cited boost", () => {
     assert.deepEqual(out1, out2);
     assert.equal(out1.length, 1);
     assert.equal(out1[0]!.id, "src");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T8 (112 F2+F3) — fusionRank/contiguousRun cost fix, score-preserving
+// ---------------------------------------------------------------------------
+
+describe("fusionRank — T8 golden (frozen pre-refactor output)", () => {
+  const withSource = (m: MemoryEntry, source: NonNullable<MemoryEntry["source"]>): MemoryEntry => ({
+    ...m,
+    source,
+  });
+
+  // Mixed corpus: all three kinds (kind-prior blend + per-kind rrf), a cited
+  // research row, phrase runs of 3 / 2 / 1 (the contiguousRun boost band), a
+  // duplicate id (the dedupe path), a non-finite prior score (floored to 0)
+  // and malformed rows (unknown kind, null, non-string text) that must be
+  // skipped. Every scored row is covered by the golden below.
+  const corpus: MemoryEntry[] = [
+    mem("s1", "semantic", "dispatch routing workflow", 0.8),
+    mem("s2", "semantic", "inventory ledger reconciliation", 0.7),
+    mem("s3", "semantic", "dispatch routing workflow for overnight shifts", 0.6),
+    mem("s4", "semantic", "routing dispatch reversed order notes", 0.55),
+    mem("e1", "episodic", "crew rerouted mid-shift yesterday", 0.9),
+    mem("e2", "episodic", "sla breached on overnight batch", 0.8),
+    mem("e3", "episodic", "dispatch routing capacity planning", 0.7),
+    mem("e4", "episodic", "dispatch routing workflow journal", 0.75),
+    withSource(mem("r1", "episodic", "dispatch routing workflow recap", 0.5), "research"),
+    mem("p1", "procedural", "reroute protocol when vehicle stalls", 0.95),
+    mem("p2", "procedural", "dispatch routing workflow checklist", 0.9),
+    mem("dup", "semantic", "dispatch routing workflow", 0.75),
+    mem("dup", "semantic", "dispatch routing workflow duplicate row", 0.75),
+  ];
+  const malformed = [
+    { id: "bad-kind", kind: "not-a-real-kind", phase: 3, text: "process notes", score: 0.9 },
+    null,
+    { id: "bad-text", kind: "semantic", phase: 1, text: 42, score: 0.5 },
+    { id: "nan-score", kind: "semantic", text: "dispatch routing workflow nan", score: Number.NaN },
+  ] as unknown as MemoryEntry[];
+  const input: MemoryEntry[] = [...corpus, ...malformed];
+  const QUERY = "dispatch routing workflow";
+
+  // FROZEN 2026-09-16 before the T8 refactor (captured from the pre-change
+  // module, raw JSON in fixes/216c_algorithms.md): id + score + kind + text,
+  // in output order, for the limit-20 call. The refactor may not move a
+  // single score or reorder a single row.
+  const GOLDEN: { id: string; score: number; text: string; kind: MemoryEntry["kind"] }[] = [
+    { id: "r1", kind: "episodic", text: "dispatch routing workflow recap", score: 0.624 },
+    { id: "s1", kind: "semantic", text: "dispatch routing workflow", score: 0.549 },
+    { id: "p2", kind: "procedural", text: "dispatch routing workflow checklist", score: 0.549 },
+    { id: "dup", kind: "semantic", text: "dispatch routing workflow", score: 0.543 },
+    { id: "e4", kind: "episodic", text: "dispatch routing workflow journal", score: 0.5 },
+    { id: "s3", kind: "semantic", text: "dispatch routing workflow for overnight shifts", score: 0.459 },
+    { id: "nan-score", kind: "semantic", text: "dispatch routing workflow nan", score: 0.435 },
+    { id: "e3", kind: "episodic", text: "dispatch routing capacity planning", score: 0.379 },
+    { id: "s4", kind: "semantic", text: "routing dispatch reversed order notes", score: 0.311 },
+    { id: "p1", kind: "procedural", text: "reroute protocol when vehicle stalls", score: 0.262 },
+    { id: "e1", kind: "episodic", text: "crew rerouted mid-shift yesterday", score: 0.22 },
+    { id: "s2", kind: "semantic", text: "inventory ledger reconciliation", score: 0.211 },
+    { id: "e2", kind: "episodic", text: "sla breached on overnight batch", score: 0.209 },
+  ];
+
+  it("deep-equals the frozen pre-refactor output (ids + scores + order + text)", () => {
+    assert.deepEqual(fusionRank(QUERY, input, 20), GOLDEN);
+    assert.equal(GOLDEN.length, corpus.length, "one duplicate id collapsed, every other valid row ranked");
+  });
+
+  it("keeps the top-6 slice frozen too (limit path unchanged)", () => {
+    assert.deepEqual(fusionRank(QUERY, input, 6), GOLDEN.slice(0, 6));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T8 (112 F3) — contiguousRun: KMP vs the naive reference it replaced
+// ---------------------------------------------------------------------------
+
+describe("contiguousRun — T8 differential vs the naive reference", () => {
+  /** The pre-refactor implementation, kept as the oracle (restart scan). */
+  const naive = (q: string[], row: string[]): number => {
+    let best = 0;
+    for (let i = 0; i < row.length; i++) {
+      let j = 0;
+      while (j < q.length && i + j < row.length && q[j] === row[i + j]) j++;
+      if (j > best) best = j;
+    }
+    return best;
+  };
+  // Seeded mulberry32 — deterministic, no Math.random in the suite.
+  const seeded = (seed: number): (() => number) => {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+
+  it("agrees with the naive oracle on 10,000 seeded token-sequence pairs", () => {
+    const rnd = seeded(0x216c5eed);
+    const alpha = ["a", "b", "c"];
+    for (let n = 0; n < 10_000; n++) {
+      const q = Array.from({ length: Math.floor(rnd() * 6) }, () => alpha[Math.floor(rnd() * 3)]!);
+      const row = Array.from({ length: Math.floor(rnd() * 10) }, () => alpha[Math.floor(rnd() * 3)]!);
+      assert.equal(
+        contiguousRun(q, row),
+        naive(q, row),
+        `pair #${n}: q=[${q.join(",")}] row=[${row.join(",")}]`,
+      );
+    }
+  });
+
+  it("handles the degenerate quadratic case (one token repeated) identically", () => {
+    const all = Array.from({ length: 40 }, () => "x");
+    assert.equal(contiguousRun(all, all), 40);
+    assert.equal(contiguousRun(all, all.slice(0, 12)), 12);
+    assert.equal(contiguousRun(["x"], all), 1);
+    // Empty inputs: no run, never a throw (the old scan also yielded 0).
+    assert.equal(contiguousRun([], all), 0);
+    assert.equal(contiguousRun(all, []), 0);
   });
 });
 
@@ -499,6 +640,34 @@ describe("estimateTokens", () => {
     const a = estimateTokens(codeHeavy);
     const b = estimateTokens(codeHeavy);
     assert.deepEqual(a, b);
+  });
+
+  // T7 (112 F1) — the old LRU key was fnv1a(text), a 32-bit hash. This pair
+  // collides on it (both hash to 933450742), so whichever string was
+  // estimated FIRST poisoned the other's count: with B first the short word
+  // "rjmr" was reported as 16 tokens (its own count is 3), and with A first
+  // the 31-char string was reported as 3 (5.3x low — the direction that lets
+  // a prompt pass the enforceTokenBudget guard while materially over budget).
+  // The pair was found by hashing candidate strings against the module's own
+  // fnv1a; the tripwire below keeps it a genuine collision if either changes.
+  const TOKEN_COLLIDE_A = "rjmr";
+  const TOKEN_COLLIDE_B = "lasipzafzrmsnlpmtfnstxtvfmtmnet";
+
+  it("keeps the pinned collision pair a real fnv1a collision (tripwire)", () => {
+    assert.equal(fnv1a(TOKEN_COLLIDE_A), fnv1a(TOKEN_COLLIDE_B), "pair must collide on the OLD cache key");
+    assert.equal(fnv1a(TOKEN_COLLIDE_A), 933450742);
+    assert.notEqual(TOKEN_COLLIDE_A.length, TOKEN_COLLIDE_B.length);
+  });
+
+  it("returns each colliding string's OWN estimate in both call orders (T7)", () => {
+    // Long string first, short word second — the reproduced bug order.
+    assert.deepEqual(estimateTokens(TOKEN_COLLIDE_B), { tokensEst: 16, tokensLo: 14, tokensHi: 18 });
+    assert.deepEqual(estimateTokens(TOKEN_COLLIDE_A), { tokensEst: 3, tokensLo: 3, tokensHi: 3 });
+    // Short word first, long string second — the other poisoning direction.
+    assert.equal(estimateTokens(TOKEN_COLLIDE_A).tokensEst, 3);
+    assert.equal(estimateTokens(TOKEN_COLLIDE_B).tokensEst, 16);
+    // A non-colliding neighbour is unaffected by whichever order ran first.
+    assert.equal(estimateTokens("dispatch routing workflow").tokensEst, 3);
   });
 });
 

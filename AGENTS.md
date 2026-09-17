@@ -12,7 +12,7 @@ contract in full) lives in **`AGENT_GUIDE.md`**; the CLI machine contract is
   app *is* the product: brief → governed 13-phase run → Agent Packet + audit trail. It is not
   a starter-template repo.
 - **Windows + space in path.** Root is `C:\Users\mnril\Desktop\RapidTool Main` (git-bash
-  `/c/Users/mnril/Desktop/RapidTool Main`). **NOT a git repo.** Quote paths. Ripgrep-style
+  `/c/Users/mnril/Desktop/RapidTool Main`). **IS a git repo** (`main`; verified 2026-09-16 — `.git` present, `git log` works). Quote paths. Ripgrep-style
   search tools fail on the space — use terminal `grep` after `cd "/c/Users/mnril/Desktop/RapidTool Main"`.
 - **Node 22** required (type-stripping). All npm scripts route through
   `scripts/with-app-env.mjs`; the dev server binds `0.0.0.0:8080` (vite.config.ts). Do not
@@ -23,7 +23,10 @@ contract in full) lives in **`AGENT_GUIDE.md`**; the CLI machine contract is
 | Doc | When |
 |---|---|
 | `AGENT_GUIDE.md` | Always — the honesty contract + how agents consume projects |
-| `README.md` | Quickstart, 13-phase pipeline, 27-verb CLI overview, deploy |
+| `RESUME.md` | **Every session start** — gate contract, hard rules, decision log, lane briefs |
+| `taskuniverselog.md` | **Every session start** — the live task-status board (all dossiers' tasks, statuses, next wave) |
+| `remainingwaves.md` | **Every session start** — every remaining wave: tasks, files, done-when, estimates, risks |
+| `README.md` | Quickstart, capabilities matrix + honest limits (what works / what can't yet), architecture, docs index |
 | `scripts/README-cli.md` | Any CLI work — verbs, exit-code taxonomy (0/1/3/4), RT_E registry |
 | `research/multiagent/94_readiness_plan.md` | Any feature work — the live what-is-left plan + wave-ownership rules |
 | `research/multiagent/93_design_flaws.md` | DF-01…DF-39 ledger of known defects |
@@ -44,7 +47,7 @@ contract in full) lives in **`AGENT_GUIDE.md`**; the CLI machine contract is
   (runtime telemetry + the `diagnose` verb).
 - `src/routes/` + `src/components/console.tsx` — the TanStack Start UI (9+ tabs incl.
   Runtime log).
-- `scripts/` — CLI + build tooling: `rapidtool-cli.mjs` (33 verbs dispatched today —
+- `scripts/` — CLI + build tooling: `rapidtool-cli.mjs` (34 verbs dispatched today —
   `grep -c 'case "'` is the count source of truth — incl. the `lesson` family +
   `diagnose` + the fixes/150 G1 continuation verbs `tree-run`/`repair`),
   `with-app-env.mjs`, `gate.sh` (the four-gate stability script), plus `*.test.mjs` suites.

@@ -9,6 +9,7 @@ dist/
 .env
 .env.local
 .env.*.local
+.env.bak-*
 
 # Logs / OS / probes
 *.log
@@ -17,6 +18,9 @@ Thumbs.db
 .probe-tmp/
 logs/trajectory.db*
 .rapidtool/logs/
+
+# Hermes local verify manifest (contains the auto-detected recipe; see taskuniverselog §6.7)
+.hermes/
 
 # Local eval / emit scratch
 RapidTool Software/

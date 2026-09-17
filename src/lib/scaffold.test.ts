@@ -100,8 +100,27 @@ describe("scaffoldProject — file-tree shape per kind", () => {
     assert.ok((pkg.devDependencies as Record<string, string>).vite);
     assert.equal(pkg.name, slugName(p.name));
     const ui = bodyOf(result, "src/ui/console.tsx");
-    assert.ok(ui.includes("from \"react\"") || ui.includes("../generated"), "React or generated barrel");
-    assert.ok(ui.includes("../generated"), "webapp console must import the generated barrel (168)");
+    // 216d (106 T-05 / F-03): the emitted shell imports the module the emitter
+    // ACTUALLY writes — here the hosted P6 module (the first job-* node),
+    // resolved relative to src/ui/. OLD assertion: `ui.includes("../generated")`
+    // pinned the literal "../generated.ts", a path the tree allow-list refuses
+    // and nothing ever wrote (a guaranteed dangling specifier in every emit).
+    // NEW: the specifier must resolve to a file present in the emitted set.
+    const genImport = ui.match(/import \* as generated from "([^"]+)";/);
+    assert.ok(genImport, "webapp console imports the generated entry namespace");
+    const specifier = genImport![1];
+    const specTarget = specifier.startsWith("../") ? `src/${specifier.slice(3)}` : specifier;
+    assert.ok(
+      okFiles(result).some((f) => f.path === specTarget),
+      `generated import target ${specTarget} must be an emitted file (specifier ${specifier})`,
+    );
+    // Teeth check: the pre-fix literal may only appear when that exact module is
+    // really on disk (the tree mode case where the barrel IS the declared entry).
+    assert.ok(
+      specifier !== "../generated.ts" ||
+        okFiles(result).some((f) => f.path === "src/generated.ts"),
+      "the pre-fix literal must never name a path nothing writes",
+    );
     assert.ok(/<h1>\{/.test(ui), "name goes through a JSX expression");
     assert.ok(!ui.includes("<h1>A/B"), "raw name never becomes JSX text");
   });
@@ -206,12 +225,14 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
       (f) => f.path.startsWith("src/") && f.body.includes("const JOBS = ["),
     );
     assert.equal(carriers.length, 1);
-    // sibling job nodes stay honest TODO stubs naming their oracle expectations
+    // leftover job-* nodes re-export the hosted module (fixes/196) — never a
+    // throw stub and never an invented job body.
     const job1 = p.specGraph!.nodes.find((n) => n.id === "job-1");
     if (job1) {
-      const stub = bodyOf(result, job1.file);
-      assert.ok(stub.includes("TODO(E-15) stub"), "job stub carries the canonical marker");
-      assert.ok(stub.includes("# orc-"), "job stub names oracle expectations");
+      const bridge = bodyOf(result, job1.file);
+      assert.ok(bridge.includes("export * from"), "leftover job re-exports the hosted module");
+      assert.ok(!bridge.includes("TODO(E-15) stub"), "leftover job is not a throw stub");
+      assert.ok(!bridge.includes("export function runJob"), "no invented leftover job body");
     }
   });
 
@@ -437,8 +458,21 @@ describe("scaffoldProject — escaping (hostile inputs)", () => {
   it("collapses newlines so hostile prose cannot break out of strings or comments", () => {
     const result = scaffoldProject(hostileProject());
     const spec = bodyOf(result, "tests/oracle.spec.ts");
-    const testLines = spec.split("\n").filter((l) => l.trimStart().startsWith("test("));
-    assert.equal(testLines.length, 2);
+    // 216b (106 T-08 / F-05): a row with no real surface to assert against no longer
+    // emits the tautological `test("<id>".length > 0)` floor — it emits a VISIBLY
+    // marked `test.skip("<id> — NOT IMPLEMENTED")` instead. This test's intent is that
+    // the rows exist and stay single-line (the escaping contract), not that every row
+    // is executable, so count BOTH forms. Counting only `test(` silently encoded the
+    // tautologies this task deleted.
+    const rows = spec.split("\n").filter((l) => {
+      const t = l.trimStart();
+      return t.startsWith("test(") || t.startsWith("test.skip(");
+    });
+    assert.equal(rows.length, 2, "both oracle rows still materialise as single-line spec entries");
+    // The new contract must hold: a skip is named, never a silent always-true assertion.
+    for (const l of spec.split("\n").filter((l) => l.trimStart().startsWith("test.skip("))) {
+      assert.ok(l.includes("NOT IMPLEMENTED"), `a skipped row must be VISIBLY marked: ${l}`);
+    }
     assert.ok(!spec.includes("line1\n"), "newline inside oracle prose was collapsed");
     const stub = bodyOf(result, "src/generated/job-0.ts");
     assert.ok(stub.includes("drop table; --"), "job label survives as prose");
@@ -618,5 +652,311 @@ describe("A2 — approved fixtures fold into tests/oracle.spec.ts", () => {
     const pkg = JSON.parse(bodyOf(scaffoldProject(p), "package.json")) as { scripts?: { test?: string } };
     assert.ok(pkg.scripts?.test?.includes("tests/oracle.spec.ts"), "still the single oracle.spec test script");
     assert.ok(!pkg.scripts?.test?.includes("brief.spec"), "no second test file");
+  });
+});
+
+describe("scaffoldProject — leftover job-* nodes (fixes/196)", () => {
+  function leftoverJobs(p: Project) {
+    return (p.specGraph?.nodes ?? []).filter((n) => n.id.startsWith("job-")).slice(1);
+  }
+
+  it("re-exports the hosted generated module for leftover jobs (no fake job bodies)", () => {
+    const p = fullRun();
+    assert.ok((p.generatedSource ?? "").trim().length > 0, "fixture must have generatedSource");
+    const host = p.specGraph!.nodes.find((n) => n.id.startsWith("job-"))!;
+    const result = scaffoldProject(p);
+    const leftovers = leftoverJobs(p);
+    assert.ok(leftovers.length >= 1, "fixture must carry leftover job-* nodes");
+    for (const node of leftovers) {
+      const body = bodyOf(result, node.file);
+      assert.ok(body.includes("export * from"), `${node.id} re-exports the hosted module`);
+      assert.ok(
+        body.includes(host.file.split("/").pop() as string),
+        `${node.id} specifier targets the host file`,
+      );
+      assert.ok(!body.includes("TODO(E-15) stub"), `${node.id} is not a throw stub`);
+      assert.ok(!body.includes("throw new Error"), `${node.id} does not throw a stub`);
+      assert.ok(!body.includes("export function runJob"), `${node.id} has no invented job body`);
+      for (const fake of ["flip", "record", "show", "publish"]) {
+        assert.ok(
+          !new RegExp(`export function ${fake}\\b`).test(body),
+          `${node.id} must not fake-implement ${fake}`,
+        );
+      }
+    }
+    const spec = bodyOf(result, "tests/oracle.spec.ts");
+    for (const node of leftovers) {
+      const m = node.purpose.match(/["“]([^"”]+)["”]/);
+      const label = m ? m[1] : node.id;
+      assert.ok(
+        !new RegExp(`Target seam: ${label}[\\s\\S]{0,400}assert\\.rejects\\(route[\\s\\S]{0,80}TODO`).test(
+          spec,
+        ),
+        `oracle must not assert TODO throw for bridged job ${label}`,
+      );
+    }
+    // host job / API route may still assert the TODO throw (do not delete globally)
+    assert.match(spec, /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/TODO\\+\(E-15\\+\) stub\/\)/);
+  });
+
+  it("keeps leftover jobs as emitJobStub when there is no generatedSource", () => {
+    const p = primed();
+    assert.equal((p.generatedSource ?? "").trim(), "", "primed fixture has no generatedSource");
+    const result = scaffoldProject(p);
+    const leftovers = leftoverJobs(p);
+    assert.ok(leftovers.length >= 1, "fixture must carry leftover job-* nodes");
+    for (const node of leftovers) {
+      const body = bodyOf(result, node.file);
+      assert.ok(body.includes("TODO(E-15) stub"), `${node.id} stays the keyless stub floor`);
+      assert.ok(body.includes("throw new Error"), `${node.id} still throws TODO`);
+      assert.ok(!body.includes("export * from"), `${node.id} is not a hosted re-export`);
+    }
+    const spec = bodyOf(result, "tests/oracle.spec.ts");
+    assert.match(
+      spec,
+      /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/TODO\\+\(E-15\\+\) stub\/\)/,
+      "stub jobs MAY still assert the TODO throw",
+    );
+  });
+
+  it("does not double-emit a leftover job path already covered by generatedTree", () => {
+    const p = fullRun();
+    const job1 = p.specGraph!.nodes.find((n) => n.id === "job-1");
+    assert.ok(job1, "fixture must carry job-1");
+    const treeSrc = "export function fromTree() { return 7; }\n";
+    const withTree: Project = {
+      ...p,
+      generatedTree: [{ path: job1!.file, source: treeSrc, hash: "h1", attempt: 0 }],
+    };
+    const files = okFiles(scaffoldProject(withTree));
+    const copies = files.filter((f) => f.path === job1!.file);
+    assert.equal(copies.length, 1, "tree-covered path emitted once");
+    assert.equal(copies[0]!.body, treeSrc, "verbatim tree source — not a bridge, not a stub");
+  });
+});
+
+/**
+ * fixes/216d — Wave D regressions (106 T-04 + T-05, plus the 216b oracle-row
+ * census these edits cross-reference). Each block pins behaviour the code
+ * edits landed in `scaffold.ts`; nothing here re-tests the pre-fix literals.
+ *
+ *   - T-04: a refused `generatedTree` row is REFUSED LOUDLY — shipped README
+ *     line + `warnings[]` — never a silent drop; the declared
+ *     `src/generated.ts` entry assembles verbatim; look-alikes stay refused.
+ *   - census (216b): the README oracle-row bullet renders in BOTH branches and
+ *     always agrees with the emitted spec's skip set.
+ *   - T-05: the emitted shell imports the module the emitter ACTUALLY writes
+ *     (the computed entry), so the specifier can never dangle.
+ */
+describe("fixes/216d — refused tree rows, declared entry, census bullet, computed UI entry", () => {
+  /** The single `## Honest boundaries` oracle-row bullet (null when absent). */
+  const censusLineOf = (readme: string): string | undefined =>
+    readme.split("\n").find((l) => l.startsWith("- Oracle rows ("));
+
+  it("T-04: a refused non-empty tree row is surfaced in the README AND warnings[] — never a silent drop", () => {
+    const treeSrc = "export function overwrite() { return 1; }\n";
+    const result = scaffoldProject({
+      ...fullRun(),
+      generatedTree: [{ path: "README.md", source: treeSrc, hash: "h-refused", attempt: 0 }],
+    });
+    const files = okFiles(result);
+    const readme = bodyOf(result, "README.md");
+    // The refusal means the row is NOT on disk: its exact bytes are in no emitted file.
+    assert.ok(
+      !files.some((f) => f.body === treeSrc),
+      "the refused row's bytes are absent from every emitted file",
+    );
+    const expected =
+      'generatedTree:refused:"README.md":path "README.md" is outside the scaffold\'s src/ subdirs and tests/';
+    assert.deepEqual(
+      result.ok ? result.warnings : [],
+      [expected],
+      "warnings[] carries the refusal verdict verbatim",
+    );
+    const refusalLine = readme.split("\n").find((l) => l.includes("generated tree row(s) were REFUSED"));
+    assert.ok(refusalLine, "the shipped README records the refusal under Honest boundaries");
+    assert.ok(
+      refusalLine!.includes(expected),
+      "the README line names the declared path and the reason — not a silent drop",
+    );
+    // A refused-only tree leaves treeMode false (no accepted row) → the legacy
+    // summary sentence; with an accepted row alongside, the CLI-facing summary
+    // carries the refusal count too (scaffold.ts summary contract).
+    const mixed = scaffoldProject({
+      ...fullRun(),
+      generatedTree: [
+        { path: "src/generated.ts", source: "export function declared() { return 2; }\n", hash: "h-ok", attempt: 0 },
+        { path: "README.md", source: treeSrc, hash: "h-refused", attempt: 0 },
+      ],
+    });
+    assert.ok(
+      (mixed as { ok: true; summary: string }).summary.includes("1 refused (see warnings)"),
+      "the CLI-facing summary flags the refusal when the tree assembles",
+    );
+    assert.deepEqual(
+      mixed.ok ? mixed.warnings : [],
+      [expected],
+      "warnings[] still carries the single refusal in the mixed tree",
+    );
+  });
+
+  it("T-04: the declared src/generated.ts entry lands verbatim; the look-alike stays refused", () => {
+    const entrySrc = 'export * from "./generated/chunk-0.ts";\n';
+    const result = scaffoldProject({
+      ...fullRun(),
+      generatedTree: [
+        { path: "src/generated.ts", source: entrySrc, hash: "h-entry", attempt: 0 },
+        { path: "src/generated/chunk-0.ts", source: "export function alpha() { return 1; }\n", hash: "h-chunk", attempt: 0 },
+        { path: "src/generated.ts.bak", source: "not a tree file\n", hash: "h-bak", attempt: 0 },
+      ],
+    });
+    const files = okFiles(result);
+    const entry = files.find((f) => f.path === "src/generated.ts");
+    assert.ok(
+      entry,
+      "the declared tree entry assembles (pre-fix it was refused by construction — 106 F-03)",
+    );
+    assert.equal(entry!.body, entrySrc, "tree files are emitted verbatim — no scaffold wrapper");
+    const warnings = result.ok ? (result.warnings ?? []) : [];
+    assert.equal(warnings.length, 1, "exactly the look-alike is refused");
+    assert.ok(
+      warnings[0]!.includes('generatedTree:refused:"src/generated.ts.bak"'),
+      "the exact-match widening cannot admit a look-alike prefix",
+    );
+    assert.ok(
+      !files.some((f) => f.path === "src/generated.ts.bak"),
+      "the refused look-alike is absent from disk",
+    );
+    assert.ok(
+      bodyOf(result, "README.md").includes('generatedTree:refused:"src/generated.ts.bak"'),
+      "the look-alike refusal is recorded in the shipped README too",
+    );
+  });
+
+  it("216b census: the README bullet renders in BOTH branches and agrees with the emitted spec", () => {
+    // Branch 1 — every pinned row carries a real assertion (full engine run).
+    const clean = scaffoldProject(fullRun());
+    const cleanLine = censusLineOf(bodyOf(clean, "README.md"));
+    const cleanSpec = bodyOf(clean, "tests/oracle.spec.ts");
+    assert.ok(cleanLine, "census bullet renders when nothing is skipped");
+    assert.match(
+      cleanLine!,
+      /: all \d+ pinned row\(s\) assert the emitted modules' real current behavior — no NOT IMPLEMENTED skips\.$/,
+      "all-assert branch statement",
+    );
+    assert.ok(!cleanLine!.includes("are NOT IMPLEMENTED"), "no false skip claim on the all-assert branch");
+    assert.equal(
+      cleanSpec.split("\n").filter((l) => l.trimStart().startsWith("test.skip(")).length,
+      0,
+      "spec agrees: zero skipped rows",
+    );
+
+    // Branch 2 — rows the emitted modules give no surface to assert against are
+    // counted AND named (id + the visible skip marker in the spec itself).
+    const skipped = scaffoldProject(primed());
+    const skipLine = censusLineOf(bodyOf(skipped, "README.md"));
+    const skipSpec = bodyOf(skipped, "tests/oracle.spec.ts");
+    assert.ok(skipLine, "census bullet still renders when rows are NOT IMPLEMENTED");
+    assert.match(
+      skipLine!,
+      /: \d+ of \d+ pinned row\(s\) assert the emitted modules' real current behavior; \d+ are NOT IMPLEMENTED/,
+      "mixed branch statement",
+    );
+    const named = skipLine!.match(/skipped \(never green\): (.+)\.$/);
+    assert.ok(named, "the census names the NOT IMPLEMENTED row ids");
+    const ids = named![1].split(", ").map((s) => s.replace(/`/g, ""));
+    assert.ok(ids.length >= 1, "at least one NOT IMPLEMENTED id is named");
+    for (const id of ids) {
+      assert.ok(
+        skipSpec.includes(`test.skip(${JSON.stringify(`${id} — NOT IMPLEMENTED`)}`),
+        `the emitted spec skips ${id} BY NAME — census and artifact agree: ${id}`,
+      );
+    }
+    const specSkips = skipSpec.split("\n").filter((l) => l.trimStart().startsWith("test.skip("));
+    assert.equal(
+      specSkips.length,
+      ids.length,
+      "census count === skipped rows in the emitted spec (one source of truth, 216b)",
+    );
+    assert.ok(
+      !bodyOf(skipped, "README.md").includes("no NOT IMPLEMENTED skips"),
+      "no false clean claim when rows skip",
+    );
+  });
+
+  it("T-05: the emitted shell imports the computed tree entry — exactly the module the oracle spec imports", () => {
+    const cases: {
+      label: string;
+      tree: NonNullable<Project["generatedTree"]>;
+      entry: string;
+      uiSpecifier: string;
+      specSpecifier: string;
+    }[] = [
+      {
+        label: "declared src/generated.ts barrel",
+        tree: [
+          { path: "src/generated.ts", source: 'export * from "./generated/chunk-0.ts";\n', hash: "h1", attempt: 0 },
+          { path: "src/generated/chunk-0.ts", source: "export function alpha() { return 1; }\n", hash: "h2", attempt: 0 },
+        ],
+        entry: "src/generated.ts",
+        uiSpecifier: "../generated.ts",
+        specSpecifier: "../src/generated.ts",
+      },
+      {
+        label: "A2 fixture tree (single src/generated/entry.ts)",
+        tree: [
+          {
+            path: "src/generated/entry.ts",
+            source: "export function createProperty(g) { return { id: 'p-1', ...g }; }\n",
+            hash: "h1",
+            attempt: 0,
+          },
+        ],
+        entry: "src/generated/entry.ts",
+        uiSpecifier: "../generated/entry.ts",
+        specSpecifier: "../src/generated/entry.ts",
+      },
+    ];
+    for (const c of cases) {
+      const result = scaffoldProject({ ...fullRun(), generatedTree: c.tree });
+      const ui = bodyOf(result, "src/ui/console.tsx");
+      const spec = bodyOf(result, "tests/oracle.spec.ts");
+      const uiImport = ui.match(/import \* as generated from "([^"]+)";/);
+      assert.ok(uiImport, `${c.label}: shell carries the generated-entry import`);
+      assert.equal(
+        uiImport![1],
+        c.uiSpecifier,
+        `${c.label}: UI specifier IS the computed entry (pre-fix: the literal "../generated.ts")`,
+      );
+      const specImport = spec.match(/import \* as treeModule from "([^"]+)";/);
+      assert.ok(specImport, `${c.label}: oracle spec imports the tree entry`);
+      assert.equal(
+        specImport![1],
+        c.specSpecifier,
+        `${c.label}: spec + UI resolve to the same entry module`,
+      );
+      assert.ok(okFiles(result).some((f) => f.path === c.entry), `${c.label}: the entry really lands on disk`);
+    }
+    // Legacy (no tree): the shell follows generatedSource's host — the first
+    // job node's file, the scaffold's documented host-selection contract —
+    // never a fixed literal.
+    const legacyProject = fullRun();
+    const legacy = scaffoldProject(legacyProject);
+    const legacyImport = bodyOf(legacy, "src/ui/console.tsx").match(
+      /import \* as generated from "([^"]+)";/,
+    );
+    assert.ok(legacyImport, "legacy shell imports its generated host");
+    const legacyTarget = `src/${legacyImport![1].replace(/^\.\.\//, "")}`;
+    const firstJob = legacyProject.specGraph!.nodes.find((n) => n.id.startsWith("job-"));
+    assert.ok(firstJob, "fixture carries job nodes");
+    assert.equal(
+      legacyTarget,
+      firstJob!.file,
+      "shell import resolves to the computed host (first job node's file)",
+    );
+    assert.ok(
+      okFiles(legacy).some((f) => f.path === legacyTarget),
+      "the computed host is really emitted",
+    );
   });
 });

@@ -1,6 +1,6 @@
 # DEPLOY.md — House Showing Scheduler
 
-> machine-generated from RapidTool packet 9f7b40f0-80e9-4959-8007-8d7b006a1451; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet 8f046a94-f71d-4940-9d36-413af5751d31; regenerate, don't hand-edit.
 > > template derived from P9/P12 artifacts — verify credentials before any deploy
 
 ## What this is

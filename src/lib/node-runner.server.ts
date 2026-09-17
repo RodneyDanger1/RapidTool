@@ -23,8 +23,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+export { runnerIsolationClaim } from "./sandbox-policy.ts";
 
-export type NodeRunResult =
+type NodeRunCore =
   | { ok: true; stdout: string; stderr: string; durationMs: number; exitCode: number }
   | {
       ok: false;
@@ -35,6 +36,13 @@ export type NodeRunResult =
   | { ok: false; reason: "refused"; code: "RT_E_VALIDATION"; error?: string }
   | { ok: false; reason: "timeout"; code: "RT_E_RUNNER_FAILED"; error?: string }
   | { ok: false; reason: "error"; code: "RT_E_RUNNER_FAILED"; error?: string };
+
+export type NodeRunResult = NodeRunCore & { sandbox: false };
+
+/** Stamp the honest non-sandbox advertisement on every runner envelope. */
+function withSandbox(r: NodeRunCore): NodeRunResult {
+  return { ...r, sandbox: false };
+}
 
 /** Hard cap before Node kills the child on a runaway writer (maxBuffer). */
 const MAX_BUFFER = 1_000_000; // 1 MB
@@ -124,6 +132,45 @@ export function scrubbedEnv(): NodeJS.ProcessEnv {
 }
 
 /**
+ * Redact secret-shaped tokens from captured child stdout/stderr before results
+ * leave the runner (174-15). Replaces with `[secret-hidden]`.
+ *
+ * Covers 40+ char tokens (fakes in tests/comments only — never log a real key):
+ *   - `sk-or-…`, `sk-proj-…`, then `sk-…` (longer prefixes first)
+ *   - `Bearer eyJ…` JWTs
+ *   - `sk_live_…` (underscore live-secret shape; hyphen `sk-` does not match it)
+ *   - the live `process.env.DEEPSEEK_API_KEY` value when set (never log the key)
+ *
+ * This is NOT a sandbox and does not weaken scrubbedEnv (env allowlist is
+ * separate). Pure-ish: only reads DEEPSEEK_API_KEY from the parent env.
+ */
+export function redactSecrets(text: string): string {
+  if (typeof text !== "string") return text as unknown as string;
+  if (text.length === 0) return text;
+  let out = text;
+
+  // Exact env value first (may be shorter than 40; still never echo it).
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (typeof apiKey === "string" && apiKey.length > 0) {
+    // split/join — never build a RegExp from the key (metachar-safe).
+    out = out.split(apiKey).join("[secret-hidden]");
+  }
+
+  // Longer prefixes first so `sk-or-` / `sk-proj-` are not double-hit by `sk-`.
+  // Token body: alnum / _ / . / - (hyphen unescaped at end — lint no-useless-escape).
+  // sk-or- = 6 → ≥34 more; sk-proj- = 8 → ≥32 more; sk- = 3 → ≥37 more.
+  out = out.replace(/\bsk-or-[A-Za-z0-9_.-]{34,}/g, "[secret-hidden]");
+  out = out.replace(/\bsk-proj-[A-Za-z0-9_.-]{32,}/g, "[secret-hidden]");
+  out = out.replace(/\bsk-(?!or-)(?!proj-)[A-Za-z0-9_.-]{37,}/g, "[secret-hidden]");
+  // Bearer eyJ… JWTs (header starts eyJ). "Bearer " + eyJ + ≥33 body ≥ 40 token-ish.
+  out = out.replace(/\bBearer\s+eyJ[A-Za-z0-9_+=/.-]{33,}/g, "[secret-hidden]");
+  // Underscore live-secret shape (sk_live_ = 8 → ≥32 more). Distinct from hyphen sk-.
+  out = out.replace(/\bsk_live_[A-Za-z0-9]{32,}/g, "[secret-hidden]");
+
+  return out;
+}
+
+/**
  * Best-effort scratch-dir cleanup. `owned` is false when mkdtempSync failed and
  * the run fell back to the OS temp root itself — that fallback dir must NEVER be
  * removed (rmSync(recursive) on tmpdir() would delete the whole temp tree), so
@@ -145,20 +192,20 @@ export async function runNodeBounded(
   opts?: { timeoutMs?: number },
 ): Promise<NodeRunResult> {
   if (!runnerAvailable()) {
-    return {
+    return withSandbox({
       ok: false,
       reason: "not-configured",
       code: "RT_E_RUNNER_UNAVAILABLE",
       error: "local bounded runner unavailable in this environment",
-    };
+    });
   }
   if (typeof code !== "string" || code.trim().length === 0) {
-    return {
+    return withSandbox({
       ok: false,
       reason: "refused",
       code: "RT_E_VALIDATION",
       error: "empty source",
-    };
+    });
   }
   const timeoutMs =
     typeof opts?.timeoutMs === "number" && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_TIMEOUT_MS;
@@ -192,12 +239,12 @@ export async function runNodeBounded(
     child = spawn(process.execPath, ["-e", code], spawnOpts);
   } catch (err) {
     removeScratchDir(dir, ownsScratchDir);
-    return {
+    return withSandbox({
       ok: false,
       reason: "error",
       code: "RT_E_RUNNER_FAILED",
       error: `spawn failed: ${(err as Error).message}`,
-    };
+    });
   }
 
   let stdout = "";
@@ -225,12 +272,13 @@ export async function runNodeBounded(
     let exitCodeAtExit: number | null = null;
     let signalAtExit: NodeJS.Signals | null = null;
 
-    const finish = (r: NodeRunResult): void => {
+    const finish = (r: NodeRunCore): void => {
       if (settled) return;
       settled = true;
       if (killTimer) clearTimeout(killTimer);
       for (const t of graceTimers) clearTimeout(t);
       graceTimers.clear();
+      const advertised = withSandbox(r);
       // Sync-first cleanup keeps the common case immediate (callers/test
       // observe no scratch residue right after the run). On Windows rmSync
       // THROWS while a pipe-holding grandchild still has its cwd inside the
@@ -239,7 +287,7 @@ export async function runNodeBounded(
       try {
         removeScratchDir(dir, ownsScratchDir);
       } catch {
-        resolve(r);
+        resolve(advertised);
         setImmediate(() => {
           try {
             removeScratchDir(dir, ownsScratchDir);
@@ -249,7 +297,7 @@ export async function runNodeBounded(
         });
         return;
       }
-      resolve(r);
+      resolve(advertised);
     };
 
     // Shared settle decision — 'close', the post-'exit' drain grace, and the
@@ -283,8 +331,8 @@ export async function runNodeBounded(
       finish({
         ok: true,
         exitCode: code ?? -1,
-        stdout,
-        stderr,
+        stdout: redactSecrets(stdout),
+        stderr: redactSecrets(stderr),
         durationMs: Date.now() - started,
       });
     };

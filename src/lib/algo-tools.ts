@@ -178,13 +178,20 @@ export function exportedNamesOf(source: string): string[] {
   if (typeof source !== "string") return [];
   const masked = maskNonCode(source);
   const names = new Set<string>();
-  // CJS: statement-position `exports.x =` / `module.exports.x =`. The char
-  // before `exports` must NOT be an identifier char, `$` or `.` (a `.`
-  // means `exports` is a property of some other object, except the
-  // explicitly allowed `module.exports.` spelling).
-  const cjs = /(^|[^A-Za-z0-9_$.]|module\.)exports\.([A-Za-z_$][\w$]*)\s*=/g;
+  // CJS: statement-position `exports.x =` / `module.exports.x =`. Two SPLIT
+  // regexes (109 T-08): the old single `(^|[^A-Za-z0-9_$.]|module\.)exports\.`
+  // let its `module\.` alternative match the TAIL of `my_module.exports.x`
+  // (that spelling carried no left boundary, so it fired mid-identifier) and
+  // the prompt then advertised a phantom export. The bare form requires a
+  // non-identifier, non-`$`, non-`.` boundary; the module form requires a
+  // boundary that is not an identifier char or `$` — so `my_module.exports.x`
+  // and `obj.exports.y` never match, while `module.exports.z` / `exports.real`
+  // still do.
+  const cjsBare = /(^|[^A-Za-z0-9_$.])exports\.([A-Za-z_$][\w$]*)\s*=/g;
+  const cjsModule = /(^|[^A-Za-z0-9_$])module\.exports\.([A-Za-z_$][\w$]*)\s*=/g;
   let m: RegExpExecArray | null;
-  while ((m = cjs.exec(masked)) !== null) names.add(m[2]);
+  while ((m = cjsBare.exec(masked)) !== null) names.add(m[2]);
+  while ((m = cjsModule.exec(masked)) !== null) names.add(m[2]);
   // ESM declarations: function (incl. `async` and `function*` generators),
   // class, const/let/var. `export default` has no hoisted name to inventory.
   const esm =
@@ -291,6 +298,16 @@ const REGEX_PRECEDERS = new Set([
  * Mask strings/comments/template literals/regex literals with spaces while
  * keeping newlines, so keyword scans stay line-accurate and never fire inside
  * non-code text. Returns a same-length string.
+ *
+ * T10 (112 F5): a template's `${…}` interpolation body is CODE, not template
+ * text — the old masker blanked the whole template (interpolations included),
+ * so a loop inside `${…}` was invisible to complexityOf and the report could
+ * claim O(1) about an n-loop (reproduced). The scan now tracks template
+ * CONTENT vs code: an interpolation re-enters code mode and its body is masked
+ * like any other code (strings/comments/regex/nested templates inside it
+ * included). The `${` opener and its matching `}` are masked like the
+ * surrounding template text, so the masked view stays brace-balanced for
+ * downstream nesting scans.
  */
 export function maskNonCode(source: string): string {
   if (typeof source !== "string") return "";
@@ -299,9 +316,41 @@ export function maskNonCode(source: string): string {
   let i = 0;
   let prevCode = ""; // last non-whitespace CODE char seen (drives regex detection)
   let codeBuf = ""; // last few code chars, for `return /re/` style detection
+  let inTemplate = false; // inside template-literal CONTENT (not an interpolation)
+  const interpDepths: number[] = []; // brace depth per open `${…}` (stack: templates nest)
   while (i < n) {
     const c = chars[i];
     const next = i + 1 < n ? chars[i + 1] : "";
+    if (inTemplate) {
+      // Template content is not code: mask everything but newlines. Escapes
+      // and the closing backtick leave the region; `${` re-enters code mode.
+      if (c === "\\") {
+        chars[i] = " ";
+        i++;
+        if (i < n) {
+          chars[i] = " ";
+          i++;
+        }
+        continue;
+      }
+      if (c === "`") {
+        chars[i] = " ";
+        i++;
+        inTemplate = false;
+        continue;
+      }
+      if (c === "$" && next === "{") {
+        chars[i] = " ";
+        chars[i + 1] = " ";
+        interpDepths.push(1);
+        i += 2;
+        inTemplate = false;
+        continue;
+      }
+      if (c !== "\n") chars[i] = " ";
+      i++;
+      continue;
+    }
     if (c === "/" && next === "/") {
       chars[i] = " ";
       if (i + 1 < n) chars[i + 1] = " ";
@@ -355,27 +404,11 @@ export function maskNonCode(source: string): string {
       continue;
     }
     if (c === "`") {
+      // Enter template CONTENT mode; the `inTemplate` branch above masks the
+      // body, re-enters code mode at `${` and exits at the closing backtick.
       chars[i] = " ";
       i++;
-      while (i < n) {
-        const ch = chars[i];
-        if (ch === "\\") {
-          chars[i] = " ";
-          i++;
-          if (i < n) {
-            chars[i] = " ";
-            i++;
-          }
-          continue;
-        }
-        if (ch === "`") {
-          chars[i] = " ";
-          i++;
-          break;
-        }
-        if (ch !== "\n") chars[i] = " ";
-        i++;
-      }
+      inTemplate = true;
       continue;
     }
     if (c === "/") {
@@ -419,6 +452,24 @@ export function maskNonCode(source: string): string {
         }
       }
     }
+    // T10 (F5): inside a `${…}` body, `{`/`}` are real code braces — depth-
+    // track them so the interpolation ends at its own matching `}` (which is
+    // masked, mirroring the masked `${` opener, keeping the view balanced).
+    if (interpDepths.length > 0 && (c === "{" || c === "}")) {
+      const top = interpDepths.length - 1;
+      if (c === "{") {
+        interpDepths[top] = interpDepths[top]! + 1;
+      } else {
+        interpDepths[top] = interpDepths[top]! - 1;
+        if (interpDepths[top] === 0) {
+          interpDepths.pop();
+          chars[i] = " ";
+          i++;
+          inTemplate = true;
+          continue;
+        }
+      }
+    }
     // Plain code char: keep, track context for regex detection.
     if (!/\s/.test(c)) {
       prevCode = c;
@@ -431,7 +482,16 @@ export function maskNonCode(source: string): string {
   return chars.join("");
 }
 
-type RecordedLoop = { line: number; nesting: number; lin: number; hal: number; halving: boolean };
+type RecordedLoop = {
+  /** Character index of the loop keyword (ascending across `loops`). */
+  kwIdx: number;
+  nesting: number;
+  lin: number;
+  hal: number;
+  halving: boolean;
+  /** T-06 (109 C-03): a halving shape seen in the BODY (not the header) — reported, never counted. */
+  bodyHalving: boolean;
+};
 
 /** Halving-step heuristics: `>>1`, `>>=1`, `>>>1`, `/ 2`, `/= 2`, `* 0.5`. */
 const HALVING_RE = />>+={0,1}\s*1\b|\/=?\s*2\b|0\.5/;
@@ -489,12 +549,24 @@ function loopBodyHead(masked: string, bodyAt: number): string {
   return out;
 }
 
-function lineOf(source: string, index: number): number {
+/**
+ * 1-based line numbers for ASCENDING character indices, in a single forward
+ * pass (T10 / 112 F6): `lineOf` used to rescan from char 0 for every recorded
+ * loop — O(loops × source). The keyword scan visits indices in ascending
+ * order, so one running (cursor, line) pair is O(source) total and
+ * byte-identical to the per-index rescan.
+ */
+function linesOfIndices(source: string, indices: number[]): number[] {
+  const out: number[] = [];
+  let cursor = 0;
   let line = 1;
-  for (let i = 0; i < index && i < source.length; i++) {
-    if (source[i] === "\n") line++;
+  for (const index of indices) {
+    for (; cursor < index && cursor < source.length; cursor++) {
+      if (source[cursor] === "\n") line++;
+    }
+    out.push(line);
   }
-  return line;
+  return out;
 }
 
 export function complexityOf(source: string): ComplexityReport {
@@ -556,13 +628,25 @@ export function complexityOf(source: string): ComplexityReport {
     }
     const header = masked.slice(kwEnd, bodyAt).slice(0, 120);
     const braced = masked[bodyAt] === "{";
-    const bodyHead = braced ? loopBodyHead(masked, bodyAt) : "";
-    const halving = HALVING_RE.test(header + bodyHead);
+    const bodyHeadRaw = braced ? loopBodyHead(masked, bodyAt) : "";
+    // A nested loop's own header is that loop's business — its halving step is
+    // counted on ITS entry, so the shape is not a "this loop's body" note.
+    const nestedKw = /\b(?:for|while|do)\b/.exec(bodyHeadRaw);
+    const bodyHead = nestedKw ? bodyHeadRaw.slice(0, nestedKw.index) : bodyHeadRaw;
+    // T-06 (109 C-03): the halving probe is a HEADER property. Probing the
+    // body too published O(log n) for a plain linear loop whose body merely
+    // contained a `0.5` literal or `x / 2` (percentages, half widths,
+    // averages) — an over-optimistic class that ships inside the generated
+    // benchmark artifact's header. A body-level halving shape no longer
+    // changes the class; it is RECORDED and reported through `extras` so the
+    // downgrade is visible instead of silent.
+    const halving = HALVING_RE.test(header);
+    const bodyHalving = !halving && bodyHead.length > 0 && HALVING_RE.test(bodyHead);
     const parent = loopFrames.length > 0 ? loopFrames[loopFrames.length - 1] : null;
     const lin = (parent ? parent.lin : 0) + (halving ? 0 : 1);
     const hal = (parent ? parent.hal : 0) + (halving ? 1 : 0);
     const nesting = (parent ? parent.nesting : 0) + 1;
-    loops.push({ line: lineOf(source, kwIdx), nesting, lin, hal, halving });
+    loops.push({ kwIdx, nesting, lin, hal, halving, bodyHalving });
     if (braced) {
       pending = { lin, hal, nesting };
       pos = bodyAt; // the brace loop will push the frame when it reaches `{`
@@ -574,7 +658,9 @@ export function complexityOf(source: string): ComplexityReport {
   const loopsCount = loops.length;
   const maxNesting = loops.reduce((acc, l) => Math.max(acc, l.nesting), 0);
   const halvingLoops = loops.filter((l) => l.halving).length;
-  const lineRefs = loops.map((l) => l.line);
+  // Loop keywords are recorded in ascending index order, so line resolution is
+  // one forward pass (T10 / 112 F6), not a rescan per loop.
+  const lineRefs = linesOfIndices(source, loops.map((l) => l.kwIdx));
   lineRefs.sort((a, b) => a - b);
 
   // Dominant chain: maximize (linear factors, then log factors).
@@ -591,6 +677,10 @@ export function complexityOf(source: string): ComplexityReport {
 
   let notation: ComplexityNotation;
   const extras: string[] = [];
+  // T-06 (109 C-03): a halving shape found ONLY in a loop body is not counted
+  // (header-only rule) — the note says so instead of leaving the downgrade
+  // silent. The base COMPLEXITY_CAVEAT string stays byte-stable.
+  if (loops.some((l) => l.bodyHalving)) extras.push("body-level halving detected — not counted");
   if (loopsCount === 0) {
     notation = "O(1)";
   } else if (best !== null && best.lin === 0) {

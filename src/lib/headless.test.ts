@@ -6,7 +6,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,7 @@ import {
   driveP6Journey,
   emitProject,
   exportJson,
+  HARNESS_APPROVE_ACTOR,
   ingest,
   loadProject,
   p6CycleLiveDeps,
@@ -28,9 +29,13 @@ import {
   runUntilGate,
   saveProject,
   summary,
+  wildPauseRun,
+  wildResumeRun,
+  wildStartRun,
+  wildStopRun,
   withCommonJsExports,
 } from "./headless.ts";
-import type { P6JourneyCycleContext } from "./headless.ts";
+import type { ApproveActor, P6JourneyCycleContext } from "./headless.ts";
 import { runGate } from "./dod.ts";
 import { importProject } from "./io.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
@@ -82,6 +87,13 @@ describe("createProject", () => {
   it("honors an explicit name", () => {
     const p = createProject({ brief: FIXTURE_BRIEF, name: "Dispatch Pro" });
     assert.equal(p.name, "Dispatch Pro");
+  });
+
+  it("215: createProject forwards a declared delivery kind (webapp → app)", () => {
+    const p = createProject({ brief: FIXTURE_BRIEF, kind: "app" });
+    assert.equal(p.kind, "app");
+    const absent = createProject({ brief: FIXTURE_BRIEF });
+    assert.equal(absent.kind, undefined, "no kind → legacy absent (library path)");
   });
 
   it("rejects an empty brief", () => {
@@ -139,6 +151,23 @@ describe("file persistence (atomic)", () => {
       const path = join(dir, "build.json");
       saveProject(path, createProject({ brief: FIXTURE_BRIEF }));
       assert.deepEqual(readdirSync(dir), ["build.json"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("174-13: refuses save when a .lock already exists (RT_E_BUSY)", () => {
+    const dir = tempDir();
+    try {
+      const path = join(dir, "build.json");
+      writeFileSync(`${path}.lock`, "held");
+      try {
+        saveProject(path, createProject({ brief: FIXTURE_BRIEF }));
+        assert.fail("expected lock refusal");
+      } catch (err) {
+        assert.equal((err as Error & { code?: string }).code, "RT_E_BUSY");
+      }
+      assert.ok(!existsSync(path), "must not write the project while locked");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -704,6 +733,53 @@ describe("fixes/153 (P2) — the refusal→next-cycle loop: cycle N+1 knows cycl
   });
 });
 
+// ---------------------------------------------------------------------------
+// 216 (T-18) — the tree-run failure tail names a red PROJECT SCRIPT. A tree
+// can be red ONLY because its own declared `npm test` failed while every spec
+// leg passed; the next cycle's repair context must name that, not chase a
+// spec that passed. (The real tail is produced by compile-check treeRun's
+// `project` verdict; this pins the headless threading of it.)
+// ---------------------------------------------------------------------------
+describe("216 (T-18) — a red project-script verdict is named in the journey tail", () => {
+  it("the next cycle's failure context names `npm run test` when every spec leg is green", async () => {
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    const tails: (string | undefined)[] = [];
+    const withTree = (p: Project): Project => ({
+      ...p,
+      generatedTree: [{ path: "src/generated.ts", source: "export const x = 1;", hash: "f1", attempt: 0 }],
+    });
+    // Every spec leg green; the emitted project's OWN declared test ran red.
+    const redProjectOnly: TreeRunOutcome = {
+      ok: false,
+      dir: "",
+      compile: { ok: true, dir: "", checked: 1, passed: 1, failed: 0, skipped: 0, verdicts: [] },
+      tests: [{ file: "tests/oracle.spec.ts", compile: "pass", tests: { pass: 2, fail: 0 }, run: "pass" }],
+      run: { kind: "ui-shell", run: "skip", detail: "UI shell — not executable headless" },
+      project: {
+        ok: false,
+        typecheck: { script: "typecheck", run: "skip", note: "declared tool `tsc` has no node_modules/.bin entry" },
+        test: { script: "test", command: "node --test tests/oracle.spec.ts", run: "fail", exitCode: 1, detail: "1 test failed" },
+      },
+    };
+    const synthesize = async (p: Project, ctx: P6JourneyCycleContext): Promise<Project> => {
+      tails.push(ctx.treeFailureTail);
+      return withTree(p);
+    };
+    const res = await driveP6Journey(base, {
+      budget: 2,
+      deps: { synthesize, runTree: async () => redProjectOnly },
+    });
+    assert.equal(res.outcome, "failed", "a red project script can never converge the journey");
+    assert.equal(tails.length, 2);
+    assert.equal(tails[0], undefined, "cycle 1 starts with no failure context");
+    assert.ok(
+      tails[1] && tails[1]!.includes("npm run test"),
+      `cycle 2's context names the red project script: ${tails[1]}`,
+    );
+    assert.ok(tails[1]!.includes("fail"), "the verdict class rides the tail");
+  });
+});
+
 describe("end-to-end round-trip", () => {
   it("create → save → load → drain to complete → export → re-import", async () => {
     const dir = tempDir();
@@ -1199,6 +1275,150 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
     }
   });
 
+  it("216 T0.7: a non-TTY approve cannot mint decidedBy:human without --i-am-human (actor-seam regression)", () => {
+    const dir = tempDir();
+    try {
+      const path = join(dir, "forge.json");
+      const pending: Project = {
+        ...createProject({ brief: FIXTURE_BRIEF }),
+        status: "awaiting_hitl",
+        hitl: { phase: 0 as Project["currentPhase"], title: "Gate", prompt: "Approve?", stakes: "test" },
+      };
+      saveProject(path, pending);
+      // The reproduced exploit: an agent process (no TTY) approves with no
+      // --force and no seat evidence. Before 216 this exited 0 and appended a
+      // ledger row reading `decidedBy: human`.
+      const ap = runCli(["approve", "--project", path]);
+      assert.equal(ap.code, 1, "non-TTY approve without --i-am-human must be refused");
+      assert.equal(ap.json.code, "RT_E_VALIDATION");
+      assert.match(String(ap.json.error), /i-am-human/);
+      // And nothing may have been minted on disk.
+      const raw = JSON.parse(readFileSync(path, "utf8")) as {
+        decisions?: Array<{ decidedBy?: string }>;
+        status?: string;
+      };
+      assert.ok(
+        (raw.decisions ?? []).every((d) => d.decidedBy !== "human"),
+        "no human-seat decision may exist without the explicit human flag",
+      );
+      assert.equal(raw.status, "awaiting_hitl", "the project must still be parked at the gate");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  describe("216 TA-2 — approve() records an actor seat; no machine path mints decidedBy:human", () => {
+    const HUMAN_ACTOR: ApproveActor = { decidedBy: "human", seat: "human-cli-i-am-human" };
+    /** A project parked at a fabricated P0 gate (approve-callable). */
+    const pendingProject = (): Project => ({
+      ...createProject({ brief: FIXTURE_BRIEF }),
+      status: "awaiting_hitl",
+      hitl: { phase: 0 as Project["currentPhase"], title: "Gate", prompt: "Approve?", stakes: "test" },
+    });
+
+    it("the default approve records the harness autopilot seat, never a human actor", async () => {
+      let p = createProject({ brief: FIXTURE_BRIEF });
+      p = (await runUntilGate(p)).project; // parked at P4
+      const out = approve(p);
+      const row = out.decisions.at(-1);
+      assert.equal(
+        row?.decidedBy,
+        HARNESS_APPROVE_ACTOR.decidedBy,
+        "the machine default is the harness autopilot seat — never auto-minted human",
+      );
+      assert.equal(row?.decidedBy, "autopilot");
+      assert.match(String(row?.note), /^\[seat harness\]/, "the row label names the seat that decided");
+    });
+
+    it("the human seat WITHOUT the out-of-band token throws — nothing minted", async () => {
+      let p = createProject({ brief: FIXTURE_BRIEF });
+      p = (await runUntilGate(p)).project; // parked at P4
+      const before = p.decisions.length;
+      const saved = process.env.RT_HUMAN_SEAT_TOKEN;
+      try {
+        delete process.env.RT_HUMAN_SEAT_TOKEN; // the machine default state: no token
+        assert.throws(
+          () => approve(p, { actor: HUMAN_ACTOR }),
+          /RT_HUMAN_SEAT_TOKEN/,
+          "claiming the human seat without the token must throw, never mint",
+        );
+        assert.throws(
+          () => approve(p, { actor: HUMAN_ACTOR, humanSeatToken: "not-the-token" }),
+          /RT_HUMAN_SEAT_TOKEN/,
+          "a mismatched token must not mint either",
+        );
+      } finally {
+        if (saved === undefined) delete process.env.RT_HUMAN_SEAT_TOKEN;
+        else process.env.RT_HUMAN_SEAT_TOKEN = saved;
+      }
+      assert.equal(p.decisions.length, before, "the input project is untouched (no row minted)");
+      assert.equal(p.status, "awaiting_hitl", "still parked at the gate");
+    });
+
+    it("the human seat works via the injected seam when the out-of-band token matches", async () => {
+      let p = createProject({ brief: FIXTURE_BRIEF });
+      p = (await runUntilGate(p)).project; // parked at P4
+      const saved = process.env.RT_HUMAN_SEAT_TOKEN;
+      try {
+        // The out-of-band secret is injected here (no real key exists — the
+        // env var IS the seam; a machine path without it cannot pass above).
+        process.env.RT_HUMAN_SEAT_TOKEN = "test-seat-token";
+        const out = approve(p, { actor: HUMAN_ACTOR, humanSeatToken: "test-seat-token" });
+        const row = out.decisions.at(-1);
+        assert.equal(row?.decidedBy, "human");
+        assert.match(String(row?.note), /\[seat human-cli-i-am-human\]/, "the row label names the human seat");
+        assert.match(String(row?.note), /RT_HUMAN_SEAT_TOKEN verified/, "the out-of-band evidence is echoed");
+      } finally {
+        if (saved === undefined) delete process.env.RT_HUMAN_SEAT_TOKEN;
+        else process.env.RT_HUMAN_SEAT_TOKEN = saved;
+      }
+    });
+
+    it("CLI: a non-TTY approve --i-am-human WITHOUT the token refuses (RT_E_VALIDATION), mints nothing", () => {
+      const dir = tempDir();
+      try {
+        const path = join(dir, "seatless.json");
+        saveProject(path, pendingProject());
+        const ap = runCli(["approve", "--project", path, "--i-am-human"], { env: { RT_HUMAN_SEAT_TOKEN: "" } });
+        assert.notEqual(ap.code, 0, "a seat claim without its out-of-band evidence must not exit 0");
+        assert.equal(ap.json.ok, false);
+        assert.equal(ap.json.code, "RT_E_VALIDATION");
+        assert.match(String(ap.json.error), /RT_HUMAN_SEAT_TOKEN/);
+        const raw = JSON.parse(readFileSync(path, "utf8")) as {
+          decisions?: Array<{ decidedBy?: string }>;
+          status?: string;
+        };
+        assert.equal((raw.decisions ?? []).length, 0, "no ledger row minted");
+        assert.equal(raw.status, "awaiting_hitl", "still parked at the gate");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("CLI: --i-am-human WITH the out-of-band token records the human seat (exit 0)", () => {
+      const dir = tempDir();
+      try {
+        const path = join(dir, "seated.json");
+        saveProject(path, pendingProject());
+        const ap = runCli(["approve", "--project", path, "--i-am-human"], {
+          env: { RT_HUMAN_SEAT_TOKEN: "test-seat-token" },
+        });
+        assert.equal(ap.code, 0, `the keyed human seat path must succeed; stderr: ${ap.stderr.slice(0, 300)}`);
+        assert.equal(ap.json.ok, true);
+        const raw = JSON.parse(readFileSync(path, "utf8")) as {
+          decisions?: Array<{ decidedBy?: string; note?: string }>;
+          status?: string;
+        };
+        const row = (raw.decisions ?? []).at(-1);
+        assert.equal(row?.decidedBy, "human", "the CLI --i-am-human + token path mints the human seat");
+        assert.match(String(row?.note), /RT_HUMAN_SEAT_TOKEN verified/);
+        assert.equal(raw.status, "running", "the approval advanced the edge");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
   it("doctor returns the capability pre-flight shape (no project required)", () => {
     const r = runCli(["doctor"]);
     assert.equal(r.code, 0);
@@ -1206,15 +1426,82 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
     const doctor = r.json as {
       llm: { configured: boolean; label: string };
       research: { configured: boolean; probed: boolean; label: string };
-      runner: { available: boolean };
+      runner: { available: boolean; sandbox: boolean };
       node: string;
+      factory: {
+        autonomousSoftwareFactory: boolean;
+        runnerIsSandbox: boolean;
+        leftoverJobsAreReexportsOrStubs?: boolean;
+        gaps?: string[];
+        inventory?: unknown;
+      };
     };
     assert.equal(typeof doctor.llm.configured, "boolean");
     assert.ok(typeof doctor.llm.label === "string" && doctor.llm.label.length > 0);
     assert.equal(typeof doctor.research.configured, "boolean");
     assert.equal(typeof doctor.research.probed, "boolean");
     assert.equal(typeof doctor.runner.available, "boolean");
+    assert.equal(doctor.runner.sandbox, false);
     assert.match(doctor.node, /^v\d+/);
+    assert.equal(doctor.factory.autonomousSoftwareFactory, false, "doctor must not claim RapidTool is a factory");
+    assert.equal(doctor.factory.runnerIsSandbox, false);
+    assert.equal(doctor.factory.leftoverJobsAreReexportsOrStubs, true);
+    assert.ok(Array.isArray(doctor.factory.gaps) && doctor.factory.gaps.length > 0, "210: gaps name why factory is false");
+    assert.equal("error" in doctor, false, "doctor envelope is not dual-channel");
+    assert.equal(doctor.factory.inventory ?? null, null, "no --tree → inventory null");
+  });
+
+  it("214 doctor --tree scans leftover jobs; factory stays false (no invented bodies)", () => {
+    // HERMETIC (fixes/215e): synthesize the tree instead of scanning the live
+    // research/eval-out dir. The old version flaked whenever a keyed eval
+    // rewrote that directory — it leaked machine state into the suite.
+    const dir = tempDir();
+    const jobs = join(dir, "src", "jobs");
+    mkdirSync(jobs, { recursive: true });
+    writeFileSync(join(jobs, "flip.ts"), "export function flip() {\n  // TODO(E-15): hosted job — not wired\n}\n");
+    writeFileSync(join(jobs, "record.ts"), 'export * from "./hosted.js";\n');
+    writeFileSync(join(jobs, "publish.ts"), 'export { publish } from "./hosted.js";\n');
+    const r = runCli(["doctor", "--tree", dir]);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    assert.equal(r.json.ok, true);
+    const factory = (r.json as { factory: {
+      autonomousSoftwareFactory: boolean;
+      leftoverJobsAreReexportsOrStubs: boolean;
+      inventory: { stubs: number; reexports: number; real: number; files: Array<{ path: string; kind: string }> } | null;
+    } }).factory;
+    assert.equal(factory.autonomousSoftwareFactory, false);
+    assert.equal(factory.leftoverJobsAreReexportsOrStubs, true);
+    assert.ok(factory.inventory, "tree scan must produce inventory");
+    assert.equal(factory.inventory!.stubs, 1, "flip is a TODO(E-15) stub");
+    assert.equal(factory.inventory!.reexports, 2, "record/publish are reexport bridges");
+    assert.equal(factory.inventory!.real, 0, "no invented bodies — classifier reads bytes only");
+    assert.ok(
+      factory.inventory!.files.some((f) => f.path.includes("flip") && f.kind === "stub"),
+      "flip is a leftover, not real",
+    );
+    assert.equal("error" in (r.json as object), false);
+  });
+
+  it("chat --ask /help is keyless exit 0 (slash tools, no DeepSeek)", () => {
+    const dir = tempDir();
+    try {
+      const path = join(dir, "proj.json");
+      const created = runCli([
+        "create",
+        "--brief",
+        "Build a tiny field ledger.",
+        "--out",
+        path,
+      ]);
+      assert.equal(created.code, 0);
+      const r = runCli(["chat", "--project", path, "--ask", "/help"]);
+      assert.equal(r.code, 0, "slash /help must not require a key");
+      assert.equal(r.json.ok, true);
+      assert.ok(String(r.json.reply).includes("/ls"));
+      assert.ok(String(r.json.reply).includes("/read"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("fixes/144 M4-1: a red-gate COMPLETE run exits 1 with RT_E_GATES_FAILED + sealedWithFailures (never a clean 0)", async () => {
@@ -1354,6 +1641,146 @@ describe("A7 emitProject wipes ghost specs and refuses foreign files", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("174-F8: refuses emit when .rapidtool-emit.lock is held (RT_E_BUSY)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-emit-"));
+    try {
+      const p = createProject({ brief: FIXTURE_BRIEF, name: "EmitLock" });
+      writeFileSync(join(dir, ".rapidtool-emit.lock"), "held");
+      const res = await emitProject(p, dir);
+      assert.equal(res.ok, false);
+      if (!res.ok) assert.equal(res.code, "RT_E_BUSY");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("174-F8: successful emit leaves no .rapidtool-emit.lock", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-emit-"));
+    try {
+      const p = createProject({ brief: FIXTURE_BRIEF, name: "EmitCleanLock" });
+      const res = await emitProject(p, dir);
+      assert.equal(res.ok, true, res.ok ? "" : res.error);
+      assert.equal(existsSync(join(dir, ".rapidtool-emit.lock")), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("216 T-07 — emit refuses or banners on an uncleared red tree-run (F-07)", () => {
+  type TrailRow = NonNullable<Project["logs"]>[number];
+  const trailRow = (level: TrailRow["level"], event: string, detail: string): TrailRow => ({
+    ts: Date.now(),
+    phase: 6 as PhaseId,
+    level,
+    event,
+    detail,
+  });
+  /** The project with a fabricated tree-verdict trail appended (the injected
+   *  seam — no real tree-run needed). */
+  const withTrail = (p: Project, ...rows: TrailRow[]): Project => ({
+    ...p,
+    logs: [...(p.logs ?? []), ...rows].slice(-200),
+  });
+
+  it("a red trail is refused with RT_E_TREE_RUN_FAILED before ANY write (default policy)", async () => {
+    const dir = tempDir();
+    try {
+      const p = withTrail(
+        createProject({ brief: FIXTURE_BRIEF, name: "RedRefuse" }),
+        trailRow("warn", "p6.tree.failure", "compile: 2 emitted files failed to parse"),
+        trailRow("warn", "p6.tree.failure", "tests: oracle.spec.ts 1 fail / 3 pass"),
+        trailRow("warn", "p6.tree.failure", "run: entry module exited 1"),
+      );
+      const out = join(dir, "out");
+      const res = await emitProject(p, out);
+      assert.equal(res.ok, false, "an uncleared red tree is never emitted by default");
+      if (!res.ok) {
+        assert.equal(res.code, "RT_E_TREE_RUN_FAILED");
+        assert.match(String(res.error), /tree-run trail is RED/);
+        assert.equal(res.redTree?.failures, 3, "F-07 observed three failed tree-runs");
+        assert.match(String(res.redTree?.lastFailure), /entry module exited 1/);
+      }
+      assert.equal(existsSync(out), false, "a refused emit must not even create the emit dir");
+      assert.equal(existsSync(join(out, "README.md")), false, "nothing was written");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("redTree:'banner' emits the tree with the unmissable banner + the honest metric", async () => {
+    const dir = tempDir();
+    try {
+      const p = withTrail(
+        createProject({ brief: FIXTURE_BRIEF, name: "RedBanner" }),
+        trailRow("warn", "p6.tree.failure", "run: entry module exited 1"),
+      );
+      const out = join(dir, "out");
+      const res = await emitProject(p, out, { redTree: "banner" });
+      assert.equal(res.ok, true, res.ok ? "" : res.error);
+      if (res.ok) {
+        assert.equal(res.redTreeBanner, true, "the emitted README carries the banner");
+        assert.equal(res.redTree?.failures, 1);
+        assert.match(String(res.redTree?.lastFailure), /entry module exited 1/);
+      }
+      const readme = readFileSync(join(out, "README.md"), "utf8");
+      assert.ok(readme.startsWith("> [!CAUTION]\n"), "the banner heads the README");
+      assert.match(readme, /RED TREE-RUN/);
+      assert.match(readme, /1 failed tree-run/);
+      assert.match(readme, /entry module exited 1/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a trail cleared by a later green run emits clean under both policies (control)", async () => {
+    const dir = tempDir();
+    try {
+      const p = withTrail(
+        createProject({ brief: FIXTURE_BRIEF, name: "RedCleared" }),
+        trailRow("warn", "p6.tree.failure", "run: entry module exited 1"),
+        trailRow("info", "p6.tree.tested", "tree-run ok: 2 specs, 1 skipped (no runner)"),
+      );
+      const plain = join(dir, "plain");
+      const bannered = join(dir, "bannered");
+      const a = await emitProject(p, plain); // default refuse — a cleared trail is not refused
+      assert.equal(a.ok, true, a.ok ? "" : a.error);
+      if (a.ok) {
+        assert.equal(a.redTreeBanner, false);
+        assert.equal(a.redTree, null, "the trail was consulted and is not red");
+      }
+      const b = await emitProject(p, bannered, { redTree: "banner" });
+      assert.equal(b.ok, true, b.ok ? "" : b.error);
+      if (b.ok) assert.equal(b.redTreeBanner, false, "no banner without an uncleared red");
+      const readPlain = readFileSync(join(plain, "README.md"), "utf8");
+      const readBanner = readFileSync(join(bannered, "README.md"), "utf8");
+      assert.equal(readPlain.includes("RED TREE-RUN"), false);
+      assert.equal(readBanner, readPlain, "on a non-red trail the banner policy is byte-identical");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("'probe' never consults the trail (fields stay absent, nothing refused or stamped)", async () => {
+    const dir = tempDir();
+    try {
+      const p = withTrail(
+        createProject({ brief: FIXTURE_BRIEF, name: "RedProbe" }),
+        trailRow("warn", "p6.tree.failure", "run: entry module exited 1"),
+      );
+      const out = join(dir, "out");
+      const res = await emitProject(p, out, { redTree: "probe" });
+      assert.equal(res.ok, true, res.ok ? "" : res.error);
+      if (res.ok) {
+        assert.equal("redTreeBanner" in res, false, "probe leaves the result fields absent");
+        assert.equal("redTree" in res, false);
+      }
+      assert.equal(readFileSync(join(out, "README.md"), "utf8").includes("RED TREE-RUN"), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("B5 runAcceptance is the single terminal writer", () => {
@@ -1365,5 +1792,149 @@ describe("B5 runAcceptance is the single terminal writer", () => {
     const b = runAcceptance(p, "aborted", "SIGTERM");
     assert.equal(b.acceptance, "aborted");
     assert.equal(p.acceptance, undefined, "input not mutated");
+  });
+});
+
+describe("185-H1 wild lifecycle — ok:true never carries error", () => {
+  it("idempotent pause/resume/stop use note, not error", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "WildH1" });
+    const started = await wildStartRun(base, { maxSteps: 1 });
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+    assert.equal("error" in started, false, "ok:true start must not carry error");
+
+    const paused = await wildPauseRun(started.project);
+    assert.equal(paused.ok, true);
+    if (!paused.ok) return;
+    assert.equal(paused.changed, true);
+
+    const again = await wildPauseRun(paused.project);
+    assert.equal(again.ok, true);
+    if (!again.ok) return;
+    assert.equal(again.changed, false);
+    assert.equal("error" in again, false);
+    assert.equal(again.note, "Wild run is already paused.");
+
+    const resumeIdle = await wildResumeRun(paused.project);
+    assert.equal(resumeIdle.ok, true);
+    if (!resumeIdle.ok) return;
+    assert.equal(resumeIdle.changed, true);
+    assert.equal("error" in resumeIdle, false);
+
+    const resumeAgain = await wildResumeRun(resumeIdle.project);
+    assert.equal(resumeAgain.ok, true);
+    if (!resumeAgain.ok) return;
+    assert.equal(resumeAgain.changed, false);
+    assert.equal("error" in resumeAgain, false);
+    assert.equal(resumeAgain.note, "Wild run is not paused.");
+
+    const stopped = await wildStopRun(resumeAgain.project);
+    assert.equal(stopped.ok, true);
+    if (!stopped.ok) return;
+    assert.equal(stopped.changed, true);
+
+    const stopAgain = await wildStopRun(stopped.project);
+    assert.equal(stopAgain.ok, true);
+    if (!stopAgain.ok) return;
+    assert.equal(stopAgain.changed, false);
+    assert.equal("error" in stopAgain, false);
+    assert.equal(stopAgain.note, "Wild run is already stopped.");
+  });
+});
+
+describe("209 — CLI lesson --accept (human-gated store write)", () => {
+  it("accept promotes lesson rows; re-accept is idempotent; empty lessons fail closed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-lesson-accept-"));
+    try {
+      const projPath = join(dir, "proj.json");
+      const storePath = join(dir, "lessons.json");
+      const created = runCli([
+        "create",
+        "--brief",
+        "Build a field-service dispatch board for HVAC.",
+        "--name",
+        "HVAC Dispatch",
+        "--out",
+        projPath,
+      ]);
+      assert.equal(created.code, 0, JSON.stringify(created.json));
+      assert.equal(created.json.ok, true);
+
+      // Seed one lesson-tagged memory row into the project file (CLI accept reads disk).
+      const raw = JSON.parse(readFileSync(projPath, "utf8")) as {
+        memory?: Array<Record<string, unknown>>;
+        brief?: string;
+        name?: string;
+      };
+      raw.memory = [
+        ...(Array.isArray(raw.memory) ? raw.memory : []),
+        {
+          id: "m-lesson-1",
+          kind: "episodic",
+          text: "HVAC dispatch board field service ranking must stay deterministic",
+          score: 0.88,
+          phase: 6,
+          tags: ["lesson", "L3", "verify-failure"],
+          source: "test",
+        },
+      ];
+      writeFileSync(projPath, JSON.stringify(raw, null, 2));
+
+      const empty = runCli([
+        "lesson",
+        "--accept",
+        "--project",
+        join(dir, "empty.json"),
+        "--out",
+        storePath,
+        "--actor",
+        "qa-human",
+      ]);
+      // missing project file → fail closed
+      assert.equal(empty.json.ok, false);
+
+      const accept = runCli([
+        "lesson",
+        "--accept",
+        "--project",
+        projPath,
+        "--out",
+        storePath,
+        "--actor",
+        "qa-human",
+        "--limit",
+        "3",
+      ]);
+      assert.equal(accept.code, 0, JSON.stringify(accept.json));
+      assert.equal(accept.json.ok, true);
+      assert.equal(accept.json.action, "accept");
+      assert.equal(accept.json.actor, "qa-human");
+      assert.equal(accept.json.promoted, 1, "first human accept must append");
+      assert.equal(accept.json.attempted, 1);
+      assert.equal(accept.json.refused, 0);
+      assert.equal("error" in accept.json, false, "ok:true must not carry error");
+
+      const again = runCli([
+        "lesson",
+        "--accept",
+        "--project",
+        projPath,
+        "--out",
+        storePath,
+        "--actor",
+        "qa-human",
+        "--limit",
+        "3",
+      ]);
+      assert.equal(again.code, 0, JSON.stringify(again.json));
+      assert.equal(again.json.ok, true);
+      assert.equal(again.json.promoted, 0, "re-accept identical content appends 0");
+      assert.equal(again.json.attempted, 1);
+      const rows = again.json.rows as Array<{ appended?: boolean }> | undefined;
+      assert.ok(Array.isArray(rows) && rows.length === 1);
+      assert.equal(rows[0]!.appended, false, "re-accept same actor is idempotent");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

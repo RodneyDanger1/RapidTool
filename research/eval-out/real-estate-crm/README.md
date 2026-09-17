@@ -1,13 +1,13 @@
 # Real-Estate CRM
 
-> machine-generated from RapidTool packet fff84028-8b4b-4820-8562-e17e5d4af790; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet 8dbb64d5-d6c9-411c-849c-60fdcde47f4b; regenerate, don't hand-edit.
 
 A real estate agent CRM web app: manage buyer and seller contacts; a lead pipeline with stages (new, contacted, qualified, showing-booked, offer-made, closed-won, closed-lost); property listings with address, list price, beds/baths/sqft and status; per-property showing notes; follow-up task scheduling with due dates and completion; and an email-to-lead capture placeholder that parses an inbound email into a contact and a pipeline lead.
 
 ## Status
 - **Kind:** cli-tool — CLI tool (kind cli-tool (inferred from brief/domain — no declared kind yet))
 - **Status:** complete · **Current phase:** P12 · **Model route:** deterministic
-- **Created:** 2026-09-08T13:38:47.717Z
+- **Created:** 2026-09-10T05:29:27.019Z
 
 ## What ships in this scaffold
 

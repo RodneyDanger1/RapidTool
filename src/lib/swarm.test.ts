@@ -556,3 +556,61 @@ describe("secops per-source scan honesty (fixes/83 P2-1)", () => {
     assert.equal(sentinel!.verdict, "revise");
   });
 });
+
+describe("185-U5 / fixes/191 — swarm is advisory-only (never dispatches LLM seats)", () => {
+  it("swarmPlan always returns advisory:true, llmDispatched:false; ok never means phases ran", () => {
+    const p = seedProject();
+    const beforePhase = p.currentPhase;
+    const beforeStatus = p.status;
+    const plan = swarmPlan(p);
+
+    assert.equal(plan.advisory, true, "exported plan is advisory");
+    assert.equal(plan.llmDispatched, false, "swarm.ts never dispatches real LLM seats");
+    assert.equal(plan.engineLinear, true, "engine stays linear");
+    // ok:true = deterministic plan produced — not "phases advanced" / not "seats ran".
+    assert.equal(plan.ok, true);
+    assert.equal(p.currentPhase, beforePhase, "currentPhase untouched");
+    assert.equal(p.status, beforeStatus, "project status untouched");
+    assert.ok(
+      plan.refinedPlan.toLowerCase().includes("advisory"),
+      "refined plan names itself advisory",
+    );
+    assert.ok(
+      plan.refinedPlan.includes("never advances currentPhase"),
+      "refined plan denies phase advancement",
+    );
+    for (const c of plan.critiques) {
+      assert.equal(c.provenance, "deterministic");
+      assert.ok(
+        c.artifact.body.includes("no LLM turn was dispatched"),
+        "each critique states no LLM turn",
+      );
+      assert.ok(c.artifact.body.includes("advisory: true"), "each critique declares advisory");
+    }
+  });
+
+  it("parallelDag + branchSuggest pin the same advisory / no-dispatch contract", () => {
+    const p = runToGate(seedProject(), 6);
+    const dag = parallelDag(p);
+    const branch = branchSuggest(p);
+    assert.equal(dag.advisory, true);
+    assert.equal(dag.llmDispatched, false);
+    assert.equal(dag.engineLinear, true);
+    assert.equal(branch.advisory, true);
+    assert.equal(branch.llmDispatched, false);
+    assert.equal(branch.engineLinear, true);
+  });
+
+  it("185-H1: ok:true swarm results never carry an error channel", () => {
+    const p = seedProject();
+    const plan = swarmPlan(p);
+    const dag = parallelDag(p);
+    const branch = branchSuggest(p);
+    for (const r of [plan, dag, branch] as const) {
+      assert.equal(r.ok, true);
+      assert.equal("error" in r, false, "ok:true must not carry error");
+      assert.equal(r.advisory, true);
+      assert.equal(r.llmDispatched, false);
+    }
+  });
+});

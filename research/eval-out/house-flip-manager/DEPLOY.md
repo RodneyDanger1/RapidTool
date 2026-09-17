@@ -1,6 +1,6 @@
 # DEPLOY.md — House-Flipping Manager
 
-> machine-generated from RapidTool packet adc7806b-02cc-4859-bdcb-9455f6412ecb; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet 4207cef0-e4ea-4436-b2e2-5ac48ab8138c; regenerate, don't hand-edit.
 > > template derived from P9/P12 artifacts — verify credentials before any deploy
 
 ## What this is

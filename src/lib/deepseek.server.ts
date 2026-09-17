@@ -6,12 +6,17 @@
  * the public bundle). The browser-facing contract lives in `./llm.ts`; this
  * module is the raw fetch and must never be imported from client code.
  *
- * Model IDs are live-verified against `https://api.deepseek.com/models` (see
- * `research/deepseek-api.md` §2): send the explicit V4 aliases only.
- * `deepseek-chat` / `deepseek-reasoner` are still accepted but BOTH silently
- * resolve to `deepseek-v4-flash` — using them would downgrade the pro tier.
- * `deepseek-v4-flash-vision-exp` is listed by `/models` but is experimental
- * (vision) and is not a chat tier.
+ * Model IDs re-verified live against `https://api.deepseek.com/models`
+ * (2026-09-16, two keys): `/models` returns EXACTLY two ids —
+ * `deepseek-flash` and `deepseek-v4-pro`. The version-tagged alias
+ * `deepseek-v4-flash` is accepted on the request path and served as
+ * `deepseek-flash` (which is DeepSeek-V4.1-Flash; the vendor dropped the
+ * version tag from the id, not the model). `deepseek-chat` /
+ * `deepseek-reasoner` are still accepted but BOTH silently resolve to
+ * `deepseek-flash`. Version-tagged ids (`deepseek-v4.1-flash` etc.) are
+ * REJECTED with an invalid_request_error naming the two supported ids.
+ * `deepseek-v4-flash-vision-exp` is NOT returned by `/models`; its
+ * request-path acceptance is UNVERIFIED (advertised for forward-compat only).
  *
  * Honesty contract: when the key is absent this returns
  * `{ ok: false, reason: "not-configured" }` and NEVER fabricates model text.
@@ -28,7 +33,10 @@ export const DEEPSEEK_MODELS = {
   pro: "deepseek-v4-pro",
 } as const;
 
-/** The exact model list `/models` returns (research/deepseek-api.md §2). */
+/** Ids RapidTool may REQUEST (aliases). NOT a claim about what /models
+ *  returns: live 2026-09-16 the vendor returns exactly `deepseek-flash` +
+ *  `deepseek-v4-pro` (see the module header). The vision-exp entry is
+ *  unverified and is kept for forward-compat only. */
 export const DEEPSEEK_MODEL_IDS: readonly string[] = [
   DEEPSEEK_MODELS.flash,
   DEEPSEEK_MODELS.pro,
@@ -396,7 +404,34 @@ export async function completeDeepSeek(
       };
     }
 
-    const parsed = (await res.json()) as DeepSeekChatBody;
+    // 216 (T0.6 — MED-3): this success path previously called res.json()
+    // UNGUARDED, so an HTTP-200 non-JSON body (a proxy/gateway HTML page, a
+    // truncated response) threw straight into the outer catch and was
+    // mislabelled as a transport failure — the user saw "unreachable" when the
+    // provider had in fact answered. Read the raw text ONCE and parse
+    // defensively: the same discipline describeError() already applies on the
+    // error path (:240-254). A non-JSON 200 now surfaces honestly as
+    // RT_E_INTERNAL with a bounded excerpt.
+    const rawSuccess = await res.text().catch(() => "");
+    let parsed: DeepSeekChatBody;
+    try {
+      const body: unknown = JSON.parse(rawSuccess);
+      // Only a JSON OBJECT can be a chat body — a quoted string / number /
+      // array is not a completion and must not reach the reader below.
+      if (body === null || typeof body !== "object" || Array.isArray(body)) {
+        throw new SyntaxError("body is not a JSON object");
+      }
+      parsed = body as DeepSeekChatBody;
+    } catch {
+      const flat = rawSuccess.replace(/\s+/g, " ").trim();
+      const bounded = flat.length > 200 ? `${flat.slice(0, 200)}…` : flat;
+      return {
+        ok: false,
+        reason: "error",
+        error: `DeepSeek returned a non-JSON ${res.status} response${bounded ? `: ${bounded}` : ""}`,
+        code: "RT_E_INTERNAL",
+      };
+    }
     const content = parsed.choices?.[0]?.message?.content;
     if (typeof content !== "string" || content.trim() === "") {
       // fixes/152-153: an EMPTY content on a thinking model is a diagnostic,

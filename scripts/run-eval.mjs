@@ -270,9 +270,12 @@ function treeRunToEvidence(outcome) {
 // ---------------------------------------------------------------------------
 
 /** Drive the pipeline to a terminal state — or, with `p6Gate: true`, to the
- *  P6 live edge — approving every parked HITL gate (the eval's human seat),
- *  bounded by hard iteration guards. Returns the terminal RunResult + whether
- *  the drain stopped on time + the park position.
+ *  P6 live edge — approving every parked HITL gate under the harness's
+ *  autopilot seat (216 TA-2: `approve()` never mints `decidedBy:"human"` for a
+ *  machine path; a forceHuman gate therefore STALLS the drain honestly instead
+ *  of being overridden by a fabricated human actor), bounded by hard
+ *  iteration guards. Returns the terminal RunResult + whether the drain stopped
+ *  on time + the park position.
  *
  * `p6Gate` (fixes/147 E3, single-synthesis keyed flow): P5 is the last stock
  * HITL phase before P6, so approving the P5 gate leaves phase 6 READY with
@@ -330,6 +333,30 @@ async function drainPipeline(project, { keyed, p6Gate = false } = {}) {
 // Per-entry evaluation.
 // ---------------------------------------------------------------------------
 
+/**
+ * fixes/215: corpus delivery-kind → Project.kind. The corpus frontmatter
+ * `kind` is a string contract (webapp/tool/game/cli-tool/library/service/"").
+ * Project.kind is the 3-way "app"|"tool"|"game" (types.ts E-15). Declared
+ * non-library kinds MUST become a Project.kind so codegen's tree trigger
+ * (singleModuleLibraryKind) does not silently collapse them to the ≤8
+ * single-module path. "library"/"service"/"" stay absent — the honest
+ * single-module library path. Never invents a kind the corpus didn't declare.
+ */
+function deliveryKindOf(corpusKind) {
+  switch (corpusKind) {
+    case "webapp":
+    case "app":
+      return "app";
+    case "game":
+      return "game";
+    case "tool":
+    case "cli-tool":
+      return "tool";
+    default:
+      return undefined; // library / service / "" → kind absent (library path)
+  }
+}
+
 /** fixes/154 (F1) — parse one p6.synthesis.attempt journal detail ("chunk
  *  N/M · attempt N · <ms>ms · ok|refused|timeout[ · refusal: …]") and answer
  *  "did this model call come back ok?". The outcome token is the one
@@ -343,7 +370,13 @@ function attemptLogOutcomeIsOk(detail) {
 
 async function evaluateEntry(entry, mode) {
   const { slug } = entry;
-  const project0 = createProject({ brief: entry.brief, name: entry.name });
+  // fixes/215: corpus `kind` is the delivery contract ("webapp"/"tool"/"game"/
+  // "cli-tool"/"library"/"service"). Map it onto Project.kind ("app"|"tool"|
+  // "game") so keyed synthesis routes to the chunked multi-file tree for every
+  // declared non-library surface — a dropped kind was the single-module leak
+  // (webapp briefs shipped "tree 1 file(s)" + leftover TODO(E-15) job stubs).
+  const kind = deliveryKindOf(entry.kind);
+  const project0 = createProject({ brief: entry.brief, name: entry.name, ...(kind ? { kind } : {}) });
 
   // 1) DRAIN. Keyless = the full keyless floor regression (unchanged).
   //    Keyed = SINGLE-SYNTHESIS (fixes/147 E3): drain keyless/floor to the
@@ -389,9 +422,13 @@ async function evaluateEntry(entry, mode) {
     : null;
 
   // 2) Emit to research/eval-out/<slug>/ (handover evidence for M6) — ONCE,
-  //    at the end, on the final drained project.
+  //    at the end, on the final drained project. 216 (T-07 / F-07):
+  //    `redTree:"banner"` — an uncleared red tree-run trail must not abort the
+  //    benchmark, but it must NOT emit silently either: the emitted README.md
+  //    is stamped with the unmissable red-tree banner and the honest
+  //    `redTreeBanner` metric rides handover evidence below.
   const emitDir = join(OUT_DIR, slug);
-  const emitResult = await emitProject(finalProject, emitDir);
+  const emitResult = await emitProject(finalProject, emitDir, { redTree: "banner" });
   let handoverEv = null;
   let treeEv = null;
   let runOutcome = null;
@@ -415,6 +452,10 @@ async function evaluateEntry(entry, mode) {
       deployMd,
       oracleSpec: Boolean(oracleSpecPath),
       oracleSpecBytes,
+      // 216 (T-07): true when the emitted README.md carries the red-tree
+      // banner (the tree-run trail's last verdict was red and uncleared) —
+      // the eval completes AND records the honest red verdict.
+      redTreeBanner: emitResult.redTreeBanner === true,
     };
     // 3) Tree-run the emitted dir (M2 evidence) — ONCE, at the end.
     runOutcome = await treeRun(emitDir);

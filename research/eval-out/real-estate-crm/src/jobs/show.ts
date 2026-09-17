@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // src/jobs/show.ts — Implement job “show” against the contract
-// machine-generated from RapidTool packet fff84028-8b4b-4820-8562-e17e5d4af790; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet 8dbb64d5-d6c9-411c-849c-60fdcde47f4b; regenerate, don't hand-edit.
 // This file hosts the machine-verified P6 synthesis module (project.generatedSource),
 // verbatim below. Its self-tests ran inside the engine isolate at P6 — keep them
 // green when you implement the surrounding jobs.

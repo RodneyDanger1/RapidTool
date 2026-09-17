@@ -33,8 +33,11 @@
 // ---------------------------------------------------------------------------
 import { fnv1a } from "./algorithms.ts";
 import { runGate } from "./dod.ts";
-import { dedupeMemoryIds } from "./engine.ts";
+import { accrueReproducedCounts, dedupeMemoryIds, isLessonMemoryId } from "./engine.ts";
 import type { Artifact, JsonLog, MemoryEntry, PhaseId, PhaseRecord, Project } from "./types.ts";
+// 216i (112 §4.1/§4.3): the failure-record shapes for the L2 intake gate —
+// TYPE-ONLY (erased at runtime; the lazy seam below carries the value).
+import type { FailureLessonOutcome, FailureRecord } from "./knowledge.ts";
 
 // knowledge.ts is server/disk-backed (statically imports node:fs) — a static
 // import here would drag node:fs into the CLIENT bundle and crash hydration
@@ -49,13 +52,22 @@ type LessonBuilder = (
   evidenceHash?: string,
   source?: MemoryEntry["source"],
 ) => MemoryEntry;
+type LessonRecordGate = (
+  record: FailureRecord,
+  opts?: { project?: Project | null; iterations?: number; hypothesis?: string },
+) => FailureLessonOutcome;
 let lessonBuilder: LessonBuilder | null = null;
+// 216i (112 §4.3 — T2): the counterexample-or-nothing gate for the L2 mint
+// (refusals land as a visible lesson.refused ledger row, never a silent no-op).
+let lessonRecordGate: LessonRecordGate | null = null;
 void import("./knowledge.ts")
   .then((m) => {
     lessonBuilder = m.templateEmissionLesson as LessonBuilder;
+    lessonRecordGate = m.failureLessonFromRecord as LessonRecordGate;
   })
   .catch(() => {
     lessonBuilder = null;
+    lessonRecordGate = null;
   });
 
 export type AgentTestRun = {
@@ -359,17 +371,37 @@ export function applyReportResult(project: Project, report: AgentReport): ApplyR
         event: "report.gate_unmet",
         detail: `P${report.phase} claim complete but DoD unmet: ${unmet.join(", ")}`,
       });
-      l2Lesson = lessonBuilder
-        ? lessonBuilder(project, phase, unmet, [], undefined, "agent-report")
-        : null;
-      if (l2Lesson) {
+      // 216i (112 §4.3 — T2): the record gate — a fail lesson needs ≥1 anchor
+      // (the unmet criterion ids ARE the anchors; no anchor ⇒ lesson.refused
+      // ledger row and NO lesson, never a silent no-op). The row itself still
+      // comes from the direct builder: it carries the E-18 `agent-report`
+      // source stamp the record builder cannot, and both paths derive the SAME
+      // signature-based id from the same anchors (216g).
+      const gate =
+        lessonRecordGate !== null && unmet.length > 0
+          ? lessonRecordGate({ kind: "gate-unmet", phase, anchors: unmet }, { project })
+          : null;
+      if (gate !== null && gate.refused) {
         logs.push({
           ts: now,
           phase,
-          level: "info",
-          event: "lesson.capture",
-          detail: `L2 template-emission ${l2Lesson.id} (P${report.phase} DoD unmet: ${unmet.join(", ")})`,
+          level: gate.log.level,
+          event: gate.log.event,
+          detail: gate.log.detail,
         });
+      } else {
+        l2Lesson = lessonBuilder
+          ? lessonBuilder(project, phase, unmet, [], undefined, "agent-report")
+          : null;
+        if (l2Lesson) {
+          logs.push({
+            ts: now,
+            phase,
+            level: "info",
+            event: "lesson.capture",
+            detail: `L2 template-emission ${l2Lesson.id} (P${report.phase} DoD unmet: ${unmet.join(", ")})`,
+          });
+        }
       }
     }
   }
@@ -432,7 +464,26 @@ export function applyReportResult(project: Project, report: AgentReport): ApplyR
       if (m && typeof m.id === "string" && m.id.length > 0) existingIds.add(m.id);
     }
     const fresh = rows.filter((r) => !existingIds.has(r.id));
-    memory = dedupeMemoryIds([...project.memory, ...fresh]).slice(-80);
+    // 216i (112 §4.2 — T1): a re-minted LESSON row (the same signature id from
+    // the same unmet gate on a later complete report) is a reproduction, not a
+    // duplicate: the stored copy accrues reproducedCount + a visible
+    // `lesson.reproduced` ledger row lands, while the incoming twin is STILL
+    // dropped (non-lesson twins keep the H43-P2-1 drop-before-merge semantics).
+    const lessonTwins = rows.filter((r) => existingIds.has(r.id) && isLessonMemoryId(r.id));
+    const twin = lessonTwins[0] ?? null;
+    const base = twin ? accrueReproducedCounts([...project.memory, ...lessonTwins]) : project.memory;
+    if (twin) {
+      logs.push({
+        ts: now,
+        phase,
+        level: "info",
+        event: "lesson.reproduced",
+        detail: `L2 template-emission ${twin.id} reproduced (P${report.phase} DoD unmet again; reproducedCount=${
+          base.find((m) => m.id === twin.id)?.reproducedCount ?? 0
+        })`,
+      });
+    }
+    memory = dedupeMemoryIds([...base, ...fresh]).slice(-80);
   }
 
   return {

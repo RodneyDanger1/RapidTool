@@ -1,89 +1,89 @@
 {
-  "id": "4cd56084-1d37-42f5-b025-b7e1304f8e31",
+  "id": "1bf0e807-f549-4335-938e-25dd71643cc2",
   "name": "Field-Ops Suite",
   "brief": "a field-ops suite for a small construction company: projects with phases + budgets, daily task lists per crew member, time sheets that roll into weekly payroll with rates + overtime, material/supply lists with purchase tracking + reorder flags, job costing by project",
   "domain": "construction",
-  "createdAt": 1788874725987,
+  "createdAt": 1789018165294,
   "status": "complete",
   "currentPhase": 12,
   "phases": [
     {
       "id": 0,
       "status": "complete",
-      "startedAt": 1788874725988,
-      "completedAt": 1788874725989,
+      "startedAt": 1789018165295,
+      "completedAt": 1789018165295,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "3269632901",
-        "checkedAt": 1788874725989
+        "checkedAt": 1789018165296
       }
     },
     {
       "id": 1,
       "status": "complete",
-      "startedAt": 1788874725990,
-      "completedAt": 1788874725991,
+      "startedAt": 1789018165296,
+      "completedAt": 1789018165298,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "1050713914",
-        "checkedAt": 1788874725991
+        "checkedAt": 1789018165298
       }
     },
     {
       "id": 2,
       "status": "complete",
-      "startedAt": 1788874725992,
-      "completedAt": 1788874725993,
+      "startedAt": 1789018165299,
+      "completedAt": 1789018165299,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "1845537766",
-        "checkedAt": 1788874725993
+        "checkedAt": 1789018165300
       }
     },
     {
       "id": 3,
       "status": "complete",
-      "startedAt": 1788874725994,
-      "completedAt": 1788874725995,
+      "startedAt": 1789018165300,
+      "completedAt": 1789018165301,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "1638292844",
-        "checkedAt": 1788874725995
+        "checkedAt": 1789018165302
       }
     },
     {
       "id": 4,
       "status": "complete",
-      "startedAt": 1788874725996,
-      "completedAt": 1788874725998,
+      "startedAt": 1789018165302,
+      "completedAt": 1789018165307,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "3527188654",
-        "checkedAt": 1788874725999
+        "checkedAt": 1789018165308
       }
     },
     {
       "id": 5,
       "status": "complete",
-      "startedAt": 1788874726000,
-      "completedAt": 1788874726002,
+      "startedAt": 1789018165309,
+      "completedAt": 1789018165311,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "2951452883",
-        "checkedAt": 1788874726003
+        "checkedAt": 1789018165312
       }
     },
     {
       "id": 6,
       "status": "complete",
-      "startedAt": 1788874726003,
-      "completedAt": 1788874726009,
+      "startedAt": 1789018165312,
+      "completedAt": 1789018165313,
       "gate": {
         "passed": false,
         "unmet": [
@@ -91,81 +91,81 @@
           "Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)"
         ],
         "evidenceHash": "552477142",
-        "checkedAt": 1788874726012
+        "checkedAt": 1789018165315
       }
     },
     {
       "id": 7,
       "status": "complete",
-      "startedAt": 1788874726013,
-      "completedAt": 1788874726014,
+      "startedAt": 1789018165315,
+      "completedAt": 1789018165316,
       "gate": {
         "passed": false,
         "unmet": [
           "Live research corpus exists for P7 (≥1 fetched finding)"
         ],
         "evidenceHash": "425504246",
-        "checkedAt": 1788874726015
+        "checkedAt": 1789018165317
       }
     },
     {
       "id": 8,
       "status": "complete",
-      "startedAt": 1788874726016,
-      "completedAt": 1788874726019,
+      "startedAt": 1789018165318,
+      "completedAt": 1789018165321,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "606175358",
-        "checkedAt": 1788874726021
+        "checkedAt": 1789018165322
       }
     },
     {
       "id": 9,
       "status": "complete",
-      "startedAt": 1788874726022,
-      "completedAt": 1788874726026,
+      "startedAt": 1789018165322,
+      "completedAt": 1789018165325,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "3030540723",
-        "checkedAt": 1788874726027
+        "checkedAt": 1789018165326
       }
     },
     {
       "id": 10,
       "status": "complete",
-      "startedAt": 1788874726027,
-      "completedAt": 1788874726028,
+      "startedAt": 1789018165331,
+      "completedAt": 1789018165332,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "3218462335",
-        "checkedAt": 1788874726029
+        "checkedAt": 1789018165332
       }
     },
     {
       "id": 11,
       "status": "complete",
-      "startedAt": 1788874726030,
-      "completedAt": 1788874726032,
+      "startedAt": 1789018165333,
+      "completedAt": 1789018165334,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "1663625674",
-        "checkedAt": 1788874726034
+        "checkedAt": 1789018165335
       }
     },
     {
       "id": 12,
       "status": "complete",
-      "startedAt": 1788874726035,
-      "completedAt": 1788874726037,
+      "startedAt": 1789018165336,
+      "completedAt": 1789018165337,
       "gate": {
         "passed": true,
         "unmet": [],
         "evidenceHash": "3530055408",
-        "checkedAt": 1788874726039
+        "checkedAt": 1789018165338
       }
     }
   ],
@@ -496,7 +496,7 @@
       "phase": 12,
       "kind": "packet",
       "title": "Agent packet (A4)",
-      "body": "# RapidTool Agent Packet v3 — Field-Ops Suite\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-08T13:38:46.040Z\nproject_id: 4cd56084-1d37-42f5-b025-b7e1304f8e31\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-08T13:38:46.040Z\",\n  \"project_id\": \"4cd56084-1d37-42f5-b025-b7e1304f8e31\",\n  \"name\": \"Field-Ops Suite\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": true\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874725997,\n      \"decided_at\": 1788874725998\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874726000,\n      \"decided_at\": 1788874726002\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874726017,\n      \"decided_at\": 1788874726019\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874726024,\n      \"decided_at\": 1788874726026\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ]\n}\n```\n\n## Mission\na field-ops suite for a small construction company: projects with phases + budgets, daily task lists per crew member, time sheets that roll into weekly payroll with rates + overtime, material/supply lists with purchase tracking + reorder flags, job costing by project\n\n## Intent lattice (A1)\nDomain: construction\nJobs: track\nEntities: crew, member, task, material, payroll, supply, budget, job-cost\nConstraints: none declared\nComplexity: 7.0 / 10\n\n## Scheduler (A3)\nTightness 5.8 · security Δ0 · api Δ0\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (2600 tok): Lock schema and routes for track before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (4800 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (1400 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/construction.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/track.ts — Implement job “track” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Crew: id:ulid, status:enum, updatedAt:datetime\n- Member: id:ulid, status:enum, updatedAt:datetime\n- Task: id:ulid, status:enum, updatedAt:datetime\n- Material: id:ulid, status:enum, updatedAt:datetime\n- Payroll: id:ulid, status:enum, updatedAt:datetime\n- Supply: id:ulid, status:enum, updatedAt:datetime\n- GET /v1/track (track)\n\n## Oracle (A7)\n- job.track.happy: Authorized operator submits “track” with a valid crew ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · human · 2026-09-08T13:38:45.998Z\n- P5 · approve · human · 2026-09-08T13:38:46.002Z\n- P8 · approve · human · 2026-09-08T13:38:46.019Z\n- P9 · approve · human · 2026-09-08T13:38:46.026Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.359] Data model written for Field-Ops Suite: crew, member, task, material, payroll, supply, budget, job-cost.\n2. [procedural 0.308] Field-Ops Suite executes as one sequential construction / trades pipeline.\n3. [episodic 0.287] Ingested brief for Field-Ops Suite in construction.\n4. [procedural 0.284] Product data is protected by least-privilege role access.\n5. [semantic 0.282] Domain construction; jobs track.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.2/10 (proceed-with-guards)\n- Technical feasibility: 6/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 7/10 — Scheduler Δ0.\n- API / rate-limit risk: 8/10 — Live-tool Δ0.\n- Delivery confidence: 6/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: track run as deterministic local steps over crew.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"construction\",\n  \"surfaces\": [\n    \"estimating & bids\",\n    \"scheduling\",\n    \"materials & punch lists\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 construction / trades entity model\n\nStatus: accepted\nDecision: The product's state is modeled around crew, member, task, material, payroll, supply, budget, job-cost derived from the brief (P0 lattice).\n\n# ADR-002 track pipeline\n\nStatus: accepted\nDecision: The product runs a sequential track pipeline over its entities.\n\n# ADR-003 construction / trades integration boundaries\n\nStatus: accepted\nDecision: External surfaces are estimating & bids, scheduling, materials & punch lists — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Field-Ops Suite API\n  version: \"1.0.0\"\npaths:\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 construction / trades entity model\n\nStatus: accepted\nDecision: The product's state is modeled around crew, member, task, material, payroll, supply, budget, job-cost derived from the brief (P0 lattice).\n\n# ADR-002 track pipeline\n\nStatus: accepted\nDecision: The product runs a sequential track pipeline over its entities.\n\n# ADR-003 construction / trades integration boundaries\n\nStatus: accepted\nDecision: External surfaces are estimating & bids, scheduling, materials & punch lists — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Field-Ops Suite API\n  version: \"1.0.0\"\npaths:\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+      "body": "# RapidTool Agent Packet v3 — Field-Ops Suite\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-10T05:29:25.340Z\nproject_id: 1bf0e807-f549-4335-938e-25dd71643cc2\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-10T05:29:25.340Z\",\n  \"project_id\": \"1bf0e807-f549-4335-938e-25dd71643cc2\",\n  \"name\": \"Field-Ops Suite\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018165306,\n      \"decided_at\": 1789018165307\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018165309,\n      \"decided_at\": 1789018165311\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018165319,\n      \"decided_at\": 1789018165321\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018165323,\n      \"decided_at\": 1789018165325\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ]\n}\n```\n\n## Mission\na field-ops suite for a small construction company: projects with phases + budgets, daily task lists per crew member, time sheets that roll into weekly payroll with rates + overtime, material/supply lists with purchase tracking + reorder flags, job costing by project\n\n## Intent lattice (A1)\nDomain: construction\nJobs: track\nEntities: crew, member, task, material, payroll, supply, budget, job-cost\nConstraints: none declared\nComplexity: 7.0 / 10\n\n## Scheduler (A3)\nTightness 5.8 · security Δ0 · api Δ0\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (2600 tok): Lock schema and routes for track before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (4800 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (1400 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/construction.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/track.ts — Implement job “track” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Crew: id:ulid, status:enum, updatedAt:datetime\n- Member: id:ulid, status:enum, updatedAt:datetime\n- Task: id:ulid, status:enum, updatedAt:datetime\n- Material: id:ulid, status:enum, updatedAt:datetime\n- Payroll: id:ulid, status:enum, updatedAt:datetime\n- Supply: id:ulid, status:enum, updatedAt:datetime\n- GET /v1/track (track)\n\n## Oracle (A7)\n- job.track.happy: Authorized operator submits “track” with a valid crew ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · human · 2026-09-10T05:29:25.307Z\n- P5 · approve · human · 2026-09-10T05:29:25.311Z\n- P8 · approve · human · 2026-09-10T05:29:25.321Z\n- P9 · approve · human · 2026-09-10T05:29:25.325Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.359] Data model written for Field-Ops Suite: crew, member, task, material, payroll, supply, budget, job-cost.\n2. [procedural 0.308] Field-Ops Suite executes as one sequential construction / trades pipeline.\n3. [episodic 0.287] Ingested brief for Field-Ops Suite in construction.\n4. [procedural 0.284] Product data is protected by least-privilege role access.\n5. [semantic 0.282] Domain construction; jobs track.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.2/10 (proceed-with-guards)\n- Technical feasibility: 6/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 7/10 — Scheduler Δ0.\n- API / rate-limit risk: 8/10 — Live-tool Δ0.\n- Delivery confidence: 6/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: track run as deterministic local steps over crew.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"construction\",\n  \"surfaces\": [\n    \"estimating & bids\",\n    \"scheduling\",\n    \"materials & punch lists\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 construction / trades entity model\n\nStatus: accepted\nDecision: The product's state is modeled around crew, member, task, material, payroll, supply, budget, job-cost derived from the brief (P0 lattice).\n\n# ADR-002 track pipeline\n\nStatus: accepted\nDecision: The product runs a sequential track pipeline over its entities.\n\n# ADR-003 construction / trades integration boundaries\n\nStatus: accepted\nDecision: External surfaces are estimating & bids, scheduling, materials & punch lists — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Field-Ops Suite API\n  version: \"1.0.0\"\npaths:\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 construction / trades entity model\n\nStatus: accepted\nDecision: The product's state is modeled around crew, member, task, material, payroll, supply, budget, job-cost derived from the brief (P0 lattice).\n\n# ADR-002 track pipeline\n\nStatus: accepted\nDecision: The product runs a sequential track pipeline over its entities.\n\n# ADR-003 construction / trades integration boundaries\n\nStatus: accepted\nDecision: External surfaces are estimating & bids, scheduling, materials & punch lists — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Field-Ops Suite API\n  version: \"1.0.0\"\npaths:\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
       "language": "markdown"
     }
   ],
@@ -679,357 +679,357 @@
   ],
   "logs": [
     {
-      "ts": 1788874725987,
+      "ts": 1789018165294,
       "phase": 0,
       "level": "info",
       "event": "project.created",
       "detail": "construction"
     },
     {
-      "ts": 1788874725989,
+      "ts": 1789018165295,
       "phase": 0,
       "level": "info",
       "event": "phase.enter",
       "detail": "P0 Deep Research & Feasibility"
     },
     {
-      "ts": 1788874725990,
+      "ts": 1789018165296,
       "phase": 0,
       "level": "info",
       "event": "scorecard.ready",
       "detail": "overall=7.2 verdict=proceed-with-guards"
     },
     {
-      "ts": 1788874725989,
+      "ts": 1789018165295,
       "phase": 0,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874725989,
+      "ts": 1789018165296,
       "phase": 0,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 32696329"
     },
     {
-      "ts": 1788874725990,
+      "ts": 1789018165297,
       "phase": 1,
       "level": "info",
       "event": "phase.enter",
       "detail": "P1 Core Orchestration & State Graph"
     },
     {
-      "ts": 1788874725991,
+      "ts": 1789018165298,
       "phase": 1,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874725991,
+      "ts": 1789018165298,
       "phase": 1,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 10507139"
     },
     {
-      "ts": 1788874725993,
+      "ts": 1789018165299,
       "phase": 2,
       "level": "info",
       "event": "phase.enter",
       "detail": "P2 Memory & Context Consolidation"
     },
     {
-      "ts": 1788874725993,
+      "ts": 1789018165299,
       "phase": 2,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874725993,
+      "ts": 1789018165300,
       "phase": 2,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 18455377"
     },
     {
-      "ts": 1788874725995,
+      "ts": 1789018165301,
       "phase": 3,
       "level": "info",
       "event": "phase.enter",
       "detail": "P3 Tool Integration & Interoperability"
     },
     {
-      "ts": 1788874725995,
+      "ts": 1789018165301,
       "phase": 3,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874725995,
+      "ts": 1789018165302,
       "phase": 3,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 16382928"
     },
     {
-      "ts": 1788874725996,
+      "ts": 1789018165306,
       "phase": 4,
       "level": "info",
       "event": "phase.enter",
       "detail": "P4 Security, Isolation & Authorization"
     },
     {
-      "ts": 1788874725997,
+      "ts": 1789018165306,
       "phase": 4,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874725998,
+      "ts": 1789018165307,
       "phase": 4,
       "level": "info",
       "event": "hitl.approved",
       "detail": "Security, Isolation & Authorization"
     },
     {
-      "ts": 1788874725999,
+      "ts": 1789018165308,
       "phase": 4,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 35271886"
     },
     {
-      "ts": 1788874726000,
+      "ts": 1789018165309,
       "phase": 5,
       "level": "info",
       "event": "phase.enter",
       "detail": "P5 Validation, HITL & Self-Learning"
     },
     {
-      "ts": 1788874726000,
+      "ts": 1789018165309,
       "phase": 5,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874726002,
+      "ts": 1789018165311,
       "phase": 5,
       "level": "info",
       "event": "hitl.approved",
       "detail": "Validation, HITL & Self-Learning"
     },
     {
-      "ts": 1788874726003,
+      "ts": 1789018165312,
       "phase": 5,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 29514528"
     },
     {
-      "ts": 1788874726004,
+      "ts": 1789018165313,
       "phase": 6,
       "level": "info",
       "event": "phase.enter",
       "detail": "P6 Code Generation, Testing & Deployment"
     },
     {
-      "ts": 1788874726006,
+      "ts": 1789018165315,
       "phase": 6,
       "level": "info",
       "event": "tests.pass",
       "detail": "tests.pass"
     },
     {
-      "ts": 1788874726009,
+      "ts": 1789018165313,
       "phase": 6,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874726010,
+      "ts": 1789018165314,
       "phase": 6,
       "level": "info",
       "event": "lesson.capture",
       "detail": "L2 template-emission lesson-template-emission-b90f22a6 (P6 sealed with unmet DoD: p6-verified, p6-brief-fit)"
     },
     {
-      "ts": 1788874726012,
+      "ts": 1789018165315,
       "phase": 6,
       "level": "warn",
       "event": "gate.verdict",
       "detail": "FAIL · 2 unmet · 55247714"
     },
     {
-      "ts": 1788874726014,
+      "ts": 1789018165316,
       "phase": 7,
       "level": "info",
       "event": "phase.enter",
       "detail": "P7 Domain & Market Research"
     },
     {
-      "ts": 1788874726014,
+      "ts": 1789018165316,
       "phase": 7,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874726014,
+      "ts": 1789018165316,
       "phase": 7,
       "level": "info",
       "event": "lesson.capture",
       "detail": "L2 template-emission lesson-template-emission-1a5cba7c (P7 sealed with unmet DoD: p7-research)"
     },
     {
-      "ts": 1788874726015,
+      "ts": 1789018165317,
       "phase": 7,
       "level": "warn",
       "event": "gate.verdict",
       "detail": "FAIL · 1 unmet · 42550424"
     },
     {
-      "ts": 1788874726017,
+      "ts": 1789018165319,
       "phase": 8,
       "level": "info",
       "event": "phase.enter",
       "detail": "P8 Dynamic UI/UX Prototyping"
     },
     {
-      "ts": 1788874726017,
+      "ts": 1789018165319,
       "phase": 8,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874726019,
+      "ts": 1789018165321,
       "phase": 8,
       "level": "info",
       "event": "hitl.approved",
       "detail": "Dynamic UI/UX Prototyping"
     },
     {
-      "ts": 1788874726021,
+      "ts": 1789018165322,
       "phase": 8,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 60617535"
     },
     {
-      "ts": 1788874726023,
+      "ts": 1789018165323,
       "phase": 9,
       "level": "info",
       "event": "phase.enter",
       "detail": "P9 CI/CD & Cloud Deployment Routing"
     },
     {
-      "ts": 1788874726024,
+      "ts": 1789018165323,
       "phase": 9,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874726026,
+      "ts": 1789018165325,
       "phase": 9,
       "level": "info",
       "event": "hitl.approved",
       "detail": "CI/CD & Cloud Deployment Routing"
     },
     {
-      "ts": 1788874726027,
+      "ts": 1789018165326,
       "phase": 9,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 30305407"
     },
     {
-      "ts": 1788874726028,
+      "ts": 1789018165332,
       "phase": 10,
       "level": "info",
       "event": "phase.enter",
       "detail": "P10 Local Agent & Edge Inference"
     },
     {
-      "ts": 1788874726028,
+      "ts": 1789018165332,
       "phase": 10,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874726029,
+      "ts": 1789018165332,
       "phase": 10,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 32184623"
     },
     {
-      "ts": 1788874726032,
+      "ts": 1789018165334,
       "phase": 11,
       "level": "info",
       "event": "phase.enter",
       "detail": "P11 Real-Time Web & Tool Augmentation"
     },
     {
-      "ts": 1788874726032,
+      "ts": 1789018165334,
       "phase": 11,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874726034,
+      "ts": 1789018165335,
       "phase": 11,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 16636256"
     },
     {
-      "ts": 1788874726037,
+      "ts": 1789018165337,
       "phase": 12,
       "level": "info",
       "event": "phase.enter",
       "detail": "P12 Documentation & Technical Specs"
     },
     {
-      "ts": 1788874726040,
+      "ts": 1789018165340,
       "phase": 12,
       "level": "warn",
       "event": "delivery.complete",
       "detail": "All 13 phases sealed. 2 failed gates: P6, P7"
     },
     {
-      "ts": 1788874726037,
+      "ts": 1789018165337,
       "phase": 12,
       "level": "info",
       "event": "algo.run",
       "detail": "A1 A2 A3 A4 A5 A6 A7 A8"
     },
     {
-      "ts": 1788874726039,
+      "ts": 1789018165338,
       "phase": 12,
       "level": "info",
       "event": "gate.verdict",
       "detail": "PASS · 0 unmet · 35300554"
     },
     {
-      "ts": 1788874726040,
+      "ts": 1789018165339,
       "phase": 12,
       "level": "warn",
       "event": "run.complete.with.failed.gates",
       "detail": "sealed complete with 2 failed DoD gate(s): P6(Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash),Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)); P7(Live research corpus exists for P7 (≥1 fetched finding))"
     },
     {
-      "ts": 1788874726041,
+      "ts": 1789018165339,
       "phase": 12,
       "level": "info",
       "event": "lesson.capture",
@@ -1039,40 +1039,40 @@
   "hitl": null,
   "decisions": [
     {
-      "id": "hitl-4-1788874725998",
+      "id": "hitl-4-1789018165307",
       "phase": 4,
       "title": "Approve isolation policy",
       "decision": "approve",
       "decidedBy": "human",
-      "requestedAt": 1788874725997,
-      "decidedAt": 1788874725998
+      "requestedAt": 1789018165306,
+      "decidedAt": 1789018165307
     },
     {
-      "id": "hitl-5-1788874726002",
+      "id": "hitl-5-1789018165311",
       "phase": 5,
       "title": "Approve validation contract",
       "decision": "approve",
       "decidedBy": "human",
-      "requestedAt": 1788874726000,
-      "decidedAt": 1788874726002
+      "requestedAt": 1789018165309,
+      "decidedAt": 1789018165311
     },
     {
-      "id": "hitl-8-1788874726019",
+      "id": "hitl-8-1789018165321",
       "phase": 8,
       "title": "Approve interface contract",
       "decision": "approve",
       "decidedBy": "human",
-      "requestedAt": 1788874726017,
-      "decidedAt": 1788874726019
+      "requestedAt": 1789018165319,
+      "decidedAt": 1789018165321
     },
     {
-      "id": "hitl-9-1788874726026",
+      "id": "hitl-9-1789018165325",
       "phase": 9,
       "title": "Approve production routing",
       "decision": "approve",
       "decidedBy": "human",
-      "requestedAt": 1788874726024,
-      "decidedAt": 1788874726026
+      "requestedAt": 1789018165323,
+      "decidedAt": 1789018165325
     }
   ],
   "modelRoute": "deterministic",
@@ -1080,7 +1080,7 @@
     "runtime": "sync-template",
     "ramMb": null,
     "timeoutS": 30,
-    "isolated": true
+    "isolated": false
   },
   "openapi": "openapi: 3.1.0\ninfo:\n  title: Field-Ops Suite API\n  version: \"1.0.0\"\npaths:\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok",
   "adr": "# ADR-001 construction / trades entity model\n\nStatus: accepted\nDecision: The product's state is modeled around crew, member, task, material, payroll, supply, budget, job-cost derived from the brief (P0 lattice).\n\n# ADR-002 track pipeline\n\nStatus: accepted\nDecision: The product runs a sequential track pipeline over its entities.\n\n# ADR-003 construction / trades integration boundaries\n\nStatus: accepted\nDecision: External surfaces are estimating & bids, scheduling, materials & punch lists — declarations, not runtime bindings.",
@@ -1165,53 +1165,53 @@
     {
       "id": "A1",
       "name": "Intent Lattice",
-      "ranAt": 1788874726039,
+      "ranAt": 1789018165338,
       "summary": "9 nodes · complexity 7.0"
     },
     {
       "id": "A2",
       "name": "FusionRank",
-      "ranAt": 1788874726039,
+      "ranAt": 1789018165338,
       "summary": "ranked 19 memory rows for the packet"
     },
     {
       "id": "A3",
       "name": "Constraint Scheduler",
-      "ranAt": 1788874726039,
+      "ranAt": 1789018165338,
       "summary": "tightness 5.8 · sec+0"
     },
     {
       "id": "A4",
       "name": "Agent Packet",
-      "ranAt": 1788874726039,
+      "ranAt": 1789018165338,
       "summary": "compiled P12 packet"
     },
     {
       "id": "A5",
       "name": "Spec Graph",
-      "ranAt": 1788874726039,
+      "ranAt": 1789018165338,
       "summary": "6 files · order schema → api → store"
     },
     {
       "id": "A6",
       "name": "Contract Synth",
-      "ranAt": 1788874726039,
+      "ranAt": 1789018165338,
       "summary": "6 entities · 1 endpoints"
     },
     {
       "id": "A7",
       "name": "Test Oracle",
-      "ranAt": 1788874726039,
+      "ranAt": 1789018165338,
       "summary": "2 cases"
     },
     {
       "id": "A8",
       "name": "Crew Router",
-      "ranAt": 1788874726039,
+      "ranAt": 1789018165338,
       "summary": "airt · 10200 tok"
     }
   ],
-  "packet": "# RapidTool Agent Packet v3 — Field-Ops Suite\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-08T13:38:46.040Z\nproject_id: 4cd56084-1d37-42f5-b025-b7e1304f8e31\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-08T13:38:46.040Z\",\n  \"project_id\": \"4cd56084-1d37-42f5-b025-b7e1304f8e31\",\n  \"name\": \"Field-Ops Suite\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": true\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874725997,\n      \"decided_at\": 1788874725998\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874726000,\n      \"decided_at\": 1788874726002\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874726017,\n      \"decided_at\": 1788874726019\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1788874726024,\n      \"decided_at\": 1788874726026\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ]\n}\n```\n\n## Mission\na field-ops suite for a small construction company: projects with phases + budgets, daily task lists per crew member, time sheets that roll into weekly payroll with rates + overtime, material/supply lists with purchase tracking + reorder flags, job costing by project\n\n## Intent lattice (A1)\nDomain: construction\nJobs: track\nEntities: crew, member, task, material, payroll, supply, budget, job-cost\nConstraints: none declared\nComplexity: 7.0 / 10\n\n## Scheduler (A3)\nTightness 5.8 · security Δ0 · api Δ0\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (2600 tok): Lock schema and routes for track before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (4800 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (1400 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/construction.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/track.ts — Implement job “track” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Crew: id:ulid, status:enum, updatedAt:datetime\n- Member: id:ulid, status:enum, updatedAt:datetime\n- Task: id:ulid, status:enum, updatedAt:datetime\n- Material: id:ulid, status:enum, updatedAt:datetime\n- Payroll: id:ulid, status:enum, updatedAt:datetime\n- Supply: id:ulid, status:enum, updatedAt:datetime\n- GET /v1/track (track)\n\n## Oracle (A7)\n- job.track.happy: Authorized operator submits “track” with a valid crew ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · human · 2026-09-08T13:38:45.998Z\n- P5 · approve · human · 2026-09-08T13:38:46.002Z\n- P8 · approve · human · 2026-09-08T13:38:46.019Z\n- P9 · approve · human · 2026-09-08T13:38:46.026Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.359] Data model written for Field-Ops Suite: crew, member, task, material, payroll, supply, budget, job-cost.\n2. [procedural 0.308] Field-Ops Suite executes as one sequential construction / trades pipeline.\n3. [episodic 0.287] Ingested brief for Field-Ops Suite in construction.\n4. [procedural 0.284] Product data is protected by least-privilege role access.\n5. [semantic 0.282] Domain construction; jobs track.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.2/10 (proceed-with-guards)\n- Technical feasibility: 6/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 7/10 — Scheduler Δ0.\n- API / rate-limit risk: 8/10 — Live-tool Δ0.\n- Delivery confidence: 6/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: track run as deterministic local steps over crew.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"construction\",\n  \"surfaces\": [\n    \"estimating & bids\",\n    \"scheduling\",\n    \"materials & punch lists\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 construction / trades entity model\n\nStatus: accepted\nDecision: The product's state is modeled around crew, member, task, material, payroll, supply, budget, job-cost derived from the brief (P0 lattice).\n\n# ADR-002 track pipeline\n\nStatus: accepted\nDecision: The product runs a sequential track pipeline over its entities.\n\n# ADR-003 construction / trades integration boundaries\n\nStatus: accepted\nDecision: External surfaces are estimating & bids, scheduling, materials & punch lists — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Field-Ops Suite API\n  version: \"1.0.0\"\npaths:\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 construction / trades entity model\n\nStatus: accepted\nDecision: The product's state is modeled around crew, member, task, material, payroll, supply, budget, job-cost derived from the brief (P0 lattice).\n\n# ADR-002 track pipeline\n\nStatus: accepted\nDecision: The product runs a sequential track pipeline over its entities.\n\n# ADR-003 construction / trades integration boundaries\n\nStatus: accepted\nDecision: External surfaces are estimating & bids, scheduling, materials & punch lists — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Field-Ops Suite API\n  version: \"1.0.0\"\npaths:\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
+  "packet": "# RapidTool Agent Packet v3 — Field-Ops Suite\n\n## System\npacket_version: 3\ncompiled_at: 2026-09-10T05:29:25.340Z\nproject_id: 1bf0e807-f549-4335-938e-25dd71643cc2\nYou are a governed implementation agent for RapidTool. You do not skip phases.\nYou may only work the current phase (P12 Documentation & Technical Specs) unless the human approved an earlier HITL gate.\nIllegal graph jumps, unsigned deploys, and tool calls outside user scope are forbidden.\nIf a test fails, capture the traceback and patch under schema lock. Do not invent APIs.\n\n## System JSON (machine-readable)\n```json\n{\n  \"schema_version\": 1,\n  \"packet_version\": 3,\n  \"compiled_at\": \"2026-09-10T05:29:25.340Z\",\n  \"project_id\": \"1bf0e807-f549-4335-938e-25dd71643cc2\",\n  \"name\": \"Field-Ops Suite\",\n  \"project_status\": \"complete\",\n  \"current_phase\": {\n    \"id\": 12,\n    \"code\": \"P12\",\n    \"title\": \"Documentation & Technical Specs\",\n    \"hitl_gate\": false\n  },\n  \"model_route\": \"deterministic\",\n  \"capabilities\": {\n    \"ingest\": true,\n    \"verify\": \"config-gated\",\n    \"vault_search\": true\n  },\n  \"report_schema\": {\n    \"phase\": \"integer 0..12\",\n    \"status\": \"\\\"complete\\\" | \\\"blocked\\\" | \\\"partial\\\"\",\n    \"summary\": \"string (non-empty)\",\n    \"files\": \"string[] (optional)\",\n    \"tests_run\": \"{command: string, pass: boolean, evidence?: string}[] (optional)\",\n    \"artifacts\": \"{title: string, body: string, language?: string}[] (optional)\"\n  },\n  \"research_hash\": \"2166136261\",\n  \"sandbox\": {\n    \"claim\": \"Engine-template runner (bounded, engine-authored code only)\",\n    \"ram_mb\": null,\n    \"timeout_s\": 30,\n    \"isolated\": false\n  },\n  \"verdict\": \"proceed-with-guards\",\n  \"rejection_loop\": null,\n  \"decisions\": [\n    {\n      \"phase\": 4,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018165306,\n      \"decided_at\": 1789018165307\n    },\n    {\n      \"phase\": 5,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018165309,\n      \"decided_at\": 1789018165311\n    },\n    {\n      \"phase\": 8,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018165319,\n      \"decided_at\": 1789018165321\n    },\n    {\n      \"phase\": 9,\n      \"decision\": \"approve\",\n      \"decided_by\": \"human\",\n      \"note\": null,\n      \"requested_at\": 1789018165323,\n      \"decided_at\": 1789018165325\n    }\n  ],\n  \"phases\": [\n    {\n      \"id\": 0,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 1,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 2,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 3,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 4,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 5,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 6,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 7,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": false\n    },\n    {\n      \"id\": 8,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 9,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 10,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 11,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    },\n    {\n      \"id\": 12,\n      \"status\": \"complete\",\n      \"rejections\": 0,\n      \"gate_passed\": true\n    }\n  ]\n}\n```\n\n## Mission\na field-ops suite for a small construction company: projects with phases + budgets, daily task lists per crew member, time sheets that roll into weekly payroll with rates + overtime, material/supply lists with purchase tracking + reorder flags, job costing by project\n\n## Intent lattice (A1)\nDomain: construction\nJobs: track\nEntities: crew, member, task, material, payroll, supply, budget, job-cost\nConstraints: none declared\nComplexity: 7.0 / 10\n\n## Scheduler (A3)\nTightness 5.8 · security Δ0 · api Δ0\n- Standard isolate policy.\n- Default API budget.\n- Stock HITL set (P4, P5, P8, P9).\nExtra HITL: none\n\n## Crew (A8)\n- architect (2600 tok): Lock schema and routes for track before code. → Pass Spec Graph order + contracts to implementer. Do not write feature code.\n- implementer (4800 tok): Write files in Spec Graph order. Current edge: Documentation & Technical Specs. → Stop when oracle tests fail twice; hand traceback to reviewer.\n- reviewer [ACTIVE] (1400 tok): Diff against contracts. Reject invented endpoints and leaked PHI/PII. → Approve only if A6 endpoints and A7 oracle are green.\n- tester (1400 tok): Run oracle + one adversarial case per constraint. → Constraints in scope: none.\n\n## Spec graph order (A5)\n- [architect] src/domain/construction.ts — Typed entities from the lattice\n- [architect] src/api/routes.ts — HTTP contracts bound to jobs\n- [implementer] src/state/store.ts — Checkpointed client/server state\n- [implementer] src/jobs/track.ts — Implement job “track” against the contract\n- [implementer] src/ui/console.tsx — Operator surfaces bound to store fields\n- [tester] tests/oracle.spec.ts — Acceptance tests from the oracle\n\n## Contracts (A6)\n- Crew: id:ulid, status:enum, updatedAt:datetime\n- Member: id:ulid, status:enum, updatedAt:datetime\n- Task: id:ulid, status:enum, updatedAt:datetime\n- Material: id:ulid, status:enum, updatedAt:datetime\n- Payroll: id:ulid, status:enum, updatedAt:datetime\n- Supply: id:ulid, status:enum, updatedAt:datetime\n- GET /v1/track (track)\n\n## Oracle (A7)\n- job.track.happy: Authorized operator submits “track” with a valid crew ⇒ 200 + persisted entity + checkpoint written\n- graph.no-skip: Agent requests P9 while P4 is open ⇒ Illegal transition; no deploy artifacts\n\n## Current edge\nP12 — Documentation & Technical Specs\nArchitecture Decision Records from P1/P7, OpenAPI + database schemas, frontend/backend parity.\nStatus: complete · model: deterministic\nExecution: Engine-template runner (bounded, engine-authored code only)\nNo pending HITL.\n\nP6 template self-test (last run): pass — tests.pass\nVerdict: proceed-with-guards\n## Decision ledger (HITL)\n- P4 · approve · human · 2026-09-10T05:29:25.307Z\n- P5 · approve · human · 2026-09-10T05:29:25.311Z\n- P8 · approve · human · 2026-09-10T05:29:25.321Z\n- P9 · approve · human · 2026-09-10T05:29:25.325Z\n\n## Ranked memory (A2 FusionRank)\n1. [semantic 0.359] Data model written for Field-Ops Suite: crew, member, task, material, payroll, supply, budget, job-cost.\n2. [procedural 0.308] Field-Ops Suite executes as one sequential construction / trades pipeline.\n3. [episodic 0.287] Ingested brief for Field-Ops Suite in construction.\n4. [procedural 0.284] Product data is protected by least-privilege role access.\n5. [semantic 0.282] Domain construction; jobs track.\n\n## Scorecard\n(deterministic feasibility estimate — template-derived, not live research)\nOverall 7.2/10 (proceed-with-guards)\n- Technical feasibility: 6/10 — Typed contracts + sequential graph.\n- Scale headroom: 9/10 — Stateless workers + durable checkpoints.\n- Security posture: 7/10 — Scheduler Δ0.\n- API / rate-limit risk: 8/10 — Live-tool Δ0.\n- Delivery confidence: 6/10 — Phased graph prevents skipped work.\nBottlenecks: Long-running tools must stream over WebSocket MCP.; HITL rejection without a qualitative note is illegal.\nAttack vectors: Prompt injection via ingested competitor pages.; Tool-call privilege escalation if OAuth scopes are inherited.; Sandbox escape if generated exec has network.\n\n## Artifacts (trimmed)\n### P9 · DoD gate — P9\n# DoD gate — P9\n\n**Result: PASS**\n\nAll criteria met for phase 9.\n\nEvidence hash: 3030540723\n\n### P10 · Local compute & inference\nCompute model: track run as deterministic local steps over crew.\n\nNo remote model inference or edge handoff is claimed — the product's logic is deterministic unless the brief names a model.\n\n### P10 · DoD gate — P10\n# DoD gate — P10\n\n**Result: PASS**\n\nAll criteria met for phase 10.\n\nEvidence hash: 3218462335\n\n### P11 · Live data & tool surfaces\n{\n  \"domain\": \"construction\",\n  \"surfaces\": [\n    \"estimating & bids\",\n    \"scheduling\",\n    \"materials & punch lists\"\n  ],\n  \"note\": \"Live surfaces derived from the brief's domain — declared, not bound at runtime (honest).\"\n}\n\n### P11 · DoD gate — P11\n# DoD gate — P11\n\n**Result: PASS**\n\nAll criteria met for phase 11.\n\nEvidence hash: 1663625674\n\n### P12 · Architecture Decision Records\n# ADR-001 construction / trades entity model\n\nStatus: accepted\nDecision: The product's state is modeled around crew, member, task, material, payroll, supply, budget, job-cost derived from the brief (P0 lattice).\n\n# ADR-002 track pipeline\n\nStatus: accepted\nDecision: The product runs a sequential track pipeline over its entities.\n\n# ADR-003 construction / trades integration boundaries\n\nStatus: accepted\nDecision: External surfaces are estimating & bids, scheduling, materials & punch lists — declarations, not runtime bindings.\n\n### P12 · OpenAPI 3.1\nopenapi: 3.1.0\ninfo:\n  title: Field-Ops Suite API\n  version: \"1.0.0\"\npaths:\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n### P12 · DoD gate — P12\n# DoD gate — P12\n\n**Result: PASS**\n\nAll criteria met for phase 12.\n\nEvidence hash: 3530055408\n\n## ADRs\n# ADR-001 construction / trades entity model\n\nStatus: accepted\nDecision: The product's state is modeled around crew, member, task, material, payroll, supply, budget, job-cost derived from the brief (P0 lattice).\n\n# ADR-002 track pipeline\n\nStatus: accepted\nDecision: The product runs a sequential track pipeline over its entities.\n\n# ADR-003 construction / trades integration boundaries\n\nStatus: accepted\nDecision: External surfaces are estimating & bids, scheduling, materials & punch lists — declarations, not runtime bindings.\n## OpenAPI\nopenapi: 3.1.0\ninfo:\n  title: Field-Ops Suite API\n  version: \"1.0.0\"\npaths:\n  /v1/track:\n    get:\n      summary: track\n      responses:\n        \"200\":\n          description: ok\n\n## Required output schema\nReturn your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.\nThe five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.\nNext legal edge: none — pipeline complete.\n\nDo not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.",
   "specGraph": {
     "nodes": [
       {

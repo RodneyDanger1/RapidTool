@@ -7,27 +7,31 @@ and dynamically imports the vault (`vault.ts`), crew (`crew.server.ts`),
 verify (`verify.server.ts`), design (`design.ts`) and diagram (`diagram.ts`)
 modules when their subcommands run.
 
-**33 subcommands** (verified on disk: `grep -c 'case "' scripts/rapidtool-cli.mjs` = 33):
+**34 subcommands** (verified on disk: `grep -c 'case "' scripts/rapidtool-cli.mjs` = 34):
 `create` `run` `gate` `approve` `reject` `retry` `ingest` `packet` `export` `emit`
 `tree-run` `repair` `summary` `vault` `search` `crew` `verify` `check` `design`
 `diagram` `artifacts` `doctor` `diagnose` `harvest` `swarm` `prompt` `bench`
-`mine` `knowledge` `lesson` `wild` `chat` `deepen` — from brief to verified artifact,
+`mine` `knowledge` `lesson` `wild` `chat` `deepen` `fixtures` — from brief to verified artifact,
 design tokens + SVG diagrams, an Obsidian-style knowledge vault, the
 runnable-scaffold writer (`emit`), per-file compile checks (`check`), telemetry
 diagnosis (`diagnose`), a bounded live-source harvester, the advisory
 swarm/prompt/bench pillar tools, a cross-project pattern store, the human-gated
 lesson family (`list`/`propose`/`accept`/`supersede`/`refute`), wild-mode
 macro-runs (enable/start/pause/resume/stop), a grounded copilot turn, the E-13
-research-deepen recovery, a capability pre-flight, and the emit→edit→re-emit
+research-deepen recovery, a capability pre-flight, the brief-fixture
+drafter/approver (`fixtures` `--draft` / `--approve` — drafted cases stay
+pending until a human approves), and the emit→edit→re-emit
 continuation verbs `tree-run` + `repair` (rows #31–32 below).
 
 > **`tree-run` + `repair` shipped (fixes/150 G1); `emit --verify-kind` is in
 > flight.** The dir-based continuation verbs are callable today — rows #31–32
 > below and the [Tree-run and repair (landed); emit verify-kind (in flight)](#tree-run-and-repair-landed-emit-verify-kind-in-flight)
-> section describe their real envelopes. `emit --verify-kind` has **NOT landed**:
-> there is no case arm (`grep -c 'case "'` reads 33, not 34) and
-> `compile-check.server.ts` exports no `verifyKind` yet — treat its row as the
-> agreed contract, not shipped behavior, and re-check before calling it.
+> section describe their real envelopes. `emit --verify-kind` has **NOT landed as
+> a documented verb**: `grep -c 'case "'` reads 34 and none of the 34 case arms is
+> `verify-kind` — the flag rides inside `emit` (`rapidtool-cli.mjs:768`, over
+> `verifyKindDir` at `compile-check.server.ts:770`) and the scratch-copy + install
+> leg is still open (TA-16) — treat its row as the
+> agreed contract, not proven behavior, and re-check before calling it.
 
 Every subcommand prints a **single JSON object** to stdout (parseable by an AI
 agent) whose envelope always carries `schema_version: 1`, `cmd` and
@@ -340,8 +344,10 @@ emit refusal → exit 1 (`RT_E_PROJECT_MISSING` / `RT_E_VALIDATION`).
 > **In flight (fixes/149 P1-2):** opt-in `--verify-kind` — a bounded
 > `npm install` + `vite build` leg for webapp/game kinds in a temp dir (never
 > mutating the emitted dir), asserting the kind's declared build actually runs.
-> NOT callable at this write — no case arm and no `verifyKind` seam on disk
-> (`grep -c 'case "' scripts/rapidtool-cli.mjs` reads 33); see the
+> NOT proven at this write — none of the 34 case arms is `verify-kind`
+> (`grep -c 'case "' scripts/rapidtool-cli.mjs` reads 34); the flag rides inside
+> `emit` (`rapidtool-cli.mjs:768` → `verifyKindDir`), whose scratch-copy + install
+> leg is still open (TA-16); see the
 > [Tree-run and repair (landed); emit verify-kind (in flight)](#tree-run-and-repair-landed-emit-verify-kind-in-flight)
 > section before relying on it.
 
@@ -358,9 +364,10 @@ a missing `--dir` argument → exit 1 (`RT_E_VALIDATION`); internal error → ex
 ## Tree-run and repair (landed); emit verify-kind (in flight)
 
 > **Status at this write: `tree-run --dir` and `repair --dir` SHIPPED (fixes/150
-> G1, case arms present, `grep -c 'case "'` = 33). `emit --verify-kind` is IN
-> FLIGHT — the fixes/149 P1-2 contract below describes what will land, but there
-> is no case arm and `compile-check.server.ts` has no `verifyKind` export yet.
+> G1, case arms present, `grep -c 'case "'` = 34). `emit --verify-kind` is IN
+> FLIGHT — the fixes/149 P1-2 contract below describes what will land, but none
+> of the 34 case arms is `verify-kind` (the flag rides inside `emit`) and the
+> scratch-copy + install leg is still open (TA-16).
 > Re-check before calling it.**
 
 - **`tree-run --dir <dir>`** (keyless, read-only) — the dir-based oracle runner
@@ -919,3 +926,39 @@ cross-project STORE files only — the project file is never touched.
 node --experimental-strip-types --test src/lib/headless.test.ts
 node --experimental-strip-types --test src/lib/harvest.test.ts   # Pillar 1 + new-pillar bridge suite
 ```
+
+## The `approve` seat — `--i-am-human` + the out-of-band `RT_HUMAN_SEAT_TOKEN` (216 · TA-2)
+
+Every HITL approval is recorded under an explicit **actor seat**, so a machine
+path can never mint `decidedBy: "human"` (the pre-216 behaviour: `approve()`
+hardcoded a human actor for every caller, including the eval harness).
+
+- **Default seat (no seat claimed)** → `decidedBy: "autopilot"`, seat
+  `harness`; the ledger row's note carries the `[seat harness]` tag. This is
+  what an unattended/agent process gets. Consequence: a plain approve can
+  never override a `forceHuman` gate (e.g. a failed P6 sandbox) — such a gate
+  needs the human seat below plus `--force`.
+- **Human seat** → `decidedBy: "human"`, seat `human-cli-i-am-human`. A
+  non-TTY call must present BOTH pieces of evidence:
+  1. `--i-am-human` on the command line (the T0.7 guard: a non-TTY `approve`
+     without it exits 1 with `RT_E_VALIDATION` before anything is minted), and
+  2. the out-of-band token: the person at the keyboard exports
+     `RT_HUMAN_SEAT_TOKEN` in their own shell, e.g.
+     ```
+     export RT_HUMAN_SEAT_TOKEN="$(head -c 24 /dev/urandom | base64)"
+     node --experimental-strip-types scripts/rapidtool-cli.mjs approve \
+       --project build.json --i-am-human
+     ```
+     The CLI presents that value to the harness; the row's note then reads
+     `[seat human-cli-i-am-human] out-of-band RT_HUMAN_SEAT_TOKEN verified`.
+
+  With `--i-am-human` but **no matching token in the environment**, the call
+  REFUSES: exit 4, envelope `code: "RT_E_VALIDATION"`, the message naming
+  `RT_HUMAN_SEAT_TOKEN` — and **nothing is written** (the project stays parked
+  at the gate, no ledger row, no human actor). A seat claim without its
+  out-of-band evidence never lands.
+
+The token is deliberately out-of-band: do not bake it into scripts, config
+files, `package.json`, or the project JSON — a process that merely inherited an
+agent's environment does not hold it. `approve` is the only verb with this
+requirement; the autopilot path (`gate --autopilot`, `wild`) never touches it.

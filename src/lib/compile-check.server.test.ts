@@ -8,10 +8,10 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { compileCheckDir, treeRun, verifyKindDir } from "./compile-check.server.ts";
+import { compileCheckDir, parseVerdictForSource, treeRun, verifyKindDir } from "./compile-check.server.ts";
 import { scrubbedEnv } from "./node-runner.server.ts";
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), "rapidtool-cc-"));
@@ -301,7 +301,22 @@ describe("treeRun — execute the emitted tree in-loop (fixes/144 M3/B3)", () =>
       assert.equal(r.run!.run, "skip", "UI shell is an honest skip");
       assert.equal(r.run!.entry, undefined, "no entry is resolved for a UI shell");
       assert.ok((r.run!.detail ?? "").includes("UI shell"), r.run!.detail);
-      assert.equal(r.ok, true, "skip counts green — compile pass + nothing red");
+      assert.equal(r.ok, true, "UI-shell skip counts green — compile pass + nothing red (185-S5: only ui-shell skip is green)");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("185-S5: headless skip (no entry resolved, not a UI shell) is NOT green", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "lib-no-main", type: "module" }));
+      write(dir, "src/util.ts", "export const n = 1;\n");
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.compile.ok, true);
+      assert.equal(r.run!.run, "skip");
+      assert.notEqual(r.run!.kind, "ui-shell");
+      assert.equal(r.ok, false, "headless skip must not share green with a UI-shell skip");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -392,6 +407,282 @@ describe("treeRun — execute the emitted tree in-loop (fixes/144 M3/B3)", () =>
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("A3: string-quoted assert.equal is NOT a behavioral assertion (empty oracle)", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(
+        dir,
+        [
+          `import { test } from "node:test";`,
+          `test("quoted assert is not a call", () => {`,
+          `  const s = "assert.equal(1, 1)";`,
+          `  void s;`,
+          `});`,
+          ``,
+        ].join("\n"),
+      );
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, false, "string-literal assert must not mint green");
+      assert.equal(r.tests[0]!.run, "fail");
+      assert.equal(r.tests[0]!.tests.pass, 0);
+      assert.equal(r.tests[0]!.detail, "no behavioral assertion ran");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("A3: empty oracle.spec.ts is NOT green", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, "\n");
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, false, "empty oracle must not mint green");
+      assert.equal(r.tests.length, 1);
+      assert.equal(r.tests[0]!.run, "fail");
+      assert.equal(r.tests[0]!.detail, "no behavioral assertion ran");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("A3: commented-out assert is NOT green", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(
+        dir,
+        [
+          `import { test } from "node:test";`,
+          `test("commented assert", () => {`,
+          `  // assert.equal(1, 1);`,
+          `  /* assert.equal(2, 2); */`,
+          `});`,
+          ``,
+        ].join("\n"),
+      );
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, false);
+      assert.equal(r.tests[0]!.run, "fail");
+      assert.equal(r.tests[0]!.detail, "no behavioral assertion ran");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("185-S5: UI-shell skip stays green even when the record kind is app→webapp", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "ui-app", type: "module" }));
+      write(dir, "index.html", "<!doctype html><html><body>app</body></html>\n");
+      write(dir, "src/app.ts", "export const ui = 'shell';\n");
+      write(dir, ".rapidtool/project.json", JSON.stringify({ kind: "app" }));
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.compile.ok, true);
+      assert.equal(r.run!.run, "skip");
+      assert.equal(r.run!.kind, "ui-shell", "record kind must not leak into the skip classification");
+      assert.ok((r.run!.detail ?? "").includes("UI shell"), r.run!.detail);
+      assert.equal(r.ok, true, "index.html skip is green regardless of record kind");
+      assert.equal(r.sandbox, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("purity — subject bodies unchanged; compile.dir is the subject not the temp copy", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(
+        dir,
+        [
+          `import { test } from "node:test";`,
+          `import assert from "node:assert/strict";`,
+          `import { writeFileSync } from "node:fs";`,
+          `test("cwd write stays off the subject", () => {`,
+          `  writeFileSync("src/main.ts", "export const boot = () => 'mutated';\\n");`,
+          `  assert.equal(1, 1);`,
+          `});`,
+          ``,
+        ].join("\n"),
+      );
+      const beforeMain = readFileSync(join(dir, "src/main.ts"), "utf8");
+      const before = snapshotListing(dir);
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true, "copy absorbs the write; the spec still greens");
+      assert.deepEqual(snapshotListing(dir), before, "listing unchanged");
+      const afterMain = readFileSync(join(dir, "src/main.ts"), "utf8");
+      assert.equal(afterMain, beforeMain, "subject body unchanged");
+      assert.equal(afterMain.includes("mutated"), false, "subject did not absorb the copy's cwd write");
+      assert.equal(r.dir, r.compile.dir, "compile.dir is the operator-facing subject");
+      assert.equal(r.compile.dir.includes("rt-treerun-"), false, "compile.dir must not leak the temp copy");
+      assert.equal(r.sandbox, false, "treeRun advertises sandbox:false");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 216 T-18 — the emitted project's OWN toolchain: `npm run typecheck` and
+// `npm test` exactly as the tree declares them, run under the same bounded
+// runner. The hard rule: a tree that fails its own `npm test` can NEVER be
+// ok:true. An un-runnable declared script is a loud skip + note — never a
+// fabricated pass, never a silent ok. Real npm + real trees, no mocks.
+// ---------------------------------------------------------------------------
+
+describe("216 T-18 — the emitted project's own typecheck/test scripts", () => {
+  /** package.json carrying declared scripts + a green spec + main entry. */
+  const writeScriptTree = (
+    root: string,
+    scripts: Record<string, string>,
+    extras: [string, string][] = [],
+  ): void => {
+    write(
+      root,
+      "package.json",
+      JSON.stringify({ name: "mini-emit", type: "module", main: "src/main.ts", scripts }),
+    );
+    write(root, "src/main.ts", "export const boot = (): string => 'ok';\n");
+    write(root, "tests/oracle.spec.ts", PASSING_SPEC);
+    for (const [rel, body] of extras) write(root, rel, body);
+  };
+
+  it("runs the tree's OWN declared scripts for real and passes them (exit codes carried)", async () => {
+    const dir = tempDir();
+    try {
+      writeScriptTree(dir, {
+        typecheck: "node --version",
+        test: "node --experimental-strip-types --test tests/oracle.spec.ts",
+      });
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true, `green project leg must stay green: ${JSON.stringify(r.project)}`);
+      assert.ok(r.project, "treeRun always sets the project leg");
+      assert.equal(r.project!.typecheck.run, "pass");
+      assert.equal(r.project!.typecheck.exitCode, 0);
+      assert.equal(r.project!.test.run, "pass", "the tree's own npm test ran and exited 0");
+      assert.equal(r.project!.test.exitCode, 0);
+      assert.equal(
+        r.project!.test.command,
+        "node --experimental-strip-types --test tests/oracle.spec.ts",
+        "the command is carried verbatim from the emitted package.json",
+      );
+      assert.equal(r.project!.ok, true);
+      assert.equal(r.note, undefined, "a fully-run project leg is not note-worthy");
+      assert.equal(r.error, undefined);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("THE T-18 RULE: a tree failing its own npm test is NEVER ok:true — even with every spec leg green", async () => {
+    const dir = tempDir();
+    try {
+      // scripts/selfcheck.mjs is deliberately OUTSIDE tests/*.spec.* — the
+      // per-spec leg stays green and the ONLY red is the tree's own npm test.
+      writeScriptTree(dir, { typecheck: "node --version", test: "node scripts/selfcheck.mjs" }, [
+        ["scripts/selfcheck.mjs", "process.exit(1);\n"],
+      ]);
+      const r = await treeRunAsConsumer(dir);
+      assert.ok(r.tests.every((t) => t.run === "pass"), "spec leg green — the red is the project's own");
+      assert.equal(r.compile.ok, true, "every file parses — the red came from RUNNING the project's own test");
+      assert.equal(r.project!.test.run, "fail", "the tree's own test ran and failed");
+      assert.equal(r.project!.test.exitCode, 1);
+      assert.equal(r.project!.ok, false);
+      assert.equal(r.ok, false, "a tree that fails its own npm test can NEVER be ok:true");
+      assert.ok(
+        (r.error ?? "").includes("npm run test"),
+        `the top-level error names the red script: ${r.error}`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a declared typecheck that runs RED makes the tree not ok; exit code + bounded tail ride the verdict", async () => {
+    const dir = tempDir();
+    try {
+      writeScriptTree(dir, { typecheck: "node scripts/tc.mjs", test: "node --version" }, [
+        ["scripts/tc.mjs", "console.error('TS9999: synthetic type error');\nprocess.exit(2);\n"],
+      ]);
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.project!.typecheck.run, "fail");
+      assert.equal(r.project!.typecheck.exitCode, 2);
+      assert.ok(
+        (r.project!.typecheck.detail ?? "").includes("TS9999"),
+        `the bounded output tail is carried: ${r.project!.typecheck.detail}`,
+      );
+      assert.equal(r.ok, false);
+      assert.ok((r.error ?? "").includes("npm run typecheck"), r.error);
+      assert.equal(r.project!.test.run, "pass", "the other declared script still ran and passed");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("declared but UNINSTALLED toolchain → honest skip + note; never a fabricated pass, never silent", async () => {
+    const dir = tempDir();
+    try {
+      // tsc/vite are declared devDependencies of the real scaffold but there is
+      // no node_modules here — the tools are NOT the project's toolchain yet.
+      writeScriptTree(dir, { typecheck: "tsc --noEmit", test: "vite --version" });
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.project!.typecheck.run, "skip");
+      assert.equal(r.project!.test.run, "skip");
+      assert.notEqual(r.project!.typecheck.run, "pass", "a skip is never a pass");
+      assert.match(r.project!.typecheck.note ?? "", /UNVERIFIED/);
+      assert.match(r.project!.typecheck.note ?? "", /tsc/);
+      assert.match(r.project!.typecheck.note ?? "", /not a fabricated pass/);
+      assert.ok(
+        (r.note ?? "").includes("UNVERIFIED"),
+        "the top-level note makes the skip loud — an ok verdict is never silent about it",
+      );
+      assert.equal(r.project!.ok, true, "a skip is not a red — nothing declared actually failed");
+      assert.equal(r.ok, true);
+      assert.equal(r.error, undefined);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("no declared scripts → skips say exactly that (absent is not a pass); green tree unchanged", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true);
+      assert.equal(r.project!.typecheck.run, "skip");
+      // writeEmittedTree's package.json carries NO scripts block — the honest
+      // note for that shape names it, and names the script it did not find.
+      assert.match(r.project!.typecheck.note ?? "", /no package\.json "scripts" block/);
+      assert.match(r.project!.typecheck.note ?? "", /"typecheck" was not declared/);
+      assert.equal(r.project!.test.run, "skip");
+      assert.match(r.project!.test.note ?? "", /no package\.json "scripts" block/);
+      assert.match(r.project!.test.note ?? "", /"test" was not declared/);
+      assert.equal(
+        r.note,
+        undefined,
+        "nothing was DECLARED, so there is no unverified-declared-script note",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("an own test that outlives the bound is killed → run:timeout, ok:false (bounded, never a hang)", async () => {
+    const dir = tempDir();
+    try {
+      writeScriptTree(dir, { typecheck: "node --version", test: "node scripts/sleep.mjs" }, [
+        ["scripts/sleep.mjs", "setTimeout(() => {}, 120_000);\n"],
+      ]);
+      const started = Date.now();
+      const r = await treeRunAsConsumer(dir, { timeoutMs: 5000 });
+      const elapsed = Date.now() - started;
+      assert.equal(r.ok, false, "a timed-out own test is a red tree, never a pass");
+      assert.equal(r.project!.test.run, "timeout");
+      assert.ok(elapsed < 30_000, `bounded: treeRun returned in ${elapsed}ms, not 120s`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("B1 verifyKindDir", () => {
@@ -430,5 +721,56 @@ describe("B4/174-5 scrubbedEnv never copies API keys", () => {
       if (prev === undefined) delete process.env.DEEPSEEK_API_KEY;
       else process.env.DEEPSEEK_API_KEY = prev;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 216 T-02 — the parse gate that lets the emit path REFUSE a non-parsing row
+// before it is written. Ties the T-01 corruption to a refusal the writer can act
+// on: the residue the pre-216 CJS strip produced must FAIL this gate.
+// ---------------------------------------------------------------------------
+
+describe("216 T-02 — parseVerdictForSource gates writes before they happen", () => {
+  it("passes a healthy generated module body", () => {
+    const v = parseVerdictForSource("src/generated/chunk-0.ts", "export function a(): number { return 1; }\n");
+    assert.equal(v.verdict, "pass");
+  });
+
+  it("FAILS the exact residue the pre-216 CJS strip left behind (the 431-error class)", () => {
+    // What `stripCjsExportAssignments` used to emit for a MULTI-LINE
+    // `module.exports = { a, b };`: the opener dropped, the body orphaned —
+    // bare identifiers plus a dangling `};`. This must never be written.
+    const residue = ["function a() { return 1; }", "  a,", "  b,", "};", ""].join("\n");
+    const v = parseVerdictForSource("src/generated/chunk-0.ts", residue);
+    assert.equal(v.verdict, "fail", "the corruption class must not pass the gate");
+    assert.ok(typeof v.detail === "string" && v.detail.length > 0, "the refusal carries a reason");
+  });
+
+  it("FAILS an empty/whitespace source — a refusal, never a pass", () => {
+    assert.equal(parseVerdictForSource("src/generated/chunk-0.ts", "   \n").verdict, "fail");
+  });
+
+  it("reports null — NOT pass — for an uncheckable extension", () => {
+    // Unknown must never be silently treated as success by the caller.
+    assert.equal(parseVerdictForSource("README.md", "# hi\n").verdict, null);
+  });
+
+  it("passes the POST-216 stripped output of a multi-line CJS construct (T-01 + T-02 compose)", async () => {
+    const { stripCjsExportAssignments } = await import("./codegen.server.ts");
+    const src = [
+      "function a() { return 1; }",
+      "function b() { return 2; }",
+      "module.exports = {",
+      "  a,",
+      "  b,",
+      "};",
+      "",
+    ].join("\n");
+    const stripped = stripCjsExportAssignments(src, ["a", "b"]);
+    assert.equal(
+      parseVerdictForSource("src/generated/chunk-0.ts", stripped).verdict,
+      "pass",
+      "the T-01 fix produces output the T-02 gate accepts",
+    );
   });
 });

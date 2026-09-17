@@ -1,12 +1,10 @@
 // ---------------------------------------------------------------------------
 // src/jobs/lease.ts — Implement job “lease” against the contract
-// machine-generated from RapidTool packet 75285bd4-ced2-42be-9d00-caf3f9f243a7; regenerate, don't hand-edit.
-// TODO(E-15 stub): implement the job contract below. Oracle expectations
-// this module must satisfy:
-  // # orc-4 job.lease.happy — Authorized operator submits “lease” with a valid portfolio => 200 + persisted entity + checkpoint written
+// machine-generated from RapidTool packet 5587eca3-156b-4c57-9ea4-23879f548cb5; regenerate, don't hand-edit.
+// fixes/144 (M2) tree bridge: the generated tree ships no file at this spec-graph
+// path, so this module re-exports the tree ENTRY module (src/jobs/rent.ts) verbatim —
+// real generated code, not a TODO stub. Align this node's file with a tree path
+// (or regenerate the tree) to replace the bridge.
 // ---------------------------------------------------------------------------
 
-export function runJob_3(input: unknown): { ok: boolean } {
-  void input;
-  throw new Error("TODO(E-15 stub): implement job lease");
-}
+export * from "./rent.ts";

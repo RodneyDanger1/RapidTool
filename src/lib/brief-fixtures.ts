@@ -45,6 +45,14 @@ export const BRIEF_FIXTURE_APPROVALS = ["pending", "approved"] as const;
 export type BriefFixtureApproval = (typeof BRIEF_FIXTURE_APPROVALS)[number];
 
 /**
+ * Provenance of an approval flip (184 / 207). NEVER defaulted to `"human"`.
+ * Draft paths never set this. Only an explicit opts.decidedBy on
+ * approveFixtureCases stamps it — agents must not mint `decidedBy:"human"`.
+ */
+export const BRIEF_FIXTURE_DECIDED_BY = ["human", "autopilot"] as const;
+export type BriefFixtureDecidedBy = (typeof BRIEF_FIXTURE_DECIDED_BY)[number];
+
+/**
  * Typed output predicate — a deterministic CHECK DESCRIPTOR, never free text and
  * never executable code:
  * - shape  — `value` is a plain JSON literal; the harness asserts
@@ -89,6 +97,12 @@ export type BriefFixtureCase = {
   /** Human-approval state. PENDING by construction from the drafter; the only
    *  writer of "approved" is the explicit human-invoked approval helper. */
   approval: BriefFixtureApproval;
+  /**
+   * Who flipped approval → approved. Absent on drafts. Never defaulted to
+   * `"human"` (184/207) — only explicit approveFixtureCases opts stamp it.
+   * Agents must not mint `decidedBy:"human"`.
+   */
+  decidedBy?: BriefFixtureDecidedBy;
   /**
    * C2 (fixes/162 A1): entry export the harness calls. Absent on legacy
    * drafts; when present it is a non-empty identifier the A2 emitter binds.
@@ -465,6 +479,12 @@ export function validateFixtureCase(c: BriefFixtureCase): BriefFixtureValidation
     errors.push(`source: must be one of ${BRIEF_FIXTURE_SOURCES.join("|")}`);
   if (!(BRIEF_FIXTURE_APPROVALS as readonly string[]).includes(c.approval))
     errors.push(`approval: must be one of ${BRIEF_FIXTURE_APPROVALS.join("|")}`);
+  const decidedBy = (c as { decidedBy?: unknown }).decidedBy;
+  if (decidedBy !== undefined) {
+    if (!(BRIEF_FIXTURE_DECIDED_BY as readonly string[]).includes(decidedBy as string)) {
+      errors.push(`decidedBy: must be one of ${BRIEF_FIXTURE_DECIDED_BY.join("|")} when present`);
+    }
+  }
 
   // given: a plain JSON literal (never code, never a runtime object).
   if (!isPlainJsonLiteral(c.given)) {
@@ -546,22 +566,60 @@ export function fixtureApprovalGate(cases: readonly BriefFixtureCase[]): BriefFi
 // Explicit human approval helper (the ONLY writer of "approved")
 // ---------------------------------------------------------------------------
 
+export type ApproveFixtureOpts = {
+  /**
+   * Provenance of this approve. REQUIRED to stamp `decidedBy` on the case.
+   * NEVER defaulted — omitting opts leaves `decidedBy` absent (does not mint
+   * `decidedBy:"human"`). Callers that are not a human seat must pass
+   * `"autopilot"` (or omit) rather than forging `"human"`.
+   */
+  decidedBy?: BriefFixtureDecidedBy;
+};
+
 /**
- * Pure, explicit, human-invoked approval flip for the named case ids. The
+ * Pure, explicit approval flip for the named case ids. The
  * drafter/validator/gate never call this — only the A2 human-approve verb/UI
- * may. Unknown ids are ignored. Returns a NEW array (input untouched).
+ * (or an honest autopilot seat) may. Unknown ids are ignored. Returns a NEW
+ * array (input untouched).
+ *
+ * decidedBy is NEVER defaulted to `"human"` (184/207 residual). Draft paths
+ * never set it. Agent code must not pass `decidedBy:"human"`.
  */
 export function approveFixtureCases(
   cases: readonly BriefFixtureCase[],
   ids: readonly string[],
+  opts?: ApproveFixtureOpts,
 ): BriefFixtureCase[] {
   const wanted = new Set(ids);
-  return cases.map((c) => (wanted.has(c.id) ? { ...c, approval: "approved" as const } : c));
+  const decidedBy = opts?.decidedBy;
+  if (decidedBy !== undefined && !(BRIEF_FIXTURE_DECIDED_BY as readonly string[]).includes(decidedBy)) {
+    throw new Error(
+      `approveFixtureCases: decidedBy must be one of ${BRIEF_FIXTURE_DECIDED_BY.join("|")} when provided`,
+    );
+  }
+  return cases.map((c) => {
+    if (!wanted.has(c.id)) return c;
+    // Spread then set approval; strip any forged decidedBy unless opts stamps one.
+    const { decidedBy: _forged, ...rest } = c;
+    const next: BriefFixtureCase = { ...rest, approval: "approved" as const };
+    if (decidedBy !== undefined) {
+      next.decidedBy = decidedBy;
+    }
+    // else: deliberately omit decidedBy — never mint decidedBy:"human"
+    return next;
+  });
 }
 
 /** Approve every case (the "accept the whole drafted set" A2 action). */
-export function approveAllFixtureCases(cases: readonly BriefFixtureCase[]): BriefFixtureCase[] {
-  return approveFixtureCases(cases, cases.map((c) => c.id));
+export function approveAllFixtureCases(
+  cases: readonly BriefFixtureCase[],
+  opts?: ApproveFixtureOpts,
+): BriefFixtureCase[] {
+  return approveFixtureCases(
+    cases,
+    cases.map((c) => c.id),
+    opts,
+  );
 }
 
 /**
@@ -689,6 +747,13 @@ export function coerceAcceptanceFixtures(raw: unknown): {
       source: rec.source,
       approval: rec.approval,
     };
+    // Copy decidedBy only when it is a real enum member — never invent "human".
+    if (
+      typeof (rec as { decidedBy?: unknown }).decidedBy === "string" &&
+      (BRIEF_FIXTURE_DECIDED_BY as readonly string[]).includes((rec as { decidedBy: string }).decidedBy)
+    ) {
+      copy.decidedBy = (rec as { decidedBy: BriefFixtureDecidedBy }).decidedBy;
+    }
     if (typeof rec.target === "string" && rec.target.trim().length > 0) {
       copy.target = rec.target.trim();
     }

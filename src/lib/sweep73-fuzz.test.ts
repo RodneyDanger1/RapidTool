@@ -1222,24 +1222,19 @@ describe("not-configured honesty (keyless)", () => {
   it("chatOnceServer validates empty/blank messages and null projects before LLM work", async () => {
     const KEY = "DEEPSEEK_API_KEY";
     const had = process.env[KEY];
-    // Keyless: the honest not-configured refusal fires FIRST (documented order),
-    // so validation is only observable on a configured machine.
-    const configured = typeof had === "string" && had.length > 0;
+    // Slash tools made validation observable keyless: empty/null is always
+    // RT_E_VALIDATION (error), never a not-configured lie about a blank send.
     try {
-      if (!configured) {
-        const res = await chatOnceServer(seedProject(), "   ");
+      for (const msg of ["", "   ", "\n\t", 42 as unknown as string]) {
+        const res = await chatOnceServer(seedProject(), msg);
         assert.equal(res.ok, false);
-        assert.equal((res as { reason: string }).reason, "not-configured", "not-configured precedes validation keyless");
-      } else {
-        for (const msg of ["", "   ", "\n\t", 42 as unknown as string]) {
-          const res = await chatOnceServer(seedProject(), msg);
-          assert.equal(res.ok, false);
-          assert.equal((res as { reason: string }).reason, "error", `empty message rejected: ${JSON.stringify(msg)}`);
-        }
-        const res = await chatOnceServer(null as unknown as Project, "hi");
-        assert.equal(res.ok, false);
-        assert.equal((res as { reason: string }).reason, "error", "null project rejected");
+        assert.equal((res as { reason: string }).reason, "error", `empty message rejected: ${JSON.stringify(msg)}`);
+        assert.equal((res as { code: string }).code, "RT_E_VALIDATION");
       }
+      const res = await chatOnceServer(null as unknown as Project, "hi");
+      assert.equal(res.ok, false);
+      assert.equal((res as { reason: string }).reason, "error", "null project rejected");
+      assert.equal((res as { code: string }).code, "RT_E_VALIDATION");
     } finally {
       if (had === undefined) delete process.env[KEY];
       else process.env[KEY] = had;

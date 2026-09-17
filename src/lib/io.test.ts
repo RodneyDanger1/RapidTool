@@ -14,7 +14,7 @@ import {
   slugName,
 } from "./io.ts";
 import { compileAgentPacket } from "./packet.ts";
-import { dedupeMemoryIds, emptyProject, hydrateProject, stampPacket } from "./engine.ts";
+import { hydrateProject, stampPacket } from "./engine.ts";
 import { phaseHandoff } from "./handoff.ts";
 import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
 import type { Project } from "./types.ts";
@@ -273,6 +273,20 @@ describe("importProject — corrupt nested rows", () => {
     const h1 = compileAgentPacket(single).match(/research_hash: (\d+)/)?.[1];
     const h2 = compileAgentPacket(dup).match(/research_hash: (\d+)/)?.[1];
     assert.equal(h1, h2, "a duplicate URL cannot churn the corpus fingerprint");
+  });
+
+  it("215: hydrateProject preserves a legal delivery kind and drops a junk one", () => {
+    const base = seedProject();
+    const app = hydrateProject({ ...base, kind: "app" } as never);
+    assert.equal(app.kind, "app", "declared kind survives hydration (codegen tree trigger reads it)");
+    const game = hydrateProject({ ...base, kind: "game" } as never);
+    assert.equal(game.kind, "game");
+    // A hand-edited / legacy payload with an unknown kind must not survive —
+    // singleModuleLibraryKind() reads it directly and a garbage value would
+    // silently mis-route synthesis. Absent → the legacy library path.
+    const junk = hydrateProject({ ...base, kind: "banana" } as never);
+    assert.equal(junk.kind, undefined, "unknown kind is dropped");
+    assert.equal("kind" in junk, false, "dropped kind is absent, not undefined-valued (byte-identical floor)");
   });
 
   it("survives a legacy modelRoute with junk log rows (per-row log repair)", () => {

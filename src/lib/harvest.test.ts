@@ -24,10 +24,11 @@ import {
   harvestForPacket,
   harvestRepos,
   harvestResultLesson,
+  HARVEST_MAX_CANDIDATES,
   TREND_NOTE_DISCLAIMER,
   trendNotes,
 } from "./harvest.ts";
-import type { HarvestLessonReason, HarvestOptions } from "./harvest.ts";
+import type { HarvestLessonReason, HarvestLlmResult, HarvestOptions } from "./harvest.ts";
 import {
   benchProject,
   harvest,
@@ -61,8 +62,11 @@ const searchWith =
 
 const OK_README = "# Acme Lib\n\nA real-time scheduler for HVAC dispatch.\n".repeat(20); // > 300 chars
 
-const llmOk = (queries: string[]) => async () => ({ ok: true, text: JSON.stringify({ queries }) });
-const llmFail = (error: string) => async () => ({ ok: false, error });
+const llmOk = (queries: string[]) => async (): Promise<HarvestLlmResult> => ({
+  ok: true,
+  text: JSON.stringify({ queries }),
+});
+const llmFail = (error: string) => async (): Promise<HarvestLlmResult> => ({ ok: false, error });
 const llmThrow = () => async () => {
   throw new Error("network exploded");
 };
@@ -126,6 +130,44 @@ describe("buildHarvestQueries", () => {
     const plan = await buildHarvestQueries(brief, { llmConfigured: true, llm: llmThrow() });
     assert.equal(plan.source, "keyword");
     assert.ok(plan.note && plan.note.includes("threw"));
+  });
+
+  it("185-H1: dual-channel ok:true + error fail-closes onto the keyword floor (never uses the LLM queries)", async () => {
+    const plan = await buildHarvestQueries(brief, {
+      llmConfigured: true,
+      // Hostile dual-channel payload (185-H1 class). Cast: the public seam is
+      // discriminated; runtime must still fail-close if a caller lies.
+      llm: (async () => ({
+        ok: true,
+        text: JSON.stringify({ queries: ["poisoned-llm-query github"] }),
+        error: "already complete",
+      })) as HarvestOptions["llm"],
+    });
+    assert.equal(plan.source, "keyword");
+    assert.ok(!plan.queries.includes("poisoned-llm-query github"), "dual-channel must not mint LLM queries");
+    assert.ok(plan.note && plan.note.includes("already complete"), `note should carry the dual-channel error, got: ${plan.note}`);
+  });
+
+  it("185-H1: whitespace-only error on ok:true is not dual-channel (LLM queries used)", async () => {
+    const plan = await buildHarvestQueries(brief, {
+      llmConfigured: true,
+      llm: (async () => ({
+        ok: true,
+        text: JSON.stringify({ queries: ["kept-llm-query github"] }),
+        error: "   ",
+      })) as HarvestOptions["llm"],
+    });
+    assert.equal(plan.source, "llm");
+    assert.deepEqual(plan.queries, ["kept-llm-query github"]);
+  });
+
+  it("llm ok:false without error prose → keyword floor + unknown", async () => {
+    const plan = await buildHarvestQueries(brief, {
+      llmConfigured: true,
+      llm: async () => ({ ok: false }),
+    });
+    assert.equal(plan.source, "keyword");
+    assert.ok(plan.note && plan.note.includes("unknown"), `note should carry unknown, got: ${plan.note}`);
   });
 });
 
@@ -409,6 +451,24 @@ describe("harvestForPacket", () => {
     if (res.ok !== true) return;
     assert.deepEqual(res.rows, []);
     assert.ok(res.notes.some((n) => n.includes("honest empty") || n.includes("unavailable")));
+  });
+
+  it("185-H1: dual-channel LLM seam degrades to keyword; packet ok:true never carries error", async () => {
+    const res = await harvestForPacket(seedProject(), {
+      llmConfigured: true,
+      llm: (async () => ({
+        ok: true,
+        text: JSON.stringify({ queries: ["poisoned-llm-query github"] }),
+        error: "already complete",
+      })) as HarvestOptions["llm"],
+      search: searchWith("fail") as unknown as HarvestOptions["search"],
+    });
+    assert.equal(res.ok, true);
+    if (res.ok !== true) return;
+    assert.equal(res.querySource, "keyword");
+    assert.equal("error" in res, false, "ok:true packet must not dual-channel");
+    assert.ok(!res.queries.includes("poisoned-llm-query github"));
+    assert.ok(res.notes.some((n) => n.includes("already complete")));
   });
 });
 

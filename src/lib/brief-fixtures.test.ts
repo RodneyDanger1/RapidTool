@@ -494,6 +494,31 @@ describe("fixtureApprovalGate + approveFixtureCases", () => {
     assert.equal(cases[0].approval, "pending");
     assert.equal(fixtureApprovalGate(after).unapprovedIds.includes("orc-1"), false);
   });
+
+  it("draft never mints decidedBy; approve without opts never mints decidedBy:human", () => {
+    const cases = draftCases();
+    assert.ok(cases.every((c) => c.decidedBy === undefined), "drafter must not stamp decidedBy");
+    const bare = approveFixtureCases(cases, ["orc-1"]);
+    assert.equal(bare[0]!.approval, "approved");
+    assert.equal(bare[0]!.decidedBy, undefined, "no default decidedBy:human");
+    // Forged prior decidedBy:human is stripped when opts omit decidedBy
+    const forged: BriefFixtureCase = { ...cases[0]!, decidedBy: "human" };
+    const stripped = approveFixtureCases([forged], [forged.id]);
+    assert.equal(stripped[0]!.approval, "approved");
+    assert.equal(stripped[0]!.decidedBy, undefined, "forged human provenance stripped without opts");
+  });
+
+  it("approve with explicit decidedBy:human stamps only when opted in", () => {
+    const cases = draftCases();
+    const human = approveFixtureCases(cases, ["orc-1"], { decidedBy: "human" });
+    assert.equal(human[0]!.decidedBy, "human");
+    const auto = approveAllFixtureCases(cases, { decidedBy: "autopilot" });
+    assert.ok(auto.every((c) => c.decidedBy === "autopilot"));
+    assert.throws(
+      () => approveFixtureCases(cases, ["orc-1"], { decidedBy: "agent" as "human" }),
+      /decidedBy/,
+    );
+  });
 });
 
 describe("A1 coerceAcceptanceFixtures + C2 target", () => {
@@ -589,5 +614,25 @@ describe("A1 coerceAcceptanceFixtures + C2 target", () => {
     const approved = approveFixtureCases(draft.cases, [draft.cases[0]!.id]);
     const again = mergeDraftedFixtures(approved, draft.cases);
     assert.equal(again.find((c) => c.id === draft.cases[0]!.id)?.approval, "approved");
+  });
+
+  it("coerce copies decidedBy only when enum-valid; never invents human", () => {
+    const withHuman = {
+      ...validCase(),
+      approval: "approved" as const,
+      decidedBy: "human" as const,
+    };
+    const withJunk = { ...validCase(), id: "orc-2", requirementId: "orc-2", decidedBy: "agent" };
+    const r = coerceAcceptanceFixtures([withHuman, withJunk, validCase()]);
+    assert.equal(r.value?.find((c) => c.id === "orc-1")?.decidedBy, "human");
+    // junk decidedBy fails validate → dropped (or stripped). Either way not invented.
+    const junkKept = r.value?.find((c) => c.id === "orc-2");
+    if (junkKept) assert.equal(junkKept.decidedBy, undefined);
+    const plain = coerceAcceptanceFixtures([validCase()]);
+    assert.equal(plain.value?.[0]?.decidedBy, undefined);
+    assert.equal(
+      validateFixtureCase({ ...validCase(), decidedBy: "agent" as "human" }).ok,
+      false,
+    );
   });
 });

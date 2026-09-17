@@ -1,6 +1,6 @@
 # DEPLOY.md — Real-Estate CRM
 
-> machine-generated from RapidTool packet fff84028-8b4b-4820-8562-e17e5d4af790; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet 8dbb64d5-d6c9-411c-849c-60fdcde47f4b; regenerate, don't hand-edit.
 > > template derived from P9/P12 artifacts — verify credentials before any deploy
 
 ## What this is

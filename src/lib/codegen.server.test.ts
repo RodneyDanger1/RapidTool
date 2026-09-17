@@ -12,9 +12,12 @@ import {
   assembleTreeEntry,
   briefFitSatisfied,
   chunkTypeSignatures,
+  forbiddenPrimitiveHit,
+  FORBIDDEN_PRIMITIVE_NAMES,
   injectMissingExports,
   liveP6Synthesis,
   materializeImportableTree,
+  nondeterministicPrimitiveHit,
   parseSynthesisEnvelope,
   pathSlugFromNames,
   p6SynthesisBriefFitRepairPrompt,
@@ -37,11 +40,14 @@ import {
   TREE_ENTRY_PATH,
   validateSynthesisModule,
   REPAIR_TREE_FAILURE_TAIL_MAX,
+  synthWithBackoff,
+  p6TokenCapFromEnv,
+  proseLineHits,
   type ChunkPriorFile,
 } from "./codegen.server.ts";
 import { applyPhaseResult, emptyProject } from "./engine.ts";
 import { buildPhase6Module } from "./sandbox.ts";
-import { briefNounHits } from "./sandbox.ts";
+import { briefNounHits, maskLiteralsAndComments } from "./sandbox.ts";
 import { fnv1a } from "./algorithms.ts";
 import { oracleBriefGrounded } from "./verify.server.ts";
 import type { DeepSeekCompleteOptions } from "./deepseek.server.ts";
@@ -307,6 +313,50 @@ describe("p6Synthesis prompts (byte-stable contract)", () => {
     assert.match(s, /module\.exports\.add = add/);
   });
 
+  // fixes/215b: the prompt's rule 4 and the validator denylist MUST agree.
+  // They drifted once (prompt omitted require/globalThis/self/XMLHttpRequest);
+  // a keyed chunk 2/4 then refused on `globalThis`, a primitive the model was
+  // never told to avoid. These two invariants make that drift impossible.
+  it("215b: system prompt names EVERY validator-enforced forbidden primitive", () => {
+    const s = p6SynthesisSystemPrompt();
+    for (const name of FORBIDDEN_PRIMITIVE_NAMES) {
+      assert.ok(
+        s.includes(name),
+        `system prompt omits forbidden primitive \`${name}\` — the model would be blind-sided by the validator`,
+      );
+    }
+  });
+
+  it("215b: FORBIDDEN_PRIMITIVE_NAMES is exactly the validator denylist (no name unmatched, none missing)", () => {
+    for (const name of FORBIDDEN_PRIMITIVE_NAMES) {
+      const hit = forbiddenPrimitiveHit(name);
+      assert.ok(
+        hit.hard !== null || hit.soft !== null,
+        `FORBIDDEN_PRIMITIVE_NAMES lists \`${name}\` but the validator regexes do not match it`,
+      );
+    }
+    // Every HARD/SOFT alternative must be represented in the names list, so a
+    // newly-banned primitive cannot be enforced without being advertised.
+    const advertised = new Set<string>(FORBIDDEN_PRIMITIVE_NAMES);
+    const hardNames = ["eval", "Function", "import"];
+    const softNames = [
+      "process",
+      "require",
+      "globalThis",
+      "window",
+      "self",
+      "fetch",
+      "WebSocket",
+      "XMLHttpRequest",
+      "document",
+      "localStorage",
+      "indexedDB",
+    ];
+    for (const n of [...hardNames, ...softNames]) {
+      assert.ok(advertised.has(n), `validator bans \`${n}\` but the prompt list omits it`);
+    }
+  });
+
   it("user prompt carries the brief, numbered requirements and verbatim signatures", () => {
     const u = p6SynthesisUserPrompt(KANBAN_BRIEF, KANBAN_SPEC);
     assert.match(u, /BRIEF:/);
@@ -464,7 +514,7 @@ describe("liveP6Synthesis (T4/T5 — fixes/97 P0-01 Part B)", () => {
     assert.equal(q.implementationSpec?.source, "p6");
     assert.equal(q.implementationSpec?.briefHash, String(fnv1a(KANBAN_BRIEF)));
     assert.deepEqual(q.implementationSpec?.typeSignatures, KANBAN_SIGNATURES);
-    assert.equal(q.modelRoute, "deepseek-pro");
+    assert.equal(q.modelRoute, "deepseek-flash");
     assert.ok(q.artifacts.some((a) => a.title === "Generated module (LLM, machine-verified)"));
     assert.ok(q.artifacts.some((a) => a.title.includes("Verify outcome")));
     assert.ok(!q.artifacts.some((a) => a.title.includes("placeholder")), "placeholder artifact replaced");
@@ -810,6 +860,17 @@ describe("chunked synthesis pure helpers (fixes/144 M2 / S-01 T2)", () => {
     );
   });
 
+  it("C1/U4: empty lessons keep the legacy prompt; nonempty lessons append PRIOR LESSONS", () => {
+    const spec = ledgerSpec(2);
+    const legacy = p6SynthesisUserPrompt(LEDGER_BRIEF, spec);
+    assert.equal(p6SynthesisUserPrompt(LEDGER_BRIEF, spec, []), legacy);
+    assert.equal(p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures, [], []), legacy);
+    const withLessons = p6SynthesisUserPrompt(LEDGER_BRIEF, spec, ["never mint accepted from a red gate"]);
+    assert.ok(withLessons.startsWith(legacy));
+    assert.ok(withLessons.includes("PRIOR LESSONS"));
+    assert.ok(withLessons.includes("never mint accepted from a red gate"));
+  });
+
   it("chunk prompt appends the earlier-files context block without touching the legacy prefix", () => {
     const spec = ledgerSpec(2);
     const base = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures);
@@ -860,6 +921,63 @@ describe("chunked synthesis pure helpers (fixes/144 M2 / S-01 T2)", () => {
     assert.equal(stripCjsExportAssignments(src, ["a"]).includes("module.exports"), false);
     assert.ok(stripCjsExportAssignments(src, ["a"]).includes("function a() {}"));
     assert.ok(stripCjsExportAssignments(src, ["a"]).includes("function b() {}"));
+  });
+
+  it("216 T-01/T-16: a MULTI-LINE module.exports = {…} is removed WHOLE and the output still parses", () => {
+    // The pre-216 code dropped only the `module.exports = {` line and kept the object body,
+    // leaving a dangling `};` plus bare identifiers — a SyntaxError in every emitted module.
+    // This feeds the multi-line form the old test never used, and asserts on PARSE, not shape.
+    const src = [
+      "function a() { return 1; }",
+      "function b() { return 2; }",
+      "module.exports = {",
+      "  a,",
+      "  b,",
+      "};",
+      "function c() { return 3; }",
+      "",
+    ].join("\n");
+    const out = stripCjsExportAssignments(src, ["a", "b"]);
+    assert.equal(out.includes("module.exports"), false, "the assign line is gone");
+    assert.equal(out.includes("};"), false, "the literal's closing brace goes with it");
+    assert.ok(!/^\s*[ab],\s*$/m.test(out), "no bare object keys are left behind");
+    assert.ok(out.includes("function a() { return 1; }"), "unrelated code is preserved");
+    assert.ok(out.includes("function c() { return 3; }"), "code AFTER the construct is preserved");
+    // The real defect was a module body that did not parse — assert the parse, not the text.
+    assert.doesNotThrow(() => new Function(out), "the stripped output must still parse");
+    // TEETH: the pre-216 output shape does NOT parse, so this test would have caught the bug.
+    assert.throws(
+      () => new Function("function a() {}\n  a,\n  b,\n};\n"),
+      SyntaxError,
+      "the pre-216 output shape must be rejected — the old test could not see this",
+    );
+  });
+
+  it("216 T-01: single-line whole-object assign is still fully dropped (legacy behaviour kept)", () => {
+    const src = "function a() { return 1; }\nmodule.exports = { a };\n";
+    const out = stripCjsExportAssignments(src, ["a"]);
+    assert.equal(out.includes("module.exports"), false);
+    assert.ok(out.includes("function a() { return 1; }"));
+    assert.doesNotThrow(() => new Function(out));
+  });
+
+  it("216 T-01: braces inside string literals do not confuse the depth tracking", () => {
+    const src = [
+      "function a() { return \"}\"; }",
+      "module.exports = {",
+      "  a,",
+      "  note: \"} not a close\",",
+      "};",
+      "function c() { return 3; }",
+      "",
+    ].join("\n");
+    const out = stripCjsExportAssignments(src, ["a"]);
+    assert.equal(out.includes("module.exports"), false);
+    assert.ok(
+      out.includes("function c() { return 3; }"),
+      "code after the literal survives a `}` that sits inside a string",
+    );
+    assert.doesNotThrow(() => new Function(out));
   });
 
   it("A0 materializeImportableTree: single file is identity (legacy disk bytes)", () => {
@@ -973,10 +1091,31 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     assert.ok(later.source.includes("import {"), "later chunk imports prior exports");
     assert.ok(later.source.includes("export {"), "later chunk is ESM");
     assert.ok(!later.source.includes("(function (module, exports"), "no IIFE wrapper on disk");
-    assert.equal(q.lastTest, base.lastTest, "lastTest untouched (no fabricated 'tested')");
+    // 216 (T-06 / F-02): the tree REPLACED the artifact, so the template
+    // `tests.pass` stamp describes a template that no longer exists. The old
+    // assertion here pinned identity (`lastTest untouched`) — which kept the
+    // no-fabrication intent but ALSO let a stale green stamp outlive its
+    // artifact, which is exactly the shipped-packet F-02 (packet records
+    // ok:true while the shipped test exits 1). Now: invalidate, and still never
+    // fabricate a 'tested' claim in its place.
+    assert.equal(
+      base.lastTest?.detail,
+      "tests.pass",
+      "precondition: the base really carried a template tests.pass stamp (else this test proves nothing)",
+    );
+    assert.equal(
+      q.lastTest,
+      null,
+      "216 T-06: a stamp describing the REPLACED artifact is INVALIDATED, not carried forward",
+    );
+    assert.notEqual(
+      (q.lastTest as { label?: string } | null)?.label,
+      "tested",
+      "and no fabricated 'tested' claim is minted in its place",
+    );
     assert.ok(!q.artifacts.some((a) => a.title.includes("machine-verified")));
     assert.ok(q.artifacts.some((a) => a.title.startsWith("Generated source tree (LLM")));
-    assert.equal(q.modelRoute, "deepseek-pro", "pro tier really synthesized the chunks");
+    assert.equal(q.modelRoute, "deepseek-flash", "flash tier really synthesized the chunks");
     assert.equal(q.implementationSpec?.source, "p6");
     assert.equal(q.implementationSpec?.typeSignatures.length, 20);
     assert.ok(q.logs.some((l) => l.event === "p6.synthesis" && l.detail.includes("4 file(s) in 3 chunk(s)")));
@@ -997,7 +1136,7 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     assert.ok(q.generatedSource.includes(`export * from "./generated/chunk-0.ts";`));
     assert.ok(q.generatedSource.includes(`export * from "./generated/collect-rent8.ts";`));
     assert.ok(!q.generatedSource.includes("collect-rent16"), "refused chunk 2 is absent from the barrel");
-    assert.equal(q.modelRoute, "deepseek-pro");
+    assert.equal(q.modelRoute, "deepseek-flash");
     assert.equal(q.lastTest, base.lastTest, "no verified claim on a partial");
     const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
     assert.ok(refusal, "refusal is logged");
@@ -1050,7 +1189,7 @@ describe("liveP6Synthesis ≤8 single-chunk byte-parity regression (fixes/144 M2
     assert.equal(tree[0]!.source, q.generatedSource, "tree file source == generatedSource (byte-identical)");
     assert.equal(tree[0]!.hash, String(fnv1a(KANBAN_MODULE.trim())));
     assert.equal(tree[0]!.attempt, 0);
-    assert.equal(q.modelRoute, "deepseek-pro");
+    assert.equal(q.modelRoute, "deepseek-flash");
     assert.ok(q.artifacts.some((a) => a.title === "Generated module (LLM, machine-verified)"));
     assert.equal((q.lastTest as { label?: string } | null)?.label, "tested");
   });
@@ -1181,7 +1320,7 @@ describe("liveP6Synthesis kind-scoped tree trigger (fixes/148 F1)", () => {
       undefined,
       "no fabricated tested stamp on the chunked path (verify is the tree-run lane's step)",
     );
-    assert.equal(q.modelRoute, "deepseek-pro");
+    assert.equal(q.modelRoute, "deepseek-flash");
     assert.ok(
       q.artifacts.some((a) => a.kind === "code" && a.title.includes("Generated source tree")),
       "tree artifact (never the machine-verified single-module artifact)",
@@ -1247,7 +1386,7 @@ describe("P6 synthesis budget constants reach both call sites (fixes/154)", () =
     assert.equal(opts.maxTokens, P6_SYNTH_MAX_TOKENS, "…via the exported constant, not a literal fork");
     assert.equal(opts.timeoutMs, 240_000, "timeoutMs rides P6_SYNTH_TIMEOUT_MS");
     assert.equal(opts.timeoutMs, P6_SYNTH_TIMEOUT_MS, "…via the exported constant, not a literal fork");
-    assert.equal(opts.model, "deepseek-v4-pro", "pro tier (the 240s/32k budget is the pro-synthesis budget)");
+    assert.equal(opts.model, "deepseek-v4-flash", "216 T0.1: flash tier (the 240s/32k budget is the synthesis budget)");
     assert.equal(opts.json, true, "json envelope");
     assert.equal(
       opts.thinking,
@@ -1267,7 +1406,7 @@ describe("P6 synthesis budget constants reach both call sites (fixes/154)", () =
       assert.equal(opts.maxTokens, 32_000);
       assert.equal(opts.timeoutMs, P6_SYNTH_TIMEOUT_MS, "chunk call carries the 240s timeout");
       assert.equal(opts.timeoutMs, 240_000);
-      assert.equal(opts.model, "deepseek-v4-pro");
+      assert.equal(opts.model, "deepseek-v4-flash", "216 T0.1: same tier at both P6 call sites");
       assert.equal(opts.json, true, "chunk envelopes are json_object calls");
       assert.equal(
         opts.thinking,
@@ -1277,3 +1416,447 @@ describe("P6 synthesis budget constants reach both call sites (fixes/154)", () =
     }
   });
 });
+
+describe("synthWithBackoff token ledger (194/199)", () => {
+  const okWithUsage = (n: number): LlmResult => ({
+    ok: true,
+    text: "module.exports = {}",
+    model: "deepseek-v4-pro",
+    usage: { promptTokens: n, completionTokens: 0 },
+  });
+
+  it("no cap: usage is recorded but the ok result is returned (unmetered)", async () => {
+    const res = await synthWithBackoff(async () => okWithUsage(99999), "p", {}, async () => {}, undefined, undefined);
+    assert.equal(res.ok, true);
+  });
+
+  it("missing usage is a no-op even with a cap", async () => {
+    const res = await synthWithBackoff(
+      async () => ({ ok: true, text: "x", model: "deepseek-v4-pro" }),
+      "p",
+      {},
+      async () => {},
+      undefined,
+      1,
+    );
+    assert.equal(res.ok, true);
+  });
+
+  it("cap exceeded after usage → RT_E_BUDGET_EXHAUSTED (never a green module)", async () => {
+    const res = await synthWithBackoff(async () => okWithUsage(50), "p", {}, async () => {}, undefined, 10);
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.equal(res.code, "RT_E_BUDGET_EXHAUSTED");
+  });
+
+  it("p6TokenCapFromEnv: unset/0/NaN undefined; positive int floors", () => {
+    assert.equal(p6TokenCapFromEnv({}), undefined);
+    assert.equal(p6TokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: "0" }), undefined);
+    assert.equal(p6TokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: "12.9" }), 12);
+  });
+});
+
+// --- 216f (W2 · R3) — synthesis honesty: T-09 prose-in-code, T-15 determinism, T-10 contract ----
+
+/**
+ * 216f T-09 regression fixture: VERBATIM prose lines from the REAL leaked blob
+ * (`research/eval-out/coffeehouse2home-property-ledger/src/generated/chunk-0.ts`
+ * lines 342, 344 and 362) — LLM deliberation that shipped inside a module body.
+ * Line 342 is the W1 residual evader (the `/` in "flip/rental/field ops");
+ * line 350 (the model's own statement of the T-10 contradiction) is the same
+ * shape. The full 11-line region is re-checked against the real file by the
+ * lane's on-disk probe (11/11 hits).
+ */
+const LEAKED_BLOB_PROSE = [
+  "Given the constraints, I must interpret: The type signatures are the only exported functions; the other requirements (5,6,7, etc.) are implemented through internal mechanisms or through the existing functions when applicable. For example, creating a lead or dealing with a property might trigger flip/rental/field ops logic. But without external APIs to manage those domains, it's impossible.",
+  "Maybe the generator expects that the module can include non-exported functions and the exported functions can call them. But the user cannot interact with them directly. The requirements say \"Provide a flip manager...\" Could be that the flip manager is just data structures and functions internal, but not exported? The brief says \"implement\" but not necessarily export. Yet the instructions say \"Export EXACTLY the functions the spec's typeSignatures name; nothing more, nothing less.\" So we cannot export additional functions. But we can have internal functions. The requirements might be satisfied if the internal functions exist and are somehow triggered through the exported ones. For example, when we create a lead with a property, we might also create a flip acquisition if the property is a flip? That seems forced.",
+  "I'll write the code now.",
+].join("\n");
+
+/** The exact scaffold-authored line that trips the prose detector in the real
+ *  emitted tree (`research/eval-out/<app>/src/main.tsx:11`) — OUT OF SCOPE by
+ *  construction: only LLM chunk envelopes reach the chunk gate (the import ban
+ *  fires first regardless — pinned below). */
+const SCAFFOLD_UI_IMPORT_LINE = 'import Console from "./ui/console";';
+
+/** Verbatim shape of the real scaffold-authored UI entry (main.tsx head). */
+const SCAFFOLD_UI_FIXTURE = [
+  "// ---------------------------------------------------------------------------",
+  "// src/main.tsx — Browser entry — mounts the UI shell (P8 interface contract)",
+  "// machine-generated from RapidTool packet aa185020-cfff-49ac-9224-25b108274a17; regenerate, don't hand-edit.",
+  "// The mounted surface is the contract-level Console shell from src/ui; wiring",
+  "// it to the store/job modules is the build work ahead (see README honest",
+  "// boundaries).",
+  "// ---------------------------------------------------------------------------",
+  "",
+  'import { createRoot } from "react-dom/client";',
+  "",
+  SCAFFOLD_UI_IMPORT_LINE,
+  "",
+  'const rootEl = document.getElementById("root");',
+  'if (!rootEl) throw new Error("missing #root element — index.html did not load");',
+  "createRoot(rootEl).render(<Console />);",
+].join("\n");
+
+/** LEGAL-code control (must NEVER be refused by the T-09/T-15 gates): the
+ *  brief-faithful kanban module plus division-shaped lines, a prose-shaped
+ *  string, a comment that merely MENTIONS Math.random (masked — data). */
+const LEGAL_DETERMINISTIC_CONTROL = [
+  KANBAN_MODULE,
+  "",
+  "// flip/rental/field ops — documented in a comment, never code.",
+  "/**",
+  " * req-3 note: deterministic math only — never Math.random().",
+  " */",
+  "function shareOf(name, groups) {",
+  '  const label = "flip/rental/field ops";',
+  "  return name.length / groups + label.length;",
+  "}",
+].join("\n");
+
+/** Legal single lines that must stay invisible to the T-09 detector: division
+ *  slashes, semicolons, strings/comments carrying prose or a slash, calls. */
+const LEGAL_PROSE_LOOKALIKES = [
+  "const total = count / pages;",
+  "return total / pages;",
+  "const ratio = count / total / groups;",
+  "if (total > 0) { return count / total; }",
+  "'use strict';",
+  "module.exports.createBoard = createBoard;",
+  'if (typeof name !== "string" || name === "") { throw new Error("name required"); }',
+  'const URL_PART = "a/b";',
+  'return "flip/rental/field ops";',
+  "// flip/rental/field ops are documented here",
+  "return firstName / lastName / department / section;",
+  "assign(firstName / lastName / department / section);",
+  "const pick = (row) => row.price / row.qty;",
+];
+
+/** Records every synthesis prompt (one synthesis + its bounded repairs). */
+function captureDeps(reply: string) {
+  const prompts: string[] = [];
+  const calls: string[] = [];
+  const complete = async (prompt: string): Promise<LlmResult> => {
+    calls.push("complete");
+    prompts.push(prompt);
+    return { ok: true, text: reply, model: "deepseek-v4-flash" };
+  };
+  return {
+    calls,
+    prompts,
+    deps: {
+      complete,
+      expand: async (): Promise<ExpandBriefResult> => ({ ok: true, spec: KANBAN_SPEC }),
+      verify: async (): Promise<VerifyOutcome> => {
+        // Parent-fix (W2 boundary): the stub must RECORD itself like every other
+        // capture harness in this suite — the legal-control e2e asserts
+        // `calls.includes("verify")`, which could never pass otherwise.
+        calls.push("verify");
+        return {
+          status: "passed",
+          iterations: 1,
+          evidence: "unused — the deterministic floor refuses before verify",
+          finalSource: KANBAN_MODULE,
+          cases: [],
+        };
+      },
+    },
+  };
+}
+
+describe("216f T-09/T-15 detectors (proseLineHits / nondeterministicPrimitiveHit)", () => {
+  it("T-09: flags EVERY prose line of the real leaked blob excerpt, incl. the W1 residual evader", () => {
+    const hits = proseLineHits(LEAKED_BLOB_PROSE);
+    assert.deepEqual(
+      hits.map((h) => h.line),
+      [1, 2, 3],
+      "all three verbatim blob lines are prose-in-code",
+    );
+    // Parent-fix: `text` is a bounded EXCERPT (PROSE_EXCERPT_MAX), so the assertion
+    // must check the HIT LINE, not a substring of the excerpt.
+    const slashLine =
+      LEAKED_BLOB_PROSE.split("\n").findIndex((l) => l.includes("flip/rental/field ops")) + 1;
+    assert.ok(
+      hits.some((h) => h.line === slashLine),
+      "the chunk-0.ts:342 slash-prose line is caught (W1's 1-line residual gap closed)",
+    );
+  });
+
+  it("T-09 control: legal code and prose-shaped strings/comments stay invisible", () => {
+    for (const src of LEGAL_PROSE_LOOKALIKES) {
+      assert.deepEqual(proseLineHits(src), [], `unexpected prose hit on legal line: ${src}`);
+    }
+    assert.deepEqual(
+      proseLineHits(LEGAL_DETERMINISTIC_CONTROL),
+      [],
+      "the legal-code control module carries zero prose hits",
+    );
+  });
+
+  it("T-15: flags Math.random in CODE; a literal/comment mention is data (masked contract)", () => {
+    assert.equal(
+      nondeterministicPrimitiveHit(maskLiteralsAndComments('function f() { return "x" + Math.random(); }')),
+      "Math.random",
+    );
+    assert.equal(
+      nondeterministicPrimitiveHit(
+        maskLiteralsAndComments('// never call Math.random()\nfunction f() { return "Math.random"; }'),
+      ),
+      null,
+      "comment + string mentions are masked away — data, never a violation",
+    );
+    assert.equal(nondeterministicPrimitiveHit(""), null);
+    assert.equal(nondeterministicPrimitiveHit(undefined as unknown as string), null);
+  });
+});
+
+describe("216f validateSynthesisModule gates (T-09 prose, T-15 Math.random)", () => {
+  it("T-09: the leaked-blob module is refused (RT_E_VALIDATION) naming the prose lines", () => {
+    const v = validateSynthesisModule(
+      `${LEGAL_DETERMINISTIC_CONTROL}\n${LEAKED_BLOB_PROSE}`,
+      ["createBoard", "addColumn"],
+      ["createBoard", "addColumn"],
+    );
+    assert.ok(!v.ok);
+    if (!v.ok) {
+      assert.equal(v.code, "RT_E_VALIDATION");
+      assert.match(v.error, /prose-in-code in generated module \(3 prose lines/);
+      assert.match(v.error, /first at line \d+/);
+    }
+  });
+
+  it("T-15: a Math.random() module is refused (RT_E_VALIDATION); the legal control is NOT refused", () => {
+    const broken = KANBAN_MODULE.replace(
+      'return { id: "b-" + name, name: name, columns: [] };',
+      'return { id: "b-" + Math.random(), name: name, columns: [] };',
+    );
+    assert.notEqual(broken, KANBAN_MODULE, "teeth: the fixture really swaps in Math.random()");
+    const v = validateSynthesisModule(broken, KANBAN_ENVELOPE.exports, ["createBoard", "addColumn"]);
+    assert.ok(!v.ok);
+    if (!v.ok) {
+      assert.equal(v.code, "RT_E_VALIDATION");
+      assert.match(v.error, /non-deterministic primitive.*Math\.random/);
+    }
+    const ok = validateSynthesisModule(
+      LEGAL_DETERMINISTIC_CONTROL,
+      ["createBoard", "addColumn"],
+      ["createBoard", "addColumn"],
+    );
+    assert.ok(ok.ok, "the legal-code control must NOT be refused by the new gates");
+  });
+
+  it("chunk-gate scope: scaffold-authored UI content is refused for the IMPORT, never for prose", () => {
+    // Layering: the zero-import contract is consulted BEFORE the prose rule, so
+    // the documented main.tsx:11 false-positive shape can never be the
+    // operative refusal for scaffold-shaped content. Scaffold-authored files
+    // never reach this validator anyway — its only callers are the two LLM
+    // synthesis drivers (+ their repair re-checks), pinned by the e2e tests.
+    const v = validateSynthesisModule(SCAFFOLD_UI_FIXTURE, [], []);
+    assert.ok(!v.ok);
+    if (!v.ok) {
+      assert.match(v.error, /forbidden primitive in generated module code \(import\)/);
+      assert.ok(!v.error.includes("prose-in-code"), "prose is never the operative refusal here");
+    }
+    const hits = proseLineHits(SCAFFOLD_UI_FIXTURE);
+    assert.deepEqual(hits.map((h) => h.line), [11], "only the import line trips the prose shape");
+    assert.equal(hits[0]!.text, SCAFFOLD_UI_IMPORT_LINE.slice(0, 80));
+    const bodyOnly = SCAFFOLD_UI_FIXTURE.split("\n")
+      .filter((l) => !l.startsWith("import "))
+      .join("\n");
+    assert.deepEqual(proseLineHits(bodyOnly), [], "the scaffold UI body itself is not prose-shaped");
+  });
+});
+
+describe("216f e2e refusals through liveP6Synthesis (T-09 / T-15)", () => {
+  it("T-09 e2e: a synthesis emitting the leaked blob is REFUSED after ONE prose repair (floor stands)", async () => {
+    const base = p6Base();
+    const envelope = {
+      module: `${KANBAN_MODULE}\n${LEAKED_BLOB_PROSE}`,
+      exports: KANBAN_ENVELOPE.exports,
+      reqTrace: KANBAN_ENVELOPE.reqTrace,
+    };
+    const { calls, prompts, deps } = captureDeps(JSON.stringify(envelope));
+    const q = await liveP6Synthesis(base, deps);
+    assert.deepEqual(calls, ["complete", "complete"], "one synthesis + ONE bounded prose repair re-prompt");
+    assert.ok(
+      prompts[1]!.includes("English prose sentences written into the module body"),
+      "the repair re-prompt carries the PROSE defect class (not the generic repair)",
+    );
+    assert.equal(q.generatedSource, base.generatedSource, "the deterministic floor stands — never a fabricated pass");
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal, "p6.synthesis.refused logged");
+    assert.match(refusal.detail, /RT_E_VALIDATION/);
+    assert.match(refusal.detail, /prose-in-code/);
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis"), "no success event minted");
+  });
+
+  it("T-15 e2e: a synthesis using Math.random() is REFUSED after ONE determinism repair", async () => {
+    const base = p6Base();
+    const broken = KANBAN_MODULE.replace(
+      'return { id: "b-" + name, name: name, columns: [] };',
+      'return { id: "b-" + Math.random(), name: name, columns: [] };',
+    );
+    const envelope = {
+      module: broken,
+      exports: KANBAN_ENVELOPE.exports,
+      reqTrace: KANBAN_ENVELOPE.reqTrace,
+    };
+    const { calls, prompts, deps } = captureDeps(JSON.stringify(envelope));
+    const q = await liveP6Synthesis(base, deps);
+    assert.deepEqual(calls, ["complete", "complete"]);
+    assert.ok(
+      prompts[1]!.includes("non-deterministic primitive"),
+      "the determinism repair class dispatched (not the generic repair)",
+    );
+    assert.equal(q.generatedSource, base.generatedSource);
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal);
+    assert.match(refusal.detail, /RT_E_VALIDATION/);
+    assert.match(refusal.detail, /Math\.random/);
+  });
+
+  it("legal-code control e2e: the deterministic control is NOT refused and reaches the machine verify", async () => {
+    const base = p6Base();
+    const envelope = {
+      module: LEGAL_DETERMINISTIC_CONTROL,
+      exports: ["createBoard", "addColumn"],
+      reqTrace: { "req-1": "createBoard", "req-2": "addColumn" },
+    };
+    const { calls, deps } = captureDeps(JSON.stringify(envelope));
+    const q = await liveP6Synthesis(base, deps);
+    assert.ok(calls.includes("verify"), "the legal module reached the machine verify step");
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "no refusal for legal, deterministic code");
+  });
+
+  it("chunk-gate scope: an LLM CHUNK module with prose is refused inside the chunked driver (chunk 1/3, honest partial)", async () => {
+    const base = p6Base(LEDGER_BRIEF);
+    const spec = ledgerSpec(20);
+    const groups = chunkTypeSignatures(spec.typeSignatures);
+    const chunkNames = groups.map((g) => signatureFunctionNames(g));
+    const prompts: string[] = [];
+    const calls: string[] = [];
+    const proseChunk = (names: readonly string[]) =>
+      [
+        "const ledgerKit = { property: 1, ledger: 1, rent: 1, collection: 1, tenant: 1, records: 1, lease: 1, renewal: 1, reminders: 1, payment: 1, tracking: 1 };",
+        LEAKED_BLOB_PROSE,
+        ...names.map((n) => `function ${n}(input) { return input; }`),
+        ...names.map((n) => `module.exports.${n} = ${n};`),
+      ].join("\n");
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      calls.push("complete");
+      prompts.push(prompt);
+      const isSynth = prompt.includes("TYPE SIGNATURES (must export");
+      const idx = isSynth ? prompts.filter((p) => p.includes("TYPE SIGNATURES (must export")).length - 1 : 0;
+      const names = chunkNames[idx] ?? [];
+      // The model stays stubborn through the bounded prose repair: prose again.
+      return {
+        ok: true,
+        text: JSON.stringify({ module: proseChunk(names), exports: [...names], reqTrace: {} }),
+        model: "deepseek-v4-flash",
+      };
+    };
+    const q = await liveP6Synthesis(base, {
+      complete,
+      expand: async () => ({ ok: true as const, spec }),
+      verify: async () => ({ status: "passed" as const, iterations: 0, evidence: "unused", cases: [] }),
+    });
+    assert.equal(q.generatedSource, base.generatedSource, "chunk 0 refused → nothing real exists → floor stands");
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal, "chunk refusal logged");
+    assert.match(refusal.detail, /chunk 1\/3 refused/);
+    assert.match(refusal.detail, /prose-in-code/);
+    assert.ok(
+      prompts.some((p) => p.includes("English prose sentences written into the module body")),
+      "the PROSE repair class dispatched inside the chunked path (this is the LLM-chunk gate)",
+    );
+    assert.equal(
+      prompts.filter((p) => p.includes("TYPE SIGNATURES (must export")).length,
+      1,
+      "only chunk 0 ever synthesized (the refusal stopped the walk)",
+    );
+  });
+});
+
+describe("216f T-10 — prompt contract: signature ceiling vs requirement duty", () => {
+  it("system prompt: the export ceiling is scoped per file, hidden logic is forbidden (no unsatisfiable pair)", () => {
+    const s = p6SynthesisSystemPrompt();
+    assert.ok(
+      !s.includes("1. Export EXACTLY the functions the spec's typeSignatures name; nothing more, nothing less."),
+      "old unscoped rule 1 replaced",
+    );
+    assert.ok(s.includes("nothing more, nothing less"), "the export ceiling is retained");
+    assert.ok(s.includes("each file exports ONLY its own listed signatures"), "ceiling scoped per file");
+    assert.ok(
+      s.includes("never hide a requirement's logic behind non-exported helpers"),
+      "hidden logic explicitly forbidden (the leak's failed workaround)",
+    );
+  });
+
+  it("chunk prompt: requirements are project-wide; implementation duty is scoped to THIS file's signatures", () => {
+    const spec = ledgerSpec(16);
+    const chunk = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures.slice(0, 8), [
+      { path: "src/generated.ts", exports: ["collectRent0", "collectRent1"], reqTrace: { "req-1": "collectRent0" } },
+    ]);
+    assert.ok(chunk.includes("TYPE SIGNATURES (must export"), "synthesis-prompt marker preserved for the test-internal detector");
+    assert.ok(chunk.includes("implemented across ALL of its files"), "requirements marked project-wide");
+    assert.ok(
+      chunk.includes("this file implements every one its TYPE SIGNATURES below cover"),
+      "implementation duty scoped to this file's signatures",
+    );
+    assert.ok(chunk.includes("never hide its logic behind non-exported helpers here"), "hidden logic forbidden in-file");
+    assert.ok(
+      chunk.includes("nothing more, nothing less; THIS file's share of the project"),
+      "signature list scoped to this file (other files export the rest)",
+    );
+  });
+
+  it("satisfiability: a 10-capability brief chunked to N files demands only each file's own signatures", () => {
+    // The exact scenario the model called impossible at chunk-0.ts:350 — 10
+    // capabilities, 5 files — now demands (a) every requirement implemented
+    // SOMEWHERE, (b) this file's signatures only, (c) no hidden logic.
+    const spec = {
+      requirements: Array.from({ length: 10 }, (_, i) => `Capability ${i + 1} must be provided.`),
+      edgeCases: [],
+      errorHandling: [],
+      typeSignatures: ledgerSignatures(10),
+      dataFlow: [],
+      negativeConstraints: [],
+    };
+    const chunk2Sigs = chunkTypeSignatures(spec.typeSignatures)[1]!;
+    const prior: ChunkPriorFile[] = [
+      {
+        path: "src/generated.ts",
+        exports: signatureFunctionNames(chunkTypeSignatures(spec.typeSignatures)[0]!),
+        reqTrace: {},
+      },
+    ];
+    const chunk2 = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, chunk2Sigs, prior);
+    for (let i = 1; i <= 10; i++) {
+      assert.ok(chunk2.includes(`${i}. Capability ${i} must be provided.`), `requirement ${i} visible in the chunk prompt`);
+    }
+    const sigBlock = chunk2.slice(chunk2.indexOf("TYPE SIGNATURES"), chunk2.indexOf("NEGATIVE CONSTRAINTS"));
+    const listed = sigBlock.split("\n").filter((l) => l.startsWith("- export function"));
+    assert.deepEqual(
+      listed.map((l) => l.slice(2)),
+      chunk2Sigs,
+      "only THIS chunk's signatures are demanded from this file",
+    );
+    assert.ok(!sigBlock.includes("collectRent0("), "another file's signatures are never demanded from this file");
+    assert.ok(
+      chunk2.includes("implemented across ALL of its files") && chunk2.includes("implemented THERE"),
+      "the other capabilities are owned by the other files — satisfiable without exceeding the ceiling",
+    );
+  });
+
+  it("T-09/T-15 refusals are advertised in the system prompt (215b drift-proof principle)", () => {
+    const s = p6SynthesisSystemPrompt();
+    assert.ok(s.includes("Never use Math.random()"), "Math.random ban advertised to the model");
+    assert.ok(s.includes("non-deterministic primitive"), "determinism wording present");
+    assert.ok(s.includes("Write CODE only"), "prose-in-code refusal advertised");
+    assert.ok(s.includes("I'll write the code now"), "the exact failure mode is named");
+    assert.ok(
+      nondeterministicPrimitiveHit(maskLiteralsAndComments("const id = Math.random();")) !== null,
+      "the advertised token is the one the validator matches",
+    );
+  });
+});
+

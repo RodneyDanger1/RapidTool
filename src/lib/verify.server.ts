@@ -18,16 +18,28 @@
 //      id: one bounded repair retry, then an honest refusal — never a
 //      machine pass on a reduced oracle. Empty seeds keep the legacy
 //      generation prompt byte-for-byte (fixes/159 F3).
+//   5. 216i (112 §4.1/§4.3 — T1/T2): every L3 lesson this seam mints goes
+//      through the counterexample-or-nothing gate. With ≥1 anchor (the
+//      failing machine-case ids runCases() reported) the row's id hashes the
+//      216g signature, so a recurring failure maps to ONE row; with NO anchor
+//      the mint REFUSES — no row, and the visible `lessonRefused` envelope
+//      (`lesson.refused`) rides the outcome for the consumer (verify.ts
+//      applyVerifyOutcome) to append to project.logs.
 //
 // Honesty contract: status "passed" is minted ONLY from a real runner pass;
 // "not-configured" when no DeepSeek key; every exit carries evidence text.
-// The harness uses `with(exports)` so expressions reference exported names.
+// The harness uses `with(exports)` so expressions reference exported names,
+// supports BOTH CommonJS export styles (`exports.x = …` and
+// `module.exports = { … }` — 109 C-07), and refuses to declare a pass when
+// the compiled module exposes no callable name at all (109 C-01: machine
+// verification must never be vacuous).
 // ---------------------------------------------------------------------------
 import { completeDeepSeek, isDeepSeekConfigured } from "./deepseek.server.ts";
 import { countLooseEquals, stripStringsAndComments } from "./bench.ts";
 import { briefNounHits, identifierHits } from "./sandbox.ts";
-import { verifyOutcomeLesson } from "./knowledge.ts";
-import type { MemoryEntry } from "./types.ts";
+import { failureLessonFromRecord, verifyOutcomeLesson } from "./knowledge.ts";
+import type { ErrorCode } from "./errors.ts";
+import type { JsonLog, MemoryEntry } from "./types.ts";
 
 export type VerifyCase = { id: string; expression: string };
 
@@ -55,8 +67,31 @@ export type VerifyOutcome = {
   lint?: LintFailure[];
   /** L3 (failed/error) or L4 (passed) lesson row minted at the outcome point
    *  (fixes/98 §2.3 writer 2(c)/3). Absent on not-configured. The consumer
-   *  appends it to project memory idempotently. */
+   *  appends it to project memory idempotently. 216i (112 T1/T2): the L3 row
+   *  is minted through the §4.3 record gate — anchored to the failing
+   *  machine-case ids, so its id hashes the 216g signature (ONE row per
+   *  recurring failure). Never present together with `lessonRefused`. */
   lesson?: MemoryEntry;
+  /** 216i (112 §4.3 — T2): the counterexample-or-nothing refusal envelope.
+   *  Present INSTEAD of `lesson` when the L3 mint had no anchor to prove the
+   *  failure with (an oracle-generation refusal before any case ran): NO row
+   *  is minted, and `log` is the visible `lesson.refused` ledger payload the
+   *  consumer appends to project.logs — never a silent no-op (112 §2.4). */
+  lessonRefused?: LessonRefusal;
+};
+
+/**
+ * 216i (112 §4.3 — T2): the refusal half of the counterexample-or-nothing
+ * gate, verbatim from knowledge.failureLessonFromRecord. `signature` is the
+ * 216g signature the refused row WOULD have hashed; `reason` names the missing
+ * proof; `code` is the RT_E class of the refusal.
+ */
+export type LessonRefusal = {
+  verdict: "refuse:no-proof";
+  reason: string;
+  code: ErrorCode;
+  signature: string;
+  log: { level: JsonLog["level"]; event: "lesson.refused"; detail: string };
 };
 
 const MAX_ITERATIONS = 3;
@@ -70,10 +105,19 @@ export type OracleExpressionCheck =
  * harness (`with(exports){ return (E); }`). The expression must stay a single
  * expression: statement separators (`;`), template literals (backticks),
  * unterminated/unbalanced `()`/`[]`/`{}`, comment smuggling and stray line
- * terminators are rejected or neutralized so a hostile reply can never break
- * out of the return-expression context and execute its own statements (which
- * could print forged ORACLE_RESULT verdict lines). Characters inside string
- * literals are data and pass through untouched. Pure — never throws.
+ * terminators are rejected or neutralized, and the keyword scan below rejects
+ * the named escape hatches (function/eval/globals + `constructor`/`prototype`/
+ * `__proto__` — 109 C-05).
+ *
+ * HONEST SCOPE (fixes/216a, 109 C-05): this is a STATEMENT-FORM gate, NOT a
+ * sandbox. It stops a hostile reply from splicing its own statements into the
+ * return-expression context; it does not make case expressions inert, and a
+ * text-level guard can only reject the shapes it names. Execution bounds
+ * (wall-clock timeout, output caps, scrubbed child env) live in
+ * `node-runner.server.ts` — which is bounded, not isolated — and the module
+ * under test already runs with full globals in that same child process.
+ * Characters inside string literals are data and pass through untouched.
+ * Pure — never throws.
  */
 export function sanitizeOracleExpression(raw: unknown): OracleExpressionCheck {
   if (typeof raw !== "string" || !raw.trim()) {
@@ -134,11 +178,20 @@ export function sanitizeOracleExpression(raw: unknown): OracleExpressionCheck {
     if (ch === "`") return { ok: false, reason: "template literals are not allowed" };
     if (ch === ";") return { ok: false, reason: "statement separator ';' is not allowed" };
     // Assignment/arrow detection: `=` is allowed only as part of a comparison
-    // (`==`, `===`, `!=`, `!==`, `<=`, `>=`); `=>` arrows and bare `=`
-    // assignments are statement-level and rejected.
+    // (`==`, `===`, `!=`, `!==`, `<=`, `>=`); `=>` arrows, bare `=` and the
+    // shift-assignments are statement-level and rejected.
     if (ch === "=") {
       const prev = i > 0 ? src[i - 1] : "";
-      if (prev === "=" && next === ">") return { ok: false, reason: "arrow functions are not allowed" };
+      // 109 C-04: an arrow's `=` is ALWAYS followed by `>` in every real
+      // spelling (`a => b`, `(a) => b`); the old `prev === "=" && next === ">"`
+      // test could never describe one and is gone.
+      if (next === ">") return { ok: false, reason: "arrow functions are not allowed" };
+      // 109 C-04: `>>=`, `<<=`, `>>>=` were slipping through the `>=`/`<=`
+      // exemption (`prev` ∈ {"<", ">"}) as "not assignments" — reject them
+      // explicitly before the comparison exemption is consulted.
+      if (/(?:<<|>>|>>>)=$/.test(src.slice(Math.max(0, i - 3), i + 1))) {
+        return { ok: false, reason: "assignment is not allowed" };
+      }
       if (
         next !== "=" &&
         prev !== "=" &&
@@ -191,9 +244,13 @@ export function sanitizeOracleExpression(raw: unknown): OracleExpressionCheck {
   // Keyword-level escapes: any of these can smuggle statements/globals into
   // the return-expression context and are rejected outright (audit-39 1.1).
   // Scanned over the string-stripped form so literal text like 'function'
-  // inside a data string never trips it.
+  // inside a data string never trips it. 109 C-05: `constructor`/`prototype`/
+  // `__proto__` are on the list because `[].constructor.constructor(...)()`
+  // reconstructs `Function` from a blank-slate value and reaches globals —
+  // name-based, so it is a hatch-closer, not a proof (see the honest-scope
+  // note on this function).
   if (
-    /\b(?:function|class|new\s+Function|eval|require|process|globalThis|console|import|export|yield)\b/.test(
+    /\b(?:function|class|new\s+Function|eval|require|process|globalThis|console|import|export|yield|constructor|prototype|__proto__)\b/.test(
       stripStringsAndComments(expression),
     )
   ) {
@@ -352,7 +409,20 @@ function buildHarness(source: string, cases: VerifyCase[]): string {
     "const __sandbox = Object.freeze({ console: Object.freeze({ log: function(){}, error: function(){}, warn: function(){}, info: function(){}, debug: function(){}, trace: function(){} }) });",
     "try {",
     "  const __fn = new Function('exports', 'module', 'require', __SRC + '\\n; return exports;');",
-    "  __fn(__exports, { exports: __exports }, () => {});",
+    "  const __mod = { exports: __exports };",
+    "  __fn(__exports, __mod, () => {});",
+    // T-05 (109 C-07): the `module` parameter is no longer a decoy. The far
+    // more common `module.exports = { … }` style reassigns the property on
+    // this object; fold its keys back onto __exports so BOTH CommonJS styles
+    // expose the API to the `with(exports)` case scope (an `exports.x =`
+    // module leaves __mod.exports === __exports and the fold is a no-op).
+    "  if (__mod.exports && __mod.exports !== __exports) { for (const k of Object.keys(__mod.exports)) __exports[k] = __mod.exports[k]; }",
+    // T-01 (109 C-01): the runner's OWN export inventory, measured from what
+    // actually compiled — it cannot lie about the module. runCases refuses to
+    // mint a pass when this list is empty: nothing in a case is required to
+    // reference an export, so a self-contained literal could otherwise be
+    // "machine-verified" against a module that exports nothing at all.
+    "  __emit('HARNESS_EXPORTS ' + Object.keys(__exports).filter(function (k) { return typeof __exports[k] === 'function'; }).join(','));",
     "  __emit('HARNESS_COMPILE pass');",
     "} catch (e) {",
     "  __emit('HARNESS_COMPILE fail ' + String(e).slice(0, 120));",
@@ -369,6 +439,16 @@ function buildHarness(source: string, cases: VerifyCase[]): string {
 }
 
 export type CaseResult = { id: string; pass: boolean; detail: string };
+
+/**
+ * T-01 (109 C-01): the honest reason a run is refused when the compiled module
+ * offers no callable export. Nothing in a case is required to reference an
+ * export, so without this gate a self-contained literal could mint a
+ * "machine-verified" pass for a module that was never called — the one shape
+ * the honesty contract cannot allow. Exported so callers/tests can pin it.
+ */
+export const NO_CALLABLE_EXPORTS_REASON =
+  "module exports no callable names — machine verification is vacuous";
 
 export async function runCases(
   source: string,
@@ -433,8 +513,18 @@ export async function runCases(
   const seen = new Set<string>();
   const results: CaseResult[] = [];
   let forged = false;
+  let callables = "";
   for (const line of out.split("\n")) {
-    const m = /^ORACLE_RESULT (.+?) (pass|fail)(?: (.*))?$/.exec(line.trim());
+    // T-01 (109 C-01): the harness's OWN export inventory, emitted right
+    // after the compile call. Last line wins — the module source has already
+    // finished running before the harness prints, so a lookalike line it
+    // printed cannot displace the measured one.
+    const trimmed = line.trim();
+    if (trimmed.startsWith("HARNESS_EXPORTS")) {
+      callables = trimmed.slice("HARNESS_EXPORTS".length).trim();
+      continue;
+    }
+    const m = /^ORACLE_RESULT (.+?) (pass|fail)(?: (.*))?$/.exec(trimmed);
     if (!m) continue;
     if (!expected.has(m[1]) || seen.has(m[1])) {
       forged = true;
@@ -444,16 +534,25 @@ export async function runCases(
     results.push({ id: m[1], pass: m[2] === "pass", detail: m[3] ?? "" });
   }
   const compileFail = /^HARNESS_COMPILE fail/.test(out);
+  if (compileFail) {
+    return { pass: false, results, compileError: "source failed to compile in the harness" };
+  }
+  // T-01 (109 C-01): refuse the run when the module exports no callable name.
+  // Fail-closed and actionable: the previous shape let a self-contained
+  // literal (`({board:1}).board === 1`) mint a pass for a module that was
+  // never called, and a `module.exports = { … }` module (T-05) produced a
+  // bare ReferenceError with no diagnosis.
+  if (!callables) {
+    return { pass: false, results, compileError: NO_CALLABLE_EXPORTS_REASON };
+  }
   const allSeen = [...expected].every((id) => seen.has(id));
   return {
     pass:
-      !compileFail &&
       !forged &&
       allSeen &&
       results.length === validated.length &&
       results.every((r) => r.pass),
     results,
-    ...(compileFail ? { compileError: "source failed to compile in the harness" } : {}),
   };
 }
 
@@ -482,20 +581,72 @@ export function oracleSignatureFunctionNames(typeSignatures: readonly string[]):
 }
 
 /**
- * Brief-grounding guard for oracle cases (fixes/116). A generated case set is
- * VACUOUS when it only re-asserts the source's own placeholder identifiers
- * (e.g. `synthesize({job:'invoice'}).ok === true` against the deterministic
- * toy) — self-referential certification that says nothing about the brief.
- * The oracle must reference at least one BRIEF noun OR one contract function
- * name as an identifier; otherwise the set is rejected and verify fails
- * honestly (never a vacuous machine pass). A vocabulary-free brief with no
- * contract signatures passes vacuously (nothing to ground against).
+ * T-02 (109 C-01, second half): identifiers a case text actually CALLS — a
+ * name (optionally followed by spaces) immediately before an open paren in
+ * the case source.
+ */
+function calledIdentifiers(code: string): string[] {
+  const out: string[] = [];
+  // sanitizeOracleExpression() collapses every tab/newline to a single space
+  // before a case is ever run, so spaces are the only separator that matters.
+  for (const m of code.matchAll(/([A-Za-z_$][A-Za-z0-9_$]*)[ ]*[(]/g)) out.push(m[1]);
+  return out;
+}
+
+/**
+ * Static proxy for "the module under test exports callable names": the source
+ * assigns to `exports`/`module.exports` AND carries a function value
+ * (`function` keyword or an arrow) — the CommonJS shapes the generation
+ * prompt produces (verify.server.ts buildOracleCasesPrompt). Deliberately
+ * conservative: grounding only tightens when the module demonstrably exports
+ * functions, so a data-only module keeps the legacy behavior. (The harness's
+ * own runtime inventory — T-01 `HARNESS_EXPORTS` — stays the authoritative
+ * one; this is the generation-time approximation of it.)
+ */
+function sourceExportsCallables(source: string | undefined): boolean {
+  if (typeof source !== "string" || !source.trim()) return false;
+  const code = stripStringsAndComments(source);
+  const assignsExports = /(^|[^A-Za-z0-9_$])module[.]exports|(^|[^A-Za-z0-9_$.])exports[.=]/.test(code);
+  const hasFunctionValue = /=>|(^|[^A-Za-z0-9_$])function([^A-Za-z0-9_$]|$)/.test(code);
+  return assignsExports && hasFunctionValue;
+}
+
+/** fixes/116 vacuity reason (unchanged wording — callers and tests match on it). */
+function vacuousReason(targets: readonly string[]): string {
+  return `oracle cases reference no brief noun or contract function (vacuous self-referential certification — expected at least one of: ${targets.slice(0, 8).join(", ")})`;
+}
+
+/**
+ * T-02 variant of the same reason: the noun IS present, but only as data
+ * (an object-literal key, a property name) — no case calls into the module.
+ * Keeps the fixes/116 prefix so existing matchers still fire.
+ */
+function calledVacuityReason(targets: readonly string[]): string {
+  return `oracle cases reference no brief noun or contract function as a CALLED identifier (vacuous self-referential certification — no case calls into the module; expected at least one call to one of: ${targets.slice(0, 8).join(", ")})`;
+}
+
+/**
+ * Brief-grounding guard for oracle cases (fixes/116, tightened by 109 T-02).
+ * A generated case set is VACUOUS when it only re-asserts the source's own
+ * placeholder identifiers (e.g. `synthesize({job:'invoice'}).ok === true`
+ * against the deterministic toy) — self-referential certification that says
+ * nothing about the brief. The oracle must reference at least one BRIEF noun
+ * OR one contract function name as an identifier; otherwise the set is
+ * rejected and verify fails honestly (never a vacuous machine pass). A
+ * vocabulary-free brief with no contract signatures passes vacuously (nothing
+ * to ground against).
+ *
+ * T-02 (109 C-01): an identifier occurrence alone is not contact — a hit that
+ * only ever appears as DATA (`({board:1}).board === 1`) proves nothing about
+ * the module. When `source` is supplied and demonstrably exports functions,
+ * at least one hit must land on an identifier the cases actually CALL.
  */
 export function oracleBriefGrounded(
   cases: VerifyCase[],
   brief: string,
   signatureNames: readonly string[],
-): { ok: boolean; reason?: string } {
+  source?: string,
+): { ok: true } | { ok: false; reason: string } {
   const { required } = briefNounHits(brief);
   const targets = [
     ...new Set([
@@ -507,13 +658,20 @@ export function oracleBriefGrounded(
   const joined = (cases ?? [])
     .map((c) => (c && typeof c.expression === "string" ? c.expression : ""))
     .join("\n");
-  const hits = identifierHits(targets, joined);
-  return hits.length > 0
-    ? { ok: true }
-    : {
-        ok: false,
-        reason: `oracle cases reference no brief noun or contract function (vacuous self-referential certification — expected at least one of: ${targets.slice(0, 8).join(", ")})`,
-      };
+  const code = stripStringsAndComments(joined);
+  const hits = identifierHits(targets, code);
+  if (hits.length === 0) return { ok: false, reason: vacuousReason(targets) };
+  // T-02 (109 C-01, second half): a hit that only appears as DATA (an object
+  // key, a property name) is not contact with the module — when the source
+  // demonstrably exports functions, at least one hit must be on an identifier
+  // the cases actually CALL.
+  if (
+    sourceExportsCallables(source) &&
+    identifierHits(targets, calledIdentifiers(code).join(" ")).length === 0
+  ) {
+    return { ok: false, reason: calledVacuityReason(targets) };
+  }
+  return { ok: true };
 }
 
 export type OracleCasesPromptInput = {
@@ -622,21 +780,24 @@ export async function generateCases(
   signatureNames: readonly string[] = [],
   seeds = "",
   pinnedOracleIds: readonly string[] = [],
-): Promise<{ ok: true; cases: VerifyCase[] } | { ok: false; reason: "not-configured" | "error"; error?: string }> {
-  if (!isDeepSeekConfigured()) return { ok: false, reason: "not-configured" };
+): Promise<
+  | { ok: true; cases: VerifyCase[] }
+  | { ok: false; reason: "not-configured" | "error"; error?: string; code: ErrorCode }
+> {
+  if (!isDeepSeekConfigured()) return { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" };
   // Hostile/JS callers may pass non-strings — normalize before slicing.
   const src = typeof source === "string" ? source : "";
   const br = typeof brief === "string" ? brief : "";
   if (!src.trim()) {
-    return { ok: false, reason: "error", error: "source is empty — nothing to generate cases for" };
+    return { ok: false, reason: "error", error: "source is empty — nothing to generate cases for", code: "RT_E_VALIDATION" };
   }
   const contract = (signatureNames ?? []).filter((s): s is string => typeof s === "string");
   const prompt = buildOracleCasesPrompt({ source: src, brief: br, signatureNames: contract, seeds });
   const res = await completeDeepSeek(prompt, { model: "deepseek-v4-flash", json: true });
   if (!res.ok) {
     return res.reason === "not-configured"
-      ? { ok: false, reason: "not-configured" }
-      : { ok: false, reason: "error", error: res.error };
+      ? { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" }
+      : { ok: false, reason: "error", error: res.error, code: res.code ?? "RT_E_INTERNAL" };
   }
   let cases = parseOracleJson(res.text);
   if (cases === null) {
@@ -651,12 +812,12 @@ export async function generateCases(
       { model: "deepseek-v4-flash", json: true },
     );
     if (!retry.ok) {
-      return { ok: false, reason: "error", error: "model returned an unparseable oracle payload" };
+      return { ok: false, reason: "error", error: "model returned an unparseable oracle payload", code: "RT_E_INTERNAL" };
     }
     cases = parseOracleJson(retry.text);
   }
   if (cases === null) {
-    return { ok: false, reason: "error", error: "model returned an unparseable oracle payload" };
+    return { ok: false, reason: "error", error: "model returned an unparseable oracle payload", code: "RT_E_INTERNAL" };
   }
   // E-08 (A4-b): pin the A7 oracle ids — a returned case list that DROPS a
   // pinned row must never be accepted (the verify loop would otherwise mint a
@@ -695,6 +856,7 @@ export async function generateCases(
           ok: false,
           reason: "error",
           error: `oracle case list dropped pinned A7 rows: ${stillMissing.join(", ")} — refused (E-08 pin: never a blind pass on a reduced oracle)`,
+          code: "RT_E_VALIDATION",
         };
       }
     }
@@ -702,11 +864,54 @@ export async function generateCases(
   // fixes/116: reject a vacuous oracle (cases referencing only the source's own
   // placeholder identifiers) — self-referential certification must never mint a
   // machine pass. This makes the placeholder FAIL honestly on the CLI path.
-  const grounded = oracleBriefGrounded(cases, br, contract);
+  // fixes/116 + 109 T-02: pass the source so the grounding rule also requires
+  // a CALLED hit when the module demonstrably exports functions (a data-only
+  // occurrence must never certify a module the cases never touch).
+  const grounded = oracleBriefGrounded(cases, br, contract, src);
   if (!grounded.ok) {
-    return { ok: false, reason: "error", error: grounded.reason };
+    return { ok: false, reason: "error", error: grounded.reason, code: "RT_E_VALIDATION" };
   }
   return { ok: true, cases };
+}
+
+/**
+ * 216i (112 §4.1/§4.2/§4.3 — T1/T2): the record-gated L3 mint shared by every
+ * verify outcome site (phase 6 — the verify loop is P6-only, fixes/98 §2.3
+ * writer 2(c)). `anchors` are the stable ids the failure is tied to: the
+ * failing machine-case ids runCases() reported (`f.id`), never prose. With ≥1
+ * anchor the row comes from knowledge.failureLessonFromRecord's verify path,
+ * so its id hashes the 216g SIGNATURE (kind · phase · class · sorted anchors)
+ * and a recurring failure maps to ONE row instead of forking a new one per
+ * run (112 §4.2). The free-text evidence rides the row TEXT only.
+ *
+ * With NO anchor (an oracle-generation refusal before any case ever ran, or a
+ * shape that recorded no failing ids) the §4.3 counterexample floor REFUSES:
+ * `lesson` is absent and `lessonRefused` carries the refusal envelope — its
+ * reason, its RT_E code and the visible `lesson.refused` ledger payload the
+ * consumer appends to project.logs. Never a silent no-op (112 §2.4).
+ */
+function gatedFailureMint(
+  anchors: readonly string[],
+  evidence: string,
+  iterations: number,
+  classCode: ErrorCode | null,
+): Pick<VerifyOutcome, "lesson" | "lessonRefused"> {
+  const rec = failureLessonFromRecord(
+    { kind: "verify-failed", phase: 6, classCode, anchors, detailTail: evidence },
+    { iterations },
+  );
+  if (rec.refused) {
+    return {
+      lessonRefused: {
+        verdict: rec.verdict,
+        reason: rec.reason,
+        code: rec.code,
+        signature: rec.signature,
+        log: rec.log,
+      },
+    };
+  }
+  return { lesson: rec.lesson };
 }
 
 export async function verifyAndFixServer(
@@ -753,7 +958,10 @@ export async function verifyAndFixServer(
       evidence,
       // L3 verify-failure on a refused run (oracle generation failed / compile
       // refused) — never on a mere not-configured (98 §2.3 writer 2(c)).
-      ...(status === "error" ? { lesson: verifyOutcomeLesson("error", 6, evidence, 0) } : {}),
+      // 216i (112 §4.3 — T2): this path never ran a case, so there is NO
+      // failing-case id to anchor the failure to ⇒ the mint REFUSES (no row)
+      // and the visible lessonRefused envelope rides the outcome instead.
+      ...(status === "error" ? gatedFailureMint([], evidence, 0, gen.code) : {}),
     };
   }
   const cases = gen.cases;
@@ -772,6 +980,9 @@ export async function verifyAndFixServer(
         cases,
         ...(lint.length > 0 ? { lint } : {}),
         // L4 verified-procedure on a machine pass (Voyager commit-on-verify).
+        // 216i note: a PASS is not a failure record, so the §4.3
+        // counterexample gate (gatedFailureMint) does not apply here — the L4
+        // row keeps its direct builder and its stable evidence-derived id.
         lesson: verifyOutcomeLesson("passed", 6, evidence, i + 1),
       };
     }
@@ -788,7 +999,11 @@ export async function verifyAndFixServer(
         cases,
         ...(lint.length > 0 ? { lint } : {}),
         // L3 verify-failure on a run that exhausted iterations while failing.
-        lesson: verifyOutcomeLesson("failed", 6, evidence, maxIterations),
+        // 216i (112 §4.2/§4.3 — T1/T2): anchored to the FAILING machine-case
+        // ids — the counterexample IS the failing case, so the row is provable
+        // and a recurrence maps to the same signature row (never a per-run
+        // fork). A shape that somehow recorded no failing id would refuse.
+        ...gatedFailureMint(fails.map((f) => f.id), evidence, maxIterations, null),
       };
     }
     // Fail → ask the model for a patched source (it NEVER declares the pass).
@@ -824,7 +1039,11 @@ export async function verifyAndFixServer(
     finalSource: current,
     cases,
     ...(exhaustedLint.length > 0 ? { lint: exhaustedLint } : {}),
-    // L3 verify-failure on the final exhausted shape (fail-to-pass never converged).
-    lesson: verifyOutcomeLesson("failed", 6, evidence, maxIterations),
+    // L3 verify-failure on the final exhausted shape (fail-to-pass never
+    // converged). 216i (112 §4.3 — T2): no failing-case result survives into
+    // this tail (the loop returns on every observed failure; this is the TS
+    // path-completeness guard), so there is no id to anchor on — the mint
+    // refuses VISIBLY (lessonRefused) instead of inventing an unprovable row.
+    ...gatedFailureMint([], evidence, maxIterations, null),
   };
 }

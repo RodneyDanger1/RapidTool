@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // src/jobs/rent.ts — Implement job “rent” against the contract
-// machine-generated from RapidTool packet 75285bd4-ced2-42be-9d00-caf3f9f243a7; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet 5587eca3-156b-4c57-9ea4-23879f548cb5; regenerate, don't hand-edit.
 // This file hosts the machine-verified P6 synthesis module (project.generatedSource),
 // verbatim below. Its self-tests ran inside the engine isolate at P6 — keep them
 // green when you implement the surrounding jobs.

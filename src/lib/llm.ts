@@ -35,7 +35,18 @@ const completeServer = createServerFn({ method: "POST" })
   .validator(
     (input: {
       prompt: string;
-      opts?: { model?: LlmModel; system?: string; maxTokens?: number; json?: boolean };
+      opts?: {
+        model?: LlmModel;
+        system?: string;
+        maxTokens?: number;
+        json?: boolean;
+        /** 216 (T0.5 — fixes/156 E1 parity): the server call sites pass
+         *  `thinking: false` for structured json envelopes so reasoning_content
+         *  cannot consume the whole max_tokens window and return content:""
+         *  (the empty-content blocker). The facade must forward it or the UI /
+         *  engine path silently re-enables that blocker. */
+        thinking?: boolean;
+      };
     }) => input,
   )
   .handler(async ({ data }) => {

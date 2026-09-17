@@ -36,20 +36,18 @@ import {
 } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
 import { failedGates, hardDodBlockInto, hardDodMessage, recordGateInto, runGate } from "./dod.ts";
-import { capabilityDemands } from "./scaffold.ts";
-import { capabilityCoverage } from "./maker-score.ts";
 import { approvedAcceptanceFixtures } from "./brief-fixtures.ts";
 import { runSummaryLesson, templateEmissionLesson } from "./knowledge.ts";
 import { exportPacketText, exportProjectJson, importProject, slugName } from "./io.ts";
 import { applyReportResult, validateReport, type ReportApplyReason } from "./report-intake.ts";
 import { canEnter, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { applyWrite, rollback, snapshotPaths } from "./write-set.ts";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 import type {
-  Artifact,
   ArtifactKind,
   GeneratedTreeFile,
   ModelRoute,
@@ -70,10 +68,24 @@ export function loadProject(path: string, opts?: { preserveWildRun?: boolean }):
   return res.project;
 }
 
-/** Persist a project to `path` atomically (write temp file, then rename over target). */
+/** Persist a project to `path` atomically (write temp file, then rename over target).
+ *  174-13: exclusive `.lock` (O_EXCL) so two writers cannot interleave. */
 export function saveProject(path: string, project: Project): string {
   const target = resolve(path);
   mkdirSync(dirname(target), { recursive: true });
+  const lockPath = `${target}.lock`;
+  let fd: number | null = null;
+  try {
+    fd = openSync(lockPath, "wx");
+  } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? String((err as { code?: unknown }).code) : "";
+    if (code === "EEXIST") {
+      const e = new Error("saveProject: another writer holds the lock");
+      (e as Error & { code?: string }).code = "RT_E_BUSY";
+      throw e;
+    }
+    throw err;
+  }
   const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
   try {
     writeFileSync(tmp, exportProjectJson(project), "utf8");
@@ -85,6 +97,17 @@ export function saveProject(path: string, project: Project): string {
       /* best-effort temp cleanup */
     }
     throw err;
+  } finally {
+    try {
+      if (fd !== null) closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (existsSync(lockPath)) unlinkSync(lockPath);
+    } catch {
+      /* ignore */
+    }
   }
   return target;
 }
@@ -117,11 +140,11 @@ export function runAcceptance(
 // ---------------------------------------------------------------------------
 
 /** Create a fresh project from a brief (emptyProject + inferName). */
-export function createProject(input: { brief: string; name?: string }): Project {
+export function createProject(input: { brief: string; name?: string; kind?: Project["kind"] }): Project {
   const brief = typeof input?.brief === "string" ? input.brief.trim() : "";
   if (!brief) throw new Error("createProject requires a non-empty brief.");
   const name = typeof input?.name === "string" && input.name.trim() ? input.name.trim() : inferName(brief);
-  return emptyProject({ name, brief });
+  return emptyProject({ name, brief, ...(input.kind ? { kind: input.kind } : {}) });
 }
 
 // ---------------------------------------------------------------------------
@@ -695,11 +718,39 @@ export async function runUntilGate(
 // Gate decisions + report intake + export helpers.
 // ---------------------------------------------------------------------------
 
-/** Approve the pending HITL gate on the current edge (human decision; pass
- *  `force` to override a forceHuman gate such as a failed P6 sandbox).
- *  Throws when there is no pending gate on the CURRENT edge (store.approve
- *  parity — a stale gate must fail loudly, never silently no-op). */
-export function approve(project: Project, opts: { force?: boolean } = {}): Project {
+/** 216 (TA-2 / P0-01): the actor seat a HITL approval is recorded under.
+ *  `approve()` used to hardcode `decidedBy: "human"`, so every machine caller
+ *  (the eval harness, any headless drain) minted a human actor for a machine
+ *  decision. A machine path may now only ever claim the `autopilot` seat; a
+ *  row claiming `human` must additionally present the out-of-band seat token
+ *  (see `approve`). */
+export type ApproveActor =
+  | { decidedBy: "human"; seat: "human-cli-i-am-human" }
+  | { decidedBy: "autopilot"; seat: "harness" | "autopilot" };
+
+/** The default seat of `approve()` — the harness's own autopilot actor. Named
+ *  so a caller can state the default explicitly; it can never mint
+ *  `decidedBy: "human"` (that needs the token path below). */
+export const HARNESS_APPROVE_ACTOR: ApproveActor = { decidedBy: "autopilot", seat: "harness" };
+
+/** Approve the pending HITL gate on the current edge (pass `force` to override
+ *  a forceHuman gate such as a failed P6 sandbox). Throws when there is no
+ *  pending gate on the CURRENT edge (store.approve parity — a stale gate must
+ *  fail loudly, never silently no-op).
+ *
+ *  216 (TA-2 / P0-01): the decision is recorded under an explicit ACTOR SEAT.
+ *  Default = `HARNESS_APPROVE_ACTOR` (autopilot/harness), so no machine path
+ *  can mint `decidedBy: "human"`. The human seat
+ *  (`{ decidedBy: "human", seat: "human-cli-i-am-human" }`) additionally
+ *  requires the OUT-OF-BAND `RT_HUMAN_SEAT_TOKEN` environment secret to be set
+ *  (by the person at the keyboard, in their own shell) and presented here as
+ *  `opts.humanSeatToken` — a call claiming the human seat without a matching
+ *  token throws instead of minting a human row. Every row's note carries a
+ *  `[seat <label>]` tag so the ledger shows which seat decided. */
+export function approve(
+  project: Project,
+  opts: { force?: boolean; actor?: ApproveActor; humanSeatToken?: string } = {},
+): Project {
   if (!project.hitl) {
     throw new Error(`approve: no pending gate to approve (status: ${project.status}).`);
   }
@@ -708,7 +759,31 @@ export function approve(project: Project, opts: { force?: boolean } = {}): Proje
       `approve: pending gate is for P${project.hitl.phase} but the current edge is P${project.currentPhase} — state drifted; refusing a silent no-op.`,
     );
   }
-  const base = approveHitl(project, { decidedBy: "human", force: opts.force });
+  const actor = opts.actor ?? HARNESS_APPROVE_ACTOR;
+  let note: string;
+  if (actor.decidedBy === "human") {
+    // 216 (TA-2): the human seat is mintable ONLY through the out-of-band
+    // token — a machine path has no RT_HUMAN_SEAT_TOKEN in its environment
+    // (the person at the keyboard exports it in their own shell) and cannot
+    // produce the matching pair, so it can never mint a human actor.
+    const expected = (process.env.RT_HUMAN_SEAT_TOKEN ?? "").trim();
+    const presented = (opts.humanSeatToken ?? "").trim();
+    if (expected.length === 0 || presented !== expected) {
+      // Machine-readable code on the thrown Error (same shape as
+      // phases.ts:119): a seat claim without its out-of-band evidence is a
+      // validation refusal, not an opaque internal error, so the CLI's
+      // catch-all preserves RT_E_VALIDATION on the envelope.
+      const err = new Error(
+        "approve: the human seat requires the out-of-band RT_HUMAN_SEAT_TOKEN (set it in your own shell and pass it as opts.humanSeatToken) — refusing to mint decidedBy:human without it.",
+      ) as Error & { code?: string };
+      err.code = "RT_E_VALIDATION";
+      throw err;
+    }
+    note = `[seat ${actor.seat}] out-of-band RT_HUMAN_SEAT_TOKEN verified`;
+  } else {
+    note = `[seat ${actor.seat}] autopilot seat — no human decision claimed`;
+  }
+  const base = approveHitl(project, { decidedBy: actor.decidedBy, force: opts.force, note });
   // E-02 (store.approve parity): record the just-approved phase's DoD gate —
   // approveHitl sets PhaseRecord.gate inline but the gate artifact + log are
   // recordGateInto's, and the packet is re-stamped after the verdict so its
@@ -1060,6 +1135,10 @@ export type WriteVaultResult = {
  * file gets a safe name and every [[target]] — in note bodies AND _index.md —
  * is rewritten to that name (only such titles are affected).
  */
+/** 216 (T-07 / F-07): the bounded red-tree reference an emit result carries —
+ *  the refusal's cause (`ok: false`) or the banner's trail (`ok: true`). */
+export type RedTreeRef = { failures: number; lastFailure: string };
+
 export type EmitProjectResult = {
   ok: true;
   dir: string;
@@ -1070,7 +1149,23 @@ export type EmitProjectResult = {
   wiped: string[];
   /** A7: leftover files kept because `--force` (foreign user files). */
   survivors: string[];
-} | { ok: false; error: string; code?: string; foreign?: string[] };
+  /** 216 (T-07 / F-07): true when the emitted `README.md` carries the red-tree
+   *  banner — the artifact's own declaration that the phase rail below it is a
+   *  RECORD, not a passing build (`redTree: "banner"` policy only). */
+  redTreeBanner?: boolean;
+  /** 216 (T-07 / F-07): the uncleared red-tree trail behind the banner, or
+   *  `null` when the trail's last verdict is not red (absent on the `probe`
+   *  policy, which never consults the trail). */
+  redTree?: RedTreeRef | null;
+} | {
+  ok: false;
+  error: string;
+  code?: string;
+  foreign?: string[];
+  /** 216 (T-07 / F-07): the uncleared red-tree trail behind an
+   *  `RT_E_TREE_RUN_FAILED` refusal. */
+  redTree?: RedTreeRef | null;
+};
 
 const EMIT_SKIP_DIRS = new Set(["node_modules", ".git", ".vercel"]);
 const GHOST_SPEC_RE = /(^|\/)[^/]+\.(spec|test)\.(ts|mts|cts|js|mjs|cjs)$/i;
@@ -1100,24 +1195,158 @@ function walkEmitRel(root: string): string[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// 216 (T-07 / F-07) — the red-tree emit guard. The engine logged a red tree
+// three times and shipped the artifact anyway, with the phase rail reading P6
+// `complete` (the phase RECORD is written independently of the tree verdict).
+// `emitProject` therefore consults the durable tree-verdict trail BEFORE it
+// writes anything: refuse with a coded error (default) or stamp an unmissable
+// banner into the emitted README.md.
+// ---------------------------------------------------------------------------
+
+/** The tree-verdict trail read off the project's own log rows (216 T-07).
+ *
+ *  Red   = `p6.tree.failure` — one failed tree-run, carrying the bounded tail
+ *          the journey/repair driver stamped.
+ *  Green = `p6.journey.converged` (a green journey verdict),
+ *          `p6.tree.tested` (minted ONLY after a green tree-run — codegen
+ *          `mintTreeRunTested`), or `p6.tree.tested.skipped` (a green run that
+ *          executed no specs — still a green run, explicitly labelled).
+ *
+ *  Anything else — DoD/gate rows, synthesis refusals, a `p6.journey.failed`
+ *  after a GREEN tree with a failed gate — is not a tree verdict and never
+ *  clears a red row. The LAST row wins, so a tree repaired to green by a later
+ *  run emits clean: the guard blocks an uncleared red tree, not a bad history. */
+export type TreeRunTrail = {
+  /** The last tree verdict on the trail (`none` = the project never ran one). */
+  last: "red" | "green" | "none";
+  /** Count of `p6.tree.failure` rows in the trail (F-07 observed 3). */
+  failures: number;
+  /** The most recent failure tail, bounded like the journey's own log rows. */
+  lastFailure: string;
+  /** The most recent green row's detail, bounded — "" when there is none. */
+  lastGreen: string;
+};
+
+export function treeRunTrail(project: Project): TreeRunTrail {
+  const rows = Array.isArray(project.logs) ? project.logs : [];
+  let last: TreeRunTrail["last"] = "none";
+  let failures = 0;
+  let lastFailure = "";
+  let lastGreen = "";
+  for (const row of rows) {
+    const event = typeof row?.event === "string" ? row.event : "";
+    const detail = typeof row?.detail === "string" ? row.detail : "";
+    if (event === "p6.tree.failure") {
+      last = "red";
+      failures += 1;
+      lastFailure = detail;
+    } else if (
+      event === "p6.journey.converged" ||
+      event === "p6.tree.tested" ||
+      event === "p6.tree.tested.skipped"
+    ) {
+      last = "green";
+      lastGreen = detail;
+    }
+  }
+  return {
+    last,
+    failures,
+    lastFailure: lastFailure.slice(0, 1800),
+    lastGreen: lastGreen.slice(0, 240),
+  };
+}
+
+/** 216 (T-07): the unmissable banner stamped at the TOP of the emitted
+ *  `README.md` under the `banner` policy. It states only what the engine knows
+ *  — it never claims a pass, and it names the phase rail below it as the
+ *  phase RECORD it is (F-07: `complete` is written independently of the tree
+ *  verdict). Plain-text + GitHub alert syntax, so it renders unmissably in a
+ *  terminal, an editor and on GitHub alike. */
+export function redTreeBanner(trail: TreeRunTrail): string {
+  const failed = trail.failures === 1 ? "1 failed tree-run" : `${trail.failures} failed tree-runs`;
+  const tail = trail.lastFailure.trim().replace(/\r?\n/g, " ").replace(/`/g, "'");
+  return [
+    "> [!CAUTION]",
+    "> ## RED TREE-RUN — THIS ARTIFACT IS NOT VERIFIED (RapidTool T-07 / F-07)",
+    ">",
+    `> The last machine tree-run over this project's generated tree FAILED: ${failed} on the`,
+    "> project's own log trail (see `logs` in the run JSON), with **no green tree-run since**.",
+    "> Any phase rail below that reads P6 `complete` is the engine's phase RECORD — it is",
+    "> written independently of the tree verdict and is NOT evidence of a passing build.",
+    tail.length > 0 ? `> Last failure: \`${tail}\`` : "> The failure tail was empty on the record.",
+    ">",
+    "> Clear it by reaching a green tree-run (`rapidtool tree-run --dir <dir> --project <run.json>`)",
+    "> and re-emitting. Until then, do not treat this tree as a verified deliverable.",
+    "",
+  ].join("\n");
+}
+
+/** 216 (T-07 / F-07): what `emitProject` does when the project's tree-verdict
+ *  trail is an UNCLEARED red (`p6.tree.failure` with no green run since).
+ *  - `refuse` (default): return a coded `RT_E_TREE_RUN_FAILED` refusal BEFORE
+ *    anything is written — an uncleared red tree is never emitted silently.
+ *  - `banner`: emit anyway, prepending `redTreeBanner` to the emitted
+ *    `README.md` and stamping `redTreeBanner: true` + `redTree` on the result
+ *    (the eval driver's policy: the benchmark completes, and the artifact
+ *    itself declares the red verdict).
+ *  - `probe`: never consult the trail (result fields stay absent). */
+export type EmitProjectOptions = {
+  force?: boolean;
+  redTree?: "refuse" | "banner" | "probe";
+};
+
 /**
  * fixes/126 (W2 #1): the CODE → RUNNABLE-APP path. A7: never silently merge
  * leftover tests/*.spec.ts (treeRun would execute ghost specs). Snapshot the
  * dir, write the scaffold, wipe ghost specs + byte-identical leftovers, refuse
  * other foreign files unless `force`.
+ *
+ * 216 (T-07 / F-07): the durable tree-verdict trail (`treeRunTrail`) is
+ * consulted BEFORE anything is written. A trail whose last verdict is red with
+ * no green run since is refused with a coded error by default, or shipped ONLY
+ * under the explicit `redTree: "banner"` policy with the unmissable banner
+ * stamped at the top of the emitted README.md.
  */
 export async function emitProject(
   project: Project,
   dir: string,
-  opts: { force?: boolean } = {},
+  opts: EmitProjectOptions = {},
 ): Promise<EmitProjectResult> {
+  // 216 (T-07 / F-07): the trail read + refusal come FIRST — before the
+  // scaffold compile, the target dir, the lock and every write — so a refused
+  // emit cannot leave a partial tree (not even an empty emit dir) behind.
+  // `probe` opts out of the trail read entirely (result fields stay unset).
+  const redTreePolicy = opts.redTree ?? "refuse";
+  const trail = redTreePolicy === "probe" ? null : treeRunTrail(project);
+  if (trail !== null && trail.last === "red" && redTreePolicy === "refuse") {
+    const runs = trail.failures === 1 ? "1 failed tree-run" : `${trail.failures} failed tree-runs`;
+    return {
+      ok: false,
+      error:
+        `emit refused: the project's tree-run trail is RED (${runs}, no green run since) — ` +
+        `reach a green tree-run (rapidtool tree-run) or emit with redTree:"banner" to ship the ` +
+        `unmissable banner. Last failure: ${trail.lastFailure.slice(0, 300)}`,
+      code: "RT_E_TREE_RUN_FAILED",
+      redTree: { failures: trail.failures, lastFailure: trail.lastFailure },
+    };
+  }
   const scaffold = await import("./scaffold.ts");
   const result = scaffold.scaffoldProject(project);
   if (!result.ok) return { ok: false, error: result.error };
+  // 216 (T-07): under the `banner` policy the banner is prepended to the
+  // README.md body BEFORE the lock and the file loop below, so it lands
+  // atomically with — and cannot drift from — the rest of the emit.
+  const banner =
+    trail !== null && trail.last === "red" && redTreePolicy === "banner" ? redTreeBanner(trail) : null;
+  const files = banner
+    ? result.files.map((f) => (f.path === "README.md" ? { ...f, body: `${banner}\n${f.body}` } : f))
+    : result.files;
   const target = resolve(dir);
-  const intended = new Set(result.files.map((f) => f.path));
+  const intended = new Set(files.map((f) => f.path));
   const existing = walkEmitRel(target);
-  const leftovers = existing.filter((p) => !intended.has(p));
+  const leftovers = existing.filter((p) => !intended.has(p) && p !== ".rapidtool-emit.lock");
   const ghosts = leftovers.filter((p) => GHOST_SPEC_RE.test(p) || p.startsWith("tests/"));
   const foreign = leftovers.filter((p) => !ghosts.includes(p));
   if (foreign.length > 0 && opts.force !== true) {
@@ -1129,32 +1358,70 @@ export async function emitProject(
     };
   }
   mkdirSync(target, { recursive: true });
-  const written: string[] = [];
-  for (const f of result.files) {
-    const full = join(target, f.path);
-    mkdirSync(dirname(full), { recursive: true });
-    writeFileSync(full, f.body, "utf8");
-    written.push(f.path);
+  const lockPath = join(target, ".rapidtool-emit.lock");
+  let fd: number | null = null;
+  try {
+    fd = openSync(lockPath, "wx");
+  } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? String((err as { code?: unknown }).code) : "";
+    if (code === "EEXIST") {
+      return { ok: false, error: "emit: another writer holds the emit lock", code: "RT_E_BUSY" };
+    }
+    throw err;
   }
-  const wiped: string[] = [];
-  for (const p of ghosts) {
+  const snap = snapshotPaths(
+    target,
+    files.map((f) => f.path),
+  );
+  try {
+    const written: string[] = [];
+    for (const f of files) {
+      applyWrite(target, f.path, f.body, snap);
+      written.push(f.path);
+    }
+    const wiped: string[] = [];
+    for (const p of ghosts) {
+      try {
+        unlinkSync(join(target, p));
+        wiped.push(p);
+      } catch {
+        /* leftover already gone */
+      }
+    }
+    const moduleEmbedded = files.some((f) => f.body.includes(project.generatedSource ?? ""));
+    return {
+      ok: true,
+      dir: target,
+      files: written,
+      summary: result.summary,
+      moduleEmbedded,
+      wiped,
+      survivors: opts.force === true ? foreign : [],
+      // 216 (T-07): absent under the `probe` policy (the trail was never
+      // consulted); `false`/`null` when the trail was read and is not red.
+      ...(trail === null
+        ? {}
+        : {
+            redTreeBanner: banner !== null,
+            redTree: banner === null ? null : { failures: trail.failures, lastFailure: trail.lastFailure },
+          }),
+    };
+  } catch (err) {
+    rollback(target, snap);
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `emit rolled back: ${msg}`, code: "RT_E_INTERNAL" };
+  } finally {
     try {
-      unlinkSync(join(target, p));
-      wiped.push(p);
+      if (fd !== null) closeSync(fd);
     } catch {
-      /* leftover already gone */
+      /* ignore */
+    }
+    try {
+      if (existsSync(lockPath)) unlinkSync(lockPath);
+    } catch {
+      /* ignore */
     }
   }
-  const moduleEmbedded = result.files.some((f) => f.body.includes(project.generatedSource ?? ""));
-  return {
-    ok: true,
-    dir: target,
-    files: written,
-    summary: result.summary,
-    moduleEmbedded,
-    wiped,
-    survivors: opts.force === true ? foreign : [],
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1299,12 +1566,23 @@ function p6JourneyLog(project: Project, level: "info" | "warn" | "error", event:
 }
 
 /** First ~tail of a red TreeRunOutcome: top-level error, then the first
- *  failing spec, then the entry verdict. Never empty on a !ok outcome. */
+ *  failing spec, then (216 · T-18) a declared project script that ran red,
+ *  then the entry verdict. Never empty on a !ok outcome. */
 function treeRunFailureTail(o: TreeRunOutcome): string {
   if (typeof o.error === "string" && o.error.trim().length > 0) return o.error;
   const spec = (o.tests ?? []).find((t) => t.run !== "pass");
   if (spec) {
     return `${spec.file}: ${spec.run}${spec.detail ? ` — ${spec.detail}` : ""}`;
+  }
+  // 216 (T-18): the emitted project's own declared script can be the ONLY red
+  // (every spec leg green) — it must be named, or the repair prompt would
+  // chase a spec that passed. `error` normally carries this too; this branch
+  // covers a verdict that reached here without it.
+  const script = [o.project?.typecheck, o.project?.test].find(
+    (v) => v && (v.run === "fail" || v.run === "timeout" || v.run === "error"),
+  );
+  if (script) {
+    return `npm run ${script.script}: ${script.run}${script.detail ? ` — ${script.detail}` : ""}`;
   }
   if (o.run && o.run.run !== "pass" && o.run.run !== "skip") {
     return `entry ${o.run.entry ?? o.run.kind}: ${o.run.run}${o.run.detail ? ` — ${o.run.detail}` : ""}`;
@@ -1349,7 +1627,13 @@ async function defaultP6Synthesize(project: Project, ctx: P6JourneyCycleContext)
 async function defaultP6RunTree(project: Project, workDir?: string): Promise<TreeRunOutcome> {
   const dir = workDir ?? mkdtempSync(join(tmpdir(), "rapidtool-p6-"));
   try {
-    const emitted = await emitProject(project, dir);
+    // 216 (T-07) parent audit (R2 flagged this site): this is the INTERNAL
+    // candidate emit — it runs on every P6 repair cycle to produce the tree the
+    // verdict then judges, so it must NEVER gate on the trail (a red trail from
+    // cycle N would refuse cycle N+1's candidate and kill the repair loop).
+    // `redTree: "probe"` = no trail read; the refuse/banner guard stays on the
+    // ship paths (the CLI emit verb keeps the default, run-eval passes "banner").
+    const emitted = await emitProject(project, dir, { redTree: "probe" });
     if (!emitted.ok) {
       return {
         ok: false,
@@ -1844,6 +2128,40 @@ async function defaultRepairRunTree(dir: string): Promise<TreeRunOutcome> {
   }
 }
 
+/** 216 (T-02): the set of `generatedTree` paths whose source does NOT parse,
+ *  resolved through the SAME string-computed dynamic seam `treeRun` uses —
+ *  because `typescript` is a devDependency and must never enter this module's
+ *  static graph. Refusing to write a non-parsing row is the whole point: the
+ *  checker already existed, it just sat off the write path.
+ *
+ *  Deliberately fail-OPEN when the seam is unavailable: in exactly that case the
+ *  tree-run verdict over the same artifact is unavailable too, so no cycle can
+ *  reach a green verdict by bypassing this gate — there is no false pass to
+ *  protect against, and refusing every write would break runs (e.g. a
+ *  production install without devDependencies) that the tree lane already
+ *  reports honestly as unverifiable. Never throws. */
+async function parseGateTreeRows(synthesized: Project): Promise<ReadonlySet<string>> {
+  const out = new Set<string>();
+  const rows = Array.isArray(synthesized.generatedTree) ? synthesized.generatedTree : [];
+  if (rows.length === 0) return out;
+  try {
+    const ccSpec = "./compile-check." + "server.ts";
+    const cc = (await import(ccSpec)) as {
+      parseVerdictForSource?: (p: string, s: string) => { verdict: string | null; detail?: string };
+    };
+    if (typeof cc.parseVerdictForSource !== "function") return out;
+    for (const row of rows) {
+      const path = typeof row?.path === "string" ? row.path : "";
+      if (!path || typeof row?.source !== "string") continue; // the applier refuses these already
+      const v = cc.parseVerdictForSource(path, row.source);
+      if (v.verdict !== "pass") out.add(path);
+    }
+  } catch {
+    /* seam unavailable — see the fail-open note above */
+  }
+  return out;
+}
+
 /** Write the tree rows of a synthesized project onto the artifact dir IN
  *  PLACE — only rows whose on-disk content differs are written (hash-checked
  *  per file against the disk), never deleting files, never touching non-tree
@@ -1852,6 +2170,9 @@ async function defaultRepairRunTree(dir: string): Promise<TreeRunOutcome> {
 function applySynthesizedTreeToDir(
   synthesized: Project,
   dir: string,
+  /** 216 (T-02): paths pre-judged as non-parsing by the compile-check seam
+   *  (`parseGateTreeRows`). A path in this set is refused, never written. */
+  refuseNonParsing?: ReadonlySet<string>,
 ): { written: string[]; unchanged: string[]; refused: string[]; warnings: string[] } {
   const target = resolve(dir);
   const written: string[] = [];
@@ -1879,15 +2200,37 @@ function applySynthesizedTreeToDir(
     } catch {
       disk = null;
     }
+    // 216 (T-02): a row whose source does not parse never reaches the disk.
+    // Previously the checker existed but sat OFF the write path, so corruption
+    // (the `module.exports = {…}` strip leaving a dangling `};`) landed in the
+    // artifact and was only discovered afterwards.
+    if (refuseNonParsing !== undefined && refuseNonParsing.has(path)) {
+      refused.push(path);
+      warnings.push(
+        `repair:apply:refused:${JSON.stringify(path)}:source does not parse — nothing written (216 T-02 parse gate)`,
+      );
+      continue;
+    }
     if (disk === row.source) {
       unchanged.push(path);
       continue;
     }
+    // 216 (T-03): write temp + rename, so a crash mid-write can never leave a
+    // TRUNCATED file in the artifact. The product is the deliverable, so it is
+    // now written at least as carefully as the bookkeeping — saveProject has
+    // used tmp+rename (+ an O_EXCL lock) since 174-13. Cleanup is best-effort.
+    const tmp = `${full}.tmp-${process.pid}-${Date.now()}`;
     try {
       mkdirSync(dirname(full), { recursive: true });
-      writeFileSync(full, row.source, "utf8");
+      writeFileSync(tmp, row.source, "utf8");
+      renameSync(tmp, full);
       written.push(path);
     } catch (err) {
+      try {
+        if (existsSync(tmp)) rmSync(tmp, { force: true });
+      } catch {
+        /* best-effort temp cleanup */
+      }
       warnings.push(
         `repair:apply:failed:${JSON.stringify(path)}:${err instanceof Error ? err.message : String(err)} — nothing written`,
       );
@@ -2082,7 +2425,11 @@ export async function repairTreeDir(
       continue;
     }
     // 3a. Apply the repaired rows onto the dir IN PLACE (only changed files).
-    const apply = applySynthesizedTreeToDir(synthesized, target);
+    // 216 (T-02): parse-gate FIRST — a row whose source does not parse is
+    // refused rather than written, so a corrupted synthesis cannot land in the
+    // artifact at all (the class that traced to 431 tsc errors).
+    const nonParsing = await parseGateTreeRows(synthesized);
+    const apply = applySynthesizedTreeToDir(synthesized, target, nonParsing);
     for (const w of apply.written) if (!applied.written.includes(w)) applied.written.push(w);
     for (const w of apply.warnings) if (!applied.warnings.includes(w)) applied.warnings.push(w);
     for (const r of apply.refused) if (!applied.refused.includes(r)) applied.refused.push(r);
@@ -2472,8 +2819,27 @@ export function listArtifacts(project: Project): ArtifactLite[] {
 export type DoctorStatus = {
   llm: { configured: boolean; label: string };
   research: { configured: boolean; probed: boolean; label: string };
-  runner: { available: boolean };
+  runner: { available: boolean; sandbox: false };
   node: string;
+  /** Honest factory bar — agents must not infer "it ships software" from llm.configured.
+   *  210: field-truth via doctor.factoryClaim — never a hardcoded true flip. */
+  factory: {
+    autonomousSoftwareFactory: boolean;
+    leftoverJobsAreReexportsOrStubs: boolean;
+    chatHasSlashToolsOnly: boolean;
+    runnerIsSandbox: false;
+    isolation: { sandbox: false; kind: "none"; docker: false; bwrap: false; note: string };
+    tokenCap: number | null;
+    /** Why the factory bar is unmet. Empty only when autonomousSoftwareFactory is true. */
+    gaps: string[];
+    inventory: {
+      scanned: string | null;
+      stubs: number;
+      reexports: number;
+      real: number;
+      files: Array<{ path: string; kind: "stub" | "reexport" | "real" }>;
+    } | null;
+  };
 };
 
 /** Wait up to `ms` for a promise; resolves null on timeout (never rejects). */
@@ -2520,14 +2886,48 @@ async function probeTavily(): Promise<boolean> {
 }
 
 /**
+ * 214: walk a product tree for leftover job modules (`src/jobs/*.ts`, `jobs/*.ts`).
+ * Best-effort, never throws. Does not invent bodies — classifier reads bytes.
+ */
+export function collectJobSources(treeDir: string): Array<{ path: string; source: string }> {
+  const out: Array<{ path: string; source: string }> = [];
+  const root = resolve(treeDir);
+  const candidates = [join(root, "src", "jobs"), join(root, "jobs")];
+  for (const dir of candidates) {
+    if (!existsSync(dir)) continue;
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.endsWith(".ts") && !name.endsWith(".js") && !name.endsWith(".mjs")) continue;
+      const full = join(dir, name);
+      try {
+        if (!statSync(full).isFile()) continue;
+        out.push({ path: relative(root, full).replace(/\\/g, "/"), source: readFileSync(full, "utf8") });
+      } catch {
+        /* skip unreadable */
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * E-25: capability pre-flight for agent drivers — what CAN this host do right
  * now? Reads process.env through the server modules (never the server-fn
  * status surfaces, which need a Start runtime). The research probe is a real
  * tiny search (1 result, 3 s cap); a failed probe reports configured:false so
  * an agent branches before driving instead of discovering the outage mid-run.
  * Never throws.
+ *
+ * 214: `opts.treeDir` scans `src/jobs/*.ts` (and `jobs/*.ts`) and feeds the
+ * leftover-job census into factoryClaim. Absent tree → RAPIDTOOL_FACTORY_EVIDENCE
+ * (inventory null). Never invents job bodies.
  */
-export async function doctorStatus(): Promise<DoctorStatus> {
+export async function doctorStatus(opts?: { treeDir?: string }): Promise<DoctorStatus> {
   const llm = { configured: false, label: "not configured (set DEEPSEEK_API_KEY)" };
   try {
     const { isDeepSeekConfigured, DEEPSEEK_MODEL_IDS } = await import("./deepseek.server.ts");
@@ -2540,7 +2940,7 @@ export async function doctorStatus(): Promise<DoctorStatus> {
   }
 
   const research = { configured: false, probed: false, label: "unavailable" };
-  let runner = { available: false };
+  let runner: DoctorStatus["runner"] = { available: false, sandbox: false };
   try {
     const { isTavilyConfigured } = await import("./tavily.server.ts");
     if (isTavilyConfigured()) {
@@ -2559,12 +2959,73 @@ export async function doctorStatus(): Promise<DoctorStatus> {
   }
   try {
     const { runnerAvailable } = await import("./node-runner.server.ts");
-    runner = { available: runnerAvailable() };
+    runner = { available: runnerAvailable(), sandbox: false };
   } catch {
-    runner = { available: false };
+    runner = { available: false, sandbox: false };
   }
 
-  return { llm, research, runner, node: process.version };
+  let isolation: DoctorStatus["factory"]["isolation"] = {
+    sandbox: false,
+    kind: "none",
+    docker: false,
+    bwrap: false,
+    note: "RapidTool's node-runner is a bounded timeout + env allowlist. It is NOT Docker, bwrap, or a security sandbox.",
+  };
+  try {
+    const { runnerIsolationClaim } = await import("./sandbox-policy.ts");
+    isolation = runnerIsolationClaim();
+  } catch {
+    /* keep the inline honest floor */
+  }
+
+  // 210: field-truth factory latch — never hardcode true; RapidTool-now is false.
+  // 214: optional treeDir scan computes leftover/real from actual job files.
+  let factory: DoctorStatus["factory"] = {
+    autonomousSoftwareFactory: false,
+    leftoverJobsAreReexportsOrStubs: true,
+    chatHasSlashToolsOnly: true,
+    runnerIsSandbox: false,
+    isolation,
+    tokenCap: null,
+    gaps: [
+      "leftover jobs are reexports or TODO(E-15) stubs — not a multi-job product",
+      'no human-approved fixtures (decidedBy:"human")',
+      "no real multi-job product",
+      "product-complete bar not met (skip≠green; stubs≠complete)",
+    ],
+    inventory: null,
+  };
+  try {
+    const doctor = await import("./doctor.ts");
+    const treeDir = typeof opts?.treeDir === "string" && opts.treeDir.trim() ? opts.treeDir.trim() : "";
+    let claim = doctor.doctorFactory(process.env);
+    if (treeDir) {
+      const files = collectJobSources(treeDir);
+      const inv = doctor.inventoryFromJobSources(files, resolve(treeDir));
+      const evidence = doctor.evidenceFromJobInventory(inv);
+      claim = doctor.factoryClaim(evidence, process.env);
+    }
+    factory = {
+      autonomousSoftwareFactory: claim.autonomousSoftwareFactory,
+      leftoverJobsAreReexportsOrStubs: claim.leftoverJobsAreReexportsOrStubs,
+      chatHasSlashToolsOnly: claim.chatHasSlashToolsOnly,
+      runnerIsSandbox: false,
+      isolation: claim.isolation,
+      tokenCap: claim.tokenCap,
+      gaps: claim.gaps,
+      inventory: claim.inventory,
+    };
+  } catch {
+    /* keep the inline honest floor (factory stays false) */
+  }
+
+  return {
+    llm,
+    research,
+    runner,
+    node: process.version,
+    factory,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2745,7 +3206,7 @@ export async function knowledgeFind(storePath: string, query: string, limit = 5)
 }
 
 export type WildStartShape =
-  | { ok: true; project: Project; outcome: string; steps: number; error?: string }
+  | { ok: true; project: Project; outcome: string; steps: number; note?: string }
   | { ok: false; reason: "not-wild" | "not-active"; error: string };
 
 /**
@@ -2778,7 +3239,8 @@ export async function wildStartHeadless(project: Project, opts: { maxSteps?: num
   if (steps >= maxSteps && outcome === "advanced") {
     lastError = `bounded: reached the ${maxSteps}-step cap with the wild run still advancing`;
   }
-  return { ok: true, project: current, outcome, steps, ...(lastError ? { error: lastError } : {}) };
+  // 185-H1: ok:true never carries `error` — pause/cap detail is `note`.
+  return { ok: true, project: current, outcome, steps, ...(lastError ? { note: lastError } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -2885,12 +3347,14 @@ export type WildLifecycleShape =
       changed: boolean;
       outcome?: string;
       steps?: number;
-      error?: string;
+      /** Informational only on ok:true — never dual-channel `error` (185-H1). */
+      note?: string;
     }
   | {
       ok: false;
-      reason: "not-wild" | "not-active" | "already-active";
+      reason: "not-wild" | "not-active" | "already-active" | "already-complete";
       error: string;
+      code?: string;
     };
 
 /** Enable Wild Mode and BEGIN a bounded macro-run — the missing headless half
@@ -2898,8 +3362,8 @@ export type WildLifecycleShape =
  *  stamps the canonical active wildRun, logs wild.start, then drives
  *  engine.wildStep up to maxSteps (default 24, clamped 1–48). Refuses only an
  *  ALREADY-ACTIVE run (store.startWildRun parity — a duplicate start must fail
- *  loudly, never double-loop). A project already complete returns ok with
- *  outcome "noop" and steps 0 (nothing was started, nothing fabricated). */
+ *  loudly, never double-loop). A project already complete is ok:false
+ *  (185-H1 — never dual-channel ok:true + error). */
 export async function wildStartRun(
   project: Project,
   opts: { maxSteps?: number } = {},
@@ -2914,12 +3378,10 @@ export async function wildStartRun(
   }
   if (project.status === "complete") {
     return {
-      ok: true,
-      project,
-      changed: false,
-      outcome: "noop",
-      steps: 0,
+      ok: false,
+      reason: "already-complete",
       error: "Project already complete — no wild run started.",
+      code: "RT_E_PHASE_ILLEGAL",
     };
   }
   const { wildStep, wildLog } = await import("./engine.ts");
@@ -2964,7 +3426,7 @@ export async function wildStartRun(
     changed: true,
     outcome,
     steps,
-    ...(lastError ? { error: lastError } : {}),
+    ...(lastError ? { note: lastError } : {}),
   };
 }
 
@@ -2976,7 +3438,7 @@ export async function wildPauseRun(project: Project): Promise<WildLifecycleShape
     return { ok: false, reason: "not-active", error: "No active wild run to pause." };
   }
   if (run.pause === true) {
-    return { ok: true, project, changed: false, error: "Wild run is already paused." };
+    return { ok: true, project, changed: false, note: "Wild run is already paused." };
   }
   const { wildPause } = await import("./engine.ts");
   return {
@@ -2994,7 +3456,7 @@ export async function wildResumeRun(project: Project): Promise<WildLifecycleShap
     return { ok: false, reason: "not-active", error: "No active wild run to resume." };
   }
   if (run.pause !== true) {
-    return { ok: true, project, changed: false, error: "Wild run is not paused." };
+    return { ok: true, project, changed: false, note: "Wild run is not paused." };
   }
   const { wildLog } = await import("./engine.ts");
   const resumed: Project = {
@@ -3022,7 +3484,7 @@ export async function wildStopRun(project: Project): Promise<WildLifecycleShape>
     return { ok: false, reason: "not-active", error: "No wild run to stop." };
   }
   if (!run.active && run.pause === false && run.stoppedAt !== null) {
-    return { ok: true, project, changed: false, error: "Wild run is already stopped." };
+    return { ok: true, project, changed: false, note: "Wild run is already stopped." };
   }
   const { wildLog } = await import("./engine.ts");
   const stopped: Project = {

@@ -1,21 +1,18 @@
 // ---------------------------------------------------------------------------
 // src/ui/console.tsx — Operator surfaces bound to store fields
-// machine-generated from RapidTool packet 9f7b40f0-80e9-4959-8007-8d7b006a1451; regenerate, don't hand-edit.
-// Operator surfaces bound to store fields (P8 interface contract).
-// Shell only — implementing the surfaces named in the project's
-// "Interface contract" artifact is the human/agent build work ahead.
+// machine-generated from RapidTool packet 8f046a94-f71d-4940-9d36-413af5751d31; regenerate, don't hand-edit.
+// Operator surfaces bound to generated modules (P8). Not a stub wall:
+// the barrel at src/generated.ts is imported when P6 produced a module.
 // ---------------------------------------------------------------------------
 
-import { useState } from "react";
+import * as generated from "../generated.ts";
 
 export function Console() {
-  const [notice] = useState<string>(
-    "shell — implement the P8 interface-contract surfaces against the store stubs",
-  );
+  const exported = Object.keys(generated);
   return (
     <main>
       <h1>{"House Showing Scheduler"}</h1>
-      <p>{notice}</p>
+      <p>generated exports ({exported.length}): {exported.join(", ") || "(none)"}</p>
     </main>
   );
 }

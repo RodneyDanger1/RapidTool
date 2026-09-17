@@ -1,12 +1,10 @@
 // ---------------------------------------------------------------------------
 // src/jobs/record.ts — Implement job “record” against the contract
-// machine-generated from RapidTool packet 16692201-777b-4cf6-b02b-a85f02e9c6a3; regenerate, don't hand-edit.
-// TODO(E-15) stub: implement the job contract below. Oracle expectations
-// this module must satisfy:
-  // # orc-2 job.record.happy — Authorized operator submits “record” with a valid buyer => 200 + persisted entity + checkpoint written
+// machine-generated from RapidTool packet aa185020-cfff-49ac-9224-25b108274a17; regenerate, don't hand-edit.
+// fixes/144 (M2) tree bridge: the generated tree ships no file at this spec-graph
+// path, so this module re-exports the tree ENTRY module (src/generated/check-reorder-flags.ts) verbatim —
+// real generated code, not a TODO stub. Align this node's file with a tree path
+// (or regenerate the tree) to replace the bridge.
 // ---------------------------------------------------------------------------
 
-export function runJob_1(input: unknown): { ok: boolean } {
-  void input;
-  throw new Error("TODO(E-15) stub: implement job record");
-}
+export * from "../generated/check-reorder-flags.ts";

@@ -21,10 +21,12 @@
 // Run: node --experimental-strip-types --test src/lib/compile-check.server.test.ts
 // ---------------------------------------------------------------------------
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, resolve, sep } from "node:path";
 import ts from "typescript";
 import { runNodeBounded } from "./node-runner.server.ts";
+import { maskLiteralsAndComments } from "./sandbox.ts";
 
 export type CompileVerdict = "pass" | "fail";
 
@@ -81,6 +83,28 @@ function checkWithNode(file: string): { verdict: CompileVerdict; detail?: string
   const err = [r.stderr, r.stdout].filter((s) => typeof s === "string" && s.trim()).join("\n");
   const tail = err.trim().split("\n").slice(-6).join("\n").slice(0, 600);
   return { verdict: "fail", detail: tail || `node --check exited ${r.status ?? "with signal " + r.signal}` };
+}
+
+/** 216 (T-02): syntactic parse verdict for a source string that is NOT yet on
+ *  disk. Reuses the very same typescript-transpile check `compileCheckDir`
+ *  applies to files (`checkWithTypescript`), so the gate and the checker agree
+ *  by construction. This is what lets the emit path REFUSE a non-parsing row
+ *  before it is written, instead of the corruption only being discoverable
+ *  after the fact (the `module.exports = {…}` strip class, 431 tsc errors).
+ *
+ *  `verdict: null` means "not checkable here" — callers must treat that as a
+ *  refusal reason, never as a pass. */
+export function parseVerdictForSource(
+  path: string,
+  source: string,
+): { verdict: CompileVerdict | null; detail?: string } {
+  if (typeof source !== "string" || source.trim() === "") {
+    return { verdict: "fail", detail: "empty source" };
+  }
+  const ext = (String(path).split(".").pop() ?? "").toLowerCase();
+  const checkable = ext === "ts" || ext === "tsx" || ext === "js" || ext === "jsx" || ext === "mjs" || ext === "cjs";
+  if (!checkable) return { verdict: null, detail: `not a checkable code extension: .${ext}` };
+  return checkWithTypescript(path, source);
 }
 
 /** typescript-transpile verdict for one TS/TSX-family file (syntactic). */
@@ -217,6 +241,13 @@ export function compileCheckDir(dir: string): CompileCheckResult {
 //                            load/execution crashes is run=fail with the
 //                            error tail (never a fabricated pass)
 //   TreeRunOutcome.run     — the kind-entry smoke verdict or an honest skip
+//   TreeRunOutcome.project — 216 (T-18): the emitted project's OWN declared
+//                            package.json `typecheck`/`test` scripts, run under
+//                            the same bounded runner (real exit codes + bounded
+//                            tails). A declared script that ran RED makes the
+//                            whole tree NOT ok; one whose toolchain is not
+//                            installed is a loud `skip` + note — never a
+//                            fabricated pass, never a silent ok.
 //
 // Execution mechanics (no new sandbox, caps reused):
 //   * every spec executes as `node --test <file>` inside a runNodeBounded
@@ -267,20 +298,75 @@ export type TreeEntryVerdict = {
   durationMs?: number;
 };
 
-export type TreeRunOutcome = {
-  /** True only when every compile verdict passes, every spec run passes and
-   *  the entry run passes or is an honest skip — a red tree is never ok. */
+/** 216 (T-18): one verdict for a script the emitted project declares for
+ *  itself (`package.json` `scripts.typecheck` / `scripts.test`). The script
+ *  NAME is a constant of this module — never read from the tree — so no tree
+ *  content reaches a shell line; the COMMAND is npm's own, taken verbatim
+ *  from the emitted package.json and resolved by npm internally.
+ *
+ *  `run: "skip"` is NOT a pass: it means the script was not declared, or its
+ *  tool is not resolvable for this tree, and `note` says exactly why. Every
+ *  non-pass verdict carries the honest reason — never a fabricated pass. */
+export type TreeProjectScriptVerdict = {
+  /** package.json script name asked for ("typecheck" | "test"). */
+  script: string;
+  /** The command string exactly as the emitted package.json declares it. */
+  command?: string;
+  /** pass = exit 0; fail = non-zero exit; error = spawn/protocol failure;
+   *  timeout = killed at the wall-clock cap; skip = never executed (see note). */
+  run: TreeRunVerdict;
+  /** Process exit code when the script actually ran (null = none reported). */
+  exitCode?: number | null;
+  /** Bounded combined-output tail — present on any non-pass that produced output. */
+  detail?: string;
+  durationMs?: number;
+  /** Honest reason a `skip`/`error` verdict is not a pass. Present on every
+   *  non-pass; never used to soften a red into a green. */
+  note?: string;
+};
+
+/** 216 (T-18): the emitted project's OWN toolchain verdict — the scripts it
+ *  declares for itself. `ok` is true iff no declared script ran red
+ *  (fail/timeout/error); an un-runnable one stays a loud `skip` — "absent or
+ *  un-runnable" is never a pass and never a silent ok. */
+export type TreeProjectScriptsVerdict = {
   ok: boolean;
-  /** Normalized absolute dir that was run. */
+  typecheck: TreeProjectScriptVerdict;
+  test: TreeProjectScriptVerdict;
+};
+
+export type TreeRunOutcome = {
+  /** True only when every compile verdict passes, every spec run passes, the
+   *  entry run passes or is an honest UI-shell skip, AND (216 · T-18) no
+   *  declared project script ran red — a tree that fails its own `npm test`
+   *  can never be `ok:true`, and a headless skip is never green (185-S5 / 192). */
+  ok: boolean;
+  /** Normalized absolute SUBJECT dir (never the deleted temp copy). */
   dir: string;
-  /** Per-file parse verdicts (compileCheckDir, unchanged). */
+  /** Per-file parse verdicts (compileCheckDir). `compile.dir` is rewritten to
+   *  the subject so operators never see the ephemeral `rt-treerun-*` copy. */
   compile: CompileCheckResult;
   /** Per-spec run verdicts (deterministic order: sorted rel paths). */
   tests: TreeSpecVerdict[];
   /** Kind-entry smoke verdict (always present for a runnable dir). */
   run: TreeEntryVerdict | null;
-  /** Set only when the dir is unreadable / holds no code files. */
+  /** Set when the dir is unreadable, holds no code files, or (216 · T-18) a
+   *  declared project script ran red — the top-level reason the tree is not ok. */
   error?: string;
+  /** 216 (T-18): the emitted project's OWN declared `typecheck` + `test`
+   *  scripts, run under the same bounded runner (real exit codes + bounded
+   *  output tails). Optional so fixture objects in other lanes stay
+   *  assignable; `treeRun()` always sets it. */
+  project?: TreeProjectScriptsVerdict;
+  /** 216 (T-18): top-level honest note — set whenever a DECLARED project
+   *  script was not executed (its tool is not resolvable without installed
+   *  deps), so an ok verdict can never be SILENT about unverified project
+   *  tools. A note'd skip is still never a pass. */
+  note?: string;
+  /** Always false when present. Copy-to-temp + bounded runner is emit-tree
+   *  isolation, NOT a security sandbox. Optional so fixture objects in other
+   *  lanes stay assignable; treeRun() always sets it. */
+  sandbox?: false;
 };
 
 const DEFAULT_RUN_TIMEOUT_MS = 30_000;
@@ -381,16 +467,88 @@ function entryRunnerCode(entryAbs: string): string {
   ].join("\n");
 }
 
+/** 216 (T-18): is the declared script executable for THIS tree? A declared
+ *  npm script runs with the project's own installed toolchain: the command's
+ *  first token resolves via the tree's `node_modules/.bin` (win suffixes
+ *  .cmd/.exe/.ps1/.bat); the Node runtime family (`node`/`npm`/`npx`) is the
+ *  platform every runner leg already assumes and resolves as the script says.
+ *  A GLOBAL install of the same tool is deliberately NOT consulted — it is
+ *  not the toolchain the emitted package.json declares, and using it could
+ *  mask a missing devDependency on an uninstalled tree (the exact F-02
+ *  overclaim class this seam prevents). Deterministic and output-free by
+ *  design: a genuinely red script can never be misread as "tool missing"
+ *  (which would let a `skip` hide a red). */
+const RUNTIME_TOOLS = new Set(["node", "node.exe", "npm", "npm.cmd", "npx", "npx.cmd"]);
+function scriptToolResolvable(root: string, command: string): { tool: string; resolvable: boolean } {
+  const first = command.trim().split(/\s+/)[0] ?? "";
+  const tool = first.replace(/^["']|["']$/g, "");
+  if (!tool) return { tool, resolvable: false };
+  if (tool.includes("/") || tool.includes("\\")) {
+    return { tool, resolvable: existsSync(join(root, tool)) };
+  }
+  if (RUNTIME_TOOLS.has(tool.toLowerCase())) return { tool, resolvable: true };
+  const win = process.platform === "win32";
+  const binDir = join(root, "node_modules", ".bin");
+  const binExts = win ? [".cmd", ".exe", ".ps1", ".bat", ""] : [""];
+  for (const ext of binExts) {
+    if (existsSync(join(binDir, tool + ext))) return { tool, resolvable: true };
+  }
+  return { tool, resolvable: false };
+}
+
+/** 216 (T-18): the runner wrapper that executes ONE declared project script
+ *  (`npm run <script>`) inside the temp copy — the same bounded-runner
+ *  contract as the spec/entry wrappers: CJS-safe, inner timeout + maxBuffer,
+ *  compact JSON envelope on stdout, exit via process.exitCode. The script
+ *  NAME is a constant supplied by this module; npm reads the COMMAND from the
+ *  tree's own package.json. */
+function projectScriptRunnerCode(script: string, cwd: string, innerTimeoutMs: number): string {
+  return [
+    `const { spawnSync } = require("node:child_process");`,
+    `let r = null;`,
+    `let caught = null;`,
+    `try {`,
+    `  r = spawnSync(${JSON.stringify(`npm run ${script}`)}, {`,
+    `    encoding: "utf8",`,
+    `    timeout: ${innerTimeoutMs},`,
+    `    maxBuffer: 4194304,`,
+    `    windowsHide: true,`,
+    `    shell: true,`,
+    `    cwd: ${JSON.stringify(cwd)},`,
+    `  });`,
+    `} catch (e) {`,
+    `  caught = String((e && e.message) || e);`,
+    `}`,
+    `if (caught !== null) {`,
+    `  process.stdout.write(JSON.stringify({ kind: "error", error: caught }));`,
+    `  process.exitCode = 2;`,
+    `} else {`,
+    `  const out = [r.stdout || "", r.stderr || ""].join("\\n");`,
+    `  const timedOut = !!(r.error && r.error.code === "ETIMEDOUT");`,
+    `  const spawnErr = r.error && !timedOut ? String(r.error.message || r.error.code) : null;`,
+    `  process.stdout.write(JSON.stringify({ kind: "done", status: typeof r.status === "number" ? r.status : null, timedOut, spawnErr, tail: out.slice(-${WRAPPER_TAIL_MAX}) }));`,
+    `  process.exitCode = typeof r.status === "number" ? r.status : 1;`,
+    `}`,
+  ].join("\n");
+}
+
 /** Parse the wrapper's JSON envelope off the runner stdout (the envelope is
  *  written LAST, so the runner's 1MB output slice keeps it). */
-function parseWrapperEnvelope(stdout: string): { kind: string; status?: number | null; timedOut?: boolean; tail?: string; error?: string } | null {
+function parseWrapperEnvelope(stdout: string): {
+  kind: string;
+  status?: number | null;
+  timedOut?: boolean;
+  tail?: string;
+  error?: string;
+  spawnErr?: string;
+} | null {
   const text = typeof stdout === "string" ? stdout : "";
   const start = text.lastIndexOf('{"kind":');
   if (start < 0) return null;
   try {
     const parsed = JSON.parse(text.slice(start)) as Record<string, unknown>;
     if (parsed.kind !== "done" && parsed.kind !== "ok" && parsed.kind !== "error") return null;
-    return parsed as { kind: string; status?: number | null; timedOut?: boolean; tail?: string; error?: string };
+    return parsed as { kind: string; status?: number | null; timedOut?: boolean; tail?: string; error?: string; spawnErr?: string };
   } catch {
     return null;
   }
@@ -424,13 +582,12 @@ function parseTapSummary(tap: string): {
 /**
  * A3: Node's TAP summary counts TESTS, not assertions (`test("load", () => {})`
  * prints `# pass 1` with zero asserts). A behavioral pass requires at least one
- * `assert.*` call in the spec source. Comments/strings are stripped first so a
- * commented-out assert cannot mint green.
+ * `assert.*` call in the spec source. Comments AND string literals are
+ * stripped first (maskLiteralsAndComments) so a commented-out or
+ * string-quoted assert cannot mint green.
  */
 function specSourceHasAssert(source: string): boolean {
-  const stripped = source
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/(^|[^:\\])\/\/.*$/gm, "$1");
+  const stripped = maskLiteralsAndComments(typeof source === "string" ? source : "");
   return /\bassert\s*\.\s*[A-Za-z]/.test(stripped) || /\bassert\s*\(/.test(stripped);
 }
 
@@ -568,7 +725,9 @@ function resolveEntry(dir: string): { entry: string | null; kind: string; reason
   const coarse = typeof record?.kind === "string" && COARSE_KIND_LABEL[record.kind] ? (record.kind as string) : "";
   const label = coarse ? COARSE_KIND_LABEL[coarse] : "";
   if (existsSync(join(dir, "index.html"))) {
-    return { entry: null, kind: label || "ui-shell", reason: "UI shell — not executable headless" };
+    // Structural UI-shell skip — record kind (app→webapp, game, …) must NOT
+    // leak into `kind`, because entryGreen is `skip && kind === "ui-shell"`.
+    return { entry: null, kind: "ui-shell", reason: "UI shell — not executable headless" };
   }
   const headlessLabel = label || "headless";
   const pkg = readJsonIfAny(dir, "package.json");
@@ -636,37 +795,219 @@ async function runEntryFile(dir: string, rel: string, kind: string, timeoutMs: n
   return { ...base, run: "fail", detail: detail.slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
 }
 
+/** 216 (T-18): run ONE declared project script under the bounded runner. Never
+ *  fabricates a pass: every path that did not produce exit 0 is a `fail`,
+ *  `timeout` or `error` (red), or a loud `skip` with a `note` (never executed
+ *  — not declared, or its tool is not resolvable for this tree). */
+async function runProjectScript(
+  root: string,
+  script: string,
+  scripts: Record<string, unknown> | null,
+  timeoutMs: number,
+): Promise<TreeProjectScriptVerdict> {
+  const started = Date.now();
+  const duration = (): number => Date.now() - started;
+  const base: TreeProjectScriptVerdict = { script, run: "skip", durationMs: 0 };
+  if (scripts === null) {
+    return {
+      ...base,
+      note: `the emitted tree has no package.json "scripts" block — "${script}" was not declared, nothing ran (absent is not a pass)`,
+    };
+  }
+  const raw = typeof scripts[script] === "string" ? scripts[script].trim() : "";
+  if (!raw) {
+    return { ...base, note: `the emitted package.json declares no "${script}" script — nothing ran (absent is not a pass)` };
+  }
+  const { tool, resolvable } = scriptToolResolvable(root, raw);
+  if (!resolvable) {
+    return {
+      ...base,
+      command: raw,
+      note:
+        `the declared "${script}" tool \`${tool}\` has no node_modules/.bin entry in this tree (and is not the node/npm runtime) — ` +
+        `"npm run ${script}" was NOT executed; the tree's own ${script} is UNVERIFIED (npm install, then re-run to verify) — not a fabricated pass`,
+    };
+  }
+  const innerTimeout = Math.max(500, timeoutMs - INNER_TIMEOUT_MARGIN_MS);
+  const run = await runNodeBounded(projectScriptRunnerCode(script, root, innerTimeout), { timeoutMs });
+  if (!run.ok) {
+    if (run.reason === "timeout") {
+      return { ...base, command: raw, run: "timeout", detail: `npm run ${script} killed after ${timeoutMs / 1000}s`, durationMs: duration() };
+    }
+    if (run.reason === "not-configured") {
+      return { ...base, command: raw, run: "error", detail: `${run.code}: local bounded runner unavailable`, durationMs: duration() };
+    }
+    return { ...base, command: raw, run: "error", detail: run.error ?? run.reason, durationMs: duration() };
+  }
+  const env = parseWrapperEnvelope(run.stdout);
+  if (!env) {
+    return { ...base, command: raw, run: "error", detail: "runner produced no parseable envelope", durationMs: duration() };
+  }
+  if (env.kind === "error") {
+    return { ...base, command: raw, run: "error", detail: (env.error ?? "npm script runner failed").slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
+  }
+  const tail = (env.tail ?? "").trim();
+  if (env.spawnErr) {
+    return { ...base, command: raw, run: "error", detail: `spawn failed: ${env.spawnErr}`.slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
+  }
+  if (env.timedOut) {
+    return { ...base, command: raw, run: "timeout", detail: `npm run ${script} killed after ${innerTimeout / 1000}s (inner timeout)`, durationMs: duration() };
+  }
+  const exitCode = typeof env.status === "number" ? env.status : 1;
+  if (exitCode === 0) return { ...base, command: raw, run: "pass", exitCode: 0, durationMs: duration() };
+  return {
+    ...base,
+    command: raw,
+    run: "fail",
+    exitCode,
+    detail: (tail || `npm run ${script} exited ${exitCode}`).slice(0, VERDICT_TAIL_MAX),
+    durationMs: duration(),
+  };
+}
+
+/** 216 (T-18): the project leg — resolve + run both declared scripts in the
+ *  temp copy, and classify the results for the tree verdict: `red` = at least
+ *  one declared script ran fail/timeout/error (→ the tree is NOT ok);
+ *  `skippedDeclared` = declared but never executed (→ loud top-level note). */
+async function runProjectScripts(
+  work: string,
+  timeoutMs: number,
+): Promise<{
+  verdict: TreeProjectScriptsVerdict;
+  red: TreeProjectScriptVerdict[];
+  skippedDeclared: TreeProjectScriptVerdict[];
+}> {
+  const pkg = readJsonIfAny(work, "package.json");
+  const scripts =
+    pkg && typeof pkg.scripts === "object" && pkg.scripts !== null
+      ? (pkg.scripts as Record<string, unknown>)
+      : null;
+  const typecheck = await runProjectScript(work, "typecheck", scripts, timeoutMs);
+  const test = await runProjectScript(work, "test", scripts, timeoutMs);
+  const all = [typecheck, test];
+  const red = all.filter((v) => v.run === "fail" || v.run === "timeout" || v.run === "error");
+  const skippedDeclared = all.filter((v) => v.run === "skip" && typeof v.command === "string");
+  return { verdict: { ok: red.length === 0, typecheck, test }, red, skippedDeclared };
+}
+
 /**
- * Run the emitted tree in-loop: per-file parse verdicts (compileCheckDir,
- * reused) + every emitted tests/*.spec.ts|*.test.ts executed under the
- * bounded runner + one kind-entry smoke verdict (or an honest skip for
- * webapp/game UI shells). Read-only over `dir`; no project-record mutation.
- * Never fabricates a pass: a spec/entry that errors or times out is a fail
- * / error / timeout verdict carrying the tail.
+ * Run the emitted tree in-loop on a TEMP COPY (174-F8 / Phase F): the live
+ * emit dir is never the cwd of node --test or the entry smoke. Read-only
+ * over the subject `dir`; copy is always deleted. Never fabricates a pass.
+ *
+ * 216 (T-18): additionally runs the emitted project's OWN declared
+ * `typecheck`/`test` scripts (`npm run <script>`) in the temp copy under the
+ * same bounded runner. A declared script that ran red makes the tree NOT ok —
+ * a tree failing its own `npm test` can never be `ok:true`; a declared script
+ * that could not run is a loud `skip` + note, never a fabricated pass.
  */
 export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promise<TreeRunOutcome> {
   const timeoutMs =
     typeof opts?.timeoutMs === "number" && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_RUN_TIMEOUT_MS;
-  const compile = compileCheckDir(dir);
-  const outcome: TreeRunOutcome = { ok: false, dir: compile.dir || dir, compile, tests: [], run: null };
-  if (compile.error) {
-    outcome.error = compile.error;
+  const subject = resolve(dir);
+  let work = subject;
+  let copy: string | null = null;
+  try {
+    copy = mkdtempSync(join(tmpdir(), "rt-treerun-"));
+    if (existsSync(subject) && statSync(subject).isDirectory()) {
+      cpSync(subject, copy, { recursive: true });
+    } else {
+      rmSync(copy, { recursive: true, force: true });
+      copy = null;
+    }
+    if (copy) work = copy;
+  } catch (err) {
+    if (copy) {
+      try {
+        rmSync(copy, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+    return {
+      ok: false,
+      dir: subject,
+      sandbox: false,
+      compile: {
+        ok: false,
+        dir: subject,
+        checked: 0,
+        passed: 0,
+        failed: 0,
+        skipped: 0,
+        verdicts: [],
+        error: `treeRun: could not copy subject (${err instanceof Error ? err.message : String(err)})`,
+      },
+      tests: [],
+      run: null,
+      error: "treeRun copy-to-temp failed — live emit dir was not used as the subject",
+    };
+  }
+  try {
+    const compileRaw = compileCheckDir(work);
+    // Operator-facing dir is the SUBJECT, never the deleted temp copy.
+    const compile: CompileCheckResult = { ...compileRaw, dir: subject };
+    const outcome: TreeRunOutcome = { ok: false, dir: subject, sandbox: false, compile, tests: [], run: null };
+    if (compile.error) {
+      outcome.error = compile.error;
+      return outcome;
+    }
+    const compileByFile = new Map(compile.verdicts.map((v) => [v.file, v]));
+    for (const rel of walkSpecFiles(work)) {
+      outcome.tests.push(await runSpecFile(work, rel, compileByFile.get(rel), timeoutMs));
+    }
+    const entry = resolveEntry(work);
+    if (entry.entry) {
+      outcome.run = await runEntryFile(work, entry.entry, entry.kind, timeoutMs);
+    } else {
+      outcome.run = { kind: entry.kind, run: "skip", detail: entry.reason };
+    }
+    // 216 (T-18): the emitted project's OWN toolchain — `npm run typecheck`
+    // and `npm test` exactly as the tree declares them. ADDITIVE to the
+    // parse/spec/entry verdicts above; a declared script that ran red makes
+    // the tree NOT ok ("a tree failing its own npm test can never be ok"),
+    // and a declared-but-un-runnable script is a loud skip + note — never a
+    // fabricated pass and never a silent ok.
+    const projectLeg = await runProjectScripts(work, timeoutMs);
+    outcome.project = projectLeg.verdict;
+    if (projectLeg.red.length > 0) {
+      outcome.error = projectLeg.red
+        .map(
+          (v) =>
+            `the emitted project's own \`npm run ${v.script}\` ${v.run}` +
+            (typeof v.exitCode === "number" ? ` (exit ${v.exitCode})` : "") +
+            (v.detail ? ` — ${v.detail.slice(0, 300)}` : ""),
+        )
+        .join("; ")
+        .slice(0, 1800);
+    } else if (projectLeg.skippedDeclared.length > 0) {
+      outcome.note = (
+        `the emitted project's own ${projectLeg.skippedDeclared
+          .map((v) => `\`npm run ${v.script}\``)
+          .join(" / ")} ${projectLeg.skippedDeclared.length === 1 ? "was" : "were"} NOT executed — ` +
+        `the tree's own tools are UNVERIFIED (not a pass): ${projectLeg.skippedDeclared
+          .map((v) => v.note ?? "un-runnable")
+          .join(" · ")}`
+      ).slice(0, 1800);
+    }
+    const specsGreen = outcome.tests.length === 0 || outcome.tests.every((t) => t.run === "pass");
+    // Fail-closed: missing entry verdict is NOT green. Headless skip is NOT
+    // green. Only an executed pass or a structural UI-shell skip counts.
+    const entryGreen =
+      !!outcome.run &&
+      (outcome.run.run === "pass" ||
+        (outcome.run.run === "skip" && outcome.run.kind === "ui-shell"));
+    outcome.ok = compile.ok && specsGreen && entryGreen && projectLeg.verdict.ok;
     return outcome;
+  } finally {
+    if (copy) {
+      try {
+        rmSync(copy, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
   }
-  const compileByFile = new Map(compile.verdicts.map((v) => [v.file, v]));
-  for (const rel of walkSpecFiles(outcome.dir)) {
-    outcome.tests.push(await runSpecFile(outcome.dir, rel, compileByFile.get(rel), timeoutMs));
-  }
-  const entry = resolveEntry(outcome.dir);
-  if (entry.entry) {
-    outcome.run = await runEntryFile(outcome.dir, entry.entry, entry.kind, timeoutMs);
-  } else {
-    outcome.run = { kind: entry.kind, run: "skip", detail: entry.reason };
-  }
-  const specsGreen = outcome.tests.length === 0 || outcome.tests.every((t) => t.run === "pass");
-  const entryGreen = !outcome.run || outcome.run.run === "pass" || outcome.run.run === "skip";
-  outcome.ok = compile.ok && specsGreen && entryGreen;
-  return outcome;
 }
 
 export type VerifyKindResult = {

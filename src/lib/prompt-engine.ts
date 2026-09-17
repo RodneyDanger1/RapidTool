@@ -38,8 +38,7 @@ import {
   DEEPSEEK_MODELS,
   isDeepSeekConfigured,
 } from "./deepseek.server.ts";
-import { fusionRank } from "./algorithms.ts";
-import type { MemoryEntry, PhaseId } from "./types.ts";
+import { dualChannelFailDetail } from "./errors.ts";
 
 /** The exhaustive expansion shape expandBrief emits and applyPolicies enriches. */
 export type ExpandedSpec = {
@@ -184,7 +183,7 @@ function expansionPrompt(
     "- requirements: 5-12 implementable sentences covering EVERY feature, user workflow, and hard constraint the brief states — none of the brief's asks may be dropped; each phrased so a test can verify it.",
     "- edgeCases: boundary, empty-input, duplicate, concurrency, timeout, offline/backend-down, plus the brief's own domain risks (e.g. same-day reroutes, HIPAA-safe notes, rate-limited search); each as a behavior a test must pin.",
     "- errorHandling: failure modes and the honest handling each needs (invalid input, backend down, partial write, timeout). Never invent error codes or APIs.",
-    '- typeSignatures: one line per public function/component in TypeScript syntax, e.g. "createOrder(items: CartItem[]): Promise<Order>".',
+    '- typeSignatures: one line per public function/component in TypeScript syntax, e.g. "createOrder(items: CartItem[]): Promise<Order>". COVERAGE (fixes/215d): emit at least one signature for EVERY requirement above — a requirement with no signature cannot be built later; never drop a feature the brief states.',
     "- dataFlow: the ordered steps data takes from raw input to persisted/output form, failure-path steps included (one line per step).",
     '- negativeConstraints: everything the brief forbids or implies must-not-do, each phrased as "DO NOT ...".',
     "- Every array entry is one plain line: no markdown, no numbering prefixes, no empty strings.",
@@ -243,6 +242,16 @@ async function expansionCall(prompt: string): Promise<ExpansionCallResult> {
     return res.reason === "not-configured"
       ? { ok: false, reason: "not-configured" }
       : { ok: false, reason: "error", error: res.error };
+  }
+  // 185-H1: hostile/stub `{ ok:true, error }` is never a spec. Fail-close here
+  // (provider lie) so expandBrief does NOT take the unparseable-repair path.
+  const dual = dualChannelFailDetail(res);
+  if (dual) {
+    return {
+      ok: false,
+      reason: "error",
+      error: `expansion dual-channel response (${dual}) — never treat ok:true+error as a spec`,
+    };
   }
   const spec = parseExpandedSpecJson(res.text);
   return spec === null ? null : { ok: true, spec };

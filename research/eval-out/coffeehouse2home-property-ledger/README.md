@@ -1,13 +1,13 @@
 # Coffeehouse2Home Property Ledger
 
-> machine-generated from RapidTool packet 16692201-777b-4cf6-b02b-a85f02e9c6a3; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet aa185020-cfff-49ac-9224-25b108274a17; regenerate, don't hand-edit.
 
 Coffeehouse2Home is one software suite for a property-services company that does brokerage, house flipping, rentals, and field services, run by one shared Property Ledger: every property has a single record (ownership, address, status, full history) shared across all five domains. The real-estate CRM tracks contacts, buyer and seller leads, and a deal pipeline with stages; any listing, flip, or rental property can publish showing slots (private showings and open houses) that buyers book with ema…
 
 ## Status
 - **Kind:** webapp — web app (kind webapp (mapped from declared kind "app"))
-- **Status:** complete · **Current phase:** P12 · **Model route:** deepseek-pro
-- **Created:** 2026-09-09T02:13:42.767Z
+- **Status:** running · **Current phase:** P6 · **Model route:** deepseek-pro
+- **Created:** 2026-09-10T05:52:53.467Z
 
 ## What ships in this scaffold
 
@@ -31,6 +31,10 @@ Coffeehouse2Home is one software suite for a property-services company that does
 | `src/jobs/publish.ts` | job-4 — Implement job “publish” against the contract |
 | `src/ui/console.tsx` | ui — Operator surfaces bound to store fields |
 | `tests/oracle.spec.ts` | tests — Acceptance tests from the oracle |
+| `src/generated/check-reorder-flags.ts` | generated tree file — brief capability module (project.generatedTree, fixes/144 M2) |
+| `src/generated/chunk-0.ts` | generated tree file — brief capability module (project.generatedTree, fixes/144 M2) |
+| `src/generated/compute-rent-roll.ts` | generated tree file — brief capability module (project.generatedTree, fixes/144 M2) |
+| `src/generated/create-flip-project.ts` | generated tree file — brief capability module (project.generatedTree, fixes/144 M2) |
 
 ## Phase rail
 
@@ -40,13 +44,13 @@ Coffeehouse2Home is one software suite for a property-services company that does
 - P3 Tool Integration & Interoperability — complete · gate passed
 - P4 Security, Isolation & Authorization — complete · gate passed
 - P5 Validation, HITL & Self-Learning — complete · gate passed
-- P6 Code Generation, Testing & Deployment — complete · gate passed
-- P7 Domain & Market Research — complete · gate unmet (Live research corpus exists for P7 (≥1 fetched finding))
-- P8 Dynamic UI/UX Prototyping — complete · gate passed
-- P9 CI/CD & Cloud Deployment Routing — complete · gate passed
-- P10 Local Agent & Edge Inference — complete · gate passed
-- P11 Real-Time Web & Tool Augmentation — complete · gate passed
-- P12 Documentation & Technical Specs — complete · gate passed
+- P6 Code Generation, Testing & Deployment — complete · gate unrecorded
+- P7 Domain & Market Research — locked · gate unrecorded
+- P8 Dynamic UI/UX Prototyping — locked · gate unrecorded
+- P9 CI/CD & Cloud Deployment Routing — locked · gate unrecorded
+- P10 Local Agent & Edge Inference — locked · gate unrecorded
+- P11 Real-Time Web & Tool Augmentation — locked · gate unrecorded
+- P12 Documentation & Technical Specs — locked · gate unrecorded
 
 ## Commands
 
@@ -72,7 +76,7 @@ Coffeehouse2Home is one software suite for a property-services company that does
 
 ## Honest boundaries
 
-- The machine-verified core is the generated P6 module under `src/` (project.generatedSource); everything else is a typed stub awaiting implementation.
+- The machine-verified substance is the generated tree under `src/` + `tests/` (project.generatedTree — fixes/144 M2): every file was emitted verbatim at its own repo-relative path and content-hashed at P6; `tests/oracle.spec.ts` imports the tree's ENTRY module (the file at the path the legacy P6 host would have used) so `npm test` executes the real tree. Scaffold infrastructure outside the tree is exactly that — infrastructure.
 - `src/ui/` is a contract-level shell (P8 interface contract), not a finished UI.
 - Deploy templates from P9/P12 are recorded artifacts only — see DEPLOY.md; nothing here deploys by itself.
 - `assets/` and `public/` are expected at the emitted scaffold and are NOT engine-generated.

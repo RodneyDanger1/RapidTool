@@ -474,6 +474,9 @@ test("runUntilHitl runs P1..P4 and stops at the first stock gate with reason hit
   assert.equal(r.ok, true);
   assert.equal(r.ran, 4);
   assert.equal(r.stoppedReason, "hitl");
+  // 185-H1 / 208: ok:true never carries `error`
+  assert.equal("error" in r, false);
+  if (r.ok) assert.equal(r.note, undefined);
   const after = current(p.id);
   assert.equal(after.currentPhase, 4);
   assert.equal(after.status, "awaiting_hitl");
@@ -584,7 +587,11 @@ test("full pipeline: runUntilHitl + approve loops to completion with honest stop
       assert.equal(r.ok, true);
       break;
     } else {
-      assert.fail(`unexpected stop ${r.stoppedReason}: ${"error" in r ? r.error : ""}`);
+      assert.fail(
+        `unexpected stop ${r.stoppedReason}: ${
+          r.ok === false ? r.error : "note" in r && r.note ? r.note : ""
+        }`,
+      );
     }
     assert.ok(approvals < 12, "loop must terminate");
   }

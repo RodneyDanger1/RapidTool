@@ -1,4 +1,5 @@
-import { PHASES } from "./phases.ts";
+import { PHASES, phaseCoverage, phaseCoverageLine } from "./phases.ts";
+import type { PhaseCoverage } from "./phases.ts";
 import { fnv1a, fusionRank } from "./algorithms.ts";
 import { sandboxClaim } from "./sandbox.ts";
 import type { MemoryEntry, PhaseDef, Project } from "./types.ts";
@@ -85,6 +86,7 @@ function systemJson(
   phase: PhaseDef,
   compiledAt: string,
   loop: { count: number; note: string | null },
+  coverage: PhaseCoverage,
 ): string {
   // SWEEP-2 (esc-1): escape raw backticks as \u0060 so the envelope stays a
   // single parseable ```json block. JSON.stringify does NOT escape backticks,
@@ -138,6 +140,16 @@ function systemJson(
         rejections: p.rejectionHistory?.length ?? 0,
         gate_passed: p.gate ? p.gate.passed : null,
       })),
+      // T-14 (106 §6, finding F-11): the honest coverage census — a run
+      // stopped at P6 executed 7 of 13 phases and the P7–P12 tail produced 0
+      // artifacts; the envelope states the real numbers so no machine consumer
+      // reads the 13-entry phase list as "all 13 ran". Same census as the
+      // "## Current edge" rail (one pure helper, one arithmetic).
+      phase_coverage: {
+        executed: coverage.executed,
+        total: coverage.total,
+        artifacts_from_p7_p12: coverage.tailArtifacts,
+      },
     },
     null,
     2,
@@ -209,6 +221,10 @@ export function compileAgentPacket(
   // currentPhase — hydrateProject clamps it, but a hand-built Project with a
   // corrupt value must fall back to P0 rather than crash mid-compile.
   const phase = PHASES[project.currentPhase] ?? PHASES[0];
+  // T-14 (106 §6/F-11): one coverage census shared by the rail line and the
+  // System JSON envelope — pure, derived from the project's own records and
+  // artifact rows (never a hard-coded "13 phases ran").
+  const coverage = phaseCoverage(project.phases, project.artifacts);
   const lattice = project.lattice;
   const schedule = project.schedule;
   const memoryRows = project.memory ?? [];
@@ -333,7 +349,7 @@ export function compileAgentPacket(
     : "";
   // H-05 (fixes/115): deterministic — derived from project state, never wall clock.
   const compiledAt = compiledAtFor(project);
-  const sysJson = systemJson(project, phase, compiledAt, { count: loopCount, note: lastLoopNote });
+  const sysJson = systemJson(project, phase, compiledAt, { count: loopCount, note: lastLoopNote }, coverage);
 
   const notes = (project.notes ?? "").trim();
   // BUG WAVE 27: empty collections must render an explicit "(none)" placeholder —
@@ -413,6 +429,11 @@ export function compileAgentPacket(
     phase.summary,
     `Status: ${project.status} · model: ${project.modelRoute}`,
     `Execution: ${sandboxClaim(project.sandbox)}`,
+    // T-14 (106 §6, finding F-11): honest phase coverage in the rail. The
+    // shipped end-to-end run executed 7 of 13 phases and the strictly linear
+    // graph left P7–P12 at 0 artifacts — this line reports the real census so
+    // no surface (packet, machine consumer, human reader) implies all 13 ran.
+    `Phase coverage: ${phaseCoverageLine(coverage)} — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).`,
     hitl,
     priorBlock,
     project.lastTest ? `P6 template self-test (last run): ${project.lastTest.ok ? "pass" : "FAIL"} — ${project.lastTest.detail}` : "",

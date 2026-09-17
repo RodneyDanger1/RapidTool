@@ -26,6 +26,7 @@
 // TanStack server-fn and throws outside a Start runtime).
 // ---------------------------------------------------------------------------
 import { completeDeepSeek, DEEPSEEK_MODELS, isDeepSeekConfigured } from "./deepseek.server.ts";
+import { dualChannelFailDetail } from "./errors.ts";
 import { freeWebSearch } from "./websearch.server.ts";
 import { lessonRow } from "./knowledge.ts";
 import type { ResearchResult } from "./research.ts";
@@ -45,6 +46,12 @@ export const HARVEST_DEFAULT_MAX_QUERIES = 2;
 export const HARVEST_MAX_QUERIES_PLAN = 4;
 /** LLM query count cap (validated after the json reply). */
 export const HARVEST_LLM_MAX_QUERIES = 6;
+/** 109 T-09: hard cap on GitHub candidates collected in Phase A (deduped repo
+ *  URLs). Enforced at the top of the query loop AND inside the per-result
+ *  scan, so neither an extra query nor a wide result page can push the
+ *  candidate list past it. Exportable like the other bounds — consumers may
+ *  persist/search on it. */
+export const HARVEST_MAX_CANDIDATES = 6;
 
 export const HARVEST_QUERY_LABEL =
   "queries are derived from the brief (deepseek-v4-flash json:true when configured, deterministic keyword floor otherwise) — not a promise that any repo matches.";
@@ -88,6 +95,15 @@ export type HarvestSearchResult = {
   notes: string[];
 };
 
+/**
+ * LLM query-builder seam. Discriminated: never `{ ok: true, error }`.
+ * 185-H1 dual-channel (ok:true + error) is a lie — buildHarvestQueries
+ * fail-closes that shape onto the keyword floor.
+ */
+export type HarvestLlmResult =
+  | { ok: true; text: string }
+  | { ok: false; error?: string };
+
 /** Test/dev seams — every option defaults to the real, bounded behavior. */
 export type HarvestOptions = {
   /** Search backend override (tests inject a fake). */
@@ -97,7 +113,7 @@ export type HarvestOptions = {
   /** JSON fetcher override (tests inject a fake). */
   fetchJson?: (url: string, opts: { timeoutMs: number }) => Promise<unknown>;
   /** LLM seam: when omitted, the real deepseek-v4-flash json call runs iff a key is configured. */
-  llm?: (brief: string) => Promise<{ ok: boolean; text?: string; error?: string }>;
+  llm?: (brief: string) => Promise<HarvestLlmResult>;
   /** Force the configured flag (tests pin the not-configured path deterministically). */
   llmConfigured?: boolean;
   maxFetches?: number;
@@ -216,16 +232,40 @@ function harvestQueryPrompt(brief: string): string {
 const HARVEST_LLM_SYSTEM =
   "You are RapidTool's harvest query builder. Return the single JSON object the user describes — no prose before or after it.";
 
-async function defaultQueryLlm(brief: string): Promise<{ ok: boolean; text?: string; error?: string }> {
+async function defaultQueryLlm(brief: string): Promise<HarvestLlmResult> {
   const res = await completeDeepSeek(harvestQueryPrompt(brief), {
     model: DEEPSEEK_MODELS.flash,
     json: true,
     maxTokens: 512,
     system: HARVEST_LLM_SYSTEM,
   });
-  return res.ok
-    ? { ok: true, text: res.text }
-    : { ok: false, error: typeof res.error === "string" ? res.error : (res.reason ?? "LLM call failed") };
+  // Discriminated: never stamp ok:true together with error (185-H1).
+  // Usage on res is dropped here — harvest.ts has no numeric token cap
+  // (parent must wire recordSpend at codegen.server.ts liveP6Synthesis).
+  // completeDeepSeek itself does not dual-channel; hostile/stub wrappers can.
+  const dual = dualChannelFailDetail(res);
+  if (dual) return { ok: false, error: dual };
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: typeof res.error === "string" ? res.error : (res.reason ?? "LLM call failed"),
+    };
+  }
+  return { ok: true, text: res.text };
+}
+
+/**
+ * 185-H1: `{ ok: true, error }` is a dual-channel lie — treat as LLM failure.
+ * Composes `dualChannelFailDetail` (errors.ts / 205) so harvest stays on the
+ * shared detector; ok:false still degrades to the keyword floor (unknown if
+ * the failure carries no prose).
+ */
+function harvestLlmFailDetail(res: { ok?: unknown; error?: unknown; text?: unknown }): string | null {
+  const dual = dualChannelFailDetail(res);
+  if (dual !== null) return dual;
+  if (res.ok === true) return null;
+  const err = typeof res.error === "string" && res.error.trim() ? res.error.trim() : "";
+  return err || "unknown";
 }
 
 export async function buildHarvestQueries(brief: string, opts: HarvestOptions = {}): Promise<HarvestQueryPlan> {
@@ -238,10 +278,12 @@ export async function buildHarvestQueries(brief: string, opts: HarvestOptions = 
   const llm = opts.llm ?? defaultQueryLlm;
   try {
     const res = await llm(b);
-    if (!res.ok) {
-      return { queries: keywordQueries(b), source: "keyword", note: `LLM query builder failed (${res.error ?? "unknown"}) — keyword floor used` };
+    const fail = harvestLlmFailDetail(res);
+    if (fail !== null) {
+      return { queries: keywordQueries(b), source: "keyword", note: `LLM query builder failed (${fail}) — keyword floor used` };
     }
-    const queries = cleanQueries(parseQueryJson(res.text ?? ""), HARVEST_LLM_MAX_QUERIES);
+    const text = res.ok === true && typeof res.text === "string" ? res.text : "";
+    const queries = cleanQueries(parseQueryJson(text), HARVEST_LLM_MAX_QUERIES);
     if (queries.length === 0) {
       return { queries: keywordQueries(b), source: "keyword", note: "LLM returned no usable queries — keyword floor used" };
     }
@@ -368,6 +410,11 @@ export async function harvestRepos(queries: readonly string[], opts: HarvestOpti
   const candidates: { repo: string; url: string; snippet: string }[] = [];
   const seenRepos = new Set<string>();
   for (const q of qs) {
+    // 109 T-09: enforce the candidate cap across queries — the inner
+    // per-result break below only stops collecting WITHIN one result page,
+    // so without this check a further query still burned a search call
+    // (against the time budget) with a full candidate list already in hand.
+    if (candidates.length >= HARVEST_MAX_CANDIDATES) break;
     if (remainingMs() <= 0) {
       notes.push(`time budget exhausted before query "${q}" — remaining queries skipped`);
       break;
@@ -391,7 +438,7 @@ export async function harvestRepos(queries: readonly string[], opts: HarvestOpti
       if (!snippet) continue;
       seenRepos.add(repo);
       candidates.push({ repo, url: item.url, snippet });
-      if (candidates.length >= 6) break;
+      if (candidates.length >= HARVEST_MAX_CANDIDATES) break;
     }
   }
   if (candidates.length === 0) {
@@ -457,7 +504,15 @@ export async function harvestRepos(queries: readonly string[], opts: HarvestOpti
     });
   }
   if (hits.length === 0) {
-    notes.push("all candidate fetches failed — honest empty result (no repos fabricated)");
+    // 109 T-09: with a zero fetch budget (or a deadline that expired before
+    // the first attempt) NO fetch failed — the old note claimed "all
+    // candidate fetches failed", which reads as tried-and-failed. State the
+    // real reason instead: zero fetch attempts were spent.
+    notes.push(
+      fetches > 0
+        ? "all candidate fetches failed — honest empty result (no repos fabricated)"
+        : "fetch budget is 0 — no candidate fetched",
+    );
   }
   return { hits, notes };
 }

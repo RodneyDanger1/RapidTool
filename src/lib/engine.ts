@@ -3,7 +3,6 @@ import type { ErrorCode } from "./errors.ts";
 import { flattenStack } from "./rt-events.ts";
 import type { RtEventSeed } from "./rt-events.ts";
 import { compileAgentPacket } from "./packet.ts";
-import { STOCK_HITL } from "./phases.ts";
 import {
   bootstrapMemory,
   feasibilityScorecard,
@@ -16,7 +15,6 @@ import {
 import { buildPhase6Module, healSource, runGenerated, sandboxClaim } from "./sandbox.ts";
 import {
   archTrace,
-  b18Tail,
   capabilityLine,
   failedGates,
   hardDodBlockInto,
@@ -28,6 +26,12 @@ import {
 // deepseek-v4-flash). Loaded lazily inside wildStep (server boundary — a
 // static import would pull server-only code into the client bundle).
 import type { WildClassifierResult, WildReviewContext } from "./wild-mode.server.ts";
+// 216i (112 §4.1/§4.3): the failure-record shapes for the L2 seal's record
+// gate — TYPE-ONLY (erased at runtime), mirroring the wild-mode.server type
+// import above. The VALUE (failureLessonFromRecord) rides the lazy
+// LessonSurface seam below, so knowledge.ts's node:fs never enters the client
+// bundle (H2 rule).
+import type { FailureLessonOutcome, FailureRecord } from "./knowledge.ts";
 // Optional real-backend integration (concurrently-authored modules). Imported
 // read-only; when the underlying backend is not configured each resolves to a
 // typed `{ ok: false, reason: "not-configured" }` and the engine falls back to
@@ -86,6 +90,15 @@ type LessonSurface = {
     opts?: { limit?: number },
   ) => string[];
   lessonRankLimit: number;
+  // 216i (112 §4.1/§4.3 — T2): the failure-record gate ("a lesson without a
+  // counterexample is not a lesson"). Anchored records mint through the same
+  // builders the direct callers use (ONE id per failure); an anchor-less
+  // record returns refuse:no-proof + a visible lesson.refused ledger payload,
+  // so a refusal is recorded, never a silent no-op.
+  failureLessonFromRecord: (
+    record: FailureRecord,
+    opts?: { project?: Project | null; iterations?: number; hypothesis?: string },
+  ) => FailureLessonOutcome;
 };
 let lessonSurface: LessonSurface | null = null;
 void import("./knowledge.ts")
@@ -97,6 +110,7 @@ void import("./knowledge.ts")
       selectLessons: m.selectLessons,
       lessonLinesForBrief: m.lessonLinesForBrief,
       lessonRankLimit: m.EXPAND_LESSON_RANK_LIMIT,
+      failureLessonFromRecord: m.failureLessonFromRecord,
     };
   })
   .catch(() => {
@@ -301,6 +315,50 @@ export function dedupeMemoryIds(rows: MemoryEntry[]): MemoryEntry[] {
     // occurrence of the same base cannot mint it again (suffix collision).
     return { ...m, id };
   });
+}
+
+/** 216i (112 §4.2 — T1): the lesson-row identity convention (knowledge.lessonRow
+ *  mints `lesson-<classShort>-<fnv8(signature||text)>`). Engine-side modules use
+ *  this to gate the reproduction accrual WITHOUT importing the disk-backed
+ *  knowledge.ts (H2 lazy-seam rule). Non-lesson rows are never touched. */
+export function isLessonMemoryId(id: unknown): boolean {
+  return typeof id === "string" && id.startsWith("lesson-");
+}
+
+/**
+ * 216i (112 §3.1/§4.2 — T1): the reproduction accrual. A repeated identical
+ * failure re-derives the SAME signature-based lesson id (216g), so when the
+ * merge sites see the same lesson id twice, the honest record is: ONE row whose
+ * `reproducedCount` accrues — NOT a forked `-2` twin (dedupeMemoryIds' rename
+ * semantics stay intact for every other row) and NOT a silently dropped
+ * occurrence. The FIRST occurrence's content wins (a fresher mint keeps its
+ * text/tags); the count = the sum of both sides' counts + 1 for the fold.
+ *
+ * Pure and deterministic: non-lesson duplicates pass through untouched (an
+ * earlier copy already counted is never re-counted — only a genuine twin pair
+ * folds). Callers run this BEFORE dedupeMemoryIds at merge sites.
+ */
+export function accrueReproducedCounts(rows: MemoryEntry[]): MemoryEntry[] {
+  const out: MemoryEntry[] = [];
+  const at = new Map<string, number>();
+  for (const m of rows) {
+    if (!m || typeof m !== "object") {
+      out.push(m);
+      continue;
+    }
+    const i = isLessonMemoryId(m.id) ? at.get(m.id) : undefined;
+    if (i !== undefined) {
+      const prev = out[i];
+      if (!prev) continue;
+      const a = Number.isFinite(prev.reproducedCount) ? (prev.reproducedCount as number) : 0;
+      const b = Number.isFinite(m.reproducedCount) ? (m.reproducedCount as number) : 0;
+      out[i] = { ...prev, reproducedCount: a + b + 1 };
+      continue;
+    }
+    if (isLessonMemoryId(m.id)) at.set(m.id, out.length);
+    out.push(m);
+  }
+  return out;
 }
 
 /** Swap the packet artifact body for the freshly compiled packet (B-19/R10). */
@@ -1186,11 +1244,6 @@ export function sealHonesty(project: Project): { clean: boolean; failed: string[
   return { clean: failed.length === 0, failed };
 }
 
-/** 8-hex FNV-1a — knowledge.ts lessonRow's content-address convention. */
-function fnv8hex(s: string): string {
-  return fnv1a(s).toString(16).padStart(8, "0");
-}
-
 /**
  * Deterministic lesson-evidence digest (fixes/144 M5-1, engine half) in the
  * shared format knowledge.ts's lessonEvidenceDetail helper emits (C4 lane) so
@@ -1330,7 +1383,11 @@ export function applyPhaseResult(project: Project, phase: PhaseId): Project {
       ...primed.artifacts.filter((a) => a.phase !== phase && a.kind !== "packet"),
       ...artifacts,
     ],
-    memory: dedupeMemoryIds([...result.memory, ...primed.memory]).slice(0, 80),
+    // 216i (112 §4.2 — T1): the accrual runs BEFORE the id dedupe — a re-minted
+    // lesson row (same signature id) folds into the ONE stored row with
+    // reproducedCount + 1 instead of forking a `-2` twin; every non-lesson row
+    // keeps the B-12 rename semantics.
+    memory: dedupeMemoryIds(accrueReproducedCounts([...result.memory, ...primed.memory])).slice(0, 80),
     logs: [
       ...primed.logs,
       ...result.logs,
@@ -1350,9 +1407,10 @@ export function applyPhaseResult(project: Project, phase: PhaseId): Project {
   };
   // L2 template-emission capture (fixes/98 §2.3 writer 2(b) / 98_make_2 §5): a
   // phase that SEALS complete (not awaiting_hitl) with unmet DoD mints ONE
-  // content-addressed template-emission lesson row. Idempotent: the id hashes the
-  // deterministic text, and the merge below drops any twin already in memory
-  // (H43-P2-1 replacement — a re-seal of the same gate never forks a row).
+  // template-emission lesson row. 216i (112 §4.2 — T1): the row is minted
+  // through the record gate and carries the SIGNATURE id (216g), so a re-seal
+  // of the same gate re-derives the same id and the merge below accrues its
+  // reproducedCount on the ONE stored row (never a forked twin).
   let memory = merged.memory;
   const sealLogs: JsonLog[] = [];
   if (!needsHitl && lessonSurface) {
@@ -1364,9 +1422,7 @@ export function applyPhaseResult(project: Project, phase: PhaseId): Project {
       // journey's refusal class (RT_E_*) and refusal reason when a keyed
       // synthesis refusal was recorded — in the shared lessonEvidenceDetail
       // format (knowledge.ts emits the same bytes via the C4 lane) so engine-
-      // and driver-minted rows converge. Content-addressed over the FINAL text
-      // (lessonRow parity): an identical seal mints an identical row, so
-      // re-seals never fork.
+      // and driver-minted rows converge.
       const unmetCriteria = r.unmet.map((g) => g.criterion);
       const refusal = refusalClassOf(merged);
       const digest = lessonEvidenceDetail(
@@ -1374,28 +1430,51 @@ export function applyPhaseResult(project: Project, phase: PhaseId): Project {
         refusal?.code ?? null,
         refusal && refusal.tail ? refusal.tail : null,
       );
-      const base = lessonSurface.templateEmissionLesson(
-        merged,
-        phase,
-        unmetCriteria,
-        lessonSurface.absentLexNouns(merged.brief, merged.lattice),
-        r.evidenceHash,
+      // 216i (112 §4.1/§4.3 — T2): mint through the record gate — the §4.3
+      // counterexample floor (≥1 anchor) plus the 216g signature identity, so
+      // a repeated identical failure maps to ONE row. A refusal (0 anchors)
+      // records a visible lesson.refused ledger row and mints NO lesson —
+      // never a silent no-op. (Floor, not live traffic: runGate's contract
+      // makes !pass ⇒ ≥1 unmet criterion, so today this guards the invariant.)
+      const rec = lessonSurface.failureLessonFromRecord(
+        { kind: "gate-unmet", phase, anchors: unmetCriteria, evidenceHash: r.evidenceHash },
+        { project: merged },
       );
-      const text = fitLessonEvidence(digest) || base.text;
-      const lesson: MemoryEntry =
-        text === base.text
-          ? base
-          : { ...base, text, id: `lesson-template-emission-${fnv8hex(text)}` };
-      if (!memory.some((m) => m.id === lesson.id)) {
-        memory = dedupeMemoryIds([lesson, ...memory]).slice(0, 80);
+      if (rec.refused) {
+        sealLogs.push({
+          ts: Date.now(),
+          phase,
+          level: rec.log.level,
+          event: rec.log.event,
+          detail: rec.log.detail,
+        });
+      } else {
+        const base = rec.lesson;
+        const text = fitLessonEvidence(digest) || base.text;
+        // 216i (T1): the id stays the 216g SIGNATURE id. The digest tail is
+        // volatile (refusal reason / model prose) and the pre-216i
+        // `fnv8hex(text)` id override re-opened exactly the §4.2 fork this
+        // package closes — the text rides the row, the identity does not.
+        const lesson: MemoryEntry = text === base.text ? base : { ...base, text };
+        const existing = memory.some((m) => m.id === lesson.id);
+        // 216i (T1): lesson first ⇒ the fold puts the accrued count on the
+        // fresher row (this mint), while dedupeMemoryIds keeps its rename
+        // semantics for every non-lesson twin.
+        const folded = accrueReproducedCounts([lesson, ...memory]);
+        memory = dedupeMemoryIds(folded).slice(0, 80);
+        const stored = folded[0] ?? lesson;
         sealLogs.push({
           ts: Date.now(),
           phase,
           level: "info" as const,
-          event: "lesson.capture",
-          detail: `L2 template-emission ${lesson.id} (P${phase} sealed with unmet DoD: ${r.unmet
-            .map((g) => g.id)
-            .join(", ")}${refusal ? `; class: ${refusal.code}` : ""})`,
+          event: existing ? "lesson.reproduced" : "lesson.capture",
+          detail: existing
+            ? `L2 template-emission ${lesson.id} reproduced (P${phase} gate unmet again${
+                refusal ? `; class: ${refusal.code}` : ""
+              }; reproducedCount=${stored.reproducedCount ?? 0})`
+            : `L2 template-emission ${lesson.id} (P${phase} sealed with unmet DoD: ${r.unmet
+                .map((g) => g.id)
+                .join(", ")}${refusal ? `; class: ${refusal.code}` : ""})`,
         });
       }
     }
@@ -1703,6 +1782,9 @@ export function emptyProject(input: {
   brief: string;
   /** Explicit create-time override (CLI --advisory sends false). Undefined → keyed default. */
   enforceDod?: boolean;
+  /** Delivery-kind (E-15 wave: "app"|"tool"|"game"). Declared kind wins at codegen
+   *  tree-trigger time; absent → singleModuleLibraryKind() routes to the ≤8 library path. */
+  kind?: Project["kind"];
 }): Project {
   const domain = inferDomain(input.brief);
   const base: Project = {
@@ -1716,6 +1798,7 @@ export function emptyProject(input: {
     createdAt: Date.now(),
     status: "intake",
     currentPhase: 0,
+    ...(input.kind ? { kind: input.kind } : {}),
     phases: PHASES.map((p) => ({
       id: p.id,
       status: p.id === 0 ? "ready" : "locked",
@@ -1744,10 +1827,11 @@ export function emptyProject(input: {
     sandbox: {
       // Honest default: generated code runs through the bounded engine-template runner today (B-18);
       // runtime:"worker" is reserved for the real Worker sandbox (R1) once producers need it.
+      // 213: isolated defaults false — node-runner is NOT Docker/bwrap (doctor.runnerIsSandbox:false).
       runtime: "sync-template",
       ramMb: null,
       timeoutS: 30,
-      isolated: true,
+      isolated: false,
     },
     openapi: "",
     adr: "",
@@ -2260,7 +2344,7 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
       runtime,
       ramMb: typeof raw.sandbox?.ramMb === "number" ? raw.sandbox.ramMb : null,
       timeoutS: raw.sandbox?.timeoutS ?? 30,
-      isolated: raw.sandbox?.isolated ?? true,
+      isolated: raw.sandbox?.isolated ?? false,
     },
     lattice,
     schedule,
@@ -2284,6 +2368,15 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
     competitors: Array.isArray(raw.competitors) ? raw.competitors : [],
     phases: phaseRepair.phases,
   };
+  // E-15 / fixes/215: `...raw` carries Project.kind through, but an unknown /
+  // non-string persisted kind (a hand-edited or legacy payload) must not
+  // survive — codegen's tree trigger (singleModuleLibraryKind) reads it
+  // directly, so a garbage value would silently mis-route synthesis. Clamp to
+  // the legal 3-way set; absent = the legacy single-module-library path
+  // (byte-identical for kind-less payloads).
+  if (!(filled.kind === "app" || filled.kind === "tool" || filled.kind === "game")) {
+    delete filled.kind;
+  }
   if (acceptanceFixtures !== undefined) filled.acceptanceFixtures = acceptanceFixtures;
   else delete filled.acceptanceFixtures;
   if (acceptanceApprovedAt !== undefined) filled.acceptanceApprovedAt = acceptanceApprovedAt;
@@ -2773,50 +2866,10 @@ export async function liveLayer(project: Project, phase: PhaseId, deps?: LiveLay
   // Keyless runs keep the honest placeholder (p6-brief-fit fails by
   // construction). Any failure degrades to the deterministic floor.
   if (phase === 6) {
-    try {
-      // fixes/116 (P0-01 Part B closure): the keyed-P6 guard must be
-      // BARE-NODE-SAFE. `llmStatus()` routes through a TanStack createServerFn
-      // (llm.ts) that resolves to `{configured:false}` outside a Start server
-      // runtime, so under bare Node — the ONLY host the CLI/headless driver
-      // runs on — this branch ALWAYS skipped liveP6Synthesis and keyed runs
-      // silently shipped the deterministic placeholder. Reuse the same
-      // direct-env probe codegen.server.ts already relies on
-      // (isDeepSeekConfigured: a plain process.env.DEEPSEEK_API_KEY read),
-      // via the client-safe concatenated dynamic import idiom below.
-      const dsSpec = "./deepseek." + "server.ts";
-      const ds = (await import(dsSpec)) as { isDeepSeekConfigured?: () => boolean };
-      const configured = typeof ds.isDeepSeekConfigured === "function" ? ds.isDeepSeekConfigured() : false;
-      if (configured) {
-        // fixes/148 (F1 follow-up): real journeys arrive kind-absent (the
-        // create path never classifies), and codegen's tree trigger is
-        // kind-scoped — a kind-absent webapp brief would silently take the
-        // ≤8 single-module path and ship no tree. Stamp the delivery kind
-        // from the brief classifier here, BEFORE the codegen call: ui →
-        // "app" (webapp tree), cli-tool → "tool" (CLI tree), library →
-        // kind stays absent (the honest single-module library path).
-        if (done.kind === undefined || done.kind === null) {
-          const surfaceKind = uiKindOf(done);
-          if (surfaceKind === "ui") done = { ...done, kind: "app" };
-          else if (surfaceKind === "cli-tool") done = { ...done, kind: "tool" };
-        }
-        const codegenSpec = "./codegen." + "server.ts";
-        const codegen = (await import(codegenSpec)) as {
-          liveP6Synthesis?: (p: Project, deps?: { treeFailure?: string }) => Promise<Project>;
-        };
-        if (typeof codegen.liveP6Synthesis === "function") {
-          // fixes/147 (E2): the journey driver's tree-failure tail rides the
-          // additive `deps` param into codegen (deps.treeFailure is codegen's
-          // ONLY failure-context reader); absent ⇒ liveP6Synthesis(done) —
-          // byte-identical legacy call.
-          const upgraded = await codegen.liveP6Synthesis(done, deps);
-          if (upgraded && typeof upgraded === "object" && upgraded !== done) {
-            done = upgraded;
-          }
-        }
-      }
-    } catch {
-      /* keyed synthesis unavailable → deterministic floor stands */
-    }
+    // fixes/209: single path via upgradeP6Keyed (was duplicated inline + dead helper).
+    // Bare-node-safe DeepSeek probe + kind stamp + liveP6Synthesis live inside the helper.
+    // Keyless / refusal → floor unchanged. stampP6ReqTrace always runs on the final P6 state.
+    done = await upgradeP6Keyed(done, deps);
     // fixes/144 (M2 lane B4): stamp the p6-arch reqTrace on the FINAL P6 state
     // — after keyed synthesis upgraded the project with a generatedTree (the
     // applyPhaseResult stamp above already ran pre-upgrade and only fires on a

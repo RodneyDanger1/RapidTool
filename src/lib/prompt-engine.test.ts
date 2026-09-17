@@ -156,6 +156,10 @@ describe("expansionPrompt fidelity + build-ready framing (fixes/95)", () => {
         content.includes("Every requirement must trace to a sentence in the brief"),
         `${t.id}: traceability-to-brief rule present`,
       );
+      assert.ok(
+        content.includes("at least one signature for EVERY requirement"),
+        `${t.id}: signature-coverage rule present (fixes/215d — one module per capability)`,
+      );
     }
   });
 
@@ -304,6 +308,15 @@ describe("expandBrief", () => {
     if (res.ok) return;
     assert.equal(res.reason, "error");
     assert.match(res.error ?? "", /DeepSeek rejected the request \(HTTP 400/);
+  });
+
+  it("185-H1: keyed success never carries an error channel", async () => {
+    process.env[KEY] = "sk-test";
+    globalThis.fetch = expandedViaFetch(FULL_SPEC);
+    const res = await expandBrief("Build a fleet healthcheck tool");
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal("error" in res, false, "ok:true must not carry error");
   });
 });
 

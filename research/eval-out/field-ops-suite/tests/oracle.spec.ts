@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // tests/oracle.spec.ts — acceptance tests from the A7 oracle (project.oracle)
-// machine-generated from RapidTool packet 4cd56084-1d37-42f5-b025-b7e1304f8e31; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet 1bf0e807-f549-4335-938e-25dd71643cc2; regenerate, don't hand-edit.
 // REAL assertions, no todo stubs (fixes/135). Row ids are PINNED: the verify
 // harness seeds + pins orc-* ids across runs (E-08) — never rename or drop
 // one. Each test asserts what the emitted modules ACTUALLY do today:

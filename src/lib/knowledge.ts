@@ -27,6 +27,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fnv1a, fusionRank, tokenizeWords } from "./algorithms.ts";
+import type { ErrorCode } from "./errors.ts";
 import type { HitlDecision, IntentLattice, JsonLog, MemoryEntry, PhaseId, Project } from "./types.ts";
 
 /**
@@ -132,6 +133,62 @@ export function lessonLinesForBrief(
   return rankBriefLessons(brief, memory, opts).map((r) => `[${r.kind} ${r.score}] ${r.text}`);
 }
 
+/**
+ * 216g (112 §4.4 — T4): resolve a configured KnowledgeStore into the lesson
+ * rows the expansion prompt ranks. `rankBriefLessons` / `lessonLinesForBrief`
+ * already accept cross-project rows via `opts.proven`; the missing half was the
+ * store → rows resolver this function provides. The caller (the codegen/engine
+ * expansion sites) passes the result straight through:
+ *
+ *   const proven = provenRowsFromStore(storePath, project.name);
+ *   lessonLinesForBrief(brief, selectLessons(project.memory ?? [], 6, LIMIT), {
+ *     limit: LIMIT, proven: proven.rows,
+ *   });
+ *
+ * No store path configured ⇒ `{rows: [], degraded: false}` and the caller's
+ * prompt stays BYTE-IDENTICAL to the legacy expansion (absent store ⇒ no
+ * change). A configured path that cannot be read/parsed ⇒
+ * `{rows: [], degraded: true, reason, code}` — the failure is RETURNED, never
+ * thrown into a synthesis path and never silently swallowed as "no lessons":
+ * the refusal state stays visible to the caller (112 §2.2 rung 6).
+ * Read-only: this never appends to the store (112 §3.4 P1 — no machine writer).
+ */
+export type ProvenRowsResult = {
+  rows: RankableLessonRow[];
+  /** true when a store path was configured but the store could not be read. */
+  degraded: boolean;
+  /** Present when degraded: the store's own refusal message. */
+  reason?: string;
+  /** RT_E code for the degraded case (surfaced, never thrown). */
+  code?: ErrorCode;
+};
+
+export function provenRowsFromStore(
+  storePath: string | null | undefined,
+  project: string,
+  opts?: { limit?: number; minScore?: number; includeSuperseded?: boolean; includeRetired?: boolean },
+): ProvenRowsResult {
+  const path = typeof storePath === "string" ? storePath.trim() : "";
+  if (!path) return { rows: [], degraded: false };
+  try {
+    const store = new KnowledgeStore(path);
+    const proven = store.injectProven(typeof project === "string" ? project : "", {
+      limit: opts?.limit ?? EXPAND_LESSON_RANK_LIMIT,
+      minScore: opts?.minScore,
+      includeSuperseded: opts?.includeSuperseded,
+      includeRetired: opts?.includeRetired,
+    });
+    return { rows: proven.map((p) => provenToLessonRow(p)), degraded: false };
+  } catch (err) {
+    return {
+      rows: [],
+      degraded: true,
+      reason: err instanceof Error ? err.message : String(err),
+      code: "RT_E_VALIDATION",
+    };
+  }
+}
+
 export type KnowledgeKind = "brief" | "pattern" | "fix" | "note";
 
 export interface KnowledgeEntry {
@@ -147,6 +204,11 @@ export interface KnowledgeEntry {
   sourcePath?: string;
   /** ISO timestamp of the first save (never rewritten on duplicates). */
   savedAt: string;
+  /** Maker-card score for eval-gated lesson promotion (185-U1). Optional;
+   *  NEVER part of the fingerprint — score gates the write, it does not
+   *  fork content-addressed identity. Missing on a lesson-tagged save
+   *  refuses promotion (shouldPromoteLesson treats unknown next as false). */
+  score?: number;
   /** Learning-loop telemetry (fixes/98 §4.2): how many later runs produced
    *  counter-evidence against this entry's claim. Writer-only, mutated via
    *  bumpCounterEvidence(); NEVER part of the fingerprint (else idempotent
@@ -165,8 +227,17 @@ export type NewKnowledgeEntry = Omit<KnowledgeEntry, "id" | "savedAt">;
 
 export interface SaveResult {
   entry: KnowledgeEntry;
-  /** false when an identical entry already existed (idempotent no-op). */
+  /** false when an identical entry already existed (idempotent no-op)
+   *  OR when a lesson write was refused by shouldPromoteLesson. */
   appended: boolean;
+  /** true when a lesson-tagged save was refused (eval-gated regression /
+   *  missing maker score). Never set for non-lesson rows. Store is
+   *  append-only: refuse never deletes prior rows. */
+  refused?: boolean;
+  /** Machine reason when refused (e.g. "eval-gated-regression"). */
+  reason?: string;
+  /** RT_E_* when refused. */
+  code?: ErrorCode;
 }
 
 export interface KnowledgeMatch {
@@ -282,10 +353,16 @@ export class KnowledgeStore {
   }
 
   /** All entries, newest last (append order). Reads the file at most once
-   *  per mutation cycle; later saves update the cache directly. */
+   *  per mutation cycle; later saves update the cache directly.
+   *
+   *  109 T-10: returns a DEFENSIVE COPY — a caller that empties, sorts or
+   *  pushes onto the returned array must not corrupt the live cache every
+   *  later read serves. Row objects are shared by identity (append-only rows
+   *  are never rewritten in place by the store); callers that mutate a row
+   *  object are already outside the store's contract. */
   entries(): KnowledgeEntry[] {
     if (this.cache === null) this.cache = this.readStore();
-    return this.cache;
+    return [...this.cache];
   }
 
   count(): number {
@@ -349,7 +426,14 @@ export class KnowledgeStore {
   /** Persist one entry. Append-only + idempotent: saving an entry whose
    *  fingerprint already exists returns the original row and appends nothing.
    *  The write is merge-on-save (fresh disk rows are folded in first), so a
-   *  stale in-memory cache can never erase rows another instance appended. */
+   *  stale in-memory cache can never erase rows another instance appended.
+   *
+   *  185-U1 / fixes/191: lesson-tagged rows (tags include LESSON_TAG) are
+   *  eval-gated via shouldPromoteLesson against any prior same-id or
+   *  same-title lesson. Regression or missing next maker score → no append,
+   *  { appended:false, refused:true, reason:"eval-gated-regression",
+   *  code:"RT_E_VALIDATION" }. Non-lesson rows are byte-identical to the
+   *  pre-gate path. Never deletes rows. */
   savePattern(input: NewKnowledgeEntry): SaveResult {
     assertValidNewEntry(input);
     const local = this.entries();
@@ -359,6 +443,70 @@ export class KnowledgeStore {
     if (existing) {
       this.cache = base;
       return { entry: existing, appended: false };
+    }
+
+    if (isLessonTagged(input.tags)) {
+      return this.saveLessonIfImproved(input, id, base);
+    }
+
+    const entry: KnowledgeEntry = {
+      ...input,
+      tags: [...input.tags].sort(),
+      id,
+      savedAt: new Date().toISOString(),
+    };
+    const next = [...base, entry];
+    this.writeStore(next);
+    this.cache = next;
+    return { entry, appended: true };
+  }
+
+  /**
+   * Lesson write path (185-U1): gate on shouldPromoteLesson(prior.score,
+   * incoming.score). Prior = same-id (already handled above) or same-title
+   * lesson-tagged row in the same project. Append-only on promote; refuse
+   * envelope on regression / unknown next score — never mutates prior rows.
+   *
+   * 209: human `lesson --accept` rows carry tags `accepted` + `actor:*`. The
+   * human CLI flag IS the gate — do not re-block them on missing maker cards
+   * (that made every accept a silent no-op: ok:true, appended:false, empty store).
+   */
+  private saveLessonIfImproved(
+    input: NewKnowledgeEntry,
+    id: string,
+    base: KnowledgeEntry[],
+  ): SaveResult {
+    const humanAccepted =
+      Array.isArray(input.tags) &&
+      input.tags.includes("accepted") &&
+      input.tags.some((t) => typeof t === "string" && t.startsWith("actor:"));
+
+    const prior =
+      base.find((e) => e.id === id) ??
+      base.find(
+        (e) =>
+          e.project === input.project &&
+          e.title === input.title &&
+          isLessonTagged(e.tags),
+      );
+    const priorMaker = prior?.score;
+    const nextMaker = input.score;
+    if (!humanAccepted && !shouldPromoteLesson(priorMaker, nextMaker)) {
+      // Candidate is built for the envelope only — never written.
+      const candidate: KnowledgeEntry = {
+        ...input,
+        tags: [...input.tags].sort(),
+        id,
+        savedAt: new Date().toISOString(),
+      };
+      this.cache = base;
+      return {
+        entry: prior ?? candidate,
+        appended: false,
+        refused: true,
+        reason: "eval-gated-regression",
+        code: "RT_E_VALIDATION",
+      };
     }
 
     const entry: KnowledgeEntry = {
@@ -590,6 +738,10 @@ export class KnowledgeStore {
 
 /** Tag every lesson row carries; the single facet for selectLessons. */
 export const LESSON_TAG = "lesson";
+/** True when tags mark a KnowledgeStore / memory row as a lesson (185-U1). */
+export function isLessonTagged(tags: readonly string[] | undefined): boolean {
+  return Array.isArray(tags) && tags.includes(LESSON_TAG);
+}
 /** Hard cap on a lesson row's text (bounded prompt injection, H43-P2-2). */
 export const LESSON_TEXT_MAX = 240;
 /** Counter-evidence units before a K-tier row is retired (98 §6.2). */
@@ -609,6 +761,11 @@ export type LessonSpec = {
   score: number;
   source: MemoryEntry["source"];
   tags?: string[];
+  /** 216g (112 §4.2 — T1): the canonical failure signature the id hashes.
+   *  When given, ONLY this string feeds `fnv8` — the volatile `text` tail stays
+   *  human-readable and can no longer fork the row's identity. Absent → the
+   *  legacy content-addressed `fnv8(text)`, so every pre-216g row keeps its id. */
+  signature?: string;
 };
 
 /** 8-hex FNV-1a of a string (the K-id convention, minus the prefix). */
@@ -616,17 +773,146 @@ function fnv8(s: string): string {
   return fnv1a(s).toString(16).padStart(8, "0");
 }
 
+// ---------------------------------------------------------------------------
+// 216g (112 §4.1/§4.2 — T1): failure records + canonical signatures.
+//
+// THE DEFECT (112 §4.2, verified from this tree): every lesson id was
+// `lesson-<class>-<fnv8(text)>`, and a fail row's `text` embeds the free-text
+// evidence (a verify tail, the iteration count, the chunk index, the evidence
+// hash). The SAME failure with a different tail therefore minted a NEW row
+// every time it recurred — and each fork pushed an older lesson toward the
+// 80-row FIFO eviction (engine.ts:1331).
+//
+// THE FIX: the id hashes a *canonical signature* — the stable part of the
+// failure (kind · phase · RT_E class · sorted anchor ids), never the volatile
+// prose. Anchors are ids that are already stable across runs: failing machine
+// case ids, unmet DoD criterion ids, artifact/phase row ids. The volatile tail
+// stays in the row TEXT (human-readable) but can no longer fork the identity.
+// ---------------------------------------------------------------------------
+
+/** 216g (112 §4.1): the failure classes a lesson record may carry. */
+export type FailureKind =
+  | "gate-unmet"
+  | "verify-failed"
+  | "synthesis-refused"
+  | "rejected"
+  | "harvest-degraded"
+  | "drift";
+
+/**
+ * 216g (112 §4.1): the normalized failure record — the missing object between
+ * the failure log and a lesson row. `signature` is derived (never stored): the
+ * ONLY thing hashed into the row id (§4.2). `detailTail` is the volatile
+ * human-readable tail: it rides the row TEXT and is excluded from the id
+ * whenever anchors exist.
+ */
+export type FailureRecord = {
+  kind: FailureKind;
+  phase: PhaseId;
+  /** RT_E_* code of the refusal / failure class (optional; in the signature). */
+  classCode?: string | null;
+  /** Stable ids the failure is anchored to — failing case ids | unmet
+   *  criterion ids | artifact/phase row ids. ≥1 required by the §4.3 gate
+   *  (failureLessonFromRecord), else `refuse:no-proof`. */
+  anchors?: readonly string[];
+  /** FNV-1a (or the machine-run's own) content hash over the judged artifact.
+   *  Never part of the id (§4.3: the hash must not be the identity). */
+  evidenceHash?: string | null;
+  /** Volatile human-readable tail — stored as TEXT, never in the id. */
+  detailTail?: string | null;
+};
+
+/**
+ * 216g (112 §4.2 rule 1/2): canonical anchor id — lowercased, path → basename,
+ * `:line(:col)` refs stripped. Ids stay ids: anything that is not a stable id
+ * belongs in the tail, not here.
+ */
+function canonicalAnchor(anchor: unknown): string {
+  if (typeof anchor !== "string") return "";
+  let a = anchor.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!a) return "";
+  const cut = Math.max(a.lastIndexOf("/"), a.lastIndexOf("\\"));
+  if (cut >= 0) a = a.slice(cut + 1);
+  a = a.replace(/(:\d+){1,2}$/, "");
+  return a.trim();
+}
+
+/**
+ * 216g (112 §4.2 rules 2/3/5): normalize free text for the anchor-less
+ * signature fallback. Deterministic string ops only, no LLM: paths →
+ * basenames, line/column refs and hex digests stripped, digit runs collapsed
+ * to `<n>` ("after 3 iterations", "chunk 2/4" are process noise, not part of
+ * the failure), lowercased, whitespace collapsed, capped at 200 chars.
+ * HONEST LABEL: this is a normalization heuristic that keeps distinct
+ * unanchored failures distinct while killing per-run noise — it is NOT a
+ * semantic dedupe, and it never runs when anchors are present (they are the
+ * counterexample; the tail is then excluded entirely).
+ */
+function canonicalText(text: unknown): string {
+  if (typeof text !== "string") return "";
+  const out: string[] = [];
+  for (const raw of text.toLowerCase().split(/\s+/)) {
+    let token = raw.replace(/^[^a-z0-9]+/, "").replace(/[^a-z0-9>]+$/, "");
+    if (!token) continue;
+    const cut = Math.max(token.lastIndexOf("/"), token.lastIndexOf("\\"));
+    if (cut >= 0) token = token.slice(cut + 1);
+    token = token.replace(/(:\d+){1,2}$/, "");
+    if (/^[0-9a-f]{6,}$/.test(token)) {
+      out.push("<hex>");
+      continue;
+    }
+    token = token.replace(/([=:])([0-9a-f]{8,})(?=$|[^0-9a-z])/g, "$1<hex>");
+    out.push(token.replace(/\d+/g, "<n>"));
+  }
+  return out.join(" ").slice(0, 200);
+}
+
+/**
+ * 216g (112 §4.2 — T1): the deterministic failure signature. Same inputs →
+ * same string, for any call order and any process:
+ *
+ *   `<kind>|p<phase>|<class-or-none>|anchors:<sorted,deduped ids>`
+ *   `<kind>|p<phase>|<class-or-none>|tail:<normalized tail>`  (anchors absent)
+ *
+ * Anchors are sorted, de-duplicated and canonicalized (rule 1); the tail is
+ * excluded whenever anchors exist (rule 4). Two runs that hit the same failure
+ * therefore derive the same id and map to the SAME row instead of forking one.
+ */
+export function failureSignature(record: FailureRecord): string {
+  const kind = typeof record?.kind === "string" ? record.kind.trim().toLowerCase() : "unknown";
+  const phase = Number.isFinite(record?.phase) ? Math.max(0, Math.floor(record.phase)) : 0;
+  const cls = typeof record?.classCode === "string" ? record.classCode.trim().toUpperCase() : "";
+  const anchors: string[] = [];
+  for (const a of Array.isArray(record?.anchors) ? record.anchors : []) {
+    const c = canonicalAnchor(a);
+    if (c && !anchors.includes(c)) anchors.push(c);
+  }
+  anchors.sort();
+  const tail = anchors.length > 0 ? "" : canonicalText(record?.detailTail);
+  return [
+    kind,
+    `p${phase}`,
+    cls || "none",
+    anchors.length > 0 ? `anchors:${anchors.join(",")}` : `tail:${tail}`,
+  ].join("|");
+}
+
 /**
  * The one row builder every writer goes through. Deterministic: content-
  * addressed id `lesson-<class>-<fnv8(text)>` (identical text ⇒ identical id ⇒
  * dedupeMemoryIds is an exact no-op), tags sorted+deduped and always carrying
  * [LESSON_TAG, classShort, level], text collapsed to ≤ LESSON_TEXT_MAX.
+ *
+ * 216g (112 §4.2 — T1): when `spec.signature` is given the id hashes THAT
+ * instead of the text, so a recurrence of the same failure (same kind/phase/
+ * anchors) maps to the same row even when its free-text tail differs.
  */
 export function lessonRow(spec: LessonSpec): MemoryEntry {
   const text =
     typeof spec.text === "string"
       ? spec.text.replace(/\s+/g, " ").trim().slice(0, LESSON_TEXT_MAX)
       : "";
+  const signature = typeof spec.signature === "string" ? spec.signature.trim() : "";
   const raw = [
     LESSON_TAG,
     spec.classShort,
@@ -642,7 +928,7 @@ export function lessonRow(spec: LessonSpec): MemoryEntry {
   }
   tags.sort();
   return {
-    id: `lesson-${spec.classShort}-${fnv8(text)}`,
+    id: `lesson-${spec.classShort}-${fnv8(signature || text)}`,
     kind: spec.kind,
     phase: spec.phase,
     text,
@@ -828,6 +1114,10 @@ export function templateEmissionLesson(
   const text =
     `L2 template-emission: phase P${phase} sealed with gate unmet (${ids.join(", ") || "unknown"}); ` +
     `required brief nouns with 0 hits in emitted source: ${nounText}; evidenceHash=${hash}.`;
+  // 216g (112 §4.2 — T1): signature = (phase, sorted unmet criterion ids). The
+  // noun list and the evidence hash are process noise and stay in the text —
+  // re-sealing the same unmet gate can no longer fork a row per emission.
+  const signature = failureSignature({ kind: "gate-unmet", phase, anchors: ids });
   return lessonRow({
     classShort: "template-emission",
     level: "L2",
@@ -836,19 +1126,30 @@ export function templateEmissionLesson(
     text,
     score: 0.7,
     source,
+    signature,
   });
 }
 
 /** L3 — verify-failure (98 §2.3). The optional `hypothesis` is model prose
  *  (Reflexion turn) and is stored ONLY behind the literal `| hypothesis:`
  *  marker — honest labeling, never as fact (98 §2.3 rule). Evidence detail is
- *  clipped to 140 chars inside the 240-char row budget. */
+ *  clipped to 140 chars inside the 240-char row budget.
+ *
+ *  216g (112 T1/T2): the optional `proof` carries the record's stable anchors
+ *  (failing machine-case ids) and the RT_E class code. With anchors the id
+ *  hashes ONLY (kind · phase · class · anchors) — the free-text tail can no
+ *  longer fork the row. Without them the id falls back to the normalized tail
+ *  (numbers/hex refs collapsed), so the per-run iteration count and the
+ *  `evidenceHash=` suffix stop minting a new row each recurrence. The §4.3
+ *  gate that REFUSES an anchor-less fail lesson lives in
+ *  `failureLessonFromRecord`. */
 export function verifyFailureLesson(
   project: Project,
   phase: PhaseId,
   evidence: string,
   iterations: number,
   hypothesis?: string,
+  proof?: { anchors?: readonly string[]; classCode?: string | null } | null,
 ): MemoryEntry {
   const ev = (typeof evidence === "string" ? evidence : "").replace(/\s+/g, " ").trim().slice(0, 140);
   const n = Number.isFinite(iterations) ? Math.max(0, Math.floor(iterations)) : 0;
@@ -860,6 +1161,13 @@ export function verifyFailureLesson(
   const text =
     `L3 verify-failure: machine-run cases failing after ${n} iteration(s): ` +
     `${ev || "evidence absent"}; evidenceHash=${hash}.${hyp}`;
+  const signature = failureSignature({
+    kind: "verify-failed",
+    phase,
+    classCode: proof?.classCode,
+    anchors: proof?.anchors,
+    detailTail: evidence,
+  });
   return lessonRow({
     classShort: "verify-failure",
     level: "L3",
@@ -868,6 +1176,7 @@ export function verifyFailureLesson(
     text,
     score: 0.7,
     source: "engine",
+    signature,
   });
 }
 
@@ -939,6 +1248,13 @@ export function driftLesson(
     `L2-style drift: phase P${laterPhase} touched files of P${earlierPhase}; ` +
     `evidence hash changed ${String(oldHash).slice(0, 8)}->${String(newHash).slice(0, 8)}; ` +
     `unmetNow=${ids.join(", ") || "none"}.`;
+  // 216g (112 §4.2 — T1): signature = (later phase, earlier phase, unmet ids).
+  // The old→new hash pair is per-detection noise and stays in the text.
+  const signature = failureSignature({
+    kind: "drift",
+    phase: laterPhase,
+    anchors: [...ids, `earlier:P${earlierPhase}`],
+  });
   return lessonRow({
     classShort: "drift",
     level: "L2",
@@ -947,7 +1263,119 @@ export function driftLesson(
     text,
     score: 0.6,
     source: "engine",
+    signature,
   });
+}
+
+/**
+ * 216g (112 §4.3 — T2): the counterexample-or-nothing outcome. Either the row
+ * (plus the signature its id hashed) or a REFUSAL that must be recorded — never
+ * a silent no-op: `log` is the exact ledger payload the caller appends via
+ * lessonLog().
+ */
+export type FailureLessonOutcome =
+  | { verdict: "fail:deterministic"; refused: false; lesson: MemoryEntry; signature: string }
+  | {
+      verdict: "refuse:no-proof";
+      refused: true;
+      lesson: null;
+      signature: string;
+      reason: string;
+      code: ErrorCode;
+      log: { level: JsonLog["level"]; event: "lesson.refused"; detail: string };
+    };
+
+/**
+ * 216g (112 §4.3/§4.2 — T2): "a lesson without a counterexample is not a
+ * lesson". A fail record is minted ONLY when it carries ≥1 anchor — a failing
+ * machine-case id, an unmet DoD criterion id, or an artifact/phase row id — the
+ * execution feedback the failure is actually tied to. No anchor ⇒
+ * `refuse:no-proof` (the §2.2 rung-6 honest floor), NO row is built, and the
+ * caller gets a `lesson.refused` ledger payload to append with lessonLog(): the
+ * refusal is recorded, never dropped. A kind with no builder in this module
+ * (harvest / synthesis / rejection rows are minted by their owning writers) is
+ * refused with the same visible envelope and a reason naming the gap.
+ *
+ * The row comes from the SAME builder a direct caller uses, with the anchors
+ * threaded through as `proof` — so the record path and the direct path derive
+ * ONE id (98 §3 anti-noise (b)), never two rows for one failure.
+ *
+ * HONESTY INVARIANT (112 §3.4 P1, preserved): this mints PROJECT-MEMORY rows
+ * only. The permanent KnowledgeStore stays append-only with NO machine writer —
+ * the human `lesson --accept` path (rapidtool-cli.mjs:1681-1683) remains its
+ * only writer.
+ */
+export function failureLessonFromRecord(
+  record: FailureRecord,
+  opts?: { project?: Project | null; iterations?: number; hypothesis?: string },
+): FailureLessonOutcome {
+  const anchors: string[] = [];
+  for (const a of Array.isArray(record?.anchors) ? record.anchors : []) {
+    const clean = typeof a === "string" ? a.trim() : "";
+    if (clean !== "" && !anchors.includes(clean)) anchors.push(clean);
+  }
+  const signature = failureSignature(record);
+  const kind = typeof record?.kind === "string" ? record.kind : "unknown";
+  const phase = (Number.isFinite(record?.phase) ? Math.max(0, Math.floor(record.phase)) : 0) as PhaseId;
+  const refuse = (reason: string): FailureLessonOutcome => ({
+    verdict: "refuse:no-proof",
+    refused: true,
+    lesson: null,
+    signature,
+    reason,
+    code: "RT_E_VALIDATION",
+    log: {
+      level: "warn",
+      event: "lesson.refused",
+      detail: `refuse:no-proof — ${kind} P${phase}: ${reason}`,
+    },
+  });
+  if (anchors.length === 0) {
+    return refuse(
+      "no anchor: a fail lesson requires ≥1 failing case id, unmet criterion id, or artifact row id (112 §4.3)",
+    );
+  }
+  if (kind === "verify-failed") {
+    return {
+      verdict: "fail:deterministic",
+      refused: false,
+      signature,
+      lesson: verifyFailureLesson(
+        undefined as unknown as Project,
+        phase,
+        typeof record.detailTail === "string" ? record.detailTail : "",
+        opts?.iterations ?? 0,
+        opts?.hypothesis,
+        { anchors, classCode: record.classCode },
+      ),
+    };
+  }
+  if (kind === "gate-unmet") {
+    const project = opts?.project ?? null;
+    if (!project) {
+      // The builder's fallback evidence hash binds the project's brief — a
+      // record without the project cannot mint the same row a direct caller
+      // would, so it refuses rather than invent a different one.
+      return refuse(
+        "gate-unmet needs opts.project: templateEmissionLesson binds the brief into its fallback evidence hash",
+      );
+    }
+    return {
+      verdict: "fail:deterministic",
+      refused: false,
+      signature,
+      lesson: templateEmissionLesson(
+        project,
+        phase,
+        anchors,
+        [],
+        typeof record.evidenceHash === "string" ? record.evidenceHash : undefined,
+      ),
+    };
+  }
+  return refuse(
+    `no builder registered in knowledge.ts for kind '${kind}' — its owning writer must mint the row`,
+  );
 }
 
 /** Pressure predicate (98 §4.2): memory at/over `threshold` rows means the
@@ -1053,10 +1481,16 @@ export function topLessonRows(
   if (ranked.length === 0) {
     // Blank/unrankable brief: score-desc, id-asc (selectLessons tiebreak) so
     // the human still sees the strongest rows, deterministically.
+    // Non-finite scores coerce to 0 so junk rows never NaN-sort.
+    const lessonScore = (m: MemoryEntry): number =>
+      typeof m.score === "number" && Number.isFinite(m.score) ? m.score : 0;
     ranked = [...rows]
-      .sort((a, b) => (b.score - a.score !== 0 ? b.score - a.score : a.id < b.id ? -1 : 1))
+      .sort((a, b) => {
+        const d = lessonScore(b) - lessonScore(a);
+        return d !== 0 ? d : a.id < b.id ? -1 : 1;
+      })
       .slice(0, cap)
-      .map((m) => ({ id: m.id, score: m.score, text: m.text, kind: m.kind }));
+      .map((m) => ({ id: m.id, score: lessonScore(m), text: m.text, kind: m.kind }));
   }
   const byId = new Map<string, MemoryEntry>();
   for (const r of rows) byId.set(r.id, r);
@@ -1109,6 +1543,11 @@ export function acceptedLessonEntry(opts: {
   const body =
     `${text || "(empty lesson text)"} — accepted from project "${project}" by ${actor} ` +
     `(source lesson row ${row.id ?? "unknown"}).`;
+  // 209: carry the memory row's maker score so 185-U1 eval-gate can admit the
+  // first human accept (shouldPromoteLesson refuses unknown next). Score is
+  // NOT part of the fingerprint — same content re-accept stays idempotent.
+  const score =
+    typeof row.score === "number" && Number.isFinite(row.score) ? row.score : undefined;
   return {
     project,
     kind: "note",
@@ -1116,6 +1555,7 @@ export function acceptedLessonEntry(opts: {
     tags,
     body: body.slice(0, 1200),
     sourcePath: row.id ? `lesson:${row.id}` : undefined,
+    ...(score !== undefined ? { score } : {}),
   };
 }
 

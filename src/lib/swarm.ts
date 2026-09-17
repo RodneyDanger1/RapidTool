@@ -248,9 +248,17 @@ export type SwarmPlanOptions = {
 };
 
 export type SwarmPlanResult = {
+  /**
+   * Deterministic advisory plan produced successfully.
+   * HONEST LABEL (185-U5 / fixes/191): `ok: true` means the pure plan
+   * function returned — it does NOT mean LLM seats ran, phases advanced,
+   * or DoD gates passed. Pair with `advisory: true` + `llmDispatched: false`.
+   */
   ok: true;
   /** Advisory only — critiques never mutate DoD gates, decisions, or records. */
   advisory: true;
+  /** Always false: this module never dispatches real LLM seats (crew.server owns that). */
+  llmDispatched: false;
   /** The engine remains linear; swarm output never advances currentPhase. */
   engineLinear: true;
   phase: PhaseId;
@@ -736,6 +744,7 @@ export function swarmPlan(project: Project, opts: SwarmPlanOptions = {}): SwarmP
   return {
     ok: true,
     advisory: true,
+    llmDispatched: false,
     engineLinear: true,
     phase,
     critiques,
@@ -775,6 +784,8 @@ export type ParallelDagResult = {
   ok: true;
   /** Metadata only — nothing is scheduled, nothing is mutated. */
   advisory: true;
+  /** Always false: parallelDag never dispatches seats or mutates the engine. */
+  llmDispatched: false;
   /** The engine still advances one phase at a time (canEnter +1). */
   engineLinear: true;
   /** First non-complete phase (null only when all 13 phases are sealed). */
@@ -897,6 +908,7 @@ export function parallelDag(project: Project): ParallelDagResult {
   return {
     ok: true,
     advisory: true,
+    llmDispatched: false,
     engineLinear: true,
     frontier,
     ready,
@@ -925,6 +937,8 @@ export type BranchSuggestResult = {
   ok: true;
   /** Advisory only — nothing is re-opened or re-run by this function. */
   advisory: true;
+  /** Always false: branchSuggest never dispatches seats. */
+  llmDispatched: false;
   /** The engine stays linear; loop-backs are suggestions for a re-run plan. */
   engineLinear: true;
   frontier: PhaseId | null;
@@ -1005,6 +1019,7 @@ export function branchSuggest(project: Project): BranchSuggestResult {
   return {
     ok: true,
     advisory: true,
+    llmDispatched: false,
     engineLinear: true,
     frontier,
     suggestions,

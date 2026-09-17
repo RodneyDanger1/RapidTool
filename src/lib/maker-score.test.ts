@@ -19,11 +19,14 @@ import {
   m9OnTime,
   capabilityCoverage,
   treeFilesOf,
+  treeRunLooksSkipped,
+  treeRunToMakerEvidence,
   FLOOR_QUALIFIER_EVIDENCE,
   type MakerScoreInput,
   type MakerScoreCard,
 } from "./maker-score.ts";
 import type { Project } from "./types.ts";
+import type { TreeRunOutcome } from "./compile-check.server.ts";
 
 // ---------------------------------------------------------------------------
 // Hand-built fixture helpers (deterministic; no fs, no clock, no key).
@@ -142,6 +145,38 @@ describe("M1 substance", () => {
   test("empty project (no tree, no source) scores 0", () => {
     assert.equal(m1Substance(input()).score, 0);
   });
+
+  test("TODO(E-15) stub tree cannot score substance (not product-complete)", () => {
+    const stub = `export function runAlpha(input: unknown): { ok: boolean } {
+  void input;
+  throw new Error("TODO(E-15) stub: implement job alpha");
+}`;
+    const p = project({ generatedTree: [treeFile("src/jobs/alpha.ts", stub)] });
+    const c = m1Substance(input({ project: p, corpus: { expectedCapabilities: ["alpha"] } }));
+    assert.equal(c.score, 0);
+    assert.match(c.evidence, /stubs\/reexports/);
+  });
+
+  test("reexport-only leftover job cannot cover a capability", () => {
+    const p = project({
+      generatedTree: [
+        treeFile("src/jobs/alpha.ts", 'export { runCore as runAlpha } from "./core.ts";\n'),
+        treeFile("src/core.ts", "export function runCore() { return 1; }"),
+      ],
+    });
+    const cov = capabilityCoverage(p, ["alpha"]);
+    assert.deepEqual(cov.missing, ["alpha"], "reexport-only file does not cover alpha");
+    const c = m1Substance(input({ project: p, corpus: { expectedCapabilities: ["alpha"] } }));
+    assert.equal(c.score, 0);
+  });
+
+  test("all-stub tree with no expectedCapabilities still scores 0 (vacuous is not product-complete)", () => {
+    const stub = 'export { x } from "./host.ts";\n';
+    const p = project({ generatedTree: [treeFile("src/jobs/leftover.ts", stub)] });
+    const c = m1Substance(input({ project: p, corpus: { expectedCapabilities: [] } }));
+    assert.equal(c.score, 0);
+    assert.match(c.evidence, /stubs\/reexports/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -198,6 +233,34 @@ describe("capabilityCoverage", () => {
     const cov = capabilityCoverage(project({ generatedTree: tree() }), []);
     assert.deepEqual(cov.covered, {});
     assert.deepEqual(cov.missing, []);
+  });
+
+  test("215c: capability function words are NOT match forms (stopword leak closed)", () => {
+    // Before 215c this junk module "covered" real-estate capabilities purely
+    // because `and` is a substring of `handleStandardNotice` and `per` of
+    // `property` — a fake-green M1. Function-word tokens must not be forms.
+    const junk = [
+      "function handleStandardNotice(x) { return x; }",
+      "function gatherOtherInformation(y) { return y; }",
+      "function beforeAfter(z) { return z; }",
+    ].join("\n");
+    const p = project({ generatedTree: [treeFile("src/generated.ts", junk)] });
+    const cap =
+      "One shared Property Ledger record per property (ownership, address, status, full history) across brokerage, flipping, rentals, and field services";
+    const cov = capabilityCoverage(p, [cap]);
+    assert.deepEqual(Object.keys(cov.covered), [], "junk module must cover nothing");
+    assert.deepEqual(cov.missing, [cap]);
+  });
+
+  test("215c: real substance vocabulary still covers (stoplist does not over-strip)", () => {
+    const p = project({
+      generatedTree: [treeFile("src/ledger.ts", "function recordPropertyOwnership(propertyId) {}")],
+    });
+    const cov = capabilityCoverage(p, [
+      "One shared Property Ledger record per property (ownership, address, status, full history)",
+    ]);
+    assert.equal(cov.missing.length, 0);
+    assert.equal(cov.covered[Object.keys(cov.covered)[0]].length, 1);
   });
 
   test("coverage verdict agrees with m1Substance score 0/1 (no drift)", () => {
@@ -265,6 +328,64 @@ describe("M2 runs", () => {
     const c = m2Runs(input({ treeRun: { ok: true, dir: "research/eval-out/x", testsPass: 4, testsFail: 0 } }));
     assert.equal(c.score, 1);
     assert.match(c.evidence, /treeRun ok/);
+  });
+
+  test("skip ≠ green: ok:true with 0 assertions scores 0", () => {
+    const c = m2Runs(input({ treeRun: { ok: true, dir: "d", testsPass: 0, testsFail: 0 } }));
+    assert.equal(c.score, 0);
+    assert.match(c.evidence, /skip is not green/);
+  });
+
+  test("skip ≠ green: skipped flag scores 0 even if ok:true", () => {
+    const c = m2Runs(input({ treeRun: { ok: true, skipped: true, testsPass: 2, testsFail: 0, dir: "d" } }));
+    assert.equal(c.score, 0);
+    assert.match(c.evidence, /skip is not green/);
+  });
+
+  test("skip ≠ green: ok:true without testsPass is skip-shaped", () => {
+    assert.equal(m2Runs(input({ treeRun: { ok: true } })).score, 0);
+    assert.equal(treeRunLooksSkipped({ ok: true }), true);
+  });
+
+  test("treeRunToMakerEvidence: skip-only TAP is not ok", () => {
+    const ev = treeRunToMakerEvidence({
+      ok: true,
+      dir: "d",
+      compile: { ok: true, dir: "d", checked: 1, passed: 1, failed: 0, skipped: 0, verdicts: [] },
+      tests: [
+        {
+          file: "tests/oracle.spec.ts",
+          compile: "pass",
+          tests: { pass: 0, fail: 0 },
+          run: "skip",
+          detail: "no entry",
+        },
+      ],
+      run: { kind: "cli-tool", run: "skip", detail: "no package.json main" },
+    } as TreeRunOutcome);
+    assert.equal(ev!.ok, false);
+    assert.equal(ev!.skipped, true);
+    assert.equal(ev!.testsPass, 0);
+  });
+
+  test("treeRunToMakerEvidence: real TAP pass stays ok", () => {
+    const ev = treeRunToMakerEvidence({
+      ok: true,
+      dir: "d",
+      compile: { ok: true, dir: "d", checked: 1, passed: 1, failed: 0, skipped: 0, verdicts: [] },
+      tests: [
+        {
+          file: "tests/oracle.spec.ts",
+          compile: "pass",
+          tests: { pass: 3, fail: 0 },
+          run: "pass",
+        },
+      ],
+      run: { kind: "cli-tool", run: "pass", entry: "src/generated.ts" },
+    } as TreeRunOutcome);
+    assert.equal(ev!.ok, true);
+    assert.equal(ev!.skipped, false);
+    assert.equal(ev!.testsPass, 3);
   });
 });
 
@@ -446,14 +567,14 @@ describe("M7 learning", () => {
   }
 
   test("no prior same-domain run scores 0 (no claim without data)", () => {
-    const c = m7Learning(input({ project: greenProject(), treeRun: { ok: true }, journey: { outcome: "converged", cycles: 1, budget: 3 }, prior: null }));
+    const c = m7Learning(input({ project: greenProject(), treeRun: { ok: true, testsPass: 1, testsFail: 0 }, journey: { outcome: "converged", cycles: 1, budget: 3 }, prior: null }));
     assert.equal(c.score, 0);
     assert.match(c.evidence, /no prior/);
   });
 
   test("M1+M2+M3 ≥ prior same-domain run scores 1", () => {
     const c = m7Learning(
-      input({ project: greenProject(), treeRun: { ok: true }, journey: { outcome: "converged", cycles: 1, budget: 3 }, prior: { m1: 1, m2: 0, m3: 1 } }),
+      input({ project: greenProject(), treeRun: { ok: true, testsPass: 1, testsFail: 0 }, journey: { outcome: "converged", cycles: 1, budget: 3 }, prior: { m1: 1, m2: 0, m3: 1 } }),
     );
     assert.equal(c.score, 1);
     assert.match(c.evidence, /3 ≥ prior same-domain 2/);
@@ -461,19 +582,19 @@ describe("M7 learning", () => {
 
   test("equality with the prior run still passes (run 2 ≥ run 1)", () => {
     const c = m7Learning(
-      input({ project: greenProject(), treeRun: { ok: true }, journey: { outcome: "converged", cycles: 1, budget: 3 }, prior: { m1: 1, m2: 1, m3: 1 } }),
+      input({ project: greenProject(), treeRun: { ok: true, testsPass: 1, testsFail: 0 }, journey: { outcome: "converged", cycles: 1, budget: 3 }, prior: { m1: 1, m2: 1, m3: 1 } }),
     );
     assert.equal(c.score, 1);
   });
 
   test("regression below the prior same-domain run scores 0", () => {
     const p = project({
-      // M1: tree misses the capability → 0; M3: red gate → 0; M2 still runs.
+      // M1: tree misses the capability → 0; M3: red gate → 0; M2 still runs (assertions existed).
       generatedTree: [treeFile("src/other.ts", "export function other() {}")],
       phases: [phase(6, { passed: false, unmet: ["p6-brief-fit"] })],
     });
     const c = m7Learning(
-      input({ project: p, corpus: { kind: "library", expectedCapabilities: ["ledger"] }, treeRun: { ok: true }, journey: { outcome: "keyless", cycles: 0, budget: 3 }, prior: { m1: 1, m2: 1, m3: 1 } }),
+      input({ project: p, corpus: { kind: "library", expectedCapabilities: ["ledger"] }, treeRun: { ok: true, testsPass: 1, testsFail: 0 }, journey: { outcome: "keyless", cycles: 0, budget: 3 }, prior: { m1: 1, m2: 1, m3: 1 } }),
     );
     assert.equal(m1Substance(input({ project: p, corpus: { kind: "library", expectedCapabilities: ["ledger"] } })).score, 0);
     assert.equal(c.score, 0);
@@ -560,6 +681,50 @@ describe("scoreMaker card", () => {
     });
     assert.equal(c.total, 9);
     assert.equal(c.mean, 1);
+  });
+
+  test("stub leftover jobs cannot land a 9/9 product-complete card", () => {
+    const stub = `export function runAlpha(input: unknown): { ok: boolean } {
+  void input;
+  throw new Error("TODO(E-15) stub: implement job alpha");
+}`;
+    const p = project({
+      generatedTree: [treeFile("src/jobs/alpha.ts", stub)],
+      phases: [phase(6, { passed: true })],
+      lastTest: { ok: true, detail: "verify pass", label: "tested", evidenceHash: "deadbeef1234" },
+    });
+    const c = card({
+      project: p,
+      corpus: { kind: "library", expectedCapabilities: ["alpha"] },
+      treeRun: { ok: true, dir: "d", testsPass: 2, testsFail: 0 },
+      journey: { outcome: "converged", cycles: 1, budget: 3 },
+      handover: { emitted: true, deployMd: true, oracleSpec: true, oracleSpecBytes: 4200 },
+      prior: { m1: 1, m2: 1, m3: 1 },
+      budget: { used: 1, budget: 3 },
+      stop: { onTime: true, refused: false, loud: false },
+    });
+    assert.ok(c.total < 9, `stub jobs must not score product-complete, got ${c.total}/9`);
+    assert.equal(c.criteria.M1.score, 0);
+  });
+
+  test("skip treeRun cannot land M2 green on an otherwise 9/9 shape", () => {
+    const p = project({
+      generatedTree: [treeFile("src/ledger.ts", "export function ledgerTotals() {}")],
+      phases: [phase(6, { passed: true })],
+      lastTest: { ok: true, detail: "verify pass", label: "tested", evidenceHash: "deadbeef1234" },
+    });
+    const c = card({
+      project: p,
+      corpus: { kind: "library", expectedCapabilities: ["ledger"] },
+      treeRun: { ok: true, dir: "d", testsPass: 0, testsFail: 0, skipped: true },
+      journey: { outcome: "converged", cycles: 1, budget: 3 },
+      handover: { emitted: true, deployMd: true, oracleSpec: true, oracleSpecBytes: 4200 },
+      prior: { m1: 1, m2: 1, m3: 1 },
+      budget: { used: 1, budget: 3 },
+      stop: { onTime: true, refused: false, loud: false },
+    });
+    assert.equal(c.criteria.M2.score, 0);
+    assert.ok(c.total < 9);
   });
 
   test("deterministic keyless floor lands the honest low card", () => {

@@ -6,10 +6,13 @@
 # an earlier one fails, so one invocation reports the whole picture):
 #   1. typecheck   npm run typecheck                        (tsc --noEmit)
 #   2. lint        npm run lint                             (eslint .)
-#   3. tests       scripts leg, then the src/lib suite ("lib suite") — same
+#   3. gaps        node scripts/check-assertion-gaps.mjs    (T-17 assertion-gap
+#                  lint — tautological assertions + zero-assertion tests; exits
+#                  1 on findings, and its exit is folded into the verdict)
+#   4. tests       scripts leg, then the src/lib suite ("lib suite") — same
 #                  order and commands as `npm test`, so gate.sh stays honest
 #                  about the chain npm test `&&`-s together
-#   4. build       npm run build                            (vite build +
+#   5. build       npm run build                            (vite build +
 #                  db:migrate; slowest and least diagnostic, so it runs last)
 #
 # --double  Re-run both test legs a second time in the same invocation.
@@ -21,7 +24,7 @@
 #
 # Exit codes:
 #   0  every gate green (skips are allowed and reported, never silently)
-#   1  a gate hard-failed (a test failed both runs, or typecheck/lint/build red)
+#   1  a gate hard-failed (a test failed both runs, or typecheck/lint/gaps/build red)
 #   2  usage error
 #   3  flake detected under --double (run-1/run-2 disagreement)
 #
@@ -81,6 +84,7 @@ START="$(now_ms)"
 
 run typecheck "$TMP/typecheck.log" npm run typecheck > /dev/null
 run lint "$TMP/lint.log" npm run lint > /dev/null
+run assertionGaps "$TMP/assertionGaps.log" node scripts/check-assertion-gaps.mjs > /dev/null
 run testsScripts "$TMP/testsScripts.log" node --test "scripts/**/*.test.mjs" > /dev/null
 run testsLib "$TMP/testsLib.log" node --experimental-strip-types --test \
   "src/lib/*.test.ts" "src/lib/app-data/app-data.test.ts" "src/lib/auth/*.test.ts" > /dev/null
@@ -139,7 +143,7 @@ function legStats(log) {
 }
 
 const gates = {};
-for (const id of ["typecheck", "lint", "build"]) {
+for (const id of ["typecheck", "lint", "assertionGaps", "build"]) {
   gates[id] = { ok: exitOf(id) === 0, exit: exitOf(id), ms: msOf(id) };
 }
 gates.lint.problems =
@@ -171,7 +175,7 @@ for (const [id, log1, log2] of [["testsScripts", s1, s2], ["testsLib", l1, l2]])
 let code = 0;
 if (hardFails.length > 0) code = 1;
 else if (flakes.length > 0) code = 3;
-else if (!(gates.typecheck.ok && gates.lint.ok && gates.build.ok)) code = 1;
+else if (!(gates.typecheck.ok && gates.lint.ok && gates.assertionGaps.ok && gates.build.ok)) code = 1;
 
 const verdict = {
   ok: code === 0,
@@ -191,7 +195,7 @@ NODE
 code=$?
 
 # Diagnosis on stderr for any red gate (stdout stays JSON-only).
-for id in typecheck lint testsScripts testsLib build; do
+for id in typecheck lint assertionGaps testsScripts testsLib build; do
   ext="$(awk -F'\t' -v k="$id.exit" '$1 == k { print $2 }' "$RESULTS")"
   if [ "$ext" != "0" ]; then tail_log "$id" "$TMP/$id.log"; fi
 done

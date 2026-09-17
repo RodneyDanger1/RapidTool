@@ -1,0 +1,366 @@
+# taskuniverselog.md — RapidTool: the live task-status board
+
+**This file is a MANDATORY READ, first in order: `AGENTS.md` → `RESUME.md` → `taskuniverselog.md` → the dossier named in your task.**
+
+It is the single merged status board for **every task from every dossier** (`100`–`112`) plus the
+master plan (`104_factory_upgrade_plan.md`). `RESUME.md` records the session history and the hard
+rules; **this file maps the REMAINING WORK** — what is done, what is in flight, what is open, its
+size, where it lives, and what the next wave should pick up.
+
+**Snapshot written:** 2026-09-16 (~19:30 local) — right after wave `deleg_66c8d4c6` was dispatched,
+**before** its verification pass.
+**⚠️ STATUSES BELOW ARE SNAPSHOT VALUES — THE DISK IS TRUTH. VERIFY BEFORE TRUSTING.**
+
+---
+
+## 0. How a new AI session MUST use this file
+
+1. **Read order (mandatory):** `AGENTS.md` → `RESUME.md` (§0, §1 incl. §1.0/§1.4, §10, §5, then
+   §2/§3/§4/§6) → **this file** → the dossier named in your task.
+2. **Reproduce the four gates BEFORE changing anything:**
+   ```bash
+   cd "/c/Users/mnril/Desktop/RapidTool Main"
+   npm run typecheck ; npm run lint ; npm test ; npm run build
+   ```
+   Expected at the 2026-09-16 baseline: typecheck 0 · lint 0 (watch the warning) · scripts 195/195 +
+   src 1662/1662 · build 0. Counts GROW with new tests; a DROP is a regression **you** caused.
+3. **Verify any 🔄/✅ claim here against disk evidence before trusting it:**
+   - landing logs: `ls fixes/ | grep 216` (216a–216h are the current wave's),
+   - `git status --short -- src scripts` (62 modified at wave start; grows as lanes land),
+   - `grep` the cited anchor; line numbers drift — quote surrounding code, not bare numbers.
+   **If this file disagrees with disk, disk wins — correct this file in the same pass.**
+4. **Never run the full gate while agents are mid-edit.** Attribute a red gate by comparing the
+   failing file's mtime against the run window FIRST (RESUME §5.5 / §12 rule 4).
+5. **At EVERY wave boundary: append a changelog line (§7) and flip statuses for what actually
+   landed, each with its evidence path.** This file is how the next session carries on.
+
+**Evidence locations**
+- Fix landing logs: `fixes/NN_*.md` (216a, 216c exist; 216b-owed; 216d–216h = current wave).
+- Dossiers: `research/multiagent/NN_*.md` (100–112 + 104 master plan).
+- Live delegation transcripts: `C:\Users\mnril\AppData\Local\hermes\cache\delegation\live\deleg_66c8d4c6\task-{0..4}.log`.
+- Gate logs from the 2026-09-16 session: `C:\Users\mnril\_gates\*.log` (session-local, not durable).
+
+---
+
+## 1. Current snapshot (2026-09-16)
+
+- **Wave `deleg_66c8d4c6` (5 flash lanes) IN FLIGHT at write time.** Targets: T-04/T-05 (L1
+  scaffold) · T-07 + TA-2 (L2 headless / run-eval.mjs) · T-09/T-10/T-15 (L3 codegen / prompt-engine)
+  · 112 T1–T4 (L4 knowledge / judgment.ts) · UI subset of 111 + 110 §5 derivation (L5) · plus
+  `fixes/216b` recovery and the oracle-census README fix (L1).
+- **WAVE 1 CLOSED (2026-09-16 ~19:40) — all writers stopped; wave-boundary gates: ALL FOUR GREEN.**
+  `typecheck 0` (after parent repair: explicit `boolean` annotations on the TS7022 inference-cycle
+  lets at `codegen.server.ts:269-270`) · `lint 0 errors / 0 warnings` (the census fix consumed
+  `oracleRowLine` — the W1 lint warning is GONE) · `npm test` scripts **195/195** + src
+  **1675/1675** (L4's +13 tests) · `build 0`. `scaffold.test.ts` re-verified **32/32** after L1's
+  last unverified assertion edit; L3's 9 scratch probes deleted by parent.
+  **Lane outcomes:** L4 ✅ complete (T1–T4 core + `judgment.ts` + `judgment.test.ts`); L1 ⚠️
+  scaffold code landed + suite green, regression tests + `216b`/`216d` logs owed; L2 ⚠️ T-07
+  helpers unwired, TA-2 absent; L3 ⚠️ detectors unwired, T-10 absent; L5 ⚠️ 7/11 UI tasks +
+  110 §5 landed, `216h` complete. **W2 (repair/consolidation R1–R5) DISPATCHED — see §4.**
+- **WAVE 2 `deleg_cc446a2b` CLOSED (2026-09-16 ~20:11) — boundary gates: ALL FOUR GREEN.**
+  `typecheck 0` · `lint exit 0 / 4 warnings` (all = remnants of unfinished lane work: codegen
+  render-test unused imports ×2 → W3-L1; verify.server unused `failureLessonFromRecord`/`JsonLog` →
+  W3-L3) · `npm test` scripts **215/215** + src **1702/1702, 0 fail** · `build 0`. Parent repairs at
+  the boundary (recorded old→new where assertions changed): (a) R3's JSDoc `*/`-in-path syntax error
+  fixed (`codegen.server.test.ts`); (b) R2's flagged internal caller audited → `redTree:"probe"` on
+  the P6 candidate emit (`headless.ts:1619`) so a red trail cannot kill the repair loop; (c) six
+  test-authoring fixes across the two new suites (stub-records-verify, excerpt-vs-line assert,
+  one-tautology-one-finding, mask-count, walk-exit-2, json-path suffix); (d) lane scratch files
+  deleted. **Lane outcomes:** R1 ✅ complete (4 tests, `216b`+`216d` written); R2 ✅ **P0 pair
+  landed+verified** (T-07 wired + TA-2 seat, headless 83/83; `216e` text owed → W3-L2); R3 ✅ landed
+  (gates wired, T-10 fixed, codegen 86/86; `216f` text owed → W3-L1); R4 ⚠️ T1/T2 ~60% (types+engine
+  verified 73/73; T2 2b + pins → W3-L3); R5 ✅ checker + T-17 (20/20; T-14 → W3-L5, `216j` owed).
+- **WAVE 3 `deleg_124a1cf4` CLOSED (2026-09-16 ~20:44) — boundary gates: ALL FOUR GREEN.**
+  `typecheck 0` · `lint 0` (0 warnings after parent cleanup) · `npm test` scripts **220/220** +
+  src **1737/1737, 0 fail** · `build 0`. Parent repairs: rt-timeline ×2 (case-insensitive
+  `rtEventTailStatus`; `openSpans` counts only UNCLOSED starts), `exec.test.ts` scratch-dir
+  failure attributed as load-flake (solo 19/19; full re-run green), 4 unused imports removed,
+  strays deleted (`probe-l5-coverage.ts`, `_w3l1_recon.mjs`). **Lane outcomes:** L1 ⚠️ mapping
+  helpers landed UNWIRED (TA-15 still open → W4-L1); L2 ✅ **T-18 COMPLETE**; L3 ⚠️ wiring
+  done+green (95/95), pins owed → W4-L3; L4 ⚠️ TASK-06 ✅ + TASK-07 ✅ + TASK-11 module ✅;
+  L5 ⚠️ T-14 core landed. **W4 "product + Wave H primitives" DISPATCHED — per-lane notes at
+  `wave_plans/W4/lane-*.md` (§4).**
+- **WAVE 4 `deleg_95e01933` CLOSED (2026-09-16 ~21:15) — boundary gates: ALL FOUR GREEN +
+  `scripts/gate.sh` RUN GREEN for the first time (TA-23: JSON verdict `ok:true`; the run caught
+  and the parent fixed the exec.test.ts scratch-dir flake — 45s grace for T-18's npm-spawning
+  siblings; re-run green). Sweep: `typecheck 0` · `lint 0` · `test` scripts **220/220** + src
+  **1803/1803** · `build 0`. **Lane outcomes:** L1 ⚠️ doctor `jobScopeShortfall` + 3 tests land
+  (15/15); TA-15 rewire fully DESIGNED with probes but still UNWIRED; L2 ✅ **COMPLETE**
+  (`patch.ts` 21 + `policy.ts` 27 = 48/48; Wave H cores); L3 ⚠️ 4 lesson-loop pins + accrual pin
+  + rt-client fix + gate.sh step all landed/green (verify.server 19/19, report-intake 23/23);
+  `216i` half-filled; L4 ✅ **COMPLETE** (`cmd-palette.tsx` + `runtime-timeline-pane.tsx`,
+  additive, typecheck+eslint 0); L5 ⚠️ T-14 pins green (packet 47, gates 85) + 5 mop-up edits
+  on disk (verified green by the parent sweep); T-15 guard + harvest cap tests owed. **Next:
+  docs audit + README/remaining-waves push, then W5 (§4).**
+- **Wave-start gate baseline (reproduced 2026-09-16 19:11–19:13, no writers active):**
+  typecheck **0** · lint **0 errors / 1 warning** (the warning IS the census defect — assigned to L1)
+  · `npm test` **scripts 195/195 + src 1662/1662, 0 fail** · build **0**.
+- **Doctor truth at snapshot:** `autonomousSoftwareFactory: false`; coffeehouse tree inventory
+  `{stubs: 0, reexports: 5, real: 0}`. Exact command (the flag needs a dir):
+  `node scripts/rapidtool-cli.mjs doctor --tree research/eval-out/coffeehouse2home-property-ledger`
+- **Landed before the wave (this session's 216 series):** 109 T-01, T-02, T-03, T-04, T-05, T-06,
+  T-12 · 106 T-01, T-02, T-03, T-06, T-08, T-16 · 112 T7, T8, T10 · parent repairs (RESUME §2.4 /
+  §10 / §11).
+- **§6.3 attributable diffs RESOLVED (parent, 2026-09-16):** `scripts/run-eval.mjs` +32 = fixes/215
+  `deliveryKindOf` kind-routing; `src/components/console.tsx` +1 = `else if (res.note) setNotice(...)`
+  (dual-channel note surfacing, 208 series). Confirm visually at commit review.
+
+---
+
+## 2. Task universe (status legend)
+
+- ✅ landed — with evidence path · 🔄 **in flight in `deleg_66c8d4c6` — VERIFY before trusting** ·
+  ❌ open · ⚠️ partial / unverified clause.
+- Sizes are the dossiers' own (legends differ slightly): 106/112 = S ≤ ½–1 day · M 1–2 d · L 3+ d;
+  105 = S ≤ 1 d · M 2–5 d · L 1–2+ wk (single engineer, repo-familiar).
+
+### 2.1 dossier 106 — RapidTool deep analysis (`106_rapidtool_deep_analysis.md` §6)
+
+| # | Task | Size | Status | Evidence / note |
+|---|---|---|---|---|
+| T-01 | `stripCjsExportAssignments` removes the whole CJS construct | S | ✅ | 216 wave (§9); empirical before/after 2-of-4 → 0-of-4 unparseable |
+| T-02 | Parse-gate every tree file before it is written | M | ✅ | §10; compile-check +5 tests; gate on the write path |
+| T-03 | Atomic tree write (tmp + rename) | S | ✅ | §10 |
+| T-04 | Declared tree entry `src/generated.ts` — allow or refuse LOUDLY (no silent drop) | S | ✅ W2 | entry written; refusals → README + `warnings[]`; 4 regression tests (scaffold 36/36) |
+| T-05 | Emitted UI imports computed `treeEntryPath`, not the literal | S | ✅ W2 | computed entry pinned (3 shapes; tests) |
+| T-06 | Invalidate `lastTest`/`generatedSource` on tree change | S | ✅ | §10; `treeUpgraded` sets `lastTest: null`; one assertion updated old→new (recorded) |
+| T-07 | `emit` refuses/banners on an un-cleared red tree-run | M | ✅ W2 | wired: refuse-default / banner / probe; both branches + green control + no-partial-write pinned (4 tests); internal candidate emit = `probe` (parent audit) |
+| T-08 | Kill the tautological oracle floor | M | ✅ | 216b (Lane B + parent repair §2.4/§11) |
+| T-09 | Reject prose-in-code at synthesis | S | ✅ W2 | wired + refuses (RT_E_VALIDATION); 11/11 real-blob lines (residual gap closed); prose repair prompt; e2e pinned |
+| T-10 | Resolve the prompt contradiction (signatures-only vs implement-everything) | M | ✅ W2 | system + chunk prompts scoped per file; T-09/T-15/T-16 bans advertised |
+| T-11 | Gate lesson capture on a green seal; tag lessons with target probe | M | ❌ | engine/knowledge; **next-wave candidate** |
+| T-12 | Seat check: fail closed on latency + attestation + TTY | S | ⚠️ partial | harness half = TA-2 (W1 L2); latency/attestation clause unverified |
+| T-13 | Reconcile declared jobs vs materialised job nodes | S | ⚠️ doctor half ✅ W4 | `jobScopeShortfall()` + 3 tests (15/15); persist+print + engine log → W5-L1 |
+| T-14 | P7–P12: report "7 of 13 executed" honestly OR unblock them | M | ✅ W4 | core + 4 packet pins + 2 gates pins green (132/132); census 13/13/**8** (packet row excluded); rail line + `phase_coverage` key live |
+| T-15 | Ban `Math.random()` in generated code | S | ✅ W2 | wired + refuses; determinism repair prompt; masked-literal control pinned (e2e) |
+| T-16 | Assertion-gap regression (multi-line CJS fixture + parse asserts) | S | ✅ | Wave D |
+| T-17 | Assertion-gap LINT (tautology + zero-assertion tests repo-wide) | M | ✅ tooling W2 | `scripts/check-assertion-gaps.mjs` + 20/20 tests; repo scan = 1 finding (`rt-client.test.ts:121`); gate wiring + rt-client fix ✅ W4 (gate.sh runs it; first green run recorded) |
+| T-18 | `tree-run`: "parses" → "the product builds and tests" | L | ✅ W3 | treeRun runs the tree's own typecheck+test (additive `project` verdict); failing test can never be ok:true; unavailable toolchain = loud skip+note (no fabricated pass) |
+
+### 2.2 dossier 105 — adversarial critique (`105_plan_critique.md` §8; 23 TAs)
+
+| # | Task | Size | Status | Note |
+|---|---|---|---|---|
+| TA-1 | Verify the four `[lane-reported]` blockers (`100:37-41`) before tasking | S | ❌ | P1-02/03/04/06 leads |
+| TA-2 | Eval harness gets a real LABELLED seat (never bare `decidedBy:"human"`) | S | ✅ W2 | ApproveActor + autopilot default + `RT_HUMAN_SEAT_TOKEN` gate; CLI passes the human actor; 5 tests + CLI probe matrix; README-cli documented |
+| TA-3 | Extend T0.9 to EVERY published count + executable drift check | S | ❌ | README/AGENTS/README-cli counts; `fixtures` verb unlisted |
+| TA-4 | Co-land + assert P6 `reasoningEffort` | S | ❌ | = 104 T0.4 |
+| TA-5 | Provider-aware "configured" predicate (replace `isDeepSeekConfigured()` gates) | S/M | ❌ | Phase 1; must land WITH T1.5 |
+| TA-6 | 101 LOW-6/7/8 in the router (retryable codes, Retry-After, aborts, read-back) | S | ❌ | Phase 1 |
+| TA-7 | Provenance migration round-trip fixtures (real persisted projects) | S | ❌ | upgrades T1.3 |
+| TA-8 | Per-provider probe state on `doctor`; gate the "any provider" claim | S | ❌ | upgrades T1.5 |
+| TA-9 | Budget: enumerate surfaces by grep; state default cap policy | S | ❌ | upgrades T2.1 |
+| TA-10 | Unattended invocation surface — OR a written non-goal | M/L | ❌ | Phase 2/3 |
+| TA-11 | Oracle-strength audit (signal 9) as its own task | S | ❌ | Phase 3 |
+| TA-12 | Error-handling audit (signal 10) as its own task | S | ❌ | Phase 3 |
+| TA-13 | Split T3.3 into named signals; defer the rest explicitly | S | ❌ | plan hygiene |
+| TA-14 | Cross-family, order-swapped judge protocol | S/M | ❌ | Phase 3, needs T1.5 |
+| **TA-15** | **Emit a REAL multi-job product (P0-04)** | **M/L** | **❌ → W5-L1** | **Fully DESIGNED by W4-L1 with real probes: corpus binds record=5/flip=2/show=2, track=0/publish=0, 16 leftover → plan = 3 job files + 2 generated chunks; rewire + scaffold bridge/census + oracle-ctx still UNWIRED. Done-when unchanged. Maker-test critical path.** |
+| TA-16 | `verify-kind`: scratch copy + install + claim strikes (C1) | S/M | ❌ | same commit as T4.1 |
+| TA-17 | Git landing detail: `.gitignore`, init, A4 dependency | S | ❌ | inside T4.2 |
+| TA-18 | Apply-patch: preservation + conflict semantics | S | ❌ | inside T4.3 |
+| TA-19 | Sandboxing: task it OR strike it (explicit non-goal) | L | ❌ | Phase 4/5 |
+| TA-20 | Orphan pillars (arch-tools/algo-tools/vector/exportProfiles): wire or descope | S/M | ❌ | Phase 5 |
+| TA-21 | P9 deploy-artifact honesty (`template — not executed` marker) | S | ❌ | P1-06 |
+| TA-22 | Explicit deferral register (A12, A13 + unmapped) | S | ❌ | plan hygiene |
+| TA-23 | Plan hardening on 104 itself (done-whens, rules, `gate.sh` baseline) | S | ❌ | do before Phase 1 |
+
+### 2.3 dossier 109 — core bug hunt (`109_bughunt_core.md` §6)
+
+| # | Task | Size | Status | Note |
+|---|---|---|---|---|
+| T-01 | Machine harness requires a callable export (kills vacuous pass) | S | ✅ | 216a; "if only one thing lands, land this" |
+| T-02 | `identifierHits` over stripped source + must-hit-a-called-identifier | S | ✅ | 216a |
+| T-03 | Close the `=` guard hole (`>>=`/`<<=`/`>>>=`); delete dead arrow branch | S | ✅ | 216a; 6 regression rows |
+| T-04 | Blocklist `constructor`/`prototype`/`__proto__`; correct the claim | S | ✅ | 216a |
+| T-05 | Consume `module` param / support `module.exports = {…}`; diagnose zero exports | S | ✅ | 216a |
+| T-06 | Halving probe → loop HEADER only (body-shape → `extras` note) | S | ✅ | 216c |
+| T-07 | `intentLattice` frequency: canonical-stem BOTH sides | S | ❌ | `algorithms.ts:373` old anchor |
+| T-08 | CJS export regex: only real `module.exports.` (kill `my_module.exports.x` phantom) | S | ❌ | `algo-tools.ts:185` |
+| T-09 | Name + enforce harvest candidate cap; fix zero-budget note | S | ❌ | `harvest.ts:430` etc. |
+| T-10 | `KnowledgeStore.entries()` returns a defensive copy | S | ❌ | `knowledge.ts:301-304` |
+| T-11 | One stemmer, stated once (3 stemmers + unstemmed tokenize) | M | ❌ | overlaps 112 T9 |
+| T-12 | verify-safety regression block (6 assertions) | M | ✅ | 216a |
+| T-13 | Audit remaining text-level name guards (both directions) | M | ❌ | |
+| T-14 | Publish verify lane's real capability contract (prompt + docs) | S | ❌ | |
+| T-15 | Source-level determinism guard test | S | ❌ | |
+| T-16 | Commit probe evidence as `probe-109-core.ts` | S | ❌ | |
+
+### 2.4 dossier 112 — judgment + durable learning (`112_...md` §6)
+
+| # | Task | Size | Status | Note |
+|---|---|---|---|---|
+| T1 | Failure-signature ids (one row per repeated failure; `reproducedCount++`) | M | ✅ wiring W3 (95/95 green) | `failureSignature()` + `accrueReproducedCounts`; re-seal logs `lesson.reproduced`; pins → W4-L3 |
+| T2 | Counterexample-or-nothing (`refuse:no-proof`, no lesson) | S | ✅ wiring W3 (95/95 green) | `gatedFailureMint` at 3 sites; visible `lesson.refused` row; pins + `216i` → W4-L3 |
+| T3 | Pure `judgePhase(project, phase)` in NEW `judgment.ts` (no LLM) | M | ✅ (216g) | 276 lines, 7/7 tests incl. purity scan, all six rungs |
+| T4 | Thread store rows into the expansion prompt (`opts.proven` plumbing) | M | ⚠️ resolver landed; hops → W3 | `provenRowsFromStore()` exists; 4 call-site hops deferred (codegen ×3 + engine) |
+| T5 | `lesson --advise` / `--verify` read-only verbs | M | ❌ | |
+| T6 | Poisoning-guard predicates + tests (P2/P5/P6/P7) | S | ⚠️ | in dossier; NOT in RESUME §4's remaining list — verify before tasking |
+| T7 | `estimateTokens` cache key fix + collision pin | S | ✅ | 216c (`fnv1a` collision reproduced) |
+| T8 | `fusionRank`/`contiguousRun` cost fix + frozen golden | M | ✅ | 216c; golden byte-identical |
+| T9 | Stemmer `-ies → y` | S | ❌ | **MED-HIGH test risk — LAND ALONE, never bundled** |
+| T10 | `complexityOf` masked-interpolation honesty + `lineOf` single pass | S–M | ✅ | 216c |
+| T11 | Contradiction ⇒ mandatory supersede + `--consolidate` generator | M | ❌ | |
+| T12 | Document the judgment contract in `AGENT_GUIDE.md` | S | ❌ | docs last |
+
+### 2.5 master plan 104 — phases (`104_factory_upgrade_plan.md` §5/§7)
+
+| Phase | Tasks | Status | Corrected effort (105 §6) |
+|---|---|---|---|
+| 0 | T0.1 ✅ · T0.2 ✅ · T0.3 ✅ · T0.4 ❌ · T0.5 ✅ · T0.6 ✅ · T0.7 ✅ · T0.8 ✅ · T0.9 ✅ · T0.10 ❌ (**owner: user**) | 8/10 | ≈6–9 d total; ~1 d left + user key |
+| 1 | T1.1–T1.6 ❌ (adapters/router/provenance; upgrades TA-5…TA-8) | 0/6 | ≈12–19 eng-days |
+| 2 | T2.1, T2.2 ❌ (token ledger everywhere; budget pre-attempt) | 0/2 | ≈4–7 eng-days |
+| 3 | T3.1, T3.2 ❌ · T3.3 ❌ (pending 102 + TA-13) · T3.4 ❌ · T3.5 ✅-ish (one lying double found+fixed; sweep recorded) · T3.6 ❌ (`format:check`) | ~1/6 | ≈10–23 eng-days |
+| 4 | T4.1–T4.4 ❌ (verify-kind real install; git; apply-patch; resume) | 0/4 | ≈13–26 eng-days |
+| 5 | T5.1–T5.8 ❌ (streaming; review UI; eval verb; provenance fields; plugins; multi-language†; cassette; multi-tenant†) | 0/8 | ≈25–55 eng-days | 
+† T5.6/T5.8 are **product decisions**, not engineering tasks — move to the decision register.
+
+### 2.6 Wave H — competitor steals (`107_competitors_agentic.md`, `108_competitors_app_generators.md`; 18 tasks)
+
+🔄 W4-L2 landed the pure cores ✅ (`patch.ts` 21 tests + `policy.ts` 27 tests, 48/48); integration halves + T-107.2/T-107.5 → W5+. Named highlights: **T-107.1** `str_replace` patch primitive (unique-match refusal + graded fuzzy) · **T-107.2** provider registry + role tiers · **T-107.3** one-seam policy engine · **T-107.5** run-side acceptance fixtures + pass@k · **T-107.9** compaction constants · **T-107.10** sub-agent contract + mock-LLM E2E · **108-T1** in-place edit verb (dry-run + ledger attribution) · **108-T2** export registry → synthesis · **108-T3** precondition-vs-failure RT_E split · **108-T5** repair-budget + coded exhausted error · **108-T7** E2E-vs-running-instance feasibility spike. (11 named here; the rest live in the dossiers.)
+
+### 2.7 UI (`110_ui_audit_vs_competitors.md`, `111_ui_design_research.md`)
+
+- 111: **11 tasks (TASK-01…11)**. W1 L5 landed **7/11** (TASK-02/03/04/05/08/09 + TASK-07 partial:
+  tooltips done, 2 chip-jargon spots remain) + appended **110 §5** (`216h` complete). Remaining:
+  W3 landed TASK-06 ✅ (5/5; README drift 33→34 + `fixtures` + verify-kind claims fixed),
+  TASK-07 ✅ (both chips), TASK-11 module ✅ (28/28, parent-fixed); W4 landed **TASK-10 ✅ +
+  TASK-11 wiring ✅** (`cmd-palette.tsx` + `runtime-timeline-pane.tsx`, additive, typecheck 0);
+  **TASK-01 → W5.**
+- 110 §5 task list: 🔄 being DERIVED/APPENDED by W1 L5 (replaces the lost `_(pending)_`; derive from
+  110 §1–§4 only — never invent). Remainder + follow-on UI waves = **TBD after W1**.
+
+### 2.8 Housekeeping / owed
+
+| Item | Status |
+|---|---|
+| `fixes/216b_oracle_floor.md` | ✅ WRITTEN (W2-R1, 85 lines) |
+| `fixes/216d_scaffold_waveD.md` | ✅ COMPLETE (W2-R1, 88 lines) |
+| `fixes/216e_red_tree_emit_and_seat.md` | ✅ WRITTEN (W3-L2, 10.4 KB) |
+| `fixes/216f_synthesis_honesty.md` | ⚠️ text owed → W3-L1 |
+| `fixes/216g_judgment_learning.md` | ✅ complete |
+| `fixes/216h_ui_wave.md` | ✅ complete |
+| `fixes/216i_knowledge_integration.md` | ⚠️ pins ✅; body sections owed → W5-L2 |
+| `fixes/216j_honesty_tooling.md` | ⚠️ pins ✅; body owed → W5-L2 |
+| `fixes/216k_multi_job_emission.md` | ⚠️ recon+design ✅; body owed → W5-L1 |
+| `fixes/216l_tree_run_build_test.md` | ✅ WRITTEN (W3-L2, 14.4 KB) |
+| `fixes/216m_ui_wave2.md` | ✅ COMPLETE (W4-L4) |
+| `fixes/216n_wave_h_primitives.md` | ✅ COMPLETE (W4-L2) |
+| `scripts/check-assertion-gaps.mjs` (new) | ✅ works (20/20 tests); gate wiring + `rt-client.test.ts:121` fix → W4 |
+| lint warnings | ✅ RESOLVED (parent, W3 boundary: unused imports removed; lint = 0 warnings) |
+| RESUME §1 lint-warning nuance note | ❌ optional |
+| `110` §5 derivation | 🔄 W1 L5 |
+| `bash scripts/gate.sh` (TA-23) | ✅ FIRST REAL RUN, GREEN (2026-09-16; 6 gates; JSON verdict `ok:true`) |
+
+---
+
+## 3. Counts + effort model (computed 2026-09-16)
+
+- **Remaining unique items ≈ 70–90** (≈95 raw across dossiers, minus obvious double-numbering:
+  TA-2≈T-12 · TA-4≈T0.4 · 109 T-11≈112 T9 stemmer family).
+- **The dossiers' own math (105 §6 + §8.1):** master-plan Phases 1–5 ≈ **64–130 engineer-days**,
+  +8–16 for the TA upgrades, i.e. **≈3–6 engineer-months single-threaded** — plus Wave H (18)
+  and UI. That is the *full plan tail*, not the critical path.
+- **Wave-cadence estimate (how this project actually runs):** ≈2–3 more waves clear the P0/P1
+  honesty cluster + the acceptance path; ≈4–6+ more waves cover Wave H + Phases 3–5 + UI.
+- **Two finish lines — do not conflate:**
+  1. **Maker test** (friend-usable Coffeehouse2Home app): **TA-15 → T-18 → T-13/T-14 honesty →
+     fresh keyed run.** ≈2–3 waves + the user's key.
+  2. **`doctor` latch** (`autonomousSoftwareFactory: true`; 105 §8.1 critical path):
+     T0.7+T0.8+TA-2 ✅/🔄 → **T1.3+T1.4 → T2.1 → T3.1/T3.2 + TA-15 → fresh keyed run (T0.10)**.
+
+---
+
+## 4. Recommended NEXT WAVE (W2) — candidates (VERIFY after W1 closes)
+
+> Ownership is only valid once every W1 lane has stopped. Re-grep anchors before briefing.
+> Keep ≤5 lanes, disjoint files, flash-only, §3.0 guardrails verbatim, skeleton-first.
+
+> **W3 CLOSED (§1). W4 DISPATCHED 2026-09-16 ~20:50 — "product + Wave H primitives" (5 lanes;
+> each dispatch brief orders the lane to read its own `wave_plans/W4/lane-N.md` notes file FIRST —
+> parent-analyzed mini-task plans + anchors + traps + copy-paste verify commands).**
+1. **W4-L1 — TA-15 rewire + T-13 (THE product blocker)** (`codegen.server.ts`+test, `scaffold.ts`+test,
+   `doctor.ts`+test, `engine.ts`; log `fixes/216k`). Done-when: `reexports: 0, stubs: 0, real ≥ 3`
+   + ≥3 job modules pass their own oracle rows.
+2. **W4-L2 — Wave H primitives, cores only** (NEW `src/lib/patch.ts` = T-107.1 str_replace;
+   NEW `src/lib/policy.ts` = T-107.3; log `fixes/216n`). Integration halves → W5.
+3. **W4-L3 — lesson-loop pins + T-17 wiring** (`verify.server.test.ts`, `report-intake.test.ts`,
+   `rt-client.test.ts:121` fix, `scripts/gate.sh` step; completes `216i`).
+4. **W4-L4 — UI finish** (TASK-10 cmdk palette + TASK-11 timeline-pane wiring in `console.tsx`;
+   completes `216m`).
+5. **W4-L5 — T-14 pins + 109 mop-up ×5** (`packet.test.ts` pins; algorithms/algo-tools/harvest/
+   knowledge fixes; completes `216j`).
+
+> **W3 sketch (after W2):** TA-15 + T-13 (multi-job — THE product blocker; files free after R1/R3)
+> · T-18 (tree-run builds+tests; after R2) · T-11 · T4 hops · UI remainder (TASK-01/06/10/11) ·
+> 105/109 mop-up. Deferred beyond: Wave H, Phases 1–5, product decisions.
+
+Deferred to W3+: 105 standalones (TA-1/TA-3/TA-21/TA-23), 112 T5/T9/T11/T12, Wave H, Phases 1–5.
+
+---
+
+## 5. Owner (user) items
+
+- **T0.10 — fresh keyed eval run** (`npm run eval -- --keyed` family; needs a valid RapidTool
+  `DEEPSEEK_API_KEY`; `.env` holds a 35-char key whose liveness is unverified). Everything
+  quality-related ultimately rests on this.
+- Product decisions (later): T5.6 multi-language boundary; T5.8 server-side storage/multi-tenant.
+
+---
+
+## 6. Maintenance protocol (mandatory)
+
+1. Flip statuses **only with evidence** (command output / landing log / file:line).
+2. Add a §7 changelog line at every wave boundary: date · wave id · what landed · what changed
+   here · next wave.
+3. Never delete history from §7; append only.
+4. If a new dossier or task list lands, add its section here — this file must remain the single
+   merged board (do not fork status into other docs).
+5. Keep the snapshot header honest: bump "Snapshot written" whenever you edit.
+6. **Every wave dispatch: the parent pre-analyzes each lane's tasks and embeds a per-lane
+   mini-task plan in its brief** (standing user directive) — lanes start with an explicit
+   numbered plan, not a theme.
+7. **`hermes verify` LANDMINE (2026-09-16):** `.hermes/environment.json` now exists with the
+   auto-detected recipe whose test phase includes `npm run format` (= `prettier --write .`,
+   WRITE mode — it would reformat the whole tree). The parent's edit to remove that step was
+   BLOCKED (protected agent-instruction file; no user consent — correctly so). **Do NOT run
+   `hermes verify` as-is.** Either obtain user approval to neutralize the manifest (remove the
+   format step) or delete `.hermes/`. `.hermes/` is an untracked artifact — include it in
+   review-before-commit. RESUME §5.2 remains correct until this is resolved.
+
+---
+
+## 7. Changelog
+
+- **2026-09-16** — file created (parent, post-W1 dispatch, pre-W1 verification). Contains the
+  merged universe of 106 (18) + 105 (23) + 109 (16) + 112 (12) + 104 phases + Wave H (18) + UI
+  boards with snapshot statuses. Next: verify W1 (`deleg_66c8d4c6`) landings, four gates, then
+  dispatch W2 per §4.
+- **2026-09-16 (later, mid-wave)** — L2 capped mid-edit (`final status=completed` but summary:
+  "incomplete, ran out of iteration budget"). Verified by parent: T-07 machinery landed UN-WIRED
+  (`headless.ts:1096-1210`, 0 callers); TA-2 untouched; `headless.test.ts` untouched; `fixes/216e`
+  skeleton only; `headless.ts` typechecks clean. W2 revised to include the P0 repair lane (§4).
+- **2026-09-16 (wave 1 close)** — W1 `deleg_66c8d4c6` verified: L4 complete; L1/L2/L3/L5 partials
+  (rows updated); parent repaired the last 2 typecheck errors (boolean annotations, zero behavior
+  change) → **all four gates GREEN on the frozen tree** (0 / 0+0w / 195+1675 / 0). W2 repair wave
+  R1–R5 dispatched (§4).
+- **2026-09-16 (wave 2 close)** — W2 `deleg_cc446a2b` verified: R1 ✅, R2 ✅ (P0 pair), R3 ✅,
+  R5 ✅; R4 ⚠️ 60%. Parent boundary repairs (JSDoc fix, `redTree:"probe"` audit, six test fixes,
+  cleanup) → **all four gates GREEN** (0 / 0e+4w / 215+1702 / 0). Lint warnings assigned to W3-L1/L3.
+  W3 "product wave" dispatched with per-lane mini-task plans (§4).
+- **2026-09-16 (wave 3 close + wave 4 dispatch)** — W3 `deleg_124a1cf4` verified: **T-18 ✅
+  COMPLETE** (the deepest honesty upgrade: a tree failing its own `npm test` can never be
+  `ok:true`); TA-15 mapping helpers landed but UNWIRED; T2 wiring green (95/95) unpinned; T-14
+  core landed; UI TASK-06/07 + TASK-11 module landed; README-cli verb-count drift fixed
+  (33→34 + `fixtures`). Parent boundary repairs (rt-timeline ×2, exec-flake attribution,
+  import cleanup, strays) → **all four gates GREEN** (0 / 0 / 220+1737 / 0; lint back to
+  **0 warnings**). W4 dispatched with **per-lane notes files** (`wave_plans/W4/lane-*.md` —
+  standing user directive: every lane reads its own plan).
+- **2026-09-16 (wave 4 close)** — W4 `deleg_95e01933` verified: **L2 ✅ `patch.ts`+`policy.ts`
+  (48/48), L4 ✅ palette + timeline pane, T-14 ✅ pinned, lesson-loop pins ✅, rt-client fixed,
+  gate.sh wired**; L1's TA-15 rewire fully designed (probes included) but still UNWIRED; L5's
+  5 mop-up edits verified green by the boundary sweep (their new tests partially owed).
+  Parent boundary: exec.test.ts flake fixed (45s grace, T-18 rationale), all four gates GREEN
+  (0 / 0 / 220+1803 / 0) + **gate.sh first-ever GREEN run**. Next: codebase audit + README/
+  remaining-waves docs + push, then W5 dispatch.

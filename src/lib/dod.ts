@@ -44,8 +44,20 @@ function briefHasVocabulary(brief: string): boolean {
 const hasArtifact = (p: Project, phase: number, kind: string): boolean =>
   (p.artifacts ?? []).some((a) => a.phase === phase && a.kind === kind);
 
-const phaseComplete = (p: Project, phase: number): boolean =>
-  (p.phases ?? []).some((r) => r.id === phase && r.status === "complete");
+/** 216 (T0.8 — actor-truthful HITL probe): the old `phaseComplete` asked only
+ *  whether the phase RECORD was complete, so four criteria asserting "HITL
+ *  approved" were satisfied by ANY machine approval — the claim was about a
+ *  person, the test was about a record (the self-referential-criteria bug).
+ *  This reads the DECISION LEDGER and returns who actually approved, so a
+ *  criterion can assert exactly what was verified. Strictly stronger than the
+ *  record check: a completed phase with no ledger row now fails. */
+const approvalActor = (p: Project, phase: number): "human" | "autopilot" | null => {
+  const row = (p.decisions ?? []).find(
+    (d) => d.phase === phase && d.decision === "approve",
+  );
+  return row ? row.decidedBy : null;
+};
+const approved = (p: Project, phase: number): boolean => approvalActor(p, phase) !== null;
 
 const kindsPresent = (p: Project, kinds: string[]): boolean => {
   const present: Set<string> = new Set((p.memory ?? []).map((m) => m.kind));
@@ -77,15 +89,62 @@ export type ArchTraceRow = {
 export type ArchTrace = {
   /** true when generatedTree is a non-empty array (tree mode). */
   present: boolean;
+  /**
+   * true when the tree probe did not run (absent tree = legacy single-module).
+   * Skip is NOT product-complete: `runGate` p6-arch still passes so the keyless
+   * floor is not hard-broken, but `archProductComplete` is false.
+   */
+  skipped: boolean;
   /** Capability → files mapping (tree mode; empty in legacy mode). */
   rows: ArchTraceRow[];
   /** Capability labels with NO tree file carrying their identifiers. */
   missing: string[];
-  /** Tree file paths byte-identical to a deterministic template stub. */
+  /** Tree file paths that are template stubs, TODO(E-15) stubs, or reexport-only. */
   stubFiles: string[];
   /** Human note: "tree (<n> files)" or "single-module (legacy path)". */
   note: string;
 };
+
+/**
+ * Canonical leftover-job / floor markers. A file carrying these is not a
+ * product implementation — never invent flip/record/show/publish bodies to
+ * "fix" this; the honest bar is to refuse product-complete on stubs.
+ */
+export function isStubSource(source: string): boolean {
+  if (typeof source !== "string") return true;
+  if (source.includes("TODO(E-15)")) return true;
+  if (/throw\s+new\s+Error\s*\(\s*(['"`])TODO\b/i.test(source)) return true;
+  if (isReexportOnlySource(source)) return true;
+  return false;
+}
+
+/** True when, after comment strip, every statement is `export … from` / `import … from`. */
+export function isReexportOnlySource(source: string): boolean {
+  const code = String(source ?? "")
+    .replace(/\/\*[\s\S]*?\*\//g, "\n")
+    .replace(/\/\/[^\n]*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!code) return false;
+  const stmts = code
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (stmts.length === 0) return false;
+  const reexport =
+    /^(export\s+(\*|\{[\s\S]*?\})\s+from\s+['"][^'"]+['"]|import\s+.+\s+from\s+['"][^'"]+['"])$/;
+  return stmts.every((st) => reexport.test(st));
+}
+
+/** Product-complete tree: present, not skipped, no missing caps, no stub files. */
+export function archProductComplete(t: ArchTrace): boolean {
+  return (
+    t.present === true &&
+    t.skipped !== true &&
+    t.missing.length === 0 &&
+    t.stubFiles.length === 0
+  );
+}
 
 /** Primary declared name a typeSignature line demands: `export function
  * createBoard(…)` → createBoard; `export type Order = …` → Order; bare
@@ -174,9 +233,11 @@ export function archTrace(p: Project): ArchTrace {
   const tree = Array.isArray(p.generatedTree) ? p.generatedTree : [];
   if (tree.length === 0) {
     // Deterministic/keyless runs and refused keyed synthesis that landed the
-    // single-module floor carry no tree — pass vacuously (legacy path).
+    // single-module floor carry no tree — p6-arch still PASSES so the keyless
+    // floor is not hard-broken, but this is a SKIP, not product-complete.
     return {
       present: false,
+      skipped: true,
       rows: [],
       missing: [],
       stubFiles: [],
@@ -185,7 +246,9 @@ export function archTrace(p: Project): ArchTrace {
   }
   const files = tree.filter((f) => f && typeof f.source === "string" && f.source.length > 0);
   const stubs = templateStubTexts(p);
-  const stubFiles = files.filter((f) => stubs.has(f.source)).map((f) => f.path);
+  const stubFiles = files
+    .filter((f) => stubs.has(f.source) || isStubSource(f.source))
+    .map((f) => f.path);
   const rows: ArchTraceRow[] = [];
   const missing: string[] = [];
   for (const cap of archCapabilities(p)) {
@@ -204,6 +267,7 @@ export function archTrace(p: Project): ArchTrace {
   }
   return {
     present: true,
+    skipped: false,
     rows,
     missing,
     stubFiles,
@@ -282,8 +346,8 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     },
     {
       id: "p4-approved",
-      criterion: "P4 HITL approved — phase record complete",
-      probe: (p) => phaseComplete(p, 4),
+      criterion: "P4 approved — decision ledger records the approver (human or autopilot)",
+      probe: (p) => approved(p, 4),
     },
   ],
   5: [
@@ -294,8 +358,8 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     },
     {
       id: "p5-complete",
-      criterion: "P5 HITL approved — phase record complete",
-      probe: (p) => phaseComplete(p, 5),
+      criterion: "P5 approved — decision ledger records the approver (human or autopilot)",
+      probe: (p) => approved(p, 5),
     },
   ],
   6: [
@@ -378,10 +442,11 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       // the capability's stemmed identifier, and no tree file may be
       // byte-identical to a deterministic template stub (the engine floor).
       // An absent tree — deterministic/keyless runs, or a refused keyed
-      // synthesis that landed the single-module floor — passes vacuously with
-      // the "single-module (legacy path)" note: the keyless floor must never
-      // be broken by the tree probe. archTrace() carries the reqTrace detail
-      // (mapping rows / missing / stub files) the engine's P6 stamp surfaces.
+      // synthesis that landed the single-module floor — still PASSES this
+      // probe so the keyless floor is not hard-broken. That pass is a SKIP,
+      // not product-complete: archProductComplete() is false, and TODO(E-15)
+      // / reexport-only tree files join template stubs in stubFiles (fail).
+      // archTrace() carries the reqTrace detail the engine's P6 stamp surfaces.
       id: "p6-arch",
       criterion:
         "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub (absent tree = single-module legacy path)",
@@ -415,8 +480,8 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     },
     {
       id: "p8-complete",
-      criterion: "P8 HITL approved — phase record complete",
-      probe: (p) => phaseComplete(p, 8),
+      criterion: "P8 approved — decision ledger records the approver (human or autopilot)",
+      probe: (p) => approved(p, 8),
     },
   ],
   9: [
@@ -427,8 +492,8 @@ export const DOD: Record<PhaseId, GateItem[]> = {
     },
     {
       id: "p9-complete",
-      criterion: "P9 HITL approved — phase record complete",
-      probe: (p) => phaseComplete(p, 9),
+      criterion: "P9 approved — decision ledger records the approver (human or autopilot)",
+      probe: (p) => approved(p, 9),
     },
   ],
   10: [

@@ -1,6 +1,7 @@
 // ---------------------------------------------------------------------------
 // verify.server.test.ts — E-08 (A4-b) oracle-seeding + pinned-id tests for the
-// machine verify seam (fixes/159 F3).
+// machine verify seam (fixes/159 F3) + the 109 T-12 verify-safety regression
+// block appended at the end (fixes/216a: findings C-01/C-04/C-05/C-07).
 //
 // The E-08 seam (dod.ts:706-728 oracleToCaseSeeds/missingOracleCaseIds) was
 // DEAD: no production caller fed the A7 oracle rows into the generation
@@ -17,6 +18,11 @@
 // The LLM is faked via a globalThis.fetch stub (completeDeepSeek → fetch);
 // no network, no real key needed — and the pinned-id refusal fires before
 // runCases is ever reached (runner-independent).
+//
+// 216i (112 T1/T2) appends the lesson-loop block at the end: an unanchored
+// refusal is VISIBLE (lessonRefused, no lesson row), an anchored failure run
+// mints ONE signature-id row whose repeat re-derives the SAME id and accrues
+// `reproducedCount` through the consumer (verify.ts applyVerifyOutcome).
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -24,10 +30,21 @@ import {
   buildOracleCasesPrompt,
   droppedPinnedOracleIds,
   generateCases,
+  NO_CALLABLE_EXPORTS_REASON,
+  oracleBriefGrounded,
+  runCases,
+  sanitizeOracleExpression,
   verifyAndFixServer,
 } from "./verify.server.ts";
+import { runnerAvailable } from "./node-runner.server.ts";
 import { oracleToCaseSeeds } from "./dod.ts";
 import type { OracleTest } from "./types.ts";
+// 216i (112 T1/T2): the lesson-loop pins below consume the client-safe
+// consumer half (verify.ts applyVerifyOutcome) over a real seeded project.
+import { applyVerifyOutcome } from "./verify.ts";
+import { seedProject } from "./testing/fixtures.ts";
+
+const available = runnerAvailable();
 
 const SOURCE = "const x = 1;";
 
@@ -102,15 +119,18 @@ type CapturedCall = { url: string; prompt: string };
 
 function chatReply(payload: unknown) {
   const content = typeof payload === "string" ? payload : JSON.stringify(payload);
-  return {
-    status: 200,
-    ok: true,
-    json: async () => ({
+  // A REAL Response — not a hand-rolled { ok, status, json() } object cast to
+  // Response. Production reads the body with res.text() and parses defensively
+  // (216 T0.6, the non-JSON-200 guard) exactly as the real API requires, so a
+  // stub that implements only .json() misrepresents the type it claims to be.
+  return new Response(
+    JSON.stringify({
       choices: [{ message: { content } }],
       model: "deepseek-v4-flash",
       usage: { prompt_tokens: 10, completion_tokens: 10 },
     }),
-  } as unknown as Response;
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
 }
 
 /**
@@ -248,6 +268,7 @@ describe("generateCases E-08 wiring (real path, fetch-stubbed)", () => {
       if (res.ok) {
         const ids = res.cases.map((c) => c.id);
         for (const id of ORACLE_IDS) assert.ok(ids.includes(id), `pinned ${id} kept`);
+        assert.equal("error" in res, false, "ok:true must not carry an error channel");
       }
       assert.equal(mock.calls.length, 1, "no repair retry needed");
       const prompt = mock.calls[0]!.prompt;
@@ -292,6 +313,7 @@ describe("generateCases E-08 wiring (real path, fetch-stubbed)", () => {
       assert.equal(res.ok, false);
       if (!res.ok) {
         assert.equal(res.reason, "error");
+        assert.equal(res.code, "RT_E_VALIDATION");
         assert.match(res.error ?? "", /orc-2/, "evidence names the dropped pinned row");
         assert.match(res.error ?? "", /refused/, "refusal is explicit, never a silent accept");
       }
@@ -335,6 +357,272 @@ describe("verifyAndFixServer E-08 refusal (dropped pinned id never reaches the l
       assert.match(outcome.evidence, /orc-2/);
       assert.match(outcome.evidence, /refused/);
       assert.equal(mock.calls.length, 2, "generation + one bounded repair retry, then refusal");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 109 T-12 — verify-safety regression block (findings C-01/C-04/C-05/C-07).
+// All four defects were live in a green suite: nothing ever pinned a
+// literal-only case, a shift assignment, a `constructor` escape, or a
+// `module.exports` module. Each assertion below goes red if its fix is
+// reverted; the two `pass` rows are the positive controls that go red if the
+// new gates over-reject. See fixes/216a for the landing log.
+// ---------------------------------------------------------------------------
+describe("109 T-12 — verify-safety regression block", () => {
+  it("T-01: a module that exports nothing can never mint a machine pass", { skip: !available }, async () => {
+    const res = await runCases("const helper = 1;", [
+      { id: "c1", expression: "({board:1}).board===1" },
+    ]);
+    // The expression itself evaluates TRUE — the export-inventory gate, not
+    // the case, is what refuses the pass (that is the whole finding).
+    assert.equal(res.results[0]?.pass, true);
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, NO_CALLABLE_EXPORTS_REASON);
+  });
+
+  it("T-01 control: an `exports.x =` module still machine-passes", { skip: !available }, async () => {
+    const res = await runCases("exports.add = (a, b) => a + b;", [
+      { id: "add", expression: "add(2,3) === 5" },
+    ]);
+    assert.equal(res.pass, true, `exports.add style must stay green: ${JSON.stringify(res)}`);
+    assert.equal(res.compileError, undefined);
+    assert.equal(res.results[0]?.pass, true);
+  });
+
+  it("T-05: a `module.exports = {…}` module machine-passes (reassignment folded back)", { skip: !available }, async () => {
+    const res = await runCases("module.exports = { add: (a, b) => a + b };", [
+      { id: "add", expression: "add(2,3) === 5" },
+    ]);
+    assert.equal(res.pass, true, `module.exports style must compile AND export: ${JSON.stringify(res)}`);
+    assert.equal(res.compileError, undefined);
+    assert.equal(res.results[0]?.pass, true);
+  });
+
+  it("T-03: shift assignments are rejected; comparisons and the arrow reason are exact", () => {
+    for (const expr of ["x >>= 1", "x <<= 1", "x >>>= 1"]) {
+      const chk = sanitizeOracleExpression(expr);
+      assert.equal(chk.ok, false, `${expr} must be rejected`);
+      if (!chk.ok) assert.equal(chk.reason, "assignment is not allowed");
+    }
+    for (const expr of ["x >= 1", "x <= 1", "x == 1", "x === 1"]) {
+      assert.equal(sanitizeOracleExpression(expr).ok, true, `${expr} must stay accepted`);
+    }
+    const arrow = sanitizeOracleExpression("a => a");
+    assert.equal(arrow.ok, false);
+    if (!arrow.ok) assert.equal(arrow.reason, "arrow functions are not allowed");
+    const parenArrow = sanitizeOracleExpression("(a) => a");
+    assert.equal(parenArrow.ok, false);
+    if (!parenArrow.ok) assert.equal(parenArrow.reason, "arrow functions are not allowed");
+  });
+
+  it("T-04: `constructor.constructor` escapes are rejected; the word in a string stays data", () => {
+    const escapes = [
+      "[].constructor.constructor('return console')().log('ORACLE_RESULT case-1 pass')",
+      "[].constructor.constructor('return process')().platform.length > 0",
+    ];
+    for (const expr of escapes) {
+      const chk = sanitizeOracleExpression(expr);
+      assert.equal(chk.ok, false, `${expr} must be rejected`);
+      if (!chk.ok) assert.equal(chk.reason, "disallowed construct (function/eval/global access)");
+    }
+    assert.equal(
+      sanitizeOracleExpression("typeof f === 'function'").ok,
+      true,
+      "a keyword inside a string literal is still data",
+    );
+  });
+
+  it("T-02: a literal-only case set cannot ground a function-exporting module", () => {
+    const literalOnly = [{ id: "c1", expression: "({board: 1}).board === 1" }];
+    const grounded = oracleBriefGrounded(
+      literalOnly,
+      "board ledger",
+      [],
+      "exports.board = () => ({ board: 1 });",
+    );
+    assert.equal(grounded.ok, false, "object-key data must not certify a module the case never calls");
+    if (!grounded.ok) assert.match(grounded.reason, /reference no brief noun or contract function/);
+    // Same set, no callable exports in the source: legacy behavior (nothing to
+    // tighten against — the runCases T-01 gate owns that shape), and a case
+    // that actually CALLS the export grounds normally.
+    assert.equal(oracleBriefGrounded(literalOnly, "board ledger", [], "const helper = 1;").ok, true);
+    const called = oracleBriefGrounded(
+      [{ id: "c1", expression: "createBoard({ board: 1 }).board === 1" }],
+      "board ledger",
+      [],
+      "exports.createBoard = (o) => o;",
+    );
+    assert.equal(called.ok, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 216i (112 T1/T2) — the lesson-loop pins. W3-L3 wired the record-gated mint
+// (verify.server.ts `gatedFailureMint`) and the consumer accrual (verify.ts
+// `applyVerifyOutcome`) but landed ZERO pins; these four assertions go red if
+// either half is reverted. See fixes/216i_knowledge_integration.md.
+//   • an anchor-less refusal mints NO lesson row and surfaces `lessonRefused`
+//     (the visible `lesson.refused` ledger row lands via the consumer);
+//   • an anchored failing run mints exactly ONE signature-id row;
+//   • a repeat re-derives the SAME id and the ONE stored row's
+//     `reproducedCount` accrues in place (never a forked twin);
+//   • the signature id is stable across repeats (run-tail drift — e.g. the
+//     iteration count — never forks the row) and distinct per anchor set.
+// ---------------------------------------------------------------------------
+
+/** The queued generation reply whose 3 pinned cases all fail against SOURCE:
+ *  `dispatch` is not defined in `const x = 1;`, so with maxIterations 1 the
+ *  loop returns on the first observed failure anchored to the 3 case ids. */
+const anchoredFailingRun = () =>
+  verifyAndFixServer(SOURCE, BRIEF, {
+    seeds: SEEDS,
+    pinnedOracleIds: ORACLE_IDS,
+    maxIterations: 1,
+  });
+
+describe("216i (112 T1/T2) — verify lesson loop (refusal · signature id · accrual)", () => {
+  it("T2: an anchor-less refusal mints NO lesson and surfaces lessonRefused (visible lesson.refused)", async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([dropOrc2, dropOrc2]);
+    try {
+      const outcome = await verifyAndFixServer(SOURCE, BRIEF, {
+        seeds: SEEDS,
+        pinnedOracleIds: ORACLE_IDS,
+      });
+      assert.equal(outcome.status, "error", "the generation refusal never becomes a run");
+      assert.equal(outcome.iterations, 0, "no case ever ran");
+      assert.equal(outcome.lesson, undefined, "an unprovable L3 row must never be minted");
+      const refusal = outcome.lessonRefused;
+      assert.ok(refusal, "the refusal envelope rides the outcome — never a silent no-op");
+      assert.equal(refusal.verdict, "refuse:no-proof");
+      assert.equal(refusal.code, "RT_E_VALIDATION");
+      assert.equal(refusal.log.event, "lesson.refused");
+      assert.match(refusal.reason, /no anchor/);
+      assert.match(refusal.log.detail, /no anchor/);
+      // Consumer half (verify.ts applyVerifyOutcome): the refusal lands as ONE
+      // visible ledger row and project memory gains NO lesson row.
+      const applied = applyVerifyOutcome(seedProject(), outcome);
+      assert.equal(
+        applied.memory.filter((m) => m.id.startsWith("lesson-")).length,
+        0,
+        "no lesson row for a refusal",
+      );
+      assert.ok(
+        applied.logs.some((l) => l.event === "lesson.refused" && l.detail.includes("no anchor")),
+        "lesson.refused is visible in the ledger",
+      );
+      assert.ok(!applied.logs.some((l) => l.event === "lesson.capture"), "no capture log on a refusal");
+      assert.ok(applied.logs.some((l) => l.event === "verify.fail"), "the outcome itself still records");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("T1: an anchored failing run mints exactly ONE signature-id lesson row", { skip: !available }, async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([allPinned]);
+    try {
+      const outcome = await anchoredFailingRun();
+      assert.equal(outcome.status, "failed", "3 failing pinned cases exhaust the run");
+      assert.equal(outcome.lessonRefused, undefined, "an anchored failure is provable — never refused");
+      const lesson = outcome.lesson;
+      assert.ok(lesson, "the failing run mints the L3 signature row");
+      assert.match(lesson.id, /^lesson-verify-failure-[0-9a-f]{8}$/, "id hashes the 216g signature");
+      assert.ok((lesson.tags ?? []).includes("L3"), "L3 tag present");
+      assert.ok((lesson.tags ?? []).includes("verify-failure"), "class tag present");
+      assert.match(lesson.text, /orc-1/, "the row text names a failing case anchor");
+      assert.equal(lesson.phase, 6, "P6 is the verify loop's phase");
+      // Consumer half: exactly ONE row lands in project memory.
+      const applied = applyVerifyOutcome(seedProject(), outcome);
+      assert.equal(applied.memory.filter((m) => m.id === lesson.id).length, 1, "ONE row, not a fork");
+      assert.ok(
+        applied.logs.some((l) => l.event === "lesson.capture" && l.detail.includes(lesson.id)),
+        "lesson.capture names the row",
+      );
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("T1: a repeat re-derives the SAME id and accrues reproducedCount on the ONE row", { skip: !available }, async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([allPinned, allPinned]);
+    try {
+      const first = await anchoredFailingRun();
+      const second = await anchoredFailingRun();
+      assert.equal(first.status, "failed");
+      assert.equal(second.status, "failed");
+      const firstLesson = first.lesson;
+      const secondLesson = second.lesson;
+      assert.ok(firstLesson, "the first run minted the row");
+      assert.ok(secondLesson, "the repeat minted the row again");
+      const id = firstLesson.id;
+      assert.equal(secondLesson.id, id, "the recurrence re-derives the SAME signature id");
+      const applied1 = applyVerifyOutcome(seedProject(), first);
+      const afterFirst = applied1.memory.filter((m) => m.id === id);
+      assert.equal(afterFirst.length, 1, "first landing stores ONE row");
+      assert.equal(afterFirst[0]?.reproducedCount, undefined, "a first landing carries no reproduction count");
+      const applied2 = applyVerifyOutcome(applied1, second);
+      const afterSecond = applied2.memory.filter((m) => m.id === id);
+      assert.equal(afterSecond.length, 1, "the twin folds into the stored row — never two rows");
+      assert.equal(afterSecond[0]?.reproducedCount, 1, "the reproduction accrues in place");
+      assert.ok(
+        applied2.logs.some((l) => l.event === "lesson.reproduced" && l.detail.includes("reproducedCount=1")),
+        "lesson.reproduced records the accrual",
+      );
+      assert.equal(
+        applied2.logs.filter((l) => l.event === "lesson.capture").length,
+        applied1.logs.filter((l) => l.event === "lesson.capture").length,
+        "a twin never re-captures (the first landing's capture row stays the only one)",
+      );
+      const applied3 = applyVerifyOutcome(applied2, first);
+      assert.equal(
+        applied3.memory.filter((m) => m.id === id)[0]?.reproducedCount,
+        2,
+        "the count increments, never resets",
+      );
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("T1: the signature id is stable across repeats and distinct for a different anchor set", { skip: !available }, async () => {
+    const restoreKey = withFakeKey();
+    // A: 1 iteration. B: 2 iterations (one fix round-trip) — same anchors,
+    // different run tail. C: a different pinned anchor set (only orc-2).
+    const mock = mockChat([allPinned, allPinned, "const x = 1;", onlyOrc2]);
+    try {
+      const one = await anchoredFailingRun();
+      const two = await verifyAndFixServer(SOURCE, BRIEF, {
+        seeds: SEEDS,
+        pinnedOracleIds: ORACLE_IDS,
+        maxIterations: 2,
+      });
+      assert.equal(one.status, "failed");
+      assert.equal(two.status, "failed");
+      assert.match(one.evidence, /after 1 iterations/, "run A's tail names its iteration count");
+      assert.match(two.evidence, /after 2 iterations/, "run B's tail differs");
+      const oneLesson = one.lesson;
+      const twoLesson = two.lesson;
+      assert.ok(oneLesson, "run A minted a row");
+      assert.ok(twoLesson, "run B minted a row");
+      assert.equal(twoLesson.id, oneLesson.id, "tail drift never forks the signature id");
+      const three = await verifyAndFixServer(SOURCE, BRIEF, {
+        seeds: SEEDS,
+        pinnedOracleIds: ["orc-2"],
+        maxIterations: 1,
+      });
+      assert.equal(three.status, "failed");
+      const threeLesson = three.lesson;
+      assert.ok(threeLesson, "run C minted a row for its own anchor set");
+      assert.notEqual(threeLesson.id, oneLesson.id, "a different failing anchor set is a different row");
     } finally {
       mock.restore();
       restoreKey();

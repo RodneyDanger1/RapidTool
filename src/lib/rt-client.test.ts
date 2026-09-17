@@ -115,10 +115,21 @@ test("heartbeat rows divert to the sidecar, never the row list", () => {
 
 test("setBusyProbe registers and clears without a window", () => {
   __rtResetForTests();
-  setBusyProbe(() => ({ projectId: "p", phase: 5, active: true, pause: false, startedAt: 1, lastAutoAt: 2 }));
+  let probeCalls = 0;
+  setBusyProbe(() => {
+    probeCalls += 1;
+    return { projectId: "p", phase: 5, active: true, pause: false, startedAt: 1, lastAutoAt: 2 };
+  });
   setBusyProbe(null);
-  // No assertion beyond: must not throw in Node.
-  assert.ok(true);
+  // T-17 (fixes/216i): the real expectation. Node has no window, so the probe
+  // is a pure latch — it is consulted ONLY by the browser-installed heartbeat
+  // (rt-client.ts installRtClient), so registering/clearing must never invoke
+  // it eagerly, never emit a telemetry row, and never touch the ring sidecars.
+  assert.equal(probeCalls, 0, "the probe is registered, never invoked without a window");
+  const snap = rtSnapshot();
+  assert.equal(snap.stats.rows, 0, "a probe register/clear round-trip emits no rows");
+  assert.equal(snap.ring.lastHeartbeat, null, "no heartbeat sidecar without the window install");
+  assert.equal(snap.crashSnapshot, null, "no crash sidecar from a probe round-trip");
 });
 
 test("rtSnapshot: stats + tail + no crash snapshot on a fresh ring", () => {
@@ -160,7 +171,6 @@ test("buildClientDiagnosis: honest none-detected floor on a clean ring", () => {
 
 test("buildClientDiagnosis: project wildRun + errors flow into the contract", () => {
   __rtResetForTests();
-  const now = 5_000;
   reportRt({
     level: "error",
     scope: "wild-step",

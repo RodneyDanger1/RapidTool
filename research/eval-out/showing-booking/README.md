@@ -1,13 +1,13 @@
 # House Showing Scheduler
 
-> machine-generated from RapidTool packet 9f7b40f0-80e9-4959-8007-8d7b006a1451; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet 8f046a94-f71d-4940-9d36-413af5751d31; regenerate, don't hand-edit.
 
 a house-showing scheduler: agents publish open-house and private-showing slots, buyers book slots with email confirmation, reminders, calendar sync stub, showing feedback form, per-property showing history
 
 ## Status
 - **Kind:** webapp — web app (kind webapp (inferred from brief/domain — no declared kind yet))
 - **Status:** complete · **Current phase:** P12 · **Model route:** deterministic
-- **Created:** 2026-09-08T13:38:49.651Z
+- **Created:** 2026-09-10T05:29:29.104Z
 
 ## What ships in this scaffold
 

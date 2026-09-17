@@ -8,14 +8,16 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   DOD,
+  archProductComplete,
   archTrace,
   gateArtifact,
+  isReexportOnlySource,
+  isStubSource,
   missingOracleCaseIds,
   oracleToCaseSeeds,
   readyFor,
   recordGateInto,
   runGate,
-  type ArchTrace,
 } from "./dod.ts";
 import { applyPhaseResult, emptyProject, rejectHitl, stampP6ReqTrace } from "./engine.ts";
 import { buildPhase6Module } from "./sandbox.ts";
@@ -404,6 +406,49 @@ describe("DoD property tests (E-26)", () => {
         );
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-14 (106 §6, finding F-11) — phase-coverage census on REAL runs. The rail
+// line lives in packet.ts, but the numbers are a function of the run: this
+// suite is where full and prefixed runs are cheap, so the census is pinned
+// against the engine's own artifacts (independent recount) — W4-L5.
+// ---------------------------------------------------------------------------
+
+describe("T-14 — phase coverage census on real runs", () => {
+  it("full 13-phase run: rail reports 13 of 13 / 8 P7–P12 artifacts", () => {
+    const done = fullRun();
+    assert.equal(done.status, "complete");
+    assert.ok(
+      done.packet.includes("Phase coverage: 13 of 13 phases executed / 8 artifacts from P7–P12"),
+      `full-run packet carries the real census (got ${JSON.stringify(
+        done.packet.match(/Phase coverage: [^\n]*/)?.[0] ?? null,
+      )})`,
+    );
+    // Independent recount from the artifact rows the census consumes — the
+    // stored kind "packet" row is NOT a phase deliverable and never counts.
+    const tail = done.artifacts.filter((a) => a.phase >= 7 && a.kind !== "packet").length;
+    assert.equal(tail, 8, "artifact rows independently agree with the rail's 8");
+  });
+
+  it("stopped 7-phase prefix: rail reports 7 of 13 / 0 — never the all-ran claim", () => {
+    const partial = runHeadless(seedProject(), ALL_PHASES.slice(0, 7));
+    assert.equal(
+      partial.phases.filter((r) => r.status === "complete").length,
+      7,
+      "prefix run really sealed P0–P6",
+    );
+    assert.ok(
+      partial.packet.includes("Phase coverage: 7 of 13 phases executed / 0 artifacts from P7–P12"),
+      `prefix packet carries the honest census (got ${JSON.stringify(
+        partial.packet.match(/Phase coverage: [^\n]*/)?.[0] ?? null,
+      )})`,
+    );
+    assert.ok(
+      !partial.packet.includes("13 of 13 phases executed"),
+      "a stopped run must never carry the all-ran claim",
+    );
   });
 });
 
@@ -883,12 +928,15 @@ describe("fixes/144 M2 — p6-arch probe over generatedTree (archTrace)", () => 
     assert.ok(!r.unmet.some((g) => g.id === "p6-arch"), "p6-arch must pass on the keyless floor");
     const t = archTrace(floor);
     assert.equal(t.present, false);
+    assert.equal(t.skipped, true, "absent tree is a skip, not product-complete");
+    assert.equal(archProductComplete(t), false, "skip ≠ product-complete");
     assert.equal(t.note, "single-module (legacy path)");
     assert.deepEqual(t.rows, []);
     // the promoted (keyed single-module) shape without a tree passes too
     const promoted = promote(fullRun());
     const rp = runGate(promoted, 6);
     assert.ok(!rp.unmet.some((g) => g.id === "p6-arch"));
+    assert.equal(archProductComplete(archTrace(promoted)), false);
   });
 
   it("keyless lattice path: job vocabulary maps to tree files when no spec exists", () => {
@@ -948,6 +996,41 @@ describe("fixes/144 M2 — p6-arch probe over generatedTree (archTrace)", () => 
     const t = archTrace(p);
     assert.deepEqual(t.missing, [], `both declared names must map: ${JSON.stringify(t.missing)}`);
     assert.equal(runGate(p, 6).pass, true);
+    assert.equal(t.skipped, false);
+    assert.equal(archProductComplete(t), true);
+  });
+
+  it("TODO(E-15) stub tree fails p6-arch (stub ≠ product-complete)", () => {
+    const stub = [
+      "export function createBoard(name: string) {",
+      '  throw new Error("TODO(E-15) stub: implement job createBoard");',
+      "}",
+    ].join("\n");
+    const p = archProject(archTree([{ path: "src/domain/board.ts", source: stub, hash: "h-stub", attempt: 0 }]));
+    const r = runGate(p, 6);
+    assert.ok(r.unmet.some((g) => g.id === "p6-arch"), "TODO(E-15) stub must fail p6-arch");
+    const t = archTrace(p);
+    assert.ok(t.stubFiles.includes("src/domain/board.ts"));
+    assert.equal(archProductComplete(t), false);
+    assert.equal(isStubSource(stub), true);
+  });
+
+  it("reexport-only leftover job fails p6-arch", () => {
+    const reexport = 'export { createBoard, addColumn } from "./host.ts";\n';
+    assert.equal(isReexportOnlySource(reexport), true);
+    const p = archProject(
+      archTree([{ path: "src/jobs/leftover.ts", source: reexport, hash: "h-re", attempt: 0 }]),
+    );
+    const r = runGate(p, 6);
+    assert.ok(r.unmet.some((g) => g.id === "p6-arch"), "reexport-only file must fail p6-arch");
+    const t = archTrace(p);
+    assert.ok(t.stubFiles.includes("src/jobs/leftover.ts"));
+    assert.equal(archProductComplete(t), false);
+  });
+
+  it("isStubSource pins real code as not a stub", () => {
+    assert.equal(isStubSource("export function createBoard() { return { id: 'b1' }; }"), false);
+    assert.equal(isReexportOnlySource("export function createBoard() { return 1; }"), false);
   });
 });
 

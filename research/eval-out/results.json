@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-09T02:16:22.226Z",
+  "generatedAt": "2026-09-10T06:05:29.683Z",
   "mode": "keyed",
   "corpusDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus",
   "entries": [
@@ -9,71 +9,92 @@
       "domain": "real-estate",
       "domainMatch": 1,
       "kind": "webapp",
-      "status": "complete",
+      "status": "dod",
       "mode": "keyed",
       "criteria": {
         "M1": {
           "score": 1,
-          "evidence": "tree 1 file(s); reqTrace: One shared Property Ledger record per property (ownership, address, status, full history) across brokerage, flipping, rentals, and field services->src/generated.ts | Real-estate CRM: contacts, buyer and seller leads, and a deal pipeline with stages->src/generated.ts | Showing slots (private showings and open houses) publishable from any listing, flip, or rental property; buyers book with email confirmation, reminders, calendar-sync stub, and per-property showing history with buyer feedback->src/generated.ts | Flip manager: acquisitions, renovation budgets with line items, contractor bids, flip project phases, job costing per property->src/generated.ts | Rental portfolio: leases, tenants, rent roll with payment records, maintenance requests, vacancy tracking, lease-renewal reminders->src/generated.ts | Field-ops suite: work orders raised from any property become crew task lists; crew time sheets roll into weekly payroll with rates and overtime; material/supply lists with purchase records and reorder flags->src/generated.ts | Cross-domain flows: work-order hours feed payroll and job cost; showings on flip or rental properties create CRM buyer leads; deals, flips, leases, and work orders accumulate on the shared ledger record->src/generated.ts"
+          "evidence": "tree 4 file(s); reqTrace: One shared Property Ledger record per property (ownership, address, status, full history) across brokerage, flipping, rentals, and field services->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Real-estate CRM: contacts, buyer and seller leads, and a deal pipeline with stages->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Showing slots (private showings and open houses) publishable from any listing, flip, or rental property; buyers book with email confirmation, reminders, calendar-sync stub, and per-property showing history with buyer feedback->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Flip manager: acquisitions, renovation budgets with line items, contractor bids, flip project phases, job costing per property->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Rental portfolio: leases, tenants, rent roll with payment records, maintenance requests, vacancy tracking, lease-renewal reminders->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Field-ops suite: work orders raised from any property become crew task lists; crew time sheets roll into weekly payroll with rates and overtime; material/supply lists with purchase records and reorder flags->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts | Cross-domain flows: work-order hours feed payroll and job cost; showings on flip or rental properties create CRM buyer leads; deals, flips, leases, and work orders accumulate on the shared ledger record->src/generated/chunk-0.ts,src/generated/create-flip-project.ts,src/generated/compute-rent-roll.ts,src/generated/check-reorder-flags.ts"
         },
         "M2": {
-          "score": 1,
-          "evidence": "treeRun ok (C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-out\\coffeehouse2home-property-ledger; tests 16 pass / 0 fail)"
+          "score": 0,
+          "evidence": "treeRun not ok — spec tests/oracle.spec.ts failed: test \"C:\\\\Users\\\\mnril\\\\AppData\\\\Local\\\\Temp\\\\rt-treerun-ZmsS18\\\\tests\\\\oracle.spec.ts\" failed"
         },
         "M3": {
-          "score": 1,
-          "evidence": "P6 journey converged after 1/3 cycle(s)"
+          "score": 0,
+          "evidence": "no iteration convergence: journey outcome \"failed\""
         },
         "M4": {
-          "score": 1,
-          "evidence": "lastTest \"tested\" + evidenceHash 16895818"
+          "score": 0,
+          "evidence": "machine verification missing: lastTest label=\"unlabeled\" + NO evidenceHash"
         },
         "M5": {
           "score": 1,
-          "evidence": "1 red gate record(s) (P7) surfaced loudly: sealedWithFailures flag + census log + warn gate.verdict"
+          "evidence": "no red DoD gate records — nothing to hide"
         },
         "M6": {
           "score": 1,
-          "evidence": "handover dir emitted with DEPLOY.md + oracle spec (18520b)"
+          "evidence": "handover dir emitted with DEPLOY.md + oracle spec (30055b)"
         },
         "M7": {
-          "score": 1,
-          "evidence": "M1+M2+M3 3 ≥ prior same-domain 3 (m1 1/m2 1/m3 1)"
+          "score": 0,
+          "evidence": "M1+M2+M3 1 < prior same-domain 2 — regression (m1 1/m2 1/m3 0)"
         },
         "M8": {
           "score": 1,
-          "evidence": "journey used 1/3 cycle(s) — inside budget"
+          "evidence": "journey used 3/3 cycle(s) — inside budget · cycle count only (no measured token usage)"
         },
         "M9": {
-          "score": 1,
-          "evidence": "run stopped on time, no refusal — nothing to shout"
+          "score": 0,
+          "evidence": "run did not stop on time (cap/overrun without terminal state)"
         }
       },
-      "total": 9,
-      "mean": 1,
+      "total": 4,
+      "mean": 0.4444,
       "baseline": "delivery ≈ 1/10, process ≈ 8/10 — 0 shipped modules across all six journeys; learning loop fires on a real keyed run for the first time (L2/L4/L5) but lesson content stays hollow (dossier 99)",
       "coverage": {
         "covered": {
           "One shared Property Ledger record per property (ownership, address, status, full history) across brokerage, flipping, rentals, and field services": [
-            "src/generated.ts"
+            "src/generated/chunk-0.ts",
+            "src/generated/create-flip-project.ts",
+            "src/generated/compute-rent-roll.ts",
+            "src/generated/check-reorder-flags.ts"
           ],
           "Real-estate CRM: contacts, buyer and seller leads, and a deal pipeline with stages": [
-            "src/generated.ts"
+            "src/generated/chunk-0.ts",
+            "src/generated/create-flip-project.ts",
+            "src/generated/compute-rent-roll.ts",
+            "src/generated/check-reorder-flags.ts"
           ],
           "Showing slots (private showings and open houses) publishable from any listing, flip, or rental property; buyers book with email confirmation, reminders, calendar-sync stub, and per-property showing history with buyer feedback": [
-            "src/generated.ts"
+            "src/generated/chunk-0.ts",
+            "src/generated/create-flip-project.ts",
+            "src/generated/compute-rent-roll.ts",
+            "src/generated/check-reorder-flags.ts"
           ],
           "Flip manager: acquisitions, renovation budgets with line items, contractor bids, flip project phases, job costing per property": [
-            "src/generated.ts"
+            "src/generated/chunk-0.ts",
+            "src/generated/create-flip-project.ts",
+            "src/generated/compute-rent-roll.ts",
+            "src/generated/check-reorder-flags.ts"
           ],
           "Rental portfolio: leases, tenants, rent roll with payment records, maintenance requests, vacancy tracking, lease-renewal reminders": [
-            "src/generated.ts"
+            "src/generated/chunk-0.ts",
+            "src/generated/create-flip-project.ts",
+            "src/generated/compute-rent-roll.ts",
+            "src/generated/check-reorder-flags.ts"
           ],
           "Field-ops suite: work orders raised from any property become crew task lists; crew time sheets roll into weekly payroll with rates and overtime; material/supply lists with purchase records and reorder flags": [
-            "src/generated.ts"
+            "src/generated/chunk-0.ts",
+            "src/generated/create-flip-project.ts",
+            "src/generated/compute-rent-roll.ts",
+            "src/generated/check-reorder-flags.ts"
           ],
           "Cross-domain flows: work-order hours feed payroll and job cost; showings on flip or rental properties create CRM buyer leads; deals, flips, leases, and work orders accumulate on the shared ledger record": [
-            "src/generated.ts"
+            "src/generated/chunk-0.ts",
+            "src/generated/create-flip-project.ts",
+            "src/generated/compute-rent-roll.ts",
+            "src/generated/check-reorder-flags.ts"
           ]
         },
         "missing": []
@@ -81,21 +102,19 @@
       "notes": {
         "approvedGates": [
           "P4",
-          "P5",
-          "P8",
-          "P9"
+          "P5"
         ],
-        "treeRunOk": true,
-        "journey": "converged",
-        "stall": null,
+        "treeRunOk": false,
+        "journey": "failed",
+        "stall": "drain iteration cap reached without a terminal state",
         "emitError": null,
-        "p6Refused": false,
+        "p6Refused": true,
         "synthesisSucceeded": true
       }
     }
   ],
   "summary": {
     "entries": 1,
-    "meanTotal": 1
+    "meanTotal": 0.4444
   }
 }

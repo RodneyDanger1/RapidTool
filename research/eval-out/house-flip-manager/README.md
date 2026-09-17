@@ -1,13 +1,13 @@
 # House-Flipping Manager
 
-> machine-generated from RapidTool packet adc7806b-02cc-4859-bdcb-9455f6412ecb; regenerate, don't hand-edit.
+> machine-generated from RapidTool packet 4207cef0-e4ea-4436-b2e2-5ac48ab8138c; regenerate, don't hand-edit.
 
 a house-flipping project manager: property acquisition tracker, renovation budgets by line item, contractor bids + invoices, rehab timeline with milestones, ARV/after-repair-value estimator, flip P&L dashboard
 
 ## Status
 - **Kind:** webapp — web app (kind webapp (inferred from brief/domain — no declared kind yet))
 - **Status:** complete · **Current phase:** P12 · **Model route:** deterministic
-- **Created:** 2026-09-08T13:38:46.885Z
+- **Created:** 2026-09-10T05:29:26.259Z
 
 ## What ships in this scaffold
 

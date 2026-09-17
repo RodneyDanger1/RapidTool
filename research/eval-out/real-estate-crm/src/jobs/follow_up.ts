@@ -1,12 +1,10 @@
 // ---------------------------------------------------------------------------
 // src/jobs/follow_up.ts — Implement job “follow-up” against the contract
-// machine-generated from RapidTool packet fff84028-8b4b-4820-8562-e17e5d4af790; regenerate, don't hand-edit.
-// TODO(E-15 stub): implement the job contract below. Oracle expectations
-// this module must satisfy:
-  // # orc-3 job.follow-up.happy — Authorized operator submits “follow-up” with a valid lead => 200 + persisted entity + checkpoint written
+// machine-generated from RapidTool packet 8dbb64d5-d6c9-411c-849c-60fdcde47f4b; regenerate, don't hand-edit.
+// fixes/144 (M2) tree bridge: the generated tree ships no file at this spec-graph
+// path, so this module re-exports the tree ENTRY module (src/jobs/show.ts) verbatim —
+// real generated code, not a TODO stub. Align this node's file with a tree path
+// (or regenerate the tree) to replace the bridge.
 // ---------------------------------------------------------------------------
 
-export function runJob_2(input: unknown): { ok: boolean } {
-  void input;
-  throw new Error("TODO(E-15 stub): implement job follow-up");
-}
+export * from "./show.ts";

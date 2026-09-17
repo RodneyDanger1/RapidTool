@@ -117,6 +117,14 @@ export type MemoryEntry = {
    *  retireMemory() drops a row once it reaches LESSON_RETIRE_COUNTER (3).
    *  Absent/0/NaN read as 0. Absent on legacy rows (no-op). */
   counterEvidence?: number;
+  /** 216i (112 §3.1/§4.2 — T1): how many LATER recurrences independently
+   *  reproduced this row's claim. TELEMETRY, like counterEvidence: mutated by
+   *  the merge accrual (engine.accrueReproducedCounts) and never part of any
+   *  content fingerprint or id — lesson ids hash the failure signature
+   *  (knowledge.lessonRow), so a repeated identical failure maps to the ONE
+   *  existing row and only this counter moves. Absent/0/NaN read as 0.
+   *  Absent on legacy rows (no-op). */
+  reproducedCount?: number;
 };
 
 export type JsonLog = {
