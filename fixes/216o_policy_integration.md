@@ -39,4 +39,6 @@ nothing routed through it. This lane routes EVERY approval through the seam:
 
 ## 5. Not done / deferred
 
-(fill)
+**W7 boundary status (parent, 2026-09-17):** code + the 6 bypass pins landed W6-L2; all suites
+re-verified green (headless 90/90, gates/dod 85/85, README-cli 5/5, typecheck 0; full W7 sweep
+src 1894/1894). Sections 1-2 (work log / old→new) + real-output evidence STILL OWED → W8-L2.

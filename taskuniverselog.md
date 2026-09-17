@@ -119,6 +119,19 @@ size, where it lives, and what the next wave should pick up.
   codegen pins → job-keyed contract, barrel-assert dedupe, **gate.sh glob fix — nested
   `src/lib/**/*.test.ts` (registry suite was invisible to every sweep)**, 216k completed +
   parent-verified, board.
+- **WAVE 7 `deleg_ce19b316` CLOSED (2026-09-17 ~08:55) — 5/5 lanes incomplete; parent-repaired
+  to green. Boundary `gate.sh`: `{"ok":true}`** — typecheck 0 · lint 0 · gaps 0 · build 0 ·
+  scripts **235/235** + src **1894/1894** (+53 = compaction 19 + subagent 22 + mock 12).
+  **Lane outcomes:** L1 ⚠️ patch wiring landed (baseline held) — tests+216r owed; L2 ⚠️
+  compaction.ts+tests written but NEVER RUN (parent fixed 2 assertions + impl guard → 19/19);
+  L3 ⚠️ left `README-cli.test.mjs` ERRORING (3 tests, missing helper) — parent removed them to
+  `216s` verbatim, scripts leg restored; L4 ⚠️ 4 modules written, never verified (parent fixed
+  `../`→`./` paths, LlmResult.model, error?? guards, role:null mapping → typecheck 0, 22/22 +
+  12/12 + 21/21); L5 ⚠️ **verification lane** — keyless E2E PASS (honest park/refusals/UNVERIFIED
+  typecheck), **scaffold-half claims FALSIFIED** (scaffold.ts untouched since 673e349; corpus
+  emit still `reexports: 5, real: 0`; oracle rows all skip; no `p6.jobs.shortfall` producer),
+  1 defect (`headless.ts:1467` moduleEmbedded on empty generatedSource), determinism =
+  path/log identity only (sha1 withheld). Evidence + falsification record: `fixes/216u`.
 - **Wave-start gate baseline (reproduced 2026-09-16 19:11–19:13, no writers active):**
   typecheck **0** · lint **0 errors / 1 warning** (the warning IS the census defect — assigned to L1)
   · `npm test` **scripts 195/195 + src 1662/1662, 0 fail** · build **0**.
@@ -182,7 +195,7 @@ size, where it lives, and what the next wave should pick up.
 | TA-12 | Error-handling audit (signal 10) as its own task | S | ❌ | Phase 3 |
 | TA-13 | Split T3.3 into named signals; defer the rest explicitly | S | ❌ | plan hygiene |
 | TA-14 | Cross-family, order-swapped judge protocol | S/M | ❌ | Phase 3, needs T1.5 |
-| **TA-15** | **Emit a REAL multi-job product (P0-04)** | **M/L** | **✅ VERIFIED (W6)** | **Census triple on a fresh emit: `reexports: 0, stubs: 0, real: 3` (`src/jobs/rent*.ts`, 3 chunks, 0 refusals). Probe + 216k evidence section = the proof. Residual: the LIVE corpus tree re-materialises on a fresh KEYED run (T0.10, user-owned).** |
+| **TA-15** | **Emit a REAL multi-job product (P0-04)** | **M/L** | **⚠️ PARTIAL — W8-L1** | **TREE half REAL (W6 probe: `reexports: 0, stubs: 0, real: 3` on a directly-written tree; rewire at codegen :1981-1984/:2237/:2277). SCAFFOLD half + D2 oracle ctx + T-13 log NOT LANDED — L5-W7 falsified W5/W6 claims vs bytes (scaffold.ts untouched since 673e349; corpus emit path still bridged: `reexports: 5, real: 0`; 5/5 oracle rows `test.skip`). W8-L1 completes per fixes/216u.** |
 | TA-16 | `verify-kind`: scratch copy + install + claim strikes (C1) | S/M | ❌ | same commit as T4.1 |
 | TA-17 | Git landing detail: `.gitignore`, init, A4 dependency | S | ❌ | inside T4.2 |
 | TA-18 | Apply-patch: preservation + conflict semantics | S | ❌ | inside T4.3 |
@@ -244,7 +257,7 @@ size, where it lives, and what the next wave should pick up.
 
 ### 2.6 Wave H — competitor steals (`107_competitors_agentic.md`, `108_competitors_app_generators.md`; 18 tasks)
 
-🔄 W6: T-107.3 **pins ✅** (bypass un-bypassable both seats; force needs human seat — headless 90/90) · T-107.2 **tests ✅ + doctor surfacing ✅** (registry 21/21) · T-107.5 ✅ (trials=2 evidence). Bodies 216o/216p → W7. W4/W5 cores: `patch.ts` + `policy.ts` 48/48. Named highlights: **T-107.1** `str_replace` patch primitive (unique-match refusal + graded fuzzy) · **T-107.2** provider registry + role tiers · **T-107.3** one-seam policy engine · **T-107.5** run-side acceptance fixtures + pass@k · **T-107.9** compaction constants · **T-107.10** sub-agent contract + mock-LLM E2E · **108-T1** in-place edit verb (dry-run + ledger attribution) · **108-T2** export registry → synthesis · **108-T3** precondition-vs-failure RT_E split · **108-T5** repair-budget + coded exhausted error · **108-T7** E2E-vs-running-instance feasibility spike. (11 named here; the rest live in the dossiers.)
+🔄 W7: T-107.1 **wired** (repair deltas via `applyStrReplace`; tests owed → W8-L5) · T-107.9 **module+tests ✅** (compaction 19/19; log 216v owed) · T-107.10 **modules ✅** (subagent 22/22 + mock 12/12; log 216t owed). W6: T-107.3 pins ✅ (headless 90/90) · T-107.2 tests+doctor ✅ (registry 21/21) · T-107.5 ✅. Named highlights: **T-107.1** `str_replace` patch primitive (unique-match refusal + graded fuzzy) · **T-107.2** provider registry + role tiers · **T-107.3** one-seam policy engine · **T-107.5** run-side acceptance fixtures + pass@k · **T-107.9** compaction constants · **T-107.10** sub-agent contract + mock-LLM E2E · **108-T1** in-place edit verb (dry-run + ledger attribution) · **108-T2** export registry → synthesis · **108-T3** precondition-vs-failure RT_E split · **108-T5** repair-budget + coded exhausted error · **108-T7** E2E-vs-running-instance feasibility spike. (11 named here; the rest live in the dossiers.)
 
 ### 2.7 UI (`110_ui_audit_vs_competitors.md`, `111_ui_design_research.md`)
 
@@ -270,9 +283,14 @@ size, where it lives, and what the next wave should pick up.
 | `fixes/216i_knowledge_integration.md` | ✅ COMPLETE (W5-L2) |
 | `fixes/216j_honesty_tooling.md` | ✅ COMPLETE (W5-L2) |
 | `fixes/216k_multi_job_emission.md` | ✅ COMPLETE + parent-verified (census triple) |
-| `fixes/216o_policy_integration.md` | ⏳ body → W7-L2 (code+tests landed W6-L2 ✓) |
-| `fixes/216p_provider_registry.md` | ⏳ body → W7-L2 (code+tests landed W6-L3 ✓) |
+| `fixes/216o_policy_integration.md` | ⏳ bodies → W8-L2 (code+pins ✅; suites verified) |
+| `fixes/216p_provider_registry.md` | ⏳ body → W8-L2 (registry 21/21 ✅) |
 | `fixes/216q_eval_fixtures.md` | ✅ COMPLETE (W6-L4) |
+| `fixes/216r_patch_integration.md` | ⏳ wiring ✅ (baseline held); tests + body → W8-L5 |
+| `fixes/216s_cli_wave.md` | ⏳ pre-written tests preserved in-log; arm + T5 verbs → W8-L3 |
+| `fixes/216t_subagent_contract.md` | ⏳ modules ✅ (22/22 + 12/12); body → W8-L4 |
+| `fixes/216u_w7_e2e_verification.md` | ✅ WRITTEN (parent-assembled; carries the falsification record) |
+| `fixes/216v_compaction_constants.md` | ⏳ to write → W8-L2 (module + tests ✅ 19/19) |
 | `fixes/216l_tree_run_build_test.md` | ✅ WRITTEN (W3-L2, 14.4 KB) |
 | `fixes/216m_ui_wave2.md` | ✅ COMPLETE (W4-L4) |
 | `fixes/216n_wave_h_primitives.md` | ✅ COMPLETE (W4-L2) |
@@ -306,14 +324,17 @@ size, where it lives, and what the next wave should pick up.
 > Ownership is only valid once every W1 lane has stopped. Re-grep anchors before briefing.
 > Keep ≤5 lanes, disjoint files, flash-only, §3.0 guardrails verbatim, skeleton-first.
 
-> **W6 CLOSED (§1 — TA-15 VERIFIED). W7 DISPATCHED 2026-09-16 ~22:30 — "integrations + tails"
-> (5 lanes; every brief orders the lane to read its own `wave_plans/W7/lane-N.md` FIRST).**
-1. **W7-L1 — T-107.1 patch integration** (`patch.ts` → codegen repair loop + headless repairTreeDir;
-   `codegen.server.ts`+test, `headless.ts`+test, `fixes/216r`).
-2. **W7-L2 — logs + compaction** (`fixes/216o`, `fixes/216p` bodies; T-107.9 compaction constants).
-3. **W7-L3 — CLI wave** (108-T1 in-place edit verb dry-run + ledger attribution; 112 T5 lesson verbs).
-4. **W7-L4 — T-107.10 sub-agent contract + mock-LLM E2E**.
-5. **W7-L5 — E2E verification lane** (keyless brief→emit→census run; scaffold bridge census vs bytes).
+> **W7 CLOSED (§1 — TA-15 status CORRECTED: tree half real, scaffold half open). W8 DISPATCHED
+> 2026-09-17 ~09:00 — "scaffold completion + closures" (5 lanes; every brief orders the lane to
+> read its own `wave_plans/W8/lane-N.md` FIRST).**
+1. **W8-L1 — TA-15 completion (THE blocker)**: scaffold D3 bridge policy for real (job nodes never
+   bridged; counted + surfaced), D2 oracle job-row ctx, `p6.jobs.shortfall` production log + caller,
+   `moduleEmbedded` empty-string fix (`scaffold.ts`+test, `headless.ts`+test, `engine.ts`; per `fixes/216u`).
+2. **W8-L2 — logs lane**: `fixes/216o` + `216p` + `216v` bodies (verified numbers only).
+3. **W8-L3 — CLI wave (redo)**: re-land the 3 preserved tests + `verbArmSource` helper + `edit` arm
+   + `lesson --advise/--verify` (`scripts/*`).
+4. **W8-L4 — T-107.10 closure**: `fixes/216t` body + mock E2E completion/verification.
+5. **W8-L5 — patch-integration tests + `216r` body** (`codegen.server.test.ts` only).
 
 > **W3 sketch (after W2):** TA-15 + T-13 (multi-job — THE product blocker; files free after R1/R3)
 > · T-18 (tree-run builds+tests; after R2) · T-11 · T4 hops · UI remainder (TASK-01/06/10/11) ·
@@ -400,3 +421,10 @@ Deferred to W3+: 105 standalones (TA-1/TA-3/TA-21/TA-23), 112 T5/T9/T11/T12, Wav
   dedupe, **gate.sh glob fix (nested suites were invisible)**, 216k completed+verified.
   **`gate.sh {"ok":true}`** — scripts 235 + src **1841**. L1's close report recorded as FALSE
   about tests in 216k (honesty log).
+- **2026-09-17 (wave 7 close)** — 5/5 lanes incomplete (two hung ~10h post-cap), everything
+  parent-repaired to green: doctor imports, compaction assertions + guard, README-cli red
+  restored (tests preserved to 216s), mock/subagent path+type slips, lint items. L5's
+  verification FALSIFIED the W5/W6 scaffold-half claims vs bytes (scaffold.ts untouched since
+  673e349; corpus emit `reexports: 5`) → TA-15 status corrected to PARTIAL; `fixes/216u`
+  written with the full falsification record. **`gate.sh {"ok":true}`** — scripts 235 +
+  src **1894** (+53 new tests). W8 dispatched: scaffold completion + closures.

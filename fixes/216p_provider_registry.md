@@ -35,4 +35,7 @@ TODO
 
 ## 4. Deferred-hops list + follow-ups
 
-TODO
+**W7 boundary status (parent, 2026-09-17):** registry tests 21/21 + verify 20/20 + chat 70/70 +
+crew 46/46 + doctor 15/15 verified. Parent fixes recorded: doctor type-only import (W6), gate.sh
+nested-test glob (W6), and the W7-L4 mock provider (12/12, verified by the parent — its own
+provider, never a DeepSeek alias). Sections 1-3 + the deferred list STILL OWED → W8-L2.

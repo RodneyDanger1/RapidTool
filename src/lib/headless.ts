@@ -1550,6 +1550,10 @@ export type P6CycleLiveDepsShape = {
    *  ONLY when the previous cycle's synthesis refused — the refusal class
    *  (RT_E_* code) + first ~200 chars of the model's reason. */
   synthesisRefusal?: string;
+  /** T-107.1 (216r · W7-L1): the opt-in patch (str_replace) repair level —
+   *  set ONLY by `repairCycleLiveDeps` (the repair drivers). `p6CycleLiveDeps`
+   *  never sets it, so the journey mapping stays byte-identical to fixes/153. */
+  patchRepairs?: boolean;
 };
 
 export function p6CycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDepsShape | undefined {
@@ -1560,6 +1564,19 @@ export function p6CycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDepsShap
   if (tail.length > 0) deps.treeFailure = tail;
   if (refusal.length > 0) deps.synthesisRefusal = refusal.slice(0, P6_JOURNEY_REFUSAL_MAX);
   return deps;
+}
+/**
+ * T-107.1 (216r · W7-L1): the repair drivers' ctx→deps mapping — the journey
+ * mapping (fixes/153 P2) PLUS the opt-in patch (str_replace) repair level. A
+ * repair cycle is exactly where a bounded per-file delta beats a whole-module
+ * re-emit: codegen applies a returned delta against the module it just
+ * produced for that file via `applyStrReplace` and revalidates it with the
+ * EXISTING deterministic validator; any refusal returns the legacy
+ * full-rewrite repair path UNCHANGED. Exported so the repair seam and its
+ * tests share ONE mapping without a model.
+ */
+export function repairCycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDepsShape {
+  return { ...(p6CycleLiveDeps(ctx) ?? {}), patchRepairs: true };
 }
 
 /** Injectable seams. The defaults ARE the production seams; fakes only replace
@@ -1680,7 +1697,13 @@ function treeRunFailureTail(o: TreeRunOutcome): string {
  *  deps?.treeFailure for tree-repair re-prompts and deps?.synthesisRefusal
  *  for refusal-aware re-prompts. p6CycleLiveDeps is the single ctx→deps
  *  mapping. */
-async function defaultP6Synthesize(project: Project, ctx: P6JourneyCycleContext): Promise<Project> {
+/** The shared cycle-synthesis core: floor stamping + the live-layer call. The
+ *  two defaults below differ ONLY in the ctx→deps mapping they pass. */
+async function synthesizeCycle(
+  project: Project,
+  ctx: P6JourneyCycleContext,
+  deps: P6CycleLiveDepsShape | undefined,
+): Promise<Project> {
   let p = project;
   if (ctx.treeFailureTail) {
     const logs = p.logs ?? [];
@@ -1689,11 +1712,24 @@ async function defaultP6Synthesize(project: Project, ctx: P6JourneyCycleContext)
     if (!alreadyStamped) p = p6JourneyLog(p, "warn", "p6.tree.failure", ctx.treeFailureTail);
   }
   try {
-    const upgraded = await liveLayer(p, 6, p6CycleLiveDeps(ctx));
+    const upgraded = await liveLayer(p, 6, deps);
     return upgraded && upgraded !== p ? upgraded : p;
   } catch {
     return applyPhaseResult(p, 6);
   }
+}
+
+async function defaultP6Synthesize(project: Project, ctx: P6JourneyCycleContext): Promise<Project> {
+  return synthesizeCycle(project, ctx, p6CycleLiveDeps(ctx));
+}
+
+/** T-107.1 (216r · W7-L1): the `repairTreeDir` default synthesis seam —
+ *  `defaultP6Synthesize` with the patch-repair level ON (a repair cycle is
+ *  exactly where a per-file delta beats a whole-module re-emit). Everything
+ *  else is identical: same floor, same refusal passthrough, same log
+ *  stamping. */
+async function defaultRepairSynthesize(project: Project, ctx: P6JourneyCycleContext): Promise<Project> {
+  return synthesizeCycle(project, ctx, repairCycleLiveDeps(ctx));
 }
 
 /** Default tree verdict seam: emit the generatedTree to a dir (workDir when
@@ -2130,6 +2166,61 @@ export function importTreeDir(project: Project, dir: string): ImportTreeDirResul
   };
 }
 
+/** T-107.1 (216r · W7-L1): one landed patch (str_replace) delta as the repair
+ *  result reports it — the structured half of the `p6.repair.delta` record
+ *  codegen writes (`codegen.server.ts patchDeltaLogEntry`; keep the two in
+ *  step). */
+export type RepairDeltaRecord = {
+  path: string;
+  kind: "exact" | "fuzzy";
+  score: number;
+  threshold: number | null;
+  matches: number;
+  removedLines: number;
+  addedLines: number;
+  unified: string;
+};
+
+/** Read the patch-repair records a synthesis cycle wrote onto the project:
+ *  `p6.repair.delta` (structured JSON detail — the codegen codec) and
+ *  `p6.repair.patch.refused` (coded refusal details). Pure and total: a
+ *  malformed record is skipped, never thrown, and non-string details are
+ *  ignored. */
+export function repairPatchRecords(project: Project): { deltas: RepairDeltaRecord[]; refusals: string[] } {
+  const deltas: RepairDeltaRecord[] = [];
+  const refusals: string[] = [];
+  for (const entry of project.logs ?? []) {
+    if (!entry || typeof entry.event !== "string" || typeof entry.detail !== "string") continue;
+    if (entry.event === "p6.repair.delta") {
+      try {
+        const raw = JSON.parse(entry.detail) as Partial<RepairDeltaRecord> | null;
+        if (
+          raw &&
+          typeof raw.path === "string" &&
+          (raw.kind === "exact" || raw.kind === "fuzzy") &&
+          typeof raw.score === "number"
+        ) {
+          deltas.push({
+            path: raw.path,
+            kind: raw.kind,
+            score: raw.score,
+            threshold: typeof raw.threshold === "number" ? raw.threshold : null,
+            matches: typeof raw.matches === "number" ? raw.matches : 0,
+            removedLines: typeof raw.removedLines === "number" ? raw.removedLines : 0,
+            addedLines: typeof raw.addedLines === "number" ? raw.addedLines : 0,
+            unified: typeof raw.unified === "string" ? raw.unified : "",
+          });
+        }
+      } catch {
+        /* malformed record — skipped, never thrown */
+      }
+    } else if (entry.event === "p6.repair.patch.refused") {
+      refusals.push(entry.detail);
+    }
+  }
+  return { deltas, refusals };
+}
+
 /** One repair-cycle synthesis/run seam pair — the dir-based sibling of
  *  P6JourneyDeps. Defaults are the PRODUCTION seams (live-layer P6 synthesis
  *  + compile-check treeRun over the dir); fakes replace them in unit tests
@@ -2171,7 +2262,19 @@ export type RepairTreeResult = {
   /** First-import telemetry (the hash-checked edit report). */
   import: ImportTreeDirResult;
   /** Repair writes performed onto the dir (union across cycles). */
-  applied: { written: string[]; unchanged: string[]; refused: string[]; warnings: string[] };
+  applied: {
+    written: string[];
+    unchanged: string[];
+    refused: string[];
+    warnings: string[];
+    /** T-107.1 (216r): the patch (str_replace) deltas the cycles LANDED —
+     *  structured + unified, read back from the p6.repair.delta records the
+     *  codegen repair wrote onto the project's log ledger. */
+    deltas: RepairDeltaRecord[];
+    /** Coded patch refusals (p6.repair.patch.refused) — each is a delta that
+     *  did NOT land and whose legacy full-rewrite repair ran. */
+    patchRefusals: string[];
+  };
   events: string[];
 };
 
@@ -2343,9 +2446,19 @@ export async function repairTreeDir(
   const budget =
     typeof opts.budget === "number" && opts.budget > 0 ? Math.floor(opts.budget) : P6_JOURNEY_DEFAULT_BUDGET;
   const events: string[] = [];
-  const synthesize = opts.deps?.synthesize ?? defaultP6Synthesize;
+  // T-107.1 (216r · W7-L1): the dir repair runs its cycles with the patch
+  // (str_replace) repair level ON (defaultRepairSynthesize). A custom
+  // deps.synthesize seam replaces it verbatim — the caller owns the level then.
+  const synthesize = opts.deps?.synthesize ?? defaultRepairSynthesize;
   const runTree = opts.deps?.runTree ?? defaultRepairRunTree;
-  const base = { written: [] as string[], unchanged: [] as string[], refused: [] as string[], warnings: [] as string[] };
+  const base = {
+    written: [] as string[],
+    unchanged: [] as string[],
+    refused: [] as string[],
+    warnings: [] as string[],
+    deltas: [] as RepairDeltaRecord[],
+    patchRefusals: [] as string[],
+  };
   const fail = (error: string): RepairTreeResult => ({
     ok: false,
     error,
@@ -2469,7 +2582,14 @@ export async function repairTreeDir(
   p = p6JourneyLog(p, "warn", "p6.tree.failure", treeTail);
   events.push(`tree-run fail (pre-cycle): ${treeTail.slice(0, 140)}`);
   let refusal: string | null = null;
-  const applied = { written: [] as string[], unchanged: [] as string[], refused: [] as string[], warnings: [] as string[] };
+  const applied = {
+    written: [] as string[],
+    unchanged: [] as string[],
+    refused: [] as string[],
+    warnings: [] as string[],
+    deltas: [] as RepairDeltaRecord[],
+    patchRefusals: [] as string[],
+  };
   for (let cycle = 1; cycle <= budget; cycle++) {
     const ctx: P6JourneyCycleContext = { cycle };
     if (treeTail !== null) ctx.treeFailureTail = treeTail;
@@ -2500,6 +2620,12 @@ export async function repairTreeDir(
       p = synthesized;
       continue;
     }
+    // T-107.1 (216r · W7-L1): read back the patch-repair records the cycle's
+    // synthesis wrote onto the project's log ledger — the structured deltas it
+    // LANDED and the coded refusals whose legacy full-rewrite repair ran.
+    const patchRecords = repairPatchRecords(synthesized);
+    for (const d of patchRecords.deltas) applied.deltas.push(d);
+    for (const r of patchRecords.refusals) if (!applied.patchRefusals.includes(r)) applied.patchRefusals.push(r);
     // 3a. Apply the repaired rows onto the dir IN PLACE (only changed files).
     // 216 (T-02): parse-gate FIRST — a row whose source does not parse is
     // refused rather than written, so a corrupted synthesis cannot land in the

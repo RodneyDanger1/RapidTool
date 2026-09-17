@@ -88,6 +88,7 @@
 // ---------------------------------------------------------------------------
 import { fnv1a } from "./algorithms.ts";
 import { briefNounHits, identifierHits, maskLiteralsAndComments } from "./sandbox.ts";
+import { applyStrReplace, type PatchRequest } from "./patch.ts";
 import {
   completeDeepSeek,
   DEEPSEEK_MODELS,
@@ -452,6 +453,308 @@ export function p6SynthesisSystemPrompt(): string {
   ].join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// T-107.1 (216r · W7-L1): the patch (str_replace) repair level.
+//
+// `patch.ts` (W4 core, 391 lines) is the surgical edit primitive: ONE textual
+// replacement or a coded refusal (unique-match contract; opt-in graded fuzzy;
+// diff-as-result). This section is the INTEGRATION — a bounded patch repair
+// re-prompt for the LOCALIZED defect classes (soft forbidden primitive /
+// non-deterministic primitive / prose-in-code), parsed into a `PatchRequest`,
+// applied via `applyStrReplace` against the module the model just produced for
+// THIS file (one chunk = one emitted tree file), and revalidated by the
+// existing deterministic validator (`validateSynthesisModule`) before
+// acceptance.
+//
+// Doctrine (restated from patch.ts, unchanged): refusal-default — a
+// multi-match, a no-match, a no-op or a malformed request REFUSES with its
+// code and the legacy full-rewrite repair path runs UNCHANGED (prompt bytes
+// included). Fuzzy is NOT enabled in this wire: the graded level is opt-in by
+// contract, and auto-accepting a fuzzy delta into the emitted artifact would
+// be a guess into a write. Binding / missing-signature defects are not
+// localized text edits and keep the legacy path. Every landed delta is
+// recorded (`p6.repair.delta`, structured JSON detail); every refusal is
+// recorded (`p6.repair.patch.refused`, coded).
+// ---------------------------------------------------------------------------
+
+/** Cap on the exact-source lines one patch excerpt window carries. */
+export const PATCH_REPAIR_WINDOW_MAX_LINES = 24;
+/** Cap on the chars one patch excerpt window carries. */
+export const PATCH_REPAIR_WINDOW_MAX_CHARS = 1600;
+/** Cap on the excerpt windows one patch re-prompt carries (defect clusters). */
+export const PATCH_REPAIR_MAX_WINDOWS = 3;
+/** Cap on the unified-diff chars a `p6.repair.delta` record carries. */
+export const PATCH_REPAIR_DIFF_MAX = 800;
+
+/** One exact-source window of the previous module, quoted to the model so a
+ *  delta's `oldStr` can be copied character-for-character. */
+export type PatchExcerptWindow = { firstLine: number; lastLine: number; text: string };
+
+/** 1-based line numbers carrying `needle` (capped, order kept). Pure and
+ *  total: non-strings and an empty needle yield []. */
+export function tokenLineNumbers(source: unknown, needle: unknown, cap = 6): number[] {
+  if (typeof source !== "string" || typeof needle !== "string" || needle.length === 0) return [];
+  const out: number[] = [];
+  const limit = Number.isFinite(cap) ? Math.max(1, Math.floor(cap as number)) : 6;
+  const lines = source.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i]!.includes(needle)) {
+      out.push(i + 1);
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Exact-source excerpt windows around 1-based line numbers: every hit line is
+ * widened by `ctx` lines, adjacent/overlapping windows merge, and the result is
+ * capped (≤ PATCH_REPAIR_MAX_WINDOWS windows; ≤ PATCH_REPAIR_WINDOW_MAX_LINES
+ * lines and ≤ PATCH_REPAIR_WINDOW_MAX_CHARS chars each — whole lines only,
+ * never a truncated line). `text` is the module's own lines joined verbatim —
+ * never reflowed, never whitespace-collapsed — so a model can copy an exact
+ * `oldStr` from it. Pure and total: garbage line numbers are ignored and an
+ * out-of-range line never fabricates text.
+ */
+export function patchExcerptWindows(
+  source: unknown,
+  lines: readonly number[],
+  ctx = 1,
+): { windows: PatchExcerptWindow[]; omittedLines: number } {
+  if (typeof source !== "string" || source.length === 0) return { windows: [], omittedLines: 0 };
+  const src = source.split("\n");
+  const hits = [
+    ...new Set(
+      (Array.isArray(lines) ? lines : []).filter(
+        (n): n is number => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= src.length,
+      ),
+    ),
+  ].sort((a, b) => a - b);
+  if (hits.length === 0) return { windows: [], omittedLines: 0 };
+  const wanted: { from: number; to: number }[] = [];
+  for (const line of hits) {
+    const from = Math.max(1, line - ctx);
+    const to = Math.min(src.length, line + ctx);
+    const last = wanted[wanted.length - 1];
+    if (last && from <= last.to + 1) last.to = Math.max(last.to, to);
+    else wanted.push({ from, to });
+  }
+  const kept = wanted.slice(0, PATCH_REPAIR_MAX_WINDOWS);
+  let omitted = wanted.length - kept.length;
+  const windows: PatchExcerptWindow[] = [];
+  for (const w of kept) {
+    let to = Math.min(w.to, w.from + PATCH_REPAIR_WINDOW_MAX_LINES - 1);
+    if (w.to > to) omitted += w.to - to;
+    let text = src.slice(w.from - 1, to).join("\n");
+    while (to > w.from && text.length > PATCH_REPAIR_WINDOW_MAX_CHARS) {
+      omitted += 1;
+      to -= 1;
+      text = src.slice(w.from - 1, to).join("\n");
+    }
+    windows.push({ firstLine: w.from, lastLine: to, text });
+  }
+  return { windows, omittedLines: omitted };
+}
+
+/** A parsed patch (delta) envelope — the model's bounded `str_replace` block.
+ *  `fuzzy` rides through VERBATIM: `applyStrReplace` re-validates it at
+ *  runtime (a malformed level refuses; it is never silently defaulted). */
+export type PatchRepairEnvelope = { oldStr: string; newStr: string; fuzzy?: unknown };
+
+/**
+ * Parse a model reply into the patch (delta) envelope
+ * `{"patch":{"oldStr":"…","newStr":"…"[,"fuzzy":{"threshold":n}]}}`. Tolerant
+ * of ```json fences (parseSynthesisEnvelope precedent). Returns null when the
+ * reply is NOT a patch envelope — the caller then keeps the legacy
+ * module-envelope repair path. Total: non-strings, garbage JSON, a missing
+ * block and a blank/empty `oldStr` are all null, never a throw.
+ */
+export function parseSynthesisPatchEnvelope(text: unknown): PatchRepairEnvelope | null {
+  if (typeof text !== "string") return null;
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+  let obj: unknown;
+  try {
+    obj = JSON.parse(cleaned);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+  const block = (obj as Record<string, unknown>).patch;
+  if (!block || typeof block !== "object" || Array.isArray(block)) return null;
+  const b = block as Record<string, unknown>;
+  const oldStr = typeof b.oldStr === "string" ? b.oldStr : "";
+  const newStr = typeof b.newStr === "string" ? b.newStr : null;
+  if (oldStr.length === 0 || newStr === null) return null;
+  return { oldStr, newStr, ...(b.fuzzy !== undefined ? { fuzzy: b.fuzzy } : {}) };
+}
+
+/** The structured delta record a landed patch carries (log + repair result). */
+export type PatchDeltaRecord = {
+  path: string;
+  kind: "exact" | "fuzzy";
+  score: number;
+  threshold: number | null;
+  matches: number;
+  removedLines: number;
+  addedLines: number;
+  unified: string;
+};
+
+/** The `p6.repair.delta` event (structured JSON detail). This is the ONE codec
+ *  shared by the producer (this module) and the reader
+ *  (`headless.ts repairPatchRecords`) — keep the two in step. */
+export function patchDeltaLogEntry(record: PatchDeltaRecord): JsonLog {
+  return {
+    ts: Date.now(),
+    phase: 6 as PhaseId,
+    level: "info",
+    event: "p6.repair.delta",
+    detail: JSON.stringify({ ...record, unified: record.unified.slice(0, PATCH_REPAIR_DIFF_MAX) }),
+  };
+}
+
+/** The `p6.repair.patch.refused` event (coded + bounded) — logged whenever the
+ *  delta path did not land and the legacy full-rewrite repair takes over. */
+export function patchRefusalLogEntry(detail: string, path?: string): JsonLog {
+  const clean = typeof detail === "string" && detail.trim() ? detail.replace(/\s+/g, " ").trim() : "unknown";
+  return {
+    ts: Date.now(),
+    phase: 6 as PhaseId,
+    level: "warn",
+    event: "p6.repair.patch.refused",
+    detail: `${path ? `${path} · ` : ""}${clean.slice(0, 400)}`,
+  };
+}
+
+/** T-107.1 (216r): the patch-repair opt-in for one synthesis call. */
+export type PatchRepairOptions = {
+  /** The tree path this module will be emitted at (log records only). */
+  path?: string;
+  /** Bounded log sink — the caller's attempt accumulator (200-entry cap). */
+  log?: (entry: JsonLog) => void;
+};
+
+/** The localized defect a patch can fix, or null when the defect class is not
+ *  a bounded text edit (binding / missing-signature / envelope classes keep the
+ *  legacy path untouched). Priority mirrors the legacy repair dispatch
+ *  (unbound > soft-forbidden > missing-signature > non-deterministic > prose).
+ */
+function patchableDefect(input: {
+  source: string;
+  masked: string;
+  softToken: string | null;
+  unbound: readonly string[];
+  missingSig: readonly string[];
+  nondet: string | null;
+  prose: readonly ProseLineHit[];
+}): { defect: string; lines: number[] } | null {
+  if (input.unbound.length > 0) return null;
+  const srcLines = input.source.split("\n");
+  if (input.softToken !== null) {
+    const token = input.softToken;
+    const lines = tokenLineNumbers(input.masked, token).filter((n) => (srcLines[n - 1] ?? "").includes(token));
+    if (lines.length === 0) return null;
+    return {
+      defect: `the module uses a forbidden primitive: \`${token}\` (the zero-dep / zero-IO contract forbids it)`,
+      lines,
+    };
+  }
+  if (input.missingSig.length > 0) return null;
+  if (input.nondet !== null) {
+    const token = input.nondet;
+    const lines = tokenLineNumbers(input.masked, token).filter((n) => (srcLines[n - 1] ?? "").includes(token));
+    if (lines.length === 0) return null;
+    return { defect: `the module uses a non-deterministic primitive: \`${token}\``, lines };
+  }
+  if (input.prose.length > 0) {
+    const lines = input.prose.map((h) => h.line);
+    return {
+      defect: `the module body contains English prose (planning text, not JavaScript) at line(s) ${lines.join(", ")}`,
+      lines,
+    };
+  }
+  return null;
+}
+
+/**
+ * T-107.1 (216r · W7-L1): ONE patch-repair attempt for one file. Offers the
+ * bounded delta first (`p6SynthesisPatchRepairPrompt` quotes the exact current
+ * source), applies a returned delta via `applyStrReplace` against the module
+ * the model just produced, and revalidates the patched module with the
+ * EXISTING deterministic validator. Returns the patched envelope on a landed
+ * delta, or null on every non-landing outcome (no excerpt, a non-delta reply,
+ * a coded `applyStrReplace` refusal, a patched module that still fails
+ * validation, a failed model call) — the caller's legacy full-rewrite repair
+ * then runs UNCHANGED. A landed delta and every refusal are logged through the
+ * caller's bounded sink. Never throws on garbage replies.
+ */
+async function attemptPatchRepair(input: {
+  previous: SynthesisEnvelope;
+  defect: string;
+  lines: readonly number[];
+  signatureNames: readonly string[];
+  completeCall: P6SynthesisDeps["complete"];
+  opts: DeepSeekCompleteOptions;
+  treeFailure?: string;
+  path?: string;
+  log?: (entry: JsonLog) => void;
+}): Promise<SynthesisEnvelope | null> {
+  const excerpt = patchExcerptWindows(input.previous.module, input.lines);
+  if (excerpt.windows.length === 0) return null;
+  const reply = await input.completeCall(
+    p6SynthesisPatchRepairPrompt(input.defect, excerpt.windows, input.treeFailure),
+    input.opts,
+  );
+  if (!reply.ok) {
+    input.log?.(
+      patchRefusalLogEntry(
+        `RT_E_LLM_REJECTED · the patch repair call did not succeed (${reply.error ?? reply.reason ?? "unknown"})`,
+        input.path,
+      ),
+    );
+    return null;
+  }
+  const delta = parseSynthesisPatchEnvelope(reply.text);
+  if (delta === null) return null; // not a delta reply — the legacy full-rewrite repair follows
+  const request: PatchRequest = {
+    oldStr: delta.oldStr,
+    newStr: delta.newStr,
+    ...(delta.fuzzy !== undefined ? { fuzzy: delta.fuzzy as PatchRequest["fuzzy"] } : {}),
+  };
+  const applied = applyStrReplace(input.previous.module, request);
+  if (!applied.ok) {
+    input.log?.(patchRefusalLogEntry(`${applied.code} · ${applied.error}`, input.path));
+    return null;
+  }
+  const reValidated = validateSynthesisModule(applied.text, input.previous.exports, input.signatureNames);
+  if (!reValidated.ok) {
+    input.log?.(
+      patchRefusalLogEntry(
+        `patched module still fails validation — ${reValidated.code} · ${reValidated.error}`,
+        input.path,
+      ),
+    );
+    return null;
+  }
+  input.log?.(
+    patchDeltaLogEntry({
+      path: input.path ?? "",
+      kind: applied.kind,
+      score: applied.score,
+      threshold: applied.threshold,
+      matches: applied.matches,
+      removedLines: applied.diff.removedLines,
+      addedLines: applied.diff.addedLines,
+      unified: applied.diff.unified,
+    }),
+  );
+  return { module: applied.text, exports: [...input.previous.exports], reqTrace: { ...input.previous.reqTrace } };
+}
+
 /**
  * fixes/144 (M3-2): cap on the optional tree-run failure context appended to
  * a bounded repair re-prompt (the tree-run lane's own verdict tails are
@@ -557,6 +860,40 @@ export function p6SynthesisProseRepairPrompt(hits: readonly ProseLineHit[], tree
     "Rewrite the module as CODE ONLY: delete every prose sentence entirely — do not rephrase it, do not move it into a comment or a string, do not explain. Every line of the module must be a real JavaScript statement.",
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no markdown fences.",
+  ].join("\n") + repairTreeFailureTail(treeFailure);
+}
+
+/**
+ * T-107.1 (216r · W7-L1): the patch-first repair re-prompt. It carries the
+ * named defect plus the EXACT current source windows (whole lines, verbatim)
+ * so a returned `oldStr` can be copied character-for-character, and it offers
+ * the two legal reply shapes — the bounded str_replace delta first, the legacy
+ * full corrected envelope as the alternative. Deterministic bytes for a given
+ * (defect, windows, treeFailure); the quoted windows are captured source, so
+ * unlike the sibling repair prompts this one is self-contained (the model
+ * needs no memory of its previous reply to copy an exact oldStr).
+ */
+export function p6SynthesisPatchRepairPrompt(
+  defect: string,
+  windows: readonly PatchExcerptWindow[],
+  treeFailure?: string,
+): string {
+  const named = typeof defect === "string" ? defect.replace(/\s+/g, " ").trim() : "";
+  const blocks: string[] = [];
+  for (const w of Array.isArray(windows) ? windows : []) {
+    if (!w || typeof w.text !== "string" || w.text.length === 0) continue;
+    blocks.push(
+      `--- lines ${w.firstLine}-${w.lastLine} (line numbers are for orientation only — they are NOT part of the text) ---\n${w.text}\n--- end lines ${w.firstLine}-${w.lastLine} ---`,
+    );
+  }
+  return [
+    `Your previous module was refused by the deterministic validator: ${named || "(defect unnamed)"}.`,
+    "Fix it with ONE bounded replacement instead of rewriting the module. The exact current source is quoted below — a replacement's oldStr must be copied from it character-for-character (whole lines, no line numbers, no added or removed indentation):",
+    ...blocks,
+    'Return JSON ONLY, FIRST FORM (preferred): {"patch":{"oldStr":"<exact text copied from the quoted source — it must occur EXACTLY once in the module>","newStr":"<the replacement text; empty deletes the matched text>"},}.',
+    'SECOND FORM, only if one unique replacement cannot fix the defect: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
+    "Change ONLY the named defect — every other line of the module stays byte-identical.",
+    "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no rejection-path tests, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
 }
 
@@ -1521,6 +1858,12 @@ export type P6SynthesisDeps = {
    *  re-prompt built during this synthesis appends it as a coded context
    *  block; omitted keeps the legacy byte-identical repair prompts. */
   treeFailure?: string;
+  /** T-107.1 (216r · W7-L1): opt-in patch (str_replace) repair level — when
+   *  true a LOCALIZED defect (soft forbidden primitive / non-deterministic
+   *  primitive / prose-in-code) gets ONE bounded delta attempt BEFORE the
+   *  legacy full-rewrite repair; a refusal returns the legacy path unchanged.
+   *  Absent/false keeps every prompt byte and the model-call count legacy. */
+  patchRepairs?: boolean;
 };
 
 /** Number of expandBrief attempts on a transient/timeout failure (backoff). */
@@ -1892,6 +2235,9 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   // re-prompt of THIS synthesis when the caller supplied it (defensively
   // normalized at the prompt builders; absent ⇒ byte-identical legacy text).
   const treeFailure = deps?.treeFailure;
+  // T-107.1 (216r · W7-L1): the opt-in patch-repair level (see
+  // P6SynthesisDeps.patchRepairs) — false unless the caller asks for it.
+  const patchRepairs = deps?.patchRepairs === true;
   const brief = typeof project.brief === "string" ? project.brief : "";
   if (!brief.trim() || !Array.isArray(project.phases)) return project;
 
@@ -1975,14 +2321,14 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   // signatures keeps the legacy path (nothing to chunk).
   const chunkGroups = chunkTypeSignatures(specRecord.typeSignatures);
   if (singleModuleLibraryKind(project) && chunkGroups.length <= 1) {
-    return synthesizeSingleModule(project, brief, specRecord, signatureNames, complete, verify, treeFailure);
+    return synthesizeSingleModule(project, brief, specRecord, signatureNames, complete, verify, treeFailure, patchRepairs);
   }
   // fixes/216k (105 TA-15, W6-L1): the chunked driver computes its own
   // chunk→file plan (treeChunkPlan) and consumption order (orderTreeChunks)
   // INSIDE — the caller no longer passes a flat grouping. Job-keyed chunks land
   // at their spec-graph `src/jobs/*.ts` paths; a job-less graph keeps the
   // pre-216k index-keyed mapping byte-for-byte (treeChunkPlan's legacy branch).
-  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure);
+  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs);
 }
 
 /**
@@ -2006,6 +2352,8 @@ async function synthesizeSingleModule(
   complete: P6SynthesisDeps["complete"],
   verify: P6SynthesisDeps["verify"],
   treeFailure?: string,
+  /** T-107.1 (216r · W7-L1): the opt-in patch (str_replace) repair level. */
+  patchRepairs = false,
 ): Promise<Project> {
   // --- Step 2 (legacy): synthesis (one call + one bounded repair re-prompt) --
   const lessonLines = lessonLinesForBrief(
@@ -2041,6 +2389,11 @@ async function synthesizeSingleModule(
       synthAttemptLogEntry({ chunkIndex: 0, chunkTotal: 1, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
     );
   });
+  // T-107.1 (216r): the patch-repair sink rides the same bounded attempt
+  // journal; the single module's emitted path is the tree entry file.
+  const patch: PatchRepairOptions | undefined = patchRepairs
+    ? { path: TREE_ENTRY_PATH, log: (entry) => pushAttemptLog(attemptLogs, entry) }
+    : undefined;
   const res = await synthWithBackoff(completeCall, user, opts);
   if (!res.ok) {
     return refuse(
@@ -2081,6 +2434,42 @@ async function synthesizeSingleModule(
     // is refused. A HARD forbidden primitive still refuses with no repair.
     const nondet = nondeterministicPrimitiveHit(masked);
     const prose = proseLineHits(envelope.module);
+    // T-107.1 (216r · W7-L1): the patch-first delta repair, ONLY when the
+    // caller opted in and the defect is a LOCALIZED text edit (soft forbidden
+    // token / non-deterministic primitive / prose). A landed delta is applied
+    // by `applyStrReplace` against the module the model just produced and
+    // revalidated by the SAME deterministic validator below; every non-landing
+    // outcome (no excerpt, non-delta reply, coded refusal, patched module
+    // still invalid) falls through to the legacy full-rewrite repair with its
+    // prompt bytes unchanged.
+    if (patch !== undefined) {
+      const defect = patchableDefect({
+        source: envelope.module,
+        masked,
+        softToken: repairableForbidden ? hit.soft : null,
+        unbound,
+        missingSig,
+        nondet,
+        prose,
+      });
+      if (defect !== null) {
+        const patched = await attemptPatchRepair({
+          previous: envelope,
+          defect: defect.defect,
+          lines: defect.lines,
+          signatureNames,
+          completeCall,
+          opts,
+          treeFailure,
+          path: patch.path,
+          log: patch.log,
+        });
+        if (patched !== null) {
+          envelope = patched;
+          validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames);
+        }
+      }
+    }
     if (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
@@ -2207,6 +2596,8 @@ async function synthesizeChunkedTree(
   specRecord: NonNullable<Project["implementationSpec"]>,
   complete: P6SynthesisDeps["complete"],
   treeFailure?: string,
+  /** T-107.1 (216r · W7-L1): the opt-in patch (str_replace) repair level. */
+  patchRepairs = false,
 ): Promise<Project> {
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
@@ -2248,12 +2639,18 @@ async function synthesizeChunkedTree(
       { limit: EXPAND_LESSON_RANK_LIMIT },
     );
     const user = p6SynthesisChunkUserPrompt(brief, specRecord, chunk.signatures, prior, lessonLines);
+    // T-107.1 (216r): per-chunk patch-repair sink — the chunk plan's path IS
+    // the emitted tree file's path; absent when the level is off (legacy).
+    const patch: PatchRepairOptions | undefined = patchRepairs
+      ? { path: chunk.path, log: (entry) => pushAttemptLog(attemptLogs, entry) }
+      : undefined;
     const synth = await synthesizeChunkEnvelope(
       complete,
       user,
       opts,
       signatureFunctionNames(chunk.signatures),
       treeFailure,
+      patch,
       (attempt, res) => {
         pushAttemptLog(
           attemptLogs,
@@ -2318,6 +2715,9 @@ async function synthesizeChunkEnvelope(
   opts: DeepSeekCompleteOptions,
   signatureNames: string[],
   treeFailure?: string,
+  /** T-107.1 (216r · W7-L1): the opt-in patch (str_replace) repair level —
+   *  absent keeps every prompt byte and the model-call count legacy. */
+  patch?: PatchRepairOptions,
   onAttempt?: (attempt: number, res: LlmResult) => void,
 ): Promise<{ ok: true; envelope: SynthesisEnvelope } | { ok: false; code: ErrorCode; error: string }> {
   // fixes/153 (P1): sequential attempt numbering per chunk — one event per
@@ -2353,6 +2753,42 @@ async function synthesizeChunkEnvelope(
     // modules that ever reach it are model-authored chunk envelopes.
     const nondet = nondeterministicPrimitiveHit(masked);
     const prose = proseLineHits(envelope.module);
+    // T-107.1 (216r · W7-L1): the patch-first delta repair, ONLY when the
+    // caller opted in and the defect is a LOCALIZED text edit (soft forbidden
+    // token / non-deterministic primitive / prose). A landed delta is applied
+    // by `applyStrReplace` against the module the model just produced for THIS
+    // chunk and revalidated by the SAME deterministic validator below; every
+    // non-landing outcome (no excerpt, non-delta reply, coded refusal, patched
+    // module still invalid) falls through to the legacy full-rewrite repair
+    // with its prompt bytes unchanged.
+    if (patch !== undefined) {
+      const defect = patchableDefect({
+        source: envelope.module,
+        masked,
+        softToken: repairableForbidden ? hit.soft : null,
+        unbound,
+        missingSig,
+        nondet,
+        prose,
+      });
+      if (defect !== null) {
+        const patched = await attemptPatchRepair({
+          previous: envelope,
+          defect: defect.defect,
+          lines: defect.lines,
+          signatureNames,
+          completeCall,
+          opts,
+          treeFailure,
+          path: patch.path,
+          log: patch.log,
+        });
+        if (patched !== null) {
+          envelope = patched;
+          validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames);
+        }
+      }
+    }
     if (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)

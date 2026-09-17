@@ -36,6 +36,18 @@
  * env selection (`RAPIDTOOL_PROVIDER`), failover, probes/doctor surfacing, and
  * per-call telemetry — all specified in research/multiagent/101_provider_integration.md §4
  * and owned by later waves.
+ *
+ * T-107.10 (W7 · L4, fixes/216t) added ONE seam here, additively: an EXPLICIT
+ * provider selection (`CallModelOptions.provider` + `resolveExplicitProvider`)
+ * so a caller can dispatch to an explicitly-passed provider — today the
+ * test-only mock (`./mock.ts`, never in `PROVIDERS`, never in `ROLE_TIERS`,
+ * never in `KNOWN_MODEL_IDS`). The explicit path validates the MODEL ID
+ * against THAT provider's own `requestModelIds` (ids are provider-scoped, so
+ * `mock-canned-v1` is never a "deepseek model id"), refuses a malformed
+ * descriptor or an out-of-namespace id with `RT_E_VALIDATION`, and NEVER
+ * falls back to the role tier. The default path is byte-identical: with no
+ * `provider` passed, resolution and dispatch are exactly `resolveRoleModel` →
+ * `PROVIDERS` as before, and the keyless floor is untouched.
  */
 
 import {
@@ -45,7 +57,7 @@ import {
   isDeepSeekConfigured,
 } from "./deepseek.ts";
 import type { DeepSeekCompleteOptions, DeepSeekMessage } from "./deepseek.ts";
-import type { LlmResult } from "../../llm.ts";
+import type { LlmModel, LlmResult } from "../../llm.ts";
 import type { ErrorCode } from "../../errors.ts";
 
 // ---------------------------------------------------------------------------
@@ -75,8 +87,11 @@ export function isModelRole(value: unknown): value is RapidToolModelRole {
 // Providers
 // ---------------------------------------------------------------------------
 
-/** Ids the registry knows. Additive: one per provider file under this dir. */
-export type LlmProviderId = "deepseek";
+/** Ids the registry knows. Additive: one per provider file under this dir.
+ *  `mock` (T-107.10, fixes/216t) is the explicitly-passed test provider from
+ *  `./mock.ts` — it is a legal provider ID for the EXPLICIT path only and is
+ *  deliberately absent from `PROVIDERS`/`ROLE_TIERS`/`KNOWN_MODEL_IDS`. */
+export type LlmProviderId = "deepseek" | "mock";
 
 /** Request-path model ids whose acceptance is live-verified for the DeepSeek
  *  API (2026-09-16, two keys — see `./deepseek.ts` header). `deepseek-flash`
@@ -108,8 +123,14 @@ export type LlmProviderDescriptor = {
   /** Prefix for model-id env pins (`<PREFIX>_MODEL_<ROLE>`). */
   readonly modelEnvPrefix: string;
   readonly defaultBaseUrl: string;
-  /** Live-verified request-path ids for this provider. */
-  readonly requestModelIds: readonly KnownModelId[];
+  /** The ids this provider may be REQUESTED for — a PROVIDER-SCOPED
+   *  namespace. DeepSeek lists its live-verified request ids (the same set
+   *  `KNOWN_MODEL_IDS` publishes); the mock lists its own `mock-canned-v1`.
+   *  Widened from `KnownModelId[]` to `string[]` by T-107.10 (fixes/216t) so
+   *  a non-DeepSeek provider can be described without inventing a DeepSeek
+   *  model id — the registry validates an explicit provider's model against
+   *  ITS OWN list, never against DeepSeek's. */
+  readonly requestModelIds: readonly string[];
   readonly isConfigured: () => boolean;
   readonly complete: (
     prompt: string,
@@ -136,6 +157,71 @@ export const PROVIDERS: readonly LlmProviderDescriptor[] = Object.freeze([
  *  `callModel` converts a missing tier provider into a coded refusal). */
 export function getProvider(id: string): LlmProviderDescriptor | undefined {
   return PROVIDERS.find((p) => p.id === id);
+}
+
+// ---------------------------------------------------------------------------
+// Explicit provider selection (T-107.10 · W7-L4, fixes/216t)
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of resolving an explicitly-passed provider: the descriptor to
+ * dispatch through plus the model id to send. The id is validated against the
+ * PROVIDER'S OWN `requestModelIds` namespace — never against
+ * `KNOWN_MODEL_IDS` (which stays DeepSeek-only, so a mock id can never pose
+ * as a DeepSeek model id).
+ */
+export type ExplicitProviderSelection =
+  | { ok: true; descriptor: LlmProviderDescriptor; model: string }
+  | { ok: false; code: ErrorCode; error: string };
+
+/**
+ * Validate an EXPLICITLY passed provider descriptor (T-107.10): shape-check it
+ * (a hostile/partial object is a coded `RT_E_VALIDATION` refusal — never a
+ * dispatch, never a silent fallback to the role tier), then pick the model id:
+ * `opts.model` when given (must be in THAT provider's `requestModelIds`) else
+ * the provider's first request id. Pure — no I/O, no env read.
+ */
+export function resolveExplicitProvider(
+  provider: unknown,
+  opts: { model?: unknown } = {},
+): ExplicitProviderSelection {
+  const bad = (error: string): ExplicitProviderSelection => ({ ok: false, code: "RT_E_VALIDATION", error });
+  if (provider === null || typeof provider !== "object" || Array.isArray(provider)) {
+    return bad(
+      `an explicit provider must be a provider descriptor object — got ${provider === null ? "null" : Array.isArray(provider) ? "an array" : typeof provider}. Refusing rather than falling back to the role tier.`,
+    );
+  }
+  const rec = provider as Record<string, unknown>;
+  const id = typeof rec.id === "string" && rec.id.trim() ? rec.id.trim() : "";
+  if (!id) return bad("an explicit provider descriptor needs a non-empty string id");
+  if (typeof rec.complete !== "function") {
+    return bad(`explicit provider "${id}" has no complete() — refusing rather than dispatching into a half-built provider`);
+  }
+  if (typeof rec.isConfigured !== "function") {
+    return bad(`explicit provider "${id}" has no isConfigured() — a provider descriptor must carry the honest probe`);
+  }
+  const requestModelIds = Array.isArray(rec.requestModelIds)
+    ? rec.requestModelIds.filter((m): m is string => typeof m === "string" && m.trim().length > 0)
+    : [];
+  if (requestModelIds.length === 0) {
+    return bad(`explicit provider "${id}" declares no requestModelIds — nothing to request; refusing`);
+  }
+  const explicit = opts.model;
+  if (explicit !== undefined) {
+    if (typeof explicit !== "string" || explicit.trim() === "") {
+      return bad(
+        `explicit provider "${id}": an explicit model id must be a non-empty string — got ${JSON.stringify(explicit)}. Refusing rather than silently defaulting.`,
+      );
+    }
+    const wanted = explicit.trim();
+    if (!requestModelIds.includes(wanted)) {
+      return bad(
+        `explicit provider "${id}": model "${wanted}" is not in that provider's request ids (${requestModelIds.join(", ")}) — ids are provider-scoped; refusing rather than substituting.`,
+      );
+    }
+    return { ok: true, descriptor: provider as LlmProviderDescriptor, model: wanted };
+  }
+  return { ok: true, descriptor: provider as LlmProviderDescriptor, model: requestModelIds[0]! };
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +367,13 @@ export type CallModelOptions = {
   /** Explicit model id override — must be EXACTLY one of `KNOWN_MODEL_IDS`
    *  (the explicit-model rule); unknown ⇒ coded `RT_E_VALIDATION` refusal. */
   model?: string;
+  /** Explicit PROVIDER override (T-107.10 · W7-L4, fixes/216t) — the
+   *  "param" half of explicit selection. ONLY an explicitly constructed
+   *  descriptor (today: `./mock.ts`'s) is meaningful here; the role tier is
+   *  never consulted when this is passed and a malformed/out-of-namespace
+   *  selection is a coded refusal, never a fallback. Omitted ⇒ the default
+   *  DeepSeek tier path, byte-identical. */
+  provider?: LlmProviderDescriptor;
   system?: string;
   maxTokens?: number;
   json?: boolean;
@@ -305,6 +398,21 @@ export async function callModel(
   prompt: string,
   opts: CallModelOptions = {},
 ): Promise<LlmResult> {
+  // T-107.10 (fixes/216t): an EXPLICIT provider short-circuits the role tier
+  // (the caller selected it — never a fallback, never a "configured" probe
+  // read). The model id is validated inside the provider's own namespace.
+  if (opts.provider !== undefined) {
+    const selection = resolveExplicitProvider(opts.provider, { model: opts.model });
+    if (!selection.ok) {
+      return { ok: false, reason: "error", error: selection.error, code: selection.code };
+    }
+    const { model: _explicitModel, provider: _explicitProvider, ...rest } = opts;
+    // `selection.model` is an opaque, provider-scoped id on this path; the
+    // descriptor owns its meaning (the mock ignores it). The cast is confined
+    // to this one forwarding boundary — `DeepSeekCompleteOptions.model` is
+    // deliberately NOT widened (deepseek request shapes stay untouched).
+    return selection.descriptor.complete(prompt, { ...rest, model: selection.model as LlmModel });
+  }
   const resolved = resolveRoleModel(role, { model: opts.model });
   if (!resolved.ok) {
     return { ok: false, reason: "error", error: resolved.error, code: resolved.code };

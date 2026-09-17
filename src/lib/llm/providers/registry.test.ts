@@ -60,12 +60,13 @@ function capturingFetch(calls: Captured[]): typeof fetch {
 const KEY = "DEEPSEEK_API_KEY";
 const PIN_KEYS = ["DEEPSEEK_MODEL_MAIN", "DEEPSEEK_MODEL_REASONING", "DEEPSEEK_MODEL_WEAK"];
 
-/** Set env vars for one test; returns the restorer (deletes vars that were unset). */
-function withEnv(vars: Record<string, string>): () => void {
+/** Set (or delete, via `undefined`) env vars for one test; returns the restorer. */
+function withEnv(vars: Record<string, string | undefined>): () => void {
   const saved = new Map<string, string | undefined>();
   for (const [k, v] of Object.entries(vars)) {
     saved.set(k, process.env[k]);
-    process.env[k] = v;
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
   }
   return () => {
     for (const [k, v] of saved) {
@@ -77,17 +78,14 @@ function withEnv(vars: Record<string, string>): () => void {
 
 /** Clear the key + every role pin for one test; returns the restorer. */
 function withCleanLlmEnv(vars: Record<string, string> = {}): () => void {
-  const saved = new Map<string, string | undefined>();
-  for (const k of [KEY, ...PIN_KEYS]) {
-    saved.set(k, process.env[k]);
-    delete process.env[k];
-  }
-  for (const [k, v] of Object.entries(vars)) process.env[k] = v;
+  const cleared: Record<string, undefined> = {};
+  for (const k of [KEY, ...PIN_KEYS]) cleared[k] = undefined;
+  // Compose two restorers; reverse order: applied vars first, then the cleared originals.
+  const restoreCleared = withEnv(cleared);
+  const restoreVars = withEnv(vars);
   return () => {
-    for (const [k, v] of saved) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
+    restoreVars();
+    restoreCleared();
   };
 }
 
