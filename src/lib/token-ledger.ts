@@ -39,7 +39,11 @@
  * `cacheWriteTokens`, `reasoningTokens`) on `TokenSpend` / `TokenLedger`,
  * `billableInputTokens`, `estimateCostUsd` + `TokenPrices`, and the
  * `TokenBudget` seam — `createTokenBudget`, `budgetCap`, `isBudgetExhausted`,
- * `assertBudgetHeadroom`, `recordBudgetSpend`.
+ * `assertBudgetHeadroom`, `recordBudgetSpend` — plus the A3 catch wrapper
+ * (`runBudgetedCall` / `budgetStopRefusal`): a budget stop is a CODED stop at
+ * the seam, never an unhandled throw an outer catch would classify as
+ * RT_E_INTERNAL (226 A3 / D2.3). No default cap is set here — the cap stays
+ * caller-supplied (unset env ⇒ unmetered, every helper a no-op).
  */
 export class SessionBudgetExceeded extends Error {
   readonly code = "RT_E_BUDGET_EXHAUSTED" as const;
@@ -360,6 +364,86 @@ export function recordBudgetSpend(
     if (spent > cap) throw new SessionBudgetExceeded(spent, cap);
   }
   return budget.ledger;
+}
+
+// ---------------------------------------------------------------------------
+// A3 catch wrapper (T-107.6 · D2.3 · 226 A3): a budget stop must be its coded
+// outcome, never RT_E_INTERNAL
+// ---------------------------------------------------------------------------
+
+/**
+ * The coded refusal a seam returns when a budget stop stops it (A3 · D2.3).
+ * `SessionBudgetExceeded` is thrown by `assertBudgetHeadroom` /
+ * `recordBudgetSpend` and (226 A3) had NO production catcher; a seam that
+ * adopts the budget threading without wrapping that throw lets an outer
+ * generic catch classify a CONTROLLED stop as `RT_E_INTERNAL`. Budgeted
+ * seams therefore run their wire calls through `runBudgetedCall`, which
+ * returns this envelope instead of ever letting the throw escape.
+ */
+export type BudgetStopRefusal = {
+  ok: false;
+  reason: "error";
+  error: string;
+  code: "RT_E_BUDGET_EXHAUSTED";
+};
+
+/**
+ * Translate a caught error into the coded budget-stop refusal — or null for
+ * any non-budget error (the caller rethrows those unchanged, so real faults
+ * keep their own classification). The message carries the code so a log
+ * reader never has to infer the class from prose.
+ */
+export function budgetStopRefusal(err: unknown): BudgetStopRefusal | null {
+  if (!(err instanceof SessionBudgetExceeded)) return null;
+  return {
+    ok: false,
+    reason: "error",
+    error: `${err.message} [RT_E_BUDGET_EXHAUSTED] — controlled stop at the session budget cap (spend kept)`,
+    code: "RT_E_BUDGET_EXHAUSTED",
+  };
+}
+
+/** True when a value is the coded budget-stop refusal (narrows for seams that
+ *  must distinguish a stop from an ordinary failed result). */
+export function isBudgetStopRefusal(x: unknown): x is BudgetStopRefusal {
+  return (
+    !!x &&
+    typeof x === "object" &&
+    (x as { ok?: unknown }).ok === false &&
+    (x as { code?: unknown }).code === "RT_E_BUDGET_EXHAUSTED"
+  );
+}
+
+/** The usage shape a wire result carries (LlmResult-compatible). */
+export type ModelUsage = { promptTokens: number; completionTokens: number };
+
+/**
+ * Run ONE wire call under a budget, with the A3 catch wrapper:
+ *   1. pre-dispatch gate — `assertBudgetHeadroom` refuses BEFORE the wire;
+ *   2. the call itself;
+ *   3. post-response accounting — `recordBudgetSpend` records the REAL usage
+ *      of every response that reports it (success or not: recording only on
+ *      success silently under-counts retries), keeping the spend in the
+ *      ledger even when the crossing refuses the result.
+ * A budget stop at step 1 or 3 comes back as `BudgetStopRefusal`; any other
+ * error is rethrown untouched. `budget === undefined` keeps the
+ * byte-identical legacy path (no gate, no recording, result passes through).
+ */
+export async function runBudgetedCall<
+  T extends { ok: boolean; usage?: ModelUsage | null | undefined },
+>(budget: TokenBudget | undefined, call: () => Promise<T>): Promise<T | BudgetStopRefusal> {
+  try {
+    if (budget) assertBudgetHeadroom(budget);
+    const res = await call();
+    if (budget && res && typeof res === "object" && res.usage) {
+      recordBudgetSpend(budget, res.usage);
+    }
+    return res;
+  } catch (err) {
+    const refusal = budgetStopRefusal(err);
+    if (refusal) return refusal;
+    throw err;
+  }
 }
 
 export function wouldExceed(

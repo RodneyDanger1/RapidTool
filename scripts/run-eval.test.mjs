@@ -7,23 +7,38 @@ import {
   buildSummary,
   checkAcceptance,
   choose,
+  classifyDrainEnding,
+  classifyLlmPreflight,
+  classifyRunOutcome,
   drainPipeline,
+  finishRunMarker,
+  formatPreflightLines,
   graderFileFor,
   graderLeakScan,
   isTerminalDrainOutcome,
+  keyedRunDecision,
   keylessSkipNotices,
   loadGrader,
+  markerPathFor,
   parseGrader,
   passAtK,
   passCaretK,
   passesAcceptance,
   planTargets,
+  probeP6Reachability,
+  readRunMarker,
+  RUN_MARKER_NAME,
+  RUN_OUTCOME_CLASSES,
+  runMarkerState,
+  runWithMarker,
   scoringCorpusFor,
   trialEmitDir,
   treeTextFiles,
   trialsSummary,
+  writeRunStartMarker,
 } from "./run-eval.mjs";
 import { createProject, runUntilGate } from "../src/lib/headless.ts";
+import { ERROR_CODE_DOC } from "../src/lib/errors.ts";
 import { projectRoot } from "./with-app-env.mjs";
 
 /**
@@ -521,4 +536,285 @@ test("(d) the drain exits on the FIRST dod round with a coded stop (WB-2 → M9)
   assert.equal(rowsAfter, 1, `exactly ONE drain round ran the hard-DoD block — got ${rowsAfter} (80 before this fix)`);
   assert.equal(drain.p.currentPhase, 1, "cursor unmoved — a hard stop advances nothing");
   assert.equal(drain.approved.length, 0, "no gate was approved on the way out");
+});
+
+// ---------------------------------------------------------------------------
+// (e) OV-35 (fixes/244, W16-L1) — the Step-0 preflight: OV-27 reachability +
+// failure-class triage + kill-safety run marker. The three clauses `235` §2
+// row 3 names as unasserted are pinned here: (a) marker ORDERING (before entry
+// 1), (b) one distinct coded output per preflight class (stubbed 401/402/400),
+// (c) the keyless path writes nothing new.
+// ---------------------------------------------------------------------------
+
+test("OV-35: the run-start marker is written before the first corpus entry", async () => {
+  const dir = tempDir("marker-order");
+  try {
+    const seen = [];
+    const selected = [{ entry: { slug: "case-a" } }, { entry: { slug: "case-b" } }];
+    const out = await runWithMarker(selected, {
+      mode: "keyed",
+      outDir: dir,
+      runner: async (t) => {
+        seen.push({ slug: t.entry.slug, marker: readRunMarker(dir) });
+        return { entryRow: { slug: t.entry.slug } };
+      },
+    });
+    assert.equal(out.markerPath, join(dir, RUN_MARKER_NAME));
+    assert.equal(seen.length, 2, "both entries ran");
+    for (const s of seen) {
+      assert.ok(s.marker, `${s.slug}: the marker must exist BEFORE the entry runs (ordering, not existence)`);
+      assert.equal(s.marker.mode, "keyed");
+      assert.equal(s.marker.finishedAt, null, "the marker is UNFINISHED while entries run — a kill at any point leaves it so");
+      assert.equal(s.marker.done, false);
+      assert.equal(typeof s.marker.startedAt, "string");
+      assert.ok(!Number.isNaN(Date.parse(s.marker.startedAt)), "startedAt is a parseable timestamp");
+    }
+    assert.deepEqual(seen.map((s) => s.slug), ["case-a", "case-b"], "entries ran in order");
+    // Unfinished until the caller finalizes AFTER both persists (main does that):
+    assert.equal(runMarkerState(dir).state, "unfinished");
+    finishRunMarker(dir, { entries: 2 });
+    assert.equal(runMarkerState(dir).state, "finished");
+    assert.equal(readRunMarker(dir).entries, 2);
+    assert.equal(typeof readRunMarker(dir).finishedAt, "string");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("OV-35: preflight maps not-configured/401/402/400 to distinct coded output", () => {
+  const cases = [
+    [{ configured: false }, "not-configured", "RT_E_LLM_NOT_CONFIGURED"],
+    [
+      { configured: true, wire: { attempted: true, ok: false, httpStatus: 401, code: "RT_E_LLM_REJECTED", error: "DeepSeek API key is invalid (HTTP 401)" } },
+      "auth-rejected",
+      "RT_E_LLM_REJECTED",
+    ],
+    [
+      { configured: true, wire: { attempted: true, ok: false, httpStatus: 402, code: "RT_E_LLM_REJECTED", error: "DeepSeek account balance exhausted (HTTP 402)" } },
+      "balance-exhausted",
+      "RT_E_BUDGET_EXHAUSTED",
+    ],
+    [
+      { configured: true, wire: { attempted: true, ok: false, httpStatus: 400, code: "RT_E_LLM_REJECTED", error: "DeepSeek rejected the request (HTTP 400: model not found)", requestedModel: "deepseek-v4-flash" } },
+      "request-rejected",
+      "RT_E_VALIDATION",
+    ],
+  ];
+  const classes = new Set();
+  const codes = new Set();
+  for (const [input, cls, code] of cases) {
+    const c = classifyLlmPreflight(input);
+    assert.equal(c.class, cls);
+    assert.equal(c.code, code);
+    assert.equal(typeof c.detail, "string");
+    classes.add(c.class);
+    codes.add(c.code);
+    assert.ok(Object.keys(ERROR_CODE_DOC).includes(c.code), `${c.code} must be a real registry code (errors.ts)`);
+  }
+  assert.equal(classes.size, 4, "the four demanded endings are CLASS-distinct");
+  assert.equal(codes.size, 4, "the four demanded endings are CODE-distinct (235 §2 row 3)");
+  // The request-rejected detail names the requested model id (D1.4's drift question):
+  assert.match(classifyLlmPreflight(cases[3][0]).detail, /deepseek-v4-flash/);
+  // The remaining endings classify too (no silent fallthrough):
+  assert.equal(classifyLlmPreflight({ configured: true, wire: { attempted: true, ok: false, httpStatus: null, code: "RT_E_NETWORK_UNREACHABLE", error: "fetch failed" } }).class, "unreachable");
+  assert.equal(classifyLlmPreflight({ configured: true, wire: { attempted: true, ok: false, httpStatus: null, code: "RT_E_LLM_TIMEOUT", error: "timed out" } }).class, "timeout");
+  assert.equal(classifyLlmPreflight({ configured: true, wire: null }).class, "configured-unprobed");
+  assert.equal(classifyLlmPreflight({ configured: true, wire: { attempted: true, ok: true, httpStatus: 200, model: "deepseek-v4-flash" } }).class, "wire-ok");
+  const ok = classifyLlmPreflight({ configured: true, wire: { attempted: true, ok: true, httpStatus: 200 } });
+  assert.equal(ok.code, null, "wire-ok is not a failure — no code");
+  assert.equal(ok.ok, true);
+});
+
+test("OV-35: a keyless run writes no run-start marker and adds no fields to results.json", async () => {
+  const dir = tempDir("keyless-marker");
+  try {
+    let runnerCalls = 0;
+    const out = await runWithMarker([{ entry: { slug: "k" } }], {
+      mode: "keyless",
+      outDir: dir,
+      runner: async () => {
+        runnerCalls += 1;
+        return { entryRow: { slug: "k" } };
+      },
+    });
+    assert.equal(runnerCalls, 1, "the keyless wrapper still runs the entries");
+    assert.equal(out.markerPath, null);
+    assert.deepEqual(readdirSync(dir), [], "the keyless path writes NOTHING new next to results.json (durable pin, not a manual diff)");
+    assert.equal(runMarkerState(dir).state, "none");
+    assert.equal(markerPathFor(dir), join(dir, RUN_MARKER_NAME));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // The persisted summary schema is pinned by key set — no new fields may appear:
+  assert.deepEqual(
+    Object.keys(buildSummary([])).sort(),
+    ["cases", "flakyCases", "graderLeaks", "passAtK", "skipped", "skips", "trials"],
+    "buildSummary's key set is the contract; the keyless path must not gain fields",
+  );
+});
+
+test("OV-35: a ≤4/9 outcome is routed to the named branch", () => {
+  const low = keyedRunDecision({ mode: "keyed", meanOfNine: 3.5 });
+  assert.equal(low.branch, "retrace-first");
+  assert.match(low.line, /re-trace/i);
+  assert.match(low.line, /do not re-run/i, "the wording must name re-trace vs re-run");
+  const edge = keyedRunDecision({ mode: "keyed", meanOfNine: 4 });
+  assert.equal(edge.branch, "retrace-first", "exactly 4/9 is inside the branch");
+  const band = keyedRunDecision({ mode: "keyed", meanOfNine: 5.5 });
+  assert.equal(band.branch, "band-expected");
+  assert.match(band.line, /log/i);
+  const high = keyedRunDecision({ mode: "keyed", meanOfNine: 8 });
+  assert.equal(high.branch, "above-prediction");
+  const keyless = keyedRunDecision({ mode: "keyless", meanOfNine: 6 });
+  assert.equal(keyless.branch, "n/a");
+  assert.equal(keyless.line, null, "the rule is keyed-only — keyless stays byte-identical (no line)");
+  const nan = keyedRunDecision({ mode: "keyed", meanOfNine: Number.NaN });
+  assert.equal(nan.branch, "no-score");
+});
+
+test("OV-35: every drain ending and all seven RunOutcome values classify to a coded class", () => {
+  // All seven RunOutcome values (headless.ts:527) — none may be silent:
+  const outcomes = ["hitl", "complete", "blocked", "error", "progress", "cap", "dod"];
+  assert.deepEqual(Object.keys(RUN_OUTCOME_CLASSES).sort(), [...outcomes].sort(), "exactly the seven RunOutcome values are classified");
+  for (const o of outcomes) {
+    const c = classifyRunOutcome(o);
+    assert.equal(c.outcome, o);
+    assert.equal(typeof c.class, "string");
+    assert.notEqual(c.class, "stalled", "no outcome may classify as a bare silent stall");
+    if (c.code !== null) assert.ok(Object.keys(ERROR_CODE_DOC).includes(c.code), `${o}: ${c.code} must be a registry code`);
+  }
+  // The two stall provenances C-2 left uncoded now carry their registry code:
+  const gateStall = classifyDrainEnding({ position: "stalled", outcome: "hitl", code: "RT_E_GATE_PENDING" });
+  assert.equal(gateStall.class, "gate-unapprovable");
+  assert.equal(gateStall.code, "RT_E_GATE_PENDING");
+  const capStall = classifyDrainEnding({ position: "stalled", outcome: "progress", code: "RT_E_BUDGET_EXHAUSTED" });
+  assert.equal(capStall.class, "iteration-budget-exhausted");
+  assert.equal(capStall.code, "RT_E_BUDGET_EXHAUSTED");
+  // An uncoded stall can never be silent either — it reports the emitter bug:
+  const uncoded = classifyDrainEnding({ position: "stalled", outcome: null, code: null });
+  assert.equal(uncoded.class, "stalled-uncoded");
+  assert.equal(uncoded.code, "RT_E_UNKNOWN");
+  assert.match(String(uncoded.detail), /emitter bug/);
+  // The other positions:
+  const p6 = classifyDrainEnding({ position: "p6-gate", outcome: "hitl" });
+  assert.equal(p6.class, "p6-handoff");
+  assert.equal(p6.code, null);
+  const dod = classifyDrainEnding({ position: "dod", outcome: "dod", code: "RT_E_GATE_PENDING" });
+  assert.equal(dod.code, "RT_E_GATE_PENDING", "C-2's code survives the triage");
+  assert.equal(classifyDrainEnding({ position: "terminal", outcome: "blocked" }).code, "RT_E_GATE_PENDING");
+  assert.equal(classifyDrainEnding({ position: "terminal", outcome: "error" }).code, "RT_E_INTERNAL");
+  const done = classifyDrainEnding({ position: "terminal", outcome: "complete" });
+  assert.equal(done.code, null);
+  assert.equal(done.ok, true);
+});
+
+test("OV-35: a real unapprovable gate ends the drain as a CODED stall, never a silent one", async () => {
+  const p0 = createProject({
+    brief: "Build a small notes app with add/list/search and its own tests.",
+    name: "GateStall",
+  });
+  // Park GENUINELY on a stock HITL gate (P4 — `autopilot:false` stops there),
+  // then make it forceHuman: the drain's machine-seat approve() refuses it,
+  // which is exactly the approve-throw stall branch (was uncoded before OV-35).
+  const pre = await runUntilGate(p0, { autopilot: false, maxSteps: 60 });
+  assert.equal(pre.project.status, "awaiting_hitl", "precondition: genuinely parked on a gate");
+  assert.equal(pre.outcome, "hitl");
+  const parked = { ...pre.project, hitl: { ...pre.project.hitl, forceHuman: true } };
+  const drain = await drainPipeline(parked);
+  assert.equal(drain.position, "stalled", "the unapprovable gate is the stall branch");
+  assert.equal(drain.code, "RT_E_GATE_PENDING", "the stall carries the registry code for an unresolved gate");
+  assert.equal(drain.ending.class, "gate-unapprovable");
+  assert.equal(drain.onTime, false);
+  assert.ok(typeof drain.stall === "string" && drain.stall.length > 0, "the stall evidence is preserved");
+});
+
+test("OV-35: the reachability probe loads the P6 separate specifiers and classifies a stubbed wire", async () => {
+  const before = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "dummy-key-for-probe-test";
+  try {
+    // 401 stub: the vendor answers, the key is refused — NO network in tests.
+    let calls401 = 0;
+    const stub401 = async () => {
+      calls401 += 1;
+      return new Response(JSON.stringify({ error: { message: "Authentication Fails" } }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const probe = await probeP6Reachability({ fetchImpl: stub401 });
+    assert.equal(probe.configured, true, "the P6 specifier's configured probe must see the dummy key on the bare-node host");
+    assert.equal(probe.specifiers.engine.resolved, true);
+    assert.equal(probe.specifiers.engine.liveLayer, true);
+    assert.equal(probe.specifiers.deepseek.resolved, true);
+    assert.equal(probe.specifiers.deepseek.isDeepSeekConfigured, true);
+    assert.equal(probe.specifiers.codegen.resolved, true);
+    assert.equal(probe.specifiers.codegen.liveP6Synthesis, true);
+    assert.equal(probe.wire.attempted, true);
+    assert.equal(probe.wire.httpStatus, 401);
+    assert.equal(probe.class, "auth-rejected");
+    assert.equal(probe.code, "RT_E_LLM_REJECTED");
+    assert.ok(calls401 >= 1, "the wire step really called the injected fetch");
+    assert.equal(JSON.stringify(probe).includes("dummy-key-for-probe-test"), false, "the probe must never echo the key value");
+    const lines = formatPreflightLines(probe);
+    assert.ok(lines.some((l) => /configured=true/.test(l)));
+    assert.ok(lines.some((l) => /cannot prove/.test(l)), "the probe states what it cannot prove without a real key");
+    // A 200 completion stub classifies as wire-ok (model reach for one call):
+    const okBody = {
+      model: "deepseek-v4-flash",
+      choices: [{ message: { content: "OK" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 5, completion_tokens: 1 },
+    };
+    const probe2 = await probeP6Reachability({
+      fetchImpl: async () => new Response(JSON.stringify(okBody), { status: 200, headers: { "content-type": "application/json" } }),
+    });
+    assert.equal(probe2.class, "wire-ok");
+    assert.equal(probe2.ok, true);
+    assert.equal(probe2.wire.httpStatus, 200);
+    assert.equal(probe2.wire.model, "deepseek-v4-flash");
+    // wire:false → configured but UNPROBED (never a silent pass):
+    const unprobed = await probeP6Reachability({ wire: false });
+    assert.equal(unprobed.class, "configured-unprobed");
+    assert.equal(unprobed.wire, null);
+    // No key → not-configured, wire skipped entirely:
+    delete process.env.DEEPSEEK_API_KEY;
+    const keyless = await probeP6Reachability({});
+    assert.equal(keyless.configured, false);
+    assert.equal(keyless.class, "not-configured");
+    assert.equal(keyless.wire, null);
+    assert.equal(keyless.specifiers.engine.resolved, true, "the specifiers still resolve keyless");
+  } finally {
+    if (before === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = before;
+  }
+});
+
+test("OV-35: an unfinished marker marks a killed run (the stale results.json cannot read as current)", () => {
+  const dir = tempDir("killed");
+  try {
+    writeFileSync(
+      join(dir, "results.json"),
+      JSON.stringify({ generatedAt: "2026-09-17T02:49:36.070Z", mode: "keyless", entries: [] }),
+      "utf8",
+    );
+    assert.equal(runMarkerState(dir).state, "none", "no marker yet");
+    writeRunStartMarker(dir, { mode: "keyed", entries: 6, startedAt: "2026-09-24T01:00:00.000Z" });
+    const state = runMarkerState(dir);
+    assert.equal(state.state, "unfinished");
+    assert.ok(state.note && /results\.json/.test(state.note), "the read states what cannot be trusted");
+    assert.ok(/killed/.test(state.note));
+    // The stale file is still on disk (the kill cannot remove it) — the marker
+    // is the only signal that separates it from THIS run's result:
+    const stale = JSON.parse(readFileSync(join(dir, "results.json"), "utf8"));
+    assert.ok(stale.generatedAt < readRunMarker(dir).startedAt, "the stale file PREDATES the killed run");
+    // A rerun overwrites the marker at start (WB-6: no double-kill confusion):
+    writeRunStartMarker(dir, { mode: "keyed", entries: 1, startedAt: "2026-09-24T02:00:00.000Z" });
+    assert.equal(runMarkerState(dir).state, "unfinished");
+    finishRunMarker(dir, { entries: 1 });
+    const finished = runMarkerState(dir);
+    assert.equal(finished.state, "finished");
+    assert.equal(finished.marker.done, true);
+    assert.equal(typeof finished.marker.finishedAt, "string");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

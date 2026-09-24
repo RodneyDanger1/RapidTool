@@ -4,6 +4,9 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   classifyJobSource,
   coerceFactoryClaim,
@@ -14,9 +17,12 @@ import {
   FACTORY_GAP,
   inventoryFromJobSources,
   jobScopeShortfall,
+  productCompleteFromProject,
   RAPIDTOOL_FACTORY_EVIDENCE,
 } from "./doctor.ts";
 import { RUNNER_IS_NOT_A_SANDBOX } from "./sandbox-policy.ts";
+import { archTrace } from "./dod.ts";
+import type { Project } from "./types.ts";
 
 describe("doctor factory — field-truth latch", () => {
   it("RapidTool-now evidence keeps autonomousSoftwareFactory false", () => {
@@ -247,5 +253,230 @@ describe("doctor factory — field-truth latch", () => {
     assert.equal(pre.reexports, 3);
     assert.equal(pre.real, 0);
     assert.equal(evidenceFromJobInventory(pre).realMultiJobProduct, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OV-9 (W18-L1): `productComplete`'s producer — real project state, never a flag
+//
+// Pre-OV-9 the latch's productComplete input was settable only by a unit test:
+// the sole caller (headless.doctorStatus, the `doctor --tree` path) passed no
+// evidence, and coerceFactoryClaim read the flag straight off a raw blob.
+// productCompleteFromProject derives the field from the project's own artifact
+// state instead — the generatedTree bytes, through the SAME p6-arch trace the
+// P6 gate reads. Grounding: (a) the ONE tracked real export that ships a
+// generatedTree (`research/eval-out/coffeehouse2home-property-ledger`, tracked
+// and clean) refuses on its NAMED leftover, and the verdict flips when exactly
+// that file is dropped — real bytes, both directions; (b) the keyed multi-file
+// arch-complete shape fires the producer and the latch then lacks only the
+// (not yet produced) fixture probe. A hand-passed flag can never mint the field.
+// ---------------------------------------------------------------------------
+
+const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+const realExportPath = (app: string): string =>
+  join(REPO_ROOT, "research", "eval-out", app, ".rapidtool", "project.json");
+/** A tracked real export the tests rely on. A missing file is a FAIL — the
+ *  refusal ground is real bytes on disk, never a silent skip. */
+const readRealExport = (app: string): Record<string, unknown> => {
+  const path = realExportPath(app);
+  assert.ok(existsSync(path), `tracked real export missing: ${path}`);
+  return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+};
+/** headless.collectJobSources mirror (8 lines): the tree's OWN job files. Kept
+ *  local so this suite does not compile the whole headless module. */
+const readTreeJobSources = (dir: string): Array<{ path: string; source: string }> => {
+  const out: Array<{ path: string; source: string }> = [];
+  for (const sub of ["src/jobs", "jobs"]) {
+    const full = join(dir, sub);
+    if (!existsSync(full)) continue;
+    for (const name of readdirSync(full)) {
+      if (!/\.(ts|js|mjs)$/.test(name)) continue;
+      out.push({ path: `${sub}/${name}`, source: readFileSync(join(full, name), "utf8") });
+    }
+  }
+  return out;
+};
+
+/** Keyed multi-file shape: an expanded spec demanding createBoard/addColumn +
+ *  tree files whose CODE carries those identifiers. */
+const OV9_SPEC = {
+  requirements: ["Board shows cards by status", "Columns hold cards"],
+  edgeCases: [],
+  errorHandling: [],
+  typeSignatures: [
+    "export function createBoard(name: string): Board",
+    "export function addColumn(board: Board, title: string): Column",
+  ],
+  dataFlow: [],
+  negativeConstraints: [],
+  source: "p6" as const,
+  briefHash: "ov9-fixture",
+  createdAt: 1,
+} as Project["implementationSpec"];
+
+const OV9_TREE = (): NonNullable<Project["generatedTree"]> =>
+  [
+    {
+      path: "src/domain/board.ts",
+      source: [
+        "export type Board = { id: string; name: string; columns: Column[] };",
+        "export function createBoard(name: string): Board { return { id: 'b1', name, columns: [] }; }",
+      ].join("\n"),
+      hash: "h-ov9-board",
+      attempt: 0,
+    },
+    {
+      path: "src/domain/column.ts",
+      source: [
+        "export type Column = { id: string; title: string };",
+        "export function addColumn(board: Board, title: string): Column { return { id: 'c1', title }; }",
+      ].join("\n"),
+      hash: "h-ov9-column",
+      attempt: 0,
+    },
+  ] as NonNullable<Project["generatedTree"]>;
+
+const ov9Project = (tree: NonNullable<Project["generatedTree"]> = OV9_TREE()): Project =>
+  ({
+    name: "OV-9 Board",
+    lattice: {
+      domain: "boards",
+      jobs: ["board", "column"],
+      entities: [],
+      constraints: [],
+      nodes: [],
+      complexity: 2,
+    },
+    phases: [],
+    generatedTree: tree,
+    implementationSpec: OV9_SPEC,
+  }) as unknown as Project;
+
+describe("OV-9 — productComplete derives from real project state", () => {
+  it("producer FIRES on the arch-complete keyed multi-file shape; the only remaining latch gap is the unproduced fixture probe", () => {
+    const p = ov9Project();
+    assert.equal(productCompleteFromProject(p), true, "arch-complete tree must mint productComplete");
+    // Same bar as the P6 gate — one derivation, no drift:
+    assert.deepEqual(archTrace(p).missing, []);
+    assert.deepEqual(archTrace(p).stubFiles, []);
+
+    const inv = inventoryFromJobSources([
+      { path: "src/jobs/board.ts", source: "export function createBoard() { return { id: 'b1' }; }" },
+      { path: "src/jobs/column.ts", source: "export function addColumn() { return { id: 'c1' }; }" },
+    ]);
+    const ev = evidenceFromJobInventory(inv, { project: p });
+    assert.equal(ev.productComplete, true, "the evidence builder carries the PRODUCED value");
+    assert.equal(ev.leftoverJobsAreReexportsOrStubs, false);
+    assert.equal(ev.realMultiJobProduct, true);
+
+    const claim = factoryClaim(ev, {});
+    assert.equal(claim.autonomousSoftwareFactory, false, "fixtures still have no producer (T5.2-A's lane)");
+    assert.deepEqual(claim.gaps, [FACTORY_GAP.fixtures], "the ONLY gap left is the fixture probe");
+    // Latch semantics (:81-92, unchanged): once the fixture probe has its value
+    // the AND fires — the produced productComplete is latch-grade, not a token.
+    const fired = factoryClaim({ ...ev, humanFixtures: true }, {});
+    assert.equal(fired.autonomousSoftwareFactory, true);
+    assert.deepEqual(fired.gaps, []);
+  });
+
+  it("the REAL café export refuses on its named leftover; dropping exactly that file flips the verdict", () => {
+    const real = readRealExport("coffeehouse2home-property-ledger");
+    const tree = real.generatedTree as Array<{ path: string }>;
+    assert.ok(Array.isArray(tree) && tree.length > 0, "the tracked export still carries a generatedTree");
+
+    assert.equal(productCompleteFromProject(real), false, "the real product is not product-complete");
+    const t = archTrace(real);
+    assert.deepEqual(t.stubFiles, ["src/generated.ts"], "refusal names the real leftover (a reexport-only barrel)");
+    assert.deepEqual(t.missing, [], "…and it is NOT a missing capability — the leftover IS the reason");
+
+    // Differential on real bytes: this export with ONLY the named leftover
+    // dropped is arch-complete → the verdict tracks content, not a flag.
+    const kept = tree.filter((f) => !t.stubFiles.includes(f.path));
+    assert.equal(kept.length, tree.length - 1);
+    assert.equal(productCompleteFromProject({ ...real, generatedTree: kept }), true);
+
+    // End-to-end evidence build over the real tree dir's own bytes (the census)
+    // + the real export: the 214 census cross-gate still refuses this tree.
+    const dir = join(REPO_ROOT, "research", "eval-out", "coffeehouse2home-property-ledger");
+    const inv = inventoryFromJobSources(readTreeJobSources(dir), dir);
+    assert.equal(inv.reexports, 5);
+    const ev = evidenceFromJobInventory(inv, { project: real });
+    assert.equal(ev.productComplete, false, "the real leftover refuses productComplete");
+    assert.equal(ev.leftoverJobsAreReexportsOrStubs, true);
+    assert.equal(factoryClaim(ev, {}).autonomousSoftwareFactory, false);
+  });
+
+  it("REFUSES when the real state lacks it — tree-absent export, dropped tree, stubs, non-object state", () => {
+    // A real tracked export with NO tree (keyless single-module floor): a SKIP.
+    const floored = readRealExport("real-estate-crm");
+    assert.equal(archTrace(floored).skipped, true, "the real floor is a SKIP, not complete");
+    assert.equal(productCompleteFromProject(floored), false, "skip ≠ green");
+
+    // The keyed shape with the tree dropped / a capability dropped / a stub kept.
+    assert.equal(productCompleteFromProject(ov9Project([])), false, "absent tree refuses");
+    assert.equal(productCompleteFromProject(ov9Project(OV9_TREE().slice(0, 1))), false, "missing capability refuses");
+    const withTodo = [
+      ...OV9_TREE(),
+      {
+        path: "src/jobs/flip.ts",
+        source: 'throw new Error("TODO(E-15) stub: implement job flip");',
+        hash: "h-todo",
+        attempt: 0,
+      },
+    ] as NonNullable<Project["generatedTree"]>;
+    assert.equal(productCompleteFromProject(ov9Project(withTodo)), false, "TODO(E-15) stub ≠ complete");
+    const withReexport = [
+      ...OV9_TREE(),
+      { path: "src/jobs/leftover.ts", source: 'export { run } from "./track.ts";', hash: "h-re", attempt: 0 },
+    ] as NonNullable<Project["generatedTree"]>;
+    assert.equal(productCompleteFromProject(ov9Project(withReexport)), false, "reexport-only leftover ≠ complete");
+
+    // Hostile/absent state is never assumed: fail-closed, never a throw.
+    for (const junk of [null, undefined, [], "", 42, true, {}, "{}"]) {
+      assert.equal(productCompleteFromProject(junk), false, `non-project state must refuse: ${String(junk)}`);
+    }
+  });
+
+  it("ANTI-GOAL: a hand-passed productComplete flag cannot mint the field (typed or untyped caller)", () => {
+    const inv = inventoryFromJobSources([
+      { path: "src/jobs/a.ts", source: "export function a() { return 1; }" },
+      { path: "src/jobs/b.ts", source: "export function b() { return 2; }" },
+    ]);
+    // The old flag, exactly as an untyped .mjs caller would pass it (the CLI is
+    // JS): the builder is keyed to `project` now and ignores the flag at runtime.
+    const untyped = { productComplete: true } as never;
+    const ev = evidenceFromJobInventory(inv, untyped);
+    assert.equal(ev.productComplete, false, "the flag is not read");
+    const claim = factoryClaim(ev, {});
+    assert.equal(claim.autonomousSoftwareFactory, false);
+    assert.ok(claim.gaps.includes(FACTORY_GAP.complete), "the complete gap stands");
+
+    // Same through the coercion boundary: a raw blob claiming the whole field
+    // truth cannot mint product-complete without real project state.
+    const blob = {
+      autonomousSoftwareFactory: true,
+      leftoverJobsAreReexportsOrStubs: false,
+      humanFixtures: true,
+      realMultiJobProduct: true,
+      productComplete: true,
+    };
+    const coerced = coerceFactoryClaim(blob);
+    assert.equal(coerced.autonomousSoftwareFactory, false);
+    assert.deepEqual(coerced.gaps, [FACTORY_GAP.complete], "only the unminted probe refuses");
+    // Handed the REAL state the same blob derives the bar honestly: still false
+    // for a floor export, and closed only by the arch-complete project.
+    assert.ok(coerceFactoryClaim(blob, readRealExport("real-estate-crm")).gaps.includes(FACTORY_GAP.complete));
+    assert.deepEqual(coerceFactoryClaim(blob, ov9Project()).gaps, []);
+  });
+
+  it("the 214 census cross-gate is unchanged: a complete project over a leftover census still refuses", () => {
+    const inv = inventoryFromJobSources([
+      { path: "src/jobs/board.ts", source: "export function createBoard() { return { id: 'b1' }; }" },
+      { path: "src/jobs/leftover.ts", source: 'export { run } from "./track.ts";' },
+    ]);
+    const ev = evidenceFromJobInventory(inv, { project: ov9Project() });
+    assert.equal(ev.productComplete, false, "no loosening: the scan's leftovers still refuse the bar");
+    assert.equal(ev.leftoverJobsAreReexportsOrStubs, true);
+    assert.equal(ev.realMultiJobProduct, false);
   });
 });

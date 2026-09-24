@@ -43,6 +43,14 @@
 // and never invented job bodies. No generatedSource ⇒ leftover jobs stay
 // emitJobStub (byte-identical keyless floor). Tree-covered paths still skip.
 //
+// fixes/247 (G5 · 216y §2.3): the emitted failure paths carry the harness's
+// coded-refusal contract across the artifact boundary — every TODO(E-15) stub
+// rejection and every entry boot guard prefixes a REGISTERED RT_E code
+// (EMITTED_REFUSAL_CODE below; errors.ts is the code source — never an
+// invented id) in the `<code> · <reason>` refusal-log shape, and the emitted
+// oracle spec asserts the coded form. A consumer of the tree can classify
+// failures instead of receiving text-only errors.
+//
 // Honest local-only framing (E-27): DEPLOY.md is a template derived from the
 // P9/P12 artifacts recorded in the project; it states that the pipeline never
 // executed or validated those templates and that nothing in the scaffold
@@ -118,6 +126,21 @@ export const DEPLOY_HONESTY_STAMP =
 
 const MACHINE_STAMP = (id: string): string =>
   `machine-generated from RapidTool packet ${id || "unknown"}; regenerate, don't hand-edit.`;
+
+/**
+ * fixes/247 (G5 · 216y §2.3 — "the coded-refusal contract stops at the
+ * artifact boundary"): every emitted failure path names a REGISTERED code
+ * from errors.ts (invariant I13), never an invented one. `RT_E_VALIDATION`
+ * is the registry's class for an operation a seam declines with a named
+ * reason — the same class phases.ts:119 and headless.ts's policy seam stamp
+ * on their guard refusals ("a validation refusal, not an opaque internal
+ * error"). The emitted message shape is the refusal-log shape
+ * `<RT_E code> · <reason>` (engine.ts refusalClassOf parses it).
+ */
+const EMITTED_REFUSAL_CODE = "RT_E_VALIDATION";
+
+/** `<RT_E code> · <reason>` — the prefix every emitted failure path carries. */
+const emittedRefusal = (reason: string): string => `${EMITTED_REFUSAL_CODE} · ${reason}`;
 
 // ---------------------------------------------------------------------------
 // Small deterministic text helpers (escaping lives here, once)
@@ -715,7 +738,7 @@ function emitApi(node: { file: string; purpose: string }, project: Project): str
     `  input: unknown,`,
     `): Promise<{ ok: boolean }> {`,
     `  void input;`,
-    `  throw new Error(\`TODO(E-15) stub: implement \${method} \${path}\`);`,
+    `  throw new Error(\`${emittedRefusal("TODO(E-15) stub: implement")} \${method} \${path}\`);`,
     `}`,
     "",
   ];
@@ -771,7 +794,7 @@ function emitJobStub(
     ]),
     `export function run${pascal(node.id)}(input: unknown): { ok: boolean } {`,
     `  void input;`,
-    `  throw new Error(${jstr(`TODO(E-15) stub: implement job ${label}`)});`,
+    `  throw new Error(${jstr(emittedRefusal(`TODO(E-15) stub: implement job ${label}`))});`,
     `}`,
     "",
   ].join("\n");
@@ -917,7 +940,7 @@ function emitUi(
           "",
           `export async function main(ctx: ServiceContext): Promise<number> {`,
           `  void ctx;`,
-          `  throw new Error("TODO(E-15) stub: implement the service entry");`,
+          `  throw new Error(${jstr(emittedRefusal("TODO(E-15) stub: implement the service entry"))});`,
           `}`,
           "",
         ]
@@ -926,7 +949,7 @@ function emitUi(
           "",
           `export async function main(ctx: CliContext): Promise<number> {`,
           `  void ctx;`,
-          `  throw new Error("TODO(E-15) stub: implement the console entry per the oracle");`,
+          `  throw new Error(${jstr(emittedRefusal("TODO(E-15) stub: implement the console entry per the oracle"))});`,
           `}`,
           "",
         ];
@@ -1559,7 +1582,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
         `  // which is the signal to replace it with the row's real acceptance assert.`,
         `  const ep = ENDPOINTS.find((e) => e.job === ${jstr(row.job)});`,
         `  assert.ok(ep, "endpoint for the row's job must exist (contract drift)");`,
-        `  await assert.rejects(route(ep.method, ep.path, {}), /TODO\\(E-15\\) stub/);`,
+        `  await assert.rejects(route(ep.method, ep.path, {}), /${EMITTED_REFUSAL_CODE} · TODO\\(E-15\\) stub/);`,
       );
       if (wantsCheckpoint && storeOk) {
         lines.push(
@@ -1831,7 +1854,7 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
         `import Console from ${jstr(uiSpecifier)};`,
         "",
         "const rootEl = document.getElementById(\"root\");",
-        "if (!rootEl) throw new Error(\"missing #root element — index.html did not load\");",
+        `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element — index.html did not load"))});`,
         "createRoot(rootEl).render(<Console />);",
         "",
       );
@@ -1848,7 +1871,7 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
         `}`,
         "",
         "const rootEl = document.getElementById(\"root\");",
-        "if (!rootEl) throw new Error(\"missing #root element — index.html did not load\");",
+        `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element — index.html did not load"))});`,
         "createRoot(rootEl).render(<Shell />);",
         "",
       );
@@ -1866,7 +1889,7 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
       `import { bootGame } from ${jstr(uiSpecifier)};`,
       "",
       "const rootEl = document.getElementById(\"root\");",
-      "if (!rootEl) throw new Error(\"missing #root element — index.html did not load\");",
+      `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element — index.html did not load"))});`,
       "const handle = bootGame(rootEl);",
       "void handle; // keep the GameHandle reachable for future HMR/dev wiring",
       "",
@@ -1874,7 +1897,7 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
   } else {
     lines.push(
       "const rootEl = document.getElementById(\"root\");",
-      "if (!rootEl) throw new Error(\"missing #root element — index.html did not load\");",
+      `if (!rootEl) throw new Error(${jstr(emittedRefusal("missing #root element — index.html did not load"))});`,
       "rootEl.textContent = \"game shell — no spec-graph ui node was emitted; run the pipeline to P0/P1 and re-emit.\";",
       "",
     );

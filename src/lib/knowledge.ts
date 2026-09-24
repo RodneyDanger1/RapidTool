@@ -1432,6 +1432,242 @@ export function lessonLog(
 }
 
 // ---------------------------------------------------------------------------
+// F3 (221 §F3 — W18 lane 2): cross-run learning MEASUREMENT.
+//
+// 219d hop 6 ("next run behaves differently") had a mechanism with no
+// measurement: rows accrue a `reproducedCount` when the same failure signature
+// recurs (engine.accrueReproducedCounts, report-intake.ts's twin accrual, and
+// verify.ts's repro-accrual), and NOTHING read the counter — selectLessons
+// ranks on static score. This block is that measurement, and only that: a
+// pure, read-only census of lesson-tagged memory rows plus their post-minting
+// recurrence telemetry.
+//
+// HONESTY FLOORS (221 §F3 "Honesty constraints it MUST satisfy"):
+//   (a) recurrence ≠ causation — LESSON_OUTCOME_LABEL rides INSIDE the object;
+//   (b) no rate claim below n=2 targets — `claim` says "baseline only"
+//       (echoing m7Learning's "no learning claim without data");
+//   (c) read-only by construction — pure function, no writer, no store, no log;
+//   (d) the census window (the engine's 80-row memory FIFO) is disclosed so a
+//       rate is never read as all-time;
+//   (e) never presented as an eval score — M1–M9 stay the scorecard.
+// T-11 stays MUTED here: this block reads rows, it never mints one. A red
+// seal's `p*.seal.unmet` log is not lesson-tagged, so it cannot appear in this
+// census — the mute is structural, not a flag.
+// ---------------------------------------------------------------------------
+
+/** F3 (constraint a): the honest label that rides inside every report — a bare
+ *  rate would read as proof the lesson was followed. */
+export const LESSON_OUTCOME_LABEL =
+  "recurrence after minting — not proof the lesson was followed (recurrence ≠ causation)";
+
+/** F3 (constraint b): the n≥2 floor — below it the report says "baseline
+ *  only"; a single target is an anecdote, not a rate (mirrors maker-score.ts
+ *  m7Learning's "no learning claim without data"). */
+export const LESSON_OUTCOME_MIN_N = 2;
+
+/** F3 (constraint d): the engine's memory FIFO cap (`…slice(0, 80)`,
+ *  engine.ts's applyPhaseResult merge) — disclosed in `censusWindow` so a rate
+ *  is never read as all-time. */
+export const LESSON_CENSUS_CAP = 80;
+
+/**
+ * F3: the classShort tag of ONE lesson row — ONE classifier shared by
+ * `lesson --list`'s `class` field and this report's `perClass` grouping.
+ * Skips the lesson marker, the L1–L5 level, `accepted`, and the machine
+ * telemetry tag families (`probe:` from T-11's probe tags, `actor:` from the
+ * human-gated accept). Without those two skips the classifier reports a PROBE
+ * tag as the class on any probe-tagged row — observed on disk: the keyed W16
+ * record's `lesson --list` printed `class: "probe:p6-brief-fit"` for a
+ * template-emission row. Null when no class tag is present (junk tolerated).
+ */
+export function lessonClassTag(tags: readonly string[] | undefined): string | null {
+  if (!Array.isArray(tags)) return null;
+  const found = tags.find(
+    (t): t is string =>
+      typeof t === "string" &&
+      t.trim() !== "" &&
+      t !== LESSON_TAG &&
+      !/^L[1-5]$/.test(t) &&
+      t !== "accepted" &&
+      !t.startsWith("probe:") &&
+      !t.startsWith("actor:"),
+  );
+  return found ? found.trim() : null;
+}
+
+/** F3: one lesson target's outcome row — the per-row evidence behind the rate. */
+export type LessonOutcomeEvidence = {
+  id: string;
+  /** classShort tag (lessonClassTag); null on a row with no class tag. */
+  class: string | null;
+  /** L1–L5 tag when present, else null. */
+  level: string | null;
+  phase: PhaseId;
+  /** The `probe:<id>` tags the row targets, verbatim and sorted. */
+  probes: string[];
+  /** Live telemetry read off the row: absent/NaN reads 0, never fabricated. */
+  reproducedCount: number;
+  /** `reproducedCount > 0` — a recurrence was recorded after minting. */
+  reproduced: boolean;
+  /** The `lesson.reproduced` ledger details that accrued this row's counter,
+   *  read from `opts.logs` when supplied (the real write sites: verify.ts's
+   *  repro-accrual and report-intake.ts's twin accrual); [] when no log
+   *  matched or no logs were supplied — never synthesized. */
+  ledgerRows: string[];
+  /** One-line digest: id · reproducedCount=N (recurred N× | no recurrence) · probes. */
+  evidence: string;
+};
+
+/** F3: one lesson class's outcome aggregate. */
+export type LessonOutcomeClass = {
+  class: string;
+  total: number;
+  reproduced: number;
+  unreproduced: number;
+  /** reproduced / total (a class exists only with ≥1 row, so never null). */
+  recurrenceRate: number;
+};
+
+/** F3: the read-only cross-run learning measurement (221 §F3 step A). */
+export type LessonOutcomeReport = {
+  label: string;
+  readOnly: true;
+  measurement: string;
+  /** The memory census the report was computed over — totalRows is the whole
+   *  memory (the FIFO's unit), lessonRows the lesson-tagged subset. */
+  censusWindow: { totalRows: number; lessonRows: number; cap: number; atCap: boolean };
+  total: number;
+  reproduced: number;
+  unreproduced: number;
+  /** reproduced / total, or null when there are no rows — never a fabricated 0. */
+  recurrenceRate: number | null;
+  perClass: LessonOutcomeClass[];
+  evidence: LessonOutcomeEvidence[];
+  /** total ≥ LESSON_OUTCOME_MIN_N. */
+  sufficientSample: boolean;
+  /** The n-floor verdict; carries "baseline only" below the floor. */
+  claim: string;
+  /** What this is not, verbatim — so a JSON consumer cannot misread it. */
+  note: string;
+};
+
+/**
+ * F3 (221 §F3 step A): the cross-run learning measurement. Reads ONLY
+ * lesson-tagged memory rows (plus, optionally, the project's own ledger rows to
+ * attribute the accruals) and returns the recurrence census:
+ *
+ *   total / reproduced / unreproduced + recurrenceRate (reproduced ÷ total),
+ *   perClass[] (grouped by classShort), evidence[] (id · probe:<id> tags ·
+ *   reproducedCount · the `lesson.reproduced` ledger details that accrued it),
+ *   and the disclosed censusWindow the rows were read from.
+ *
+ * Pure and deterministic: same inputs → same report; nothing is written, no
+ * row is minted, ranked, promoted or demoted; junk input is tolerated (junk
+ * rows are not lesson-tagged and are counted only in totalRows). Ordering is
+ * id-asc in evidence[] and class-asc in perClass[] (the house tiebreak).
+ */
+export function lessonOutcomeReport(
+  memory: readonly MemoryEntry[],
+  opts?: { logs?: readonly JsonLog[] },
+): LessonOutcomeReport {
+  const mem: readonly unknown[] = Array.isArray(memory) ? memory : [];
+  const rows = mem.filter(
+    (m): m is MemoryEntry =>
+      !!m &&
+      typeof m === "object" &&
+      typeof (m as MemoryEntry).id === "string" &&
+      Array.isArray((m as MemoryEntry).tags) &&
+      ((m as MemoryEntry).tags as readonly string[]).includes(LESSON_TAG),
+  );
+  const logs = Array.isArray(opts?.logs) ? opts.logs : [];
+  const evidence: LessonOutcomeEvidence[] = rows
+    .map((m) => {
+      const tags = (Array.isArray(m.tags) ? m.tags : []).filter((t): t is string => typeof t === "string");
+      const probes = tags.filter((t) => t.startsWith("probe:")).sort();
+      const level = tags.find((t) => /^L[1-5]$/.test(t)) ?? null;
+      const count = Number.isFinite(m.reproducedCount)
+        ? Math.max(0, Math.floor(m.reproducedCount as number))
+        : 0;
+      const ledgerRows = logs
+        .filter(
+          (l) =>
+            !!l &&
+            typeof l === "object" &&
+            l.event === "lesson.reproduced" &&
+            typeof l.detail === "string" &&
+            l.detail.includes(m.id),
+        )
+        .map((l) => l.detail);
+      const outcome = count > 0 ? `recurred ${count}× after minting` : "no recurrence recorded after minting";
+      const probeText = probes.length > 0 ? `probes: ${probes.join(", ")}` : "no probe ids";
+      return {
+        id: m.id,
+        class: lessonClassTag(tags),
+        level,
+        phase: (Number.isFinite(m.phase) ? Math.max(0, Math.floor(m.phase)) : 0) as PhaseId,
+        probes,
+        reproducedCount: count,
+        reproduced: count > 0,
+        ledgerRows,
+        evidence: `${m.id} · reproducedCount=${count} (${outcome}) · ${probeText}`,
+      };
+    })
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const byClass = new Map<string, { total: number; reproduced: number }>();
+  for (const e of evidence) {
+    const key = e.class ?? "unclassed";
+    const agg = byClass.get(key) ?? { total: 0, reproduced: 0 };
+    agg.total += 1;
+    if (e.reproduced) agg.reproduced += 1;
+    byClass.set(key, agg);
+  }
+  const perClass: LessonOutcomeClass[] = [...byClass.entries()]
+    .map(([cls, a]) => ({
+      class: cls,
+      total: a.total,
+      reproduced: a.reproduced,
+      unreproduced: a.total - a.reproduced,
+      recurrenceRate: a.reproduced / a.total,
+    }))
+    .sort((a, b) => (a.class < b.class ? -1 : a.class > b.class ? 1 : 0));
+  const total = evidence.length;
+  const reproduced = evidence.filter((e) => e.reproduced).length;
+  const unreproduced = total - reproduced;
+  const sufficientSample = total >= LESSON_OUTCOME_MIN_N;
+  const claim =
+    total === 0
+      ? "no lesson targets in this record — nothing measured (baseline only)"
+      : total === 1
+        ? "insufficient runs — baseline only (1 lesson target observed; a recurrence rate needs n≥2)"
+        : `${reproduced}/${total} lesson targets recurred after minting (n=${total}) — recurrence ≠ causation`;
+  const atCap = mem.length >= LESSON_CENSUS_CAP;
+  const note = [
+    "read-only measurement — nothing was written",
+    "not an eval score (M1–M9 stay the scorecard)",
+    "a 0 rate means no recurrence was RECORDED in this census window (absence of evidence is not evidence of absence)",
+    atCap
+      ? `the census window is at its ${LESSON_CENSUS_CAP}-row cap — older rows may already have been evicted (FIFO), so read the rate as windowed, never all-time`
+      : `census window below the ${LESSON_CENSUS_CAP}-row cap`,
+    "T-11 stays muted: a red seal mints no lesson row, so it cannot appear in this census",
+  ].join("; ");
+  return {
+    label: LESSON_OUTCOME_LABEL,
+    readOnly: true,
+    measurement: "cross-run learning — recurrence of a lesson's target after minting",
+    censusWindow: { totalRows: mem.length, lessonRows: rows.length, cap: LESSON_CENSUS_CAP, atCap },
+    total,
+    reproduced,
+    unreproduced,
+    recurrenceRate: total === 0 ? null : reproduced / total,
+    perClass,
+    evidence,
+    sufficientSample,
+    claim,
+    note,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Human correction path — pure helpers behind the `lesson` verb family
 // (98 §7). The CLI/headless wiring is the integration lane's; these are the
 // deterministic cores with honest floors (no fabricated proposals).

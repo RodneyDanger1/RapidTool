@@ -37,9 +37,14 @@ import {
   type FailureLessonOutcome,
   provenRowsFromStore,
   lessonLinesForBrief,
+  lessonOutcomeReport,
+  lessonClassTag,
+  LESSON_OUTCOME_LABEL,
+  LESSON_OUTCOME_MIN_N,
+  LESSON_CENSUS_CAP,
 } from "./knowledge.ts";
 import { seedProject } from "./testing/fixtures.ts";
-import type { HitlDecision, IntentLattice, PhaseId } from "./types.ts";
+import type { HitlDecision, IntentLattice, JsonLog, MemoryEntry, PhaseId } from "./types.ts";
 
 function tempStorePath(): string {
   const dir = mkdtempSync(join(tmpdir(), "rt-knowledge-"));
@@ -1037,5 +1042,214 @@ describe("216g / 112 T4 — KnowledgeStore rows into the expansion prompt (opts.
     } finally {
       cleanup(file);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F3 (221 §F3 — W18 lane 2): cross-run learning measurement.
+// The report is pure; these tests pin the honesty floors: zeros never fabricate
+// a rate, the label rides inside the object, the n<2 floor says "baseline only",
+// the census window is disclosed, and the accruing ledger rows are attributed
+// from logs only when they really match.
+// ---------------------------------------------------------------------------
+
+describe("F3 (221 §F3 — W18) — lessonOutcomeReport: cross-run learning measurement (read-only)", () => {
+  const lesson = (id: string, over: Partial<MemoryEntry> = {}): MemoryEntry => ({
+    id,
+    kind: "episodic",
+    phase: 6 as PhaseId,
+    text: `${id} evidence`,
+    score: 0.5,
+    tags: [LESSON_TAG, "L2", "template-emission"],
+    ...over,
+  });
+
+  it("empty/junk memory ⇒ zeros + null rate, the label inside the object, baseline-only claim", () => {
+    const report = lessonOutcomeReport([]);
+    assert.equal(report.total, 0);
+    assert.equal(report.reproduced, 0);
+    assert.equal(report.unreproduced, 0);
+    assert.equal(report.recurrenceRate, null, "no rows ⇒ null, never a fabricated 0");
+    assert.deepEqual(report.perClass, []);
+    assert.deepEqual(report.evidence, []);
+    assert.deepEqual(report.censusWindow, {
+      totalRows: 0,
+      lessonRows: 0,
+      cap: LESSON_CENSUS_CAP,
+      atCap: false,
+    });
+    assert.equal(report.sufficientSample, false, `the floor is n≥${LESSON_OUTCOME_MIN_N}`);
+    assert.equal(report.sufficientSample, false, "no rows ⇒ no claim");
+    assert.match(report.claim, /baseline only/);
+    assert.equal(report.label, LESSON_OUTCOME_LABEL, "the recurrence≠causation label rides INSIDE the object");
+    assert.match(report.label, /not proof the lesson was followed/);
+    assert.equal(report.readOnly, true);
+    assert.match(report.note, /not an eval score/);
+
+    // Junk input: never throws, never counts as lesson rows.
+    const junk = [
+      null,
+      undefined,
+      {},
+      { id: 7 },
+      { id: "x", tags: "lesson" },
+      { id: "y", tags: ["other"] },
+    ] as unknown as MemoryEntry[];
+    const jr = lessonOutcomeReport(junk);
+    assert.equal(jr.total, 0);
+    assert.equal(jr.censusWindow.totalRows, 6, "junk rows are counted in the window, never in the census");
+    assert.equal(jr.recurrenceRate, null);
+    assert.equal(lessonOutcomeReport(null as unknown as MemoryEntry[]).total, 0);
+  });
+
+  it("one reproduced row ⇒ 1/1 with the evidence string; the n<2 floor still says baseline only", () => {
+    const row = lesson("lesson-template-emission-aaaa1111", {
+      reproducedCount: 2,
+      tags: [LESSON_TAG, "L2", "template-emission", "probe:p6-verified", "probe:p6-brief-fit"],
+    });
+    const report = lessonOutcomeReport([row]);
+    assert.equal(report.total, 1);
+    assert.equal(report.reproduced, 1);
+    assert.equal(report.unreproduced, 0);
+    assert.equal(report.recurrenceRate, 1, "1/1");
+    assert.equal(report.sufficientSample, false, "n=1 is below the n≥2 floor");
+    assert.match(report.claim, /insufficient runs — baseline only/);
+    const e = report.evidence[0]!;
+    assert.equal(e.reproducedCount, 2);
+    assert.equal(e.reproduced, true);
+    assert.deepEqual(e.probes, ["probe:p6-brief-fit", "probe:p6-verified"], "probe tags surfaced, sorted");
+    assert.match(e.evidence, /lesson-template-emission-aaaa1111/);
+    assert.match(e.evidence, /reproducedCount=2/);
+    assert.match(e.evidence, /recurred 2× after minting/);
+    assert.match(e.evidence, /probes: probe:p6-brief-fit, probe:p6-verified/);
+    assert.deepEqual(report.perClass, [
+      { class: "template-emission", total: 1, reproduced: 1, unreproduced: 0, recurrenceRate: 1 },
+    ]);
+  });
+
+  it("class grouping: perClass rates + the unclassed bucket; lessonClassTag skips probe:/actor: telemetry", () => {
+    const rows = [
+      lesson("lesson-drift-1", { tags: [LESSON_TAG, "L3", "drift"] }),
+      lesson("lesson-drift-2", { tags: [LESSON_TAG, "L3", "drift"], reproducedCount: 3 }),
+      lesson("lesson-vague-brief-1", { tags: [LESSON_TAG, "L2", "vague-brief"], reproducedCount: 1 }),
+      lesson("lesson-plain-1", { tags: [LESSON_TAG], reproducedCount: 1 }),
+    ];
+    const snapshot = JSON.stringify(rows);
+    const report = lessonOutcomeReport(rows);
+    assert.equal(report.total, 4);
+    assert.equal(report.reproduced, 3);
+    assert.equal(report.unreproduced, 1);
+    assert.equal(report.recurrenceRate, 0.75);
+    assert.deepEqual(
+      report.perClass.map((c) => c.class),
+      ["drift", "unclassed", "vague-brief"],
+      "class-asc order; a class-less row lands in the explicit unclassed bucket",
+    );
+    assert.deepEqual(report.perClass[0], {
+      class: "drift",
+      total: 2,
+      reproduced: 1,
+      unreproduced: 1,
+      recurrenceRate: 0.5,
+    });
+    assert.equal(report.perClass[1]!.recurrenceRate, 1);
+    assert.equal(report.perClass[2]!.total, 1);
+    assert.deepEqual(
+      report.evidence.map((e) => e.id),
+      ["lesson-drift-1", "lesson-drift-2", "lesson-plain-1", "lesson-vague-brief-1"],
+      "evidence is id-asc",
+    );
+    assert.equal(JSON.stringify(rows), snapshot, "read-only: the input memory is untouched");
+
+    // The shared classifier itself (also the `lesson --list` class field):
+    assert.equal(
+      lessonClassTag(["lesson", "L2", "probe:p6-brief-fit", "probe:p6-verified", "template-emission"]),
+      "template-emission",
+      "a probe tag is never the class (the on-disk list-arm bug this fixed)",
+    );
+    assert.equal(lessonClassTag(["lesson", "L3", "accepted", "actor:cli-human", "drift"]), "drift");
+    assert.equal(lessonClassTag(["lesson", "L2"]), null);
+    assert.equal(lessonClassTag(undefined), null);
+  });
+
+  it("censusWindow discloses the 80-row FIFO cap; non-lesson rows inflate only totalRows", () => {
+    const at = Array.from({ length: LESSON_CENSUS_CAP }, (_, i) =>
+      lesson(`lesson-bulk-${String(i).padStart(3, "0")}`),
+    );
+    const below = lessonOutcomeReport(at.slice(0, LESSON_CENSUS_CAP - 1));
+    assert.deepEqual(below.censusWindow, {
+      totalRows: LESSON_CENSUS_CAP - 1,
+      lessonRows: LESSON_CENSUS_CAP - 1,
+      cap: LESSON_CENSUS_CAP,
+      atCap: false,
+    });
+    assert.match(below.note, /below the 80-row cap/);
+
+    const full = lessonOutcomeReport(at);
+    assert.deepEqual(full.censusWindow, {
+      totalRows: LESSON_CENSUS_CAP,
+      lessonRows: LESSON_CENSUS_CAP,
+      cap: LESSON_CENSUS_CAP,
+      atCap: true,
+    });
+    assert.match(full.note, /at its 80-row cap/);
+    assert.equal(full.total, LESSON_CENSUS_CAP);
+    assert.equal(full.sufficientSample, true);
+    assert.match(full.claim, new RegExp(`0/${LESSON_CENSUS_CAP} lesson targets recurred`));
+
+    const plain = Array.from(
+      { length: 3 },
+      (_, i) =>
+        ({ id: `plain-${i}`, kind: "semantic", phase: 1, text: "x", score: 0.1 }) as MemoryEntry,
+    );
+    const mixed = lessonOutcomeReport([...at, ...plain]);
+    assert.equal(mixed.censusWindow.totalRows, LESSON_CENSUS_CAP + 3);
+    assert.equal(mixed.censusWindow.lessonRows, LESSON_CENSUS_CAP);
+    assert.equal(mixed.total, LESSON_CENSUS_CAP, "non-lesson rows are counted in the window, never the census");
+  });
+
+  it("ledgerRows: only the real `lesson.reproduced` details that accrued THIS row are attributed; [] otherwise", () => {
+    const id = "lesson-template-emission-b90f22a6";
+    const row = lesson(id, { reproducedCount: 1 });
+    const logs = [
+      {
+        ts: 1,
+        phase: 6 as PhaseId,
+        level: "info" as const,
+        event: "lesson.capture",
+        detail: `L2 template-emission ${id} (P6 sealed with unmet DoD)`,
+      },
+      {
+        ts: 2,
+        phase: 6 as PhaseId,
+        level: "info" as const,
+        event: "lesson.reproduced",
+        detail: `L2 template-emission ${id} reproduced (P6 DoD unmet again; reproducedCount=1)`,
+      },
+      {
+        ts: 3,
+        phase: 6 as PhaseId,
+        level: "info" as const,
+        event: "lesson.reproduced",
+        detail: "L2 template-emission lesson-other-1 reproduced (verify failed again; reproducedCount=1)",
+      },
+    ];
+    const report = lessonOutcomeReport([row], { logs });
+    assert.deepEqual(
+      report.evidence[0]!.ledgerRows,
+      [`L2 template-emission ${id} reproduced (P6 DoD unmet again; reproducedCount=1)`],
+      "a capture row or another id's accrual is never claimed as this row's ledger evidence",
+    );
+    assert.deepEqual(
+      lessonOutcomeReport([row]).evidence[0]!.ledgerRows,
+      [],
+      "no logs supplied ⇒ [] — never synthesized",
+    );
+    assert.deepEqual(
+      lessonOutcomeReport([row], { logs: [null, {}, { event: "lesson.reproduced" }] as unknown as JsonLog[] })
+        .evidence[0]!.ledgerRows,
+      [],
+      "junk logs tolerated",
+    );
   });
 });

@@ -919,7 +919,8 @@ export function synthesizePhase(
                 (c) => `## ${c.name} (${c.class})\nSource: illustrative template\nStrength: ${c.strength}\nGap RapidTool exploits: ${c.gap}`,
               ),
               ``,
-              `Architectural advantage: deterministic 0–12 graph with HITL, MCP/A2A, and ADRs — generators skip this; IDEs leave it to the human.`,
+              `Architectural advantage: deterministic 0–12 graph with HITL and ADRs — generators skip this; IDEs leave it to the human.`,
+              `MCP/A2A server contracts are roadmap declarations, not runtime (B-18).`,
             ].join("\n"),
           ),
         ],
@@ -1026,6 +1027,7 @@ export function synthesizePhase(
             "cicd",
             "GitHub Actions workflow",
             [
+              `# template — not executed: recorded P9 artifact; RapidTool never ran this workflow (B-18).`,
               `name: rapidtool-gate`,
               `on: [pull_request]`,
               `jobs:`,
@@ -1047,6 +1049,7 @@ export function synthesizePhase(
             "cicd",
             "IaC sketch",
             [
+              `# template — not executed: recorded P9 sketch; nothing here was provisioned or validated (B-18).`,
               `# GCP + Firebase hosting`,
               `hosting: firebase preview channels`,
               `workers: cloud run, scale-to-zero`,

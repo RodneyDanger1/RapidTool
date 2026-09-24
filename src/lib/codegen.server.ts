@@ -114,6 +114,10 @@ import {
 } from "./token-ledger.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 import type { Artifact, ArtifactKind, GeneratedTreeFile, JsonLog, PhaseId, Project } from "./types.ts";
+// T5.4 (W18 LANE 5): the artifact-provenance shape + vocabulary live in io.ts
+// (the serialization boundary that validates and round-trips them). TYPE-ONLY
+// import — erased at runtime, so this server module gains no new runtime edge.
+import type { ArtifactProvenance } from "./io.ts";
 
 // --- constants ---------------------------------------------------------------
 
@@ -2268,7 +2272,38 @@ function cleanRepairedSource(text: unknown): string | null {
   return cleaned || null;
 }
 
-function verifyOutcomeArtifact(finalModule: string, outcome: VerifyOutcome): Artifact {
+/**
+ * T5.4 (W18 LANE 5): an artifact record carrying its provenance stamp. The
+ * stamp shape + vocabulary live in io.ts (exported as `ArtifactProvenance`);
+ * the field is not yet folded onto the `Artifact` type in types.ts (outside
+ * this lane's file box), so every emit site widens structurally here.
+ */
+type StampedArtifact = Artifact & { provenance?: ArtifactProvenance };
+
+/**
+ * T5.4: the provenance stamp for a MODEL-produced artifact. `servedModel` must
+ * be the id the provider ACTUALLY served (its own `LlmResult.model`) — never
+ * the requested constant. Fail closed: a blank served id (or a blank input
+ * hash) yields null — no stamp at all rather than a guessed/unverifiable
+ * producer (declare-or-strike; fixes/217c §T5.4: a stamp that guesses the
+ * producer is worse than none).
+ */
+function modelProvenance(servedModel: unknown, inputHash: string): ArtifactProvenance | null {
+  const model = typeof servedModel === "string" ? servedModel.trim() : "";
+  if (!model || !inputHash) return null;
+  return { producer: "model", model, timestamp: Date.now(), inputHash };
+}
+
+/**
+ * T5.4: the provenance stamp for a deterministic (machine-derived) record —
+ * rendered from inputs by code, never by a model call. Carries no `model` key
+ * by construction (a deterministic record is never model-stamped).
+ */
+function deterministicProvenance(inputHash: string): ArtifactProvenance {
+  return { producer: "deterministic", timestamp: Date.now(), inputHash };
+}
+
+function verifyOutcomeArtifact(finalModule: string, outcome: VerifyOutcome): StampedArtifact {
   const evidenceHash = String(fnv1a(`${finalModule}${outcome.evidence}`));
   const caseLines: string[] = [];
   for (const c of outcome.cases ?? []) {
@@ -2292,6 +2327,10 @@ function verifyOutcomeArtifact(finalModule: string, outcome: VerifyOutcome): Art
     title: "Verify outcome — passed (machine-run)",
     body,
     language: "markdown",
+    // T5.4: the runner's evidence text is machine-derived — producer
+    // "deterministic" (never model-stamped); the input hash is the same
+    // verified-module+evidence hash the artifact id already derives from.
+    provenance: deterministicProvenance(evidenceHash),
   };
 }
 
@@ -2319,15 +2358,28 @@ function testedLastTestStamp(detail: string, evidenceHash: string): {
  * provenance). A non-forceHuman P6 gate (schedule.extraHitl) is retitled to
  * approve the REAL module; a forceHuman gate never reaches this function.
  */
-function upgraded(project: Project, finalModule: string, outcome: VerifyOutcome, specRecord: Project["implementationSpec"]): Project {
+function upgraded(
+  project: Project,
+  finalModule: string,
+  outcome: VerifyOutcome,
+  specRecord: Project["implementationSpec"],
+  /** T5.4: the id the provider actually served for this synthesis — the
+   *  primary call's `LlmResult.model` (every bounded repair re-prompt reuses
+   *  the same opts/model resolution). Blank/null ⇒ no stamp, fail closed. */
+  servedModel: string | null,
+): Project {
   const evidenceHash = String(fnv1a(`${finalModule}${outcome.evidence}`));
-  const codeArtifact: Artifact = {
+  // T5.4: the model-produced module's stamp — the SERVED model id + the
+  // synthesis input hash (the persisted brief hash).
+  const prov = modelProvenance(servedModel, specRecord?.briefHash ?? "");
+  const codeArtifact: StampedArtifact = {
     id: `6-code-llm-module-${evidenceHash.slice(0, 8)}`,
     phase: 6,
     kind: "code",
     title: "Generated module (LLM, machine-verified)",
     body: finalModule,
     language: "javascript",
+    ...(prov ? { provenance: prov } : {}),
   };
   const memoryId = "6-episodic-0.93";
   const memory = [
@@ -2765,7 +2817,9 @@ async function synthesizeSingleModule(
   }
 
   // --- Step 5: honest state ---------------------------------------------------
-  const up = upgraded(withAttemptLogs(project, attemptLogs), finalModule, outcome, specRecord);
+  // T5.4: the SERVED model id from the primary synthesis LlmResult (never the
+  // requested P6_SYNTH_MODEL constant) rides into the artifact provenance.
+  const up = upgraded(withAttemptLogs(project, attemptLogs), finalModule, outcome, specRecord, res.model);
   // fixes/144 (M2): the verified single module is the one-file generatedTree
   // (entry path; content-addressed hash; attempt 0) — generatedSource stays
   // byte-identical (== the tree file's source) so every existing consumer
@@ -2918,9 +2972,10 @@ async function synthesizeChunkedTree(
  * One chunk's synthesis: synthWithBackoff + the bounded repair classes the
  * legacy single-module path uses (envelope-parse repair ×1; export-binding /
  * soft-forbidden / missing-signature repair ×1; deterministic export
- * injection last-mile). Returns the accepted envelope or the coded failure —
- * brief-fit is deliberately NOT a per-chunk gate (tree-level fit runs on the
- * assembled entry; nouns spread across files).
+ * injection last-mile). Returns the accepted envelope (+ T5.4: the SERVED
+ * model id of this chunk's primary synthesis call, for the tree artifact's
+ * provenance) or the coded failure — brief-fit is deliberately NOT a per-chunk
+ * gate (tree-level fit runs on the assembled entry; nouns spread across files).
  */
 async function synthesizeChunkEnvelope(
   complete: P6SynthesisDeps["complete"],
@@ -2936,7 +2991,7 @@ async function synthesizeChunkEnvelope(
    *  envelope reads (the caller knows the planned file path); absent keeps the
    *  legacy no-op. */
   readSink?: EnvelopeReadSink,
-): Promise<{ ok: true; envelope: SynthesisEnvelope } | { ok: false; code: ErrorCode; error: string }> {
+): Promise<{ ok: true; envelope: SynthesisEnvelope; servedModel: string } | { ok: false; code: ErrorCode; error: string }> {
   // fixes/153 (P1): sequential attempt numbering per chunk — one event per
   // model call (synthWithBackoff retries + each bounded repair re-prompt); an
   // absent observer keeps this path the exact legacy no-op.
@@ -3041,7 +3096,9 @@ async function synthesizeChunkEnvelope(
     const reValidated = validateSynthesisModule(injected.source, envelope.exports, signatureNames);
     if (reValidated.ok) envelope = { ...envelope, module: injected.source };
   }
-  return { ok: true, envelope };
+  // T5.4: the SERVED model id (the provider's own LlmResult.model) rides back
+  // to the caller for the tree artifact's provenance stamp.
+  return { ok: true, envelope, servedModel: res.model };
 }
 
 /**

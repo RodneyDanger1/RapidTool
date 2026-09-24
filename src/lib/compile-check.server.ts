@@ -1101,6 +1101,9 @@ export type VerifyKindStepVerdict = {
    *  (`opts.installCommand`) — that verdict is NOT evidence a real dependency
    *  install happened and must never be read as one. */
   mocked?: boolean;
+  /** install only (OV-43, W17-L5): the report-only supply-chain posture of the
+   *  subject tree — evidence, NEVER a gate. See `supplyChainFloorFor`. */
+  supplyChain?: SupplyChainPosture;
 };
 
 export type VerifyKindResult = {
@@ -1155,6 +1158,115 @@ export function installToolFor(dir: string): { tool: "npm ci" | "npm install"; c
         command: "npm install --no-audit --no-fund",
         reason: "no package-lock.json — npm install resolves the declared deps and writes a lockfile (nothing to ci from)",
       };
+}
+
+/** OV-43 (W17-L5) — the command that WOULD audit an emitted tree for real.
+ *  Named here, never executed by this surface: the install leg runs with
+ *  `--no-audit` by design, and auditing needs the network — a host that cannot
+ *  audit must say so, not report clean. One copy-paste away, in the tree. */
+export const SUPPLY_CHAIN_AUDIT_COMMAND = "npm audit --omit=dev";
+
+/** OV-43 (W17-L5) — the emitted-tree supply-chain posture, REPORT-ONLY.
+ *
+ *  The two facts that make the floor necessary, both by design:
+ *    · the install leg runs `npm ci|install --no-audit --no-fund`
+ *      (`installToolFor` above) — advisory audit is OFF, so a dependency
+ *      advisory is never seen on this path;
+ *    · emitted trees declare caret-pinned deps (`scaffold.ts` PKG_DEPS) and
+ *      ship no lockfile — a fresh emit resolves current patches.
+ *  This type has NO ok/fail and can never gate a run (`gate: false`, pinned by
+ *  `compile-check.server.test.ts`). It exists so the cost is VISIBLE instead of
+ *  silent (the gpt-pilot supply-chain lesson, `RESUME.md:628`). */
+export type SupplyChainPosture = {
+  /** Stable tag for downstream readers; this is a report, not a verdict. */
+  report: "supply-chain-posture";
+  /** Always false — evidence only, never a gate (OV-43's own rule). */
+  gate: false;
+  /** True when the tree's package.json parsed; false → the counts below are 0. */
+  packageJson: boolean;
+  lockfile: "present" | "absent";
+  /** Which install tool this leg used ("npm ci" | "npm install" | "seam"). */
+  installTool: string;
+  /** The exact command line whose flags this posture describes. */
+  installCommand: string;
+  /** True when that command carries `--no-audit` — this leg never audits. */
+  noAuditFlag: boolean;
+  /** Always false while the install leg runs `--no-audit`: no audit happened here. */
+  audited: false;
+  /** The honest statement of what was NOT checked, and how to check it for real. */
+  auditNote: string;
+  /** Range shapes across dependencies + devDependencies. */
+  caretPinned: number;
+  exactPinned: number;
+  otherRange: number;
+  totalDeps: number;
+  /** Up to 5 `name@range` loose-pin examples (the caret pins). */
+  caretExamples: string[];
+  /** One line a reader must not lose: report-only, caret pins are deliberate. */
+  caveat: string;
+};
+
+/** OV-43 (W17-L5): report an emitted tree's supply-chain posture — report-only,
+ *  never a gate. Deterministic: reads package.json + lockfile presence and the
+ *  install tool the leg uses; no network, no execution. Never throws into the
+ *  caller — an unreadable package.json is reported as `packageJson: false`. */
+export function supplyChainFloorFor(
+  dir: string,
+  opts?: { installTool?: string; installCommand?: string },
+): SupplyChainPosture {
+  const resolved = installToolFor(dir);
+  const installTool = opts?.installTool ?? resolved.tool;
+  const installCommand = opts?.installCommand ?? resolved.command;
+  const noAuditFlag = /(?:^|\s)--no-audit(?:\s|$)/.test(installCommand);
+  let packageJson = false;
+  let deps: Record<string, string> = {};
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    deps = { ...(parsed.dependencies ?? {}), ...(parsed.devDependencies ?? {}) };
+    packageJson = true;
+  } catch {
+    packageJson = false;
+  }
+  let caretPinned = 0;
+  let exactPinned = 0;
+  let otherRange = 0;
+  const caretExamples: string[] = [];
+  for (const [name, range] of Object.entries(deps)) {
+    if (/^\^\d/.test(range)) {
+      caretPinned += 1;
+      if (caretExamples.length < 5) caretExamples.push(`${name}@${range}`);
+    } else if (/^\d+\.\d+\.\d+$/.test(range)) {
+      exactPinned += 1;
+    } else {
+      otherRange += 1;
+    }
+  }
+  const lockfile = existsSync(join(dir, "package-lock.json")) ? "present" : "absent";
+  const auditNote =
+    installTool === "seam"
+      ? `report-only: this leg ran the test seam (no npm ran). The default leg runs \`npm ci|install --no-audit --no-fund\` — audit is off by design — so NO advisory audit has happened. Run \`${SUPPLY_CHAIN_AUDIT_COMMAND}\` inside an emitted tree to check for real (network required); a host that cannot audit says so.`
+      : `report-only: this leg ran \`${installCommand}\` — audit is off by design, and emitted trees ship caret-pinned deps with no lockfile, so NO advisory audit has happened here. Run \`${SUPPLY_CHAIN_AUDIT_COMMAND}\` inside the tree to check for real (network required); a host that cannot audit says so — it never reports clean.`;
+  return {
+    report: "supply-chain-posture",
+    gate: false,
+    packageJson,
+    lockfile,
+    installTool,
+    installCommand,
+    noAuditFlag,
+    audited: false,
+    auditNote,
+    caretPinned,
+    exactPinned,
+    otherRange,
+    totalDeps: Object.keys(deps).length,
+    caretExamples,
+    caveat:
+      "evidence only, never a gate: caret pins are deliberate (a fresh emit resolves current patches) and their honest cost is drift — recorded here, not enforced.",
+  };
 }
 
 /** 216z: the runner wrapper that executes ONE module-resolved command line
@@ -1218,6 +1330,9 @@ async function runInstallStep(
     command,
     tool,
     reason,
+    // OV-43 (W17-L5): report-only posture travels WITH the install verdict, so
+    // a caller never has to ask twice. `gate:false` — it can never gate a run.
+    supplyChain: supplyChainFloorFor(copy, { installTool: tool, installCommand: command }),
     run: "skip",
     durationMs: 0,
     ...(seam ? { mocked: true } : {}),

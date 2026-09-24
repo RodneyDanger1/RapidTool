@@ -21,9 +21,11 @@ const TRUNC_MARKER = "…[TRUNCATED — regenerate at a HITL gate for the full p
 const EMPTY_MEM_LINE = "(empty — treat Phase 0 research as first write)";
 
 let engineEmptyProject: ((input: { name: string; brief: string }) => Project) | null = null;
+let engineStampP6ReqTrace: ((project: Project) => Project) | null = null;
 try {
   const engine = await import("./engine.ts");
   engineEmptyProject = engine.emptyProject;
+  engineStampP6ReqTrace = engine.stampP6ReqTrace;
 } catch {
   engineEmptyProject = null; // engine.ts not loadable under strip-types yet — replica below stands in.
 }
@@ -790,5 +792,93 @@ test("H-05/D3 (pin): compiled_at derives from the newest state stamp, never wall
   assert.equal(env.compiled_at, expect, "System JSON compiled_at matches the prose stamp");
   // And a recompile right after (wall clock advanced) is still byte-identical:
   assert.equal(compileAgentPacket(p), out, "same project + same decision → same bytes");
+});
+
+// ---------------------------------------------------------------------------
+// W16 L4 (OV-14) — the packet half of the skip≠complete proof. The P6 reqTrace
+// artifact is the production carrier of the p6-arch verdict (engine
+// stampP6ReqTrace); this test proves the packet's ## Artifacts (trimmed)
+// section renders that verdict for tree-carrying projects, and that a SKIPPED
+// tree (no tree — keyless/legacy) leaves the packet silent: no artifact, no
+// verdict. Complete + fail legs are observable through the packet; the skip
+// leg is silence — the exact gap OV-14 names, with the packet-side fix
+// proposal in fixes/244_lane4_pinned_windows.md §OV-14.
+// ---------------------------------------------------------------------------
+test("W16 L4 OV-14: the packet carries the p6-arch reqTrace verdict for tree projects; a skipped tree stays silent", async () => {
+  assert.ok(
+    engineStampP6ReqTrace,
+    "engine.ts must be loadable for this pipeline proof (gates.test.ts imports it statically — it is)",
+  );
+  const { archProductComplete, archTrace } = await import("./dod.ts");
+  const stamp = engineStampP6ReqTrace!;
+
+  const specFor = (sigs: string[]) =>
+    ({
+      requirements: [],
+      edgeCases: [],
+      errorHandling: [],
+      typeSignatures: sigs,
+      dataFlow: [],
+      negativeConstraints: [],
+      source: "p6",
+      briefHash: "w16-l4",
+      createdAt: 1,
+    }) as unknown as Project["implementationSpec"];
+  const boardFile = {
+    path: "src/domain/board.ts",
+    source: "export function createBoard(name: string) { return { name, columns: [] }; }",
+    hash: "h-w16-l4",
+    attempt: 0,
+  };
+
+  // complete tree → PASS visible to a packet reader
+  const complete = makeProject();
+  complete.implementationSpec = specFor(["export function createBoard(name: string): Board"]);
+  complete.generatedTree = [boardFile] as unknown as Project["generatedTree"];
+  const stampedComplete = stamp(complete);
+  assert.equal(
+    archProductComplete(archTrace(stampedComplete)),
+    true,
+    "fixture precondition: the tree IS product-complete",
+  );
+  const okPacket = compileAgentPacket(stampedComplete);
+  assert.ok(
+    okPacket.includes("### P6 · P6 architecture trace (reqTrace)"),
+    "the packet renders the reqTrace artifact (## Artifacts (trimmed)) — the surface this test pins",
+  );
+  assert.ok(
+    okPacket.includes("**p6-arch: PASS** · tree (1 file)"),
+    "the complete verdict + tree note are visible in the packet",
+  );
+
+  // failing tree → FAIL + the named missing capability visible
+  const incomplete = makeProject();
+  incomplete.implementationSpec = specFor([
+    "export function createBoard(name: string): Board",
+    "export function addColumn(board: Board, title: string): Column",
+  ]);
+  incomplete.generatedTree = [boardFile] as unknown as Project["generatedTree"];
+  const stampedIncomplete = stamp(incomplete);
+  assert.equal(
+    archProductComplete(archTrace(stampedIncomplete)),
+    false,
+    "fixture precondition: a missing capability ⇒ not product-complete",
+  );
+  const failPacket = compileAgentPacket(stampedIncomplete);
+  assert.ok(failPacket.includes("**p6-arch: FAIL**"), "the failing verdict is visible in the packet");
+  assert.ok(failPacket.includes("Missing capabilities"), "with the named missing-capability section");
+
+  // skipped tree → the stamp is a no-op; the packet never mentions the fact
+  const skipped = makeProject();
+  assert.equal(stamp(skipped), skipped, "no tree → no reqTrace write (keyless floor stays byte-identical)");
+  assert.equal(
+    archProductComplete(archTrace(skipped)),
+    false,
+    "the skip is NOT product-complete (the fact under proof)",
+  );
+  const skipPacket = compileAgentPacket(skipped);
+  assert.ok(skipPacket.includes("## Artifacts (trimmed)"), "the artifacts section itself renders (empty placeholder)");
+  assert.ok(!skipPacket.includes("reqTrace"), "no reqTrace artifact for the skip — the fact surfaces as SILENCE");
+  assert.ok(!skipPacket.includes("p6-arch"), "and no p6-arch verdict anywhere in the packet");
 });
 

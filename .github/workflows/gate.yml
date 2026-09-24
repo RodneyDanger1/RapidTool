@@ -1,0 +1,95 @@
+# =============================================================================
+# .github/workflows/gate.yml — THE one CI workflow (W17 LANE 5 · row: CI-workflow)
+#
+# What it does: runs the repo's own stability script, unchanged.
+#   scripts/gate.sh = typecheck → lint → assertion-gap lint → both test legs → build
+#   stdout = exactly one JSON verdict; exit 0 all-green · 1 hard fail · 2 usage · 3 flake.
+#
+# NO KEYS: this workflow declares no secrets and references none. Every gate is
+# keyless by design (AGENTS.md §Honesty 2 "keyless floors" — no DEEPSEEK_API_KEY →
+# deterministic scaffold + honest RT_E_LLM_NOT_CONFIGURED). Never add a key here.
+#
+# RUNNER CHOICE — DELIBERATE, GAP DOCUMENTED (this is not an oversight):
+#   The ubuntu leg is the START, and it CANNOT catch this repo's Windows-path bug
+#   class. The field's habit is per-OS legs — aider ships `ubuntu-tests.yml` AND
+#   `windows-tests.yml` as two files (verified: `grep -n runs-on
+#   ~/rt-competitors/aider/.github/workflows/{ubuntu,windows}-tests.yml`). This
+#   repo's known-broken commands are Windows-path-class, e.g.:
+#     · scripts/gate.sh:51-53 — the MSYS `cygpath -m` conversion so node.exe can
+#       read the mktemp dir; on ubuntu this branch is dead code — never exercised
+#     · src/lib/node-runner.server.ts — Windows-native spawn (.cmd shims, windowsHide)
+#     · OV-2 browser-guard `/workspace` path bug (fixes/224 · PLAN-IMPROVER 2026-09-24)
+#   So a green ubuntu leg does NOT certify the Windows path handling the dev host
+#   uses. Proposed close, NOT landed (owner's call — see fixes/247_lane5_infra.md §A):
+#   the commented `windows-leg` job below mirrors aider's split; it is not enabled
+#   because it has never been run green and doubles CI minutes. Do not enable blind.
+#
+# HONEST LIMIT: this file has never executed (landed without a push run). The
+#   lockfile does carry linux optional bindings, so `npm ci` is EXPECTED to resolve
+#   (`grep -c '@rolldown/binding-linux-x64-gnu' package-lock.json` > 0) — expectation,
+#   not evidence, until the first green run on the remote.
+# =============================================================================
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: reading the repo is all this workflow needs (competitor habit —
+# cline's desktop-test.yml declares `permissions: contents: read`).
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate.sh (ubuntu-22.04 · node 22.23.2 pinned)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node (pinned to the dev host)
+        uses: actions/setup-node@v4
+        with:
+          # Pin == the dev host (`node -v` → v22.23.2; nodejs.org/dist/v22.23.2/ → HTTP 200).
+          # Floor is Node 22 anyway: the test legs use --experimental-strip-types.
+          node-version: "22.23.2"
+          cache: npm
+
+      - name: Install (locked, from package-lock.json)
+        run: npm ci --no-audit --no-fund
+
+      - name: Four gates — scripts/gate.sh
+        run: bash scripts/gate.sh
+
+  # ---------------------------------------------------------------------------
+  # PROPOSAL ONLY — the Windows leg. Do NOT uncomment without the owner's call:
+  # it has never been run green, it doubles CI minutes, and it exists precisely
+  # because the ubuntu leg above cannot see the Windows-path class (gate.sh's
+  # cygpath branch, node-runner's native spawn, OV-2). Evidence + rationale:
+  # fixes/247_lane5_infra.md §A.
+  # ---------------------------------------------------------------------------
+  # windows-leg:
+  #   name: gate.sh (windows-latest · node 22.23.2 pinned)
+  #   runs-on: windows-latest
+  #   timeout-minutes: 45
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Set up Node (pinned to the dev host)
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: "22.23.2"
+  #         cache: npm
+  #     - name: Install (locked)
+  #       run: npm ci --no-audit --no-fund
+  #     - name: Four gates — scripts/gate.sh (git-bash)
+  #       shell: bash
+  #       run: bash scripts/gate.sh

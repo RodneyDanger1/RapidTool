@@ -47,6 +47,14 @@ export type CompleteOptions = {
   system?: string;
   maxTokens?: number;
   json?: boolean;
+  /** OV-36 (W17 · L3) — the per-site thinking decision, pinned EXPLICITLY at
+   *  every pro-tier call site below (never left to the vendor default):
+   *  `false` for the structured json envelope (fixes/156 E1 — reasoning must
+   *  not consume the output window), `true` for the prose tasks (thinking is
+   *  the wanted mode there; pinned so a future default flip cannot change
+   *  them silently). Forwarded verbatim to the provider, where it can only
+   *  ever turn the pro tier OFF (flash keeps its disabled shape). */
+  thinking?: boolean;
 };
 
 /** Signature-compatible with `complete()` (llm.ts) and `completeDeepSeek()` (deepseek.server.ts). */
@@ -118,6 +126,11 @@ export function createLlmTasks(completeFn: Completer) {
     const res = await completeFn(CONSTRAINT_PROMPT(brief), {
       model: "deepseek-v4-pro",
       json: true,
+      // OV-36 (W17 · L3), site 1/3 — json envelope ⇒ thinking OFF: the
+      // fixes/156 E1 rule (reasoning_content must not consume the max_tokens
+      // window this structured call needs for its output). This is the exact
+      // json:true + pro shape 227 §2b names as a live E1 home.
+      thinking: false,
     });
     if (!res.ok) {
       return res.reason === "not-configured"
@@ -142,6 +155,13 @@ export function createLlmTasks(completeFn: Completer) {
   ): Promise<FeedbackResult> {
     const res = await completeFn(FEEDBACK_PROMPT(note, phaseTitle), {
       model: "deepseek-v4-pro",
+      // OV-36 (W17 · L3), site 2/3 — prose guidance ⇒ thinking ON, pinned
+      // explicitly rather than left to the vendor default. Justification
+      // (OV-36 allows this written form): the reply is 2–4 sentences and the
+      // note is ≤4000 chars, so E1's large-prompt window-starvation mode is
+      // not in play; interpreting a rejection benefits from reasoning, and
+      // the pin makes any future default flip visible instead of silent.
+      thinking: true,
     });
     if (!res.ok) {
       return res.reason === "not-configured"
@@ -166,6 +186,11 @@ export function createLlmTasks(completeFn: Completer) {
   ): Promise<NarrativeResult> {
     const res = await completeFn(NARRATIVE_PROMPT(snapshot, phase), {
       model: "deepseek-v4-pro",
+      // OV-36 (W17 · L3), site 3/3 — one-paragraph narrative ⇒ thinking ON,
+      // pinned explicitly (same written justification as site 2/3: prose
+      // output from a ≤2000-char grounded brief — no E1 starvation mode; the
+      // pin keeps the decision visible if the provider default ever moves).
+      thinking: true,
     });
     if (!res.ok) {
       return res.reason === "not-configured"

@@ -97,7 +97,10 @@ export type LlmProviderId = "deepseek" | "mock";
  *  API (2026-09-16, two keys — see `./deepseek.ts` header). `deepseek-flash`
  *  is the id the vendor SERVES for the alias `deepseek-v4-flash`; we keep
  *  requesting the alias (byte-identical to the pre-registry code) and read the
- *  served id back from every response. */
+ *  served id back from every response.
+ *  OV-37 (W17 · L3): if that alias ever dies, the provider's refusal names the
+ *  requested id and the refresh procedure for these ids lives beside
+ *  `DEEPSEEK_MODELS` in `./deepseek.ts`. */
 const DEEPSEEK_REQUEST_MODEL_IDS = [
   DEEPSEEK_MODELS.flash,
   DEEPSEEK_MODELS.pro,

@@ -54,6 +54,12 @@ export const ERROR_CODES = [
   "RT_E_DISK_FULL",
   "RT_E_PORT_IN_USE",
   "RT_E_NETWORK_UNREACHABLE",
+  // W18 lane-3 (fixes/249, playbook T4.2): the git landing tail needs an exact
+  // code for "the git binary is absent in this environment" — no existing code
+  // names it honestly (RT_E_RUNNER_UNAVAILABLE's doc is node-runner-specific
+  // and its agentAction would misdirect a git caller). Append-only; consumers
+  // match string literals, never array position.
+  "RT_E_GIT_UNAVAILABLE",
 ] as const;
 
 /**
@@ -459,5 +465,11 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
       "A network call never reached its target — DNS miss, refused or reset connection, unreachable host (includes undici's bare 'fetch failed').",
     agentAction:
       "Check the target host/port and connectivity; retry once if the failure may be transient, then report the unreachable endpoint honestly instead of fabricating the remote result.",
+  },
+  RT_E_GIT_UNAVAILABLE: {
+    meaning:
+      "The git binary is not available in this environment, so the git landing tail cannot run.",
+    agentAction:
+      "Report the absence honestly and leave the tree uninitialized — install git, or run where git exists; never fake a landing or hand-roll repository metadata.",
   },
 };

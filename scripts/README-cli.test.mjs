@@ -208,8 +208,8 @@ function usageCommandKeys(source) {
   const block = source.slice(source.indexOf("commands: {", start));
   const keys = [];
   for (const line of block.split(/\r?\n/)) {
-    if (/^  \}/.test(line)) break; // end of the commands object
-    const m = line.match(/^    "?([a-z][a-z-]*)"?: /);
+    if (/^ {2}\}/.test(line)) break; // end of the commands object
+    const m = line.match(/^ {4}"?([a-z][a-z-]*)"?: /);
     if (m) keys.push(m[1]);
   }
   return keys;

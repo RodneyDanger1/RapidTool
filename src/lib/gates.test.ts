@@ -1210,3 +1210,90 @@ describe("D2 reframe-lessons read-back (fixes/144 M5/D2)", () => {
     assert.equal(again.hitl?.prompt, prompt);
   });
 });
+
+// ---------------------------------------------------------------------------
+// W16 L4 (OV-14) — skip ≠ complete, made OBSERVABLE. `archProductComplete`
+// (dod.ts:232) is computed but has no production caller; the p6-arch verdict's
+// only production surface is the reqTrace artifact + its `dod.reqtrace` log row
+// (engine.ts stampP6ReqTrace → rendered by the packet's artifact list; the
+// packet half is proven in packet.test.ts). This block pins, against bytes:
+//   (a) for tree-carrying projects the artifact verdict IS archProductComplete
+//       (PASS ⇔ true, FAIL ⇔ false) — the surface carries the predicate;
+//   (b) the SKIPPED shape surfaces as SILENCE, and the recorded gate cannot
+//       tell it from a real tree — exactly the invisibility OV-14 names.
+// The packet-side explicit value is a fix in a file outside this lane's box:
+// exact patch proposal in fixes/244_lane4_pinned_windows.md §OV-14.
+// ---------------------------------------------------------------------------
+describe("W16 L4 — OV-14 skip≠complete observability via the reqTrace artifact", () => {
+  it("tree-carrying: the reqTrace artifact verdict tracks archProductComplete exactly (PASS ⇔ true, FAIL ⇔ false)", () => {
+    const complete = stampP6ReqTrace(archProject(archTree([ARCH_BOARD_FILE, ARCH_COLUMN_FILE])));
+    const okArt = complete.artifacts.find((a) => a.phase === 6 && a.title === reqTraceTitle);
+    assert.ok(okArt, "reqTrace artifact present on the complete tree");
+    assert.match(okArt!.body, /\*\*p6-arch: PASS\*\* · tree \(2 files\)/, "artifact states PASS + the tree note");
+    assert.equal(
+      archProductComplete(archTrace(complete)),
+      true,
+      "the PASS surface ⇔ product-complete (the artifact is a reader's only view of the predicate)",
+    );
+
+    const missing = stampP6ReqTrace(archProject(archTree([ARCH_BOARD_FILE])));
+    const badArt = missing.artifacts.find((a) => a.phase === 6 && a.title === reqTraceTitle);
+    assert.ok(badArt, "reqTrace artifact present on the failing tree");
+    assert.match(badArt!.body, /\*\*p6-arch: FAIL\*\*/, "the failing tree's artifact states FAIL");
+    assert.ok(
+      badArt!.body.includes("Missing capabilities") &&
+        badArt!.body.includes("export function addColumn(board: Board, title: string): Column"),
+      "the FAIL surface names the missing capability (missing/stub trees are visibly NOT complete)",
+    );
+    assert.equal(
+      archProductComplete(archTrace(missing)),
+      false,
+      "the FAIL surface ⇔ not product-complete — verdict and predicate agree on every tree-carrying shape",
+    );
+  });
+
+  it("skipped: the distinction surfaces as silence — gate passes, stamp writes nothing, gate record cannot tell skip from tree", () => {
+    // The SKIP shape aligned on every other axis: a promoted full run (every
+    // probe green — pinned at :97-108) with NO tree. Its sibling below
+    // (archProject) differs only in the p6-arch inputs it reads (generatedTree
+    // + implementationSpec) — every other probe sees identical state, so any
+    // gate-record difference would have to come from the arch axis.
+    const skipped = promote(fullRun());
+    const tSkip = archTrace(skipped);
+    assert.equal(tSkip.skipped, true, "absent tree is the SKIP shape");
+    assert.equal(archProductComplete(tSkip), false, "skip ≠ product-complete (the fact under test)");
+    assert.ok(
+      !runGate(skipped, 6).unmet.some((g) => g.id === "p6-arch"),
+      "p6-arch passes vacuously on the skip (the keyless floor is not hard-broken)",
+    );
+    assert.equal(
+      stampP6ReqTrace(skipped),
+      skipped,
+      "the stamp is a same-reference no-op: a skip writes NO reqTrace artifact and NO dod.reqtrace log",
+    );
+    assert.ok(
+      !(skipped.artifacts ?? []).some((a) => a.phase === 6 && a.title === reqTraceTitle),
+      "no reqTrace artifact on the skip",
+    );
+    assert.ok(
+      !(skipped.logs ?? []).some((l) => l.event === "dod.reqtrace"),
+      "no dod.reqtrace log row on the skip",
+    );
+
+    const tree = archProject(archTree([ARCH_BOARD_FILE, ARCH_COLUMN_FILE]));
+    const recSkip = recordGateInto(skipped, 6).phases.find((r) => r.id === 6)?.gate;
+    const recTree = recordGateInto(tree, 6).phases.find((r) => r.id === 6)?.gate;
+    assert.equal(recSkip?.passed, true, "the skip records a PASSING gate");
+    assert.equal(recTree?.passed, true, "the tree records a PASSING gate");
+    assert.equal(
+      recSkip?.passed,
+      recTree?.passed,
+      "on the gate axis the two shapes are indistinguishable — skip≠complete cannot be read back from the gate record",
+    );
+    assert.notEqual(
+      archProductComplete(archTrace(skipped)),
+      archProductComplete(archTrace(tree)),
+      "…while the predicate itself DOES differ: the fact exists, only the surface is missing (proposal in fixes/244)",
+    );
+  });
+});

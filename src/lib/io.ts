@@ -41,6 +41,79 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// T5.4 (W18 LANE 5) — artifact provenance: the additive stamp an emitted
+// artifact record may carry, and the serialization boundary that keeps it
+// honest.
+//
+// Shape (additive + OPTIONAL on the record — legacy rows stay unstamped):
+//   artifact.provenance = { producer, model?, timestamp, inputHash }
+//   - producer : "deterministic" | "model" | "replay" — what actually produced
+//     the record. "deterministic" = machine-derived content no LLM call
+//     produced (NEVER model-stamped); "model" = an LLM call produced it;
+//     "replay" = a recorded envelope served from a T5.7 cassette tape. No
+//     writer mints "replay" yet — the vocabulary + validator accept it so the
+//     cassette lane can label a replay honestly instead of letting it pass as
+//     a live run.
+//   - model    : the model id ACTUALLY served (never the requested id).
+//     Present iff producer !== "deterministic".
+//   - timestamp: epoch ms at record emission.
+//   - inputHash: FNV-1a (stringified) of the input the record derives from.
+//
+// Import laws (this file is the only serialization boundary for a Project):
+//   - a WELL-FORMED stamp rides through import untouched — the
+//     export→import→export round-trip of a healthy project stays byte-no-op;
+//   - a MALFORMED or CONTRADICTORY stamp is DROPPED, loudly (repair note), and
+//     is never repaired into shape — absence is honest, a guessed producer is
+//     not (the types.ts:187 law: fail closed on a contradiction, never invent
+//     provenance);
+//   - an ABSENT stamp stays absent: legacy rows are never stamped at import.
+// ---------------------------------------------------------------------------
+
+/** T5.4: the closed producer vocabulary for an artifact provenance stamp. */
+export const ARTIFACT_PRODUCERS = ["deterministic", "model", "replay"] as const;
+export type ArtifactProducer = (typeof ARTIFACT_PRODUCERS)[number];
+
+/** T5.4: the additive provenance stamp on an emitted artifact record. */
+export type ArtifactProvenance = {
+  producer: ArtifactProducer;
+  /** The model id actually served — present iff producer !== "deterministic". */
+  model?: string;
+  /** Epoch ms at emission (Date.now() at the producing write). */
+  timestamp: number;
+  /** FNV-1a (stringified) of the input this record was derived from. */
+  inputHash: string;
+};
+
+function isArtifactProducer(v: unknown): v is ArtifactProducer {
+  return typeof v === "string" && (ARTIFACT_PRODUCERS as readonly string[]).includes(v);
+}
+
+/**
+ * T5.4: validate a carried provenance value. Returns the stamp (canonical keys,
+ * original values) when it is well-formed and non-contradictory, else null —
+ * the caller DROPS a null result rather than repair it (fail closed).
+ * Unknown sibling keys are tolerated by the caller and preserved (the
+ * generatedTree T0.2 additive-tolerance precedent); the known fields are strict.
+ */
+export function coerceArtifactProvenance(v: unknown): ArtifactProvenance | null {
+  if (!isPlainObject(v)) return null;
+  if (!isArtifactProducer(v.producer)) return null;
+  const timestamp = v.timestamp;
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp) || timestamp <= 0) return null;
+  const inputHash = v.inputHash;
+  if (typeof inputHash !== "string" || inputHash.trim().length === 0) return null;
+  if (v.producer === "deterministic") {
+    // The T5.4 law: a deterministic record is never model-stamped. A model id
+    // here is a contradiction — the whole stamp fails closed.
+    if (v.model !== undefined) return null;
+    return { producer: "deterministic", timestamp, inputHash };
+  }
+  // model / replay: the claim is unverifiable without the served model id.
+  if (typeof v.model !== "string" || v.model.trim().length === 0) return null;
+  return { producer: v.producer, model: v.model, timestamp, inputHash };
+}
+
+// ---------------------------------------------------------------------------
 // fixes/115 H-03 (io half) — import-time field defense.
 //
 // importProject's whitelist below validates the containers the pipeline cannot
@@ -146,6 +219,26 @@ function sanitizeImportPayload(raw: Record<string, unknown>): string[] {
   // crew — container only in hydrate; a null row crashes the packet crew
   // render (c.role read).
   defendRowArray(raw, "crew", notes);
+
+  // T5.4 (W18 LANE 5): artifact provenance — the additive stamp
+  // { producer, model?, timestamp, inputHash } on an artifact row. A
+  // well-formed stamp rides through UNTOUCHED (byte no-op, so a healthy
+  // export→import→export round-trip keeps its stamps byte-identically); a
+  // malformed or contradictory stamp is DROPPED with a loud note and never
+  // repaired into shape (fail closed — absence is honest, a guessed producer
+  // is not). An absent stamp stays absent: legacy rows are never stamped here.
+  const artifactRows = raw.artifacts;
+  if (Array.isArray(artifactRows)) {
+    let droppedStamps = 0;
+    for (const row of artifactRows) {
+      if (!isPlainObject(row) || row.provenance === undefined) continue;
+      if (coerceArtifactProvenance(row.provenance) === null) {
+        delete row.provenance;
+        droppedStamps += 1;
+      }
+    }
+    if (droppedStamps > 0) notes.push(`artifacts:provenance:-${droppedStamps}`);
+  }
 
   // scorecard — never regenerated by attachAlgorithms and never normalized by
   // hydrate, so a structurally-broken object reaches compileAgentPacket and

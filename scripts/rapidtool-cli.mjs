@@ -49,6 +49,7 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --refute --knowledge-file lessons.json --id K1a2b3c4d [--evidence "…"]   # counter-evidence bump (decay/retire)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --advise (--project build.json | --knowledge-file lessons.json) [--brief "…"] [--phase N] [--limit N]   # 216s (112 T5): read-only pre-flight — ranked FAIL-class lesson rows (fusionRank vs --brief, else score-desc) with the live telemetry the rows actually carry (reproducedCount / counterEvidence)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --verify (--knowledge-file lessons.json | --project build.json) --anchor <path> [--mark-stale] [--limit N]   # 216s (112 T5): re-hash the anchor's current bytes against each row's recorded evidenceHash= token → ok | stale | anchor-missing; READ-ONLY unless --mark-stale (store counterEvidence telemetry only, never content)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --effect --project build.json   # F3 (221 §F3): read-only cross-run learning MEASUREMENT — recurrence census of the project's lesson rows (reproduced/unreproduced, per-class rates, per-row evidence with the lesson.reproduced ledger rows that accrued it); recurrence ≠ causation label + census window + n≥2 "baseline only" floor ride inside the JSON
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs packet  --project build.json [--knowledge lessons.json]        # tier-1: seed Ranked memory with accepted cross-project lessons
 // ---------------------------------------------------------------------------
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -1910,14 +1911,18 @@ async function main() {
         //   --advise    ranked FAIL-class lesson rows for a brief (pre-flight)
         //   --verify    anchor re-hash → ok | stale | anchor-missing
         //               (read-only unless --mark-stale: store telemetry only)
-        const actions = ["list", "propose", "accept", "supersede", "refute", "advise", "verify"].filter(
+        // F3 (221 §F3 — W18 lane 2) — the measurement arm:
+        //   --effect    cross-run learning census from project memory rows
+        //               (reproduced/unreproduced, per-class rates, evidence
+        //               with the accruing ledger rows) — read-only
+        const actions = ["list", "propose", "accept", "supersede", "refute", "advise", "verify", "effect"].filter(
           (a) => flag(args, a),
         );
         if (actions.length !== 1) {
           return respond(
             {
               ok: false,
-              error: `lesson: pass exactly one of --list|--propose|--accept|--supersede|--refute|--advise|--verify (got ${actions.length})`,
+              error: `lesson: pass exactly one of --list|--propose|--accept|--supersede|--refute|--advise|--verify|--effect (got ${actions.length})`,
               code: "RT_E_VALIDATION",
             },
             1,
@@ -1955,9 +1960,10 @@ async function main() {
                 (t) => typeof t === "string" && t.trim() !== "" && !t.startsWith("actor:"),
               );
               const level = tags.find((t) => /^L[1-5]$/.test(t)) ?? null;
-              const cls = tags.find(
-                (t) => t !== "lesson" && !/^L[1-5]$/.test(t) && t !== "accepted",
-              ) ?? null;
+              // ONE classifier with the F3 report (knowledge.lessonClassTag):
+              // it also skips probe:/actor: telemetry tags — without that skip
+              // a probe-tagged row reported its first PROBE tag as its class.
+              const cls = k.lessonClassTag(tags);
               return {
                 id: m.id,
                 kind: m.kind,
@@ -1980,6 +1986,43 @@ async function main() {
                 rankedBy: briefText ? "fusion-rank" : "score-desc",
                 count: rows.length,
                 rows,
+              },
+              0,
+            );
+            return;
+          }
+          if (action === "effect") {
+            // F3 (221 §F3 — W18 lane 2): cross-run learning MEASUREMENT — the
+            // read-only 8th arm. The census of the project's lesson-tagged
+            // memory rows plus their post-minting recurrence telemetry
+            // (`reproducedCount`, accrued by engine.accrueReproducedCounts /
+            // report-intake.ts's twin accrual / verify.ts's repro-accrual) and
+            // the `lesson.reproduced` ledger rows that accrued it, read back
+            // from the project's own logs. NO writer: no promotion, no
+            // demotion, no mint — and the T-11 mute stays (a red seal mints no
+            // lesson row, so it cannot count here). The recurrence≠causation
+            // label, the census-window disclosure and the n≥2 "baseline only"
+            // floor ride INSIDE the JSON object (knowledge.lessonOutcomeReport).
+            if (typeof args["knowledge-file"] === "string" && args["knowledge-file"].trim()) {
+              return respond(
+                {
+                  ok: false,
+                  error:
+                    "lesson effect: the reproduction census lives in project MEMORY rows — the cross-project store carries counterEvidence, not reproducedCount (and no ledger rows); refusing --knowledge-file rather than reporting an empty store as a measurement",
+                  code: "RT_E_VALIDATION",
+                },
+                1,
+              );
+            }
+            const project = loadProjectFor("lesson effect");
+            const report = k.lessonOutcomeReport(project.memory ?? [], { logs: project.logs ?? [] });
+            respond(
+              {
+                ok: true,
+                action: "effect",
+                project: project.name,
+                readOnly: true,
+                ...report,
               },
               0,
             );
@@ -2956,7 +2999,7 @@ const USAGE = {
     bench: "bench --project <file.json>                  # synthetic estimates: tokens/time/complexity/failure points",
     mine: "mine --dir <path> [--limit N]                # bounded structural codebase map + convention map",
     knowledge: "knowledge --store <file.json> (--save <json>|--find <query>) [--limit N]  # cross-project pattern store",
-    lesson: "lesson (--list --project <file.json> [--brief <text>] [--limit N] | --propose --brief <text> [--title <t>] [--kind fix|pattern|note] [--tags a,b] [--project <name>] | --accept --project <file.json> --out <knowledge.json> [--actor <name>] [--limit N] | --supersede --knowledge-file <knowledge.json> --id <K...> [--evidence <text>|--reason <text>] [--by human|machine] | --refute --knowledge-file <knowledge.json> --id <K...> [--evidence <text>] | --advise (--project <file.json> | --knowledge-file <knowledge.json>) [--brief <text>] [--phase N] [--limit N] | --verify (--knowledge-file <knowledge.json> | --project <file.json>) --anchor <path> [--mark-stale] [--limit N])  # lesson family: list rows read-only (fusionRank vs --brief, else score-desc) / propose = bounded flash DRAFT, never writes (keyless drafts labeled 'draft (keyless)') / accept = THE human-gated cross-project write, actor recorded per row, idempotent per actor / supersede + refute = store telemetry (append-only rows + counters, never deletes) / advise = read-only ranked FAIL-class pre-flight (reproducedCount + counterEvidence printed as-is) / verify = anchor re-hash → ok | stale | anchor-missing (read-only unless --mark-stale: store counterEvidence telemetry only)",
+    lesson: "lesson (--list --project <file.json> [--brief <text>] [--limit N] | --propose --brief <text> [--title <t>] [--kind fix|pattern|note] [--tags a,b] [--project <name>] | --accept --project <file.json> --out <knowledge.json> [--actor <name>] [--limit N] | --supersede --knowledge-file <knowledge.json> --id <K...> [--evidence <text>|--reason <text>] [--by human|machine] | --refute --knowledge-file <knowledge.json> --id <K...> [--evidence <text>] | --advise (--project <file.json> | --knowledge-file <knowledge.json>) [--brief <text>] [--phase N] [--limit N] | --verify (--knowledge-file <knowledge.json> | --project <file.json>) --anchor <path> [--mark-stale] [--limit N] | --effect --project <file.json>)  # lesson family: list rows read-only (fusionRank vs --brief, else score-desc) / propose = bounded flash DRAFT, never writes (keyless drafts labeled 'draft (keyless)') / accept = THE human-gated cross-project write, actor recorded per row, idempotent per actor / supersede + refute = store telemetry (append-only rows + counters, never deletes) / advise = read-only ranked FAIL-class pre-flight (reproducedCount + counterEvidence printed as-is) / verify = anchor re-hash → ok | stale | anchor-missing (read-only unless --mark-stale: store counterEvidence telemetry only) / effect = F3 read-only cross-run learning MEASUREMENT (recurrence census: reproduced/unreproduced, per-class rates + per-row evidence with the accruing lesson.reproduced ledger rows; recurrence ≠ causation, census window, n≥2 'baseline only' floor — never an eval score)",
     wild: "wild --project <file.json> [--start|--pause|--resume|--stop] [--steps N]  # wild-mode macro-run; --start enables + begins a run",
     chat: "chat --project <file.json> --ask <text> [--history <json-array>]  # grounded copilot turn; slash tools /status /gate /packet /fixtures /ls /read /help work keyless; free-text needs DEEPSEEK_API_KEY",
     deepen: "deepen --project <file.json> [--phase N]    # re-run live research over a completed research phase (0/7/11)",

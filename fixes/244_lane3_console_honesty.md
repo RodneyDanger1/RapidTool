@@ -10,7 +10,7 @@
 
 - **DF-18 LANDED** — `grep -cE 'feasibility|template-derived|not live research' src/components/console.tsx` → **0 → 2** (:3357 source comment, :3359 rendered string). The caveat `(deterministic feasibility estimate — template-derived, not live research)` renders in `ScorecardBlock` directly under the headline `overall / 10` number — exact packet.ts:498 wording, never paraphrased. Both call sites inherit it: :2816 (run screen) and :5939 (record browser).
 - **DF-26 LANDED** — `grep -c TRUNC src/components/console.tsx` → **0 → 4** (:183 comment, :192 const, :196 helper, :2940 render). Truncation surfaced at two affordance levels: (a) Agent-packet tab — warn banner above the packet frame; (b) Export (copy/download) dropdown — warn strip at the top of the menu, so a reader sees it *before* taking the packet (playbook trap: "a banner that only appears when the user opens the packet defeats the point"). Detection reads the packet's OWN marker out of `project.packet` (`packet.includes(PACKET_TRUNC_MARKER)`) — the 14 000-char cut is **never recomputed** client-side.
-- **Layout intact** — all four edited regions re-read post-edit (see Commands); banner/strip are block-flow siblings (no absolute positioning, no fixed heights); parse-only check of the edited TSX = **0 diagnostics (PARSE CLEAN)**, ts 5.9.3. No `src/styles.css` change needed — every utility class used already appears in-file: `border-warn/30` ×8, `bg-raised` ×38, `text-warn` (competitor "illustrative template" chip :3397/:3400), `font-mono text-[11px]`.
+- **Layout intact** — all four edited regions re-read post-edit (see Commands); banner/strip are block-flow siblings (no absolute positioning, no fixed heights); parse-only check of the edited TSX = **0 diagnostics (PARSE CLEAN)** and a scoped read-only typecheck of the file = **0 diagnostics** (repo tsconfig — strict + react-jsx + `@/*` paths, 183-file program, same compiler as `npm run typecheck`; the full gate stays parent-owned per lane rules), ts 5.9.3. No `src/styles.css` change needed — every utility class used already appears in-file: `border-warn/30` ×8, `bg-raised` ×38, `text-warn` (competitor "illustrative template" chip :3397/:3400), `font-mono text-[11px]`.
 - **Test: no console test file exists** — `ls src/components/*.test.*` → none (dir holds only cmd-palette.tsx, console.tsx, preview-host-bridge.tsx, runtime-timeline-pane.tsx; playbook DF-18 row already says "(no console.tsx test file)"). Checks used instead, all actually run: (1) the two wave greps; (2) mirror-identity script — marker + cap byte-identical to packet.ts; (3) the packet's own suite `node --experimental-strip-types --test src/lib/packet.test.ts` FOREGROUND → **47/47 pass**, incl. "packets over 14000 chars carry the TRUNCATED marker (never silent cut)" — proves the marker appears in real packet output; (4) parse-only TSX syntax check. Post-OV-2 browser pass remains the playbook's belt-and-braces (not available to this lane).
 
 ## Commands + evidence (append-only) — every claim = its command
@@ -46,6 +46,17 @@ node --experimental-strip-types --test src/lib/packet.test.ts
 node C:/Users/mnril/w16l3_scratch/parse_check.mjs
 #   ts 5.9.3 · parseDiagnostics: 0 · PARSE CLEAN
 
+# SCOPED, read-only typecheck of the edited file only (repo tsconfig — strict +
+# react-jsx + @/* paths, 183-file program — same compiler as `npm run typecheck`;
+# NOT the gate, nothing written, filter proves the file was found or it fails loud)
+node C:/Users/mnril/w16l3_scratch/scoped_diag.mjs
+#   ts 5.9.3 · tsconfig files: 183 · console.tsx diagnostics: 0
+
+# targeted single-file lint of the edited file (NOT the repo-wide `npm run lint` gate)
+node_modules/.bin/eslint src/components/console.tsx
+#   ESLINT EXIT=0
+#   … --format json → messages: 0 | errorCount: 0 | warningCount: 0
+
 # class precedent (no styles.css change)
 grep -c "border-warn/30" src/components/console.tsx    # 8   (incl. this lane's 2 uses)
 grep -c "bg-raised" src/components/console.tsx         # 38
@@ -74,4 +85,4 @@ sed -n '178,198p;2536,2556p;2918,2950p;3352,3366p' src/components/console.tsx
 - Box interpretation: the Export dropdown was treated as part of "the packet/download affordance" per the playbook's DF-26 trap; it is console.tsx, and LANE 3 is the only console.tsx writer this wave.
 - git truth: the tree is uncommitted-on-7582771, so per-lane `git diff` attribution is not meaningful; evidence = the patch tool's returned diffs (per hunk) + post-edit `sed` re-reads.
 - No `packet.ts` edit; no new repo files besides this log; scratch outside repo at `C:/Users/mnril/w16l3_scratch/` (`verify_mirror.mjs`, `parse_check.mjs`).
-- Forbidden runs respected (no `npm run typecheck` / `npm test` / `npm run build`); all node runs FOREGROUND (no `stdin is not a tty` met).
+- Forbidden runs respected (no `npm run typecheck` / `npm test` / `npm run build`); all node runs FOREGROUND (no `stdin is not a tty` met). A targeted single-file `eslint src/components/console.tsx` (not on the forbidden list, not the repo-wide `npm run lint` gate) WAS run as the workspace's verification command → exit 0, 0 problems. Rationale for not running the full gate even as "extra verification": lane-forbidden (parent/boundary only) AND the wave is mid-edit under `src/lib` (other lanes) → a full-gate run now would false-fail by rule ("never run the full gate while agents are mid-edit"). The scoped console.tsx diagnostics + targeted lint above are the honest substitutes.

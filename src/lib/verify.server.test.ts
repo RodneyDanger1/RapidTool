@@ -37,6 +37,7 @@ import {
   verifyAndFixServer,
 } from "./verify.server.ts";
 import { runnerAvailable } from "./node-runner.server.ts";
+import { createTokenBudget, emptyLedger } from "./token-ledger.ts";
 import { oracleToCaseSeeds } from "./dod.ts";
 import type { OracleTest } from "./types.ts";
 // 216i (112 T1/T2): the lesson-loop pins below consume the client-safe
@@ -690,6 +691,113 @@ describe("216p T-107.2 — registry migration pin (verify seam)", () => {
       globalThis.fetch = realFetch;
       if (savedPin === undefined) delete process.env.DEEPSEEK_MODEL_WEAK;
       else process.env.DEEPSEEK_MODEL_WEAK = savedPin;
+      restoreKey();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-107.6 (A3 · D2.3 · 226 A3): the budget seam — a budget stop is the CODED
+// outcome (RT_E_BUDGET_EXHAUSTED), never RT_E_INTERNAL, and the measured
+// usage of every wire response lands in the caller-owned ledger. The default
+// cap stays UNSET: with no budget passed the path is byte-identical (every
+// test above this block runs budgetless).
+// ---------------------------------------------------------------------------
+describe("T-107.6 budget seam (A3 catch wrapper)", () => {
+  it("records the measured spend then returns the coded refusal (not RT_E_INTERNAL) when the call crosses the cap", async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([allPinned]);
+    try {
+      const budget = createTokenBudget(5); // the fake reply reports 10+10 = 20 tokens
+      const res = await generateCases(SOURCE, BRIEF, [], SEEDS, ORACLE_IDS, budget);
+      assert.equal(res.ok, false);
+      if (!res.ok) {
+        assert.equal(res.reason, "error");
+        assert.equal(res.code, "RT_E_BUDGET_EXHAUSTED");
+        assert.notEqual(res.code, "RT_E_INTERNAL");
+        assert.match(res.error ?? "", /RT_E_BUDGET_EXHAUSTED/);
+      }
+      // record-then-signal: the crossing kept the spend it measured.
+      assert.deepEqual(budget.ledger, { promptTokens: 10, completionTokens: 10, calls: 1 });
+      assert.equal(mock.calls.length, 1, "the response that crossed the cap really landed");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("refuses BEFORE the wire when the budget is already spent to the cap (0 fetch calls)", async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([allPinned]);
+    try {
+      const budget = { ledger: { promptTokens: 10, completionTokens: 0, calls: 1 }, cap: 10 };
+      const res = await generateCases(SOURCE, BRIEF, [], SEEDS, ORACLE_IDS, budget);
+      assert.equal(res.ok, false);
+      if (!res.ok) assert.equal(res.code, "RT_E_BUDGET_EXHAUSTED");
+      assert.equal(mock.calls.length, 0, "over-cap refuses BEFORE the wire");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("an unmetered budget (cap unset — D2.3) records spend and never refuses", async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([allPinned]);
+    try {
+      const budget = { ledger: emptyLedger(), cap: undefined };
+      const res = await generateCases(SOURCE, BRIEF, [], SEEDS, ORACLE_IDS, budget);
+      assert.equal(res.ok, true);
+      assert.deepEqual(budget.ledger, { promptTokens: 10, completionTokens: 10, calls: 1 });
+      assert.equal(mock.calls.length, 1);
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("verifyAndFixServer surfaces the coded budget stop (status error + coded evidence)", async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([allPinned]);
+    try {
+      const budget = { ledger: { promptTokens: 12, completionTokens: 3, calls: 1 }, cap: 15 };
+      const outcome = await verifyAndFixServer(SOURCE, BRIEF, {
+        seeds: SEEDS,
+        pinnedOracleIds: ORACLE_IDS,
+        budget,
+      });
+      assert.equal(outcome.status, "error");
+      assert.match(outcome.evidence, /RT_E_BUDGET_EXHAUSTED/);
+      assert.equal(mock.calls.length, 0, "no wire call under an exhausted budget");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("a budget stop at the FIX dispatch exits coded (the loop never spins on a spent budget)", async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([allPinned]);
+    try {
+      // gen spends 20 (10+10) < 25, so generation runs; the fix reply pushes
+      // the ledger to 40 > 25, so the FIX dispatch is the seam that stops.
+      const budget = { ledger: emptyLedger(), cap: 25 };
+      const outcome = await verifyAndFixServer(SOURCE, BRIEF, {
+        seeds: SEEDS,
+        pinnedOracleIds: ORACLE_IDS,
+        budget,
+      });
+      assert.equal(outcome.status, "error");
+      assert.match(outcome.evidence, /fix dispatch refused/);
+      assert.match(outcome.evidence, /RT_E_BUDGET_EXHAUSTED/);
+      assert.equal(
+        budget.ledger.promptTokens + budget.ledger.completionTokens,
+        40,
+        "generation + fix spend are both kept",
+      );
+      assert.equal(mock.calls.length, 2, "generation + the fix dispatch that crossed the cap");
+    } finally {
+      mock.restore();
       restoreKey();
     }
   });

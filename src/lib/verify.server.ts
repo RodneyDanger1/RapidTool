@@ -36,6 +36,11 @@
 // ---------------------------------------------------------------------------
 import { isDeepSeekConfigured } from "./deepseek.server.ts";
 import { callModel } from "./llm/providers/registry.ts";
+// T-107.6 (A3 · D2.3 · 226 A3): the budget catch wrapper — a budget stop is
+// this seam's coded refusal (RT_E_BUDGET_EXHAUSTED), never an unhandled throw
+// an outer catch would classify RT_E_INTERNAL.
+import { isBudgetStopRefusal, runBudgetedCall } from "./token-ledger.ts";
+import type { TokenBudget } from "./token-ledger.ts";
 import { countLooseEquals, stripStringsAndComments } from "./bench.ts";
 import { briefNounHits, identifierHits } from "./sandbox.ts";
 import { failureLessonFromRecord, verifyOutcomeLesson } from "./knowledge.ts";
@@ -774,6 +779,14 @@ export function droppedPinnedOracleIds(
  * list that drops a pinned id gets one bounded repair retry and then an
  * honest refusal — the verify loop can never run — let alone pass — a
  * reduced oracle.
+ *
+ * T-107.6 (A3 · D2.3): the caller MAY thread a `TokenBudget` (6th param) —
+ * every wire call below runs through the catch wrapper (`runBudgetedCall`)
+ * and records the response's REAL measured usage in the caller-owned ledger.
+ * An over-cap stop comes back as this seam's coded refusal
+ * (`RT_E_BUDGET_EXHAUSTED`, spend kept) — it can never surface as an escaping
+ * throw (which an outer catch would classify `RT_E_INTERNAL`). No budget ⇒
+ * the byte-identical legacy path.
  */
 export async function generateCases(
   source: string,
@@ -781,6 +794,7 @@ export async function generateCases(
   signatureNames: readonly string[] = [],
   seeds = "",
   pinnedOracleIds: readonly string[] = [],
+  budget?: TokenBudget,
 ): Promise<
   | { ok: true; cases: VerifyCase[] }
   | { ok: false; reason: "not-configured" | "error"; error?: string; code: ErrorCode }
@@ -797,7 +811,10 @@ export async function generateCases(
   // T-107.2 (fixes/216p): role-tiered call — `weak` = the cheapest tier for
   // short structured envelopes (flash + json; thinking disabled). Same
   // request shape the legacy `completeDeepSeek(…, "deepseek-v4-flash")` sent.
-  const res = await callModel("weak", prompt, { json: true });
+  const res = await runBudgetedCall(budget, () => callModel("weak", prompt, { json: true }));
+  // A3: the pre-dispatch gate or the post-response record stopped the run at
+  // the budget — return the CODED outcome, never fall through to RT_E_INTERNAL.
+  if (isBudgetStopRefusal(res)) return res;
   if (!res.ok) {
     return res.reason === "not-configured"
       ? { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" }
@@ -807,15 +824,18 @@ export async function generateCases(
   if (cases === null) {
     // audit-88 (A3): one bounded repair retry — a single malformed payload
     // should not fail the whole verify run when the model can self-correct.
-    const retry = await callModel(
-      "weak",
-      [
-        "Your previous reply was not valid JSON with a {cases: [...]} array. Repair it now.",
-        "Return JSON ONLY: {\"cases\": [{\"id\": \"case-1\", \"expression\": \"<boolean expression>\"}]}.",
-        "Same rules as before: single boolean expressions, no semicolons/declarations/assignments.",
-      ].join("\n"),
-      { json: true },
+    const retry = await runBudgetedCall(budget, () =>
+      callModel(
+        "weak",
+        [
+          "Your previous reply was not valid JSON with a {cases: [...]} array. Repair it now.",
+          "Return JSON ONLY: {\"cases\": [{\"id\": \"case-1\", \"expression\": \"<boolean expression>\"}]}.",
+          "Same rules as before: single boolean expressions, no semicolons/declarations/assignments.",
+        ].join("\n"),
+        { json: true },
+      ),
     );
+    if (isBudgetStopRefusal(retry)) return retry;
     if (!retry.ok) {
       return { ok: false, reason: "error", error: "model returned an unparseable oracle payload", code: "RT_E_INTERNAL" };
     }
@@ -835,16 +855,19 @@ export async function generateCases(
   if (pinned.length > 0) {
     const missing = droppedPinnedOracleIds(cases.map((c) => c.id), pinned);
     if (missing.length > 0) {
-      const retry = await callModel(
-        "weak",
-        [
-          "Your previous reply dropped pinned A7 oracle rows.",
-          `Repair it now: reproduce EVERY pinned id exactly once in the case list: ${missing.join(", ")}.`,
-          'Return JSON ONLY: {"cases": [{"id": "case-1", "expression": "<boolean expression>"}]}.',
-          "Same rules as before: single boolean expressions, no semicolons/declarations/assignments.",
-        ].join("\n"),
-        { json: true },
+      const retry = await runBudgetedCall(budget, () =>
+        callModel(
+          "weak",
+          [
+            "Your previous reply dropped pinned A7 oracle rows.",
+            `Repair it now: reproduce EVERY pinned id exactly once in the case list: ${missing.join(", ")}.`,
+            'Return JSON ONLY: {"cases": [{"id": "case-1", "expression": "<boolean expression>"}]}.',
+            "Same rules as before: single boolean expressions, no semicolons/declarations/assignments.",
+          ].join("\n"),
+          { json: true },
+        ),
       );
+      if (isBudgetStopRefusal(retry)) return retry;
       if (retry.ok) {
         const repaired = parseOracleJson(retry.text);
         if (repaired !== null) {
@@ -935,6 +958,12 @@ export async function verifyAndFixServer(
      *  one is rejected (repair retry, then honest refusal — never a pass on a
      *  reduced oracle). Callers pass `project.oracle.map((o) => o.id)`. */
     pinnedOracleIds?: readonly string[];
+    /** T-107.6 (A3 · D2.3): OPTIONAL caller-owned session budget, threaded
+     *  into the case-generation call and the fix dispatch (token-ledger.ts).
+     *  Absent ⇒ the byte-identical legacy path; a budget stop returns the
+     *  coded refusal (RT_E_BUDGET_EXHAUSTED, spend kept) — never
+     *  RT_E_INTERNAL. */
+    budget?: TokenBudget;
   } = {},
 ): Promise<VerifyOutcome> {
   const maxIterations = Math.min(Math.max(opts.maxIterations ?? MAX_ITERATIONS, 1), 5);
@@ -954,6 +983,7 @@ export async function verifyAndFixServer(
     opts.signatureNames ?? [],
     opts.seeds ?? "",
     opts.pinnedOracleIds ?? [],
+    opts.budget,
   );
   if (!gen.ok) {
     const status = gen.reason === "not-configured" ? "not-configured" : "error";
@@ -1013,22 +1043,38 @@ export async function verifyAndFixServer(
       };
     }
     // Fail → ask the model for a patched source (it NEVER declares the pass).
-    const failures = run.results
-      .filter((r) => !r.pass)
-      .map((f) => `${f.id}: ${f.detail}`)
-      .join("; ");
-    const fix = await callModel(
-      "weak",
-      [
-        "The following module failed machine-run verification cases.",
-        `Failing cases: ${failures || "compile failure"}`,
-        "Return ONLY the complete corrected module source (plain code, no fences).",
-        "Do not weaken the cases; fix the source. Do not claim success.",
-        `Brief: ${brief.slice(0, 600)}`,
-        "Current source:",
-        current.slice(0, 6000),
-      ].join("\n"),
+    const failing = run.results.filter((r) => !r.pass);
+    const failures = failing.map((f) => `${f.id}: ${f.detail}`).join("; ");
+    const fix = await runBudgetedCall(opts.budget, () =>
+      callModel(
+        "weak",
+        [
+          "The following module failed machine-run verification cases.",
+          `Failing cases: ${failures || "compile failure"}`,
+          "Return ONLY the complete corrected module source (plain code, no fences).",
+          "Do not weaken the cases; fix the source. Do not claim success.",
+          `Brief: ${brief.slice(0, 600)}`,
+          "Current source:",
+          current.slice(0, 6000),
+        ].join("\n"),
+      ),
     );
+    // A3 · D2.3: a budget stop mid-loop is this seam's CODED outcome — exit
+    // with the coded evidence instead of spinning the loop on a spent budget
+    // (and never let the throw classify RT_E_INTERNAL at an outer catch).
+    // Anchored to the failing machine-case ids observed this iteration (the
+    // counterexample is real; the budget stop itself rides the evidence).
+    if (isBudgetStopRefusal(fix)) {
+      const evidence = `fix dispatch refused: ${fix.error}`;
+      return {
+        status: "error",
+        iterations: i + 1,
+        evidence,
+        finalSource: current,
+        cases,
+        ...gatedFailureMint(failing.map((f) => f.id), evidence, i + 1, fix.code),
+      };
+    }
     if (fix.ok) {
       const cleaned = fix.text.replace(/^```[a-zA-Z0-9+_-]*\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
       if (cleaned) current = cleaned;

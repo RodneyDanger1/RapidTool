@@ -7,14 +7,17 @@ import {
   assertWithinBudget,
   billableInputTokens,
   budgetCap,
+  budgetStopRefusal,
   createTokenBudget,
   emptyLedger,
   estimateCostUsd,
   isBudgetExhausted,
+  isBudgetStopRefusal,
   isUnmetered,
   recordBudgetSpend,
   recordSpend,
   recordSpendWithinCap,
+  runBudgetedCall,
   tokenCapFromEnv,
   totalTokens,
   wouldExceed,
@@ -324,5 +327,107 @@ describe("token-ledger — TokenBudget seam (T-107.6)", () => {
       assert.ok(err instanceof Error);
       assert.match((err as Error).message, /RT_E_VALIDATION/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A3 catch wrapper (T-107.6 · D2.3 · 226 A3): a budget stop must yield the
+// CODED outcome (RT_E_BUDGET_EXHAUSTED) — never RT_E_INTERNAL
+// ---------------------------------------------------------------------------
+describe("token-ledger A3 catch wrapper", () => {
+  it("budgetStopRefusal translates SessionBudgetExceeded into the coded refusal", () => {
+    const refusal = budgetStopRefusal(new SessionBudgetExceeded(10, 5));
+    assert.deepEqual(refusal, {
+      ok: false,
+      reason: "error",
+      error:
+        "Session token budget exhausted: spent 10 / cap 5 [RT_E_BUDGET_EXHAUSTED] — controlled stop at the session budget cap (spend kept)",
+      code: "RT_E_BUDGET_EXHAUSTED",
+    });
+    assert.ok(refusal && isBudgetStopRefusal(refusal));
+    // The alias subclass classifies the same way (NoMoneyException).
+    assert.equal(budgetStopRefusal(new NoMoneyException(3, 1))?.code, "RT_E_BUDGET_EXHAUSTED");
+    // Any other error keeps its own classification — the caller rethrows it.
+    assert.equal(budgetStopRefusal(new Error("boom")), null);
+    assert.equal(budgetStopRefusal(null), null);
+    assert.equal(budgetStopRefusal("nope"), null);
+  });
+
+  it("isBudgetStopRefusal: only the coded envelope narrows true", () => {
+    assert.equal(
+      isBudgetStopRefusal({
+        ok: false,
+        reason: "error",
+        error: "x",
+        code: "RT_E_BUDGET_EXHAUSTED",
+      }),
+      true,
+    );
+    assert.equal(isBudgetStopRefusal({ ok: false, reason: "error", code: "RT_E_INTERNAL" }), false);
+    assert.equal(isBudgetStopRefusal({ ok: true }), false);
+    assert.equal(isBudgetStopRefusal(null), false);
+  });
+
+  it("runBudgetedCall refuses BEFORE the wire when the budget is spent to the cap", async () => {
+    let calls = 0;
+    const budget = { ledger: { promptTokens: 9, completionTokens: 1, calls: 1 }, cap: 10 };
+    const res = await runBudgetedCall(budget, async () => {
+      calls++;
+      return { ok: true as const, usage: { promptTokens: 1, completionTokens: 1 } };
+    });
+    assert.equal(calls, 0, "no wire call after the pre-dispatch gate refused");
+    assert.ok(isBudgetStopRefusal(res));
+    assert.equal(res.code, "RT_E_BUDGET_EXHAUSTED");
+  });
+
+  it("runBudgetedCall records the measured spend THEN returns the coded refusal on a crossing", async () => {
+    const budget = createTokenBudget(50);
+    const res = await runBudgetedCall(budget, async () => ({
+      ok: true as const,
+      usage: { promptTokens: 60, completionTokens: 40 },
+    }));
+    assert.ok(isBudgetStopRefusal(res));
+    assert.equal(res.code, "RT_E_BUDGET_EXHAUSTED");
+    // record-then-signal: the spend is KEPT even though the crossing refused.
+    assert.deepEqual(budget.ledger, { promptTokens: 60, completionTokens: 40, calls: 1 });
+    assert.equal(totalTokens(budget.ledger), 100);
+  });
+
+  it("runBudgetedCall keeps the unmetered / no-budget paths a pure pass-through", async () => {
+    const unmetered = { ledger: emptyLedger(), cap: undefined };
+    const r1 = await runBudgetedCall(unmetered, async () => ({
+      ok: true as const,
+      usage: { promptTokens: 5, completionTokens: 5 },
+    }));
+    assert.equal(r1.ok, true);
+    // Unmetered still RECORDS measured spend (no cap to cross — D2.3).
+    assert.deepEqual(unmetered.ledger, { promptTokens: 5, completionTokens: 5, calls: 1 });
+    // No budget at all: no recording, no gate, result identical.
+    const result = { ok: true as const, usage: { promptTokens: 7, completionTokens: 7 } };
+    const r2 = await runBudgetedCall(undefined, async () => result);
+    assert.equal(r2, result);
+  });
+
+  it("runBudgetedCall records usage even when the result itself failed (retry spend)", async () => {
+    const budget = createTokenBudget(100);
+    const failed = {
+      ok: false as const,
+      reason: "error" as const,
+      code: "RT_E_LLM_REJECTED" as const,
+      usage: { promptTokens: 7, completionTokens: 0 },
+    };
+    const res = await runBudgetedCall(budget, async () => failed);
+    assert.equal(res, failed, "the failed result passes through unchanged");
+    assert.deepEqual(budget.ledger, { promptTokens: 7, completionTokens: 0, calls: 1 });
+  });
+
+  it("runBudgetedCall rethrows non-budget errors untouched", async () => {
+    await assert.rejects(
+      () =>
+        runBudgetedCall(createTokenBudget(10), async () => {
+          throw new Error("boom");
+        }),
+      /boom/,
+    );
   });
 });

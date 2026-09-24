@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { compileCheckDir, installToolFor, parseVerdictForSource, treeRun, verifyKindDir } from "./compile-check.server.ts";
+import { SUPPLY_CHAIN_AUDIT_COMMAND, compileCheckDir, installToolFor, parseVerdictForSource, supplyChainFloorFor, treeRun, verifyKindDir } from "./compile-check.server.ts";
 import { scrubbedEnv } from "./node-runner.server.ts";
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), "rapidtool-cc-"));
@@ -1007,5 +1007,116 @@ describe("216 T-02 — parseVerdictForSource gates writes before they happen", (
       "pass",
       "the T-01 fix produces output the T-02 gate accepts",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OV-43 (W17-L5) — report-only supply-chain floor: the install leg runs with
+// `--no-audit` by design and emitted trees ship caret-pinned deps with no
+// lockfile; this surface makes that posture VISIBLE as evidence. It has no
+// ok/fail and must never gate a run — pinned below.
+// ---------------------------------------------------------------------------
+
+describe("OV-43 — report-only supply-chain floor (never a gate)", () => {
+  it("caret-pinned, lockfile-less tree → loose pins + no lockfile + NO audit is claimed", () => {
+    const dir = tempDir();
+    try {
+      write(
+        dir,
+        "package.json",
+        JSON.stringify({
+          name: "x",
+          dependencies: { react: "^19.0.0", zod: "3.24.1" },
+          devDependencies: { vite: "^7.0.0" },
+        }),
+      );
+      const p = supplyChainFloorFor(dir);
+      assert.equal(p.report, "supply-chain-posture");
+      assert.equal(p.gate, false, "report-only by contract — no gate field can flip");
+      assert.equal(p.packageJson, true);
+      assert.equal(p.lockfile, "absent");
+      assert.equal(p.installTool, "npm install");
+      assert.equal(p.noAuditFlag, true, "the default leg carries --no-audit (audit is OFF by design)");
+      assert.equal(p.audited, false, "no audit happened on this path — the posture never claims one");
+      assert.equal(p.caretPinned, 2);
+      assert.equal(p.exactPinned, 1);
+      assert.equal(p.otherRange, 0);
+      assert.equal(p.totalDeps, 3);
+      assert.deepEqual(p.caretExamples, ["react@^19.0.0", "vite@^7.0.0"]);
+      assert.match(p.auditNote, /npm audit --omit=dev/, "the real check is named, not run");
+      assert.match(p.auditNote, /cannot audit says so/, "a host that cannot audit must say so");
+      assert.match(p.caveat, /never a gate/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("locked tree → npm ci posture; exact vs other ranges counted honestly", () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package-lock.json", "{}");
+      write(
+        dir,
+        "package.json",
+        JSON.stringify({
+          name: "x",
+          dependencies: { a: "1.2.3", b: "~2.0.0", c: "git+https://example.invalid/x.git" },
+        }),
+      );
+      const p = supplyChainFloorFor(dir);
+      assert.equal(p.lockfile, "present");
+      assert.equal(p.installTool, "npm ci");
+      assert.equal(p.installCommand, "npm ci --no-audit --no-fund");
+      assert.equal(p.noAuditFlag, true);
+      assert.equal(p.exactPinned, 1, "1.2.3 is an exact pin");
+      assert.equal(p.otherRange, 2, "tilde and git ranges are neither caret- nor exact-pinned");
+      assert.equal(p.caretPinned, 0);
+      assert.equal(SUPPLY_CHAIN_AUDIT_COMMAND, "npm audit --omit=dev");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("no package.json → honest empty report, still never a gate", () => {
+    const dir = tempDir();
+    try {
+      const p = supplyChainFloorFor(dir);
+      assert.equal(p.packageJson, false);
+      assert.equal(p.totalDeps, 0);
+      assert.equal(p.gate, false);
+      assert.equal(p.audited, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the verifyKindDir install verdict carries the posture (emits in a targeted run, no network)", async () => {
+    const dir = tempDir();
+    try {
+      write(
+        dir,
+        "package.json",
+        JSON.stringify({
+          name: "x",
+          scripts: { build: 'node -e "0"' },
+          dependencies: { react: "^19.0.0" },
+        }),
+      );
+      const r = await verifyKindDir(dir, {
+        timeoutMs: 30_000,
+        installCommand: 'node -e "process.exit(0)"',
+      });
+      assert.equal(r.install?.run, "pass");
+      const sc = r.install?.supplyChain;
+      assert.ok(sc, "the install leg always carries its supply-chain posture");
+      assert.equal(sc.gate, false);
+      assert.equal(sc.caretPinned, 1);
+      assert.equal(sc.installTool, "seam", "the seam is named as the tool that ran, never npm");
+      assert.equal(sc.noAuditFlag, false, "the seam command carries no --no-audit flag");
+      assert.match(sc.auditNote, /test seam/);
+      assert.match(sc.auditNote, /no npm ran/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

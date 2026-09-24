@@ -35,7 +35,21 @@ import { classifyError } from "../../errors.ts";
 
 export const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 
-/** Live-verified chat tiers (research/deepseek-api.md §9). */
+/**
+ * Live-verified chat tiers (research/deepseek-api.md §9).
+ *
+ * OV-37 (W17 · L3) — REFRESH PATH when an id dies. Every refusal this module
+ * returns NAMES the requested id (` — requested model: "<id>"`) alongside the
+ * vendor's own message, so an alias death (400 "model not found") is
+ * human-visible without parsing prose. Re-verify the live served ids with:
+ *
+ *   curl -s https://api.deepseek.com/models -H "authorization: Bearer $DEEPSEEK_API_KEY"
+ *
+ * then update `DEEPSEEK_MODELS` below — `DEEPSEEK_MODEL_IDS` (this file) and
+ * `DEEPSEEK_REQUEST_MODEL_IDS`/`KNOWN_MODEL_IDS` (registry.ts) follow from it.
+ * Never substitute a different id silently: unknown ids are refused before
+ * any network I/O, and this provider never falls back to a default.
+ */
 export const DEEPSEEK_MODELS = {
   flash: "deepseek-v4-flash",
   pro: "deepseek-v4-pro",
@@ -407,7 +421,11 @@ export async function completeDeepSeek(
       return {
         ok: false,
         reason: "error",
-        error: `${await describeError(res)}${exhausted}`,
+        // OV-37 (W17 · L3): the refusal NAMES the requested model id next to
+        // the vendor's own text — a dead/renamed alias (400 "model not
+        // found") is then human-visible without parsing prose (the row's
+        // explicit constraint). No branch, no classification, no fallback.
+        error: `${await describeError(res)} — requested model: "${model}"${exhausted}`,
         code: "RT_E_LLM_REJECTED",
       };
     }

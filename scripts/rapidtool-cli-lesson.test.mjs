@@ -580,3 +580,153 @@ test("W9-L3 lesson: --mark-stale bumps counterEvidence on the stale store row ON
   assert.equal(bRow.counterEvidence, 1, "the persisted bump is what later reads see");
   assert.equal(followUp.json.readOnly, true);
 });
+
+// ---------------------------------------------------------------------------
+// 7. F3 (221 §F3 — W18 lane 2) · `lesson --effect` — cross-run learning
+// MEASUREMENT, read-only. The fixture is the REAL `create` verb + engine-shaped
+// memory rows (incl. one accrued reproduction with its real `lesson.reproduced`
+// ledger row) — never hand-rolled envelopes.
+// ---------------------------------------------------------------------------
+
+const EFFECT = join(root, "effect-build.json");
+const NO_SUCH = join(root, "no-such-project.json");
+const REPRO_ID = "lesson-template-emission-aaa11111";
+const PLAIN_ID = "lesson-template-emission-bbb22222";
+const ACCRUAL = `L2 template-emission ${REPRO_ID} reproduced (P6 DoD unmet again; reproducedCount=2)`;
+
+const effectCreate = cliJson(
+  ["create", "--brief", "Invoicing dashboard for contractors", "--name", "W18 L2 Effect Fixture", "--out", EFFECT],
+  { cwd: root },
+);
+assert.equal(effectCreate.json.ok, true, `effect fixture create failed: ${effectCreate.json.error ?? ""}`);
+{
+  const project = JSON.parse(readFileSync(EFFECT, "utf8"));
+  project.memory = [
+    ...(project.memory ?? []),
+    {
+      id: REPRO_ID,
+      kind: "episodic",
+      phase: 6,
+      score: 0.7,
+      reproducedCount: 2,
+      tags: ["L2", "lesson", "probe:p6-brief-fit", "probe:p6-verified", "template-emission"],
+      text: "L2 template-emission: phase P6 sealed with gate unmet (p6-verified, p6-brief-fit).",
+    },
+    {
+      id: PLAIN_ID,
+      kind: "episodic",
+      phase: 6,
+      score: 0.6,
+      tags: ["L3", "lesson", "verify-failure"],
+      text: "L3 verify-failure: machine verification failed twice.",
+    },
+    // NOT lesson-tagged: must count only in the census WINDOW, never the census.
+    { id: "non-lesson-note", kind: "semantic", phase: 2, score: 0.1, reproducedCount: 9, tags: ["note"], text: "not a lesson" },
+  ];
+  project.logs = [
+    ...(project.logs ?? []),
+    { ts: 1, phase: 6, level: "info", event: "lesson.capture", detail: `L2 template-emission ${REPRO_ID} (P6 sealed with unmet DoD)` },
+    { ts: 2, phase: 6, level: "info", event: "lesson.reproduced", detail: ACCRUAL },
+    { ts: 3, phase: 6, level: "info", event: "lesson.reproduced", detail: "L2 template-emission lesson-other-9 reproduced (verify failed again; reproducedCount=1)" },
+  ];
+  writeFileSync(EFFECT, JSON.stringify(project, null, 2), "utf8");
+}
+
+test("W18-L2 lesson: --effect reports the recurrence census from real memory rows, read-only", () => {
+  const before = fileDigest(EFFECT);
+  const out = cliJson(["lesson", "--effect", "--project", EFFECT], { cwd: root });
+  const j = out.json;
+
+  assert.equal(out.status, 0);
+  assert.equal(j.action, "effect");
+  assert.equal(j.project, "W18 L2 Effect Fixture");
+  assert.equal(j.readOnly, true, "measurement only — the arm says so in the envelope");
+  assert.match(j.label, /recurrence ≠ causation/, "the honest label rides INSIDE the JSON object");
+  assert.match(j.label, /not proof the lesson was followed/);
+  assert.equal(j.measurement, "cross-run learning — recurrence of a lesson's target after minting");
+  assert.match(j.note, /read-only measurement/);
+  assert.match(j.note, /not an eval score/);
+  assert.match(j.note, /T-11 stays muted/);
+
+  assert.equal(j.total, 2, "only lesson-tagged rows enter the census (the note row's reproducedCount=9 is ignored)");
+  assert.equal(j.reproduced, 1);
+  assert.equal(j.unreproduced, 1);
+  assert.equal(j.recurrenceRate, 0.5);
+  assert.equal(j.sufficientSample, true, "n=2 meets the n≥2 floor");
+  assert.match(j.claim, /1\/2 lesson targets recurred after minting \(n=2\)/);
+  assert.match(j.claim, /recurrence ≠ causation/);
+  assert.deepEqual(j.censusWindow, { totalRows: 3, lessonRows: 2, cap: 80, atCap: false });
+
+  assert.deepEqual(
+    j.perClass.map((c) => [c.class, c.total, c.reproduced, c.recurrenceRate]),
+    [
+      ["template-emission", 1, 1, 1],
+      ["verify-failure", 1, 0, 0],
+    ],
+    "per-class rates, class-asc",
+  );
+
+  assert.deepEqual(
+    j.evidence.map((e) => e.id),
+    [REPRO_ID, PLAIN_ID],
+    "evidence is id-asc and covers every lesson target",
+  );
+  const repro = j.evidence[0];
+  assert.equal(repro.class, "template-emission", "probe tags are never mistaken for the class");
+  assert.equal(repro.level, "L2");
+  assert.equal(repro.phase, 6);
+  assert.deepEqual(repro.probes, ["probe:p6-brief-fit", "probe:p6-verified"]);
+  assert.equal(repro.reproducedCount, 2);
+  assert.equal(repro.reproduced, true);
+  assert.deepEqual(repro.ledgerRows, [ACCRUAL], "the real `lesson.reproduced` row that accrued it is attributed");
+  assert.match(repro.evidence, /recurred 2× after minting/);
+  const plain = j.evidence[1];
+  assert.equal(plain.reproducedCount, 0, "absent telemetry reads as 0, never fabricated");
+  assert.equal(plain.reproduced, false);
+  assert.deepEqual(plain.ledgerRows, [], "no accrual for this row ⇒ [], never another row's log");
+  assert.match(plain.evidence, /no recurrence recorded after minting/);
+  assert.equal(plain.class, "verify-failure");
+
+  assert.equal(fileDigest(EFFECT), before, "--effect is read-only — the project file is byte-identical");
+});
+
+test("W18-L2 lesson: --effect refuses honestly — missing --project, --knowledge-file, arm ambiguity", () => {
+  const before = fileDigest(EFFECT);
+  const noProject = cliJson(["lesson", "--effect"], { cwd: root });
+  assert.equal(noProject.status, 1);
+  assert.equal(noProject.json.ok, false);
+  assert.equal(noProject.json.code, "RT_E_VALIDATION");
+  assert.match(noProject.json.error, /missing required --project/);
+
+  const missing = cliJson(["lesson", "--effect", "--project", NO_SUCH], { cwd: root });
+  assert.equal(missing.status, 1);
+  assert.equal(missing.json.ok, false);
+  assert.equal(missing.json.code, "RT_E_PROJECT_MISSING");
+  assert.match(missing.json.error, /no-such-project\.json/);
+
+  const store = cliJson(["lesson", "--effect", "--project", EFFECT, "--knowledge-file", STORE], { cwd: root });
+  assert.equal(store.status, 1);
+  assert.equal(store.json.code, "RT_E_VALIDATION");
+  assert.match(store.json.error, /refusing --knowledge-file/);
+
+  const two = cliJson(["lesson", "--effect", "--list", "--project", EFFECT], { cwd: root });
+  assert.equal(two.status, 1);
+  assert.equal(two.json.code, "RT_E_VALIDATION");
+  assert.match(
+    two.json.error,
+    /pass exactly one of --list\|--propose\|--accept\|--supersede\|--refute\|--advise\|--verify\|--effect \(got 2\)/,
+  );
+
+  assert.equal(fileDigest(EFFECT), before, "refusals reported, nothing written");
+});
+
+test("W18-L2 lesson: the USAGE help entry documents --effect (the parity pin's subject)", () => {
+  const src = readFileSync(CLI_PATH, "utf8");
+  const usageLine = src.split(/\r?\n/).find((line) => /^ {4}lesson: "/.test(line));
+  assert.ok(usageLine, "rapidtool-cli.mjs USAGE must carry a lesson entry");
+  assert.match(usageLine, /--effect --project <file\.json>/, "the arm's flag shape is in the help string");
+  assert.match(usageLine, /effect = F3 read-only cross-run learning MEASUREMENT/);
+
+  // The arm itself must be reachable: the dispatcher filters on `effect`.
+  assert.match(src, /"list", "propose", "accept", "supersede", "refute", "advise", "verify", "effect"/);
+});

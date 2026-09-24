@@ -26,6 +26,20 @@
  * missing list is printed LOUDLY. maker-score stays pure: it only exposes the
  * probes; the driver owns the report.
  *
+ * W16-L1 (fixes/244) — OV-35 Step-0 preflight, three additive pieces:
+ *   (a) OV-27 reachability probe (`probeP6Reachability`) — proves the CLI keyed
+ *       path can reach a model through the P6 SEPARATE-SPECIFIER imports
+ *       (engine.ts:2851-2885), keyless with a dummy key: reports `configured`
+ *       + wire-reach honestly and states what only a real key can prove;
+ *   (b) failure-class triage (`classifyRunOutcome`/`classifyDrainEnding`) — a
+ *       coded class for EVERY RunOutcome value and drain ending; no ending may
+ *       surface as a silent `stalled`;
+ *   (c) kill-safety run marker (`writeRunStartMarker`/`finishRunMarker`/
+ *       `runWithMarker`) — WRITTEN BEFORE the first corpus entry of a keyed
+ *       run and finalized only after results.json AND history.json are written
+ *       (WB-6), so a killed run leaves `finishedAt:null` and cannot be mistaken
+ *       for a completed one. Keyless legs write nothing new (byte-identical).
+ *
  * RUN-SIDE GRADERS + TRIALS/pass@k (W5-L5 T-107.5, `wave_plans/W5/lane-5.md`; steal #5/#8 of
  * `research/multiagent/107_competitors_agentic.md`). The per-case acceptance bar is NOT
  * taken from the agent-writable corpus fixture anymore: it lives in a run-side grader file
@@ -48,7 +62,7 @@
  */
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { join, dirname, basename, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   createProject,
   runUntilGate,
@@ -641,6 +655,327 @@ export function keylessSkipNotices({ keyedRequested, hasKey }) {
 }
 
 // ---------------------------------------------------------------------------
+// OV-35(a) / OV-27 — the Step-0 preflight: LLM reachability through the P6
+// separate-specifier path (fixes/244, W16-L1).
+//
+// `upgradeP6Keyed` (engine.ts:2851-2885) imports the provider and the codegen
+// module through RUNTIME-CONCATENATED specifiers (`"./deepseek." + "server.ts"`,
+// `"./codegen." + "server.ts"`) so the client bundle never statically pulls the
+// server modules in. The open doubt (226 A1 / fixes/228 D1.1): under the bare
+// Node host the CLI/eval drivers run on, the server-fn `llmStatus` reports
+// configured:false even with a key set and `callModel` needs an
+// AsyncLocalStorage Start context — does the P6 path actually behave? This
+// probe answers from the SAME specifier idiom, keyless with a dummy key: it
+// proves (i) engine + both specifiers load on this host, (ii) the provider's
+// `configured` probe is true through them, (iii) the wire is REACHED — the
+// vendor answers, and a dummy key makes that answer a 401. What it CANNOT
+// prove without a real key: that a completion returns (model reach) and that a
+// full liveP6Synthesis converges — Step 0 itself measures those.
+// ---------------------------------------------------------------------------
+
+const LIB_DIR = join(ROOT, "src", "lib");
+/** The P6 concatenated-specifier idiom, byte-for-byte (engine.ts:2853/:2870). */
+const P6_DS_SPEC = "./deepseek." + "server.ts";
+const P6_CODEGEN_SPEC = "./codegen." + "server.ts";
+
+function probeErrorText(e) {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/** One coded class per preflight ending (OV-35(b), the `235` §2 row-3 pin).
+ *  The four demanded endings are class- AND code-distinct: not-configured →
+ *  RT_E_LLM_NOT_CONFIGURED · 401 → RT_E_LLM_REJECTED (the registry's own 401
+ *  doc) · 402 → RT_E_BUDGET_EXHAUSTED (vendor balance) · 400 →
+ *  RT_E_VALIDATION (the request the vendor received failed its validation; the
+ *  detail carries the requested model id — D1.4's drift question). Every other
+ *  ending classifies too; a `null` code means "not a failure" (wire-ok) or "no
+ *  wire evidence" (configured-unprobed). Pure — no network, no env reads. */
+export function classifyLlmPreflight({ configured, wire = null } = {}) {
+  if (configured !== true) {
+    return {
+      class: "not-configured",
+      code: "RT_E_LLM_NOT_CONFIGURED",
+      ok: false,
+      wireReached: false,
+      detail:
+        "no DEEPSEEK_API_KEY in the environment — the keyed path is off by construction (never faked)",
+    };
+  }
+  if (!wire || wire.attempted !== true) {
+    return {
+      class: "configured-unprobed",
+      code: null,
+      ok: false,
+      wireReached: false,
+      detail: "key present and configured:true through the P6 specifiers, but no wire probe ran — wire reach is UNPROVEN",
+    };
+  }
+  if (wire.ok === true) {
+    return {
+      class: "wire-ok",
+      code: null,
+      ok: true,
+      wireReached: true,
+      detail: `wire reach PROVEN — the vendor answered with a completion${wire.model ? ` (served model ${wire.model})` : ""}${typeof wire.httpStatus === "number" ? ` · HTTP ${wire.httpStatus}` : ""}`,
+    };
+  }
+  const status = typeof wire.httpStatus === "number" ? wire.httpStatus : null;
+  if (status === 401)
+    return {
+      class: "auth-rejected",
+      code: "RT_E_LLM_REJECTED",
+      ok: false,
+      wireReached: true,
+      detail: "the vendor answered HTTP 401 — the wire IS reached; the KEY was refused (a stale/dummy key reads exactly like this, so do not read any score from a run in this state)",
+    };
+  if (status === 402)
+    return {
+      class: "balance-exhausted",
+      code: "RT_E_BUDGET_EXHAUSTED",
+      ok: false,
+      wireReached: true,
+      detail: "the vendor answered HTTP 402 — account balance exhausted; a keyed run would refuse per call, never measure quality",
+    };
+  if (status === 400)
+    return {
+      class: "request-rejected",
+      code: "RT_E_VALIDATION",
+      ok: false,
+      wireReached: true,
+      detail: `the vendor answered HTTP 400 — request/params refused (vendor model-id drift reads exactly like this; requested id: ${wire.requestedModel ?? "(unreported)"})`,
+    };
+  if (status === 422)
+    return {
+      class: "params-rejected",
+      code: "RT_E_VALIDATION",
+      ok: false,
+      wireReached: true,
+      detail: "the vendor answered HTTP 422 — request params refused by the vendor",
+    };
+  if (status === 429)
+    return {
+      class: "rate-limited",
+      code: "RT_E_LLM_REJECTED",
+      ok: false,
+      wireReached: true,
+      detail: "the vendor answered HTTP 429 — rate limited; the wire is reached, retry later",
+    };
+  if (status !== null && status >= 500)
+    return {
+      class: "provider-unavailable",
+      code: "RT_E_LLM_REJECTED",
+      ok: false,
+      wireReached: true,
+      detail: `the vendor answered HTTP ${status} — the wire is reached; the provider itself is erroring`,
+    };
+  if (status !== null)
+    return {
+      class: "provider-refused",
+      code: "RT_E_LLM_REJECTED",
+      ok: false,
+      wireReached: true,
+      detail: `the vendor answered HTTP ${status} — refusal class not pre-enumerated; read the vendor text`,
+    };
+  // No HTTP status — transport-level endings.
+  const wireCode = typeof wire.code === "string" && wire.code ? wire.code : null;
+  if (wireCode === "RT_E_LLM_TIMEOUT")
+    return {
+      class: "timeout",
+      code: "RT_E_LLM_TIMEOUT",
+      ok: false,
+      wireReached: null,
+      detail: "the probe timed out — the wire may or may not have been reached; NOT evidence about quality either way",
+    };
+  if (wireCode === "RT_E_NETWORK_UNREACHABLE")
+    return {
+      class: "unreachable",
+      code: "RT_E_NETWORK_UNREACHABLE",
+      ok: false,
+      wireReached: false,
+      detail: "the probe never reached the vendor (DNS/connect) — a keyed run cannot leave this host until the network path exists",
+    };
+  if (wireCode === "RT_E_LLM_NOT_CONFIGURED")
+    return {
+      class: "not-configured",
+      code: "RT_E_LLM_NOT_CONFIGURED",
+      ok: false,
+      wireReached: false,
+      detail: "the provider itself reported not-configured at call time (key disappeared between probe steps)",
+    };
+  if (wireCode === "RT_E_LLM_REJECTED" && /no text content/.test(String(wire.error ?? "")))
+    return {
+      class: "empty-completion",
+      code: "RT_E_LLM_REJECTED",
+      ok: false,
+      wireReached: true,
+      detail: "the vendor answered but returned no text content — wire reach proven; the model OUTPUT was refused (thinking/truncation class — read the provider's diagnostic)",
+    };
+  return {
+    class: "internal",
+    code: wireCode && /^RT_E_/.test(wireCode) ? wireCode : "RT_E_INTERNAL",
+    ok: false,
+    wireReached: null,
+    detail: String(wire.error ?? "the probe failed without a classifiable code"),
+  };
+}
+
+/** What the reported class PROVES and what it canNOT prove (no real key). */
+export function preflightLimits(cls) {
+  switch (cls) {
+    case "wire-ok":
+      return {
+        proves: "one completion round-trip through the P6 specifier path (configured + wire + model text)",
+        cannotProve: "that the full liveP6Synthesis journey converges, or that any score is quality — Step 0 measures those",
+      };
+    case "auth-rejected":
+      return {
+        proves: "the wire is reachable from this host and the request shape passes to the auth check",
+        cannotProve: "that the key can run anything (it was refused) — a real key must pass this probe before any keyed reading",
+      };
+    case "balance-exhausted":
+      return {
+        proves: "the wire is reachable from this host",
+        cannotProve: "that any call can succeed (vendor balance exhausted) — top up before any keyed reading",
+      };
+    case "unreachable":
+      return {
+        proves: "the probe ran on this host",
+        cannotProve: "any vendor reach (DNS/connect failed) — fix the network path first",
+      };
+    case "not-configured":
+      return {
+        proves: "the honest keyless state",
+        cannotProve: "anything keyed (no key is present)",
+      };
+    case "configured-unprobed":
+      return {
+        proves: "configured:true through the P6 specifier",
+        cannotProve: "wire reach (no probe was attempted)",
+      };
+    default:
+      return {
+        proves: "the probe ran and classified its ending",
+        cannotProve: "anything beyond the reported class — read the class detail",
+      };
+  }
+}
+
+/** One-line stdout renderings for the probe (booleans/enums only — the key
+ *  VALUE can never appear: nothing key-shaped enters this function). */
+export function formatPreflightLines(p) {
+  const lines = [];
+  lines.push(`preflight: OV-27 reachability · configured=${p.configured} · class=${p.class}${p.code ? ` · code ${p.code}` : ""}`);
+  for (const [name, s] of Object.entries(p.specifiers || {})) {
+    lines.push(`preflight: specifier ${name}: resolved=${s.resolved}${s.error ? ` · ${s.error}` : ""}`);
+  }
+  if (p.wire) {
+    lines.push(
+      `preflight: wire attempted=${p.wire.attempted} · httpStatus=${p.wire.httpStatus ?? "n/a"} · ok=${p.wire.ok}${p.wire.code ? ` · code ${p.wire.code}` : ""}${p.wire.error ? ` · ${String(p.wire.error).slice(0, 200)}` : ""}`,
+    );
+  } else {
+    lines.push("preflight: wire not attempted (key not configured or wire probe disabled)");
+  }
+  const limits = preflightLimits(p.class);
+  lines.push(`preflight: proves: ${limits.proves}`);
+  lines.push(`preflight: cannot prove (keyless/dummy key): ${limits.cannotProve}`);
+  return lines;
+}
+
+/** The OV-27 probe. `fetchImpl` is injectable — tests stub it and NEVER hit the
+ *  network; the wire step runs only when `configured` is true and `wire !==
+ *  false`. The key VALUE never enters the result. */
+export async function probeP6Reachability({ fetchImpl = null, wire = true, timeoutMs = 20_000 } = {}) {
+  const out = {
+    probe: "OV-27",
+    checkedAt: new Date().toISOString(),
+    configured: false,
+    specifiers: {},
+    wire: null,
+  };
+  // (1) The engine door — the CLI keyed path starts here (liveLayer → upgradeP6Keyed).
+  try {
+    const engine = await import(pathToFileURL(join(LIB_DIR, "engine.ts")).href);
+    out.specifiers.engine = {
+      resolved: true,
+      liveLayer: typeof engine.liveLayer === "function",
+      error: null,
+    };
+  } catch (e) {
+    out.specifiers.engine = { resolved: false, liveLayer: false, error: probeErrorText(e) };
+  }
+  // (2) The separate specifiers, built exactly as engine builds them.
+  let ds = null;
+  try {
+    ds = await import(pathToFileURL(join(LIB_DIR, P6_DS_SPEC)).href);
+    out.specifiers.deepseek = {
+      resolved: true,
+      isDeepSeekConfigured: typeof ds.isDeepSeekConfigured === "function",
+      error: null,
+    };
+    out.configured =
+      typeof ds.isDeepSeekConfigured === "function" && ds.isDeepSeekConfigured() === true;
+  } catch (e) {
+    out.specifiers.deepseek = { resolved: false, isDeepSeekConfigured: false, error: probeErrorText(e) };
+  }
+  try {
+    const codegen = await import(pathToFileURL(join(LIB_DIR, P6_CODEGEN_SPEC)).href);
+    out.specifiers.codegen = {
+      resolved: true,
+      liveP6Synthesis: typeof codegen.liveP6Synthesis === "function",
+      error: null,
+    };
+  } catch (e) {
+    out.specifiers.codegen = { resolved: false, liveP6Synthesis: false, error: probeErrorText(e) };
+  }
+  // (3) The wire step: ONE bounded call through the provider module the P6 path
+  //     resolves to. A status-recording fetch wrapper observes the HTTP status
+  //     WITHOUT the provider's byte-stable message parsing being load-bearing.
+  const statuses = [];
+  const requestedModel =
+    ds && ds.DEEPSEEK_MODELS && typeof ds.DEEPSEEK_MODELS.flash === "string"
+      ? ds.DEEPSEEK_MODELS.flash
+      : null;
+  if (out.configured && wire !== false && ds && typeof ds.completeDeepSeek === "function") {
+    const baseFetch = fetchImpl ?? globalThis.fetch;
+    const recordingFetch = async (...args) => {
+      const res = await baseFetch(...args);
+      try {
+        statuses.push(res && typeof res.status === "number" ? res.status : null);
+      } catch {
+        statuses.push(null);
+      }
+      return res;
+    };
+    let result;
+    try {
+      result = await ds.completeDeepSeek("Reply with the single word OK.", {
+        maxTokens: 8,
+        timeoutMs,
+        fetch: recordingFetch,
+      });
+    } catch (e) {
+      result = { ok: false, error: `probe call threw: ${probeErrorText(e)}`, code: "RT_E_INTERNAL" };
+    }
+    out.wire = {
+      attempted: true,
+      ok: result && result.ok === true,
+      httpStatus: statuses.length > 0 ? statuses[statuses.length - 1] : null,
+      code: result && typeof result.code === "string" ? result.code : null,
+      error: result && result.ok !== true ? String(result.error ?? "").slice(0, 400) : null,
+      model: result && result.ok === true ? result.model ?? null : null,
+      requestedModel,
+    };
+  }
+  const c = classifyLlmPreflight({ configured: out.configured, wire: out.wire });
+  out.class = c.class;
+  out.code = c.code;
+  out.ok = c.ok;
+  out.wireReached = c.wireReached;
+  out.detail = c.detail;
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // The drain: full pipeline with stock-HITL approvals via the driver.
 // ---------------------------------------------------------------------------
 
@@ -657,6 +992,98 @@ export function isTerminalDrainOutcome(outcome) {
   return (
     outcome === "complete" || outcome === "blocked" || outcome === "error" || outcome === "dod"
   );
+}
+
+// ---------------------------------------------------------------------------
+// OV-35(b) — failure-class triage (fixes/244, W16-L1): a coded class for EVERY
+// drain ending and every RunOutcome value. `stalled` was the silent ending —
+// the approve-throw and round-guard stalls returned no code, so the stop
+// evidence fell back to the RT_EVAL_STALL harness label (W15-L2's
+// registry-boundary decision keeps that label out of src/lib/errors.ts as a
+// real code — but it must not be the only record of a stall). Every stall path
+// now carries the registry code for its actual cause:
+//   · an unapprovable gate (approve threw)   → RT_E_GATE_PENDING
+//   · the 80-round harness guard             → RT_E_BUDGET_EXHAUSTED
+//   · a post-journey non-complete terminal   → the RunOutcome's own code
+// classifyDrainEnding() is the single classifier the drain and the tests share;
+// an UNC coded stall can never classify silently (it reports RT_E_UNKNOWN plus
+// the emitter-bug detail).
+// ---------------------------------------------------------------------------
+
+/** Every RunOutcome value (headless.ts:527) with its coded class. `code: null`
+ *  = not a failure (complete) or not a stop (hitl/progress parks). */
+export const RUN_OUTCOME_CLASSES = Object.freeze({
+  hitl: { class: "hitl-parked", code: null, terminal: false },
+  complete: { class: "complete", code: null, terminal: true },
+  blocked: { class: "blocked", code: "RT_E_GATE_PENDING", terminal: true },
+  error: { class: "error", code: "RT_E_INTERNAL", terminal: true },
+  progress: { class: "in-progress", code: null, terminal: false },
+  cap: { class: "iteration-cap", code: "RT_E_BUDGET_EXHAUSTED", terminal: false },
+  dod: { class: "hard-dod", code: "RT_E_GATE_PENDING", terminal: true },
+});
+
+/** Classify one RunOutcome. An unknown value is never silent: it reports the
+ *  unknown-outcome class with RT_E_INTERNAL. */
+export function classifyRunOutcome(outcome) {
+  const hit = RUN_OUTCOME_CLASSES[outcome];
+  if (!hit) {
+    return { outcome: outcome ?? null, class: "unknown-outcome", code: "RT_E_INTERNAL", terminal: null };
+  }
+  return { outcome, ...hit };
+}
+
+/** Classify one drain ending. `position` is drainPipeline's own vocabulary:
+ *  p6-gate (intentional handoff) · dod (coded hard stop, C-2) · terminal (a
+ *  RunOutcome terminal) · stalled (the failure the triage exists to kill — now
+ *  always accompanied by a code). */
+export function classifyDrainEnding({ outcome = null, position = null, code = null } = {}) {
+  switch (position) {
+    case "p6-gate":
+      return { position, outcome, class: "p6-handoff", code: null, ok: true };
+    case "dod":
+      return { position, outcome, class: "hard-dod", code: code ?? "RT_E_GATE_PENDING", ok: false };
+    case "terminal": {
+      const out = classifyRunOutcome(outcome);
+      return { position, outcome, class: out.class, code: code ?? out.code, ok: out.class === "complete" };
+    }
+    case "stalled": {
+      if (code === "RT_E_GATE_PENDING")
+        return { position, outcome, class: "gate-unapprovable", code, ok: false };
+      if (code === "RT_E_BUDGET_EXHAUSTED")
+        return { position, outcome, class: "iteration-budget-exhausted", code, ok: false };
+      return {
+        position,
+        outcome,
+        class: "stalled-uncoded",
+        code: typeof code === "string" && /^RT_E_/.test(code) ? code : "RT_E_UNKNOWN",
+        ok: false,
+        detail: "a stall reached the classifier without a registry code — that is an emitter bug, reported honestly instead of silently",
+      };
+    }
+    default:
+      return {
+        position,
+        outcome,
+        class: "unknown-position",
+        code: "RT_E_INTERNAL",
+        ok: false,
+        detail: `unknown drain position ${JSON.stringify(position)}`,
+      };
+  }
+}
+
+/** Build a drain return value with its classified ending attached. */
+function endingRecord({ p, res, approved, onTime, stall, position, code = null }) {
+  return {
+    p,
+    res,
+    approved,
+    onTime,
+    stall,
+    position,
+    code,
+    ending: classifyDrainEnding({ outcome: res ? res.outcome : null, position, code }),
+  };
 }
 
 /** Drive the pipeline to a terminal state — or, with `p6Gate: true`, to the
@@ -689,18 +1116,22 @@ export async function drainPipeline(project, { keyed, p6Gate = false } = {}) {
         approved.push(`P${gatePhase}`);
       } catch (e) {
         // A stale/phantom gate that cannot be approved = a stalled run. Stop
-        // loudly with a code instead of spinning silently (M9).
-        return {
+        // loudly with a code instead of spinning silently (M9). OV-35(b): the
+        // stall carries RT_E_GATE_PENDING — a gate that stays unresolved is
+        // exactly the registry's meaning for it (the RT_EVAL_STALL label stays
+        // only as the last-resort stopCode fallback, never the sole record).
+        return endingRecord({
           p,
           res,
           approved,
           onTime: false,
           stall: e instanceof Error ? e.message : String(e),
           position: "stalled",
-        };
+          code: "RT_E_GATE_PENDING",
+        });
       }
       if (p6Gate && gatePhase === 5) {
-        return { p, res, approved, onTime: true, stall: null, position: "p6-gate" };
+        return endingRecord({ p, res, approved, onTime: true, stall: null, position: "p6-gate" });
       }
       continue;
     }
@@ -719,7 +1150,7 @@ export async function drainPipeline(project, { keyed, p6Gate = false } = {}) {
           events.filter((e) => typeof e === "string" && e.includes("DoD unmet")).pop() ??
           events[events.length - 1] ??
           `P${p.currentPhase} DoD unmet — hard gate blocks advance.`;
-        return {
+        return endingRecord({
           p,
           res,
           approved,
@@ -727,20 +1158,33 @@ export async function drainPipeline(project, { keyed, p6Gate = false } = {}) {
           stall: dodMsg,
           position: "dod",
           code: "RT_E_GATE_PENDING",
-        };
+        });
       }
-      return { p, res, approved, onTime: true, stall: null, position: "terminal", code: null };
+      // OV-35(b): a terminal ending carries its RunOutcome's own code (null
+      // only for `complete`) — a `blocked`/`error` end is no longer uncoded.
+      return endingRecord({
+        p,
+        res,
+        approved,
+        onTime: true,
+        stall: null,
+        position: "terminal",
+        code: classifyRunOutcome(res.outcome).code,
+      });
     }
     // progress/cap — keep looping under the round guard.
   }
-  return {
+  // OV-35(b): the 80-round guard is a budget exhaustion, coded — not a silent
+  // stall. (Was: no code at all; the stop evidence fell back to RT_EVAL_STALL.)
+  return endingRecord({
     p,
     res: lastRes,
     approved,
     onTime: false,
     stall: "drain iteration cap reached without a terminal state",
     position: "stalled",
-  };
+    code: "RT_E_BUDGET_EXHAUSTED",
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1261,10 +1705,143 @@ function persist(rows, mode, skips = []) {
 }
 
 // ---------------------------------------------------------------------------
+// OV-35(c) — kill-safety run marker (WB-6, fixes/244 W16-L1). results.json is
+// written once at the END of a run (persist, above) and history.json after it;
+// a kill anywhere leaves the PREVIOUS run's results.json on disk — the stale
+// 2026-09-17 keyless 6/9 that can be misread as the new result. The marker is
+// written BEFORE the first corpus entry of a KEYED run and finalized only after
+// BOTH persists return; `finishedAt:null` therefore means "this run did not
+// complete — do not read results.json as its result". Keyed-only: the keyless
+// leg writes nothing new (byte-identity contract).
+// ---------------------------------------------------------------------------
+
+export const RUN_MARKER_NAME = "run-in-progress.json";
+
+export function markerPathFor(outDir) {
+  return join(outDir, RUN_MARKER_NAME);
+}
+
+/** Write the run-start marker (overwrites any previous one). */
+export function writeRunStartMarker(outDir, info = {}) {
+  const marker = {
+    markerVersion: 1,
+    mode: info.mode ?? "keyed",
+    startedAt: info.startedAt ?? new Date().toISOString(),
+    finishedAt: null,
+    done: false,
+    entries: typeof info.entries === "number" ? info.entries : null,
+    corpus: info.corpus ?? null,
+    preflightClass: info.preflightClass ?? null,
+    pid: process.pid,
+  };
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(markerPathFor(outDir), `${JSON.stringify(marker, null, 2)}\n`, "utf8");
+  return marker;
+}
+
+/** Read the marker. Unreadable/absent → null (never throws). */
+export function readRunMarker(outDir) {
+  try {
+    const raw = readFileSync(markerPathFor(outDir), "utf8");
+    const doc = JSON.parse(raw);
+    return doc && typeof doc === "object" && !Array.isArray(doc) ? doc : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Finalize the marker AFTER both persists: finishedAt set, done true. */
+export function finishRunMarker(outDir, patch = {}) {
+  const prev = readRunMarker(outDir) ?? { markerVersion: 1, mode: "keyed", startedAt: null };
+  const marker = { ...prev, ...patch, finishedAt: new Date().toISOString(), done: true };
+  writeFileSync(markerPathFor(outDir), `${JSON.stringify(marker, null, 2)}\n`, "utf8");
+  return marker;
+}
+
+/** The torn-pair read (WB-6): `unfinished` means a run started and was never
+ *  finalized — the results.json on disk may be the PREVIOUS run's and must not
+ *  be read as this one's. */
+export function runMarkerState(outDir) {
+  const marker = readRunMarker(outDir);
+  if (!marker) return { state: "none", marker: null, note: null };
+  if (marker.done !== true || !marker.finishedAt) {
+    return {
+      state: "unfinished",
+      marker,
+      note: `a run started ${marker.startedAt ?? "(unknown)"} was never finalized (finishedAt:null) — it was killed mid-run; any results.json present predates or is torn relative to it and must not be read as this run's result`,
+    };
+  }
+  return { state: "finished", marker, note: null };
+}
+
+/** Run the entry loop under the marker: the marker is written BEFORE the first
+ *  entry runs (ordering is the pin) and left unfinished — main() finalizes it
+ *  only after BOTH persists return. Keyless: a no-op wrapper that writes
+ *  nothing. `runner` is injectable so the ordering is testable durably. */
+export async function runWithMarker(selected, { mode, outDir, runner, markerExtra = {} } = {}) {
+  let markerPath = null;
+  let previousUnfinished = null;
+  if (mode === "keyed") {
+    const prev = runMarkerState(outDir);
+    if (prev.state === "unfinished") {
+      previousUnfinished = prev.marker;
+      console.log(
+        `note: an earlier keyed run marker (started ${prev.marker.startedAt ?? "?"}) was NEVER finalized — that run was killed; its results.json must not be read as a completed result`,
+      );
+    }
+    writeRunStartMarker(outDir, { mode, entries: selected.length, ...markerExtra });
+    markerPath = markerPathFor(outDir);
+    console.log(
+      `marker: keyed run-start recorded at ${markerPath} (stays finishedAt:null until results.json AND history.json are written)`,
+    );
+  }
+  const rows = [];
+  for (const target of selected) {
+    rows.push(await runner(target));
+  }
+  return { rows, markerPath, previousUnfinished };
+}
+
+/** OV-35 — the ≤4/9 decision rule (227 §2a item 3; 223's pre-mortem predicts
+ *  3–6/9 centred 4–5). A ≤4/9 keyed result is inside the predicted band: the
+ *  branch is RE-TRACE (read the log, close the observed zeros) — a blind re-run
+ *  re-measures the same tree and buys nothing. Keyed-only; keyless stays
+ *  silent (byte-identity). */
+export function keyedRunDecision({ mode, meanOfNine } = {}) {
+  if (mode !== "keyed") return { branch: "n/a", line: null };
+  if (typeof meanOfNine !== "number" || !Number.isFinite(meanOfNine))
+    return { branch: "no-score", line: "no finite score to route — read the run log directly" };
+  const of9 = Math.round(meanOfNine * 100) / 100;
+  if (of9 <= 4)
+    return {
+      branch: "retrace-first",
+      line: `${of9}/9 ≤ 4 — inside 223's predicted 3–6 band: RE-TRACE the run log and close the zeros it names (OV-3/OV-4/OV-5 gate on the log) — do NOT re-run blind hoping for a better number; a re-run re-measures the same tree.`,
+    };
+  if (of9 <= 6)
+    return {
+      branch: "band-expected",
+      line: `${of9}/9 — within the pre-mortem's predicted 3–6 band: read the log, fix the named zeros, then run #2.`,
+    };
+  return {
+    branch: "above-prediction",
+    line: `${of9}/9 — above the predicted band: still read the log for the zeros before publishing any claim.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main — results are data: exit 0 always.
 // ---------------------------------------------------------------------------
 
 async function main() {
+  // OV-35(a) — standalone probe mode: run the reachability probe and exit (no
+  // corpus walk, no entries). Works keyless (dummy key) and keyed.
+  if (process.argv.includes("--preflight")) {
+    console.log(`rapidtool eval · preflight probe (OV-27) · ${new Date().toISOString()}`);
+    const probe = await probeP6Reachability({});
+    for (const line of formatPreflightLines(probe)) console.log(line);
+    console.log("exit 0 — the probe reports; a failed probe is data, not a crash");
+    process.exit(0);
+  }
   const mode = KEYED_OK ? "keyed" : "keyless";
   console.log(`rapidtool eval · mode=${mode}${KEYED && !KEYED_OK ? " (--keyed requested but DEEPSEEK_API_KEY unset — falling back to keyless)" : ""} · corpus=${CORPUS_DIR}`);
   console.log(
@@ -1323,24 +1900,45 @@ async function main() {
     console.log(`note: keyed leg bounded to ${selected.length} corpus entry (${selected[0].entry.slug}); pass --all or --limit=N for more; budget per P6 journey = ${JOURNEY_BUDGET} cycle(s)`);
   }
 
+  // OV-35(a) — the keyed preflight runs BEFORE any entry: a bad key must be a
+  // class, not a quality reading (227 §2a). Keyless legs never probe (no
+  // network, byte-identical).
+  let preflight = null;
+  if (KEYED_OK) {
+    preflight = await probeP6Reachability({});
+    for (const line of formatPreflightLines(preflight)) console.log(line);
+    if (!preflight.ok) {
+      console.log(
+        `PREFLIGHT NOT READY: class=${preflight.class} (${preflight.code ?? "no code"}) — entries below would refuse per call; their scores are NOT a quality signal. Fix the class first.`,
+      );
+    }
+  }
+
   const rows = [];
   if (selected.length === 0) {
     console.log("note: nothing gradeable — every corpus entry was skipped above (results recorded with the skip reasons, exit 0)");
   }
-  for (const { entry, grader, graderPath } of selected) {
+  const runner = async ({ entry, grader, graderPath }) => {
     try {
       const t0 = Date.now();
       const { entryRow, card, trialRows } = await evaluateEntry(entry, mode, grader, graderPath);
-      rows.push({ entryRow, card, trialRows });
       const tb = entryRow.trials;
       console.log(
         `ok   ${entry.slug}: ${entryRow.status} · ${entryRow.total}/9 (mean ${entryRow.mean.toFixed(2)}) · ${tb.trials} trial(s) · pass@${tb.kEffective}=${tb.passAtK}${tb.flaky ? " · FLAKY" : ""} · ${((Date.now() - t0) / 1000).toFixed(1)}s`,
       );
+      // OV-35(b): a non-complete ending is never silent — its code is printed
+      // where the row is printed (complete rows stay byte-identical).
+      if (entryRow.status !== "complete" && entryRow.notes && entryRow.notes.stopCode) {
+        console.log(
+          `     ending: ${entryRow.status} · code ${entryRow.notes.stopCode} — classified (see notes.stall in the row)`,
+        );
+      }
+      return { entryRow, card, trialRows };
     } catch (e) {
       // An entry that blows up is recorded as data, never a process failure.
       const msg = e instanceof Error ? e.message : String(e);
       console.log(`fail ${entry.slug}: ${msg.slice(0, 300)}`);
-      rows.push({
+      return {
         entryRow: {
           slug: entry.slug,
           name: entry.name,
@@ -1362,14 +1960,40 @@ async function main() {
         },
         card: null,
         trialRows: [],
-      });
+      };
     }
-  }
+  };
+  // OV-35(c) — the keyed run marker is written BEFORE the first corpus entry
+  // and left unfinished until both persists below return (WB-6).
+  const ran = await runWithMarker(selected, {
+    mode,
+    outDir: OUT_DIR,
+    runner,
+    markerExtra: { corpus: CORPUS_DIR, preflightClass: preflight ? preflight.class : null },
+  });
+  rows.push(...ran.rows);
 
   console.log("");
   printTable(rows);
   printTrialsSummary(rows);
   const results = persist(rows, mode, skips);
+  if (mode === "keyed") {
+    // OV-35 — the ≤4/9 decision rule: the score is routed to a named branch
+    // (re-trace vs band-expected vs above) instead of a bare number.
+    const decision = keyedRunDecision({ mode, meanOfNine: results.summary.meanTotal * 9 });
+    if (decision.line) console.log(`decision: ${decision.line}`);
+    finishRunMarker(OUT_DIR, {
+      entries: rows.length,
+      meanOfNine: Number((results.summary.meanTotal * 9).toFixed(4)),
+      decision: decision.branch,
+      preflightClass: preflight ? preflight.class : null,
+      resultsWritten: true,
+      historyWritten: true,
+    });
+    console.log(
+      "marker: keyed run finalized (finishedAt set) — results.json AND history.json are both written; a killed run would have left finishedAt:null",
+    );
+  }
   console.log(`\nwrote ${RESULTS_PATH} · ${results.entries.length} entr${results.entries.length === 1 ? "y" : "ies"} · history appended to ${HISTORY_PATH}`);
   if (skips.length > 0) console.log(`skips recorded: ${skips.length} — ${skips.map((s) => s.slug ?? "corpus").join(", ")}`);
   console.log("exit 0 — results are data, not failures");

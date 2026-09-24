@@ -30,7 +30,10 @@ import {
   resolveRoleModel,
   roleModelEnvKey,
 } from "./registry.ts";
-import { DEEPSEEK_BASE_URL, DEEPSEEK_MODELS } from "./deepseek.ts";
+import { DEEPSEEK_BASE_URL, DEEPSEEK_MODELS, completeDeepSeek } from "./deepseek.ts";
+import { createLlmTasks } from "../../llm-tasks.ts";
+import type { CompleteOptions } from "../../llm-tasks.ts";
+import type { PhaseDef } from "../../types.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers — a capture fetch + env pins with honest restore
@@ -50,10 +53,22 @@ function chatResponse(text: string, model = DEEPSEEK_MODELS.flash): Response {
   );
 }
 
-function capturingFetch(calls: Captured[]): typeof fetch {
+function capturingFetch(calls: Captured[], text = "ok"): typeof fetch {
   return (async (url: unknown, init?: RequestInit) => {
     calls.push({ url: String(url), init });
-    return chatResponse("ok");
+    return chatResponse(text);
+  }) as typeof fetch;
+}
+
+/** A vendor-style REJECTION response (e.g. 400 "model not found") — exactly one
+ *  Response, no retry (400 is not in the provider's retryable set). */
+function rejectionFetch(calls: Captured[], status: number, body: unknown): typeof fetch {
+  return (async (url: unknown, init?: RequestInit) => {
+    calls.push({ url: String(url), init });
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
   }) as typeof fetch;
 }
 
@@ -406,6 +421,225 @@ describe("registry — callModel fetch path (injected transport)", () => {
         code: "RT_E_LLM_NOT_CONFIGURED",
       });
       assert.equal(calls.length, 0, "keyless never reaches the network");
+    } finally {
+      restore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. OV-28 — the thinking-mode contract at the registry boundary (TEST-PIN
+//    ONLY; W17 · L3). No behaviour change: these pins freeze what the boundary
+//    does TODAY, so a thinking-field flip is RED, not silent. The force/refuse
+//    arm for `json:true` on the reasoning tier waits on the owner's tier
+//    intent (fixes/228 §3 #9 — MODIFY: test-pin half only).
+// ---------------------------------------------------------------------------
+
+describe("registry — thinking-mode contract at the boundary (OV-28 · test-pin only)", () => {
+  it("reasoning tier + json:true does NOT auto-disable thinking: enabled + reasoning_effort high (pinned contract)", async () => {
+    const restore = withCleanLlmEnv({ [KEY]: "sk-test-w17l3" });
+    const calls: Captured[] = [];
+    try {
+      const res = await callModel("reasoning", "structured envelope", {
+        json: true,
+        fetch: capturingFetch(calls),
+      });
+      assert.equal(res.ok, true);
+      const body = bodyOf(calls[0]!);
+      assert.equal(body.model, DEEPSEEK_MODELS.pro, "the reasoning tier requests the pro alias");
+      assert.deepEqual(
+        body.thinking,
+        { type: "enabled" },
+        "today's contract: the boundary does not touch the thinking field",
+      );
+      assert.equal(body.reasoning_effort, "high");
+      assert.deepEqual(body.response_format, { type: "json_object" }, "json:true still rides along");
+    } finally {
+      restore();
+    }
+  });
+
+  it("an explicit thinking:false crosses the boundary verbatim (the E1 escape hatch reaches the wire)", async () => {
+    const restore = withCleanLlmEnv({ [KEY]: "sk-test-w17l3" });
+    const calls: Captured[] = [];
+    try {
+      const res = await callModel("reasoning", "structured envelope", {
+        json: true,
+        thinking: false,
+        fetch: capturingFetch(calls),
+      });
+      assert.equal(res.ok, true);
+      const body = bodyOf(calls[0]!);
+      assert.equal(body.model, DEEPSEEK_MODELS.pro);
+      assert.deepEqual(body.thinking, { type: "disabled" }, "thinking:false ⇒ the non-thinking pro shape");
+      assert.equal("reasoning_effort" in body, false, "no reasoning_effort rides a thinking-disabled call");
+    } finally {
+      restore();
+    }
+  });
+
+  it("thinking:true on the flash-served tier keeps the disabled shape (flash can never think on)", async () => {
+    const restore = withCleanLlmEnv({ [KEY]: "sk-test-w17l3" });
+    const calls: Captured[] = [];
+    try {
+      const res = await callModel("main", "plain call", {
+        thinking: true,
+        fetch: capturingFetch(calls),
+      });
+      assert.equal(res.ok, true);
+      const body = bodyOf(calls[0]!);
+      assert.equal(body.model, DEEPSEEK_MODELS.flash);
+      assert.deepEqual(body.thinking, { type: "disabled" }, "flash has no thinking-on shape");
+      assert.equal("reasoning_effort" in body, false);
+    } finally {
+      restore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. OV-36 — the three pro-tier llm-tasks sites pin their thinking decision.
+//    The site decisions live in `src/lib/llm-tasks.ts`; the pins ride here
+//    (this lane's test file) as the site → opts → wire-body chain both files
+//    share. An absent/edited `thinking` at any site turns these RED.
+// ---------------------------------------------------------------------------
+
+describe("llm-tasks pro-tier sites — the thinking decision is pinned per site (OV-36)", () => {
+  const PHASE: PhaseDef = {
+    id: 0,
+    code: "P0",
+    title: "Deep Research & Feasibility",
+    summary: "Feasibility before any code.",
+    hitl: false,
+  };
+  const SNAPSHOT = { name: "Marketplace", brief: "Build a marketplace app.", domain: "ecommerce" };
+
+  it("site 1 · extractConstraints (json envelope) pins thinking:false — with the disabled wire shape", async () => {
+    const restore = withCleanLlmEnv({ [KEY]: "sk-test-w17l3" });
+    const calls: Captured[] = [];
+    const seen: Array<CompleteOptions | undefined> = [];
+    try {
+      const { extractConstraints } = createLlmTasks(async (prompt, opts) => {
+        seen.push(opts);
+        return completeDeepSeek(prompt, { ...opts, fetch: capturingFetch(calls, '{"constraints":["A"]}') });
+      });
+      const r = await extractConstraints("brief");
+      assert.equal(r.ok, true);
+      assert.deepEqual(
+        seen[0],
+        { model: DEEPSEEK_MODELS.pro, json: true, thinking: false },
+        "site 1's decision is explicit in the request opts",
+      );
+      const body = bodyOf(calls[0]!);
+      assert.equal(body.model, DEEPSEEK_MODELS.pro);
+      assert.deepEqual(body.thinking, { type: "disabled" }, "the json site must not think (fixes/156 E1)");
+      assert.equal("reasoning_effort" in body, false);
+      assert.deepEqual(body.response_format, { type: "json_object" });
+    } finally {
+      restore();
+    }
+  });
+
+  it("site 2 · interpretFeedback (prose) pins thinking:true — with the enabled wire shape", async () => {
+    const restore = withCleanLlmEnv({ [KEY]: "sk-test-w17l3" });
+    const calls: Captured[] = [];
+    const seen: Array<CompleteOptions | undefined> = [];
+    try {
+      const { interpretFeedback } = createLlmTasks(async (prompt, opts) => {
+        seen.push(opts);
+        return completeDeepSeek(prompt, { ...opts, fetch: capturingFetch(calls, "Tighten the security story.") });
+      });
+      const r = await interpretFeedback("too vague", "Security");
+      assert.equal(r.ok, true);
+      assert.deepEqual(
+        seen[0],
+        { model: DEEPSEEK_MODELS.pro, thinking: true },
+        "site 2's decision is explicit — never the vendor default",
+      );
+      const body = bodyOf(calls[0]!);
+      assert.deepEqual(body.thinking, { type: "enabled" });
+      assert.equal(body.reasoning_effort, "high");
+      assert.equal(body.max_tokens, 8192, "the pro default output budget");
+    } finally {
+      restore();
+    }
+  });
+
+  it("site 3 · phaseNarrative (prose) pins thinking:true — with the enabled wire shape", async () => {
+    const restore = withCleanLlmEnv({ [KEY]: "sk-test-w17l3" });
+    const calls: Captured[] = [];
+    const seen: Array<CompleteOptions | undefined> = [];
+    try {
+      const { phaseNarrative } = createLlmTasks(async (prompt, opts) => {
+        seen.push(opts);
+        return completeDeepSeek(prompt, { ...opts, fetch: capturingFetch(calls, "A feasibility paragraph.") });
+      });
+      const r = await phaseNarrative(SNAPSHOT, PHASE);
+      assert.equal(r.ok, true);
+      assert.deepEqual(
+        seen[0],
+        { model: DEEPSEEK_MODELS.pro, thinking: true },
+        "site 3's decision is explicit — never the vendor default",
+      );
+      const body = bodyOf(calls[0]!);
+      assert.deepEqual(body.thinking, { type: "enabled" });
+      assert.equal(body.reasoning_effort, "high");
+    } finally {
+      restore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. OV-37 — alias-death: the refusal NAMES the requested id (alongside the
+//    vendor text; nothing is parsed) and the refresh path is documented at
+//    `DEEPSEEK_MODELS` in ./deepseek.ts. No silent fallback anywhere.
+// ---------------------------------------------------------------------------
+
+describe("registry — alias-death refusals name the requested id (OV-37)", () => {
+  it("a vendor 400 'model not found' names the REQUESTED id alongside the vendor text", async () => {
+    const restore = withCleanLlmEnv({ [KEY]: "sk-test-w17l3" });
+    const calls: Captured[] = [];
+    try {
+      const res = await callModel("reasoning", "hello", {
+        fetch: rejectionFetch(calls, 400, { error: { message: "Model Not Exist" } }),
+      });
+      assert.equal(res.ok, false);
+      if (!res.ok) {
+        assert.equal(res.code, "RT_E_LLM_REJECTED");
+        assert.match(
+          res.error ?? "",
+          /requested model: "deepseek-v4-pro"/,
+          "the requested id is named verbatim",
+        );
+        assert.match(
+          res.error ?? "",
+          /Model Not Exist/,
+          "the vendor's own message still rides along (human-visible, not parsed)",
+        );
+      }
+      assert.equal(calls.length, 1, "a 400 is a first-attempt refusal — no retry, no silent fallback");
+    } finally {
+      restore();
+    }
+  });
+
+  it("the named id is the RESOLVED request id for the role (the flash tier names the flash alias)", async () => {
+    const restore = withCleanLlmEnv({ [KEY]: "sk-test-w17l3" });
+    const calls: Captured[] = [];
+    try {
+      const res = await callModel("main", "hello", {
+        fetch: rejectionFetch(calls, 400, { error: { message: "Model Not Exist" } }),
+      });
+      assert.equal(res.ok, false);
+      if (!res.ok) {
+        assert.match(res.error ?? "", /requested model: "deepseek-v4-flash"/);
+        assert.equal(
+          /deepseek-v4-pro/.test(res.error ?? ""),
+          false,
+          "the other id must not be named — the refusal carries the requested one",
+        );
+      }
     } finally {
       restore();
     }
