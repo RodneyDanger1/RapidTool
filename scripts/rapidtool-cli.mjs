@@ -110,7 +110,16 @@ function flag(args, key) {
 // {ok:false} envelope additionally gains `code` — a stable RT_E_* id from
 // classifyError (src/lib/errors.ts) — additive, exit-code taxonomy unchanged.
 // Sites that already set their own `code` pass through untouched.
-async function respond(result, exitCode) {
+//
+// fixes/217e (G1): SYNCHRONOUS by construction. The NDJSON stamp below runs
+// synchronously (cliLogEvent's body is fs-sync) and process.exit() executes in
+// the same tick as the stdout write. The former `await cliLogEvent(...)`
+// deferred the exit behind a resumed event-loop turn, so a guard-position
+// `return respond(...)` still fell through to the verb's success path and
+// crashed with a TypeError (observed 3/3 in 216y §2.3 G1). No caller awaits
+// respond — the synchronous exit is behaviour-identical on the success path,
+// and it is what makes a handled refusal actually END the verb.
+function respond(result, exitCode) {
   const out = { schema_version: SCHEMA_VERSION, cmd: CMD ?? null, ...result };
   if (out.ok === false && typeof out.code === "undefined") {
     // Exit 3 is the taxonomy's "backend not configured" (crew/verify); the
@@ -130,10 +139,12 @@ async function respond(result, exitCode) {
   }
   out.exit_code = exitCode;
   // G/E: stamp every CLI exit into the headless NDJSON event log (best-effort
-  // — the appender itself must never break the exit path).
+  // — the appender itself must never break the exit path). NOT awaited
+  // (fixes/217e G1): the append is fs-sync, and an await here deferred the
+  // exit one event-loop turn — the fall-through the audit reproduced.
   try {
     if (typeof cliLogEvent === "function") {
-      await cliLogEvent({
+      cliLogEvent({
         level: exitCode === 0 ? "info" : "error",
         scope: "cli-command",
         event: `cli.${CMD ?? "command"}.${exitCode === 0 ? "ok" : "exit"}`,
@@ -280,7 +291,10 @@ async function ensureRtAppender() {
   }
 }
 
-async function cliLogEvent(seed) {
+// fixes/217e (G1): synchronous (no awaits inside — makeCliRow + appendRtLine
+// are fs-sync), so respond() can stamp the exit log and process.exit in the
+// same tick instead of yielding to the event loop first.
+function cliLogEvent(seed) {
   try {
     if (!rtServer) return;
     const row = rtServer.makeCliRow(seed, rtSessionId);
@@ -362,13 +376,16 @@ async function main() {
   // error (exit 1), never an internal error (exit 4).
   const makeLoader = (h) => (cmdName) => {
     const proj = requireArg(args, "project", cmdName);
-    if (proj.error) respond({ ok: false, error: proj.error, code: "RT_E_VALIDATION" }, 1);
+    // fixes/217e (G1): `return` the refusal — respond() exits; without it the
+    // verb fell through and ran with `undefined` (audit 216y §2.3 G1).
+    if (proj.error) return respond({ ok: false, error: proj.error, code: "RT_E_VALIDATION" }, 1);
     try {
       return h.loadProject(proj.value);
     } catch (err) {
       // Classify the OBJECT: a read ENOENT → RT_E_PROJECT_MISSING; a malformed
       // project file (JSON/shape) → RT_E_VALIDATION. Prose could not tell them apart.
-      respond(
+      // fixes/217e (G1): same refusal contract — `return` ends the verb here.
+      return respond(
         {
           ok: false,
           error: `${cmdName}: ${err instanceof Error ? err.message : String(err)}`,
@@ -811,7 +828,10 @@ async function main() {
           }
           if (flag(args, "verify-kind")) {
             const cc = await checkDriver();
-            const vk = cc.verifyKindDir(res.dir);
+            // fixes/216z (T4.1 / TA-16): the leg is async — scratch-copy npm
+            // ci/install + the tree's declared build/test under the bounded
+            // runner (compile-check.server.ts: verifyKindDir).
+            const vk = await cc.verifyKindDir(res.dir);
             payload.verifyKind = vk;
             if (!vk.ok) {
               payload.ok = false;

@@ -15,6 +15,25 @@ import type {
   SpecNode,
 } from "./types";
 
+// ---------------------------------------------------------------------------
+// STEMMING — one canonical pair, one tokenizer (109 C-10, C-06).
+//
+// `stemToken` (one pass: lowercase, trailing-e drop, one of ing|ed|es|s,
+// agent-noun `er`, doubled-consonant collapse) and `canonicalStem` (its fixed
+// point, ≤ 4 passes) are THE stemming pair in this repo; `tokenizeWords` is
+// the shared tokenizer built on it. fusionRank, phraseHits and intentLattice
+// all match through that tokenizer, and BOTH sides of every comparison must
+// go through the same function — stemming one side only is the C-06 bug class
+// (intentLattice's freq count canonicalizes both sides, T-07).
+//
+// Two scoped exceptions are intentional, not drift:
+//   • knowledge.ts's own `tokenize` (findPatterns / `lesson find`) — UNSTEMMED
+//     token-overlap search; routing it through the pair above changes search
+//     results and must land whole, with its tests (112 T9).
+//   • engine.ts's `researchStem` — mining-only plural collapse (ies→y) for
+//     research-query building; never a ranking stemmer.
+// ---------------------------------------------------------------------------
+
 const STOP = new Set(
   "a an the and or of to for with from into on at by is are be as we you they it this that build create make design develop system app software tool".split(
     " ",

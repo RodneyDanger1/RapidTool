@@ -108,6 +108,34 @@
   }
 }
 
+/* Focus indicator, part 2 — UNLAYERED on purpose (W12 Lane E). The rule above
+   lives inside the `base` cascade layer, and several controls carry a Tailwind
+   `outline-none` utility (TAB_TRIGGER_CLASS and the Export menu item in
+   console.tsx, the palette input in cmd-palette.tsx) — layered utilities beat
+   layered base, so those controls had NO visible keyboard focus at all
+   (verified: `grep -n outline-none` → those call sites, none of them with a
+   focus ring utility). Unlayered rules beat every layered rule, so this
+   companion ring wins the cascade back for exactly the roles/inputs that need
+   it, without touching any markup:
+     · [role="tab"]         — the ten-tab strip (Radix Tabs.Trigger)
+     · [role="menuitem"*]   — Radix menus (the Export dropdown)
+     · [role="option"]      — listbox options (cmdk rows; future selects)
+     · [cmdk-input]         — the command palette's search field
+     · textarea             — incl. the sidebar Notes field, which has none */
+:where(
+    [role="tab"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="option"],
+    [cmdk-input],
+    textarea
+  ):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-accent) 16%, transparent);
+}
+
 /* Light theme tokens — the engine's "fintech · emerald" curated values
    VERBATIM from src/lib/design.ts (NEUTRALS.fintech + the emerald cast +
    SEMANTIC; design.test.ts re-verifies those pairings ≥ 4.5:1 every run).
@@ -222,7 +250,21 @@ html[data-theme="light"] {
    resolves through --color-* / --radius-* tokens so both themes apply).
    =========================================================================== */
 
-/* ---------- Buttons: solid primary (inverted fg→bg, Codex-style) ---------- */
+/* ---------- Buttons: solid primary (inverted fg→bg, Codex-style) ----------
+   W12 L-E hierarchy contract (one primary per surface). This file defines the
+   available treatments; which control wears which is the call site's job
+   (W12 Lane D's UI-16 ranks the console's action bar):
+     · SOLID (this class) — the ONE filled action recipe: the landing CTA and
+       the run status panel's next-action button. Call sites add `bg-fg
+       text-bg`; hover adds the accent glow (below).
+     · SECONDARY — the bordered `border-border` treatment (no fill). Demoted
+       by construction: outline only, at most muted text.
+     · DESTRUCTIVE/RARE — text-only (`text-muted hover:text-danger` on Archive)
+       and borderless icon buttons.
+   Verified by grep (W12 L-E): the only accent fills in this file are
+   `.chat-send` (scoped to the chat composer's own primary) and the 2px
+   `.rt-tab[data-state="active"]::after` underline indicator — no third
+   competing control fill exists. */
 .btn-solid {
   position: relative;
   transition:
@@ -277,7 +319,18 @@ html[data-theme="light"] {
   box-shadow: inset 0 1px 0 color-mix(in oklab, white 6%, transparent);
 }
 
-/* ---------- Tabs: underline chrome with accent active bar ---------- */
+/* ---------- Tabs: underline chrome with accent active bar ----------
+   W12 L-E — the ten-tab strip's affordance, named plainly: the strip WRAPS
+   (console.tsx's `flex flex-wrap`; the old `overflow-x-auto` is gone), so no
+   tab can hide off-screen behind a horizontal scroll. Each trigger is a
+   two-line block — the noun label (`whitespace-nowrap`) over a one-line plain
+   purpose (`max-w-[10.5rem]`, `whitespace-normal`) — so spacing and truncation
+   are owned by TAB_TRIGGER_CLASS utilities in console.tsx, not by this file.
+   This file owns only the underline + active accent bar below; keyboard focus
+   comes from the part-2 `[role="tab"]` rule near the top of this file (the
+   trigger's `outline-none` utility had silenced the base ring). The seven
+   advanced tabs are revealed by the "More panels" toggle and every trigger
+   stays inside one Tabs.Root, so nothing can be orphaned. */
 .rt-tab {
   position: relative;
   border-bottom: 2px solid transparent;
@@ -628,6 +681,24 @@ html[data-theme="light"] {
   );
 }
 
+/* ---------- Keyboard selection inside overlays (Radix menus + cmd palette) ----
+   Measured (W12 L-E probe `C:/Users/mnril/w12e_scratch/contrast.mjs`):
+   `bg-raised` on `bg-surface` is 1.06:1 in BOTH themes — so a Radix menu item
+   highlighted by keyboard nav (the Export menu's items, console.tsx) or a
+   command-palette row selected by the arrow keys (cmd-palette.tsx
+   `data-selected`) had only a 1.06:1 fill as its indicator: effectively
+   invisible. This additive rule gives both a real indicator — an accent-tinted
+   row plus a 2px accent left bar (the bar measures 9.32:1 dark / 7.68:1 light
+   against the row background). Markup untouched; the component's own
+   `data-[selected=true]:bg-raised` utility stays as the base state. */
+[cmdk-item][data-selected="true"],
+[role="menuitem"][data-highlighted],
+[role="menuitemcheckbox"][data-highlighted],
+[role="menuitemradio"][data-highlighted] {
+  background: color-mix(in oklab, var(--color-accent) 16%, var(--color-surface));
+  box-shadow: inset 2px 0 0 0 var(--color-accent);
+}
+
 /* ---------- Radix dialog panels: elevation + hairline ---------- */
 [role="dialog"] {
   box-shadow:
@@ -643,10 +714,18 @@ textarea[aria-invalid="true"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* W12 L-E hardening of the existing block: duration alone left infinite
+     animations (wild-live-pulse, chat-thinking, rail-glow, Tailwind's
+     animate-pulse/spin) re-triggering a 0.01ms cycle forever — iteration
+     count 1 ends them. No `scroll-behavior: smooth` exists in the app today
+     (grep across src/ + scripts/: 0 hits); the auto guard keeps a future one
+     from outliving the user's motion preference. */
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

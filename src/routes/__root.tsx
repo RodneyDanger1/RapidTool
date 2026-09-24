@@ -66,7 +66,7 @@ export const Route = createRootRoute({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              'try{var t=localStorage.getItem("rapid.theme");if(t==="light"){document.documentElement.setAttribute("data-theme","light");var m=document.querySelector("meta[name=theme-color]");if(m)m.setAttribute("content","#f6f7f4");}else if(t==="dark"){document.documentElement.setAttribute("data-theme","dark");}}catch(e){}',
+              'try{var t=localStorage.getItem("rapid.theme");if(t==="light"){document.documentElement.setAttribute("data-theme","light");var m=document.querySelector("meta[name=theme-color]");if(m)m.setAttribute("content","#f6f7f4");}else if(t==="dark"){document.documentElement.setAttribute("data-theme","dark");}}catch(e){/* best-effort flash prevention: localStorage.getItem throws SecurityError when storage is blocked (sandboxed preview / privacy mode). Ignoring it leaves the default dark theme, which is the documented default; the hydrated toggle in console.tsx still applies and persists the choice for the session. */}',
           }}
         />
       </head>

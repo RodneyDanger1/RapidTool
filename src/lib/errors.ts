@@ -46,6 +46,14 @@ export const ERROR_CODES = [
   "RT_E_ABORTED",
   "RT_E_BUSY",
   "RT_E_FOREIGN_FILES",
+  // W12 lane-a (fixes/217j, enacting 216y §2.3 G3): the four OS/network
+  // failure families that used to collapse to RT_E_UNKNOWN despite carrying
+  // an unambiguous errno. Append-only — consumers match on string literals,
+  // never on array position.
+  "RT_E_PERMISSION_DENIED",
+  "RT_E_DISK_FULL",
+  "RT_E_PORT_IN_USE",
+  "RT_E_NETWORK_UNREACHABLE",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -84,17 +92,28 @@ export function dualChannelFailDetail(res: {
 /**
  * Classify a thrown error into an ErrorCode.
  *
- * Matchers (in order):
+ * Strong matchers (per chain link, in order; first hit wins):
  *   1. `ReportRejectedError` by name → `RT_E_REPORT_PHASE_MISMATCH` when the
  *      message mentions a phase, else `RT_E_REPORT_INVALID`.
  *   2. Node `ENOENT` errno (or "ENOENT" in the message) → `RT_E_PROJECT_MISSING`.
  *   3. Abort/TimeoutError name, an `ETIMEDOUT` errno, or a timeout-ish
  *      message → `RT_E_LLM_TIMEOUT`.
- *   4. Nothing matched → the caller-supplied `fallback` (default `RT_E_UNKNOWN`).
+ *   4. `EACCES`/`EPERM` → `RT_E_PERMISSION_DENIED`, `ENOSPC` → `RT_E_DISK_FULL`,
+ *      `EADDRINUSE` → `RT_E_PORT_IN_USE`, and the connect/DNS errno family
+ *      (`ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`, `ENETUNREACH`,
+ *      `EHOSTUNREACH`, `ECONNRESET`) → `RT_E_NETWORK_UNREACHABLE` (W12 G3).
+ *   5. `SyntaxError` carrying a JSON-specific message (a failed `JSON.parse`)
+ *      → `RT_E_VALIDATION`.
+ *   6. Nothing matched → the caller-supplied `fallback` (default `RT_E_UNKNOWN`).
  *
  * Wrapper errors (e.g. fetch's "fetch failed" TypeError) carry the real
  * failure in `err.cause` — the chain (up to 4 levels) is walked and every
- * level's name/code/message is matched before giving up.
+ * level's name/code/message is matched before giving up. The BARE wrapper
+ * prose "fetch failed" is a tier-2 signal: applied as
+ * `RT_E_NETWORK_UNREACHABLE` only when the result would otherwise be the
+ * opaque default, never over a caller-supplied domain fallback (a generic
+ * wrapper phrase is weaker than the caller's domain knowledge — e.g. the
+ * research seam's `RT_E_RESEARCH_UNAVAILABLE`).
  *
  * Throw shapes are deliberately heterogeneous — Error subclasses, DOMException,
  * AggregateError (Promise.any / multi-address undici failures), and plain
@@ -105,8 +124,32 @@ export function dualChannelFailDetail(res: {
  * fallback.
  */
 
-/** Match ONE chain link against the known error families, or null. */
-function matchErrorLink(link: unknown): ErrorCode | null {
+/** Errno `.code`s whose only honest reading is "the target could not be reached". */
+const NETWORK_ERRNOS = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "ECONNRESET",
+]);
+
+/** Same family when only the printable message survives (a wrapper flattened the errno). */
+const NETWORK_ERRNO_RE =
+  /\b(ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ECONNRESET)\b/;
+
+/**
+ * JSON.parse failures are V8 SyntaxErrors with JSON-specific messages. Probe
+ * (node v22.23.2) produced exactly these texts: "Expected property name or
+ * '}' in JSON at position 1 (line 1 column 2)", "Unexpected end of JSON
+ * input", "\"undefined\" is not valid JSON". Requiring `SyntaxError` keeps a
+ * non-JSON SyntaxError (e.g. from evaluated generated code) out of this branch.
+ */
+const JSON_PARSE_MSG_RE =
+  /is not valid JSON|Unexpected end of JSON input|in JSON at position/i;
+
+/** Duck-typed field read shared by the two matcher tiers below. */
+function readLinkFields(link: unknown): { name: unknown; errno: unknown; message: string } {
   const isObject = typeof link === "object" && link !== null;
   const name = isObject ? (link as { name?: unknown }).name : undefined;
   const errno = isObject ? (link as { code?: unknown }).code : undefined;
@@ -122,6 +165,12 @@ function matchErrorLink(link: unknown): ErrorCode | null {
         : typeof link === "string"
           ? link
           : String(link);
+  return { name, errno, message };
+}
+
+/** Match ONE chain link against the known error families, or null. */
+function matchErrorLink(link: unknown): ErrorCode | null {
+  const { name, errno, message } = readLinkFields(link);
 
   // A thrown `.code` that is already an RT_E_* code wins immediately —
   // phases.ts/report-intake.ts throw coded errors and the CLI must preserve
@@ -141,7 +190,37 @@ function matchErrorLink(link: unknown): ErrorCode | null {
   ) {
     return "RT_E_LLM_TIMEOUT";
   }
+  // W12 lane-a (fixes/217j, 216y §2.3 G3): new families, deliberately AFTER
+  // the existing matchers so no previously classified error can change code.
+  if (errno === "EACCES" || errno === "EPERM" || /\b(EACCES|EPERM)\b/.test(message)) {
+    return "RT_E_PERMISSION_DENIED";
+  }
+  if (errno === "ENOSPC" || /\bENOSPC\b/.test(message)) return "RT_E_DISK_FULL";
+  if (errno === "EADDRINUSE" || /\bEADDRINUSE\b/.test(message)) return "RT_E_PORT_IN_USE";
+  if (
+    (typeof errno === "string" && NETWORK_ERRNOS.has(errno)) ||
+    NETWORK_ERRNO_RE.test(message)
+  ) {
+    return "RT_E_NETWORK_UNREACHABLE";
+  }
+  // A failed JSON.parse is an input-validation failure and reuses the
+  // existing RT_E_VALIDATION ("input or model output failed validation") —
+  // no new code is minted for a case an existing code already names.
+  if (name === "SyntaxError" && JSON_PARSE_MSG_RE.test(message)) return "RT_E_VALIDATION";
   return null;
+}
+
+/**
+ * Tier-2 matcher: the BARE generic fetch wrapper only. undici throws
+ * `TypeError: fetch failed` with the real failure in `.cause` (walked by the
+ * tier-1 passes); when nothing else matched, the wrapper prose is the sole
+ * signal, but it is inconclusive on its own ("fetch failed" spans DNS,
+ * connect, reset and abort failures) — classifyError therefore applies it
+ * only in place of the opaque default, never over a domain fallback.
+ */
+function matchErrorLinkGeneric(link: unknown): ErrorCode | null {
+  const { message } = readLinkFields(link);
+  return /fetch failed/.test(message) ? "RT_E_NETWORK_UNREACHABLE" : null;
 }
 
 /**
@@ -206,6 +285,19 @@ export function classifyError(
   for (const link of extras) {
     const hit = matchErrorLink(link);
     if (hit !== null) return hit;
+  }
+  // Tier 2 — generic wrapper prose ("fetch failed"). Only ever replaces the
+  // opaque default: a caller-supplied domain fallback is a stronger claim
+  // than a generic wrapper phrase (see the tier note above).
+  if (fallback === "RT_E_UNKNOWN") {
+    for (const link of chain) {
+      const hit = matchErrorLinkGeneric(link);
+      if (hit !== null) return hit;
+    }
+    for (const link of extras) {
+      const hit = matchErrorLinkGeneric(link);
+      if (hit !== null) return hit;
+    }
   }
   return fallback;
 }
@@ -327,5 +419,26 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
   RT_E_FOREIGN_FILES: {
     meaning: "emit refused because the target dir contains foreign files that are not leftover tests/.",
     agentAction: "Pass --force only if you intend to overwrite, or emit into a clean directory.",
+  },
+  RT_E_PERMISSION_DENIED: {
+    meaning: "The OS denied access to a file or directory (EACCES/EPERM).",
+    agentAction:
+      "Fix the path's permissions or run from a location the process may write to; do not retry the same path unchanged.",
+  },
+  RT_E_DISK_FULL: {
+    meaning: "A write failed because the filesystem has no space left (ENOSPC).",
+    agentAction:
+      "Free space or point the output at another volume before retrying; never report the write as done.",
+  },
+  RT_E_PORT_IN_USE: {
+    meaning: "A server could not bind because the address/port is already in use (EADDRINUSE).",
+    agentAction:
+      "Stop the process holding the port or bind a different port; do not kill processes blindly.",
+  },
+  RT_E_NETWORK_UNREACHABLE: {
+    meaning:
+      "A network call never reached its target — DNS miss, refused or reset connection, unreachable host (includes undici's bare 'fetch failed').",
+    agentAction:
+      "Check the target host/port and connectivity; retry once if the failure may be transient, then report the unreachable endpoint honestly instead of fabricating the remote result.",
   },
 };

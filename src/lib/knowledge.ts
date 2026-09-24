@@ -898,6 +898,28 @@ export function failureSignature(record: FailureRecord): string {
 }
 
 /**
+ * T-11 (106 §6, F-08): the probe ids a lesson row targets, surfaced as
+ * explicit `probe:<id>` tags. The ids ARE the row's own failureSignature
+ * anchors (DoD criterion ids / machine case ids / artifact row ids) — the same
+ * canonical, sorted, deduped set the content address hashes (216g) — read
+ * back off the signature string, so every existing and future writer inherits
+ * the tags with NO caller change and NO re-minted row id (the id hashes the
+ * signature, not the tag set). A contradiction between a lesson and the probe
+ * it names is therefore visible ON the row instead of compounding silently;
+ * an anchor-less signature (`tail:` fallback) names no probe and adds no tag.
+ */
+function probeTagsFromSignature(signature: string): string[] {
+  const seg = signature.split("|").find((s) => s.startsWith("anchors:"));
+  if (!seg) return [];
+  const out: string[] = [];
+  for (const raw of seg.slice("anchors:".length).split(",")) {
+    const id = raw.trim();
+    if (id) out.push(`probe:${id}`);
+  }
+  return out;
+}
+
+/**
  * The one row builder every writer goes through. Deterministic: content-
  * addressed id `lesson-<class>-<fnv8(text)>` (identical text ⇒ identical id ⇒
  * dedupeMemoryIds is an exact no-op), tags sorted+deduped and always carrying
@@ -906,6 +928,11 @@ export function failureSignature(record: FailureRecord): string {
  * 216g (112 §4.2 — T1): when `spec.signature` is given the id hashes THAT
  * instead of the text, so a recurrence of the same failure (same kind/phase/
  * anchors) maps to the same row even when its free-text tail differs.
+ *
+ * T-11 (106 §6, F-08): a signature that carries `anchors:` additionally tags
+ * the row with one `probe:<id>` per anchor (probeTagsFromSignature) — the
+ * probe ids the row targets. Tags never participate in the content address,
+ * so this surfaces the probes WITHOUT re-minting a single existing row id.
  */
 export function lessonRow(spec: LessonSpec): MemoryEntry {
   const text =
@@ -918,6 +945,11 @@ export function lessonRow(spec: LessonSpec): MemoryEntry {
     spec.classShort,
     spec.level,
     ...(Array.isArray(spec.tags) ? spec.tags : []),
+    // T-11 half 2 (217l, F1 from 217b): the probe ids the signature's anchors
+    // name, surfaced ON the row. Tags never participate in the content address
+    // (the id hashes the signature), so no row id is ever re-minted; an
+    // anchor-less `tail:` signature adds nothing (probeTagsFromSignature).
+    ...probeTagsFromSignature(signature),
   ];
   const tags: string[] = [];
   for (const t of raw) {

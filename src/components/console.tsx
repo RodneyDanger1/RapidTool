@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type 
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Tabs from "@radix-ui/react-tabs";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import {
@@ -10,6 +11,7 @@ import {
   BookOpen,
   Bot,
   Check,
+  ChevronDown,
   ChevronRight,
   Copy,
   Download,
@@ -39,7 +41,7 @@ import { DOD } from "@/lib/dod";
 import { approvalHealth } from "@/lib/gate-stats";
 import { downloadFilename, exportPacketText, exportProjectJson, slugName } from "@/lib/io";
 import { phaseHandoff } from "@/lib/handoff";
-import type { Artifact, ChatLogRow, JsonLog, PhaseId, PhaseRecord, PhaseStatus, Project } from "@/lib/types";
+import type { Artifact, ChatLogRow, JsonLog, PhaseId, PhaseRecord, PhaseStatus, Project, ProjectStatus } from "@/lib/types";
 import {
   buildVaultNotes,
   searchVault,
@@ -96,6 +98,23 @@ const PHASE_STATUS_META: Record<
     tone: "text-fg",
     label: "Ready",
   },
+};
+
+/**
+ * Plain-language labels for a PROJECT's status (this is the home list, not a
+ * phase rail). Deliberately separate from `PHASE_STATUS_META`: a project can be
+ * `intake` or `blocked`, which are NOT phase statuses, so indexing the phase
+ * map with `project.status` had no key for them. It is also the honest fix for
+ * the old `p.status.replace("_", " ")` form, which left the second underscore
+ * in `awaiting_hitl` (110 §4 CP-7). Total by type ⇒ a project status can never
+ * index a missing key.
+ */
+const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
+  intake: "not started",
+  running: "running",
+  awaiting_hitl: "waiting for you",
+  complete: "complete",
+  blocked: "blocked",
 };
 
 function PhaseGlyph({ status }: { status: PhaseStatus }) {
@@ -258,6 +277,25 @@ function hitlNeedsOverride(project: Project): boolean {
     project.currentPhase === 6 &&
     project.lastTest !== null &&
     !project.lastTest.ok
+  );
+}
+
+/**
+ * UI-03 (110 §3/§5): the ONE predicate for "the Execute / Run-to-gate action is
+ * live right now". Read by both the action-bar buttons (their `disabled`) and
+ * the Ctrl+Enter / `e` / `g` shortcut branches, so a keystroke can never start
+ * an action whose button is disabled or absent: a phase already running
+ * elsewhere (wild mode, or a reload with stored status "running"), a parked
+ * HITL gate, a blocked phase, or a sealed build. Pure over the store snapshot;
+ * `busy` folds in the caller's own in-flight latch (busyRef / busyAction).
+ */
+function canExecute(project: Project, busy: boolean): boolean {
+  return (
+    !busy &&
+    !project.hitl &&
+    project.status !== "blocked" &&
+    project.status !== "complete" &&
+    project.phases[project.currentPhase]?.status !== "running"
   );
 }
 
@@ -1234,7 +1272,7 @@ function ThemeToggle() {
 const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ["e"], label: "Execute current phase" },
   { keys: ["g"], label: "Run to next gate" },
-  { keys: ["a"], label: "Approve — when a gate is waiting" },
+  { keys: ["a"], label: "Approve — when a gate is waiting; a failed sandbox gate needs the override tick first" },
   { keys: ["r"], label: "Focus the rejection note" },
   { keys: ["/"], label: "Focus artifact search" },
   { keys: ["?"], label: "Open agent guide" },
@@ -1245,6 +1283,9 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   // 216m · 111 TASK-10: additive row for the command palette (suspends the
   // single-key shortcuts above while it is open).
   { keys: ["Ctrl", "K"], label: "Open the command palette" },
+  // T-22: additive second binding for THIS list — `?` (above) stays the Guide
+  // opener, so the dialog renders both bindings from this one table.
+  { keys: ["Ctrl", "/"], label: "Open this shortcut list" },
 ];
 
 function Kbd({ children }: { children: ReactNode }) {
@@ -1451,7 +1492,7 @@ export function HomeScreen() {
                     <span>
                       <span className="block text-sm font-medium">{p.name}</span>
                       <span className="mt-0.5 block font-mono text-xs text-muted">
-                        {p.domain} · P{p.currentPhase} · {p.status.replace("_", " ")}
+                        {p.domain} · P{p.currentPhase} · {PROJECT_STATUS_LABEL[p.status]}
                       </span>
                     </span>
                     <ChevronRight className="h-4 w-4 text-faint" />
@@ -1463,6 +1504,39 @@ export function HomeScreen() {
         </aside>
       </main>
     </div>
+  );
+}
+
+/**
+ * UI-10 (110 §3): one row in the Export menu. The menu collapses five
+ * standalone toolbar buttons into one labelled affordance; every item calls
+ * the SAME handler the old button called (copyPacket / copyHandoff /
+ * downloadPacket / downloadJson / copyProjectJson) — presentation only, no
+ * code path removed. Uses the same `{label, hint}` shape as RUN_TABS and
+ * DIAGRAM_KINDS so the plain-language purpose line stays consistent.
+ */
+function ExportMenuItem({
+  icon,
+  label,
+  hint,
+  onSelect,
+}: {
+  icon: ReactNode;
+  label: string;
+  hint: string;
+  onSelect: () => void;
+}) {
+  return (
+    <DropdownMenu.Item
+      onSelect={onSelect}
+      className="flex cursor-pointer items-start gap-2.5 rounded-sm px-2.5 py-2 outline-none select-none data-[highlighted]:bg-raised"
+    >
+      <span className="mt-0.5 shrink-0 text-muted">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-sm text-fg">{label}</span>
+        <span className="mt-0.5 block text-[11px] leading-snug text-faint">{hint}</span>
+      </span>
+    </DropdownMenu.Item>
   );
 }
 
@@ -1501,6 +1575,10 @@ export function RunScreen({ id }: { id: string }) {
   const copyTs = useRef(0);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const noteRef = useRef<HTMLTextAreaElement | null>(null);
+  // UI-01: focus target for the HITL override checkbox. The `a` shortcut never
+  // approves a gate that needs the override — it names the real control and
+  // parks focus here (same pattern as noteRef for the rejection note).
+  const overrideRef = useRef<HTMLInputElement | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedHandoff, setCopiedHandoff] = useState(false);
@@ -1572,6 +1650,20 @@ export function RunScreen({ id }: { id: string }) {
       // does not stop propagation, so the palette's own input keeps receiving
       // every event normally.
       if (paletteOpenRef.current) return;
+      // UI-02 (110 §3/§5): suspend every shortcut while ANY modal dialog is
+      // open — before this guard, `e`/`g`/`a` reached run()/onApprove()
+      // invisibly behind the Guide/Settings/Shortcuts dialog. The shared
+      // `Modal` renders role="dialog" aria-modal="true" only while open, so
+      // this DOM check is a live signal; the AlertDialog confirm (Archive) has
+      // the same obligation via role="alertdialog". The dialog keeps its own
+      // Escape/close handling — when this listener bails it neither
+      // preventDefaults nor stops propagation.
+      if (
+        document.querySelector(
+          '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+        )
+      )
+        return;
       const t = e.target as HTMLElement | null;
       const typing =
         t &&
@@ -1584,8 +1676,11 @@ export function RunScreen({ id }: { id: string }) {
       if (mod && e.key === "Enter") {
         e.preventDefault();
         const st = useRapid.getState();
-        if (!st.projects.some((p) => p.id === id)) return;
-        if (busyRef.current) return;
+        const p = st.projects.find((x) => x.id === id);
+        if (!p) return;
+        // UI-03: the same predicate the buttons use (canExecute) — a chord can
+        // never start a run whose button is disabled or absent.
+        if (!canExecute(p, busyRef.current)) return;
         if (e.shiftKey) void runUntil();
         else void run();
       } else if (mod && e.shiftKey && e.key.toLowerCase() === "c") {
@@ -1606,25 +1701,48 @@ export function RunScreen({ id }: { id: string }) {
         // through its own Radix dialog.
         e.preventDefault();
         setPaletteOpen(true);
+      } else if (mod && e.key === "/") {
+        // T-22 (110 §4 CP-6 + §3 UI-09): `?` keeps opening the Guide (the
+        // documented, muscle-memory binding — unchanged below); Ctrl+/ is the
+        // additive second binding and opens THIS shortcut list. The Shortcuts
+        // dialog states both bindings (see the SHORTCUTS table).
+        e.preventDefault();
+        setShortcutsOpen(true);
       } else if (!mod && !e.altKey && !e.repeat) {
         // Single-key shortcuts (enhancement 10: additive, no regressions).
         // Ignored while typing and when a modifier is held.
         const st = useRapid.getState();
-        if (!st.projects.some((p) => p.id === id)) return;
+        const p = st.projects.find((x) => x.id === id);
+        if (!p) return;
         const key = e.key;
         if (key === "e" || key === "E") {
           e.preventDefault();
-          if (!busyRef.current) void run();
+          // UI-03: the buttons' own predicate, not a busyRef-only latch — see
+          // canExecute(). During a run started elsewhere (wild mode, or a
+          // reload with stored status "running") this key now does nothing,
+          // exactly like the disabled button.
+          if (canExecute(p, busyRef.current)) void run();
         } else if (key === "g" || key === "G") {
           e.preventDefault();
-          if (!busyRef.current) void runUntil();
+          if (canExecute(p, busyRef.current)) void runUntil();
         } else if (key === "a" || key === "A") {
-          if (st.projects.find((x) => x.id === id)?.hitl) {
+          if (p.hitl) {
             e.preventDefault();
-            onApprove();
+            if (hitlNeedsOverride(p)) {
+              // UI-01: `a` and the Approve button are the same action. The
+              // button is disabled until the override is ticked, so the
+              // shortcut never approves here — it surfaces one plain sentence
+              // naming the real control and puts focus on it (noteRef pattern).
+              setError(
+                "This gate needs the override first — tick “I reviewed the failing sandbox output and approve anyway.” below, then approve.",
+              );
+              overrideRef.current?.focus();
+            } else {
+              onApprove();
+            }
           }
         } else if (key === "r" || key === "R") {
-          if (st.projects.find((x) => x.id === id)?.hitl) {
+          if (p.hitl) {
             e.preventDefault();
             noteRef.current?.focus();
           }
@@ -2238,7 +2356,7 @@ export function RunScreen({ id }: { id: string }) {
                 {PHASES[project.currentPhase].code}
               </p>
               <p className="font-mono text-xs text-faint">
-                {rec?.status.replace("_", " ")}
+                {rec ? PHASE_STATUS_META[rec.status].label : null}
               </p>
               {rec ? <StatusBadge project={project} phase={project.currentPhase} /> : null}
             </div>
@@ -2297,7 +2415,7 @@ export function RunScreen({ id }: { id: string }) {
                   <button
                     type="button"
                     onClick={run}
-                    disabled={running || busyAction !== null}
+                    disabled={!canExecute(project, busyAction !== null)}
                     title="Advanced — run only this phase, then stop"
                     className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-4 text-sm text-fg disabled:opacity-40"
                   >
@@ -2308,16 +2426,19 @@ export function RunScreen({ id }: { id: string }) {
                     )}
                     {busyAction === "step" ? "Running…" : `Execute ${PHASES[project.currentPhase].code}`}
                   </button>
-                  {/* 111 TASK-09: "Run to next gate" subsumes "Execute P#", so it
-                      is the primary treatment (Hick's Law: highlight the
-                      recommended option). Both buttons keep their handlers and
-                      the e/g shortcuts — styling only, no capability removed. */}
+                  {/* UI-16 (W12 Lane D): the ONE solid/primary button on this
+                      screen is the "Run to next gate" / "Approve" button in the
+                      RunStatusPanel above — this toolbar keeps the same action,
+                      the same handler and the `g` shortcut (TASK-09's capability
+                      note stands), but wears the secondary border treatment so a
+                      beginner sees exactly one primary next action, not two
+                      identical solids. */}
                   <button
                     type="button"
                     onClick={runUntil}
-                    disabled={running || busyAction !== null}
+                    disabled={!canExecute(project, busyAction !== null)}
                     title="Recommended — runs phases until something needs you"
-                    className="btn-solid inline-flex min-h-11 items-center gap-2 rounded-md bg-fg px-4 text-sm font-medium text-bg disabled:opacity-40"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-4 text-sm text-fg disabled:opacity-40"
                   >
                     {busyAction === "run" ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -2365,22 +2486,6 @@ export function RunScreen({ id }: { id: string }) {
               ) : null}
               <button
                 type="button"
-                onClick={() => void copyPacket()}
-                className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-4 text-sm text-fg"
-              >
-                <Copy className="h-4 w-4" />
-                {copied ? "Copied packet" : "Copy agent packet"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void copyHandoff()}
-                className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-4 text-sm text-fg"
-              >
-                <Copy className="h-4 w-4" />
-                {copiedHandoff ? "Copied handoff" : "Copy phase handoff"}
-              </button>
-              <button
-                type="button"
                 onClick={() => {
                   const nid = clone(project.id);
                   if (nid) void nav({ to: "/run/$id", params: { id: nid } });
@@ -2389,30 +2494,72 @@ export function RunScreen({ id }: { id: string }) {
               >
                 Clone
               </button>
-              <button
-                type="button"
-                onClick={downloadPacket}
-                className="inline-flex min-h-11 items-center gap-2 rounded-md px-3 text-sm text-muted hover:text-fg"
-              >
-                <Download className="h-4 w-4" />
-                Download packet (.md)
-              </button>
-              <button
-                type="button"
-                onClick={downloadJson}
-                className="inline-flex min-h-11 items-center gap-2 rounded-md px-3 text-sm text-muted hover:text-fg"
-              >
-                <Download className="h-4 w-4" />
-                Export
-              </button>
-              <button
-                type="button"
-                onClick={() => void copyProjectJson()}
-                className="inline-flex min-h-11 items-center gap-2 rounded-md px-3 text-sm text-muted hover:text-fg"
-              >
-                <Copy className="h-4 w-4" />
-                Copy JSON
-              </button>
+              {/* UI-10 (110 §3): the five overlapping export affordances
+                  ("Copy agent packet", "Copy phase handoff", "Download packet
+                  (.md)", "Export", "Copy JSON") collapse into ONE labelled
+                  menu. Presentation-only: every item still calls the same
+                  handler the button called (the Ctrl+Shift+C chord and the
+                  command-palette entries are untouched), so no export path
+                  was removed. The `copied` / `copiedHandoff` toast now shows
+                  on the trigger. */}
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <button
+                    type="button"
+                    title="Copy or download this build — all export paths in one menu"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-md px-3 text-sm text-muted hover:text-fg data-[state=open]:text-fg"
+                  >
+                    <Download className="h-4 w-4" />
+                    {copied ? "Copied packet ✓" : copiedHandoff ? "Copied handoff ✓" : "Export"}
+                    <ChevronDown aria-hidden="true" className="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    align="start"
+                    sideOffset={6}
+                    className="z-50 w-72 rounded-md border border-border bg-surface p-1 shadow-lg"
+                  >
+                    <DropdownMenu.Label className="px-2.5 pt-1.5 pb-1 font-mono text-[10px] tracking-widest text-faint uppercase">
+                      Copy
+                    </DropdownMenu.Label>
+                    <ExportMenuItem
+                      icon={<Copy className="h-4 w-4" aria-hidden="true" />}
+                      label="Agent packet"
+                      hint="The prompt to paste into a coding agent"
+                      onSelect={() => void copyPacket()}
+                    />
+                    <ExportMenuItem
+                      icon={<Copy className="h-4 w-4" aria-hidden="true" />}
+                      label="Phase handoff"
+                      hint="The prompt that carries this phase to another agent"
+                      onSelect={() => void copyHandoff()}
+                    />
+                    <DropdownMenu.Separator className="my-1 h-px bg-line" />
+                    <DropdownMenu.Label className="px-2.5 pt-1 pb-1 font-mono text-[10px] tracking-widest text-faint uppercase">
+                      Download
+                    </DropdownMenu.Label>
+                    <ExportMenuItem
+                      icon={<Download className="h-4 w-4" aria-hidden="true" />}
+                      label="Packet file (.md)"
+                      hint="Save the agent packet as a markdown file"
+                      onSelect={() => downloadPacket()}
+                    />
+                    <ExportMenuItem
+                      icon={<Download className="h-4 w-4" aria-hidden="true" />}
+                      label="Build file (.json)"
+                      hint="Save the whole build so it can be imported later"
+                      onSelect={() => downloadJson()}
+                    />
+                    <ExportMenuItem
+                      icon={<Copy className="h-4 w-4" aria-hidden="true" />}
+                      label="Build JSON"
+                      hint="Copy the whole build to the clipboard"
+                      onSelect={() => void copyProjectJson()}
+                    />
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
               <button
                 type="button"
                 onClick={() => setReportOpen((v) => !v)}
@@ -2510,26 +2657,18 @@ export function RunScreen({ id }: { id: string }) {
             <p className="mt-3 font-mono text-[11px] text-faint">
               Saved to this browser only · Export for backup
             </p>
-            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-faint">
+            {/* UI-11: the legend is DERIVED from the SHORTCUTS table (single
+                source) — it can no longer drift from the Shortcuts dialog,
+                which stays the canonical list and also carries the Ctrl chords.
+                Only the single-key rows fit a footer; keycap and wording both
+                come from the table, exactly as announced to a screen reader. */}
+            <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-faint">
               <span className="sr-only">Keyboard shortcuts:</span>
-              <span className="inline-flex items-center gap-1">
-                <Kbd>e</Kbd> execute
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Kbd>g</Kbd> run-to-gate
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Kbd>a</Kbd> approve
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Kbd>r</Kbd> reject note
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Kbd>/</Kbd> search
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Kbd>?</Kbd> guide
-              </span>
+              {SHORTCUTS.filter((s) => s.keys.length === 1).map((s) => (
+                <span key={s.keys[0]} className="inline-flex items-center gap-1">
+                  <Kbd>{s.keys[0]}</Kbd> {s.label}
+                </span>
+              ))}
             </p>
 
             <AlertDialog.Root open={archiveOpen} onOpenChange={setArchiveOpen}>
@@ -2656,6 +2795,7 @@ export function RunScreen({ id }: { id: string }) {
               onApprove={onApprove}
               onReject={onReject}
               noteRef={noteRef}
+              overrideRef={overrideRef}
             />
           ) : null}
 
@@ -3232,6 +3372,7 @@ function HitlDock({
   onApprove,
   onReject,
   noteRef,
+  overrideRef,
 }: {
   project: Project;
   note: string;
@@ -3239,6 +3380,7 @@ function HitlDock({
   onApprove: (force?: boolean) => void;
   onReject: () => void;
   noteRef?: RefObject<HTMLTextAreaElement | null>;
+  overrideRef?: RefObject<HTMLInputElement | null>;
 }) {
   const [forceOverride, setForceOverride] = useState(false);
   const h = project.hitl;
@@ -3309,6 +3451,7 @@ function HitlDock({
       {needsOverride && (
         <label className="mt-3 flex items-start gap-2 text-sm text-danger">
           <input
+            ref={overrideRef}
             type="checkbox"
             checked={forceOverride}
             onChange={(e) => setForceOverride(e.target.checked)}
@@ -3833,9 +3976,19 @@ function RuntimeLogPane({ project }: { project: Project }) {
       </div>
 
       {diag !== null ? (
-        <pre className="max-h-96 overflow-auto rounded-md border border-line bg-black/20 p-3 font-mono text-xs text-fg">
+        <>
+          {/* T-17 (110 §4 CP-2/CP-7): one plain-language sentence above the raw
+              payload — what the blob is, and that it never leaves the browser. */}
+          <p className="max-w-2xl text-muted">
+            Support snapshot for this build — counters, the last runtime events, and browser-storage
+            health, in raw JSON (the same fields the CLI{" "}
+            <span className="font-mono">diagnose</span> verb prints). Nothing is uploaded — this
+            panel reads only what is already in this browser.
+          </p>
+          <pre className="max-h-96 overflow-auto rounded-md border border-line bg-black/20 p-3 font-mono text-xs text-fg">
           {diag}
-        </pre>
+          </pre>
+        </>
       ) : null}
 
       {snap.tail.length === 0 ? (

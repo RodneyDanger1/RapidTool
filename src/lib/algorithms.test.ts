@@ -5,6 +5,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  canonicalStem,
   contiguousRun,
   deriveTypeSignatures,
   estimateTokens,
@@ -181,6 +182,28 @@ describe("109 T-07 — intentLattice plural/singular weight parity", () => {
     assert.equal(typeof wp, "number", "plural brief surfaces the listing node");
     assert.ok((ws ?? 0) >= 0.54, `stem-matched mention must carry the freq weight (got ${ws})`);
     assert.equal(wp, ws, `plural inflection must not change the weight (${ws} vs ${wp})`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 109 C-10 — canonicalStem is the DOCUMENTED fixed point of stemToken (the
+// STEMMING note atop algorithms.ts): iterating it again must never move a
+// token, or the "one pair" contract (and every two-sided match built on it)
+// silently drifts.
+// ---------------------------------------------------------------------------
+
+describe("109 C-10 — canonicalStem fixed-point contract", () => {
+  it("canonicalStem(canonicalStem(w)) === canonicalStem(w) on the register vocabulary", () => {
+    for (const w of [
+      "listing", "listings", "showing", "showings", "routing", "route",
+      "property", "properties", "invoice", "invoicing", "scan", "scanning",
+    ]) {
+      assert.equal(
+        canonicalStem(canonicalStem(w)),
+        canonicalStem(w),
+        `canonicalStem must be a fixed point for "${w}"`,
+      );
+    }
   });
 });
 

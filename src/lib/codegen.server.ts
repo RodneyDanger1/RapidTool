@@ -76,7 +76,13 @@
 //      also stamps a bounded `p6.synthesis.attempt` journal event (chunk
 //      index/count · attempt · timeoutMs · outcome ok/refused/timeout + the
 //      model's refusal-text excerpt — fixes/153 P1) so a reader sees WHY each
-//      call failed. A forceHuman P6
+//      call failed. A reply that ARRIVED but could not be READ as a patch or
+//      synthesis envelope stamps a bounded `p6.synthesis.envelope.unreadable`
+//      warn entry (on the patch level: the existing `p6.repair.patch.refused`
+//      event) carrying RT_E_LLM_REJECTED + a bounded received-text excerpt —
+//      fixes/217k (216y G6: the silent-null sink; absent/blank replies stay
+//      unlogged, so "no output" and "unreadable output" are distinguishable).
+//      A forceHuman P6
 //      gate (failed template sandbox, R3/B-03) is never machine-cleared.
 //
 // Zero new runtime deps. Imported by engine.ts through a runtime dynamic
@@ -556,6 +562,62 @@ export function patchExcerptWindows(
   return { windows, omittedLines: omitted };
 }
 
+// --- 217k (W12 LANE B · fixes/216y §2.3 G6): the coded unreadable-reply signal.
+// Before this block, BOTH envelope readers below (parseSynthesisPatchEnvelope /
+// parseSynthesisEnvelope) returned a bare `null` when a reply ARRIVED but could
+// not be READ (JSON.parse failure or the wrong shape) — no log, no code — so an
+// unparseable model reply was indistinguishable from "the model said nothing"
+// and keyed repair/synthesis degraded silently. The readers now report every
+// such read failure through an optional sink while keeping their return
+// contract byte-identical (`null` still means "no envelope" to every caller);
+// an absent/blank reply stays SILENT, so "no output" remains its own state. The
+// signal carries the registry code (RT_E_LLM_REJECTED — the same code the
+// callers' terminal refusals already use), a BOUNDED excerpt of what was
+// actually received, and which reader could not read it. It never claims "the
+// model refused": the truth recorded is "we could not read it".
+
+/** Bounded size of the received-text excerpt a read failure carries. */
+export const ENVELOPE_READ_EXCERPT_MAX = 160;
+
+export type EnvelopeReadFailure = {
+  /** Registry code for an arrived-but-unreadable LLM reply (errors.ts). */
+  code: ErrorCode;
+  /** Which reader could not read the reply. */
+  source: "parseSynthesisEnvelope" | "parseSynthesisPatchEnvelope";
+  /** Where the read stopped: JSON.parse threw, or the JSON was the wrong shape. */
+  reason: "unreadable-json" | "unexpected-shape";
+  /** First ENVELOPE_READ_EXCERPT_MAX chars of what was received, whitespace-collapsed. */
+  excerpt: string;
+  /** Total characters received (the excerpt is a bounded window of this). */
+  receivedChars: number;
+  /** The coded human line (a log-detail body): reader · truth · bounded excerpt. */
+  message: string;
+};
+
+/** Receives the coded signal for every ARRIVED-but-unreadable reply. */
+export type EnvelopeReadSink = (failure: EnvelopeReadFailure) => void;
+
+/** Build the coded read-failure signal: RT_E_LLM_REJECTED + the reader + a
+ *  bounded excerpt of the received bytes. `why` names the concrete read rule
+ *  that failed ("JSON.parse failed: …", "the payload is not a JSON object", …)
+ *  — never a story about the model's intent. Pure + total. */
+function readFailure(
+  source: EnvelopeReadFailure["source"],
+  text: string,
+  reason: EnvelopeReadFailure["reason"],
+  why: string,
+): EnvelopeReadFailure {
+  const excerpt = text.replace(/\s+/g, " ").trim().slice(0, ENVELOPE_READ_EXCERPT_MAX);
+  return {
+    code: "RT_E_LLM_REJECTED",
+    source,
+    reason,
+    excerpt,
+    receivedChars: text.length,
+    message: `${source}: the reply was received but could not be read — ${why} (${text.length} chars; excerpt "${excerpt}")`,
+  };
+}
+
 /** A parsed patch (delta) envelope — the model's bounded `str_replace` block.
  *  `fuzzy` rides through VERBATIM: `applyStrReplace` re-validates it at
  *  runtime (a malformed level refuses; it is never silently defaulted). */
@@ -568,27 +630,63 @@ export type PatchRepairEnvelope = { oldStr: string; newStr: string; fuzzy?: unkn
  * reply is NOT a patch envelope — the caller then keeps the legacy
  * module-envelope repair path. Total: non-strings, garbage JSON, a missing
  * block and a blank/empty `oldStr` are all null, never a throw.
+ *
+ * 217k (G6): a NON-BLANK reply that cannot be READ (JSON.parse failure, or a
+ * payload that is neither a patch block nor the legacy module envelope)
+ * reports the coded EnvelopeReadFailure through the optional `sink`. An
+ * absent/blank reply and a readable legacy module envelope (the documented
+ * continuation, not a read failure) stay silent.
  */
-export function parseSynthesisPatchEnvelope(text: unknown): PatchRepairEnvelope | null {
+export function parseSynthesisPatchEnvelope(text: unknown, sink?: EnvelopeReadSink): PatchRepairEnvelope | null {
   if (typeof text !== "string") return null;
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/, "")
     .trim();
+  if (cleaned.length === 0) return null; // blank reply — "no output", not a read failure
   let obj: unknown;
   try {
     obj = JSON.parse(cleaned);
-  } catch {
+  } catch (err) {
+    const why = err instanceof Error && err.message ? `JSON.parse failed: ${err.message.replace(/\s+/g, " ").trim().slice(0, 120)}` : "JSON.parse failed";
+    sink?.(readFailure("parseSynthesisPatchEnvelope", text, "unreadable-json", why));
     return null;
   }
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+    sink?.(readFailure("parseSynthesisPatchEnvelope", text, "unexpected-shape", "the payload is not a JSON object"));
+    return null;
+  }
   const block = (obj as Record<string, unknown>).patch;
-  if (!block || typeof block !== "object" || Array.isArray(block)) return null;
+  if (!block || typeof block !== "object" || Array.isArray(block)) {
+    // A legacy module envelope is the DOCUMENTED non-delta continuation (the
+    // caller keeps the full-rewrite repair path) — readable, not a failure.
+    const legacyModule = (obj as Record<string, unknown>).module;
+    if (typeof legacyModule === "string" && legacyModule.trim().length > 0) return null;
+    sink?.(
+      readFailure(
+        "parseSynthesisPatchEnvelope",
+        text,
+        "unexpected-shape",
+        "the payload has no `patch` block and is not a legacy module envelope",
+      ),
+    );
+    return null;
+  }
   const b = block as Record<string, unknown>;
   const oldStr = typeof b.oldStr === "string" ? b.oldStr : "";
   const newStr = typeof b.newStr === "string" ? b.newStr : null;
-  if (oldStr.length === 0 || newStr === null) return null;
+  if (oldStr.length === 0 || newStr === null) {
+    sink?.(
+      readFailure(
+        "parseSynthesisPatchEnvelope",
+        text,
+        "unexpected-shape",
+        oldStr.length === 0 ? "the `patch` block carries an empty `oldStr`" : "the `patch` block has no string `newStr`",
+      ),
+    );
+    return null;
+  }
   return { oldStr, newStr, ...(b.fuzzy !== undefined ? { fuzzy: b.fuzzy } : {}) };
 }
 
@@ -627,6 +725,29 @@ export function patchRefusalLogEntry(detail: string, path?: string): JsonLog {
     level: "warn",
     event: "p6.repair.patch.refused",
     detail: `${path ? `${path} · ` : ""}${clean.slice(0, 400)}`,
+  };
+}
+
+/** 217k (W12 LANE B · fixes/216y §2.3 G6): the warn entry for a reply that
+ *  ARRIVED but could not be read as a synthesis envelope — the visible half of
+ *  the silent-sink fix. Deliberately NOT `p6.synthesis.refused`: that event is
+ *  the TERMINAL refusal census (read by headless's codegen-refusal detail,
+ *  run-eval's failure check and judgment's risks), and a first reply a later
+ *  bounded repair rescued must not read as a refused cycle. Same bounded
+ *  refusal-log shape as its neighbours: coded detail, optional path prefix,
+ *  400-char cap. */
+export function envelopeReadLogEntry(failure: EnvelopeReadFailure, path?: string): JsonLog {
+  const clean =
+    failure && typeof failure.message === "string" && failure.message.trim()
+      ? failure.message.replace(/\s+/g, " ").trim()
+      : "unreadable reply";
+  const code = failure && typeof failure.code === "string" ? failure.code : "RT_E_LLM_REJECTED";
+  return {
+    ts: Date.now(),
+    phase: 6 as PhaseId,
+    level: "warn",
+    event: "p6.synthesis.envelope.unreadable",
+    detail: `${path ? `${path} · ` : ""}${code} · ${clean.slice(0, 400)}`,
   };
 }
 
@@ -769,7 +890,13 @@ async function attemptPatchRepair(input: {
     );
     return null;
   }
-  const delta = parseSynthesisPatchEnvelope(reply.text);
+  // 217k (W12 LANE B · G6): an ARRIVED-but-unreadable reply is recorded through
+  // the caller's bounded sink — the SAME `p6.repair.patch.refused` event the
+  // apply-validator refusals use (the delta did not land; the legacy
+  // full-rewrite repair takes over, byte-identical).
+  const delta = parseSynthesisPatchEnvelope(reply.text, (failure) => {
+    input.log?.(patchRefusalLogEntry(`${failure.code} · ${failure.message}`, input.path));
+  });
   if (delta === null) return null; // not a delta reply — the legacy full-rewrite repair follows
   const request: PatchRequest = {
     oldStr: delta.oldStr,
@@ -1698,25 +1825,41 @@ export type SynthesisEnvelope = {
 /**
  * Parse a DeepSeek JSON reply into the synthesis envelope. Tolerant of
  * ```json fences (parseOracleJson precedent); requires a non-empty module
- * string. Never throws.
+ * string. Never throws. Returns null for anything that is not a synthesis
+ * envelope — callers keep their existing "no envelope" control flow.
+ *
+ * 217k (G6): a NON-BLANK reply that cannot be READ (JSON.parse failure, a
+ * non-object payload, or a missing/blank `module`) reports the coded
+ * EnvelopeReadFailure through the optional `sink` — an unreadable model reply
+ * is no longer indistinguishable from "no output" (an absent/blank reply
+ * stays silent: nothing was received, so there is nothing to report).
  */
-export function parseSynthesisEnvelope(text: unknown): SynthesisEnvelope | null {
+export function parseSynthesisEnvelope(text: unknown, sink?: EnvelopeReadSink): SynthesisEnvelope | null {
   if (typeof text !== "string") return null;
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/, "")
     .trim();
+  if (cleaned.length === 0) return null; // blank reply — "no output", not a read failure
   let obj: unknown;
   try {
     obj = JSON.parse(cleaned);
-  } catch {
+  } catch (err) {
+    const why = err instanceof Error && err.message ? `JSON.parse failed: ${err.message.replace(/\s+/g, " ").trim().slice(0, 120)}` : "JSON.parse failed";
+    sink?.(readFailure("parseSynthesisEnvelope", text, "unreadable-json", why));
     return null;
   }
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+    sink?.(readFailure("parseSynthesisEnvelope", text, "unexpected-shape", "the payload is not a JSON object"));
+    return null;
+  }
   const rec = obj as Record<string, unknown>;
   const module = typeof rec.module === "string" ? rec.module.trim() : "";
-  if (!module) return null;
+  if (!module) {
+    sink?.(readFailure("parseSynthesisEnvelope", text, "unexpected-shape", "the payload has no non-empty `module` string"));
+    return null;
+  }
   const exportsList = Array.isArray(rec.exports)
     ? rec.exports.filter((e): e is string => typeof e === "string" && e.trim().length > 0).map((e) => e.trim())
     : [];
@@ -2445,6 +2588,12 @@ async function synthesizeSingleModule(
   const patch: PatchRepairOptions | undefined = patchRepairs
     ? { path: TREE_ENTRY_PATH, log: (entry) => pushAttemptLog(attemptLogs, entry) }
     : undefined;
+  // 217k (W12 LANE B · fixes/216y G6): the unreadable-reply sink for every
+  // envelope read in this call — a reply that ARRIVED but could not be read
+  // lands in the same bounded attempt journal the patch sink and the terminal
+  // refusal trail use, so a parse failure is never again indistinguishable
+  // from "no output".
+  const readSink: EnvelopeReadSink = (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, TREE_ENTRY_PATH));
   const res = await synthWithBackoff(completeCall, user, opts);
   if (!res.ok) {
     return refuse(
@@ -2453,10 +2602,10 @@ async function synthesizeSingleModule(
       res.error ?? res.reason ?? "synthesis call failed",
     );
   }
-  let envelope = parseSynthesisEnvelope(res.text);
+  let envelope = parseSynthesisEnvelope(res.text, readSink);
   if (envelope === null) {
     const repair = await completeCall(p6SynthesisRepairPrompt(treeFailure), opts);
-    if (repair.ok) envelope = parseSynthesisEnvelope(repair.text);
+    if (repair.ok) envelope = parseSynthesisEnvelope(repair.text, readSink);
   }
   if (envelope === null) {
     return refuse(withAttemptLogs(project, attemptLogs), "RT_E_LLM_REJECTED", "model returned an unparseable synthesis envelope after one repair attempt");
@@ -2543,7 +2692,7 @@ async function synthesizeSingleModule(
               : p6SynthesisProseRepairPrompt(prose, treeFailure);
       const repair = await completeCall(repairPrompt, opts);
       if (repair.ok) {
-        const repaired = parseSynthesisEnvelope(repair.text);
+        const repaired = parseSynthesisEnvelope(repair.text, readSink);
         if (repaired) {
           envelope = repaired;
           validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames);
@@ -2558,7 +2707,7 @@ async function synthesizeSingleModule(
     // the module may have ignored the brief's vocabulary on the first pass.
     const repair = await completeCall(p6SynthesisBriefFitRepairPrompt(fit.missing, treeFailure), opts);
     if (repair.ok) {
-      const repaired = parseSynthesisEnvelope(repair.text);
+      const repaired = parseSynthesisEnvelope(repair.text, readSink);
       if (repaired) {
         const reValidated = validateSynthesisModule(repaired.module, repaired.exports, signatureNames);
         const reFit = briefFitSatisfied(brief, repaired.module);
@@ -2718,6 +2867,9 @@ async function synthesizeChunkedTree(
           synthAttemptLogEntry({ chunkIndex: i, chunkTotal: plan.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
         );
       },
+      // 217k (W12 LANE B · G6): the unreadable-reply sink for this chunk's
+      // envelope reads — the reply belongs to the planned file's path.
+      (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, chunk.path)),
     );
     if (!synth.ok) {
       return partialTreeRefuse(
@@ -2780,6 +2932,10 @@ async function synthesizeChunkEnvelope(
    *  absent keeps every prompt byte and the model-call count legacy. */
   patch?: PatchRepairOptions,
   onAttempt?: (attempt: number, res: LlmResult) => void,
+  /** 217k (W12 LANE B · G6): the unreadable-reply sink for this chunk's
+   *  envelope reads (the caller knows the planned file path); absent keeps the
+   *  legacy no-op. */
+  readSink?: EnvelopeReadSink,
 ): Promise<{ ok: true; envelope: SynthesisEnvelope } | { ok: false; code: ErrorCode; error: string }> {
   // fixes/153 (P1): sequential attempt numbering per chunk — one event per
   // model call (synthWithBackoff retries + each bounded repair re-prompt); an
@@ -2793,10 +2949,10 @@ async function synthesizeChunkEnvelope(
       error: res.error ?? res.reason ?? "synthesis call failed",
     };
   }
-  let envelope = parseSynthesisEnvelope(res.text);
+  let envelope = parseSynthesisEnvelope(res.text, readSink);
   if (envelope === null) {
     const repair = await completeCall(p6SynthesisRepairPrompt(treeFailure), opts);
-    if (repair.ok) envelope = parseSynthesisEnvelope(repair.text);
+    if (repair.ok) envelope = parseSynthesisEnvelope(repair.text, readSink);
   }
   if (envelope === null) {
     return { ok: false, code: "RT_E_LLM_REJECTED", error: "model returned an unparseable synthesis envelope after one repair attempt" };
@@ -2869,7 +3025,7 @@ async function synthesizeChunkEnvelope(
               : p6SynthesisProseRepairPrompt(prose, treeFailure);
       const repair = await completeCall(repairPrompt, opts);
       if (repair.ok) {
-        const repaired = parseSynthesisEnvelope(repair.text);
+        const repaired = parseSynthesisEnvelope(repair.text, readSink);
         if (repaired) {
           envelope = repaired;
           validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames);

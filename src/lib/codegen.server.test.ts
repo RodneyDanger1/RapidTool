@@ -12,6 +12,8 @@ import {
   assembleTreeEntry,
   briefFitSatisfied,
   chunkTypeSignatures,
+  ENVELOPE_READ_EXCERPT_MAX,
+  envelopeReadLogEntry,
   forbiddenPrimitiveHit,
   FORBIDDEN_PRIMITIVE_NAMES,
   injectMissingExports,
@@ -53,6 +55,7 @@ import {
   p6TokenCapFromEnv,
   proseLineHits,
   type ChunkPriorFile,
+  type EnvelopeReadFailure,
   type P6SynthesisDeps,
 } from "./codegen.server.ts";
 import { applyPhaseResult, emptyProject } from "./engine.ts";
@@ -2313,6 +2316,234 @@ describe("216r patch-path defect fixes (W9-L2)", () => {
     assert.notEqual(q.generatedSource, KANBAN_MODULE.trim(), "the overwrite would have produced the plain kanban module");
     assert.ok(!(q.generatedSource ?? "").includes("Math.random"));
     assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"));
+  });
+});
+
+// --- 217k (W12 LANE B · fixes/216y §2.3 G6): the silent LLM sinks -------------
+// Both envelope readers used to return a bare `null` when a reply ARRIVED but
+// could not be READ — no log, no code — so an unparseable model reply was
+// indistinguishable from "no output". This block pins the fix's three halves:
+//   (1) the coded signal IS produced on every read failure, with a bounded
+//       excerpt of what arrived and the reader that refused to read it;
+//   (2) the caller-visible return is UNCHANGED (null still means "no
+//       envelope"/"no patch" — control flow untouched, proven end-to-end);
+//   (3) valid/absent replies stay silent — "no output" remains its own state,
+//       distinguishable from "unreadable output" by the signal's presence.
+
+/** Collects the read-failure signals a reader emits (the fix's observable). */
+function collectReadFailures(): { sink: (f: EnvelopeReadFailure) => void; failures: EnvelopeReadFailure[] } {
+  const failures: EnvelopeReadFailure[] = [];
+  return { sink: (f) => failures.push(f), failures };
+}
+
+describe("217k envelope read-failure signals (G6 silent sinks)", () => {
+  it("parseSynthesisEnvelope: malformed reply → coded signal; the caller-visible return is UNCHANGED", () => {
+    const { sink, failures } = collectReadFailures();
+    const out = parseSynthesisEnvelope("%%% not json %%%", sink);
+    assert.equal(out, null, "null still = no envelope (the pre-fix caller contract)");
+    assert.equal(failures.length, 1, "exactly one coded signal for one unreadable reply");
+    const f = failures[0]!;
+    assert.equal(f.code, "RT_E_LLM_REJECTED", "a registry code, not a bare null");
+    assert.equal(f.source, "parseSynthesisEnvelope", "the signal names WHERE it came from");
+    assert.equal(f.reason, "unreadable-json");
+    assert.equal(f.receivedChars, 16);
+    assert.ok(f.excerpt.includes("%%% not json %%%"), "the excerpt carries what was actually received");
+    assert.match(f.message, /could not be read/, "the truth is 'we could not read it'…");
+    assert.ok(!/refused/i.test(f.message), "…never a fabricated 'the model refused' story");
+  });
+
+  it("parseSynthesisEnvelope: every wrong-shape read is coded too (missing module / non-object payload)", () => {
+    for (const [text, why] of [
+      [JSON.stringify({ exports: ["x"] }), /no non-empty `module`/],
+      [JSON.stringify({ module: "  " }), /no non-empty `module`/],
+      ["[1,2,3]", /not a JSON object/],
+      ["42", /not a JSON object/],
+    ] as [string, RegExp][]) {
+      const { sink, failures } = collectReadFailures();
+      assert.equal(parseSynthesisEnvelope(text, sink), null);
+      assert.equal(failures.length, 1, `wrong shape stays null AND signals: ${text}`);
+      assert.equal(failures[0]!.code, "RT_E_LLM_REJECTED");
+      assert.equal(failures[0]!.reason, "unexpected-shape");
+      assert.match(failures[0]!.message, why, "the concrete read rule that failed is named");
+    }
+  });
+
+  it("EMPTY/ABSENT replies stay SILENT — 'no output' is not a read failure (the G6 distinction)", () => {
+    for (const text of ["", "   \n\t ", "```json\n```", undefined, null, 42]) {
+      const { sink, failures } = collectReadFailures();
+      assert.equal(parseSynthesisEnvelope(text, sink), null);
+      assert.equal(failures.length, 0, `absent/blank input must not signal: ${JSON.stringify(text)}`);
+    }
+  });
+
+  it("valid envelope → NO signal (no false positives; fences tolerated as before)", () => {
+    const { sink, failures } = collectReadFailures();
+    const e = parseSynthesisEnvelope(JSON.stringify(KANBAN_ENVELOPE), sink);
+    assert.ok(e);
+    const fenced = parseSynthesisEnvelope("```json\n" + JSON.stringify(KANBAN_ENVELOPE) + "\n```", sink);
+    assert.ok(fenced);
+    assert.equal(failures.length, 0, "a readable envelope never signals");
+  });
+
+  it("parseSynthesisPatchEnvelope: unreadable reply signals; the legacy module envelope stays silent (documented continuation)", () => {
+    const { sink, failures } = collectReadFailures();
+    assert.equal(parseSynthesisPatchEnvelope("I could not apply that patch, sorry.", sink), null);
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0]!.code, "RT_E_LLM_REJECTED");
+    assert.equal(failures[0]!.source, "parseSynthesisPatchEnvelope");
+    assert.equal(failures[0]!.reason, "unreadable-json");
+    // The legacy full-rewrite envelope is READABLE — a non-delta, not a failure.
+    assert.equal(parseSynthesisPatchEnvelope(JSON.stringify({ module: "x", exports: [] }), sink), null);
+    assert.equal(failures.length, 1, "a legacy module envelope never signals (the legacy path reads it fine)");
+    // Non-string and blank replies stay silent ("no output").
+    assert.equal(parseSynthesisPatchEnvelope(42, sink), null);
+    assert.equal(parseSynthesisPatchEnvelope("   ", sink), null);
+    assert.equal(failures.length, 1);
+    // A valid delta never signals.
+    assert.deepEqual(parseSynthesisPatchEnvelope(JSON.stringify({ patch: { oldStr: "a", newStr: "b" } }), sink), {
+      oldStr: "a",
+      newStr: "b",
+    });
+    assert.equal(failures.length, 1);
+  });
+
+  it("parseSynthesisPatchEnvelope: a malformed patch block is coded (empty oldStr / missing newStr)", () => {
+    const { sink, failures } = collectReadFailures();
+    assert.equal(parseSynthesisPatchEnvelope(JSON.stringify({ patch: { oldStr: "", newStr: "x" } }), sink), null);
+    assert.equal(parseSynthesisPatchEnvelope(JSON.stringify({ patch: { oldStr: "x" } }), sink), null);
+    assert.equal(failures.length, 2);
+    assert.ok(failures.every((f) => f.reason === "unexpected-shape" && f.code === "RT_E_LLM_REJECTED"));
+    assert.match(failures[0]!.message, /empty `oldStr`/);
+    assert.match(failures[1]!.message, /no string `newStr`/);
+  });
+
+  it("the excerpt is BOUNDED: a 10k-char garbage reply reports its length but only ENVELOPE_READ_EXCERPT_MAX excerpt chars", () => {
+    const big = "%".repeat(10_000);
+    const { sink, failures } = collectReadFailures();
+    assert.equal(parseSynthesisEnvelope(big, sink), null);
+    assert.equal(failures[0]!.receivedChars, 10_000, "the full received length is reported");
+    assert.equal(failures[0]!.excerpt.length, ENVELOPE_READ_EXCERPT_MAX, "the excerpt is capped");
+    assert.ok(!failures[0]!.message.includes(big), "never the raw model text unbounded");
+    const entry = envelopeReadLogEntry(failures[0]!, "src/generated.ts");
+    assert.ok(entry.detail.length <= 440, "the log line stays bounded (400-char cap + path/code prefix)");
+  });
+
+  it("envelopeReadLogEntry: the established refusal-log shape — coded, path-prefixed, warn level", () => {
+    const failure: EnvelopeReadFailure = {
+      code: "RT_E_LLM_REJECTED",
+      source: "parseSynthesisEnvelope",
+      reason: "unreadable-json",
+      excerpt: "%%%",
+      receivedChars: 3,
+      message: 'parseSynthesisEnvelope: the reply was received but could not be read — JSON.parse failed (3 chars; excerpt "%%%")',
+    };
+    const entry = envelopeReadLogEntry(failure, "src/generated.ts");
+    assert.equal(entry.event, "p6.synthesis.envelope.unreadable");
+    assert.equal(entry.level, "warn");
+    assert.equal(entry.phase, 6);
+    assert.ok(entry.detail.startsWith("src/generated.ts · RT_E_LLM_REJECTED · "), "codes ride the detail like the neighbours");
+    assert.match(entry.detail, /could not be read/);
+    assert.ok(!/refused/i.test(entry.detail));
+  });
+
+  it("e2e: an unparseable synthesis reply is VISIBLE (coded warn ×2) and the terminal refusal is unchanged", async () => {
+    const base = p6Base();
+    const { deps } = fakeDeps({ completeText: "the model babbled prose, no json at all" });
+    const q = await liveP6Synthesis(base, deps);
+    assert.equal(q.generatedSource, base.generatedSource, "the deterministic floor still stands");
+    const readWarns = (q.logs ?? []).filter((l) => l.event === "p6.synthesis.envelope.unreadable");
+    assert.equal(readWarns.length, 2, "BOTH unreadable reads (synthesis + bounded repair) are recorded — pre-fix: zero");
+    for (const w of readWarns) {
+      assert.equal(w.level, "warn");
+      assert.match(w.detail, /src\/generated\.ts · RT_E_LLM_REJECTED · /);
+      assert.match(w.detail, /could not be read/);
+      assert.ok(w.detail.includes("the model babbled prose"), "the excerpt names what actually arrived");
+      assert.ok(!/refused/i.test(w.detail), "the entry never claims the model refused");
+    }
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal && /RT_E_LLM_REJECTED/.test(refusal.detail), "the terminal refusal trail is unchanged");
+  });
+
+  it("e2e: an EMPTY reply reads as 'no output' — zero warns, unlike the unreadable reply (the audit's exact complaint)", async () => {
+    const base = p6Base();
+    const { deps } = fakeDeps({ completeText: "" });
+    const q = await liveP6Synthesis(base, deps);
+    assert.equal(q.generatedSource, base.generatedSource, "the floor stands (unchanged)");
+    assert.equal(
+      (q.logs ?? []).filter((l) => l.event === "p6.synthesis.envelope.unreadable").length,
+      0,
+      "nothing was received → nothing to report; the warn is the tell that separates it from the garbage case",
+    );
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal && /unparseable synthesis envelope/.test(refusal.detail), "the terminal refusal still lands");
+  });
+
+  it("e2e: a rescue is NOT a refusal — the warn is recorded, the cycle is accepted, p6.synthesis.refused stays clean", async () => {
+    const base = p6Base();
+    let n = 0;
+    const complete = async (): Promise<LlmResult> => {
+      n += 1;
+      return { ok: true, text: n === 1 ? "%%% not json %%%" : JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(base, {
+      complete,
+      expand: async () => ({ ok: true, spec: KANBAN_SPEC }),
+      verify: async () => ({
+        status: "passed",
+        iterations: 1,
+        evidence: "3/3 machine-run cases passed on iteration 1",
+        finalSource: KANBAN_MODULE,
+        cases: [],
+      }),
+    });
+    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "the bounded repair rescued the cycle (control flow unchanged)");
+    const readWarns = (q.logs ?? []).filter((l) => l.event === "p6.synthesis.envelope.unreadable");
+    assert.equal(readWarns.length, 1, "exactly one warn — only the FIRST reply was unreadable");
+    assert.ok(readWarns[0]!.detail.includes("%%% not json %%%"));
+    assert.ok(
+      !(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"),
+      "a rescued parse must never read as a refused cycle (p6.synthesis.refused is the terminal census)",
+    );
+  });
+
+  it("e2e: an unreadable PATCH reply is recorded on p6.repair.patch.refused; the legacy repair rescues, control flow unchanged", async () => {
+    const base = p6Base();
+    const h = patchHarness(
+      [
+        () => ({ ok: true, text: JSON.stringify(PROSE_REFUSED_ENVELOPE), model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: "I could not produce a patch, sorry — here is prose.", model: "deepseek-v4-flash" }),
+        () => ({ ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" }),
+      ],
+      { patchRepairs: true },
+    );
+    const q = await liveP6Synthesis(base, h.deps);
+
+    assert.deepEqual(h.kinds, ["synthesis", "patch", "legacy-prose"], "the call sequence is unchanged by the fix");
+    const refusal = (q.logs ?? []).find((l) => l.event === "p6.repair.patch.refused");
+    assert.ok(refusal, "the unreadable delta reply is recorded (pre-fix: this line was silent)");
+    assert.match(refusal!.detail, /^src\/generated\.ts · RT_E_LLM_REJECTED · /);
+    assert.match(refusal!.detail, /could not be read/);
+    assert.match(refusal!.detail, /I could not produce a patch/, "the excerpt carries the received bytes");
+    assert.ok(!/refused/i.test(refusal!.detail), "no fabricated refusal story for a reply we merely could not read");
+    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "the legacy full-rewrite repair still lands");
+    assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.repair.delta"), "an unreadable reply never stamps a delta record");
+    assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"), "no terminal refusal — the cycle was rescued");
+  });
+
+  it("e2e: the chunked path records an unreadable chunk reply with the planned FILE path (honest partial unchanged)", async () => {
+    const base = p6Base(LEDGER_BRIEF);
+    const f = chunkedDeps({ failChunk: 1 });
+    const q = await liveP6Synthesis(base, f.deps);
+    const warns = (q.logs ?? []).filter((l) => l.event === "p6.synthesis.envelope.unreadable");
+    assert.equal(warns.length, 2, "chunk 1's synthesis AND its bounded repair were unreadable → both recorded");
+    assert.ok(
+      warns.every((w) => w.detail.startsWith("src/jobs/rent-2.ts · RT_E_LLM_REJECTED · ")),
+      "the planned file path attributes the failure to the refused chunk",
+    );
+    const refusal = (q.logs ?? []).find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal && /chunk 2\/3 refused/.test(refusal.detail), "the terminal honest-partial refusal is unchanged");
+    assert.ok(!(q.generatedSource ?? "").includes("collectRent8"), "the refused chunk's export is absent from the assembled entry");
+    assert.ok((q.generatedSource ?? "").includes("collectRent0"), "the prior chunk's real file stays on the project");
   });
 });
 

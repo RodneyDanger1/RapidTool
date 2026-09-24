@@ -122,7 +122,16 @@ function completionResponse(message: PopupMessage): Response {
   });
 }
 
-/** Minimal HTML: postMessage the token to the opener and close. No React. */
+/**
+ * Minimal HTML: postMessage the token to the opener and close. No React.
+ *
+ * The inline script's three try/catch guards are deliberate best-effort (see
+ * their comments): this is a bare HTML document with no bundle and no
+ * telemetry sink (rt-client is not available here), and every guarded failure
+ * still surfaces through the opener's token:null path — client.ts's
+ * waitForPopupToken settles null and signIn reports "Sign-in was cancelled or
+ * failed" — rather than being hidden.
+ */
 function completionHtml(message: PopupMessage): string {
   // JSON is safe inside a <script type="application/json"> block; the inline
   // script only reads it. Avoids escaping pitfalls of embedding in JS source.
@@ -146,10 +155,21 @@ function completionHtml(message: PopupMessage): string {
 (function () {
   var el = document.getElementById("grok-auth-popup-msg");
   var msg = { source: "grok-auth-popup", token: null };
+  /* best-effort: the payload is JSON.stringify()d server-side with "<" escaped, so
+     parse failure means a corrupted document, not an auth failure. On failure msg
+     keeps its default { token: null }: the opener settles on null and reports
+     "Sign-in was cancelled or failed" (client.ts) — the user can retry, nothing is
+     silently accepted. No telemetry sink exists in this bare popup document. */
   try { if (el && el.textContent) msg = JSON.parse(el.textContent); } catch (e) {}
+  /* best-effort delivery: a throw here must not skip window.close() below. If the
+     message never arrives, the opener's popup.closed poll settles token:null — the
+     same user-visible "cancelled or failed" result, not a silent hang. */
   try {
     if (window.opener) window.opener.postMessage(msg, window.location.origin);
   } catch (e) {}
+  /* best-effort: browsers may refuse to close a window they do not consider
+     script-opened. If this no-ops the popup simply stays open and the user closes
+     it; the opener has already settled either way. */
   try { window.close(); } catch (e) {}
 })();
 </script>

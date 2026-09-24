@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { compileCheckDir, parseVerdictForSource, treeRun, verifyKindDir } from "./compile-check.server.ts";
+import { compileCheckDir, installToolFor, parseVerdictForSource, treeRun, verifyKindDir } from "./compile-check.server.ts";
 import { scrubbedEnv } from "./node-runner.server.ts";
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), "rapidtool-cc-"));
@@ -685,29 +685,264 @@ describe("216 T-18 — the emitted project's own typecheck/test scripts", () => 
   });
 });
 
-describe("B1 verifyKindDir", () => {
-  it("skips honestly when there is no build script", () => {
+// ---------------------------------------------------------------------------
+// 217d T-18 — the emitted project's OWN declared `build` script: executed
+// ONLY when the tree's dependencies are installed (node_modules/ present in
+// the run copy); otherwise the honest skip + UNVERIFIED note. Same hard rule
+// as typecheck/test: a declared build that ran red can never be ok:true, and
+// deps absent is never a pass.
+// ---------------------------------------------------------------------------
+
+describe("217d T-18 — the emitted project's own build script", () => {
+  /** package.json carrying a declared `build` + a green spec + main entry. */
+  const writeBuildTree = (root: string, build: string, extras: [string, string][] = []): void => {
+    write(
+      root,
+      "package.json",
+      JSON.stringify({ name: "mini-emit", type: "module", main: "src/main.ts", scripts: { build } }),
+    );
+    write(root, "src/main.ts", "export const boot = (): string => 'ok';\n");
+    write(root, "tests/oracle.spec.ts", PASSING_SPEC);
+    for (const [rel, body] of extras) write(root, rel, body);
+  };
+
+  it("(a) no node_modules → build stays the honest skip + UNVERIFIED note; never a fabricated pass", async () => {
     const dir = tempDir();
     try {
-      write(dir, "package.json", JSON.stringify({ name: "x", scripts: { test: "true" } }));
-      const r = verifyKindDir(dir);
-      assert.equal(r.ok, true);
-      assert.equal(r.skipped, true);
+      writeBuildTree(dir, "vite build");
+      const r = await treeRunAsConsumer(dir);
+      assert.ok(r.project, "treeRun always sets the project leg");
+      const build = r.project!.build;
+      assert.ok(build, "the build verdict is always present");
+      assert.equal(build!.run, "skip", "a declared build without installed deps is never executed");
+      assert.equal(build!.command, "vite build", "the command is carried verbatim from the emitted package.json");
+      assert.match(build!.note ?? "", /no node_modules\//);
+      assert.match(build!.note ?? "", /UNVERIFIED \(npm install, then re-run to verify\)/);
+      assert.match(build!.note ?? "", /not a fabricated pass/);
+      assert.notEqual(build!.run, "pass", "a skip is never a pass");
+      assert.equal(r.project!.ok, true, "a skip is not a red — nothing declared actually failed");
+      assert.match(r.note ?? "", /npm run build/, "the skip is loud at the top level");
+      assert.match(r.note ?? "", /UNVERIFIED/, "an ok verdict is never silent about the unverified build");
+      assert.equal(r.ok, true, "the rest of the tree is green; the unverified build rides the loud note");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("runs the declared build script and reports fail honestly", () => {
+  it("(b) deps present + build exits 0 → build.run pass; the declared build really ran (sentinel)", async () => {
+    const dir = tempDir();
+    const sentinelDir = tempDir();
+    const sentinel = join(sentinelDir, "built.txt");
+    try {
+      const marker = `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(sentinel)}, "built");\n`;
+      writeBuildTree(dir, "node build-marker.mjs", [["build-marker.mjs", marker]]);
+      mkdirSync(join(dir, "node_modules"), { recursive: true });
+      const before = snapshotListing(dir);
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true, `a green tree with a passing build stays ok: ${JSON.stringify(r)}`);
+      assert.ok(r.project?.build, "the build verdict is present");
+      assert.equal(r.project!.build!.run, "pass", "the declared build ran and exited 0");
+      assert.equal(r.project!.build!.exitCode, 0);
+      assert.equal(readFileSync(sentinel, "utf8"), "built", "the build script's side effect proves it executed");
+      assert.deepEqual(snapshotListing(dir), before, "the subject dir is read-only — only the temp copy ran the build");
+      assert.equal(r.project!.ok, true);
+      assert.equal(r.error, undefined);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(sentinelDir, { recursive: true, force: true });
+    }
+  });
+
+  it("(c) deps present + build exits 2 → build.run fail with the coded failure preserved; ok:false", async () => {
     const dir = tempDir();
     try {
-      write(dir, "package.json", JSON.stringify({ name: "x", scripts: { build: "node -e \"process.exit(2)\"" } }));
-      const r = verifyKindDir(dir, { timeoutMs: 30_000 });
-      assert.equal(r.ok, false);
+      writeBuildTree(dir, "node build-fail.mjs", [
+        ["build-fail.mjs", "console.error('BUILD-9001: synthetic build failure');\nprocess.exit(2);\n"],
+      ]);
+      mkdirSync(join(dir, "node_modules"), { recursive: true });
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, false, "a red declared build can never be ok:true");
+      assert.ok(r.project?.build, "the build verdict is present");
+      assert.equal(r.project!.build!.run, "fail");
+      assert.equal(r.project!.build!.exitCode, 2, "the coded failure (exit 2) is preserved");
+      assert.match(r.project!.build!.detail ?? "", /BUILD-9001/);
+      assert.equal(r.project!.ok, false);
+      assert.match(r.error ?? "", /npm run build/, "the top-level error names the red build");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+describe("B1 verifyKindDir", () => {
+  it("skips honestly when there is no build script", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "x", scripts: { test: "true" } }));
+      const r = await verifyKindDir(dir);
+      assert.equal(r.ok, true);
+      assert.equal(r.skipped, true);
+      assert.equal(r.scratch, false, "no build script ⇒ no scratch copy, no install leg");
+      assert.equal(r.install, undefined, "the install leg never runs without a build script");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs the declared build script and reports fail honestly", async () => {
+    const dir = tempDir();
+    try {
+      write(
+        dir,
+        "package.json",
+        JSON.stringify({ name: "x", scripts: { build: "node -e \"process.exit(2)\"" } }),
+      );
+      // The install command rides the documented test seam (compile-check's 216z
+      // contract): without it this tree has no lockfile and would resolve deps
+      // over the network. A seam install is marked `mocked: true` and is never
+      // evidence that a real install happened — asserted below so the honesty
+      // marking cannot silently regress.
+      const r = await verifyKindDir(dir, {
+        timeoutMs: 30_000,
+        installCommand: "node -e \"process.exit(0)\"",
+      });
+      assert.equal(r.ok, false);
+      assert.equal(r.scratch, true, "a build script ⇒ the scratch-copy install leg runs");
+      assert.equal(r.install?.run, "pass", "the seam install passed");
+      assert.equal(r.install?.mocked, true, "a seam install is marked mocked, never real");
+      assert.equal(r.build?.run, "fail", "the declared build script's real exit code is reported");
+      assert.equal(r.build?.exitCode, 2);
+      assert.equal(r.code, "RT_E_VERIFY_KIND_FAILED");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("seam install exit 0 → install pass/mocked/seam; the declared build really ran; the subject dir is untouched", async () => {
+    const dir = tempDir();
+    const sentinelDir = tempDir();
+    const sentinel = join(sentinelDir, "build-ran.txt");
+    try {
+      const marker = `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(sentinel)}, "built");\n`;
+      write(dir, "package.json", JSON.stringify({ name: "x", scripts: { build: "node scripts/marker.mjs" } }));
+      write(dir, "scripts/marker.mjs", marker);
+      const before = snapshotListing(dir);
+      const beforePkg = readFileSync(join(dir, "package.json"), "utf8");
+      const r = await verifyKindDir(dir, {
+        timeoutMs: 30_000,
+        installCommand: 'node -e "process.exit(0)"',
+      });
+      assert.equal(r.ok, true, `expected install-pass + build-pass: ${JSON.stringify(r)}`);
+      assert.equal(r.scratch, true, "a build script ⇒ the scratch-copy install leg runs");
+      assert.equal(r.install?.run, "pass");
+      assert.equal(r.install?.mocked, true, "a seam install is marked mocked, never real");
+      assert.equal(r.install?.tool, "seam", "the seam install is labelled `seam`, not npm");
+      assert.equal(r.install?.exitCode, 0);
+      assert.match(r.install?.reason ?? "", /NOT evidence of a real dependency install/);
+      assert.equal(r.build?.run, "pass", "the declared build really ran (exit 0)");
+      assert.equal(r.build?.exitCode, 0);
+      assert.equal(readFileSync(sentinel, "utf8"), "built", "the build script's side effect proves it executed");
+      assert.equal(r.code, undefined);
+      assert.deepEqual(snapshotListing(dir), before, "the subject dir's file list is untouched — the scratch copy is the point");
+      assert.equal(readFileSync(join(dir, "package.json"), "utf8"), beforePkg, "the subject package.json is byte-identical");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(sentinelDir, { recursive: true, force: true });
+    }
+  });
+
+  it("seam install exit ≠ 0 → coded failure; build/test short-circuit with the exact reason (never silently absent)", async () => {
+    const dir = tempDir();
+    try {
+      write(
+        dir,
+        "package.json",
+        JSON.stringify({ name: "x", scripts: { build: 'node -e "0"', test: "node --version" } }),
+      );
+      const r = await verifyKindDir(dir, {
+        timeoutMs: 30_000,
+        installCommand: 'node -e "process.exit(3)"',
+      });
+      assert.equal(r.ok, false);
+      assert.equal(r.scratch, true);
+      assert.equal(r.install?.run, "fail");
+      assert.equal(r.install?.exitCode, 3, "the install's real exit code is carried");
+      assert.equal(r.code, "RT_E_VERIFY_KIND_FAILED");
+      assert.equal(r.build?.run, "skip", "the declared build is never executed after a red install");
+      assert.equal(r.test?.run, "skip", "the declared test is never executed after a red install");
+      assert.equal(r.build?.command, undefined, "nothing ran — no command is claimed for the build");
+      assert.match(r.build?.note ?? "", /install did not complete \(fail\)/);
+      assert.match(r.build?.note ?? "", /the declared build was NOT executed/);
+      assert.match(r.build?.note ?? "", /fix the install failure and re-run/);
+      assert.match(r.test?.note ?? "", /the declared test was NOT executed/);
+      assert.match(r.detail ?? "", /the declared build\/test scripts were NOT executed/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a seam install that never exits is killed at installTimeoutMs → install.run timeout, bounded", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "x", scripts: { build: 'node -e "0"' } }));
+      const started = Date.now();
+      const r = await verifyKindDir(dir, {
+        installTimeoutMs: 4000,
+        installCommand: 'node -e "setTimeout(() => {}, 60_000)"',
+      });
+      const elapsed = Date.now() - started;
+      assert.equal(r.ok, false);
+      assert.equal(r.install?.run, "timeout", `the install must be classified timeout: ${JSON.stringify(r.install)}`);
+      assert.equal(r.code, "RT_E_VERIFY_KIND_FAILED");
+      assert.equal(r.build?.run, "skip");
+      assert.match(r.build?.note ?? "", /install did not complete \(timeout\)/);
+      assert.ok(elapsed < 30_000, `bounded: verifyKindDir returned in ${elapsed}ms, not 60s`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("installToolFor: lockfile present → npm ci; absent → npm install (honest mapping, no network needed)", () => {
+    const locked = tempDir();
+    const unlocked = tempDir();
+    try {
+      write(locked, "package-lock.json", "{}");
+      const ci = installToolFor(locked);
+      assert.equal(ci.tool, "npm ci");
+      assert.equal(ci.command, "npm ci --no-audit --no-fund");
+      assert.match(ci.reason, /package-lock\.json present/);
+      const install = installToolFor(unlocked);
+      assert.equal(install.tool, "npm install");
+      assert.equal(install.command, "npm install --no-audit --no-fund");
+      assert.match(install.reason, /no package-lock\.json/);
+    } finally {
+      rmSync(locked, { recursive: true, force: true });
+      rmSync(unlocked, { recursive: true, force: true });
+    }
+  });
+
+  // Opt-in (216z contract): the REAL npm path is gated behind
+  // RT_VERIFYKIND_INSTALL=1 — without the env var this stays a skip, never a
+  // fake pass, and the default suite never touches the network.
+  it(
+    "216z opt-in: the REAL npm install leg runs (RT_VERIFYKIND_INSTALL=1)",
+    { skip: process.env.RT_VERIFYKIND_INSTALL !== "1" },
+    async () => {
+      const dir = tempDir();
+      try {
+        write(dir, "package.json", JSON.stringify({ name: "x", scripts: { build: "node scripts/ok.mjs" } }));
+        write(dir, "scripts/ok.mjs", "process.exit(0);\n");
+        const r = await verifyKindDir(dir, { timeoutMs: 120_000, installTimeoutMs: 120_000 });
+        assert.equal(r.install?.run, "pass", `real install must pass: ${JSON.stringify(r.install)}`);
+        assert.equal(r.install?.tool, "npm install", "no lockfile → the real npm install path (no seam)");
+        assert.equal(r.install?.mocked, undefined, "a real install carries no mocked marker");
+        assert.equal(r.build?.run, "pass", "the declared build ran after the real install");
+        assert.equal(r.ok, true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("B4/174-5 scrubbedEnv never copies API keys", () => {

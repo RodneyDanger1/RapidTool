@@ -253,6 +253,137 @@ describe("classifyError", () => {
     for (let i = 0; i < 6; i++) leaf = Object.assign(new Error(`wrap-${i}`), { cause: leaf });
     assert.equal(classifyError(leaf, "RT_E_RUNNER_FAILED"), "RT_E_RUNNER_FAILED");
   });
+
+  // ---- W12 lane-a (fixes/217j) — G3 coverage holes. No OS/network errno may
+  // collapse to the opaque default. Shapes are the real Node/undici ones
+  // (probe evidence in fixes/217j §2.1/§4.1, node v22.23.2).
+
+  it("maps EACCES/EPERM to RT_E_PERMISSION_DENIED", () => {
+    assert.equal(
+      classifyError(
+        Object.assign(
+          new Error("EPERM: operation not permitted, open 'C:\\Windows\\System32\\config\\SAM'"),
+          {
+            code: "EPERM",
+            errno: -4048,
+            syscall: "open",
+            path: "C:\\Windows\\System32\\config\\SAM",
+          },
+        ),
+      ),
+      "RT_E_PERMISSION_DENIED",
+    );
+    assert.equal(
+      classifyError(
+        Object.assign(new Error("EACCES: permission denied, open 'x'"), { code: "EACCES" }),
+      ),
+      "RT_E_PERMISSION_DENIED",
+    );
+    // Prose-only (a wrapper flattened the errno) still classifies.
+    assert.equal(
+      classifyError(new Error("EPERM: operation not permitted, mkdir 'y'")),
+      "RT_E_PERMISSION_DENIED",
+    );
+  });
+
+  it("maps ENOSPC to RT_E_DISK_FULL", () => {
+    assert.equal(
+      classifyError(
+        Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" }),
+      ),
+      "RT_E_DISK_FULL",
+    );
+  });
+
+  it("maps EADDRINUSE to RT_E_PORT_IN_USE", () => {
+    // Real shape observed in the probe: "listen EADDRINUSE: address already in use 127.0.0.1:52658"
+    assert.equal(
+      classifyError(
+        Object.assign(new Error("listen EADDRINUSE: address already in use 127.0.0.1:52658"), {
+          code: "EADDRINUSE",
+        }),
+      ),
+      "RT_E_PORT_IN_USE",
+    );
+  });
+
+  it("maps the connect/DNS errno family to RT_E_NETWORK_UNREACHABLE", () => {
+    for (const code of [
+      "ECONNREFUSED",
+      "ENOTFOUND",
+      "EAI_AGAIN",
+      "ENETUNREACH",
+      "EHOSTUNREACH",
+      "ECONNRESET",
+    ]) {
+      assert.equal(
+        classifyError(Object.assign(new Error(`connect ${code} 127.0.0.1:52551`), { code })),
+        "RT_E_NETWORK_UNREACHABLE",
+        `errno ${code} must not collapse to an opaque code`,
+      );
+    }
+    // Real undici wrapper: the errno hides in .cause (probe G3-3/G3-4).
+    const fetchRefused = Object.assign(new Error("fetch failed"), {
+      cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:52551"), {
+        code: "ECONNREFUSED",
+      }),
+    });
+    assert.equal(classifyError(fetchRefused), "RT_E_NETWORK_UNREACHABLE");
+  });
+
+  it("maps a bare 'fetch failed' wrapper only in place of the opaque default (tier-2)", () => {
+    assert.equal(classifyError(new TypeError("fetch failed")), "RT_E_NETWORK_UNREACHABLE");
+    // Generic wrapper prose must not override a caller's domain fallback —
+    // the research seam's own code is a stronger claim than "fetch failed".
+    assert.equal(
+      classifyError(new TypeError("fetch failed: network down"), "RT_E_RESEARCH_UNAVAILABLE"),
+      "RT_E_RESEARCH_UNAVAILABLE",
+    );
+    assert.equal(
+      classifyError(new TypeError("fetch failed"), "RT_E_LLM_REJECTED"),
+      "RT_E_LLM_REJECTED",
+    );
+    // A coded cause still wins: tier-2 runs only after the full chain walk.
+    assert.equal(
+      classifyError(
+        Object.assign(new Error("fetch failed"), {
+          cause: Object.assign(new Error("Unknown phase 9"), { code: "RT_E_PHASE_ILLEGAL" }),
+        }),
+      ),
+      "RT_E_PHASE_ILLEGAL",
+    );
+  });
+
+  it("maps real JSON.parse failures to RT_E_VALIDATION, keeping non-JSON SyntaxErrors opaque", () => {
+    const jsonParseError = (text: string): unknown => {
+      try {
+        JSON.parse(text);
+        return null;
+      } catch (e) {
+        return e;
+      }
+    };
+    // Real V8 shapes (probe, node v22.23.2): three distinct message texts.
+    for (const text of ["{oops", "", "{"]) {
+      const err = jsonParseError(text);
+      assert.ok(err instanceof Error, `JSON.parse(${JSON.stringify(text)}) must have thrown`);
+      assert.equal(classifyError(err), "RT_E_VALIDATION");
+    }
+    // Strong signal: overrides a caller fallback the same way ENOENT does.
+    assert.equal(classifyError(jsonParseError("{oops"), "RT_E_LLM_REJECTED"), "RT_E_VALIDATION");
+    // A SyntaxError from evaluated CODE is not an input-validation failure.
+    assert.equal(classifyError(new SyntaxError("Unexpected token '}'")), "RT_E_UNKNOWN");
+    assert.equal(classifyError(new SyntaxError("missing ) after argument list")), "RT_E_UNKNOWN");
+  });
+
+  it("keeps genuinely unknown errors on the honest fallback after the G3 additions", () => {
+    assert.equal(classifyError(new Error("quantum flux inverted")), "RT_E_UNKNOWN");
+    assert.equal(classifyError({ weird: true }), "RT_E_UNKNOWN");
+    assert.equal(
+      classifyError(new Error("quantum flux inverted"), "RT_E_INTERNAL"),
+      "RT_E_INTERNAL",
+    );
+  });
 });
 
 describe("ERROR_CODE_DOC", () => {
@@ -292,5 +423,21 @@ describe("ERROR_CODE_DOC", () => {
     assert.ok(ERROR_CODE_DOC.RT_E_FOREIGN_FILES.meaning.trim().length > 0);
     assert.ok(ERROR_CODE_DOC.RT_E_BUSY.agentAction.trim().length > 0);
     assert.ok(ERROR_CODE_DOC.RT_E_FOREIGN_FILES.agentAction.trim().length > 0);
+  });
+
+  it("W12 G3 additions stay registered with honest docs (append-only)", () => {
+    for (const code of [
+      "RT_E_PERMISSION_DENIED",
+      "RT_E_DISK_FULL",
+      "RT_E_PORT_IN_USE",
+      "RT_E_NETWORK_UNREACHABLE",
+    ] as const) {
+      assert.ok(
+        (ERROR_CODES as readonly string[]).includes(code),
+        `${code} missing from ERROR_CODES`,
+      );
+      assert.ok(ERROR_CODE_DOC[code].meaning.trim().length > 0, `${code} meaning is empty`);
+      assert.ok(ERROR_CODE_DOC[code].agentAction.trim().length > 0, `${code} agentAction is empty`);
+    }
   });
 });

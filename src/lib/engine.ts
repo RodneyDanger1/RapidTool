@@ -22,16 +22,17 @@ import {
   recordGateInto,
   runGate,
 } from "./dod.ts";
+// fixes/216k §3 (106 T-13 / F-10): doctor.ts's counted declared-vs-materialised
+// job census — the ONE derivation (fixes/216k §3) now has its production
+// caller at the P6 apply below. doctor.ts is client-safe by contract
+// (sandbox-policy + token-ledger only — no node:fs) and imports no engine
+// code, so this edge adds neither an engine↔doctor cycle nor a hydration risk
+// (H2 rule).
+import { jobScopeShortfall } from "./doctor.ts";
 // P13 Wild Mode: the Auto-Review Supervisor classifier (configured-only —
 // deepseek-v4-flash). Loaded lazily inside wildStep (server boundary — a
 // static import would pull server-only code into the client bundle).
 import type { WildClassifierResult, WildReviewContext } from "./wild-mode.server.ts";
-// 216i (112 §4.1/§4.3): the failure-record shapes for the L2 seal's record
-// gate — TYPE-ONLY (erased at runtime), mirroring the wild-mode.server type
-// import above. The VALUE (failureLessonFromRecord) rides the lazy
-// LessonSurface seam below, so knowledge.ts's node:fs never enters the client
-// bundle (H2 rule).
-import type { FailureLessonOutcome, FailureRecord } from "./knowledge.ts";
 // Optional real-backend integration (concurrently-authored modules). Imported
 // read-only; when the underlying backend is not configured each resolves to a
 // typed `{ ok: false, reason: "not-configured" }` and the engine falls back to
@@ -90,15 +91,6 @@ type LessonSurface = {
     opts?: { limit?: number },
   ) => string[];
   lessonRankLimit: number;
-  // 216i (112 §4.1/§4.3 — T2): the failure-record gate ("a lesson without a
-  // counterexample is not a lesson"). Anchored records mint through the same
-  // builders the direct callers use (ONE id per failure); an anchor-less
-  // record returns refuse:no-proof + a visible lesson.refused ledger payload,
-  // so a refusal is recorded, never a silent no-op.
-  failureLessonFromRecord: (
-    record: FailureRecord,
-    opts?: { project?: Project | null; iterations?: number; hypothesis?: string },
-  ) => FailureLessonOutcome;
 };
 let lessonSurface: LessonSurface | null = null;
 void import("./knowledge.ts")
@@ -110,7 +102,6 @@ void import("./knowledge.ts")
       selectLessons: m.selectLessons,
       lessonLinesForBrief: m.lessonLinesForBrief,
       lessonRankLimit: m.EXPAND_LESSON_RANK_LIMIT,
-      failureLessonFromRecord: m.failureLessonFromRecord,
     };
   })
   .catch(() => {
@@ -1324,6 +1315,59 @@ function fitLessonEvidence(digest: string, budget = 240): string {
   return out.length <= budget ? out : out.slice(0, budget);
 }
 
+/**
+ * fixes/216k §3: the job label a spec-graph node's `purpose` carries —
+ * `Implement job “flip” against the contract` → `flip`. Mirrors the scaffold's
+ * `jobLabelOf` quote-stripping (straight or curly quotes) + whitespace
+ * collapse so the engine census and the scaffold README census label nodes
+ * identically; a LOCAL copy because the engine must not import the emitter
+ * module (H2 seam budget — the label rule is 4 lines, not a dependency).
+ */
+function jobLabelFromPurpose(purpose: unknown): string | null {
+  if (typeof purpose !== "string") return null;
+  const m = purpose.match(/["“]([^"”]+)["”]/);
+  if (!m) return null;
+  const label = m[1].replace(/\s+/g, " ").trim();
+  return label || null;
+}
+
+/**
+ * fixes/216k §3 (106 T-13 / F-10) — the production caller of doctor.ts's
+ * counted job-scope census: the `p6.jobs.shortfall` warn row the engine
+ * persists onto the exported project when a P6 apply's DECLARED lattice jobs
+ * outnumber the MATERIALISED spec-graph job nodes (`planSpecGraph` materialises
+ * at most FIVE — algorithms.ts). `lattice.jobs` is the brief's own
+ * declaration; the materialised side is the spec-graph job-* nodes' `purpose`
+ * labels (the scaffold README census derives the same labels from the same
+ * nodes), so a 6+-job brief can no longer ship fewer advertised job modules
+ * silently. Pure: a project in, the log row (or null) out, using doctor.ts's
+ * ONE derivation (declared-vs-materialised counts + the missing names); the
+ * caller appends only a non-null row, so zero-shortfall applies return the
+ * same logs array untouched (byte-identity).
+ */
+export function p6JobsShortfallLog(project: Project): JsonLog | null {
+  const nodes = project.specGraph?.nodes ?? [];
+  const materialised: string[] = [];
+  for (const n of nodes) {
+    if (!n || typeof n.id !== "string" || !n.id.startsWith("job-")) continue;
+    // A node without a parsable label still materialised — count it by id so
+    // the count never under-reports coverage (the `missing` names stay honest
+    // because a `job-<n>` id cannot name-match a declared job).
+    materialised.push(jobLabelFromPurpose(n.purpose) ?? n.id);
+  }
+  const s = jobScopeShortfall(project.lattice?.jobs ?? null, materialised);
+  if (s.declared <= s.materialised) return null;
+  return {
+    ts: Date.now(),
+    phase: 6,
+    level: "warn",
+    event: "p6.jobs.shortfall",
+    detail: `declared ${s.declared} lattice job(s) vs materialised ${s.materialised} spec-graph job node(s) — ${
+      s.declared - s.materialised
+    } unmaterialised; missing: ${s.missing.join(", ")}`,
+  };
+}
+
 export function applyPhaseResult(project: Project, phase: PhaseId): Project {
   // CORE-01 (defensive): refuse a truly invalid phase id before any array
   // indexing — a corrupt caller throws loudly, never crashes mid-graph.
@@ -1405,24 +1449,28 @@ export function applyPhaseResult(project: Project, phase: PhaseId): Project {
     generatedSource: result.generatedSource ?? primed.generatedSource,
     lastTest: result.lastTest ?? primed.lastTest,
   };
-  // L2 template-emission capture (fixes/98 §2.3 writer 2(b) / 98_make_2 §5): a
-  // phase that SEALS complete (not awaiting_hitl) with unmet DoD mints ONE
-  // template-emission lesson row. 216i (112 §4.2 — T1): the row is minted
-  // through the record gate and carries the SIGNATURE id (216g), so a re-seal
-  // of the same gate re-derives the same id and the merge below accrues its
-  // reproducedCount on the ONE stored row (never a forked twin).
-  let memory = merged.memory;
+  // T-11 (106 §6, F-08) — GREEN-SEAL GATE: a RED seal never mints a lesson row.
+  // fixes/98 §2.3's engine-half capture used to record "P6 sealed with unmet
+  // DoD" as an L2 template-emission lesson and feed it back through
+  // selectLessons — a lesson whose target probe never passed, so the
+  // contradiction compounded instead of surfacing (the exact F-08 finding).
+  // The red-seal signal is now an honest phase-scoped LOG carrying the same
+  // deterministic evidence digest the row text used to carry. Lesson capture
+  // stays gated on a green seal; the surviving L2 writers (headless keyed
+  // refusals, report-intake agent reports) mint from their own machine
+  // evidence through knowledge.ts's record gate, whose refuse:no-proof floor
+  // is untouched.
   const sealLogs: JsonLog[] = [];
   if (!needsHitl && lessonSurface) {
     const r = runGate(merged, phase);
     if (!r.pass) {
-      // fixes/144 (M5-1, engine half): L2 rows record WHAT was missing, not
-      // just THAT something failed (fixes/99 finding). The row text is the
-      // deterministic evidence digest — the unmet criteria VERBATIM plus the
-      // journey's refusal class (RT_E_*) and refusal reason when a keyed
-      // synthesis refusal was recorded — in the shared lessonEvidenceDetail
-      // format (knowledge.ts emits the same bytes via the C4 lane) so engine-
-      // and driver-minted rows converge.
+      // fixes/144 (M5-1, engine half): the log records WHAT was missing, not
+      // just THAT something failed (fixes/99 finding) — the unmet criteria
+      // VERBATIM plus the journey's refusal class (RT_E_*) and refusal reason
+      // when a keyed synthesis refusal was recorded — in the shared
+      // lessonEvidenceDetail format (knowledge.ts emits the same bytes via the
+      // C4 lane), fitted to the bounded ledger budget with the class clause
+      // atomic (fitLessonEvidence).
       const unmetCriteria = r.unmet.map((g) => g.criterion);
       const refusal = refusalClassOf(merged);
       const digest = lessonEvidenceDetail(
@@ -1430,58 +1478,40 @@ export function applyPhaseResult(project: Project, phase: PhaseId): Project {
         refusal?.code ?? null,
         refusal && refusal.tail ? refusal.tail : null,
       );
-      // 216i (112 §4.1/§4.3 — T2): mint through the record gate — the §4.3
-      // counterexample floor (≥1 anchor) plus the 216g signature identity, so
-      // a repeated identical failure maps to ONE row. A refusal (0 anchors)
-      // records a visible lesson.refused ledger row and mints NO lesson —
-      // never a silent no-op. (Floor, not live traffic: runGate's contract
-      // makes !pass ⇒ ≥1 unmet criterion, so today this guards the invariant.)
-      const rec = lessonSurface.failureLessonFromRecord(
-        { kind: "gate-unmet", phase, anchors: unmetCriteria, evidenceHash: r.evidenceHash },
-        { project: merged },
-      );
-      if (rec.refused) {
-        sealLogs.push({
-          ts: Date.now(),
-          phase,
-          level: rec.log.level,
-          event: rec.log.event,
-          detail: rec.log.detail,
-        });
-      } else {
-        const base = rec.lesson;
-        const text = fitLessonEvidence(digest) || base.text;
-        // 216i (T1): the id stays the 216g SIGNATURE id. The digest tail is
-        // volatile (refusal reason / model prose) and the pre-216i
-        // `fnv8hex(text)` id override re-opened exactly the §4.2 fork this
-        // package closes — the text rides the row, the identity does not.
-        const lesson: MemoryEntry = text === base.text ? base : { ...base, text };
-        const existing = memory.some((m) => m.id === lesson.id);
-        // 216i (T1): lesson first ⇒ the fold puts the accrued count on the
-        // fresher row (this mint), while dedupeMemoryIds keeps its rename
-        // semantics for every non-lesson twin.
-        const folded = accrueReproducedCounts([lesson, ...memory]);
-        memory = dedupeMemoryIds(folded).slice(0, 80);
-        const stored = folded[0] ?? lesson;
-        sealLogs.push({
-          ts: Date.now(),
-          phase,
-          level: "info" as const,
-          event: existing ? "lesson.reproduced" : "lesson.capture",
-          detail: existing
-            ? `L2 template-emission ${lesson.id} reproduced (P${phase} gate unmet again${
-                refusal ? `; class: ${refusal.code}` : ""
-              }; reproducedCount=${stored.reproducedCount ?? 0})`
-            : `L2 template-emission ${lesson.id} (P${phase} sealed with unmet DoD: ${r.unmet
-                .map((g) => g.id)
-                .join(", ")}${refusal ? `; class: ${refusal.code}` : ""})`,
-        });
+      const event = `p${phase}.seal.unmet`;
+      // T-11 (106 §6): the DoD probe ids the digest anchors to ride the log
+      // head so the ledger names the probes a green seal would have to satisfy
+      // (the lesson-row half — `probe:<id>` tags — lands in knowledge.ts from
+      // these same failureSignature anchors; NO row id is re-minted).
+      const detail = `red seal — ${r.unmet.length} unmet DoD probe(s) [${r.unmet
+        .map((g) => g.id)
+        .join(", ")}]: ${fitLessonEvidence(digest)}`;
+      // Stale-read guard: re-sealing the same unmet gate (a repair loop's
+      // re-apply) adds no new fact — an identical row already recorded in the
+      // ledger is never duplicated.
+      if (!merged.logs.some((l) => l.event === event && l.detail === detail)) {
+        sealLogs.push({ ts: Date.now(), phase, level: "warn" as const, event, detail });
       }
+    }
+  }
+  // fixes/216k §3 (106 T-13 / F-10): the production shortfall caller — a P6
+  // apply whose declared lattice jobs outnumber the materialised spec-graph
+  // job nodes persists the counted `p6.jobs.shortfall` warn row.
+  // p6JobsShortfallLog is pure and returns null when declared ≤ materialised;
+  // only a non-null row is appended, so a zero-shortfall apply returns the
+  // SAME logs array untouched (byte-identity), and a re-apply never logs the
+  // identical row twice (stale-read guard).
+  if (phase === 6) {
+    const shortfall = p6JobsShortfallLog(merged);
+    if (
+      shortfall &&
+      !merged.logs.some((l) => l.event === shortfall.event && l.detail === shortfall.detail)
+    ) {
+      sealLogs.push(shortfall);
     }
   }
   const packed = attachAlgorithms({
     ...merged,
-    memory,
     logs: sealLogs.length > 0 ? [...merged.logs, ...sealLogs].slice(-200) : merged.logs,
   });
   // fixes/144 (M2 lane B4): when this P6 apply carries a multi-file
@@ -3185,20 +3215,55 @@ export function verifyPriorPhases(
 }
 
 /**
+ * fixes/217f (216y §2.3 G2): the record an unexpected live-layer failure leaves
+ * behind. `runPhaseAsync`'s floor — the deterministic applyPhaseResult result —
+ * is no longer a silent substitute for a failed live pass: this row carries the
+ * real thrown message and the explicit statement that the floor was used.
+ *
+ * Honesty: the throw is deliberately left UNCLASSIFIED — this seam owns no
+ * classifier, and guessing an RT_E code would invent a cause (216y G3 already
+ * maps the common env/network failures to RT_E_UNKNOWN, whose own doc says the
+ * failure is opaque). The message is clipped on an explicit budget so a hostile
+ * or enormous error string cannot blow the bounded ledger (this row rides the
+ * same ≤200-row `logs` window applyPhaseResult maintains).
+ */
+const LIVE_FAILURE_MESSAGE_BUDGET = 160;
+
+function liveLayerFailureRow(phase: PhaseId, thrown: unknown): JsonLog {
+  const message = thrown instanceof Error ? thrown.message : String(thrown);
+  const clipped = message.slice(0, LIVE_FAILURE_MESSAGE_BUDGET);
+  return {
+    ts: Date.now(),
+    phase,
+    level: "warn",
+    event: `p${phase}.live.failed`,
+    detail: `live layer failed (unclassified): ${clipped}${
+      message.length > LIVE_FAILURE_MESSAGE_BUDGET ? "…" : ""
+    } — deterministic floor used instead`,
+  };
+}
+
+/**
  * Async entry point that wires optional real research (and an optional LLM phase
  * narrative) into the deterministic engine — exactly `liveLayer` with a hard
  * safety net. For research phases it fetches real data and layers it on top of the
  * synchronous applyPhaseResult; for every other phase it is exactly
  * applyPhaseResult. When no backend is configured this resolves to the identical
  * deterministic result (no behavior change). Any unexpected error falls back to
- * the deterministic path — a run never strands and never fabricates output.
+ * the deterministic path — a run never strands and never fabricates output — and
+ * the fallback is RECORDED as a bounded `p<phase>.live.failed` warn row (fixes/217f
+ * G2: a degraded live pass stays distinguishable from a deliberately deterministic
+ * one), never swallowed silently.
  */
 export async function runPhaseAsync(project: Project, phase: PhaseId): Promise<Project> {
   try {
     return await liveLayer(project, phase);
-  } catch {
+  } catch (err) {
     // Any unexpected error must never break a run — the deterministic path is the floor.
-    return applyPhaseResult(project, phase);
+    // G2 (216y §2.3): the floor is the OUTCOME, never the whole story — log the failure
+    // on the returned project so the degradation is visible in the record.
+    const floor = applyPhaseResult(project, phase);
+    return { ...floor, logs: [...floor.logs, liveLayerFailureRow(phase, err)].slice(-200) };
   }
 }
 

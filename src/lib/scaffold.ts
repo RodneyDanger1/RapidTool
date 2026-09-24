@@ -478,6 +478,28 @@ function envExample(kind: ProjectKind): string {
   ].join("\n");
 }
 
+/**
+ * fixes/217f (T4.2, 216x §2.3 item 1): the emitted tree's `.gitignore`. Once a
+ * real install + build runs INSIDE an emitted tree (T4.1), `node_modules/` and
+ * `dist/` land in the artifact and the tree stops being a reviewable unit —
+ * this file is what keeps that diff clean. It ignores ONLY what an install /
+ * build / verify run leaves behind and keeps the reviewed artifacts tracked:
+ * the generated source, `.rapidtool/project.json`, the notes and the report
+ * files. Byte-stable: no timestamps, no absolute paths, identical for every
+ * kind and mode (the determinism suite pins it).
+ */
+function gitignoreFile(): string {
+  return [
+    "# RapidTool scaffold .gitignore — keeps this emitted tree a reviewable unit.",
+    "# Ignore only what a real install/build/verify run leaves behind (T4.1/T4.2);",
+    "# the generated source, .rapidtool/project.json and the notes stay tracked.",
+    "node_modules/",
+    "dist/",
+    ".rapidtool/logs/",
+    "",
+  ].join("\n");
+}
+
 const PKG_DEPS: Partial<Record<ProjectKind, Record<string, string>>> = {
   webapp: { react: "^19.0.0", "react-dom": "^19.0.0" },
 };
@@ -1951,6 +1973,10 @@ function readmeBody(
     ["README.md", "this file — mission + commands"],
     ["DEPLOY.md", "run/test/env/deploy notes (honest local-only framing)"],
     [".env.example", "PLACEHOLDER env template — copy to .env, never commit real values"],
+    [
+      ".gitignore",
+      "keeps an install/build/verify run (node_modules/, dist/, .rapidtool/logs/) out of the review diff",
+    ],
     ["package.json", "per-kind skeleton (scripts/deps) + tsconfig.json"],
     [".rapidtool/project.json", "the full exported project (packet, artifacts, oracle, contracts)"],
   ];
@@ -2451,6 +2477,7 @@ export function scaffoldProject(project: Project): ScaffoldResult {
   // loop fills; emitting it here ran before the loop: TDZ + empty counts.)
   push("DEPLOY.md", deplyNotes(proj));
   push(".env.example", envExample(kind));
+  push(".gitignore", gitignoreFile());
   push("package.json", packageJson(kind, proj, proj.oracle.length > 0));
   push("tsconfig.json", tsconfigJson(kind, proj.oracle.length > 0));
   push(".rapidtool/project.json", exportProjectJson(project));

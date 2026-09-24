@@ -69,6 +69,7 @@ describe("scaffoldProject — file-tree shape per kind", () => {
       "README.md",
       "DEPLOY.md",
       ".env.example",
+      ".gitignore",
       "package.json",
       "tsconfig.json",
       ".rapidtool/project.json",
@@ -88,6 +89,44 @@ describe("scaffoldProject — file-tree shape per kind", () => {
     const result = scaffoldProject(p);
     assert.ok(result.ok);
     assert.match((result as { ok: true; summary: string }).summary, /kind webapp/);
+  });
+
+  it("T4.2 (217f): emits a deterministic .gitignore — ignore list pinned, reviewed artifacts tracked", () => {
+    // Single-module mode (the legacy hosted-module emit).
+    const result = scaffoldProject(fullRun());
+    const body = bodyOf(result, ".gitignore");
+    const lines = body.split("\n");
+    for (const entry of ["node_modules/", "dist/", ".rapidtool/logs/"]) {
+      assert.ok(lines.includes(entry), `.gitignore pins ${entry} as its own line`);
+    }
+    // The artifacts a person reviews stay tracked: no blanket directory ignores,
+    // and the generated source is never ignored.
+    for (const banned of [".rapidtool/", "src", "src/", "tests", "tests/", "*.ts"]) {
+      assert.ok(!lines.includes(banned), `must not ignore the reviewed artifact ${banned}`);
+    }
+    assert.ok(
+      !lines.includes(".rapidtool/project.json"),
+      "project.json (the packet export) stays tracked",
+    );
+    // Byte-stable: identical for every kind and independent of project text; no
+    // timestamp and no absolute path (the repo pins emitted determinism).
+    const other = bodyOf(
+      scaffoldProject(fullRun({ kind: "game", name: "Zeta", brief: "a different brief entirely" })),
+      ".gitignore",
+    );
+    assert.equal(other, body, "kind- and project-independent bytes");
+    assert.ok(!/\d{4}-\d{2}-\d{2}|[A-Za-z]:[\\/]/.test(body), "no timestamp or absolute path");
+    // Tree mode: the generated-tree emit carries the same bytes.
+    const tree = scaffoldProject({
+      ...fullRun(),
+      generatedTree: [
+        { path: "src/generated/entry.ts", source: "export function alpha() { return 1; }\n", hash: "h1", attempt: 0 },
+      ],
+    });
+    assert.ok(okFiles(tree).some((f) => f.path === ".gitignore"), ".gitignore emitted in tree mode");
+    assert.equal(bodyOf(tree, ".gitignore"), body, "same bytes in tree mode");
+    // Declare-or-strike: the shipped README tables every emitted file, this one included.
+    assert.ok(bodyOf(result, "README.md").includes(".gitignore"), "README names the emitted file");
   });
 
   it("gives an app kind a vite+react package.json and a React ui shell", () => {
@@ -183,6 +222,7 @@ describe("scaffoldProject — file-tree shape per kind", () => {
       "README.md",
       "DEPLOY.md",
       ".env.example",
+      ".gitignore",
       "package.json",
       "tsconfig.json",
       ".rapidtool/project.json",
@@ -196,7 +236,9 @@ describe("scaffoldProject — file-tree shape per kind", () => {
       files.every((f) => !f.path.startsWith("src/") || f.path === "src/main.tsx"),
       "only the boot-shell src entry without a spec graph",
     );
-    assert.ok((result as { ok: true; summary: string }).summary.startsWith("9 files"));
+    // fixes/217f (T4.2): the .gitignore joined the emitted file set — the count
+    // moves with it. old → new: "9 files" → "10 files".
+    assert.ok((result as { ok: true; summary: string }).summary.startsWith("10 files"));
   });
 
   it("fails honestly for a project with an empty name", () => {

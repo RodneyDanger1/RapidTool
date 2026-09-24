@@ -203,6 +203,23 @@ own `wave_plans/W6/lane-N.md` FIRST.
   verb; T-107.8 real executor **only if** docker/bwrap provably available (otherwise keep
   `sandbox-policy.ts` claims truthful and skip); Phase 5 (T5.x) minus product decisions.
 
+### W11 AS DISPATCHED (2026-09-24, `deleg_cbb4ad83` — 6 lanes, per-lane plans in `wave_plans/W11/`)
+
+The plan above was re-scoped at dispatch to the wave that actually clears the honesty backlog the
+W10 close exposed plus the audit's ranked defects. **L1** software engineer — T-18 (`build` verdict
+in `tree-run`) + the owed verify-kind install-leg tests · **L2** watchdog — independent
+verification of the W10/W11 landings, the T-107.8 isolation probe, and the additive
+`honesty-guards.test.ts` · **L3** researcher — Phase 5 (T5.1–T5.7) as a verified spec + the
+T5.6/T5.8 decision register · **L4** agentic engineer — G1 (CLI dispatch falls through a handled
+refusal) + TASK-01 (`nextAction` on the summary envelope) · **L5** coding engineer — G2 (engine
+silent catch-all) + T4.2 (emitted `.gitignore`) · **L6** UI/UX — UI-01/02/03 (the three S1 console
+bugs) + compaction (UI-05/08/11, T-22).
+
+**Pushed to W12 (not dropped):** T4.3/TA-18 patch preservation (spans `codegen.server.ts` +
+`headless.ts` + `io.ts` — collides with W11's ownership), T-107.7 checkpoint + `resume`, T-107.8
+(gated on L2's isolation probe), the `store.ts` half of G2, G5 (emitted RT_E codes), G6 (unlogged
+LLM-shape swallows), T-21 (TASK-05 tab tiering), and every T5.x that L3's spec turns runnable.
+
 ## W12 — buffer / polish (as needed)
 
 - Doc re-sync (README/board/remaining), UI polish leftovers (TASK-01 if not done), eval-corpus

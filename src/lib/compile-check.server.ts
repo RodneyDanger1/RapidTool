@@ -244,9 +244,11 @@ export function compileCheckDir(dir: string): CompileCheckResult {
 //   TreeRunOutcome.project — 216 (T-18): the emitted project's OWN declared
 //                            package.json `typecheck`/`test` scripts, run under
 //                            the same bounded runner (real exit codes + bounded
-//                            tails). A declared script that ran RED makes the
-//                            whole tree NOT ok; one whose toolchain is not
-//                            installed is a loud `skip` + note — never a
+//                            tails), plus (217d) the declared `build` once the
+//                            tree's deps are installed. A declared script that
+//                            ran RED makes the whole tree NOT ok; one whose
+//                            toolchain is not installed — or whose deps are
+//                            absent — is a loud `skip` + note, never a
 //                            fabricated pass, never a silent ok.
 //
 // Execution mechanics (no new sandbox, caps reused):
@@ -299,16 +301,18 @@ export type TreeEntryVerdict = {
 };
 
 /** 216 (T-18): one verdict for a script the emitted project declares for
- *  itself (`package.json` `scripts.typecheck` / `scripts.test`). The script
- *  NAME is a constant of this module — never read from the tree — so no tree
- *  content reaches a shell line; the COMMAND is npm's own, taken verbatim
- *  from the emitted package.json and resolved by npm internally.
+ *  itself (`package.json` `scripts.typecheck` / `scripts.test` /
+ *  `scripts.build`). The script NAME is a constant of this module — never
+ *  read from the tree — so no tree content reaches a shell line; the COMMAND
+ *  is npm's own, taken verbatim from the emitted package.json and resolved
+ *  by npm internally.
  *
  *  `run: "skip"` is NOT a pass: it means the script was not declared, or its
- *  tool is not resolvable for this tree, and `note` says exactly why. Every
- *  non-pass verdict carries the honest reason — never a fabricated pass. */
+ *  tool is not resolvable for this tree (or — `build` only — the tree's deps
+ *  are not installed yet), and `note` says exactly why. Every non-pass
+ *  verdict carries the honest reason — never a fabricated pass. */
 export type TreeProjectScriptVerdict = {
-  /** package.json script name asked for ("typecheck" | "test"). */
+  /** package.json script name asked for ("typecheck" | "test" | "build"). */
   script: string;
   /** The command string exactly as the emitted package.json declares it. */
   command?: string;
@@ -333,6 +337,14 @@ export type TreeProjectScriptsVerdict = {
   ok: boolean;
   typecheck: TreeProjectScriptVerdict;
   test: TreeProjectScriptVerdict;
+  /** 217d (T-18): the emitted project's OWN declared `build` script — run
+   *  ONLY when the tree's deps are installed (the run copy carries the
+   *  subject's `node_modules/`); without them an honest `skip` + the same
+   *  UNVERIFIED note an un-runnable toolchain gets, never a fabricated pass.
+   *  Optional so fixture objects in other lanes stay assignable; `treeRun()`
+   *  always sets it, and a red build makes the tree NOT ok (same rule as a
+   *  red typecheck/test). */
+  build?: TreeProjectScriptVerdict;
 };
 
 export type TreeRunOutcome = {
@@ -353,10 +365,11 @@ export type TreeRunOutcome = {
   /** Set when the dir is unreadable, holds no code files, or (216 · T-18) a
    *  declared project script ran red — the top-level reason the tree is not ok. */
   error?: string;
-  /** 216 (T-18): the emitted project's OWN declared `typecheck` + `test`
-   *  scripts, run under the same bounded runner (real exit codes + bounded
-   *  output tails). Optional so fixture objects in other lanes stay
-   *  assignable; `treeRun()` always sets it. */
+  /** 216 (T-18) + 217d: the emitted project's OWN declared `typecheck`,
+   *  `test` + `build` scripts, run under the same bounded runner (real exit
+   *  codes + bounded output tails; `build` only once deps are installed).
+   *  Optional so fixture objects in other lanes stay assignable; `treeRun()`
+   *  always sets it. */
   project?: TreeProjectScriptsVerdict;
   /** 216 (T-18): top-level honest note — set whenever a DECLARED project
    *  script was not executed (its tool is not resolvable without installed
@@ -865,10 +878,11 @@ async function runProjectScript(
   };
 }
 
-/** 216 (T-18): the project leg — resolve + run both declared scripts in the
- *  temp copy, and classify the results for the tree verdict: `red` = at least
- *  one declared script ran fail/timeout/error (→ the tree is NOT ok);
- *  `skippedDeclared` = declared but never executed (→ loud top-level note). */
+/** 216 (T-18) + 217d: the project leg — resolve + run the declared
+ *  `typecheck`/`test`/`build` scripts in the temp copy, and classify the
+ *  results for the tree verdict: `red` = at least one declared script ran
+ *  fail/timeout/error (→ the tree is NOT ok); `skippedDeclared` = declared
+ *  but never executed (→ loud top-level note). */
 async function runProjectScripts(
   work: string,
   timeoutMs: number,
@@ -884,10 +898,29 @@ async function runProjectScripts(
       : null;
   const typecheck = await runProjectScript(work, "typecheck", scripts, timeoutMs);
   const test = await runProjectScript(work, "test", scripts, timeoutMs);
-  const all = [typecheck, test];
+  // 217d (T-18): the declared `build` runs ONLY when the tree's deps are
+  // installed (the temp copy carries the subject's node_modules/). Without
+  // them `npm run build` could only fail for the wrong reason on an
+  // uninstalled tree (the 216x §2.1 "vite is not recognized" class) — so it
+  // stays the honest skip in the exact UNVERIFIED wording an un-runnable
+  // toolchain gets, never a fabricated pass.
+  const buildRaw = typeof scripts?.build === "string" ? scripts.build.trim() : "";
+  const build: TreeProjectScriptVerdict =
+    buildRaw === "" || existsSync(join(work, "node_modules"))
+      ? await runProjectScript(work, "build", scripts, timeoutMs)
+      : {
+          script: "build",
+          run: "skip",
+          command: buildRaw,
+          durationMs: 0,
+          note:
+            `no node_modules/ present in the tree — "npm run build" was NOT executed; ` +
+            "the tree's own build is UNVERIFIED (npm install, then re-run to verify) — not a fabricated pass",
+        };
+  const all = [typecheck, test, build];
   const red = all.filter((v) => v.run === "fail" || v.run === "timeout" || v.run === "error");
   const skippedDeclared = all.filter((v) => v.run === "skip" && typeof v.command === "string");
-  return { verdict: { ok: red.length === 0, typecheck, test }, red, skippedDeclared };
+  return { verdict: { ok: red.length === 0, typecheck, test, build }, red, skippedDeclared };
 }
 
 /**
@@ -895,11 +928,13 @@ async function runProjectScripts(
  * emit dir is never the cwd of node --test or the entry smoke. Read-only
  * over the subject `dir`; copy is always deleted. Never fabricates a pass.
  *
- * 216 (T-18): additionally runs the emitted project's OWN declared
+ * 216 (T-18) + 217d: additionally runs the emitted project's OWN declared
  * `typecheck`/`test` scripts (`npm run <script>`) in the temp copy under the
- * same bounded runner. A declared script that ran red makes the tree NOT ok —
- * a tree failing its own `npm test` can never be `ok:true`; a declared script
- * that could not run is a loud `skip` + note, never a fabricated pass.
+ * same bounded runner, plus the declared `build` once the tree's deps are
+ * installed. A declared script that ran red makes the tree NOT ok — a tree
+ * failing its own `npm test` or its own build can never be `ok:true`; a
+ * declared script that could not run is a loud `skip` + note, never a
+ * fabricated pass.
  */
 export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promise<TreeRunOutcome> {
   const timeoutMs =
@@ -962,11 +997,12 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
     } else {
       outcome.run = { kind: entry.kind, run: "skip", detail: entry.reason };
     }
-    // 216 (T-18): the emitted project's OWN toolchain — `npm run typecheck`
-    // and `npm test` exactly as the tree declares them. ADDITIVE to the
-    // parse/spec/entry verdicts above; a declared script that ran red makes
-    // the tree NOT ok ("a tree failing its own npm test can never be ok"),
-    // and a declared-but-un-runnable script is a loud skip + note — never a
+    // 216 (T-18) + 217d: the emitted project's OWN toolchain — `npm run
+    // typecheck`, `npm test` and (deps permitting) the declared `build`
+    // exactly as the tree declares them. ADDITIVE to the parse/spec/entry
+    // verdicts above; a declared script that ran red makes the tree NOT ok
+    // ("a tree failing its own npm test can never be ok"), and a
+    // declared-but-un-runnable script is a loud skip + note — never a
     // fabricated pass and never a silent ok.
     const projectLeg = await runProjectScripts(work, timeoutMs);
     outcome.project = projectLeg.verdict;
@@ -1010,49 +1046,409 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
   }
 }
 
-export type VerifyKindResult = {
-  ok: boolean;
-  dir: string;
-  script?: string;
-  skipped?: boolean;
-  detail?: string;
-  durationMs?: number;
+// ---------------------------------------------------------------------------
+// 216z (T4.1 / TA-16) — the `emit --verify-kind` leg.
+//
+// fixes/149 P1-2 / 104 §T4.1: webapp/game scaffolds DECLARE a `build` script
+// (vite build) but nothing ever installed the tree's declared dependencies, so
+// a fresh emit's declared build could never actually run — the C7 criterion
+// ("no webapp emission has ever built") stayed open. The leg now, in a FRESH
+// SCRATCH COPY (the subject dir is never written, never npm's cwd):
+//
+//   1. copy the emitted dir to a temp scratch dir — the tree's own top-level
+//      node_modules/.git are NOT copied (the install is the source of truth,
+//      not a stale dependency tree);
+//   2. install with `npm ci --no-audit --no-fund` when the copy carries a
+//      package-lock.json, else `npm install --no-audit --no-fund`; the
+//      envelope's `install.tool`/`install.reason` say which ran and why;
+//   3. run the tree's OWN declared `build` + `test` scripts in that copy
+//      (the same bounded-runner seam treeRun's project leg uses; script names
+//      are module constants — npm reads the command from the tree's own
+//      package.json);
+//   4. delete the copy (always, in a finally).
+//
+// Never fabricates a pass: an install or script that did not exit 0 is
+// fail/timeout/error with a bounded tail and `code: RT_E_VERIFY_KIND_FAILED`;
+// a red install short-circuits the scripts (marked `skip` + the exact reason,
+// never silently absent); a skip is only ever emitted WITH its reason, and a
+// skip is never a pass. The DEFAULT suite never hits the network — tests
+// inject the install command via `opts.installCommand` (marked `mocked: true`
+// in the envelope; a mocked install is never evidence of a real one) and the
+// real npm path is gated behind RT_VERIFYKIND_INSTALL=1 in the test file.
+// ---------------------------------------------------------------------------
+
+/** 216z (T4.1 / TA-16): one step of the verify-kind leg — `install` (the
+ *  scratch-copy npm ci/install) or `build`/`test` (the tree's own declared
+ *  scripts, run in that copy). Same verdict vocabulary as treeRun's legs.
+ *  `run: "skip"` is NOT a pass — the step was not executed and `note` says
+ *  exactly why. */
+export type VerifyKindStepVerdict = {
+  step: "install" | "build" | "test";
+  /** The exact command line executed in the scratch copy. */
+  command?: string;
+  run: TreeRunVerdict;
   exitCode?: number | null;
+  /** Bounded combined-output tail — present on any non-pass that produced output. */
+  detail?: string;
+  /** Honest reason a `skip`/`error` verdict is not a pass. Never a softener. */
+  note?: string;
+  durationMs?: number;
+  /** install only: which tool actually ran ("npm ci" | "npm install" | "seam"). */
+  tool?: string;
+  /** install only: why that tool (lockfile present/absent), or the seam warning. */
+  reason?: string;
+  /** install only: true when the command came from the test seam
+   *  (`opts.installCommand`) — that verdict is NOT evidence a real dependency
+   *  install happened and must never be read as one. */
+  mocked?: boolean;
 };
 
-/**
- * B1: run the emitted package.json `build` script in-dir. No build script →
- * honest skip (cli-tool/library). Bound wall-clock. Never mints tested.
- */
-export function verifyKindDir(dir: string, opts?: { timeoutMs?: number }): VerifyKindResult {
-  const root = dir;
-  const pkgPath = join(root, "package.json");
-  if (!existsSync(pkgPath)) return { ok: false, dir: root, detail: "no package.json" };
-  let pkg: { scripts?: { build?: unknown } };
-  try {
-    pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { scripts?: { build?: unknown } };
-  } catch {
-    return { ok: false, dir: root, detail: "package.json unreadable" };
-  }
-  const script = typeof pkg.scripts?.build === "string" ? pkg.scripts.build.trim() : "";
-  if (!script) {
-    return { ok: true, dir: root, skipped: true, detail: "no build script — kind has nothing to verify" };
-  }
-  const timeoutMs = typeof opts?.timeoutMs === "number" && opts.timeoutMs > 0 ? opts.timeoutMs : 120_000;
+export type VerifyKindResult = {
+  /** True iff no executed step ran red (fail/timeout/error). A skip is never
+   *  a red — but it is never a pass either, and it always carries its reason. */
+  ok: boolean;
+  /** The SUBJECT dir (never the deleted scratch copy). */
+  dir: string;
+  /** Always false when present — copy-to-scratch + the bounded runner are
+   *  emit-tree isolation, NOT a security sandbox. */
+  sandbox: false;
+  /** True iff this call really ran on a fresh scratch copy (false on a skip
+   *  or an input refusal — never claims scratch behavior that did not happen). */
+  scratch: boolean;
+  /** True iff nothing was executed (the tree declares no build script). */
+  skipped?: boolean;
+  install?: VerifyKindStepVerdict;
+  build?: VerifyKindStepVerdict;
+  test?: VerifyKindStepVerdict;
+  /** RT_E code when ok:false — `RT_E_VERIFY_KIND_FAILED` (red install/build/
+   *  test, or an uncopyable subject) | `RT_E_VALIDATION` (not a kind dir: no
+   *  readable package.json). */
+  code?: string;
+  /** Top-level honest reason: the first red step's bounded tail, the skip
+   *  explanation, or the input refusal. */
+  detail?: string;
+  /** Set whenever a DECLARED script was not executed (post-install tool
+   *  unresolvable) — an ok verdict is never SILENT about an unverified
+   *  declared script. A note'd skip is still never a pass. */
+  note?: string;
+  durationMs: number;
+};
+
+const VERIFY_KIND_SCRIPT_TIMEOUT_MS = 120_000;
+const VERIFY_KIND_INSTALL_TIMEOUT_MS = 240_000;
+
+/** 216z: which install tool a tree gets, and why — `npm ci` when the tree
+ *  carries a package-lock.json (a clean install from the lockfile), else
+ *  `npm install` (resolve the declared deps and write a lockfile; there is
+ *  nothing to `ci` from). Exported so the honest mapping is pinned by a test
+ *  that needs no network install. */
+export function installToolFor(dir: string): { tool: "npm ci" | "npm install"; command: string; reason: string } {
+  const lock = existsSync(join(dir, "package-lock.json"));
+  return lock
+    ? {
+        tool: "npm ci",
+        command: "npm ci --no-audit --no-fund",
+        reason: "package-lock.json present — npm ci installs exactly the locked tree",
+      }
+    : {
+        tool: "npm install",
+        command: "npm install --no-audit --no-fund",
+        reason: "no package-lock.json — npm install resolves the declared deps and writes a lockfile (nothing to ci from)",
+      };
+}
+
+/** 216z: the runner wrapper that executes ONE module-resolved command line
+ *  (the scratch-copy install). Same bounded contract as the spec/project
+ *  wrappers: CJS-safe, inner timeout + maxBuffer, compact JSON envelope on
+ *  stdout, exit via process.exitCode. The command line is a constant this
+ *  module resolves (npm ci/install + flags, or the test-seam command) —
+ *  never tree text. */
+function cmdRunnerCode(commandLine: string, cwd: string, innerTimeoutMs: number): string {
+  return [
+    `const { spawnSync } = require("node:child_process");`,
+    `let r = null;`,
+    `let caught = null;`,
+    `try {`,
+    `  r = spawnSync(${JSON.stringify(commandLine)}, {`,
+    `    encoding: "utf8",`,
+    `    timeout: ${innerTimeoutMs},`,
+    `    maxBuffer: 4194304,`,
+    `    windowsHide: true,`,
+    `    shell: true,`,
+    `    cwd: ${JSON.stringify(cwd)},`,
+    `  });`,
+    `} catch (e) {`,
+    `  caught = String((e && e.message) || e);`,
+    `}`,
+    `if (caught !== null) {`,
+    `  process.stdout.write(JSON.stringify({ kind: "error", error: caught }));`,
+    `  process.exitCode = 2;`,
+    `} else {`,
+    `  const out = [r.stdout || "", r.stderr || ""].join("\\n");`,
+    `  const timedOut = !!(r.error && r.error.code === "ETIMEDOUT");`,
+    `  const spawnErr = r.error && !timedOut ? String(r.error.message || r.error.code) : null;`,
+    `  process.stdout.write(JSON.stringify({ kind: "done", status: typeof r.status === "number" ? r.status : null, timedOut, spawnErr, tail: out.slice(-${WRAPPER_TAIL_MAX}) }));`,
+    `  process.exitCode = typeof r.status === "number" ? r.status : 1;`,
+    `}`,
+  ].join("\n");
+}
+
+/** 216z: the install step — resolve the honest tool (lockfile → `npm ci`,
+ *  else `npm install`; or the test seam, loudly marked), run it in the
+ *  scratch copy under the bounded runner, and classify the result. */
+async function runInstallStep(
+  copy: string,
+  opts?: { installTimeoutMs?: number; installCommand?: string },
+): Promise<VerifyKindStepVerdict> {
   const started = Date.now();
-  const r = spawnSync("npm", ["run", "build", "--ignore-scripts"], {
-    cwd: root,
-    encoding: "utf8",
-    timeout: timeoutMs,
-    shell: true,
-    env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false" },
-  });
-  const durationMs = Date.now() - started;
-  if (r.error && /TIME|ETIMEDOUT/i.test(String((r.error as { code?: string }).code ?? r.error.message))) {
-    return { ok: false, dir: root, script, detail: `build timed out after ${timeoutMs}ms`, durationMs };
+  const duration = (): number => Date.now() - started;
+  const timeoutMs =
+    typeof opts?.installTimeoutMs === "number" && opts.installTimeoutMs > 0
+      ? opts.installTimeoutMs
+      : VERIFY_KIND_INSTALL_TIMEOUT_MS;
+  const seam = typeof opts?.installCommand === "string" && opts.installCommand.trim().length > 0 ? opts.installCommand.trim() : null;
+  const resolved = installToolFor(copy);
+  const command = seam ?? resolved.command;
+  const tool = seam ? "seam" : resolved.tool;
+  const reason = seam
+    ? "install command injected via the verifyKindDir test seam (opts.installCommand) — this verdict is NOT evidence of a real dependency install"
+    : resolved.reason;
+  const base: VerifyKindStepVerdict = {
+    step: "install",
+    command,
+    tool,
+    reason,
+    run: "skip",
+    durationMs: 0,
+    ...(seam ? { mocked: true } : {}),
+  };
+  const innerTimeout = Math.max(500, timeoutMs - INNER_TIMEOUT_MARGIN_MS);
+  const run = await runNodeBounded(cmdRunnerCode(command, copy, innerTimeout), { timeoutMs });
+  if (!run.ok) {
+    if (run.reason === "timeout") {
+      return { ...base, run: "timeout", detail: `install killed after ${timeoutMs / 1000}s`, durationMs: duration() };
+    }
+    if (run.reason === "not-configured") {
+      return { ...base, run: "error", detail: `${run.code}: local bounded runner unavailable`, durationMs: duration() };
+    }
+    return { ...base, run: "error", detail: run.error ?? run.reason, durationMs: duration() };
   }
-  const code = typeof r.status === "number" ? r.status : 1;
-  if (code === 0) return { ok: true, dir: root, script, durationMs, exitCode: 0 };
-  const tail = String(r.stderr || r.stdout || r.error?.message || "").slice(-800);
-  return { ok: false, dir: root, script, detail: tail || `build exited ${code}`, durationMs, exitCode: code };
+  const env = parseWrapperEnvelope(run.stdout);
+  if (!env) {
+    return { ...base, run: "error", detail: "runner produced no parseable envelope", durationMs: duration() };
+  }
+  if (env.kind === "error") {
+    return { ...base, run: "error", detail: (env.error ?? "install runner failed").slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
+  }
+  if (env.spawnErr) {
+    return { ...base, run: "error", detail: `spawn failed: ${env.spawnErr}`.slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
+  }
+  if (env.timedOut) {
+    return { ...base, run: "timeout", detail: `install killed after ${innerTimeout / 1000}s (inner timeout)`, durationMs: duration() };
+  }
+  const exitCode = typeof env.status === "number" ? env.status : 1;
+  if (exitCode === 0) return { ...base, run: "pass", exitCode: 0, durationMs: duration() };
+  const tail = (env.tail ?? "").trim();
+  return {
+    ...base,
+    run: "fail",
+    exitCode,
+    detail: (tail || `install exited ${exitCode}`).slice(0, VERDICT_TAIL_MAX),
+    durationMs: duration(),
+  };
+}
+
+/**
+ * 216z (T4.1 / TA-16): verify the emitted kind's declared build/test for
+ * real. Fresh scratch copy of `dir` → npm ci (lockfile) / npm install → the
+ * tree's own declared `build` + `test` scripts in that copy, all bounded and
+ * classified. No build script declared → honest skip (nothing to install-and-
+ * build; the reason is in `detail`). Never fabricates a pass; never mutates
+ * `dir`; the copy is always deleted. See the 216z block comment above for the
+ * full contract, including the two coded failure classes.
+ */
+export async function verifyKindDir(
+  dir: string,
+  opts?: { timeoutMs?: number; installTimeoutMs?: number; installCommand?: string },
+): Promise<VerifyKindResult> {
+  const started = Date.now();
+  const duration = (): number => Date.now() - started;
+  const root = resolve(dir);
+  let isDir = false;
+  try {
+    isDir = statSync(root).isDirectory();
+  } catch {
+    isDir = false;
+  }
+  if (!isDir) {
+    return {
+      ok: false,
+      dir: root,
+      sandbox: false,
+      scratch: false,
+      code: "RT_E_VALIDATION",
+      detail: `verify-kind: dir not readable: ${dir}`,
+      durationMs: duration(),
+    };
+  }
+  const pkgPath = join(root, "package.json");
+  if (!existsSync(pkgPath)) {
+    return {
+      ok: false,
+      dir: root,
+      sandbox: false,
+      scratch: false,
+      code: "RT_E_VALIDATION",
+      detail: "no package.json — nothing to verify; this dir is not an emitted kind tree",
+      durationMs: duration(),
+    };
+  }
+  let pkg: { scripts?: Record<string, unknown> };
+  try {
+    pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { scripts?: Record<string, unknown> };
+  } catch {
+    return {
+      ok: false,
+      dir: root,
+      sandbox: false,
+      scratch: false,
+      code: "RT_E_VALIDATION",
+      detail: "package.json unreadable",
+      durationMs: duration(),
+    };
+  }
+  const scripts =
+    pkg && typeof pkg.scripts === "object" && pkg.scripts !== null ? (pkg.scripts as Record<string, unknown>) : null;
+  const buildRaw = typeof scripts?.build === "string" ? scripts.build.trim() : "";
+  if (!buildRaw) {
+    return {
+      ok: true,
+      dir: root,
+      sandbox: false,
+      scratch: false,
+      skipped: true,
+      detail:
+        'no build script — verify-kind skipped: the emitted package.json declares no "build" script (kinds without a build declare none), ' +
+        "so there is nothing to install-and-build; the declared test/typecheck scripts were NOT executed here (they need no install) — " +
+        "run `tree-run` / `emit --run` for the no-install spec + project-script leg. Absent is not a pass.",
+      durationMs: duration(),
+    };
+  }
+  let copy: string | null = null;
+  try {
+    copy = mkdtempSync(join(tmpdir(), "rt-verifykind-"));
+    // The tree's own top-level node_modules/.git are intentionally NOT copied
+    // — the install leg must be the source of truth for the dependency tree.
+    const skip = new Set([join(root, "node_modules"), join(root, ".git")]);
+    cpSync(root, copy, { recursive: true, filter: (src) => !skip.has(src) });
+  } catch (err) {
+    if (copy) {
+      try {
+        rmSync(copy, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+    return {
+      ok: false,
+      dir: root,
+      sandbox: false,
+      scratch: false,
+      code: "RT_E_VERIFY_KIND_FAILED",
+      detail: `scratch copy failed — the subject dir was NOT used as npm's cwd: ${err instanceof Error ? err.message : String(err)}`,
+      durationMs: duration(),
+    };
+  }
+  try {
+    const scriptTimeout =
+      typeof opts?.timeoutMs === "number" && opts.timeoutMs > 0 ? opts.timeoutMs : VERIFY_KIND_SCRIPT_TIMEOUT_MS;
+    const install = await runInstallStep(copy, opts);
+    if (install.run !== "pass") {
+      const notRun = (step: "build" | "test"): VerifyKindStepVerdict => ({
+        step,
+        run: "skip",
+        note:
+          `install did not complete (${install.run}) — the declared ${step} was NOT executed ` +
+          "(building/testing without the tree's deps would only fail for the wrong reason); fix the install failure and re-run",
+      });
+      const build = notRun("build");
+      const test = notRun("test");
+      return {
+        ok: false,
+        dir: root,
+        sandbox: false,
+        scratch: true,
+        install,
+        build,
+        test,
+        code: "RT_E_VERIFY_KIND_FAILED",
+        detail:
+          `install ${install.run}` +
+          (typeof install.exitCode === "number" ? ` (exit ${install.exitCode})` : "") +
+          (install.detail ? ` — ${install.detail.slice(0, 300)}` : "") +
+          "; the declared build/test scripts were NOT executed",
+        durationMs: duration(),
+      };
+    }
+    const buildV = await runProjectScript(copy, "build", scripts, scriptTimeout);
+    const build: VerifyKindStepVerdict = {
+      step: "build",
+      command: buildV.command,
+      run: buildV.run,
+      exitCode: buildV.exitCode,
+      detail: buildV.detail,
+      note: buildV.note,
+      durationMs: buildV.durationMs,
+    };
+    const testV = await runProjectScript(copy, "test", scripts, scriptTimeout);
+    const test: VerifyKindStepVerdict = {
+      step: "test",
+      command: testV.command,
+      run: testV.run,
+      exitCode: testV.exitCode,
+      detail: testV.detail,
+      note: testV.note,
+      durationMs: testV.durationMs,
+    };
+    const red = [build, test].filter((v) => v.run === "fail" || v.run === "timeout" || v.run === "error");
+    const unrun = [build, test].filter((v) => v.run === "skip" && typeof v.command === "string");
+    const result: VerifyKindResult = {
+      ok: red.length === 0,
+      dir: root,
+      sandbox: false,
+      scratch: true,
+      install,
+      build,
+      test,
+      durationMs: duration(),
+    };
+    if (red.length > 0) {
+      result.code = "RT_E_VERIFY_KIND_FAILED";
+      result.detail = red
+        .map(
+          (v) =>
+            `the emitted project's own \`npm run ${v.step}\` ${v.run}` +
+            (typeof v.exitCode === "number" ? ` (exit ${v.exitCode})` : "") +
+            (v.detail ? ` — ${v.detail.slice(0, 300)}` : ""),
+        )
+        .join("; ")
+        .slice(0, 1800);
+    } else if (unrun.length > 0) {
+      result.note =
+        `the emitted project's own ${unrun.map((v) => `\`npm run ${v.step}\``).join(" / ")} ${
+          unrun.length === 1 ? "was" : "were"
+        } NOT executed after a successful install — the tree's declared toolchain is UNVERIFIED (not a pass): ` +
+        unrun.map((v) => v.note ?? "un-runnable").join(" · ");
+      result.note = result.note.slice(0, 1800);
+    }
+    return result;
+  } finally {
+    if (copy) {
+      try {
+        rmSync(copy, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 }

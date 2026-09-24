@@ -7,8 +7,9 @@ master plan (`104_factory_upgrade_plan.md`). `RESUME.md` records the session his
 rules; **this file maps the REMAINING WORK** — what is done, what is in flight, what is open, its
 size, where it lives, and what the next wave should pick up.
 
-**Snapshot written:** 2026-09-16 (~19:30 local) — right after wave `deleg_66c8d4c6` was dispatched,
-**before** its verification pass.
+**Snapshot written:** 2026-09-16 (~19:30 local); **§7 changelog + wave-status annotations updated
+2026-09-24 (W10 close + W11 dispatch)** — the body's per-task statuses below are still the
+2026-09-16 snapshot where not annotated.
 **⚠️ STATUSES BELOW ARE SNAPSHOT VALUES — THE DISK IS TRUTH. VERIFY BEFORE TRUSTING.**
 
 ---
@@ -473,3 +474,70 @@ Deferred to W3+: 105 standalones (TA-1/TA-3/TA-21/TA-23), 112 T5/T9/T11/T12, Wav
   108-T7 spike: scratch install + tree-run both exit 0 (envelope unread — not claimed). L1/L4
   recon-only (plans complete; budget). **`gate.sh {"ok":true}`** — scripts **261** · src
   **1907**. W10 dispatched: engine truth + token ledger + verify-kind.
+- **2026-09-24 (wave 10 close — parent, 7 days late)** — W10 was **never verified or closed** on
+  dispatch day: L1/L2/L3 landed code but wrote no landing logs, no gate ran, 7 files sat
+  uncommitted. The parent verified all five lanes against bytes, repaired the stale tests, and
+  wrote the missing record (**`fixes/216z_w10_landing_record.md`**). **Landed and verified:**
+  T-11 green-seal gate (a red seal now mints **zero** lesson rows and records
+  `p<phase>.seal.unmet` with the unmet DoD probe ids — proven by a parent probe: only the
+  pre-existing non-lesson `Sandbox passed` row appears, `seal log: ["p6.seal.unmet"]`);
+  **⚠️ the `probe:<id>`-tag half of T-11 is UNWIRED and this entry originally over-claimed it —
+  see the correction at the end of this bullet**; the `p6.jobs.shortfall` production caller; T-107.6 cache-aware ledger +
+  budget seam + the 48 000-char runner output clamp **wired** into `runNodeBounded` after
+  redaction; T4.1/TA-16 verify-kind real install leg (scratch copy → `npm ci`/`install` →
+  declared build/test, `RT_E_VERIFY_KIND_FAILED`, seam marked `mocked:true`) with the CLI
+  awaiting it. **Parent repairs (old → new, in-file):** 2 sync call sites in
+  `compile-check.server.test.ts` → `await` + honest install-leg assertions; 4 stale tests in
+  `lesson-writers.test.ts` that pinned the **pre-T-11** behaviour (red seal mints a lesson) →
+  rewritten to the T-11 contract, M5-1's digest assertions relocated byte-exactly onto the seal
+  log (lib test count 16 → 15). **Gates after repair:** `npm run typecheck` **exit 0** ·
+  `src/lib/**` suite **1919/1919 pass** · eslint 0 on both repaired files · the pre-repair gate
+  run was red only on typecheck (3 TS2339 in the sync call sites) + lib (1920 tests / 7 fail).
+  **Honest gaps carried forward:** L1/L2/L3 landing logs never landed (216z substitutes and says
+  so) · the 7th lib failure is unattributed (only 30 log lines were retained; likeliest = the
+  floating Promise's unhandled rejection — labelled a hypothesis) · new W10 exports
+  (`p6JobsShortfallLog`, the probe-tag path, `clampRunnerOutput`, `installToolFor`) shipped with
+  no dedicated tests → assigned to W11-L2/L1 · nothing W10 landed was exercised keyed.
+  **W11 dispatched (6 lanes, `deleg_cbb4ad83`)**: L1 software engineer (T-18 `build` verdict +
+  the owed install-leg tests) · L2 watchdog (independent verification + `honesty-guards.test.ts`
+  + the T-107.8 isolation probe) · L3 researcher (Phase 5 spec + the T5.6/T5.8 decision register)
+  · L4 agentic engineer (G1 CLI dispatch fix + TASK-01 `nextAction`) · L5 coding engineer
+  (G2 engine error surface + T4.2 emitted `.gitignore`) · L6 UI/UX (the three S1 console bugs +
+  compaction). Per-lane plans: `wave_plans/W11/lane-{1..6}.md`.
+- **2026-09-24 (wave 11 return — parent triage; W12 already running)** — the 6 W11 lanes all
+  reported at ~10:42 (`deleg_cbb4ad83`, 1480 s). **L1 ✅** verify-kind install-leg tests +
+  T-18 `build` verdict (claims 42 tests/41 pass/1 by-design `RT_VERIFYKIND_INSTALL` skip + one
+  clean typecheck) · **L2 ✅ watchdog** — the wave's most valuable lane: it confirmed the T-11
+  gate, the ledger, the runner cap and the install leg, and **FALSIFIED two things** (see below);
+  its `honesty-guards.test.ts` is 4/5 with **one deliberate red** (the F1 pin); it also settled
+  **T-107.8: NO isolator on this host** (`docker`/`bwrap` → exit 127; WSL enabled but no distros)
+  → `sandbox-policy.ts` wording stays, the task stays skipped · **L3 ✅** `fixes/217c` (734 lines)
+  with two real anchor drifts caught (`deepseek.server.ts:233` → `src/lib/llm/providers/deepseek.ts:377`;
+  `chat.server.ts:48` → `:53`) · **L4 ⚠️ INCOMPLETE (self-reported)** — G1 patched (4 edits, see
+  below) but `nextAction`/TASK-01 **not started**, `217e` is a skeleton · **L5 ⚠️ PARTIAL** — both
+  items landed (`engine.ts` `liveLayerFailureRow` + the emitted `.gitignore`) but its final gate
+  and log fill did not run · **L6 ✅** UI-01/02/03 + UI-11 + T-22 landed (typecheck 0, eslint 0;
+  UI-05/08 were already in the tree and were proven, not re-applied).
+  **Parent actions taken:** (a) **G1 verified by the parent on the FINAL bytes** — L4 never re-ran
+  its repro, so this was the wave's biggest unverified claim: all three cases now print exactly one
+  coded JSON on stdout with **stderr 0 bytes** and exit 1 (`RT_E_PROJECT_MISSING` ×2,
+  `RT_E_VALIDATION`), cli md5 `3f1d15fb437e1b03d5d2d7b291f0702e`; (b) the `fixes/216z` §1-L1-item-2
+  **over-claim about `probe:<id>` tags is STRUCK** with the falsification recorded, and this
+  changelog's own over-claim corrected; (c) `wave_plans/W11/README.md`'s dead citation
+  (`217_w10_close_and_w11_plan.md` → `216z_w10_landing_record.md`) fixed.
+  **Open repairs (owner: parent, several BLOCKED on W12 ownership):**
+  1. **F1 — wire `probeTagsFromSignature` into `lessonRow`'s tag assembly** (`knowledge.ts:911`
+     defined, never called) + correct `lessonRow`'s docstring over-claim + the two failing pins
+     (`honesty-guards` F1, and any `lesson-writers` tag assertion). **Blocked until W12-LC releases
+     `knowledge.ts`.**
+  2. **TASK-01 `nextAction`** — L4's recon flagged a real vocabulary divergence: the brief's arm
+     names are *states*, 111's `kind` is *action verbs*, and the console already ships `uiNextAction`
+     (`console.tsx:292`, kinds `unknown/running/approve/retry/done/fix-gate/run`). **Decision
+     (parent, recorded): implement 111's action vocabulary as the wire contract, satisfy the brief's
+     seven arms as distinguishable cases, and keep the two computations independent this wave**
+     (111 §1 itself says "one derived field, render it twice"). Implementation owner: next wave
+     (`headless.ts` is not owned by any W12 lane).
+  3. L5's log fill + final gate; the W11 boundary `gate.sh` (parent-only, after all W12 lanes stop).
+  **Newly registered (not fixed):** **F2** — `clampRunnerOutput`'s elision marker can truncate for
+  custom caps ≈64–118 chars (no production impact at the real 48 000 cap) · G3–G7 confirmed **still
+  present** by L2's re-probe → G3/G6 in W12 lanes A/B, G7 in lane A, G4/G5 → W13.

@@ -95,7 +95,10 @@ export function CmdPalette({
         placeholder="Type an action — approve, copy, export, settings…"
         className="w-full border-b border-line bg-transparent px-4 py-3 text-sm text-fg outline-none placeholder:text-faint"
       />
-      <Command.List className="max-h-[60vh] overflow-y-auto p-2">
+      {/* `scroll-thin` = the shared treatment for capped lists (styles.css
+          names it "every capped list"); the console applies it to its 13
+          capped lists, so the palette's list joins them. */}
+      <Command.List className="scroll-thin max-h-[60vh] overflow-y-auto p-2">
         <Command.Empty className="px-3 py-6 text-center text-sm text-muted">
           No action matches that word. Try “approve”, “copy”, “export” or “settings”.
         </Command.Empty>

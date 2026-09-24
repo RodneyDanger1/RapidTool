@@ -26,7 +26,16 @@ import { join } from "node:path";
 export { runnerIsolationClaim } from "./sandbox-policy.ts";
 
 type NodeRunCore =
-  | { ok: true; stdout: string; stderr: string; durationMs: number; exitCode: number }
+  | {
+      ok: true;
+      stdout: string;
+      stderr: string;
+      durationMs: number;
+      exitCode: number;
+      /** T-107.6: present ONLY when a stream was clamped to
+       *  RUNNER_OUTPUT_MAX_CHARS — absent (byte-identical envelope) otherwise. */
+      outputClamp?: { stdout: RunnerOutputClamp; stderr: RunnerOutputClamp };
+    }
   | {
       ok: false;
       reason: "not-configured";
@@ -49,6 +58,74 @@ const MAX_BUFFER = 1_000_000; // 1 MB
 /** How much of each stream we keep in the returned result. */
 const MAX_OUTPUT = 1_000_000; // 1 MB
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * T-107.6 (dossier 107 §6d + §9): the per-stream character cap on the
+ * RETURNED stdout/stderr. Every character returned by a runner is re-sent to
+ * the model on each subsequent request, so oversized outputs cost
+ * quadratically over the remaining run (`output-limits.ts`); Cline's bash
+ * executor ships the same 48 000-char head/tail truncation this constant
+ * mirrors (107 §9 row 1). The 1 MB `MAX_OUTPUT` slice above stays the raw
+ * capture bound — this cap applies AFTER redaction, to what actually leaves
+ * the runner. Over-cap streams are middle-elided with a MARKED, COUNTED
+ * elision (never a silent cut), so head (summary lines) and tail (the final
+ * error) both survive.
+ */
+export const RUNNER_OUTPUT_MAX_CHARS = 48_000;
+
+/** Per-stream clamp accounting carried on a clamped ok envelope (T-107.6). */
+export type RunnerOutputClamp = {
+  clamped: boolean;
+  originalChars: number;
+  elidedChars: number;
+};
+
+/**
+ * Middle-truncate one runner stream to `maxChars` characters (T-107.6 — the
+ * `RUNNER_OUTPUT_MAX_CHARS` cap; layout mirrors compaction.clampToolOutput so
+ * both caps elide identically: marked middle elision, head+tail kept, text at
+ * or under the cap passes through byte-identical). Non-string input yields the
+ * empty unclamped result; a cap too small for a marked elision falls back to a
+ * plain head-cut that still COUNTS what it dropped.
+ */
+export function clampRunnerOutput(
+  text: string,
+  maxChars: number = RUNNER_OUTPUT_MAX_CHARS,
+): RunnerOutputClamp & { text: string } {
+  if (typeof text !== "string") {
+    return { text: "", clamped: false, originalChars: 0, elidedChars: 0 };
+  }
+  const cap =
+    Number.isFinite(maxChars) && maxChars > 0 ? Math.floor(maxChars) : RUNNER_OUTPUT_MAX_CHARS;
+  if (text.length <= cap) {
+    return { text, clamped: false, originalChars: text.length, elidedChars: 0 };
+  }
+  if (cap < 64) {
+    return {
+      text: text.slice(0, cap),
+      clamped: true,
+      originalChars: text.length,
+      elidedChars: text.length - cap,
+    };
+  }
+  // Two layout passes (marker length ↔ elided count), as clampToolOutput.
+  const head = Math.floor(cap * 0.6);
+  let tail = cap - head;
+  for (let pass = 0; pass < 2; pass++) {
+    const elided = text.length - head - tail;
+    const marker = `\n… [${elided} chars elided by runner output cap] …\n`;
+    tail = Math.max(0, cap - head - marker.length);
+  }
+  const elided = text.length - head - tail;
+  const marker = `\n… [${elided} chars elided by runner output cap] …\n`;
+  const out = `${text.slice(0, head)}${marker}${tail > 0 ? text.slice(text.length - tail) : ""}`;
+  return {
+    text: out.length <= cap ? out : out.slice(0, cap),
+    clamped: true,
+    originalChars: text.length,
+    elidedChars: elided,
+  };
+}
 
 /**
  * H4: settle guarantees. 'close' fires only after the child's stdio streams
@@ -328,12 +405,34 @@ export async function runNodeBounded(
         });
         return;
       }
+      // T-107.6: redact FIRST (a kept half-secret can never survive on the
+      // clamp boundary), then clamp each stream to RUNNER_OUTPUT_MAX_CHARS —
+      // the marked elision + its accounting ride the ok envelope only when a
+      // stream actually crossed the cap (unclamped envelopes stay byte-identical).
+      const outClamp = clampRunnerOutput(redactSecrets(stdout));
+      const errClamp = clampRunnerOutput(redactSecrets(stderr));
       finish({
         ok: true,
         exitCode: code ?? -1,
-        stdout: redactSecrets(stdout),
-        stderr: redactSecrets(stderr),
+        stdout: outClamp.text,
+        stderr: errClamp.text,
         durationMs: Date.now() - started,
+        ...(outClamp.clamped || errClamp.clamped
+          ? {
+              outputClamp: {
+                stdout: {
+                  clamped: outClamp.clamped,
+                  originalChars: outClamp.originalChars,
+                  elidedChars: outClamp.elidedChars,
+                },
+                stderr: {
+                  clamped: errClamp.clamped,
+                  originalChars: errClamp.originalChars,
+                  elidedChars: errClamp.elidedChars,
+                },
+              },
+            }
+          : {}),
       });
     };
 
