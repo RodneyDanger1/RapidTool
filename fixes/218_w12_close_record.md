@@ -103,8 +103,9 @@ explicitly attributed to a lane/watchdog artifact or transcript. Lane summaries 
    production impact at the real 48 000). Registered, not fixed.
 4. **G4** (no emitted-tree error scan) and **G5** (emitted product carries zero `RT_E` codes) →
    W13. **G7's audit comment** for the remaining 87 code-free catches is report-only.
-5. **L3's anchor spot-check** (`217c`): the parent still owes 5 spot-checks of its `file:line`
-   anchors (WD-1 ran out of budget before finishing them).
+5. **L3's anchor spot-check** (`217c`) — **DONE by the parent at 11:0x; see §2 item 6.** (This line
+   originally said the parent still owed it; W13's WD-A caught the self-contradiction between this
+   item and §2.6 — corrected here rather than left standing.)
 6. **`fixes/217h` and `217i` themselves remain partially filled** — their summaries carry the full
    findings; a future session should fold them in rather than re-derive.
 

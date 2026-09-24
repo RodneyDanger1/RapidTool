@@ -90,8 +90,10 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs export --project build
 
 # 9. Emit the runnable scaffold (project files + embedded generated module);
 #    --check adds one compile verdict per emitted file; --run executes the emitted
-#    tree in-loop (parse + every emitted tests/*.spec.ts + entry smoke; exit 1 on red)
-node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json [--out emitted/] [--check] [--run]
+#    tree in-loop (parse + every emitted tests/*.spec.ts + entry smoke; exit 1 on red);
+#    --red-tree banner admits an uncleared red tree-run WITH the unmissable banner
+#    on the emitted README (default refuse — see the Emit section)
+node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json [--out emitted/] [--check] [--run] [--red-tree refuse|banner]
 
 # 10. Compact JSON-safe snapshot (name, currentPhase, status, phaseCounts, lastGate,
 #     researchCount, memoryCount, vaultReady)
@@ -341,6 +343,19 @@ All files parse → exit 0 with
 With `--check`, any failed file flips the envelope to `ok: false` with the
 verdicts and exit 1 — loud, never a faked all-clear. Missing project /
 emit refusal → exit 1 (`RT_E_PROJECT_MISSING` / `RT_E_VALIDATION`).
+
+`--red-tree <refuse|banner>` selects how an **uncleared red** tree-run trail
+(`p6.tree.failure` with no green run since — the durable `treeRunTrail`) is
+handled at emit time (W14-L2 · OV-15). The default `refuse` returns a coded
+`RT_E_TREE_RUN_FAILED` refusal *before anything is written* (no partial tree,
+not even an empty emit dir); `banner` emits anyway, prepends the unmissable
+`[!CAUTION]` banner to the emitted `README.md`, and stamps
+`redTreeBanner: true` + `redTree` on the success envelope — the eval path's
+own policy. `probe` (no trail read) stays internal to the driver/journey
+paths and is **not** exposed here; any other value is rejected with
+`RT_E_VALIDATION`. This flag is what makes the refusal message's own advice —
+*emit with `redTree:"banner"` to ship the unmissable banner* — reachable from
+the CLI.
 
 > **In flight (fixes/149 P1-2):** opt-in `--verify-kind` — a bounded
 > `npm install` + `vite build` leg for webapp/game kinds in a temp dir (never
@@ -974,7 +989,7 @@ hardcoded a human actor for every caller, including the eval harness).
      `[seat human-cli-i-am-human] out-of-band RT_HUMAN_SEAT_TOKEN verified`.
 
   With `--i-am-human` but **no matching token in the environment**, the call
-  REFUSES: exit 4, envelope `code: "RT_E_VALIDATION"`, the message naming
+  REFUSES: exit 1, envelope `code: "RT_E_VALIDATION"`, the message naming
   `RT_HUMAN_SEAT_TOKEN` — and **nothing is written** (the project stays parked
   at the gate, no ledger row, no human actor). A seat claim without its
   out-of-band evidence never lands.

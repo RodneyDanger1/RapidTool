@@ -194,3 +194,56 @@ test("W7-L3: the README documents the `edit` verb's dry-run default + --write fl
   assert.match(readmeText, /dry-run/i, "the edit section must state the dry-run default");
   assert.match(readmeText, /repair\.apply/, "the edit section must name the policy action its write is routed through");
 });
+
+/**
+ * W14-L2 (TA-3): the failure payload's USAGE object must describe every dispatched
+ * verb — and nothing else. `diagnose` was dispatched with no USAGE key for waves
+ * (the 35-vs-34 drift); this binds the two sides so that class of drift cannot
+ * come back silently. The count is READ from the file, never pinned (a future
+ * verb must keep USAGE in parity, not match a frozen number).
+ */
+function usageCommandKeys(source) {
+  const start = source.indexOf("const USAGE = {");
+  if (start === -1) return null;
+  const block = source.slice(source.indexOf("commands: {", start));
+  const keys = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (/^  \}/.test(line)) break; // end of the commands object
+    const m = line.match(/^    "?([a-z][a-z-]*)"?: /);
+    if (m) keys.push(m[1]);
+  }
+  return keys;
+}
+
+test("W14-L2: every `case \"` arm has a USAGE.commands key (and vice versa)", () => {
+  const keys = usageCommandKeys(cliText);
+  assert.ok(keys, "rapidtool-cli.mjs must carry the `const USAGE = { … commands: { … } }` object");
+  const keySet = new Set(keys);
+  const missingFromUsage = [...diskVerbSet].filter((v) => !keySet.has(v));
+  assert.deepEqual(
+    missingFromUsage,
+    [],
+    `rapidtool-cli.mjs dispatches verb(s) with no USAGE key (the refusal payload would omit them): ${missingFromUsage.join(", ")}`,
+  );
+  const undocumented = keys.filter((k) => !diskVerbSet.has(k));
+  assert.deepEqual(
+    undocumented,
+    [],
+    `USAGE names verb(s) the dispatcher does not have: ${undocumented.join(", ")}`,
+  );
+  assert.equal(keys.length, realCount, `USAGE has ${keys.length} keys; the dispatcher has ${realCount} arms`);
+});
+
+test("W14-L2 (OV-15): the emit arm reads `--red-tree` and passes the policy to emitProject", () => {
+  const arm = verbArmSource(cliText, "emit");
+  assert.ok(arm, 'rapidtool-cli.mjs has no `case "emit"` arm');
+  assert.match(arm, /args\["red-tree"\]/, "the emit arm must read the documented --red-tree flag");
+  assert.match(arm, /"refuse"/, "the emit arm must accept the default `refuse` policy");
+  assert.match(arm, /"banner"/, "the emit arm must accept the `banner` policy (the refusal message's own advice)");
+  assert.match(arm, /redTree/, "the emit arm must pass a redTree policy through to emitProject");
+});
+
+test("W14-L2 (OV-15): README-cli.md documents emit's `--red-tree` policy", () => {
+  assert.match(readmeText, /--red-tree/, "README-cli.md must document the emit --red-tree flag");
+  assert.match(readmeText, /redTreeBanner/, "the emit section must name the envelope/README banner stamp");
+});

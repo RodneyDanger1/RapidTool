@@ -6,12 +6,12 @@ synthesis → verification → a paste-ready **Agent Packet** — all behind evi
 gates, an append-only decision ledger, and a hard no-fabrication **honesty contract**.
 
 **Two surfaces, one engine:** a browser app (TanStack Start + React 19, `http://localhost:8080`)
-and a file-based headless CLI (`scripts/rapidtool-cli.mjs`, **34 verbs**) that drives the same
+and a file-based headless CLI (`scripts/rapidtool-cli.mjs`, **35 verbs**) that drives the same
 pure engine with no browser and no server.
 
-> **Status (2026-09-16, after Waves 1–4 of the factory-upgrade program):**
+> **Status (2026-09-24 — the W12 boundary gate, the latest full gate of record, `fixes/218` §5):**
 > `bash scripts/gate.sh` → **`ok:true`** (typecheck 0 · lint 0 · assertion-gap lint 0 ·
-> scripts **220/220** + src **1803/1803** tests · build 0). All of that is re-runnable by you:
+> scripts **261/261** + src **1957/1957** tests (1 by-design skip) · build 0). All of that is re-runnable by you:
 > the gate script emits a single JSON verdict. RapidTool is **not yet** an autonomous software
 > factory that beats Codex/OpenHands/Claude Code — and it **tells you that itself**:
 > `doctor` reports `autonomousSoftwareFactory: false` with named `gaps[]`. The remaining
@@ -31,12 +31,14 @@ npm run dev
 # Full stability gate (6 checks + JSON verdict; --double adds a flake detector)
 bash scripts/gate.sh
 
-# Headless CLI — the factory without a browser
-node scripts/rapidtool-cli.mjs doctor                       # environment truth
-node scripts/rapidtool-cli.mjs new "your brief here"        # intake → project
-node scripts/rapidtool-cli.mjs run --until-hitl             # run to the next human gate
-node scripts/rapidtool-cli.mjs approve --i-am-human         # pass the HITL seat (or autopilot)
-node scripts/rapidtool-cli.mjs doctor --tree <project-dir>  # job-file census for an emitted tree
+# Headless CLI — the same engine without a browser (one JSON object per call; full contract: scripts/README-cli.md)
+node --experimental-strip-types scripts/rapidtool-cli.mjs doctor                     # environment truth
+node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief "your brief here" --out build.json  # intake → project file
+node --experimental-strip-types scripts/rapidtool-cli.mjs gate --project build.json  # advance until parked (awaiting_hitl → exit 2)
+export RT_HUMAN_SEAT_TOKEN="$(head -c 24 /dev/urandom | base64)"                     # the human seat's out-of-band token (TA-2)
+node --experimental-strip-types scripts/rapidtool-cli.mjs approve --project build.json --i-am-human  # pass the parked HITL seat
+node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json --out emitted/   # write the runnable scaffold
+node --experimental-strip-types scripts/rapidtool-cli.mjs doctor --tree emitted/     # job-file census for an emitted tree
 ```
 
 Environment: `DEEPSEEK_API_KEY` in `.env` enables LLM-backed phases (P6 synthesis, Chat,
@@ -77,7 +79,7 @@ brief ──► intake ──► P0..P12 phase engine (pure, deterministic, head
 Key files: `src/lib/engine.ts` · `headless.ts` · `codegen.server.ts` (P6 + chunk planning) ·
 `scaffold.ts` (tree writer) · `compile-check.server.ts` + `node-runner.server.ts` (bounded
 runner — **not a sandbox**) · `verify.server.ts` + `dod.ts` (oracles) · `doctor.ts` (environment
-truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-cli.mjs` (34 verbs).
+truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-cli.mjs` (35 verbs).
 
 ---
 
@@ -98,7 +100,7 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
 | `str_replace` patch primitive (unique-match + graded fuzzy) | ✅ core | `src/lib/patch.ts` (21 tests). **Not yet wired into P6/repair — carried past W6 (see `remainingwaves.md`)** |
 | One-seam policy engine (default-deny approvals) | ✅ core | `src/lib/policy.ts` (27 tests). **Routing wired in W5** (all 3 sites, seats byte-identical; bypass pins → W6-L2) |
 | UI: console, phase rail, HITL dock, runtime log, **command palette (⌘K)**, typed timeline | ✅ | `console.tsx` + `cmd-palette.tsx` + `runtime-timeline-pane.tsx` |
-| Headless CLI: 34 verbs, JSON output, doctor, eval harness | ✅ | `scripts/rapidtool-cli.mjs`; `README-cli.md` (doc-contract tested) |
+| Headless CLI: 35 verbs, JSON output, doctor, eval harness | ✅ | `scripts/rapidtool-cli.mjs`; `README-cli.md` (doc-contract tested) |
 | Stability gate with flake detection | ✅ | `bash scripts/gate.sh [--double]` (first green run 2026-09-16) |
 
 ## What it does **not** do yet — the honest limits

@@ -47,7 +47,7 @@ contract in full) lives in **`AGENT_GUIDE.md`**; the CLI machine contract is
   (runtime telemetry + the `diagnose` verb).
 - `src/routes/` + `src/components/console.tsx` — the TanStack Start UI (9+ tabs incl.
   Runtime log).
-- `scripts/` — CLI + build tooling: `rapidtool-cli.mjs` (34 verbs dispatched today —
+- `scripts/` — CLI + build tooling: `rapidtool-cli.mjs` (35 verbs dispatched today —
   `grep -c 'case "'` is the count source of truth — incl. the `lesson` family +
   `diagnose` + the fixes/150 G1 continuation verbs `tree-run`/`repair`),
   `with-app-env.mjs`, `gate.sh` (the four-gate stability script), plus `*.test.mjs` suites.
@@ -59,7 +59,7 @@ contract in full) lives in **`AGENT_GUIDE.md`**; the CLI machine contract is
 - `npm run dev` (port 8080) · `npm run build` (+ `db:migrate`) · `npm run preview` (port 8081)
 - `npm run typecheck` / `npm run lint` — the day-to-day gates. Keep them at 0.
 - `npm test` — runs BOTH legs (scripts first, then the full src/lib suite); both are green
-  (scripts 195/195; src ~1179 tests). A red suite is yours to fix unless it is the known
+  (scripts 261/261; src ~1957 tests — the W12 boundary gate of record, `fixes/218` §5). A red suite is yours to fix unless it is the known
   runner-timing flake (`exec.test.ts` grandchild test) which passes standalone.
 - Full gate: `bash scripts/gate.sh` (typecheck → lint → scripts → src suite → build;
   `--double` catches flakes).

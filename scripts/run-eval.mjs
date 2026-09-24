@@ -644,6 +644,21 @@ export function keylessSkipNotices({ keyedRequested, hasKey }) {
 // The drain: full pipeline with stock-HITL approvals via the driver.
 // ---------------------------------------------------------------------------
 
+/** fixes/237 (C-2 / `223` §4, M9 leg) — is a drain round's outcome TERMINAL?
+ *  The seven `RunOutcome` values live in `src/lib/headless.ts:527`. A round is
+ *  terminal when no further round can change the project's fate:
+ *  "complete"/"blocked"/"error" are the classic stops and "dod" is the T0.4
+ *  hard-DoD stop (headless.ts:587-606 — stopped:true, cursor unmoved; WB-2:
+ *  treating it as progress spun the 80-round guard and ended "stalled", M9=0).
+ *  It is NOT terminal for "hitl" (the drain approves the park and continues),
+ *  nor for "progress" / "cap" (keep looping under the round guard). Pure +
+ *  exported so `scripts/run-eval.test.mjs` pins all seven values. */
+export function isTerminalDrainOutcome(outcome) {
+  return (
+    outcome === "complete" || outcome === "blocked" || outcome === "error" || outcome === "dod"
+  );
+}
+
 /** Drive the pipeline to a terminal state — or, with `p6Gate: true`, to the
  *  P6 live edge — approving every parked HITL gate under the harness's
  *  autopilot seat (216 TA-2: `approve()` never mints `decidedBy:"human"` for a
@@ -658,7 +673,7 @@ export function keylessSkipNotices({ keyedRequested, hasKey }) {
  * FLOOR drain there means the journey is the ONLY phase-6 synthesis (the old
  * keyed flow ran the whole drain live:true — synthesis #1 inside the drain —
  * and then let the journey re-synthesize #2; fixes/146 §2 divergence #4). */
-async function drainPipeline(project, { keyed, p6Gate = false } = {}) {
+export async function drainPipeline(project, { keyed, p6Gate = false } = {}) {
   let p = project;
   let lastRes = null;
   const approved = [];
@@ -689,8 +704,32 @@ async function drainPipeline(project, { keyed, p6Gate = false } = {}) {
       }
       continue;
     }
-    if (res.outcome === "complete" || res.outcome === "blocked" || res.outcome === "error") {
-      return { p, res, approved, onTime: true, stall: null, position: "terminal" };
+    if (isTerminalDrainOutcome(res.outcome)) {
+      if (res.outcome === "dod") {
+        // fixes/237 (C-2 / `223` §4 / WB-2): a hard-DoD stop is TERMINAL. The
+        // T0.4 outcome ("dod", stopped:true — headless.ts:587-606) means
+        // enforceDod refused to leave a red-gated phase; nothing can advance,
+        // so re-entering this loop for the 80-round guard only appends ~80
+        // dod.blocked rows and returns a SILENT "stalled" (M9=0). Stop on the
+        // FIRST dod round: the hard-DoD message is the stall evidence and
+        // RT_E_GATE_PENDING is the code the wild path already uses for the
+        // same hard block (engine.ts:3571) — M9's loud coded-stop branch.
+        const events = Array.isArray(res.events) ? res.events : [];
+        const dodMsg =
+          events.filter((e) => typeof e === "string" && e.includes("DoD unmet")).pop() ??
+          events[events.length - 1] ??
+          `P${p.currentPhase} DoD unmet — hard gate blocks advance.`;
+        return {
+          p,
+          res,
+          approved,
+          onTime: true,
+          stall: dodMsg,
+          position: "dod",
+          code: "RT_E_GATE_PENDING",
+        };
+      }
+      return { p, res, approved, onTime: true, stall: null, position: "terminal", code: null };
     }
     // progress/cap — keep looping under the round guard.
   }
@@ -780,8 +819,10 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
         drain.stall = `post-journey drain ended ${drain.res.outcome} (not complete) after the P6 journey verdict`;
       }
     } else {
-      // The floor drain could not reach the P6 gate (stall/terminal) — the
-      // journey never ran; the honest stall evidence stands (M9=0).
+      // The floor drain could not reach the P6 gate — the journey never ran;
+      // whatever stop the drain ended on stands as-is (fixes/237 C-2: a
+      // hard-DoD stop is now its own coded terminal position, so a floor
+      // hard-stop is loud + coded rather than a silent stall).
       drain = pre;
     }
   } else {
@@ -888,13 +929,22 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       ? logs.some((l) => l && l.event === "p6.synthesis.attempt" && attemptLogOutcomeIsOk(l.detail))
       : undefined;
   const sealedFlag = drain.res ? drain.res.sealedWithFailures === true : false;
-  const stopCode = refusedSignal
-    ? typeof refusedCode === "string" && /RT_E/.test(refusedCode)
-      ? refusedCode.match(/RT_E[A-Z_0-9]*/)?.[0] ?? "RT_EVAL_REFUSED"
-      : "RT_EVAL_REFUSED"
-    : drain.stall
-      ? "RT_EVAL_STALL"
-      : null;
+  // fixes/237 (C-2): the drain's OWN coded terminal stop wins — a hard-DoD
+  // stop parks with RT_E_GATE_PENDING (the wild path's code for the same
+  // condition, engine.ts:3571), so M9's loud-stop branch reads the code of the
+  // stop that actually ended the run. Refusal-synthesis codes and the legacy
+  // stall code remain the fallbacks.
+  const drainStopCode =
+    typeof drain.code === "string" && /^RT_E/.test(drain.code) ? drain.code : null;
+  const stopCode = drainStopCode
+    ? drainStopCode
+    : refusedSignal
+      ? typeof refusedCode === "string" && /RT_E/.test(refusedCode)
+        ? refusedCode.match(/RT_E[A-Z_0-9]*/)?.[0] ?? "RT_EVAL_REFUSED"
+        : "RT_EVAL_REFUSED"
+      : drain.stall
+        ? "RT_EVAL_STALL"
+        : null;
   const card = scoreMaker({
     project: finalProject,
     // W5-L5 T-107.5: grading inputs come from the RUN-SIDE grader
@@ -988,6 +1038,9 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       treeRunOk: treeEv ? treeEv.ok : false,
       journey: journeyEv ? journeyEv.outcome : null,
       stall: drain.stall,
+      // fixes/237 (C-2): the coded terminal stop (null when the drain had no
+      // code) — the row evidence M9's loud-stop branch cites.
+      stopCode,
       emitError: handoverEv && !handoverEv.emitted ? handoverEv.emitError ?? null : null,
       p6Refused: refusedSignal,
       // fixes/154 (F1): the floor-gate discriminator this card was scored

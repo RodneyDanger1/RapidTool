@@ -34,7 +34,13 @@ export function checkedUrl(url) {
 export function checkedOutputPath(target, allowedDirs, label = "screenshot") {
   // Resolve first so `..` cannot slip past the prefix check.
   const abs = resolve(target);
-  const allowed = allowedDirs.some((dir) => abs.startsWith(dir.endsWith(sep) ? dir : dir + sep));
+  // Resolve each allowed dir the same way: callers pass POSIX-style literals
+  // (e.g. "/workspace"), which on Windows resolve to a `C:\...` shape — without
+  // this the prefix test against a resolved `abs` could never pass there.
+  const allowed = allowedDirs.some((dir) => {
+    const dirAbs = resolve(dir);
+    return abs.startsWith(dirAbs.endsWith(sep) ? dirAbs : dirAbs + sep);
+  });
   if (!allowed) {
     fail(`${label} path must be under ${allowedDirs.join(" or ")}, got ${abs}`);
   }

@@ -40,7 +40,7 @@ import { approvedAcceptanceFixtures } from "./brief-fixtures.ts";
 import { runSummaryLesson, templateEmissionLesson } from "./knowledge.ts";
 import { exportPacketText, exportProjectJson, importProject, slugName } from "./io.ts";
 import { applyReportResult, validateReport, type ReportApplyReason } from "./report-intake.ts";
-import { canEnter, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
+import { canEnter, PHASES, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
 import { evaluatePolicy, seatLabel } from "./policy.ts";
 import { applyWrite, rollback, snapshotPaths } from "./write-set.ts";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -957,6 +957,123 @@ export function exportJson(project: Project): string {
 
 export type PhaseCounts = Partial<Record<PhaseStatus, number>>;
 
+// ---------------------------------------------------------------------------
+// TASK-01 (W16-L2) — the wire-side next action.
+//
+// The 7-arm vocabulary is PINNED by the UI: `NEXT_ACTION_BUTTON` in
+// `src/components/console.tsx` (W16-brief coordinate :382; the symbol is the
+// anchor — L3 edits that file in this same wave, so line numbers drift) whose
+// keys are the `UiNextAction["kind"]` union (:251). This block is the wire
+// twin; the arm-parity doc-contract test
+// (`scripts/next-action-arm-parity.test.mjs`) asserts set-equality between
+// `NEXT_ACTION_KINDS`, the console's union, and the console's Record keys, so
+// the envelope and the UI can never drift. Parent decision
+// (taskuniverselog.md:534–538): implement 111's action vocabulary as the wire
+// contract; keep the two computations INDEPENDENT this wave — do not rewire
+// the console onto this field.
+// ---------------------------------------------------------------------------
+
+/** The pinned 7 arms as a runtime tuple (order mirrors the console union). */
+export const NEXT_ACTION_KINDS = [
+  "run",
+  "approve",
+  "retry",
+  "done",
+  "running",
+  "fix-gate",
+  "unknown",
+] as const;
+
+export type NextActionKind = (typeof NEXT_ACTION_KINDS)[number];
+
+/** Wire mirror of the console's `UiNextAction` (the 111 §3.4 `kind · cmd ·
+ *  phase · why` shape). `cmd` names the CLI verb that performs the action —
+ *  the UI shows the same word next to its button (one vocabulary, two
+ *  computations). */
+export type NextAction = {
+  kind: NextActionKind;
+  cmd: string;
+  phase: PhaseId;
+  why: string;
+};
+
+/** Documented generic sentence — only ever used by the `unknown` arm; never a
+ *  fabricated specific claim (mirrors console.tsx `GENERIC_NEXT_WHY`). */
+const GENERIC_NEXT_WHY = "Nothing is waiting on you — run the next phase to move the build forward.";
+
+/**
+ * TASK-01 (W16-L2) — the ONE next action for the summary envelope: a faithful
+ * transcription of the console's `uiNextAction` branch order (console.tsx:311)
+ * over the PERSISTED project state. Most urgent fact wins, exactly as in the
+ * console: empty phases → running → hitl → blocked → complete → failed gate →
+ * rejected → default run. The console additionally folds in its in-flight
+ * latch; the wire reads the recorded phase status — the honest floor.
+ * The `unknown` arm is mandatory (empty phases returns it BEFORE any phase
+ * lookup) so the field can never fabricate a specific claim; every other arm
+ * names a real CLI verb (status / gate / approve / retry / emit).
+ */
+export function nextAction(project: Project): NextAction {
+  if (!project.phases.length) {
+    return { kind: "unknown", cmd: "status", phase: project.currentPhase, why: GENERIC_NEXT_WHY };
+  }
+  const current = phaseDef(project.currentPhase);
+  if (project.phases[project.currentPhase]?.status === "running") {
+    return {
+      kind: "running",
+      cmd: "gate",
+      phase: project.currentPhase,
+      why: `${current.code} is running — wait for it to finish or stop.`,
+    };
+  }
+  if (project.hitl) {
+    return {
+      kind: "approve",
+      cmd: "approve",
+      phase: project.currentPhase,
+      why: `Phase ${current.code} is finished — it's waiting for your approval.`,
+    };
+  }
+  if (project.status === "blocked") {
+    return {
+      kind: "retry",
+      cmd: "retry",
+      phase: project.currentPhase,
+      why: `${current.code} stopped — read the rejection notes below, then retry the phase.`,
+    };
+  }
+  if (project.status === "complete") {
+    return {
+      kind: "done",
+      cmd: "emit",
+      phase: project.currentPhase,
+      why: `All ${PHASES.length} phases are sealed — the build is complete.`,
+    };
+  }
+  const failedGate = project.phases.find((r) => r.gate && r.gate.passed === false);
+  if (failedGate) {
+    return {
+      kind: "fix-gate",
+      cmd: "gate",
+      phase: failedGate.id,
+      why: `A gate check on ${phaseDef(failedGate.id).code} failed — review the gate record before continuing.`,
+    };
+  }
+  if (project.phases[project.currentPhase]?.status === "rejected") {
+    return {
+      kind: "run",
+      cmd: "gate",
+      phase: project.currentPhase,
+      why: `${current.code} was rejected — run it again after reviewing the notes.`,
+    };
+  }
+  return {
+    kind: "run",
+    cmd: "gate",
+    phase: project.currentPhase,
+    why: `Ready when you are — run ${current.code} (${current.title}).`,
+  };
+}
+
 export type ProjectSummary = {
   name: string;
   currentPhase: PhaseId;
@@ -979,6 +1096,12 @@ export type ProjectSummary = {
   failedGates: { phase: PhaseId; unmet: string[] }[];
   /** fixes/125: true when any complete phase sealed with a failed gate. */
   sealedWithFailures: boolean;
+  /** TASK-01 (W16-L2): the ONE next action (`kind · cmd · phase · why`) drawn
+   *  from the SAME 7-arm vocabulary the console renders — `kind` ∈
+   *  `NEXT_ACTION_KINDS` above, pinned arm-parity by
+   *  `scripts/next-action-arm-parity.test.mjs`. A caller never guesses the
+   *  next step; `unknown` when nothing specific is knowable. */
+  nextAction: NextAction;
 };
 
 /** JSON-safe summary for agent consumption (safe to print / pipe / store). */
@@ -1017,6 +1140,8 @@ export function summary(project: Project): ProjectSummary {
     vaultReady: vaultModuleAvailable() && (memoryCount > 0 || (project.artifacts?.length ?? 0) > 0),
     failedGates: failed,
     sealedWithFailures: failed.length > 0,
+    // TASK-01 (W16-L2): the ONE next action — same 7-arm vocabulary as the UI.
+    nextAction: nextAction(project),
   };
 }
 
@@ -1914,6 +2039,18 @@ export async function driveP6Journey(
       let gate: P6JourneyResult["gate"] = null;
       const rec6 = (finalProject.phases ?? []).find((ph) => ph.id === 6);
       if (rec6?.status === "complete") {
+        // C-1 (WB-1 defusal, 2026-09-24): mint the tested-equivalent from THIS
+        // cycle's genuinely green tree-run BEFORE recording the gate. T0.6's
+        // intent is preserved untouched — the mint is still never forced:
+        // mintTreeRunTested() self-guards on `outcome.ok === true` AND ≥1
+        // executed assertion, and a non-executed green run mints nothing
+        // (p6.tree.tested.skipped). Only the ORDER changes: the old order made
+        // p6-verified — which requires the mint's lastTest — a precondition of
+        // gate.passed, which gated the mint. Circular: every chunked keyed tree
+        // could never converge (223 §4 C-1; RED-first test added in
+        // headless.test.ts "C-1 (WB-1)"). The post-gate mint below is idempotent
+        // (mintTreeRunTested returns early when already tested) and stays.
+        finalProject = await applyTreeRunTestedMint(finalProject, verdict);
         finalProject = recordGate(finalProject);
         const g = (finalProject.phases ?? []).find((ph) => ph.id === 6)?.gate;
         if (g && typeof g === "object") {
@@ -2490,11 +2627,17 @@ export async function repairTreeDir(
   );
   const recordGreen = async (candidate: Project, verdict: TreeRunOutcome): Promise<{ project: Project; gate: RepairTreeResult["gate"]; minted: boolean }> => {
     const before = candidate.lastTest as { label?: string } | null | undefined;
-    // T0.6: record the P6 gate FIRST; mint lastTest:"tested" only when it passed.
+    // C-1 (WB-1 defusal, 2026-09-24) — same fix as the journey seam: mint the
+    // tested-equivalent from the green tree-run FIRST, then record the gate.
+    // The old "gate FIRST; mint only when it passed" order was the deadlock:
+    // p6-verified needs the mint, and the mint needed gate.passed. The mint is
+    // self-guarded (mintTreeRunTested: outcome.ok + ≥1 executed assertion), so
+    // "never mint on red / never mint unexecuted" is unchanged.
     let finalProject = candidate;
     let gate: RepairTreeResult["gate"] = null;
     const rec6 = (finalProject.phases ?? []).find((ph) => ph.id === 6);
     if (rec6?.status === "complete") {
+      finalProject = await applyTreeRunTestedMint(finalProject, verdict);
       finalProject = recordGateInto(finalProject, 6 as PhaseId);
       const g = (finalProject.phases ?? []).find((ph) => ph.id === 6)?.gate;
       if (g && typeof g === "object") {

@@ -178,6 +178,25 @@ const TAB_TRIGGER_CLASS =
   "rt-tab flex shrink-0 flex-col items-start px-3 pt-1.5 pb-2 text-sm text-muted outline-none hover:text-fg data-[state=active]:border-b data-[state=active]:border-fg data-[state=active]:text-fg";
 
 /**
+ * DF-26 (W16 lane 3): the assembled packet's own truncation accounting,
+ * mirrored byte-for-byte from `packet.ts:16` (`PACKET_MAX_CHARS = 14_000`) and
+ * `packet.ts:17` (`TRUNC_MARKER`). The console DETECTS truncation by reading
+ * this marker out of the packet text itself — it never recomputes the cut from
+ * the cap (that logic lives in `packet.ts:538-569` and would silently drift if
+ * the cap changed). Mirroring the literal follows the in-repo precedent of
+ * `packet.test.ts:20`; exporting the constants from packet.ts instead is the
+ * cleaner seam but sits outside this lane's file box (registered in
+ * `fixes/244` §Deviations).
+ */
+const PACKET_MAX_CHARS_MIRROR = 14_000;
+const PACKET_TRUNC_MARKER = "…[TRUNCATED — regenerate at a HITL gate for the full plan]";
+
+/** DF-26: true when the packet text carries the packet.ts:17 truncation marker. */
+function packetTruncated(packet: string | undefined): boolean {
+  return typeof packet === "string" && packet.includes(PACKET_TRUNC_MARKER);
+}
+
+/**
  * One tab trigger: the noun label plus its plain-language purpose line
  * (111 TASK-05). Radix `Tabs` requires triggers and contents to stay under the
  * same `Tabs.Root` — both lists render inside this Root, which is why the
@@ -2520,6 +2539,15 @@ export function RunScreen({ id }: { id: string }) {
                     sideOffset={6}
                     className="z-50 w-72 rounded-md border border-border bg-surface p-1 shadow-lg"
                   >
+                    {/* DF-26 (W16 lane 3): the trap "a banner only inside the packet
+                        body defeats the point" — so truncation also shows HERE, at
+                        the copy/download affordance itself, before anything is taken. */}
+                    {packetTruncated(current.packet) ? (
+                      <div className="mx-1 mb-1 rounded-sm border border-warn/30 px-2 py-1.5 font-mono text-[10px] leading-snug text-warn">
+                        Packet truncated — hit the {PACKET_MAX_CHARS_MIRROR}-char budget; copy/download
+                        carries the cut packet as-is.
+                      </div>
+                    ) : null}
                     <DropdownMenu.Label className="px-2.5 pt-1.5 pb-1 font-mono text-[10px] tracking-widest text-faint uppercase">
                       Copy
                     </DropdownMenu.Label>
@@ -2902,6 +2930,16 @@ export function RunScreen({ id }: { id: string }) {
             <Tabs.Content value="packet" forceMount className="data-[state=inactive]:hidden">
               {project.packet ? (
                 <div className="px-5 pt-4 pb-5">
+                  {/* DF-26 (W16 lane 3): truncation made loud where the packet is
+                      shown. Detection reads the packet's OWN marker (packet.ts:17)
+                      out of the assembled text — the cut is never recomputed here. */}
+                  {packetTruncated(project.packet) ? (
+                    <div className="mb-3 rounded-md border border-warn/30 bg-raised px-3 py-2 font-mono text-[11px] leading-relaxed text-warn">
+                      This packet is truncated — it hit the packet budget ({PACKET_MAX_CHARS_MIRROR}{" "}
+                      chars) and the tail was cut. The packet's own marker in the body reads:{" "}
+                      {PACKET_TRUNC_MARKER}. Copy or download carries this packet as-is.
+                    </div>
+                  ) : null}
                   <div className="term-frame">
                     <div className="term-bar" role="presentation">
                       <span aria-hidden="true" className="term-dot" />
@@ -3312,6 +3350,13 @@ function ScorecardBlock({ project }: { project: Project }) {
             {sc.overall}
             <span className="text-muted"> / 10</span>
             <span className="ml-3 font-mono text-xs text-accent">{sc.verdict}</span>
+          </p>
+          {/* DF-18 (W16 lane 3): the packet carries this caveat verbatim at
+              packet.ts:498 — the UI had dropped it, so the headline number read
+              as live research. Mirrored exact wording, never paraphrased softer
+              ("template-derived, not live research" is the force of the line). */}
+          <p className="mt-1 font-mono text-[11px] leading-snug text-warn">
+            (deterministic feasibility estimate — template-derived, not live research)
           </p>
         </div>
       </div>

@@ -7,8 +7,10 @@ import {
   buildSummary,
   checkAcceptance,
   choose,
+  drainPipeline,
   graderFileFor,
   graderLeakScan,
+  isTerminalDrainOutcome,
   keylessSkipNotices,
   loadGrader,
   parseGrader,
@@ -21,6 +23,7 @@ import {
   treeTextFiles,
   trialsSummary,
 } from "./run-eval.mjs";
+import { createProject, runUntilGate } from "../src/lib/headless.ts";
 import { projectRoot } from "./with-app-env.mjs";
 
 /**
@@ -463,4 +466,59 @@ test("(c) the recorded results.json keeps the legacy contract and adds W5-L5 key
     if (!g.ok) continue;
     assert.equal(JSON.stringify(entry).includes(g.grader.acceptanceBar), false, `${entry.slug}: results.json must not echo the bar into the evidence file`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// (d) fixes/237 — C-2 (`223` §4, `230` OV-5(a)): a hard-DoD stop is a CODED
+// TERMINAL stop in the drain. Today the terminal set is {complete, blocked,
+// error}, so a `dod` round (headless.ts:587-606 — a real hard stop) reads as
+// "progress" and the drain re-enters the block for its full 80-round guard
+// (~80 `dod.blocked` rows), then reports a SILENT `position:"stalled",
+// onTime:false` → M9=0. These two pins close that.
+// ---------------------------------------------------------------------------
+
+test("(d) drain terminality pins all seven RunOutcome values", () => {
+  // The seven RunOutcome values (src/lib/headless.ts:527).
+  const terminal = ["complete", "blocked", "error", "dod"];
+  const looping = ["hitl", "progress", "cap"];
+  for (const o of terminal) {
+    assert.equal(isTerminalDrainOutcome(o), true, `${o} must end the drain`);
+  }
+  for (const o of looping) {
+    assert.equal(isTerminalDrainOutcome(o), false, `${o} must not end the drain (hitl is approved + continued; progress/cap keep looping)`);
+  }
+  assert.equal(new Set([...terminal, ...looping]).size, 7, "exactly the seven RunOutcome values are pinned");
+});
+
+test("(d) the drain exits on the FIRST dod round with a coded stop (WB-2 → M9)", async () => {
+  // Same shape as `223` §C-2's scratch probe: a project COMPLETE at phase 1
+  // with a red gate under enforceDod:true — runUntilGate returns outcome
+  // "dod", stopped, cursor unmoved (the headless.test.ts:1744 recipe).
+  const p0 = createProject({
+    brief: "Build a small notes app with add/list/search and its own tests.",
+    name: "DodDrain",
+  });
+  const stepped = await runUntilGate({ ...p0, enforceDod: false }, { maxSteps: 1 });
+  assert.equal(stepped.project.currentPhase, 1, "precondition: P0 advanced under advisory");
+  const sabotaged = {
+    ...stepped.project,
+    enforceDod: true,
+    currentPhase: 1,
+    phases: stepped.project.phases.map((ph) =>
+      ph.id === 1 ? { ...ph, status: "complete", startedAt: Date.now() } : ph,
+    ),
+  };
+  const rowsBefore = (sabotaged.logs ?? []).filter((l) => l.event === "dod.blocked").length;
+  assert.equal(rowsBefore, 0, "precondition: no dod.blocked row yet");
+
+  const drain = await drainPipeline(sabotaged);
+  assert.equal(drain.res.outcome, "dod", "the round really is the hard-DoD stop");
+  assert.equal(drain.position, "dod", "a hard stop parks as its own coded position, never a silent stall");
+  assert.equal(drain.onTime, true, "the drain stopped WITH a terminal state (M9's first branch)");
+  assert.equal(drain.code, "RT_E_GATE_PENDING", "the stop carries the wild path's code for the same block (engine.ts:3571)");
+  assert.match(String(drain.stall), /DoD unmet/, "the stall evidence is the hard-DoD message");
+  const rowsAfter = (drain.p.logs ?? []).filter((l) => l.event === "dod.blocked").length;
+  assert.equal(rowsAfter, 1, `exactly ONE drain round ran the hard-DoD block — got ${rowsAfter} (80 before this fix)`);
+  assert.equal(drain.p.currentPhase, 1, "cursor unmoved — a hard stop advances nothing");
+  assert.equal(drain.approved.length, 0, "no gate was approved on the way out");
 });

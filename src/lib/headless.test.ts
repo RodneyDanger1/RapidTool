@@ -23,6 +23,7 @@ import {
   p6CycleLiveDeps,
   packet,
   reject,
+  repairTreeDir,
   retry,
   runAcceptance,
   runPhase,
@@ -510,6 +511,42 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
     assert.ok(res.events.some((e) => e.includes("P6 journey converged")), "events trail says converged");
   });
 
+  it("C-1 (WB-1): a genuinely green tree-run that EXECUTED specs mints the tested-equivalent before the gate — the deadlock must not need gate.passed to mint", async () => {
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    // The real keyed shape: the emitted tree ran its own oracle spec and it
+    // passed. treeRunTestedEvidence() requires ≥1 passing spec with ≥1 executed
+    // assertion for `executed:true` — that is the only honest mint precondition.
+    const executedVerdict: TreeRunOutcome = {
+      ok: true,
+      dir: "",
+      compile: { ...emptyCompile, ok: true, failed: 0, passed: 1, checked: 1 },
+      tests: [
+        {
+          file: "tests/oracle.spec.ts",
+          compile: "pass",
+          run: "pass",
+          tests: { pass: 1, fail: 0 },
+          detail: "1 passed",
+        },
+      ],
+      run: { kind: "library", run: "skip", detail: "no entry to smoke" },
+    };
+    const res = await driveP6Journey(base, {
+      deps: { synthesize: async (p) => withTree(p), runTree: async () => executedVerdict },
+    });
+    const lt = res.project.lastTest as { label?: string; evidenceHash?: string } | null | undefined;
+    // WB-1 (223 §4 C-1, parent-verified): today the ONLY mint call sits inside
+    // `gate.passed === true`, whose p6-verified probe requires the very
+    // lastTest the mint produces — a circular deadlock for every chunked tree.
+    // The green tree-run IS the evidence; the mint must not wait on the gate.
+    assert.equal(
+      lt?.label,
+      "tested",
+      "green tree-run with executed specs ⇒ tested-equivalent minted (C-1 defuses the gate-before-mint deadlock)",
+    );
+    assert.ok((lt?.evidenceHash ?? "").length > 0, "the mint carries its evidence hash");
+  });
+
   it("green treeRun but NO recorded P6 gate (phase 6 not complete) → FAILED, never a bare converged (fixes/159 F4)", async () => {
     const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
     // A synthesized project whose P6 record never completed: recordGateInto
@@ -572,6 +609,65 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
       if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
       else process.env.DEEPSEEK_API_KEY = savedKey;
     }
+  });
+});
+
+describe("C-1 repair seam — repairTreeDir's recordGreen mints before the gate (W15-L1)", () => {
+  const emptyCompile = { ok: false, dir: "", checked: 0, passed: 0, failed: 1, skipped: 0, verdicts: [] };
+  // The real keyed shape (same fixture discipline as the journey-seam C-1
+  // test above): the tree ran its own oracle spec and it passed —
+  // treeRunTestedEvidence()'s executed:true (≥1 passing spec with ≥1 assertion)
+  // is the only honest mint precondition.
+  const executedVerdict: TreeRunOutcome = {
+    ok: true,
+    dir: "",
+    compile: { ...emptyCompile, ok: true, failed: 0, passed: 1, checked: 1 },
+    tests: [
+      { file: "tests/oracle.spec.ts", compile: "pass", run: "pass", tests: { pass: 1, fail: 0 }, detail: "1 passed" },
+    ],
+    run: { kind: "library", run: "skip", detail: "no entry to smoke" },
+  };
+
+  it("a green tree-run carrying an executed spec mints lastTest \"tested\" BEFORE the gate — and the returned gate reflects the mint (C-1's second seam)", async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, "src", "generated"), { recursive: true });
+    writeFileSync(join(dir, "src", "generated", "hvac.ts"), "export const hvac = () => 1;\n");
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    const candidate: Project = {
+      ...base,
+      generatedTree: [
+        { path: "src/generated/hvac.ts", source: "export const hvac = () => 1;", hash: "f1", attempt: 0 },
+      ],
+    };
+    const res = await repairTreeDir(candidate, dir, { deps: { runTree: async () => executedVerdict } });
+    // The re-imported dir is tree-green on the first run, but the honest P6
+    // gate stays red over this fixture (the fixes/159 F4 shape) — so the run
+    // FAILS, and the only question this test pins is WHERE the mint sits.
+    assert.equal(res.outcome, "failed", "green tree-run + honestly-red gate is FAILED, never converged");
+    assert.equal(res.cycles, 0, "cycle-0 converge check ran — no synthesis cycle");
+    const lt = res.project.lastTest as { label?: string; evidenceHash?: string } | null | undefined;
+    // Pre-C-1, recordGreen recorded the gate FIRST and minted only when it
+    // passed — but the p6-verified probe needs the mint, so the gate could
+    // never pass on a green tree-run: the same circular deadlock C-1 defused
+    // in the journey seam. The mint now runs BEFORE the gate and must not be
+    // silently reverted.
+    assert.equal(
+      lt?.label,
+      "tested",
+      "green tree-run with executed specs ⇒ tested-equivalent minted before the gate (C-1, repair seam)",
+    );
+    assert.ok((lt?.evidenceHash ?? "").length > 0, "the mint carries its evidence hash");
+    assert.ok(res.gate, "the P6 gate was re-recorded after the re-import");
+    assert.equal(res.gate!.passed, false, "the recorded gate is the honest one — the mint never force-greens it");
+    // "The gate reflects the mint": p6-verified is satisfied by the mint that
+    // PRECEDED the gate, so its criterion must NOT be unmet. If the mint ran
+    // after a gate that can only pass with it (the pre-C-1 order), this is
+    // exactly the criterion that shows up in `unmet`.
+    assert.ok(res.gate!.unmet.length > 0, "the gate really evaluated criteria over this fixture (non-vacuous)");
+    assert.ok(
+      !res.gate!.unmet.some((u) => u.includes('lastTest.label === "tested"')),
+      'p6-verified unmet ONLY when the gate ran before the mint (the pre-C-1 deadlock) — the mint must precede the gate',
+    );
   });
 });
 

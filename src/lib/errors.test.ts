@@ -441,3 +441,45 @@ describe("ERROR_CODE_DOC", () => {
     }
   });
 });
+
+// ---- W15-L2 (fixes/241) — registry boundary: the C-2 open item (`RT_EVAL_STALL`
+// / `RT_EVAL_REFUSED` absent from the registry) is closed by DECISION
+// (declare-or-strike), not by registration. Both strings are the run-eval
+// harness's local scoring-evidence labels (scripts/run-eval.mjs — M9's
+// `stop.code`, results-row `notes.stopCode`), never thrown and never enveloped;
+// their shape fails the registry's `RT_E_*` contract, so they cannot enter it
+// as-is, and no EVAL-family code is minted for a case no surfaced failure
+// emits. These pins keep it that way.
+
+describe("registry boundary — RT_EVAL_* harness labels (W15-L2 / fixes/241)", () => {
+  const HARNESS_LABELS = ["RT_EVAL_STALL", "RT_EVAL_REFUSED"] as const;
+
+  it("keeps the two run-eval labels out of ERROR_CODES and ERROR_CODE_DOC", () => {
+    const docKeys: string[] = Object.keys(ERROR_CODE_DOC);
+    for (const label of HARNESS_LABELS) {
+      assert.ok(
+        !(ERROR_CODES as readonly string[]).includes(label),
+        `${label} is a harness evidence label, not a registry code`,
+      );
+      assert.ok(!docKeys.includes(label), `${label} must not get a doc entry`);
+    }
+  });
+
+  it("documents why they cannot be registered as-is: RT_EVAL* is not the RT_E_* shape", () => {
+    for (const label of HARNESS_LABELS) {
+      assert.doesNotMatch(label, /^RT_E_[A-Z_]+$/);
+    }
+    // ...and every real code DOES match that shape (the ERROR_CODE_DOC block
+    // above pins it) — the shape is the boundary, not the field name.
+  });
+
+  it("classifyError degrades a non-RT_E_ label to the honest fallback (not preserved as a code)", () => {
+    const stalled = (code: string): Error =>
+      Object.assign(new Error("drain ended without a terminal state"), { code });
+    assert.equal(classifyError(stalled("RT_EVAL_STALL")), "RT_E_UNKNOWN");
+    assert.equal(classifyError(stalled("RT_EVAL_REFUSED")), "RT_E_UNKNOWN");
+    assert.equal(classifyError(stalled("RT_EVAL_STALL"), "RT_E_INTERNAL"), "RT_E_INTERNAL");
+    // Contrast — a real registry code in the same position IS preserved:
+    assert.equal(classifyError(stalled("RT_E_BUDGET_EXHAUSTED")), "RT_E_BUDGET_EXHAUSTED");
+  });
+});

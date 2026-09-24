@@ -797,6 +797,23 @@ async function main() {
               1,
             );
           }
+          // W14-L2 (OV-15): expose headless.emitProject's own `redTree` policy so
+          // the coded refusal's advice — 'emit with redTree:"banner"' — is
+          // reachable from the CLI. `refuse` (the default) and `banner` (emit
+          // anyway, with the unmissable banner prepended to the emitted
+          // README.md) are accepted; `probe` (no trail read) stays internal to
+          // the eval driver / journey paths and is NOT exposed here.
+          const redTree = args["red-tree"];
+          if (redTree !== undefined && redTree !== "refuse" && redTree !== "banner") {
+            return respond(
+              {
+                ok: false,
+                error: `emit --red-tree expects "refuse" or "banner" (got ${JSON.stringify(redTree)})`,
+                code: "RT_E_VALIDATION",
+              },
+              1,
+            );
+          }
           const dest = typeof args.out === "string" ? { path: args.out, fallback: false, error: null } : defaultOutputDir(h, project);
           const dir = dest.path;
           const target = resolve(dir);
@@ -804,7 +821,10 @@ async function main() {
           // never a silent merge. Snapshot pre-existing content BEFORE writing
           // (writeFileSync replaces each file wholesale; nothing is merged).
           const preExisting = existsSync(target) && readdirSync(target).length > 0;
-          const res = await h.emitProject(project, target, { force: flag(args, "force") });
+          const res = await h.emitProject(project, target, {
+            force: flag(args, "force"),
+            ...(typeof redTree === "string" ? { redTree } : {}),
+          });
           if (!res.ok) {
             respond({ ok: false, error: res.error, code: res.code ?? "RT_E_VALIDATION", foreign: res.foreign }, 1);
             return;
@@ -816,6 +836,13 @@ async function main() {
             moduleEmbedded: res.moduleEmbedded,
             summary: res.summary,
           };
+          // W14-L2 (OV-15): under --red-tree banner the emitted tree carries the
+          // unmissable README banner — say so on the envelope too, so an agent
+          // driver can never read this as a quietly-clean emit.
+          if (res.redTreeBanner === true) {
+            payload.redTreeBanner = true;
+            payload.redTree = res.redTree ?? null;
+          }
           if (dest.fallback) {
             payload.fallback = true;
             payload.warning =
@@ -2901,18 +2928,18 @@ const USAGE = {
     create: "create --brief <text> [--name <text>] [--advisory] [--out <file.json>]   # default out: <slug>.json in the CWD (intermediate control file); --advisory: advisory DoD gates even when DEEPSEEK_API_KEY is set (keyed runs default enforceDod ON)",
     run: "run --project <file.json> [--live]            # advance one phase",
     gate: "gate --project <file.json> [--autopilot] [--live]  # advance until parked",
-    approve: "approve --project <file.json> [--force]",
+    approve: "approve --project <file.json> [--force] [--i-am-human]   # --i-am-human: human-seat claim (non-TTY requires it + the out-of-band RT_HUMAN_SEAT_TOKEN)",
     reject: "reject --project <file.json> --note <text>",
     retry: "retry --project <file.json>                  # unlock a rejected/blocked phase",
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",
     packet: "packet --project <file.json> [--out <file.md>] [--knowledge <store.json>]  # --knowledge seeds the Ranked-memory section with cross-project accepted lesson rows (tier-1, advisory)",
     export: "export --project <file.json> [--out <file.json>]",
-    emit: "emit --project <file.json> [--out <dir>] [--check] [--run]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok",
+    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse)",
     fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR human-approve selected/all ids — never auto-approves",
     "tree-run": "tree-run --dir <dir> [--project <file.json>]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0; red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
     repair: "repair --dir <dir> --project <file.json> [--budget N]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (path→content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun → red tail → one bounded synthesis repair call with deps.treeFailure → apply repaired files in place → re-import → treeRun again); green → tested-equivalent mint + honest P6 gate + converged (0); budget exhausted → honest failed (1, RT_E_REPAIR_FAILED); the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
     edit: "edit --dir <dir> --file <relpath> --find <old> --replace <new> [--write] [--project <file.json>]  # 216s (108-T1): ONE in-place str_replace on an emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, nothing is written); --write (requires --project) applies atomically only after evaluatePolicy(\"repair.apply\", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes); ambiguous / missing / no-op matches are coded refusals",
-    summary: "summary --project <file.json>",
+    summary: "summary --project <file.json>   # envelope: ok + summary incl. nextAction {kind,cmd,phase,why} — the SAME 7-arm vocabulary the console renders (run/approve/retry/done/running/fix-gate/unknown)",
     vault: "vault --project <file.json> [--out <dir>]   # one .md per note + _index.md MOC (default <home>/RapidTool Software/<slug>/vault)",
     search: "search --project <file.json> --query <text> [--limit <n>]  # token-overlap vault search",
     crew: "crew --project <file.json> [--max-steps <n>]  # advisory multi-agent crew (needs DEEPSEEK_API_KEY)",
@@ -2922,6 +2949,7 @@ const USAGE = {
     diagram: "diagram --project <file.json> --kind phases|architecture|flow [--out <file.svg>]  # SVG diagram",
     artifacts: "artifacts --project <file.json>           # index of project artifacts (id/phase/kind/title/bytes)",
     doctor: "doctor [--tree <dir>]                       # capability pre-flight (llm/research/runner/node/factory)",
+    diagnose: "diagnose [--project <file.json>]           # one-shot telemetry diagnosis from the NDJSON log tail: timeline + most-likely-cause heuristic + growth stats (no project required)",
     harvest: "harvest --project <file.json>               # bounded live-source harvest (repos/license/snippets) for the brief",
     swarm: "swarm --project <file.json>                  # deterministic advisory swarm critique of the current phase",
     prompt: "prompt --project <file.json> [--policies a,b]  # hyper-prompt expansion (needs DEEPSEEK_API_KEY)",

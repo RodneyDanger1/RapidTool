@@ -16,7 +16,7 @@ Sections (numbered per the lane plan):
    - 2.6 T5.7 cassette
    - 2.7 Tasks proven DONE-today (if any)
 3. Product-decision register (T5.6, T5.8 — USER-owned; stated, not decided)
-4. Isolation-boundary decision input (108-T7 / T-107.8) — outcome UNKNOWN, awaiting W11-L2 host probe
+4. Isolation-boundary decision input (108-T7 / T-107.8) — probe SETTLED 2026-09-24: **NO isolator on this host** (docker/bwrap absent, exit 127; WSL 0 distros) → Outcome 2 is the only available branch (see §4's drop-in slot + `fixes/217b` §2)
 5. Competitor-gap refresh (honest table)
 6. Priority ranking (by distance closed on the maker test)
 7. Self-check + commands-run ledger
@@ -544,8 +544,10 @@ minimum acceptance either way is a README posture statement.
 
 **Why this is in this document.** The lane brief: restate the decision, list what must become
 true for each outcome, cite `108:639-656` + `sandbox-policy.ts`, and write it so W11-L2's
-concurrent host probe (docker/bwrap availability) can be dropped in. **The probe outcome is
-UNKNOWN as of this writing — I did not guess it.** Both branches are written below.
+concurrent host probe (docker/bwrap availability) can be dropped in. **The probe outcome was
+UNKNOWN as of this writing — I did not guess it. [SETTLED 2026-09-24: ABSENT — no docker/bwrap
+on this host (exit 127); WSL has 0 installed distributions. The drop-in slot at the end of this
+section now carries the settled result + its evidence line; both branches remain written below.]**
 
 **The decision, restated (from `fixes/216x` §2.3 item 3, which I read today).** 108-T7 asks for
 E2E verification of an emitted app against a running instance. The dossier is explicit that
@@ -557,8 +559,9 @@ Mechanism-8 shape, and `108:688` for the T-107.8 row). The two legal outcomes fo
 itself (not for 108-T7, which stays deferred regardless until T4.1 + T-18 land):
 
 **Outcome 1 — add a real isolation boundary.**
-What must become true: (a) docker or bwrap is provably available on this host — **UNKNOWN —
-needs W11-L2's probe result** (drop it in here); (b) `sandbox-policy.ts` gains a real isolator
+What must become true: (a) docker or bwrap is provably available on this host — **SETTLED
+2026-09-24: NOT available today** (no docker/bwrap, exit 127; WSL 0 distros — `fixes/217b` §2;
+this clause can only flip if an isolator is later provisioned on the host); (b) `sandbox-policy.ts` gains a real isolator
 path: today it is frozen to `sandbox: false, kind: "none", docker: false, bwrap: false` with
 the note `RUNNER_IS_NOT_A_SANDBOX` ("RapidTool's node-runner is a bounded timeout + env
 allowlist. It is NOT Docker, bwrap, or a security sandbox." — verified at `sandbox-policy.ts:13-22`,
@@ -589,10 +592,16 @@ that cannot happen by accident; do not weaken it. (c) Starting 108-T7 work befor
 land — `fixes/216x` §2.3 item 3 gates it explicitly; the honest ceiling until then is "builds
 and tests" (T-18), never "E2E".
 
-**Drop-in slot for W11-L2's result.** `[W11-L2 PROBE RESULT — UNKNOWN at write time: if
-docker/bwrap is ABSENT → Outcome 2 is the only available branch; record it as the decision
-input and keep the claim frozen. If PRESENT → Outcome 1 becomes *possible* but still requires
-the (a)–(e) chain above before any claim changes.]`
+**Drop-in slot for W11-L2's result — FILLED (settled).** `[W11-L2 PROBE RESULT — SETTLED
+2026-09-24: ABSENT. No isolator on this host: docker/bwrap not found (exit 127); WSL is enabled
+but has 0 installed distributions ("Windows Subsystem for Linux has no installed
+distributions."). Evidence: fixes/217b_watchdog_verification.md §2 (:148–160) — the raw capture
+(w11l2_scratch/isolation_probe.txt, 2026-09-24 10:27:17); re-run 2026-09-24 by W14-L2 (the
+fill-in) with the same result — which docker bwrap → none; docker --version / bwrap --version →
+exit 127; wsl.exe -l -v → no installed distributions. → Outcome 2 is the only available branch;
+record it as the decision input and keep the claim frozen. Outcome 1 stays *possible* only if an
+isolator is later provably available, and still requires the (a)–(e) chain above before any
+claim changes.]`
 
 ---
 

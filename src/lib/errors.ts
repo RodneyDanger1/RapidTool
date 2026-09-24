@@ -56,6 +56,25 @@ export const ERROR_CODES = [
   "RT_E_NETWORK_UNREACHABLE",
 ] as const;
 
+/**
+ * Registry boundary (fixes/241 W15-L2, closing the C-2 note in fixes/237):
+ * an `RT_E*`-looking string is not automatically a code. The run-eval harness
+ * (`scripts/run-eval.mjs`) carries two legacy scoring-evidence labels,
+ * `RT_EVAL_STALL` / `RT_EVAL_REFUSED`, that stay OUT of this registry by
+ * decision (declare-or-strike):
+ *   - nothing throws them, nothing passes them through `codeError` /
+ *     `classifyError`, and no CLI envelope or exit code carries them — they
+ *     only label the drain's stop evidence (`stop.code` for the M9 rubric,
+ *     `notes.stopCode` in the results row);
+ *   - their shape (`RT_EVAL*`, no underscore after the `E`) fails this
+ *     registry's enforced `RT_E_*` prefix, so registering them as-is would
+ *     bend the convention for every consumer — and a new code is minted only
+ *     for a failure that actually surfaces;
+ *   - if a future run-eval lane wants them as real codes, THAT lane owns the
+ *     shape-conforming rename plus its emitter change; `errors.test.ts` pins
+ *     this boundary until then.
+ */
+
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
 /** Honest failure shape: `ok: false`, a human-readable `error`, and a machine-readable `code`. */
