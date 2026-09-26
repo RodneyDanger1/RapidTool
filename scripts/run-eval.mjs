@@ -2557,6 +2557,29 @@ async function main() {
     }
   }
 
+  // W23-L1 — the FUNDEDNESS wire (the run-#3 lesson): after reachability, ask
+  // the one question a 401-class probe cannot answer — does the account have
+  // balance? `funded:false` (HTTP 402 / the vendor's no-balance class) must
+  // stop the scored trials: a broke wallet is not a measurement (run #3's
+  // 3/9 @ 2.6s was an unfunded account, not a regression). `funded:null`
+  // (unaskable: auth/network/timeout) is REPORTED and proceeds — never
+  // guessed into a pass or a fail. The key VALUE never enters the output.
+  let fundedness = null;
+  if (KEYED_OK) {
+    fundedness = await probeFundedness({});
+    console.log(
+      `preflight: fundedness · configured=${fundedness.configured} · funded=${fundedness.funded === null ? "unknown" : fundedness.funded}${fundedness.class ? ` · class=${fundedness.class}` : ""}${fundedness.code ? ` · code ${fundedness.code}` : ""}${fundedness.httpStatus !== null ? ` · httpStatus=${fundedness.httpStatus}` : ""}${fundedness.servedModel ? ` · served=${fundedness.servedModel}` : ""}`,
+    );
+    if (fundedness.funded === false) {
+      console.log(
+        `FUNDEDNESS STOP: the account is UNFUNDED (${fundedness.code ?? "no-balance"}) — a scored trial would measure the wallet, not the product. Top up, then re-run. No trial runs; results will record the skip.`,
+      );
+      // The existing downstream path records "nothing gradeable" with reasons —
+      // reuse it rather than duplicating the results writer here.
+      selected.length = 0;
+    }
+  }
+
   const rows = [];
   if (selected.length === 0) {
     console.log("note: nothing gradeable — every corpus entry was skipped above (results recorded with the skip reasons, exit 0)");

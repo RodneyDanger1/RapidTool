@@ -67,6 +67,7 @@ import { renderMarkdownBlocks } from "@/lib/render";
 // that errors.ts / chat.ts landed). chat.ts does not re-export ChatTurn, so
 // the history type is declared structurally (matches chat.server.ts's shape).
 import { chatContextInfo, chatHistoryTurns, chatOnce, chatStampVersion, failedSendPrompt } from "@/lib/chat";
+import { fixturesReview } from "@/lib/fixtures.review";
 import { ERROR_CODE_DOC } from "@/lib/errors";
 import { buildClientDiagnosis, reportRt, rtSnapshot, setBusyProbe } from "@/lib/rt-client";
 import { WILD_STEP_BUDGET_MS } from "@/lib/rt-events";
@@ -133,7 +134,7 @@ function PhaseGlyph({ status }: { status: PhaseStatus }) {
   );
 }
 
-type RunTab = "artifacts" | "packet" | "spec" | "crew" | "oracle" | "design" | "diagram" | "chat" | "vault" | "runtime";
+type RunTab = "artifacts" | "packet" | "spec" | "crew" | "oracle" | "design" | "diagram" | "chat" | "vault" | "runtime" | "fixtures";
 
 /**
  * Run-console destinations — ONE source for the tab strip, its aria-label and
@@ -165,6 +166,7 @@ const RUN_TABS: { id: RunTab; label: string; purpose: string; tier: "primary" | 
   { id: "design", label: "Design", purpose: "Colors, type and spacing from Phase 6", tier: "advanced" },
   { id: "diagram", label: "Diagram", purpose: "A picture of how the build fits together", tier: "advanced" },
   { id: "runtime", label: "Runtime log", purpose: "Operator log and diagnostics", tier: "advanced" },
+  { id: "fixtures", label: "Fixtures", purpose: "Review eval fixtures against their run-side bars", tier: "advanced" },
 ];
 
 /** aria-label for one rendered tablist slice — derived from the same array the
@@ -432,6 +434,64 @@ const NEXT_ACTION_BUTTON: Record<UiNextAction["kind"], string | null> = {
  * guard (OpenHands `isServerFallbackSummary`) refuses a `why` that is really
  * serialized JSON and falls back to the documented generic sentence.
  */
+/** T5.2-A — fixtures review surface (the human seat). Read-only: corpus
+ *  fixtures next to their run-side grader bars, with the loader's honesty
+ *  label carried verbatim. Approving/rejecting records a decision through
+ *  the decision path — this pane never edits a bar (run-side authority). */
+function FixturesPanel() {
+  const [data, setData] = useState<Awaited<ReturnType<typeof fixturesReview>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void fixturesReview().then(
+      (r) => {
+        if (alive) setData(r);
+      },
+      (e: unknown) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (error) return <p className="px-5 py-4 text-sm text-muted">Fixtures unavailable: {error}</p>;
+  if (!data) return <p className="px-5 py-4 text-sm text-muted">Loading fixtures…</p>;
+  return (
+    <div className="scroll-thin max-h-[65vh] overflow-y-auto px-5 py-4">
+      <p className="text-xs text-muted">{data.label}</p>
+      {data.problems.length > 0 ? (
+        <ul className="mt-2 list-disc pl-5 text-xs text-muted">
+          {data.problems.map((p) => (
+            <li key={p}>{p}</li>
+          ))}
+        </ul>
+      ) : null}
+      {!data.ok ? (
+        <p className="mt-2 text-xs text-muted">corpus dir unreadable — see the problems above.</p>
+      ) : null}
+      <ol className="mt-3 space-y-2">
+        {data.rows.map((r) => (
+          <li key={r.slug} className="rounded-md border border-border bg-raised px-3 py-3">
+            <p className="font-mono text-[11px] text-accent">
+              {r.slug} · {r.domain} · {r.kind}
+            </p>
+            <p className="mt-1 text-sm font-medium">{r.name}</p>
+            <p className="mt-1 text-xs text-muted">{r.acceptanceBar}</p>
+            <p className="mt-1 text-[11px] text-muted">
+              {r.requiredIdentifiers.length} required identifier(s) ·{" "}
+              <span className="font-mono">{r.reviewState}</span>
+            </p>
+            {r.graderProblem ? (
+              <p className="mt-1 text-xs text-muted">bar problem: {r.graderProblem}</p>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function RunStatusPanel({
   project,
   action,
@@ -3084,6 +3144,10 @@ export function RunScreen({ id }: { id: string }) {
 
             <Tabs.Content value="vault" forceMount className="data-[state=inactive]:hidden">
               <VaultPane project={project} />
+            </Tabs.Content>
+
+            <Tabs.Content value="fixtures" forceMount className="data-[state=inactive]:hidden">
+              <FixturesPanel />
             </Tabs.Content>
 
             <Tabs.Content value="runtime" forceMount className="data-[state=inactive]:hidden">
