@@ -17,10 +17,13 @@ research/eval-corpus/
   rental-portfolio.md                         ← Make 4/5
   field-ops-suite.md                          ← Make 5/5
   coffeehouse2home-property-ledger.md         ← Phase-2 merged suite (99)
+  permit-inspection-tracker.md                ← W19-L4 (OV-7) expansion — 2nd construction fixture
 ```
 
-Six fixtures, one per real maker journey. Every brief text below the frontmatter of the
-fixtures was transcribed **verbatim** from the on-disk run evidence (see provenance
+Seven fixtures: six transcribed from the dossiers' run evidence (see the provenance
+table), plus `permit-inspection-tracker.md` — **authored** 2026-09-24 by W19-L4 under
+OV-7 (not transcribed; its file and grader say so). Every brief text below the frontmatter of the
+six transcribed fixtures was transcribed **verbatim** from the on-disk run evidence (see provenance
 table), not paraphrased from the dossiers.
 
 ## Frontmatter schema (exact keys — do not rename, reorder, or extend)
@@ -50,6 +53,26 @@ after the frontmatter — parsers must ignore everything after the closing `---`
 | `rental-portfolio.md` | `research/multiagent/98_make_4_rental_portfolio.md` (Phase 1, 4/5) | `%TEMP%\rapidtool-make-b4\` (rental.json, rental-final.json 98.6 KB, vault/50, packet.md) | `brief` field of `rental.json`/`rental-final.json` (285 chars) | `Rental Portfolio Manager` |
 | `field-ops-suite.md` | `research/multiagent/98_make_5_field_ops_suite.md` (Phase 1, 5/5) | `%TEMP%\rapidtool-make-b5\` (field-ops.json at P8, field-ops2.json, ~15 envelopes, probe-l2*.mjs, drive-journey.sh) | `brief` field of `field-ops.json` (267 chars) | `FieldOps Suite` |
 | `coffeehouse2home-property-ledger.md` | `research/multiagent/99_coffeehouse2home.md` (Phase 2 merged) + `97_coffeehouse2home_mission.md` | `%TEMP%\rapidtool-make-merge\` (c2h.json, c2h-at-p8.json, c2h-final.json 106 KB, envelopes 00–25, vault/) | `brief` field of `c2h-final.json` (1412 chars; identical across all three c2h JSONs) | `Coffeehouse2Home` |
+| `permit-inspection-tracker.md` | **none — authored, not transcribed** (W19-L4 / OV-7) | none (no run behind it) | authored 2026-09-24 against the corpus schema; `baseline` states "not yet measured" | `Permit & Inspection Tracker` (proposed) |
+
+## Domain spread & the M7 reading (OV-7, added by W19-L4)
+
+| domain | fixtures |
+|---|---|
+| `real-estate` | real-estate-crm · house-flip-manager · showing-booking · rental-portfolio · coffeehouse2home-property-ledger |
+| `construction` | field-ops-suite · permit-inspection-tracker |
+
+The corpus spans **two domains, each with ≥2 fixtures** — the property the OV-7 done-when
+("M7 measurable across ≥2 domains") needs, pinned in `scripts/run-eval.test.mjs` (section (e)).
+Before this lane `construction` carried a single fixture, so no same-domain peer existed inside it.
+
+**M7's honest reading** (stated here because the playbook requires it): the driver's M7 prior is
+read from `history.json` **by slug** (`run-eval.mjs priorFor`) — the most recent recorded row for
+that slug, whatever its domain. A slug's first run therefore reports *"no prior same-domain run —
+no learning claim without data"* (M7=0, honest), and a **new domain starts with no prior** until its
+first run records one. Two sequential `npm run eval -- --trials=2` invocations give every slug a
+prior for the second one; `--trials=2` in a *single* invocation is still two trials of one run and
+does NOT substitute for run #2 (235 §17). The keyed run-#2 citation path stays OV-8 (owner-run).
 
 All scratch dirs were present on disk at corpus-write time (2026-09-08); no dossier was
 missing, so no reconstruction from secondary evidence was needed. Verbatim brief strings

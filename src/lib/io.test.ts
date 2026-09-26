@@ -5,6 +5,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  ARTIFACT_PRODUCERS,
+  coerceArtifactProvenance,
   IMPORT_MAX_CHARS,
   PHASE_COUNT,
   downloadFilename,
@@ -12,6 +14,7 @@ import {
   exportProjectJson,
   importProject,
   slugName,
+  type ArtifactProvenance,
 } from "./io.ts";
 import { compileAgentPacket } from "./packet.ts";
 import { hydrateProject, stampPacket } from "./engine.ts";
@@ -691,5 +694,162 @@ describe("174-3 preserveWildRun hydrate", () => {
       assert.equal(keep.project.wildRun?.active, true);
       assert.equal(keep.project.wildRun?.startedAt, 1);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T5.4 (W18 LANE 5) — artifact provenance at the serialization boundary.
+// An emitted artifact record may carry `provenance = { producer, model?,
+// timestamp, inputHash }`; a well-formed stamp rides through import untouched,
+// a malformed/contradictory one is dropped LOUDLY (never repaired into shape,
+// never fabricated), and a legacy row without a stamp stays unstamped. The
+// emit-side population from real codegen data is pinned in
+// codegen.server.test.ts; this block pins the boundary laws.
+// ---------------------------------------------------------------------------
+
+describe("artifact provenance (T5.4)", () => {
+  const MODEL_STAMP = {
+    producer: "model",
+    model: "deepseek-v4-flash",
+    timestamp: 1_740_000_000_000,
+    inputHash: "1234567890",
+  } as const;
+  const DET_STAMP = { producer: "deterministic", timestamp: 1_740_000_000_001, inputHash: "987654321" } as const;
+
+  /** A full-run project whose first N artifacts carry the given stamps.
+   *  (The stamp field is not yet on the types.ts Artifact — io.ts owns the
+   *  shape until a lane owning types.ts folds it on; tests widen structurally.) */
+  const stamped = (stamps: unknown[]): Project => {
+    const p = fullRun();
+    assert.ok(p.artifacts.length >= stamps.length, "fixture precondition: enough artifacts to stamp");
+    const artifacts = p.artifacts.map((a, i) => (i < stamps.length ? Object.assign({}, a, { provenance: stamps[i] }) : a));
+    return { ...p, artifacts } as unknown as Project;
+  };
+  const provOf = (p: Project, i: number): unknown => {
+    const row = p.artifacts[i] as unknown as { provenance?: unknown };
+    return row.provenance;
+  };
+  const repairNote = (res: { ok: true; project: Project } | { ok: false; error: string }): string =>
+    res.ok ? String(res.project.logs.find((l) => l.event === "import.repaired")?.detail ?? "") : "";
+
+  it("a well-formed model stamp survives export → import untouched (no repair note)", () => {
+    const p = stamped([MODEL_STAMP]);
+    const exported = exportProjectJson(p);
+    const res = importProject(exported);
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.deepEqual(provOf(res.project, 0), MODEL_STAMP, "the stamp comes back byte-for-byte");
+    assert.equal(repairNote(res), "", "preserving a valid stamp is not a repair");
+    // The provenance guarantee is scoped to the artifact rows: hydrate (engine.ts)
+    // legitimately re-stamps phase timing on load, so a whole-project byte
+    // comparison would pin out-of-box behaviour, not the provenance boundary.
+    assert.equal(
+      JSON.stringify(res.project.artifacts),
+      JSON.stringify(p.artifacts),
+      "artifact rows (stamp included) round-trip byte-identically",
+    );
+  });
+
+  it("a deterministic stamp round-trips and never gains a model key", () => {
+    const res = importProject(exportProjectJson(stamped([DET_STAMP])));
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    const stamp = provOf(res.project, 0) as Record<string, unknown>;
+    assert.deepEqual(stamp, DET_STAMP);
+    assert.equal("model" in stamp, false, "deterministic records are never model-stamped");
+    assert.equal(repairNote(res), "");
+  });
+
+  it("unknown sibling keys on a well-formed stamp ride through (T0.2 additive tolerance)", () => {
+    const withExtra = { ...MODEL_STAMP, tapeId: "tape-1" };
+    const res = importProject(exportProjectJson(stamped([withExtra])));
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.deepEqual(provOf(res.project, 0), withExtra, "future provenance fields must not be stripped");
+    assert.equal(repairNote(res), "", "preserving extras is not a repair");
+  });
+
+  it("legacy artifacts (no stamp) stay unstamped — provenance is never fabricated at import", () => {
+    const p = fullRun();
+    assert.ok(p.artifacts.length > 0, "fixture precondition: the run produced artifacts");
+    assert.ok(
+      p.artifacts.every((a) => !("provenance" in a)),
+      "fixture precondition: engine artifacts carry no stamp yet (the T5.4 remainder)",
+    );
+    const res = importProject(exportProjectJson(p));
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.ok(
+      res.project.artifacts.every((a) => !("provenance" in a)),
+      "absence stays absence (types.ts:187 law — fail closed, never invent provenance for old rows)",
+    );
+    assert.equal(repairNote(res), "", "nothing to defend on a stamp-free payload");
+  });
+
+  it("malformed or contradictory stamps are dropped loudly, never repaired into shape", () => {
+    const junk: unknown[] = [
+      { producer: "model", timestamp: 1, inputHash: "x" }, // model claim with no served id
+      { producer: "deterministic", model: "deepseek-pro", timestamp: 1, inputHash: "x" }, // contradiction
+      { producer: "wizard", timestamp: 1, inputHash: "x" }, // outside the closed vocabulary
+      "not-an-object",
+      { producer: "deterministic", timestamp: 1 }, // no input hash
+      { producer: "deterministic", timestamp: 0, inputHash: "x" }, // clock never advanced
+      { producer: "replay", model: "   ", timestamp: 1, inputHash: "x" }, // blank served id
+    ];
+    const res = importProject(exportProjectJson(stamped(junk)));
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    for (let i = 0; i < junk.length; i++) {
+      assert.equal(provOf(res.project, i), undefined, `junk stamp ${i} is dropped, not repaired`);
+    }
+    assert.match(repairNote(res), /artifacts:provenance:-7/, "the drops are loud (one trail row names the count)");
+  });
+});
+
+describe("coerceArtifactProvenance (T5.4 vocabulary + laws)", () => {
+  it("the producer vocabulary is the closed T5.4 set (replay reserved for the T5.7 cassette)", () => {
+    assert.deepEqual([...ARTIFACT_PRODUCERS], ["deterministic", "model", "replay"]);
+  });
+
+  it("accepts well-formed model / replay / deterministic stamps", () => {
+    assert.deepEqual(coerceArtifactProvenance({ producer: "model", model: "deepseek-v4-flash", timestamp: 5, inputHash: "h" }), {
+      producer: "model",
+      model: "deepseek-v4-flash",
+      timestamp: 5,
+      inputHash: "h",
+    });
+    assert.equal(coerceArtifactProvenance({ producer: "replay", model: "deepseek-pro", timestamp: 6, inputHash: "h" })?.producer, "replay");
+    assert.deepEqual(coerceArtifactProvenance({ producer: "deterministic", timestamp: 7, inputHash: "h" }), {
+      producer: "deterministic",
+      timestamp: 7,
+      inputHash: "h",
+    });
+  });
+
+  it("fails closed on every malformed / contradictory shape", () => {
+    const cases: [string, unknown][] = [
+      ["non-object", "provenance"],
+      ["null", null],
+      ["array", []],
+      ["unknown producer", { producer: "engine", timestamp: 1, inputHash: "h" }],
+      ["missing producer", { timestamp: 1, inputHash: "h" }],
+      ["model without a served id", { producer: "model", timestamp: 1, inputHash: "h" }],
+      ["blank served id", { producer: "model", model: "  ", timestamp: 1, inputHash: "h" }],
+      ["replay without a served id", { producer: "replay", timestamp: 1, inputHash: "h" }],
+      ["deterministic + model id", { producer: "deterministic", model: "deepseek-flash", timestamp: 1, inputHash: "h" }],
+      ["non-numeric timestamp", { producer: "deterministic", timestamp: "1", inputHash: "h" }],
+      ["NaN timestamp", { producer: "deterministic", timestamp: Number.NaN, inputHash: "h" }],
+      ["non-positive timestamp", { producer: "deterministic", timestamp: 0, inputHash: "h" }],
+      ["empty input hash", { producer: "deterministic", timestamp: 1, inputHash: "" }],
+      ["non-string input hash", { producer: "deterministic", timestamp: 1, inputHash: 7 }],
+    ];
+    for (const [label, bad] of cases) {
+      assert.equal(coerceArtifactProvenance(bad), null, `must fail closed: ${label}`);
+    }
+  });
+
+  it("returns the canonical stamp for a validated value (typed surface for consumers)", () => {
+    const stamp: ArtifactProvenance | null = coerceArtifactProvenance({ producer: "model", model: "m", timestamp: 2, inputHash: "h" });
+    assert.deepEqual(stamp, { producer: "model", model: "m", timestamp: 2, inputHash: "h" });
   });
 });

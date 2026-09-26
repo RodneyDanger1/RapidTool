@@ -33,6 +33,12 @@
 // human clause. Branch on the id (`reason.split(" — ")[0]`); the clause is prose
 // for the ledger. Every DENY carries a `fallback` (type-enforced): the
 // sanctioned alternative, or `"none"` when the request itself must be fixed.
+//
+// F4 (fixes/252 LANE 2 · 221 §F4): the per-ACTION allow-lists. Precedence, one
+// line: policy decides *who may decide*; the overlay only narrows *what this
+// project permits*. Narrow-only by construction — `applyPolicyOverlay` receives
+// a verdict and can only return that verdict or a deny; it never constructs an
+// allow, and it can never cross the seat rule above it.
 // ---------------------------------------------------------------------------
 
 /**
@@ -61,8 +67,22 @@ export type PolicyFallback = "autopilot-seat" | "human-seat-token" | "none";
 
 /** An allow: no fallback exists (and the type refuses one). */
 export type PolicyAllow = { decision: "allow"; reason: string; fallback?: never };
-/** A deny: the fallback is MANDATORY (type-enforced, per P0-01's fix shape). */
-export type PolicyDeny = { decision: "deny"; reason: string; fallback: PolicyFallback };
+/**
+ * A deny: the fallback is MANDATORY (type-enforced, per P0-01's fix shape).
+ * F4 (fixes/252): a per-action list refusal additionally carries its coded
+ * value and the action it names (`code: "policy.action-off-list:hitl.force"`,
+ * `action: "hitl.force"`). Both optional — every existing consumer keeps
+ * working unchanged, and a plain seat/convention deny carries neither.
+ */
+export type PolicyDeny = {
+  decision: "deny";
+  reason: string;
+  fallback: PolicyFallback;
+  /** The per-action refusal code (names the action). Absent on seat denies. */
+  code?: string;
+  /** The action a per-action refusal names, verbatim from the caller. */
+  action?: string;
+};
 export type PolicyVerdict = PolicyAllow | PolicyDeny;
 
 /** What a caller may present. Unknown extra keys are ignored. */
@@ -73,6 +93,23 @@ export type PolicyCtx = {
   humanSeatToken?: string;
   /** The token the caller read from its own environment
    *  (`RT_HUMAN_SEAT_TOKEN`). Passed IN — this module never reads env. */
+  expectedHumanSeatToken?: string;
+};
+
+/**
+ * The TOTAL-input mirror of `PolicyCtx` (W22-L1 · ledger #52): this seam's
+ * runtime contract has always been "malformed input denies, never throws"
+ * (`classifySeat` re-classifies the raw actor itself and takes `unknown`), so
+ * a caller holding an UNTRUSTED claim — e.g. `git.server.ts`'s `seatCtxOf`,
+ * which must not trust any presented shape — may present it verbatim. The raw
+ * value still crosses to the verdict so a refusal can ECHO the malformed claim
+ * ("the claimed seat (…) is not a recognized seat shape"); narrowing at the
+ * caller would silently erase that evidence. Constructing a *recognized* seat
+ * stays `PolicyCtx`'s job.
+ */
+export type PolicyCtxInput = {
+  actor?: unknown;
+  humanSeatToken?: string;
   expectedHumanSeatToken?: string;
 };
 
@@ -167,7 +204,7 @@ function deny(reason: string, fallback: PolicyFallback): PolicyDeny {
  * Pure / deterministic / total: no I/O, no clock, no env; identical inputs give
  * deep-equal verdicts; malformed inputs deny instead of throwing.
  */
-export function evaluatePolicy(action: string, resource: string, ctx?: PolicyCtx): PolicyVerdict {
+export function evaluatePolicy(action: string, resource: string, ctx?: PolicyCtx | PolicyCtxInput): PolicyVerdict {
   const rawAction: unknown = action;
   if (typeof rawAction !== "string" || rawAction.length === 0) {
     return deny(`unknown-action — ${JSON.stringify(clip(String(rawAction)))} is not a registered action; default-deny.`, "none");
@@ -242,4 +279,227 @@ export function evaluatePolicy(action: string, resource: string, ctx?: PolicyCtx
     `no-seat — the caller presented no actor seat; claim the autopilot seat (decidedBy: "autopilot") instead.`,
     "autopilot-seat",
   );
+}
+
+// ---------------------------------------------------------------------------
+// F4 · per-ACTION allow-lists (fixes/252 LANE 2 · 221 §F4 · 220 row F4).
+//
+// 219f §2.7 + B4: the field (opencode/Roo/codex) allow-lists at *action*
+// granularity; this seam was already action-shaped but had no list. These
+// helpers add the NARROWING half only: a build may withhold an action; nothing
+// here can permit one. `autoApprovePhases` is deliberately absent — a list that
+// can only WIDEN is an owner decision, not a default this module invents.
+//
+// Matching is exact registered-action only — no globs, no regex, no DSL
+// (221 §F4 item 8). A list naming an unregistered action, a queried pairing
+// outside the action's namespace, or a malformed shape FAILS CLOSED, and every
+// refusal is CODED and names the action (`policy.action-off-list:hitl.force`)
+// — never a generic error.
+// ---------------------------------------------------------------------------
+
+/** Which list (or fail-closed family) produced a refusal. */
+export type PolicyOverlayRule = "allowActions" | "denyActions" | "alwaysAsk" | "unreadable" | "escape";
+
+/**
+ * The narrowing half of 221 §F4 item 1 — the build's per-ACTION allow-lists.
+ * All three keys are optional and independent; absent ⇒ that list narrows
+ * nothing (the byte-identical default, never a widened one).
+ *   · `allowActions` — when declared, ONLY these actions pass the overlay;
+ *     every other action is refused off-list.
+ *   · `denyActions`  — these actions are refused outright.
+ *   · `alwaysAsk`    — these actions are refused unless a human decides.
+ * `denyCommands` (221 item 4) is NOT read here: it is a runner-seam concern,
+ * not a seat/action claim, and this leaf stays action-shaped.
+ */
+export type PolicyOverlay = {
+  allowActions?: readonly string[];
+  denyActions?: readonly string[];
+  alwaysAsk?: readonly string[];
+};
+
+/** Result of reading an untrusted overlay value. */
+export type PolicyOverlayRead =
+  | { ok: true; overlay: PolicyOverlay; ignored: readonly string[] }
+  | { ok: false; detail: string };
+
+/**
+ * A per-action refusal. `code` ALWAYS names the action
+ * (`policy.action-off-list:hitl.force`), so an off-list refusal for one action
+ * can never be confused with another's — and never with the generic runtime
+ * fallbacks (`RT_E_UNKNOWN` / `RT_E_VALIDATION`) that a swallowed exception
+ * would mint. The code is namespaced to this seam rather than the `errors.ts`
+ * `RT_E_*` registry: that registry is pinned by `errors.test.ts` and no RT_E
+ * code is minted unregistered (the ledger's unregistered-RT_E defect class).
+ * A policy refusal is a VERDICT, not a thrown failure: it travels as a
+ * `PolicyVerdict` (plus `code`/`action`) or as this record.
+ */
+export type PolicyRefusal = {
+  code: string;
+  rule: PolicyOverlayRule;
+  /** The action this refusal names. */
+  action: string;
+  detail: string;
+  fallback: PolicyFallback;
+};
+
+const REFUSAL_IDS: Record<PolicyOverlayRule, string> = {
+  allowActions: "policy.action-off-list",
+  denyActions: "policy.action-denied",
+  alwaysAsk: "policy.action-ask",
+  unreadable: "policy.action-list-unreadable",
+  escape: "policy.action-list-escape",
+};
+
+/** Reason kebab id per rule (this module's reason contract). */
+const REFUSAL_REASON_IDS: Record<PolicyOverlayRule, string> = {
+  allowActions: "action-off-list",
+  denyActions: "action-denied",
+  alwaysAsk: "action-ask",
+  unreadable: "action-list-unreadable",
+  escape: "action-list-escape",
+};
+
+/** The coded refusal value for `action` under `rule` — always names the action. */
+export function policyRefusalCode(action: string, rule: PolicyOverlayRule): string {
+  return `${REFUSAL_IDS[rule]}:${clip(action)}`;
+}
+
+const OVERLAY_KEYS = ["allowActions", "denyActions", "alwaysAsk"] as const;
+
+/**
+ * Read an untrusted overlay value. `undefined` (the field is absent) is the
+ * no-narrowing default; anything else must be an object whose declared lists
+ * are arrays of non-empty action ids — otherwise the read fails (fail-closed:
+ * the caller refuses rather than silently ignoring a rule it cannot parse).
+ * Unknown keys (e.g. the runner's `denyCommands`) are reported in `ignored` so
+ * a caller can warn — never silently dropped as if enforced.
+ */
+export function readPolicyOverlay(raw: unknown): PolicyOverlayRead {
+  if (raw === undefined) return { ok: true, overlay: {}, ignored: [] };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, detail: `${JSON.stringify(clip(String(raw)))} is not an overlay object` };
+  }
+  const source = raw as Record<string, unknown>;
+  const overlay: PolicyOverlay = {};
+  const ignored: string[] = [];
+  for (const key of Object.keys(source)) {
+    if (!(OVERLAY_KEYS as readonly string[]).includes(key)) ignored.push(clip(key, 30));
+  }
+  for (const key of OVERLAY_KEYS) {
+    const value = source[key];
+    if (value === undefined) continue;
+    if (!Array.isArray(value)) return { ok: false, detail: `${key} is not a list` };
+    const list: string[] = [];
+    for (const entry of value) {
+      if (typeof entry !== "string" || entry.trim().length === 0) {
+        return { ok: false, detail: `${key} carries a non-action entry (${JSON.stringify(clip(String(entry)))})` };
+      }
+      list.push(entry);
+    }
+    overlay[key] = list;
+  }
+  return { ok: true, overlay, ignored };
+}
+
+function policyRefusalFor(action: string, rule: PolicyOverlayRule, detail: string, fallback: PolicyFallback): PolicyRefusal {
+  return { code: policyRefusalCode(action, rule), rule, action: clip(action), detail, fallback };
+}
+
+/**
+ * The narrowing question, asked directly — the console asks this before it
+ * offers a control. Does this build's per-action list refuse `action` on
+ * `resource`? Returns the coded refusal, or `null` when the list does not
+ * narrow it (including when no list is declared at all). Total: malformed
+ * arguments refuse (or return `null` for no list), never throw.
+ */
+export function policyOverlayRefusal(rawOverlay: unknown, action: string, resource: string): PolicyRefusal | null {
+  if (rawOverlay === undefined) return null; // no list declared ⇒ nothing narrows
+  const actionId = typeof action === "string" && action.length > 0 ? action : clip(String(action));
+  const read = readPolicyOverlay(rawOverlay);
+  if (!read.ok) {
+    return policyRefusalFor(
+      actionId,
+      "unreadable",
+      `this build's per-action list is unreadable (${read.detail}); default-deny — fix the list before any action passes.`,
+      "none",
+    );
+  }
+  const listed = [
+    ...(read.overlay.allowActions ?? []),
+    ...(read.overlay.denyActions ?? []),
+    ...(read.overlay.alwaysAsk ?? []),
+  ];
+  const unregistered = listed.find((entry) => !POLICY_RULES.has(entry as PolicyAction));
+  if (unregistered !== undefined) {
+    return policyRefusalFor(
+      actionId,
+      "escape",
+      `the per-action list names ${JSON.stringify(clip(unregistered))}, which is not a registered action (${KNOWN_POLICY_ACTIONS.join(", ")}); default-deny.`,
+      "none",
+    );
+  }
+  const rule = POLICY_RULES.get(actionId as PolicyAction);
+  if (rule === undefined || typeof resource !== "string" || !rule.resource.test(resource)) {
+    return policyRefusalFor(
+      actionId,
+      "escape",
+      `${JSON.stringify(clip(typeof resource === "string" ? resource : String(resource)))} is not inside ${clip(actionId)}'s registered namespace (${rule?.resourceHint ?? "unregistered action"}); the pairing cannot be narrowed, so default-deny.`,
+      "none",
+    );
+  }
+  if (read.overlay.allowActions !== undefined && !read.overlay.allowActions.includes(actionId)) {
+    return policyRefusalFor(
+      actionId,
+      "allowActions",
+      `${clip(actionId)} is not on this build's per-action allowActions list; refused off-list (the list only narrows — it never widens a default).`,
+      "none",
+    );
+  }
+  if ((read.overlay.denyActions ?? []).includes(actionId)) {
+    return policyRefusalFor(
+      actionId,
+      "denyActions",
+      `${clip(actionId)} is on this build's per-action denyActions list; refused.`,
+      "none",
+    );
+  }
+  if ((read.overlay.alwaysAsk ?? []).includes(actionId)) {
+    return policyRefusalFor(
+      actionId,
+      "alwaysAsk",
+      `${clip(actionId)} is on this build's per-action alwaysAsk list; it needs an explicit human decision, not a machine pass.`,
+      "human-seat-token",
+    );
+  }
+  return null;
+}
+
+/**
+ * Narrow a verdict through the per-action lists (221 §F4 item 2 signature).
+ *
+ * NARROW-ONLY BY CONSTRUCTION: the return is either the INPUT verdict object
+ * unchanged (no match, or the input was already a deny) or a `deny` built here.
+ * This function never constructs `{decision:"allow"}` — no allow can be minted,
+ * and the seat rule that produced the input verdict is never widened,
+ * reordered and never crossed. Precedence (each list may only withhold):
+ * unreadable → escape → allowActions → denyActions → alwaysAsk.
+ * A DENY input is returned even when a list would also match: it is already
+ * refused, and narrowing must not re-label or soften it.
+ */
+export function applyPolicyOverlay(
+  verdict: PolicyVerdict,
+  rawOverlay: unknown,
+  action: string,
+  resource: string,
+): PolicyVerdict {
+  const narrowed = policyOverlayRefusal(rawOverlay, action, resource);
+  if (narrowed === null) return verdict;
+  if (verdict.decision === "deny") return verdict;
+  return {
+    decision: "deny",
+    reason: `${REFUSAL_REASON_IDS[narrowed.rule]} — ${narrowed.detail}`,
+    fallback: narrowed.fallback,
+    code: narrowed.code,
+    action: narrowed.action,
+  };
 }

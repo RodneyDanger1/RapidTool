@@ -191,7 +191,10 @@ export type ArchTrace = {
   rows: ArchTraceRow[];
   /** Capability labels with NO tree file carrying their identifiers. */
   missing: string[];
-  /** Tree file paths that are template stubs, TODO(E-15) stubs, or reexport-only. */
+  /** Tree file paths that are template stubs, TODO(E-15) stubs, or
+   *  reexport-only jobs whose targets point OUTSIDE the tree. The machine-
+   *  assembled entry barrel whose reexport targets all resolve in-tree is
+   *  exempt (fixes/255 §P2). */
   stubFiles: string[];
   /** Human note: "tree (<n> files)" or "single-module (legacy path)". */
   note: string;
@@ -204,19 +207,32 @@ export type ArchTrace = {
  */
 export function isStubSource(source: string): boolean {
   if (typeof source !== "string") return true;
-  if (source.includes("TODO(E-15)")) return true;
-  if (/throw\s+new\s+Error\s*\(\s*(['"`])TODO\b/i.test(source)) return true;
+  if (hasTodoMarker(source)) return true;
   if (isReexportOnlySource(source)) return true;
   return false;
 }
 
-/** True when, after comment strip, every statement is `export … from` / `import … from`. */
-export function isReexportOnlySource(source: string): boolean {
-  const code = String(source ?? "")
+/** The two explicit leftover-job / floor declarations (E-15 markers). Their
+ *  own predicate because the §P2 barrel exemption must never rescue a file
+ *  that declares itself unfinished. */
+function hasTodoMarker(source: string): boolean {
+  const s = typeof source === "string" ? source : "";
+  return s.includes("TODO(E-15)") || /throw\s+new\s+Error\s*\(\s*(['"`])TODO\b/i.test(s);
+}
+
+/** Comment-stripped, whitespace-collapsed code text — pure; the shared strip
+ *  both reexport classifiers below read so their logic can never drift. */
+function stripCommentsAndCollapse(source: string): string {
+  return String(source ?? "")
     .replace(/\/\*[\s\S]*?\*\//g, "\n")
     .replace(/\/\/[^\n]*/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** True when, after comment strip, every statement is `export … from` / `import … from`. */
+export function isReexportOnlySource(source: string): boolean {
+  const code = stripCommentsAndCollapse(source);
   if (!code) return false;
   const stmts = code
     .split(";")
@@ -226,6 +242,58 @@ export function isReexportOnlySource(source: string): boolean {
   const reexport =
     /^(export\s+(\*|\{[\s\S]*?\})\s+from\s+['"][^'"]+['"]|import\s+.+\s+from\s+['"][^'"]+['"])$/;
   return stmts.every((st) => reexport.test(st));
+}
+
+/** Quoted module specifiers of every `from "…"` clause (comment-stripped).
+ *  Pure; feeds the in-tree-target barrel exemption in archTrace(). */
+function reexportSpecifiers(source: string): string[] {
+  const code = stripCommentsAndCollapse(source);
+  const out: string[] = [];
+  const re = /\bfrom\s+(['"])([^'"]+)\1/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) out.push(m[2]);
+  return out;
+}
+
+/** POSIX-normalize a relative specifier against the importing file's dir. */
+function resolveTreeSpecifier(spec: string, fromPath: string): string {
+  const from = String(fromPath ?? "").replace(/\\/g, "/");
+  const dir = from.includes("/") ? from.slice(0, from.lastIndexOf("/")) : "";
+  const stack = dir ? dir.split("/").filter(Boolean) : [];
+  for (const part of String(spec ?? "").replace(/\\/g, "/").split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      stack.pop();
+      continue;
+    }
+    stack.push(part);
+  }
+  return stack.join("/");
+}
+
+/** fixes/255 §P2: true when a reexport-only file's EVERY specifier resolves to
+ *  another file of the SAME tree (node-style candidates: exact, extensionless
+ *  → .ts/.tsx//index.ts, .js/.jsx → .ts/.tsx). A leftover job pointing outside
+ *  the tree (the E-15 `./host.ts` fixture) returns false and stays a stub. */
+function reexportTargetsAllInTree(
+  file: { path: string; source: string },
+  paths: ReadonlySet<string>,
+): boolean {
+  const specs = reexportSpecifiers(file.source);
+  if (specs.length === 0) return false;
+  return specs.every((s) => {
+    if (!s.startsWith("./") && !s.startsWith("../")) return false;
+    const base = resolveTreeSpecifier(s, file.path);
+    const candidates = [base];
+    if (!/\.[A-Za-z0-9]+$/.test(base)) {
+      candidates.push(`${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`);
+    } else if (base.endsWith(".js")) {
+      candidates.push(`${base.slice(0, -3)}.ts`, `${base.slice(0, -3)}.tsx`);
+    } else if (base.endsWith(".jsx")) {
+      candidates.push(`${base.slice(0, -4)}.tsx`);
+    }
+    return candidates.some((c) => paths.has(c));
+  });
 }
 
 /** Product-complete tree: present, not skipped, no missing caps, no stub files. */
@@ -338,8 +406,23 @@ export function archTrace(p: Project): ArchTrace {
   }
   const files = tree.filter((f) => f && typeof f.source === "string" && f.source.length > 0);
   const stubs = templateStubTexts(p);
+  const paths = new Set(files.map((f) => f.path));
   const stubFiles = files
-    .filter((f) => stubs.has(f.source) || isStubSource(f.source))
+    .filter((f) => {
+      if (stubs.has(f.source)) return true; // deterministic template floor
+      // fixes/255 §P2: the reexport-only arm is target-resolution-aware — a
+      // pure reexport file is a stub ONLY when ≥1 of its targets does not
+      // resolve to another file of this tree. The engine's own assembled entry
+      // barrel (`src/generated.ts` = `export * from "./generated/chunk-0.ts"`)
+      // is machine assembly, not a leftover job; a leftover pointing outside
+      // the tree (E-15 `./host.ts`) stays a stub. An explicit TODO(E-15) /
+      // throw-TODO marker still dominates — the exemption can never rescue a
+      // file that declares itself unfinished (the barrel never carries one).
+      if (isReexportOnlySource(f.source) && !hasTodoMarker(f.source)) {
+        return !reexportTargetsAllInTree(f, paths);
+      }
+      return isStubSource(f.source);
+    })
     .map((f) => f.path);
   const rows: ArchTraceRow[] = [];
   const missing: string[] = [];
@@ -526,11 +609,25 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       // evidence-hash ordering of existing pairs is untouched.
       id: "p6-brief-fit",
       criterion:
-        "Brief-conformance: required brief nouns appear as identifiers in generated source (or spec exists and is honored)",
+        "Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode)",
       probe: (p) => {
         const { required } = briefNounHits(p.brief);
         if (required.length === 0) return true;
-        const hits = identifierHits(required, p.generatedSource ?? "");
+        // fixes/255 §P1: in tree mode generatedSource is the ESM BARREL
+        // (`export * from …` only) — measured 0 brief hits on a fully
+        // synthesized tree. Read the union of the barrel + every generatedTree
+        // file: the SAME artifact the engine's pre-acceptance fit check
+        // measures (codegen assembleTreeEntry). The union can only ADD hits,
+        // so no verdict flips PASS→FAIL.
+        const tree = Array.isArray(p.generatedTree) ? p.generatedTree : [];
+        const source =
+          tree.length > 0
+            ? [
+                p.generatedSource ?? "",
+                ...tree.map((f) => (f && typeof f.source === "string" ? f.source : "")),
+              ].join("\n")
+            : p.generatedSource ?? "";
+        const hits = identifierHits(required, source);
         return hits.length >= Math.max(1, Math.ceil(required.length * 0.5));
       },
     },
@@ -544,11 +641,15 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       // synthesis that landed the single-module floor — still PASSES this
       // probe so the keyless floor is not hard-broken. That pass is a SKIP,
       // not product-complete: archProductComplete() is false, and TODO(E-15)
-      // / reexport-only tree files join template stubs in stubFiles (fail).
+      // bodies join template stubs in stubFiles (fail). W23 (fixes/255 §P2):
+      // a reexport-only file fails ONLY when ≥1 of its targets points outside
+      // the tree — the machine-assembled entry barrel reexporting in-tree
+      // files is exempt; an explicit TODO(E-15) / throw-TODO marker always
+      // stands as a stub.
       // archTrace() carries the reqTrace detail the engine's P6 stamp surfaces.
       id: "p6-arch",
       criterion:
-        "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub (absent tree = single-module legacy path)",
+        "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)",
       probe: (p) => {
         const t = archTrace(p);
         return t.missing.length === 0 && t.stubFiles.length === 0;

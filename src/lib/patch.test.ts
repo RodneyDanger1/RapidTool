@@ -257,3 +257,109 @@ describe("patch — purity, determinism, totality", () => {
     assert.equal(patchSimilarity("hello world", "world hello"), patchSimilarity("world hello", "hello world"));
   });
 });
+
+// ---------------------------------------------------------------------------
+// W23 L6 (T4.3 · 249 SPEC 2, Host 1) — user-edited trees: the str_replace
+// primitive's side of the preservation guarantee. The emitted dir is the USER's
+// artifact; the repair cycle must preserve a hand-edit or refuse loudly — never
+// silently overwrite. These string-level cases frame each guard on the EDIT
+// itself (the file the user touched), not on generic ambiguity: the needle that
+// targets the edited region, the copy the edit duplicated, the fuzzy window
+// that would land ON the edit.
+// ---------------------------------------------------------------------------
+describe("patch — user-edited trees (T4.3)", () => {
+  /** The user's hand-edited module. The operator corrected the return value and
+   *  left a marker comment; both must survive any later surgical replace. */
+  const userEdited = [
+    'export const VERSION = "1.0";',
+    "// USER-EDIT: return value corrected by the operator (T4.3 fixture).",
+    "export function total(x: number): number {",
+    "  return x + 2;",
+    "}",
+    "",
+    "export function label(): string {",
+    '  return "total";',
+    "}",
+    "",
+  ].join("\n");
+  const USER_EDIT_MARKER = "// USER-EDIT: return value corrected by the operator (T4.3 fixture).";
+
+  it("refuses the needle that targets the user-edited region (0 matches — nothing applied, nothing lost)", () => {
+    // The needle is the PRE-edit text: the user already replaced it, so the
+    // primitive must refuse rather than pick a neighbouring window.
+    const result = refused(applyStrReplace(userEdited, { oldStr: "  return x + 1;", newStr: "  return x + 3;" }));
+    assert.equal(result.code, "RT_E_VALIDATION", "the edited region no longer holds the stale needle");
+    assert.equal(result.kind, "none");
+    assert.equal(result.matches, 0, "0 exact matches — no rewrite is attempted");
+    assert.equal("text" in result, false, "a refusal carries no rewritten text (the user's edit is never silently dropped)");
+    assert.equal("diff" in result, false, "…and no diff is reported as if an edit had landed");
+  });
+
+  it("lands a needle on a DIFFERENT region of the same edited file and leaves the edit verbatim (surgical replace)", () => {
+    const result = ok(applyStrReplace(userEdited, { oldStr: 'return "total";', newStr: 'return "total-v2";' }));
+    assert.equal(result.kind, "exact");
+    assert.equal(result.matches, 1, "exactly one occurrence — the unique-match contract held on the edited file");
+    assert.equal(
+      result.text.includes(USER_EDIT_MARKER),
+      true,
+      "the user's comment survives byte-for-byte (the replace was surgical, not a rewrite)",
+    );
+    assert.equal(result.text.includes("  return x + 2;"), true, "the user's corrected return value is untouched");
+    assert.equal(result.text.includes("  return x + 1;"), false, "the pre-edit text never reappears");
+    assert.equal(result.diff.removed, 'return "total";', "only the targeted line moved");
+  });
+
+  it("refuses when the user's edit DUPLICATED the needle's block (true count named, candidate lines capped)", () => {
+    // The edit behaviour that makes a first-match downgrade catastrophic: the
+    // user copied a block, so a first-match implementation would rewrite the
+    // WRONG occurrence. 60 copies also exercise PATCH_MAX_LISTED.
+    const dupBlock = "const FLAG = true;";
+    const duplicated = [
+      "// USER-EDIT: the operator duplicated the block below (T4.3 fixture).",
+      dupBlock,
+      ...Array.from({ length: 59 }, () => dupBlock),
+      "export const READY = true;",
+      "",
+    ].join("\n");
+    const result = refused(applyStrReplace(duplicated, { oldStr: dupBlock, newStr: "const FLAG = false;" }));
+    assert.equal(result.code, "RT_E_VALIDATION");
+    assert.equal(result.matches, 60, "the refusal names the TRUE count (a first-match downgrade would return ok:true)");
+    assert.match(result.error, /matches 60 times/, "the error names the count, never the first hit");
+    assert.equal(result.lines.length, PATCH_MAX_LISTED, "candidate lines stay capped at PATCH_MAX_LISTED");
+    assert.equal(result.linesOmitted, 60 - PATCH_MAX_LISTED, "the omitted remainder is counted, not hidden");
+    assert.equal(result.ok, false, "ambiguity is never rescued by a guess");
+  });
+
+  it("fuzzy opt-in: a window that would land ON the edited region refuses below threshold; a landed fuzzy hit self-reports", () => {
+    // The pre-edit text still exists conceptually, but the bytes on disk moved.
+    // The graded scan must refuse when the best window (the edited return line)
+    // does not clear the threshold — and when it does land, it must self-report
+    // kind/score/threshold with the ACTUAL matched window in diff.removed.
+    const nearMiss = "  return x + 21;";
+    const belowThreshold = refused(
+      applyStrReplace(userEdited, { oldStr: nearMiss, newStr: "  return x + 99;", fuzzy: { threshold: 0.99 } }),
+    );
+    assert.equal(belowThreshold.kind, "none", "a below-threshold window never lands (the edit is safe)");
+    assert.equal(belowThreshold.threshold, 0.99, "the consulted threshold is reported");
+    assert.equal(belowThreshold.bestLine, 4, "the best window sits on the user-edited return line");
+    assert.ok(
+      belowThreshold.bestScore !== null && belowThreshold.bestScore > 0.5 && belowThreshold.bestScore < 0.99,
+      "the graded best window is reported honestly (near but below the bar)",
+    );
+    assert.match(belowThreshold.error, /fuzzy did not land/, "the refusal says fuzzy was attempted and refused");
+
+    const landed = ok(
+      applyStrReplace(userEdited, { oldStr: nearMiss, newStr: "  return x + 99;", fuzzy: { threshold: 0.5 } }),
+    );
+    assert.equal(landed.kind, "fuzzy", "a fuzzy hit must self-report its level (never silently fuzzy)");
+    assert.equal(landed.threshold, 0.5, "the threshold it cleared is on the result");
+    assert.ok(landed.score >= 0.5, "the reported score cleared the reported threshold");
+    assert.equal(landed.diff.removed, "  return x + 2;", "diff.removed is the ACTUAL matched window, never the needle");
+    assert.notEqual(landed.diff.removed, nearMiss, "the needle was not what landed — say what really replaced what");
+    assert.equal(
+      landed.text.includes(USER_EDIT_MARKER),
+      true,
+      "the rest of the edited file is preserved around the landed window",
+    );
+  });
+});

@@ -26,7 +26,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyPhaseResult } from "./engine.ts";
+import { applyPhaseResult, approveHitl, rejectHitl } from "./engine.ts";
+import type { PhaseId, Project } from "./types.ts";
 import { runGate } from "./dod.ts";
 import { runHeadless, runToGate, seedProject } from "./testing/fixtures.ts";
 import { failureSignature, lessonRow, templateEmissionLesson } from "./knowledge.ts";
@@ -356,6 +357,194 @@ describe("W16 L4 honesty guards — OV-18 clamp window pin (custom caps)", () =>
       r.elidedChars,
       big.length - (r.text.length - m![0].length),
       "count = input chars not kept, exactly (no torn-marker overcount at the real cap)",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W23 L6 (DF-09 · 249 SPEC 1) — an approval over a FAILED P6 gate must carry a
+// rationale. Design per research/multiagent/249_define_first_specs.md §SPEC 1:
+// the trigger is the engine's own `forcedOverride` condition (force ⇒ failed P6
+// sandbox); the floor is 12 trimmed chars, mirroring rejectHitl's guard; the
+// store pre-checks (typed `{ ok: false }`) and the engine throws coded
+// RT_E_VALIDATION (defense in depth for every non-store caller, incl. the CLI).
+// Pre-guard this block is RED by construction: the store call returned
+// `{ ok: true }` and the engine call did not throw (the spec's recorded read of
+// the gap). It goes green only with the store+engine guards in place — and it
+// cannot pass vacuously: the fixture's precondition trio fails HERE first.
+// ---------------------------------------------------------------------------
+
+/** Node has no localStorage, and zustand's persist resolves its storage when
+ *  store.ts is evaluated — this polyfill (store.test.ts:16-38 pattern) MUST be
+ *  installed before the dynamic import below, or persist binds no storage. */
+class L6MemoryStorage {
+  private m = new Map<string, string>();
+  get length() {
+    return this.m.size;
+  }
+  getItem(k: string) {
+    return this.m.has(k) ? this.m.get(k)! : null;
+  }
+  setItem(k: string, v: string) {
+    this.m.set(k, String(v));
+  }
+  removeItem(k: string) {
+    this.m.delete(k);
+  }
+  clear() {
+    this.m.clear();
+  }
+  key(i: number) {
+    return [...this.m.keys()][i] ?? null;
+  }
+}
+(globalThis as unknown as { localStorage: Storage }).localStorage = new L6MemoryStorage();
+(globalThis as unknown as { window: unknown }).window = globalThis;
+// Dynamic import: must run AFTER the polyfill so persist binds a real storage.
+const { useRapid } = await import("./store.ts");
+// Let the initial rehydration (empty storage) settle before the first pin.
+await new Promise((resolve) => setTimeout(resolve, 10));
+
+/** The fixture rationale (≥12 trimmed chars) — the ledger row must carry it verbatim. */
+const L6_RATIONALE =
+  "Reviewed the failing sandbox output myself: the red P6 gate is a known fixture defect — overriding to continue (DF-09).";
+
+/** The engine's own `forcedOverride` fixture (249 §SPEC 1): parked at the P6
+ *  mouth, human-only gate, failing sandbox recorded — exactly the condition
+ *  `Boolean(opts.force) && phase === 6 && lastTest !== null && !lastTest.ok`. */
+function l6Gated(over: Partial<Project> = {}): Project {
+  const p6 = runToGate(seedProject(), 6);
+  return {
+    ...p6,
+    status: "awaiting_hitl" as const,
+    hitl: {
+      ...(p6.hitl ?? { phase: 6 as PhaseId, title: "Sandbox failed — review", prompt: "broken", stakes: "high" }),
+      phase: 6 as PhaseId,
+      forceHuman: true,
+    },
+    lastTest: { ok: false, detail: "fixture: failing sandbox output" },
+    ...over,
+  };
+}
+
+/** Precondition trio — fail HERE, never pass vacuously. */
+function l6AssertFixture(gated: Project, label: string): void {
+  assert.equal(gated.currentPhase, 6, `${label}: precondition — parked at the P6 mouth`);
+  assert.equal(gated.hitl?.forceHuman, true, `${label}: precondition — human-only gate`);
+  assert.equal(gated.lastTest?.ok, false, `${label}: precondition — failing sandbox output on record`);
+}
+
+describe("W23 L6 honesty guards — DF-09 approval rationale", () => {
+  it("A1 store seat: a FORCED override of a failed P6 gate with no rationale is refused and journals nothing", () => {
+    const gated = l6Gated();
+    l6AssertFixture(gated, "A1");
+    useRapid.setState({ projects: [gated], activeId: gated.id, hydrated: true, autopilot: false });
+    const res = useRapid.getState().approve(gated.id, { force: true });
+    assert.equal(
+      res.ok,
+      false,
+      "a rubber-stamp override is refused (the pre-guard store returned {ok:true} — that is the gap this pins)",
+    );
+    if (!res.ok) {
+      assert.match(res.error, /rationale|note/i, "the refusal names what is missing");
+    }
+    const after = useRapid.getState().projects.find((p) => p.id === gated.id);
+    assert.ok(after, "the gated project stays installed in the store");
+    assert.equal(after.status, "awaiting_hitl", "the refusal leaves the gate parked");
+    assert.equal(after.currentPhase, 6, "no phase advanced on a refused override");
+    assert.equal(after.decisions.length, gated.decisions.length, "a refused override journals nothing");
+  });
+
+  it("A2 engine seat: the same override THROWS a coded RT_E_VALIDATION (never a bare internal)", () => {
+    const gated = l6Gated();
+    l6AssertFixture(gated, "A2");
+    assert.throws(
+      () => approveHitl(gated, { decidedBy: "human", force: true }),
+      (err: unknown) => {
+        assert.equal(
+          (err as { code?: string }).code,
+          "RT_E_VALIDATION",
+          "the throw must be CODED — the CLI leg classifies exit 1, never RT_E_INTERNAL",
+        );
+        assert.match((err as Error).message, /rationale|note/i, "the error names the missing rationale");
+        return true;
+      },
+    );
+    assert.equal(gated.decisions.length, 0, "a thrown refusal journals nothing");
+    assert.equal(gated.status, "awaiting_hitl", "the fixture project is untouched (pure-function contract)");
+  });
+
+  it("A3a with a ≥12-char rationale: the override lands and the row carries the rationale verbatim (both seats)", () => {
+    const gated = l6Gated();
+    l6AssertFixture(gated, "A3a");
+    assert.ok(L6_RATIONALE.trim().length >= 12, "the fixture rationale clears the floor");
+    useRapid.setState({ projects: [gated], activeId: gated.id, hydrated: true, autopilot: false });
+    const res = useRapid.getState().approve(gated.id, { force: true, note: L6_RATIONALE });
+    assert.equal(res.ok, true, "with a rationale the override is allowed");
+    const after = useRapid.getState().projects.find((p) => p.id === gated.id);
+    assert.ok(after, "the approved project is in the store");
+    const row = after.decisions[after.decisions.length - 1];
+    assert.equal(row.decision, "approve", "an approval row is journaled");
+    assert.equal(row.note, L6_RATIONALE, "the ledger row carries the caller's rationale verbatim (DF-09's observable)");
+    assert.ok(
+      after.logs.some((l) => l.event === "hitl.approved_override"),
+      "the override is still LOUD (the DF-09 guard adds a rationale; it never silences the override log)",
+    );
+
+    // Engine seat — the same rule, no store in the path:
+    const viaEngine = approveHitl(l6Gated(), { decidedBy: "human", force: true, note: L6_RATIONALE });
+    const engineRow = viaEngine.decisions[viaEngine.decisions.length - 1];
+    assert.equal(engineRow.note, L6_RATIONALE, "the engine records the rationale too (non-store callers get the same ledger)");
+    assert.equal(engineRow.decidedBy, "human", "the human actor is preserved");
+  });
+
+  it("A3b controls (an over-broad guard must fail HERE): a non-failed gate needs no note; autopilot's note path records; reject's floor is intact", () => {
+    const base = l6Gated();
+    const control: Project = {
+      ...base,
+      lastTest: { ok: true, detail: "fixture: sandbox green" },
+      hitl: { ...base.hitl!, forceHuman: false },
+    };
+    assert.equal(control.hitl?.forceHuman, false, "control precondition: not a human-only override gate");
+    assert.equal(control.lastTest?.ok, true, "control precondition: no failed sandbox on record");
+
+    // Engine seat: a non-failed parked gate approves with NO note and mints
+    // neither an override log nor a fabricated note.
+    const approved = approveHitl(control, { decidedBy: "human" });
+    const row = approved.decisions[approved.decisions.length - 1];
+    assert.equal(row.decision, "approve", "the ordinary approval still lands");
+    assert.equal(row.note, undefined, "no note was required — and none was fabricated");
+    assert.ok(
+      !approved.logs.some((l) => l.event === "hitl.approved_override"),
+      "no forced-override log on a non-forced approval",
+    );
+
+    // The autopilot note-carrying self-approval path keeps recording its note.
+    const autoNote = "[seat autopilot] bounded self-approval note (DF-09 control)";
+    const auto = approveHitl(control, { decidedBy: "autopilot", note: autoNote });
+    assert.equal(
+      auto.decisions[auto.decisions.length - 1].note,
+      autoNote,
+      "the autopilot path is exempt from the human-rationale requirement and records its own note",
+    );
+
+    // Reject's 12-char floor is unchanged — the mirror the DF-09 floor copies.
+    assert.throws(
+      () => rejectHitl(control, "too short"),
+      /12 characters/,
+      "the reject guard still refuses short feedback",
+    );
+    const rejected = rejectHitl(control, "A real reason told in more than twelve characters.");
+    assert.equal(rejected.decisions[rejected.decisions.length - 1].decision, "reject", "a valid rejection still lands");
+
+    // Store seat, force path, NON-failed gate: the DF-09 trigger is the failed
+    // sandbox, not `force` alone — this control fails if the guard got too broad.
+    useRapid.setState({ projects: [control], activeId: control.id, hydrated: true, autopilot: false });
+    const storeRes = useRapid.getState().approve(control.id, { force: true });
+    assert.equal(
+      storeRes.ok,
+      true,
+      "a forced approval of a NON-failed gate is not the DF-09 case — it must still land with no note",
     );
   });
 });

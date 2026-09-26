@@ -52,6 +52,12 @@ const BRIEF =
   "Build a field-service dispatch board for a regional HVAC shop: jobs, techs, parts, and same-day reroutes. Same-day SLA, offline warehouse scan.";
 const GUARD_ERROR =
   "Failing sandbox output requires explicit override — tick 'I reviewed the failure'.";
+/** DF-09 (W23 L6 · 249 SPEC 1): a forced override of a FAILED P6 sandbox now
+ *  REQUIRES a caller-supplied rationale (≥12 trimmed chars — enforced by the
+ *  store's pre-check and the engine's coded RT_E_VALIDATION). The two force
+ *  pins below track the new contract and assert the rationale is journaled. */
+const OVERRIDE_RATIONALE =
+  "Reviewed the failing sandbox crash myself — overriding the red P6 gate (fixture rationale).";
 
 function seedProject(over?: Partial<Project>): Project {
   return { ...emptyProject({ name: NAME, brief: BRIEF }), ...over };
@@ -197,7 +203,8 @@ test("approve with force overrides the failing P6 gate and journals the human ac
   const p = install(
     projectAtGate(6, { forceHuman: true, lastTest: { ok: false, detail: "fixture sandbox crash" } }),
   );
-  const res = useRapid.getState().approve(p.id, { force: true });
+  // DF-09 (W23 L6): the forced override now requires a caller-supplied rationale.
+  const res = useRapid.getState().approve(p.id, { force: true, note: OVERRIDE_RATIONALE });
   assert.equal(res.ok, true);
   const after = current(p.id);
   assert.equal(after.currentPhase, 7);
@@ -208,6 +215,7 @@ test("approve with force overrides the failing P6 gate and journals the human ac
   assert.equal(d.decision, "approve");
   assert.equal(d.decidedBy, "human");
   assert.equal(d.phase, 6);
+  assert.equal(d.note, OVERRIDE_RATIONALE, "DF-09: the override's rationale is journaled on the decision row");
   assert.ok(after.logs.some((l) => l.event === "hitl.approved_override"), "override is loud");
   assert.ok(
     after.memory.some((m) => m.text.startsWith("Human overrode failing sandbox at P6") && m.score === 0.4),
@@ -220,7 +228,7 @@ test("approve passes requestedAt through to the decision journal", () => {
   const p = install(
     projectAtGate(6, { forceHuman: true, lastTest: { ok: false, detail: "fixture sandbox crash" } }),
   );
-  const res = useRapid.getState().approve(p.id, { force: true, requestedAt });
+  const res = useRapid.getState().approve(p.id, { force: true, requestedAt, note: OVERRIDE_RATIONALE });
   assert.equal(res.ok, true);
   const d = current(p.id).decisions[current(p.id).decisions.length - 1];
   assert.equal(d.requestedAt, requestedAt);

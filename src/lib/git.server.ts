@@ -574,7 +574,18 @@ export function verifyGitPlan(plan: GitPlan): string | null {
 const IS_WIN = process.platform === "win32";
 /** MSYS drive form (`/c/Users/...`): never a Node path on Windows (row trap). */
 const MSYS_PATH_RE = /^\/[A-Za-z]\//;
-const CONTROL_RE = /[\u0000-\u001F]/;
+
+/**
+ * C0 control-char detector (0x00–0x1F). A plain scan — deliberately NOT a
+ * character-class regex: the repo's lint bars control chars in regex patterns
+ * (no-control-regex; see node-runner.server.test.ts's String.fromCharCode note).
+ */
+function hasControlChar(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) <= 0x1f) return true;
+  }
+  return false;
+}
 
 function validateDir(dir: unknown): { ok: true; dir: string } | { ok: false; error: string } {
   if (typeof dir !== "string" || dir.trim().length === 0) {
@@ -939,7 +950,7 @@ export async function gitLandInit(
   if (typeof timeout === "object") {
     return { ok: false, reason: "bad-input", code: "RT_E_VALIDATION", error: timeout.error };
   }
-  const gated = gateSeatAndTarget(dir, seat, (f) => f);
+  const gated = gateSeatAndTarget(dir, seat);
   if (!gated.ok) return gated.failure;
   const target = gated.dir;
 
@@ -1052,7 +1063,7 @@ export async function gitLandCommit(
   if (typeof message !== "string" || message.trim().length === 0) {
     return { ok: false, reason: "bad-input", code: "RT_E_VALIDATION", error: "message must be a non-empty string" };
   }
-  if (message.includes("\0") || CONTROL_RE.test(message.replace(/\r\n|\r|\n/g, ""))) {
+  if (message.includes("\0") || hasControlChar(message.replace(/\r\n|\r|\n/g, ""))) {
     return {
       ok: false,
       reason: "bad-input",
@@ -1071,7 +1082,12 @@ export async function gitLandCommit(
   const identity = opts?.identity ?? DEFAULT_GIT_LAND_IDENTITY;
   const name = identity?.name;
   const email = identity?.email;
-  if (typeof name !== "string" || name.trim().length === 0 || name.length > MAX_IDENTITY_NAME_CHARS || CONTROL_RE.test(name)) {
+  if (
+    typeof name !== "string" ||
+    name.trim().length === 0 ||
+    name.length > MAX_IDENTITY_NAME_CHARS ||
+    hasControlChar(name)
+  ) {
     return {
       ok: false,
       reason: "bad-input",
@@ -1082,7 +1098,7 @@ export async function gitLandCommit(
   if (
     typeof email !== "string" ||
     email.length > MAX_IDENTITY_EMAIL_CHARS ||
-    CONTROL_RE.test(email) ||
+    hasControlChar(email) ||
     !/^[^\s@]+@[^\s@]+$/.test(email)
   ) {
     return {
@@ -1093,7 +1109,7 @@ export async function gitLandCommit(
     };
   }
 
-  const gated = gateSeatAndTarget(dir, seat, (f) => f);
+  const gated = gateSeatAndTarget(dir, seat);
   if (!gated.ok) return gated.failure;
   const target = gated.dir;
 

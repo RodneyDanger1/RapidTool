@@ -46,6 +46,7 @@ import {
   resolveExplicitProvider,
 } from "./registry.ts";
 import { isDeepSeekConfigured } from "./deepseek.ts";
+import { XAI_PROVIDER_ID } from "./openai-compatible.ts";
 import type { LlmResult } from "../../llm.ts";
 
 const KEY = "DEEPSEEK_API_KEY";
@@ -120,10 +121,14 @@ describe("mock provider — honesty (T-107.10)", () => {
       false,
       "the mock is never a registered provider",
     );
-    assert.equal(
-      PROVIDERS.length,
-      1,
-      "the registered provider census is unchanged (DeepSeek only)",
+    assert.deepEqual(
+      PROVIDERS.map((p) => p.id),
+      ["deepseek", XAI_PROVIDER_ID],
+      // W20-L4 (pickup of fixes/252): the census names its members — F2 · W19-L5
+      // deliberately registered the live-probed candidate second; the mock is in
+      // neither slot and the list can still never grow silently (a third entry
+      // or a reorder is RED here, not invisible).
+      "the registered provider census is DeepSeek + the live-probed candidate — never silent growth",
     );
     for (const role of Object.keys(ROLE_TIERS) as (keyof typeof ROLE_TIERS)[]) {
       assert.equal(ROLE_TIERS[role].provider, "deepseek", `${role} still resolves to DeepSeek`);

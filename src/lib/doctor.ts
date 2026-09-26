@@ -19,13 +19,22 @@
  * (dod.ts — no node:fs anywhere in its graph; the console store already
  * bundles it). OV-9 (W18-L1): productComplete is DERIVED from real project
  * state (`productCompleteFromProject`) — never read from a caller's flag.
+ *
+ * OV-1 (W23 · L4, fixes/262): the provider ENV selection (`RAPIDTOOL_PROVIDER`)
+ * is surfaced as `DoctorProviderTeam.envSelection` — keyed vs keyless, with the
+ * honest "cloud-by-default, keyless floor" wording — read through the
+ * registry's own resolvers (no second source of truth, no key VALUE read).
+ * OV-41 (W23 · L4, fixes/262): measured spend (`DoctorSpend` / `doctorSpend`)
+ * is read from the T-107.6 token ledger — its fields and its own helpers only,
+ * never recomputed, never fabricated.
  */
 import {
   coerceIsolationClaim,
   runnerIsolationClaim,
   type IsolationClaim,
 } from "./sandbox-policy.ts";
-import { tokenCapFromEnv } from "./token-ledger.ts";
+import { estimateCostUsd, tokenCapFromEnv, totalTokens } from "./token-ledger.ts";
+import type { TokenLedger, TokenPrices, TokenSpend } from "./token-ledger.ts";
 // OV-9 (W18-L1): the product-complete producer's ONE derivation — the same
 // pure p6-arch trace the phase-6 gate reads (dod.ts, no node:fs in its graph).
 import { archProductComplete, archTrace } from "./dod.ts";
@@ -54,6 +63,10 @@ export type DoctorFactory = {
   runnerIsSandbox: false;
   isolation: IsolationClaim;
   tokenCap: number | null;
+  /** OV-41 (W23-L4): the measured spend attached to this summary, read from a
+   *  T-107.6 token ledger the caller hands in. Absent ledger ⇒
+   *  `measured:false` with all-null numbers — a fabricated 0 is never emitted. */
+  spend: DoctorSpend;
   /** Why the factory bar is unmet. Empty only when autonomousSoftwareFactory is true. */
   gaps: string[];
   /** 214: computed leftover-job census when a tree was scanned; null if not scanned. */
@@ -212,7 +225,7 @@ export function evidenceFromJobInventory(
     leftoverJobsAreReexportsOrStubs: leftover,
     realMultiJobProduct: realMulti,
     humanFixtures: extra?.humanFixtures === true,
-    productComplete: (extra as Partial<FactoryEvidence> | undefined)?.productComplete === true && realMulti && !leftover,
+    productComplete: productCompleteFromProject(extra?.project) && realMulti && !leftover,
     chatHasSlashToolsOnly: extra?.chatHasSlashToolsOnly !== false,
     isolation: extra?.isolation,
     inventory: inv,
@@ -255,10 +268,14 @@ function gapsOf(evidence: FactoryEvidence): string[] {
  * human fixtures exist, a real multi-job product exists, the product-complete
  * bar is met, AND isolation.sandbox is false. Hostile `sandbox: true` is
  * coerced away and cannot mint a factory claim.
+ *
+ * OV-41 (W23 · L4): `spend` (optional 3rd arg) is the CALLER's measured
+ * token ledger — consumed by `doctorSpend`, never recomputed here.
  */
 export function factoryClaim(
   evidence: FactoryEvidence = RAPIDTOOL_FACTORY_EVIDENCE,
   env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+  spend?: TokenSpend | TokenLedger | null,
 ): DoctorFactory {
   const leftover = evidence.leftoverJobsAreReexportsOrStubs !== false;
   const isolation = coerceIsolationClaim(evidence.isolation);
@@ -278,6 +295,7 @@ export function factoryClaim(
     runnerIsSandbox: false,
     isolation,
     tokenCap: cap ?? null,
+    spend: doctorSpend(spend),
     gaps,
     inventory: evidence.inventory ?? null,
   };
@@ -295,6 +313,11 @@ export function factoryClaim(
  * computed there; without that state the complete gap always stands
  * (fail-closed). humanFixtures still rides the blob's field truth — its
  * producer belongs to T5.2-A.
+ *
+ * OV-41 (W23 · L4): `spend` is NOT read from the blob — a raw claim can no
+ * more mint a dollar figure than it can a capability. The honest
+ * `measured:false` envelope rides here; a caller with a real ledger attaches it
+ * through `factoryClaim(…, spend)`.
  */
 export function coerceFactoryClaim(raw?: unknown, project?: unknown): DoctorFactory {
   const blob =
@@ -315,8 +338,9 @@ export function coerceFactoryClaim(raw?: unknown, project?: unknown): DoctorFact
 /** Live RapidTool doctor factory field (always false until field truth lands). */
 export function doctorFactory(
   env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+  spend?: TokenSpend | TokenLedger | null,
 ): DoctorFactory {
-  return factoryClaim(RAPIDTOOL_FACTORY_EVIDENCE, env);
+  return factoryClaim(RAPIDTOOL_FACTORY_EVIDENCE, env, spend);
 }
 
 /** Isolation advertisement the doctor must emit (frozen non-sandbox). */
@@ -356,7 +380,9 @@ export type DoctorProviderTier = {
 };
 
 /** The provider team as the doctor reports it: providers + per-role resolved
- *  model ids + the configured state. Keyless stays honestly not-configured. */
+ *  model ids + the configured state. Keyless stays honestly not-configured.
+ *  OV-1 (W23-L4): `envSelection` names which provider/model the ENVIRONMENT
+ *  resolves to (RAPIDTOOL_PROVIDER / the default rung), keyed vs keyless. */
 export type DoctorProviderTeam = {
   /** True when at least one registered provider has its key env var set. */
   configured: boolean;
@@ -367,6 +393,43 @@ export type DoctorProviderTeam = {
   line: string;
   providers: DoctorProviderEntry[];
   tiers: DoctorProviderTier[];
+  /** OV-1: the `RAPIDTOOL_PROVIDER` env selection, as the registry resolves it. */
+  envSelection: DoctorProviderEnvSelection;
+};
+
+/**
+ * OV-1 (W23 · L4): which provider/model the environment resolves to, and
+ * whether that route is keyed or on the keyless floor. Every field is read
+ * through the registry's OWN resolvers (`resolveEnvProvider` /
+ * `resolveEnvSelectedRoute`) — no second source of truth. The API-key VALUE is
+ * never read: `keyed` = the selected provider's `apiKeyEnv` is non-blank in
+ * the passed env. An unknown `RAPIDTOOL_PROVIDER` id is surfaced as the coded
+ * refusal it is (`error`), never as a silent default.
+ */
+export type DoctorProviderEnvSelection = {
+  /** The env var read for selection (`RAPIDTOOL_PROVIDER`). */
+  envVar: string;
+  /** The trimmed requested value, or null when unset/blank. */
+  requested: string | null;
+  /** Which precedence rung fired ("default" = env unset; "env" = explicitly set). */
+  source: "env" | "default";
+  /** Resolved provider id / descriptor label; null on refusal. */
+  provider: string | null;
+  label: string | null;
+  /** The provider's key env var NAME (never its value); null on refusal. */
+  apiKeyEnv: string | null;
+  /** True when that key env var is set — keyed; false = keyless floor. */
+  keyed: boolean;
+  /** The resolved `main` model id the environment routes to; null on refusal. */
+  model: string | null;
+  /** The `<PREFIX>_MODEL_MAIN` pin var for the selected provider. */
+  modelEnvKey: string | null;
+  /** True when `model` came from the env pin (not the default). */
+  pinned: boolean;
+  /** The coded refusal reason when selection/route fails; null on success. */
+  error: string | null;
+  /** One-line rendering for CLI/log summaries (`providerEnv: …`). */
+  line: string;
 };
 
 /**
@@ -416,5 +479,199 @@ export async function doctorProviderTeam(
     line: `providerTeam: ${label} — ${segments}`,
     providers,
     tiers,
+    envSelection: buildEnvSelection(registry, env),
+  };
+}
+
+/** One-line cap for embedded refusal prose in doctor summary lines. */
+function shortLine(s: string, cap = 140): string {
+  return s.length > cap ? `${s.slice(0, cap)}…` : s;
+}
+
+/**
+ * OV-1 (W23 · L4): build the honest env-selection summary (see
+ * `DoctorProviderEnvSelection`). Reads the registry's own resolvers; the
+ * "cloud-by-default, keyless floor" wording states the landed truth — the
+ * default rung is a cloud API (deepseek), and a missing key is the keyless
+ * floor (`RT_E_LLM_NOT_CONFIGURED` + deterministic scaffold), never fake
+ * model text.
+ */
+function buildEnvSelection(
+  registry: typeof import("./llm/providers/registry.ts"),
+  env: NodeJS.ProcessEnv | Record<string, string | undefined>,
+): DoctorProviderEnvSelection {
+  const envVar = registry.PROVIDER_ENV_VAR;
+  const raw = env?.[envVar];
+  const requested = typeof raw === "string" && raw.trim() ? raw.trim() : null;
+  const selection = registry.resolveEnvProvider(env as NodeJS.ProcessEnv);
+  if (!selection.ok) {
+    return {
+      envVar,
+      requested,
+      source: "env",
+      provider: null,
+      label: null,
+      apiKeyEnv: null,
+      keyed: false,
+      model: null,
+      modelEnvKey: null,
+      pinned: false,
+      error: selection.error,
+      line: `providerEnv: ${envVar}=${requested ?? "(blank)"} refused [${selection.code}] — ${shortLine(
+        selection.error,
+      )}; never silently defaulted to ${registry.DEFAULT_PROVIDER_ID}`,
+    };
+  }
+  const provider = selection.provider;
+  const keyed = Boolean(env?.[provider.apiKeyEnv]?.trim());
+  const route = registry.resolveEnvSelectedRoute("main", { env: env as NodeJS.ProcessEnv });
+  const modelEnvKey = `${provider.modelEnvPrefix}_MODEL_MAIN`;
+  const pinned = Boolean(env?.[modelEnvKey]?.trim());
+  const how =
+    selection.source === "env"
+      ? `${envVar}=${selection.requested} (env — explicit deployment choice)`
+      : `cloud-by-default (${envVar} unset ⇒ ${provider.id})`;
+  const keys = keyed
+    ? `keyed (${provider.apiKeyEnv} set)`
+    : `keyless floor (${provider.apiKeyEnv} unset ⇒ RT_E_LLM_NOT_CONFIGURED for ${provider.id}; deterministic scaffold — model text is never fabricated)`;
+  const main = route.ok ? route.model : `refused [${route.code}] ${shortLine(route.error)}`;
+  return {
+    envVar,
+    requested,
+    source: selection.source,
+    provider: provider.id,
+    label: provider.label,
+    apiKeyEnv: provider.apiKeyEnv,
+    keyed,
+    model: route.ok ? route.model : null,
+    modelEnvKey,
+    pinned,
+    error: route.ok ? null : route.error,
+    line: `providerEnv: ${how}, ${keys} · main=${main}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// OV-41 (W23 · L4, fixes/262) — measured spend, read from the T-107.6 ledger
+// ---------------------------------------------------------------------------
+
+/**
+ * Measured spend as a doctor summary reports it (OV-41). Every number is a
+ * `token-ledger.ts` field or one of its own helpers — `totalTokens` and
+ * `estimateCostUsd` — CONSUMED, never recomputed, never fabricated:
+ *
+ *   - no ledger handed in (or hostile base fields) ⇒ `measured:false` with
+ *     every token field null — a fake 0 is never emitted;
+ *   - `estimatedCostUsd` is null unless CALLER prices were supplied, because
+ *     token-ledger.ts deliberately ships no price catalog (107 §11) — an
+ *     unpriced spend reports tokens only;
+ *   - the dollar figure is an estimate under caller prices, never a vendor
+ *     bill (the ledger's own header wording).
+ */
+export type DoctorSpend = {
+  /** True only when a usable measured ledger was handed in. */
+  measured: boolean;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  /** `token-ledger.totalTokens(ledger)` — the ledger's own sum. */
+  totalTokens: number | null;
+  /** Recorded wire calls, when the fuller TokenLedger shape carries it. */
+  calls: number | null;
+  /** Cache-aware fields (T-107.6) when reported — subsets of the counts above. */
+  cachedPromptTokens: number | null;
+  cacheWriteTokens: number | null;
+  reasoningTokens: number | null;
+  /** `token-ledger.estimateCostUsd(ledger, prices)`; null when no caller prices. */
+  estimatedCostUsd: number | null;
+  /** True when caller-supplied prices were usable for the estimate. */
+  pricesSupplied: boolean;
+  /** One-line rendering for CLI/log summaries (`spend: …`). */
+  line: string;
+};
+
+/** Positive-finite gate for caller prices: an estimate is emitted only when
+ *  BOTH per-1M prices are usable. token-ledger floors bad prices to 0; this
+ *  surface refuses them instead of printing a misleading $0. */
+function usablePrices(prices: TokenPrices | null | undefined): prices is TokenPrices {
+  return Boolean(
+    prices &&
+      typeof prices === "object" &&
+      Number.isFinite(prices.inputPerMillion) &&
+      prices.inputPerMillion > 0 &&
+      Number.isFinite(prices.outputPerMillion) &&
+      prices.outputPerMillion > 0,
+  );
+}
+
+/** Deterministic USD rendering for summary lines (6 decimals; never
+ *  scientific notation for sub-cent estimates). */
+function usdAmount(usd: number): string {
+  return `$${usd.toFixed(6)}`;
+}
+
+function numOrNull(v: number | undefined): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Read one measured ledger into the doctor's honest spend summary (OV-41).
+ * `source` is a T-107.6 `TokenLedger` / `TokenSpend` — or the persisted
+ * `Project.tokenUsage` slice (`types.ts:435`). `prices` is CALLER-supplied
+ * (token-ledger ships no catalog); omitted ⇒ tokens only, cost null.
+ * Pure; never throws (hostile input ⇒ the honest `measured:false` envelope).
+ */
+export function doctorSpend(
+  source: TokenSpend | TokenLedger | null | undefined,
+  prices?: TokenPrices | null,
+): DoctorSpend {
+  const empty: DoctorSpend = {
+    measured: false,
+    promptTokens: null,
+    completionTokens: null,
+    totalTokens: null,
+    calls: null,
+    cachedPromptTokens: null,
+    cacheWriteTokens: null,
+    reasoningTokens: null,
+    estimatedCostUsd: null,
+    pricesSupplied: false,
+    line: "spend: none measured (no token-ledger sample handed in — keyless/unmetered or pre-synthesis; never estimated)",
+  };
+  if (!source || typeof source !== "object") return empty;
+  const promptTokens = numOrNull(source.promptTokens);
+  const completionTokens = numOrNull(source.completionTokens);
+  if (
+    promptTokens === null ||
+    promptTokens < 0 ||
+    completionTokens === null ||
+    completionTokens < 0
+  ) {
+    return empty;
+  }
+  const ledger = source as TokenLedger;
+  const calls = numOrNull(ledger.calls);
+  const cachedPromptTokens = numOrNull(ledger.cachedPromptTokens);
+  const cacheWriteTokens = numOrNull(ledger.cacheWriteTokens);
+  const reasoningTokens = numOrNull(ledger.reasoningTokens);
+  const total = totalTokens({ promptTokens, completionTokens, calls: calls ?? 0 });
+  const priced = usablePrices(prices);
+  const estimatedCostUsd = priced ? estimateCostUsd(source, prices) : null;
+  const callSegment = calls !== null ? ` · ${calls} call(s)` : "";
+  const costSegment =
+    estimatedCostUsd !== null
+      ? `est. ${usdAmount(estimatedCostUsd)} (caller-supplied prices — an estimate, not a vendor bill)`
+      : "est. cost n/a (no caller prices — token-ledger ships no price catalog)";
+  return {
+    measured: true,
+    promptTokens,
+    completionTokens,
+    totalTokens: total,
+    calls,
+    cachedPromptTokens,
+    cacheWriteTokens,
+    reasoningTokens,
+    estimatedCostUsd,
+    pricesSupplied: priced,
+    line: `spend: ${total} tokens measured (prompt ${promptTokens} + completion ${completionTokens}${callSegment}) · ${costSegment}`,
   };
 }

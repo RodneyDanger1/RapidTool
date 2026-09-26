@@ -7,11 +7,11 @@ and dynamically imports the vault (`vault.ts`), crew (`crew.server.ts`),
 verify (`verify.server.ts`), design (`design.ts`) and diagram (`diagram.ts`)
 modules when their subcommands run.
 
-**35 subcommands** (verified on disk: `grep -c 'case "' scripts/rapidtool-cli.mjs` = 35):
+**37 subcommands** (verified on disk: `grep -c 'case "' scripts/rapidtool-cli.mjs` = 37):
 `create` `run` `gate` `approve` `reject` `retry` `ingest` `packet` `export` `emit`
 `tree-run` `repair` `edit` `summary` `vault` `search` `crew` `verify` `check` `design`
 `diagram` `artifacts` `doctor` `diagnose` `harvest` `swarm` `prompt` `bench`
-`mine` `knowledge` `lesson` `wild` `chat` `deepen` `fixtures` — from brief to verified artifact,
+`mine` `knowledge` `lesson` `wild` `chat` `deepen` `fixtures` `scan` `eval` — from brief to verified artifact,
 design tokens + SVG diagrams, an Obsidian-style knowledge vault, the
 runnable-scaffold writer (`emit`), per-file compile checks (`check`), telemetry
 diagnosis (`diagnose`), a bounded live-source harvester, the advisory
@@ -28,7 +28,7 @@ continuation verbs `tree-run` + `repair` (rows #31–32 below).
 > flight.** The dir-based continuation verbs are callable today — rows #31–32
 > below and the [Tree-run and repair (landed); emit verify-kind (in flight)](#tree-run-and-repair-landed-emit-verify-kind-in-flight)
 > section describe their real envelopes (`edit`'s own section: [Edit (`edit`)](#edit-edit)). `emit --verify-kind` has **NOT landed as
-> a documented verb**: `grep -c 'case "'` reads 35 and none of the 35 case arms is
+> a documented verb**: `grep -c 'case "'` reads 37 and none of the 37 case arms is
 > `verify-kind` — the flag rides inside `emit` (`rapidtool-cli.mjs:768`, over
 > `verifyKindDir` at `compile-check.server.ts:770`) and the scratch-copy + install
 > leg is still open (TA-16) — treat its row as the
@@ -361,7 +361,7 @@ the CLI.
 > `npm install` + `vite build` leg for webapp/game kinds in a temp dir (never
 > mutating the emitted dir), asserting the kind's declared build actually runs.
 > NOT proven at this write — none of the 35 case arms is `verify-kind`
-> (`grep -c 'case "' scripts/rapidtool-cli.mjs` reads 35); the flag rides inside
+> (`grep -c 'case "' scripts/rapidtool-cli.mjs` reads 37); the flag rides inside
 > `emit` (`rapidtool-cli.mjs:768` → `verifyKindDir`), whose scratch-copy + install
 > leg is still open (TA-16); see the
 > [Tree-run and repair (landed); emit verify-kind (in flight)](#tree-run-and-repair-landed-emit-verify-kind-in-flight)
@@ -397,10 +397,39 @@ fails → exit 1 with the honest per-file verdicts and the check-specific code
 a missing `--dir` argument → exit 1 (`RT_E_VALIDATION`); internal error → exit 4
 (`RT_E_INTERNAL`). No project file needed.
 
+## Scan (`scan`)
+
+Advisory error-signal scan over an EXISTING emitted dir — read-only, no project
+needed, and it never re-emits over the dir (W23 L6 · G4 ·
+`research/multiagent/249_define_first_specs.md` SPEC 3; OV-21 folds in as rule
+R3). Three lexer-level rules; every finding is a prompt to look, not a verdict:
+
+- **R1 `catch-empty`** — a `catch` clause whose body holds no statement.
+- **R2 `catch-swallowed`** — a `catch` clause with statements but no `throw`,
+  `RT_E_` mention, `console.`, `.warn(`, `.error(` or `report(` (the allowlist is
+  deliberate: a finding is a prompt, not an accusation).
+- **R3 `neutral-return-unimplemented`** (OV-21) — a standalone `return "";` /
+  `return '';` / `return [];` / `return -1;` whose 5 preceding lines name an
+  unimplemented-family marker (`TODO` / `stub` / `placeholder` / …): a silent
+  neutral return next to an "unimplemented" comment must require an `RT_E_*`
+  code — or the marker's removal.
+
+```
+node --experimental-strip-types scripts/rapidtool-cli.mjs scan --dir <emitted-tree-dir>
+```
+
+Envelope: `{ ok, cmd: "scan", dir, scanned: {files, lines}, findings: [{path, line, rule, snippet, advisory: true}], advisory: true, note, exit_code }`.
+Exit **0** clean · **1** findings (the `check-assertion-gaps.mjs` idiom) ·
+**1** + `RT_E_VALIDATION` for a missing/unreadable dir, or a dir with zero
+resolvable files (the scan is never silently empty). **Posture: this verb is
+never wired into `scripts/gate.sh`, is never called by `emit`, and blocks
+nothing** — the rules are heuristics, so every finding carries `advisory: true`
+(218 §3.4 / OV-21).
+
 ## Tree-run and repair (landed); emit verify-kind (in flight)
 
 > **Status at this write: `tree-run --dir` and `repair --dir` SHIPPED (fixes/150
-> G1, case arms present, `grep -c 'case "'` = 35). `emit --verify-kind` is IN
+> G1, case arms present, `grep -c 'case "'` = 37). `emit --verify-kind` is IN
 > FLIGHT — the fixes/149 P1-2 contract below describes what will land, but none
 > of the 35 case arms is `verify-kind` (the flag rides inside `emit`) and the
 > scratch-copy + install leg is still open (TA-16).

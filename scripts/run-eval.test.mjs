@@ -4,20 +4,25 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  acceptanceFailReason,
+  briefLeakScan,
   buildSummary,
   checkAcceptance,
   choose,
   classifyDrainEnding,
   classifyLlmPreflight,
   classifyRunOutcome,
+  corpusDomainIndex,
   drainPipeline,
   finishRunMarker,
   formatPreflightLines,
   graderFileFor,
+  graderFreezeFingerprint,
   graderLeakScan,
   isTerminalDrainOutcome,
   keyedRunDecision,
   keylessSkipNotices,
+  listCorpusEntries,
   loadGrader,
   markerPathFor,
   parseGrader,
@@ -25,6 +30,7 @@ import {
   passCaretK,
   passesAcceptance,
   planTargets,
+  priorFor,
   probeP6Reachability,
   readRunMarker,
   RUN_MARKER_NAME,
@@ -35,6 +41,7 @@ import {
   trialEmitDir,
   treeTextFiles,
   trialsSummary,
+  verifyGraderFreeze,
   writeRunStartMarker,
 } from "./run-eval.mjs";
 import { createProject, runUntilGate } from "../src/lib/headless.ts";
@@ -321,6 +328,30 @@ test("(b) passesAcceptance ANDs the rubric threshold with the run-side file/cont
   assert.equal(passesAcceptance({}, okAcc, grader), false);
   const lenient = { passWhen: { meanAtLeast: 0.5, requireExpectedFiles: false, requireExpectedContent: false } };
   assert.equal(passesAcceptance({ mean: 0.5556 }, { ...okAcc, filesOk: false, contentOk: false }, lenient), true);
+});
+
+// 255 (W20-L2): the pass verdict is a boolean asked of FOUR different clauses
+// (finite mean → mean threshold → files → content). The run-2 record (`pass:no`
+// with filesOk+contentOk green and an EMPTY shortfall list) could not name its
+// own cause, because the log line only listed missingFiles/failedContent.
+// acceptanceFailReason names the FIRST false clause; it must stay clause-exact
+// with passesAcceptance (same order, same leniency gate).
+test("(b) acceptanceFailReason names the failing clause (mean threshold vs files/content)", () => {
+  const grader = { passWhen: { meanAtLeast: 1, requireExpectedFiles: true, requireExpectedContent: true } };
+  const okAcc = { filesOk: true, contentOk: true, missingFiles: [], failedContent: [] };
+  // The exact run-2 shape: files+content green, 6/9 mean → the ONLY false clause is the threshold.
+  assert.equal(passesAcceptance({ mean: 0.6667 }, okAcc, grader), false);
+  assert.match(acceptanceFailReason({ mean: 0.6667 }, okAcc, grader), /mean 0\.6667 < 1/);
+  assert.equal(acceptanceFailReason({ mean: 1 }, okAcc, grader), null, "green row has no reason");
+  assert.match(acceptanceFailReason(null, okAcc, grader), /mean/, "a crashed trial reports the mean clause");
+  assert.match(acceptanceFailReason({ mean: 1 }, { ...okAcc, filesOk: false, missingFiles: ["index.html"] }, grader), /index\.html/);
+  assert.match(
+    acceptanceFailReason({ mean: 1 }, { ...okAcc, contentOk: false, failedContent: ['package.json: missing "test"'] }, grader),
+    /package\.json/,
+  );
+  // Lenient grader: both assertion clauses are OFF → no reason even when red.
+  const lenient = { passWhen: { meanAtLeast: 0.5, requireExpectedFiles: false, requireExpectedContent: false } };
+  assert.equal(acceptanceFailReason({ mean: 0.5556 }, { ...okAcc, filesOk: false, contentOk: false, missingFiles: ["x"], failedContent: ["y"] }, lenient), null);
 });
 
 test("(b) checkAcceptance applies expectedFiles/expectedContent from outside the tree", () => {
@@ -814,6 +845,161 @@ test("OV-35: an unfinished marker marks a killed run (the stale results.json can
     assert.equal(finished.state, "finished");
     assert.equal(finished.marker.done, true);
     assert.equal(typeof finished.marker.finishedAt, "string");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// (e) OV-7 (W19-L4) — corpus spread + grader FREEZE + the brief leak scan.
+//
+// The row's done-when: "M7 measurable across ≥2 domains; graders frozen and
+// leak-scanned". These pins hold the three halves without running the (slow)
+// eval pipeline; the row's own evidence run (`npm run eval -- --trials=2`) is
+// the integration proof and lives in fixes/252_lane4_ov7.md.
+// ---------------------------------------------------------------------------
+
+test("OV-7: the corpus spans ≥2 domains and ≥2 of them carry ≥2 fixtures (a citable same-domain peer)", () => {
+  const found = listCorpusEntries();
+  const entries = found.filter((f) => f.entry !== null).map((f) => f.entry);
+  assert.ok(entries.length >= 7, `expected the seven corpus fixtures, saw ${entries.length}`);
+  const index = corpusDomainIndex(entries);
+  const domains = Object.keys(index);
+  assert.ok(domains.length >= 2, `the corpus must span ≥2 domains, saw ${domains.length}: ${domains.join(", ")}`);
+  const multi = domains.filter((d) => index[d].length >= 2);
+  assert.ok(
+    multi.length >= 2,
+    `expected ≥2 domains with ≥2 fixtures (the OV-7 expansion), saw ${multi.length}: ${JSON.stringify(index)}`,
+  );
+  // The domain the expansion targeted: construction had exactly one fixture
+  // before this lane; its peer is permit-inspection-tracker.
+  assert.ok((index.construction ?? []).length >= 2, `construction needs its second fixture: ${JSON.stringify(index.construction ?? [])}`);
+  assert.ok((index["real-estate"] ?? []).length >= 2, `real-estate keeps its fixture set: ${JSON.stringify(index["real-estate"] ?? [])}`);
+  // Trap guard (230 §OV-7): a domain's second fixture must not duplicate a brief.
+  for (const d of multi) {
+    const briefs = index[d].map((slug) => entries.find((e) => e.slug === slug).brief.trim());
+    assert.ok(briefs.every((b) => b.length > 0), `${d}: every fixture must carry a brief`);
+    assert.equal(new Set(briefs).size, briefs.length, `${d}: fixture briefs must be distinct, not copies`);
+  }
+});
+
+test("OV-7: the agent-facing brief carries no grader text (real corpus) and a planted leak is caught", () => {
+  const entries = listCorpusEntries().filter((f) => f.entry !== null).map((f) => f.entry);
+  for (const entry of entries) {
+    const g = loadGrader(entry.slug);
+    assert.equal(g.ok, true, `${entry.slug}: ${g.ok ? "" : g.error}`);
+    const scan = briefLeakScan(entry, g.grader);
+    assert.equal(scan.leaked, false, `${entry.slug}: agent-facing brief carries grader text: ${JSON.stringify(scan.hits)}`);
+    assert.deepEqual(scan.fields, ["brief", "name"], "the agent-facing surface is exactly brief + name (what createProject receives)");
+  }
+  // Control: a scan that cannot fail is not a scan — bake the bar into a
+  // synthetic brief and it MUST be flagged (the playbook's named trap).
+  const g = loadGrader("permit-inspection-tracker");
+  assert.equal(g.ok, true);
+  const planted = briefLeakScan(
+    { slug: "x", name: "X", brief: `build it so that ${g.grader.acceptanceBar}` },
+    g.grader,
+  );
+  assert.equal(planted.leaked, true);
+  assert.deepEqual(planted.hits, [{ field: "brief", marker: "acceptanceBar" }]);
+  const byName = briefLeakScan({ slug: "x", name: "permit-inspection-tracker.grader.json", brief: "clean brief" }, g.grader);
+  assert.equal(byName.leaked, true);
+  assert.deepEqual(byName.hits, [{ field: "name", marker: "graderFile" }]);
+  // A brief that legitimately names the demanded capabilities is NOT a leak:
+  const clean = briefLeakScan({ slug: "x", name: "X", brief: "a permit tracker with inspections and punch lists" }, g.grader);
+  assert.equal(clean.leaked, false);
+});
+
+test("OV-7: grader freeze — an untouched grader verifies ok; a mid-run edit is caught and named", () => {
+  const dir = tempDir("freeze");
+  try {
+    const path = join(dir, "frozen.grader.json");
+    const text = JSON.stringify({
+      slug: "frozen",
+      acceptanceBar: "the original bar text",
+      requiredIdentifiers: [],
+      requiredCapabilities: [],
+    });
+    writeFileSync(path, text, "utf8");
+    const fp = { slug: "frozen", ...graderFreezeFingerprint(path) };
+    assert.equal(fp.readable, true);
+    assert.equal(typeof fp.hash, "string");
+    assert.equal(fp.bytes, text.length);
+    // Unchanged since the fingerprint → the run is gradeable:
+    const ok = verifyGraderFreeze([fp]);
+    assert.deepEqual(ok, { checked: 1, ok: true, changed: [] });
+    // Edited mid-run (the bar is weakened by one word) → flagged with slug + hashes:
+    writeFileSync(path, text.replace("original", "softened!!"), "utf8");
+    const moved = verifyGraderFreeze([fp]);
+    assert.equal(moved.ok, false);
+    assert.equal(moved.changed.length, 1);
+    assert.equal(moved.changed[0].slug, "frozen");
+    assert.equal(moved.changed[0].reason, "bytes-changed-mid-run");
+    assert.notEqual(moved.changed[0].hashAtStart, moved.changed[0].hashNow);
+    // Deleted mid-run → flagged as unreadable, never a throw:
+    rmSync(path);
+    const gone = verifyGraderFreeze([fp]);
+    assert.equal(gone.ok, false);
+    assert.equal(gone.changed[0].reason, "unreadable-since-start");
+    // A grader that was already missing at fingerprint time is honest, not fatal:
+    const absent = graderFreezeFingerprint(join(dir, "nope.grader.json"));
+    assert.equal(absent.readable, false);
+    assert.equal(absent.hash, null);
+    assert.equal(verifyGraderFreeze([absent]).ok, false, "an unreadable grader can never verify as frozen");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("OV-7: the driver resolves each grader exactly once, at plan time (freeze by construction)", () => {
+  let calls = 0;
+  const entries = [{ slug: "a" }, { slug: "b" }, { slug: "c" }];
+  const plan = planTargets(entries, (slug) => {
+    calls += 1;
+    return {
+      ok: true,
+      path: `graders/${slug}.grader.json`,
+      grader: { slug, acceptanceBar: "bar", requiredIdentifiers: [], requiredCapabilities: [] },
+    };
+  });
+  assert.equal(calls, entries.length, "one resolution per entry — the plan is the only load site");
+  assert.equal(plan.targets.length, 3);
+  assert.deepEqual(plan.skips, [], "every case with a grader is a target");
+  for (const t of plan.targets) {
+    assert.equal(t.grader.slug, t.entry.slug, "each target carries the PLAN-TIME grader object");
+    assert.equal(typeof t.graderPath, "string", "the path rides the target — for the freeze fingerprint only");
+  }
+});
+
+test("OV-7: M7 prior resolution — rows resolve per slug across domains; a first run is honestly null", () => {
+  const dir = tempDir("m7-history");
+  try {
+    const historyPath = join(dir, "history.json");
+    writeFileSync(
+      historyPath,
+      JSON.stringify([
+        { at: "t1", mode: "keyless", slug: "real-estate-crm", m1: 0, m2: 1, m3: 0 },
+        { at: "t2", mode: "keyless", slug: "field-ops-suite", m1: 0, m2: 0, m3: 0 },
+      ]),
+      "utf8",
+    );
+    // Two domains, both resolvable — the prior exists in each:
+    assert.deepEqual(priorFor("real-estate-crm", historyPath), { m1: 0, m2: 1, m3: 0 });
+    assert.deepEqual(priorFor("field-ops-suite", historyPath), { m1: 0, m2: 0, m3: 0 });
+    // A slug with no rows is null — "no prior same-domain run", never a fabricated 0/0/0:
+    assert.equal(priorFor("permit-inspection-tracker", historyPath), null);
+    // The LAST recorded row wins (run #3 cites run #2, not run #1):
+    writeFileSync(
+      historyPath,
+      JSON.stringify([
+        { at: "t1", slug: "x", m1: 0, m2: 0, m3: 0 },
+        { at: "t2", slug: "x", m1: 1, m2: 1, m3: 1 },
+      ]),
+      "utf8",
+    );
+    assert.deepEqual(priorFor("x", historyPath), { m1: 1, m2: 1, m3: 1 });
+    // A missing/corrupt history file is a first-run, never a throw:
+    assert.equal(priorFor("x", join(dir, "absent.json")), null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

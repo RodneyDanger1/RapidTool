@@ -1981,6 +1981,13 @@ function commandBlock(
 type ReadmeJobScope = {
   unmaterialisedJobs?: { id: string; file: string; label: string | null }[];
   bridgedPaths?: string[];
+  /**
+   * OV-16 (W23-262): true when this emission really assembled a generatedTree
+   * (tree mode). Needed because the unmaterialisedJobs list is EMPTY on a tree
+   * whose files cover every job node — without the flag the README could not
+   * state that zero-job-node truth on the artifact itself. Absent = legacy mode.
+   */
+  treeMode?: boolean;
 };
 
 function readmeBody(
@@ -2061,6 +2068,14 @@ function readmeBody(
     const jobs = jobScope.unmaterialisedJobs as { id: string; file: string; label: string | null }[];
     jobScopeLines.push(
       `- ${jobs.length} declared spec-graph job node(s) were NOT materialised by the generated tree (never bridged — a re-export at a job path would read as a leftover job): ${censusIds(jobs.map((j) => j.file))}.`,
+    );
+  } else if (jobScope.treeMode === true) {
+    // OV-16 (W23-L2): on a CLEAN tree-mode emission the unmaterialised list is
+    // empty — the honest zero must be STATED, not left to the reader: the
+    // non-empty branch above renders nothing here, and silence would read as
+    // "unknown" rather than "every declared job module materialised".
+    jobScopeLines.push(
+      "- 0 declared spec-graph job node(s) were left unmaterialised by the generated tree (the tree carries every declared job module).",
     );
   }
   if ((jobScope.bridgedPaths?.length ?? 0) > 0) {

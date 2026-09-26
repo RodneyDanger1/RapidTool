@@ -35,7 +35,7 @@ CreationDate=20260924094345.728220-300
 ProcessId=14140
 ```
 Same PID and same start time (09:43:45) lane 237 recorded → a stable foreign holder, not a leftover of this wave.
-Re-check at lane end: `netstat -ano | grep :8080` → **[fill]**.
+Re-check at lane end: `netstat -ano | grep :8080` → **LISTENING 14140 (unchanged — the foreign `contractorapp` holder; the literal-8080 smoke stayed blocked). Filled by W22-L1 from the parent's 13:26 lane-end re-check (§3 R1 note); re-corroborated by a fresh byte read at 2026-09-24 18:47 — still `LISTENING 14140`.**
 Consequence, stated honestly: the **literal 8080 smoke did not run**; RapidTool browser evidence this lane comes from
 a fresh server on 8091 (§3 R6). Nothing about the app depends on the port; the blocker is the foreign process.
 

@@ -52,6 +52,25 @@
  * between trials is FLAKY, never averaged into a fabricated pass). A case with no valid
  * run-side grader is SKIPPED with a reason — never graded against an undeclared bar.
  *
+ * W19-L4 (fixes/252) — OV-7 corpus expansion + grader-FREEZE audit, additive:
+ *   (a) corpus spread — `permit-inspection-tracker` joins `field-ops-suite` as a
+ *       second `construction` fixture, so ≥2 domains each carry ≥2 fixtures and
+ *       the M7/learning prior is citable inside each (`corpusDomainIndex`; the
+ *       pin lives in scripts/run-eval.test.mjs). Prior reads stay BY SLUG
+ *       (`priorFor`): a slug's first run has no prior — honest, stated, never
+ *       faked. `priorFor` takes an injectable history path for the test pin.
+ *   (b) grader freeze — every grader file is fingerprint-raw-bytes at plan time
+ *       (`graderFreezeFingerprint`) and re-verified before persist
+ *       (`verifyGraderFreeze`); a grader that moved mid-run stamps
+ *       `results.json.graderFreeze.ok=false` + a loud print, because a bar that
+ *       changed while the run was in flight cannot grade that run. The driver
+ *       still LOADS each grader exactly once (plan time) and every trial scores
+ *       against that in-memory object.
+ *   (c) brief leak scan — `briefLeakScan` closes the OTHER leak direction the
+ *       playbook names (230 §OV-7: the emitted-tree scan misses grader text
+ *       baked into the *brief*): the agent-facing surface (brief + name) is
+ *       scanned for the grader's bar/file name and recorded per row.
+ *
  * Results are DATA, not failures: the script exits 0 always (missing corpus
  * dir, unparseable entries, red scores — all printed and recorded, never
  * thrown as process failures). Keyless = the honest regression leg.
@@ -60,8 +79,8 @@
  *      npm run eval -- --keyed (one bounded keyed entry when the key is set)
  *      npm run eval -- --trials=3 [--all|--limit=N]   (trials + pass@k)
  */
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
-import { join, dirname, basename, resolve } from "node:path";
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync, rmSync } from "node:fs";
+import { join, dirname, basename, resolve, relative, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   createProject,
@@ -73,6 +92,9 @@ import {
 import { treeRun } from "../src/lib/compile-check.server.ts";
 import { scoreMaker, capabilityCoverage, treeFilesOf } from "../src/lib/maker-score.ts";
 import { fnv1a } from "../src/lib/algorithms.ts";
+// W23-L1 (fixes/262): the trial rows' usage/cost evidence consumes the
+// T-107.6 ledger helpers directly — consume, never recompute.
+import { emptyLedger, recordSpend, totalTokens, estimateCostUsd } from "../src/lib/token-ledger.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -238,7 +260,23 @@ function loadCorpusEntry(file) {
   };
 }
 
-function listCorpusEntries() {
+/** OV-7 corpus spread: domain → slugs for the parsed entries. Pure. The
+ *  test pin reads the REAL corpus through this (`listCorpusEntries` is the
+ *  same loader the driver uses — no second parser to drift). */
+export function corpusDomainIndex(entries) {
+  const byDomain = {};
+  for (const e of entries) {
+    const d = typeof e.domain === "string" && e.domain.trim() ? e.domain.trim() : "(unstated)";
+    if (!byDomain[d]) byDomain[d] = [];
+    byDomain[d].push(e.slug);
+  }
+  return byDomain;
+}
+
+/** Walk the corpus dir into `{ entry, error }` records (frontmatter-carrying
+ *  `.md` files only; README-style documentation is skipped). Exported for the
+ *  OV-7 corpus-spread pin, which reads the real corpus through this loader. */
+export function listCorpusEntries() {
   if (!existsSync(CORPUS_DIR)) return [];
   return readdirSync(CORPUS_DIR, "utf8")
     .filter((f) => f.endsWith(".md"))
@@ -382,8 +420,13 @@ function readJson(path, fallback) {
   return fallback;
 }
 
-function priorFor(slug) {
-  const history = readJson(HISTORY_PATH, []);
+/** M7 prior evidence for one slug — the LAST recorded history row for that
+ *  slug, or null when this is the slug's first run (a new domain therefore
+ *  starts with no prior: honest, and stated in the corpus README). `historyPath`
+ *  is injectable so the M7-resolution pin can drive a temp history file; the
+ *  default is the real OUT_DIR history. */
+export function priorFor(slug, historyPath = HISTORY_PATH) {
+  const history = readJson(historyPath, []);
   const same = history.filter((h) => h && h.slug === slug);
   if (same.length === 0) return null;
   const last = same[same.length - 1];
@@ -559,6 +602,214 @@ export function trialEmitDir(outDir, slug, trial, trials) {
   return trials <= 1 ? join(outDir, slug) : join(outDir, `${slug}--trial-${trial}`);
 }
 
+// ---------------------------------------------------------------------------
+// W23-L1 (fixes/262) — per-trial MODEL EVIDENCE: the provider call tap +
+// served-id/usage/cost folding + the clean emit target.
+//
+// Run #3's results.json recorded NO model ids and NO usage anywhere: a
+// flash-only run was not verifiable from the row and the spend was invisible
+// (context for this lane). The driver now installs the provider's opt-in call
+// tap (`src/lib/llm/providers/deepseek.ts` `setLlmCallTap` — the one funnel
+// every keyed call passes through) once per keyed run, resets it per trial,
+// and folds the trial's records into the row:
+//   servedModels     — every id the provider READ BACK (never the requested
+//                      constant; a refused call served nothing, so it adds none);
+//   usage            — measured {promptTokens, completionTokens, totalTokens}
+//                      folded via the T-107.6 ledger helpers (`recordSpend` /
+//                      `totalTokens` — consume, never recompute);
+//   estimatedCostUsd — an ESTIMATE from caller-supplied per-1M prices
+//                      (`RAPIDTOOL_PRICE_INPUT_PER_M` / `RAPIDTOOL_PRICE_OUTPUT_PER_M`
+//                      env wins; else the repo's documented list-price row,
+//                      OFF-PEAK cache-miss rates — see the table below),
+//                      labelled by `costBasis`. An unknown model NEVER gets a
+//                      guessed price (null + reason — 101 §4.5).
+// Nothing is invented when nothing was measured: keyless trials (and a keyed
+// run whose tap could not install) record `usage: null` / `estimatedCostUsd:
+// null` — never fabricated zeros.
+// ---------------------------------------------------------------------------
+
+/** Documented DeepSeek list prices (USD per 1M tokens) for the cost ESTIMATE,
+ *  from the repo's own research table (`research/multiagent/90_LEAPFROG.md`
+ *  §12.3.1 pricing row, [H2]-sourced): OFF-PEAK, cache-MISS input + output.
+ *  The usage record carries no cache-hit and no peak/off-peak data, so the
+ *  estimate is a labelled off-peak/cache-miss figure, not a bill. Both the
+ *  request aliases and the vendor-SERVED ids are keyed (the vendor serves
+ *  `deepseek-flash` for the requested alias `deepseek-v4-flash`). */
+export const DEEPSEEK_PRICE_TABLE_USD_PER_M = Object.freeze({
+  "deepseek-v4-flash": { inputPerMillion: 0.22, outputPerMillion: 0.66 },
+  "deepseek-flash": { inputPerMillion: 0.22, outputPerMillion: 0.66 },
+  "deepseek-v4-pro": { inputPerMillion: 0.66, outputPerMillion: 1.98 },
+  "deepseek-v4-flash-vision-exp": { inputPerMillion: 0.22, outputPerMillion: 0.66 },
+});
+
+const PRICE_BASIS_TABLE =
+  "DeepSeek off-peak cache-miss list rates, USD per 1M tokens (research/multiagent/90_LEAPFROG.md §12.3.1 [H2]) — an estimate, not a bill: peak windows (01:00–04:00 & 06:00–10:00 UTC Mon–Fri) bill 2x and cache-hit reads are cheaper";
+
+/** Resolve per-1M prices for a trial's served models: operator env first
+ *  (`RAPIDTOOL_PRICE_INPUT_PER_M` / `RAPIDTOOL_PRICE_OUTPUT_PER_M`, the
+ *  101 §4.5 `RAPIDTOOL_PRICE_<PREFIX>` idiom), else the documented table.
+ *  Returns `{ prices: null, basis }` when no honest price exists — the caller
+ *  then records `estimatedCostUsd: null` (never invents a figure). */
+export function resolvePricesForModels(servedModels) {
+  const envIn = Number(process.env.RAPIDTOOL_PRICE_INPUT_PER_M);
+  const envOut = Number(process.env.RAPIDTOOL_PRICE_OUTPUT_PER_M);
+  if (Number.isFinite(envIn) && envIn > 0 && Number.isFinite(envOut) && envOut > 0) {
+    return {
+      prices: { inputPerMillion: envIn, outputPerMillion: envOut },
+      basis: `operator prices via RAPIDTOOL_PRICE_INPUT_PER_M=${envIn} / RAPIDTOOL_PRICE_OUTPUT_PER_M=${envOut} (USD per 1M tokens)`,
+    };
+  }
+  const models = Array.isArray(servedModels) ? servedModels : [];
+  if (models.length === 0) {
+    return { prices: null, basis: "no served model id was read back — nothing to price" };
+  }
+  const missing = models.filter((m) => !DEEPSEEK_PRICE_TABLE_USD_PER_M[m]);
+  if (missing.length > 0) {
+    return {
+      prices: null,
+      basis: `no documented price for ${missing.join(", ")} — estimatedCostUsd stays null (never invented); set RAPIDTOOL_PRICE_INPUT_PER_M/RAPIDTOOL_PRICE_OUTPUT_PER_M to price it`,
+    };
+  }
+  // Mixed-served-model trials take the HIGHER catalogue line (conservative —
+  // the estimate never under-bills a flash+pro mix).
+  const prices = models
+    .map((m) => DEEPSEEK_PRICE_TABLE_USD_PER_M[m])
+    .reduce((a, b) => (b.outputPerMillion > a.outputPerMillion ? b : a));
+  return { prices: { ...prices }, basis: PRICE_BASIS_TABLE };
+}
+
+/** Fold one trial's provider call records into the row evidence block. Pure.
+ *  `null` input means "nothing was measured" (keyless / tap unavailable) —
+ *  the caller records nulls rather than zeros. */
+export function llmEvidenceFromCallRecords(records) {
+  if (!Array.isArray(records)) return null;
+  let ledger = emptyLedger();
+  const servedModels = [];
+  let failedCalls = 0;
+  for (const r of records) {
+    if (!r || typeof r !== "object") continue;
+    const served = typeof r.servedModel === "string" ? r.servedModel.trim() : "";
+    if (served && !servedModels.includes(served)) servedModels.push(served);
+    if (r.ok !== true) failedCalls += 1;
+    if (typeof r.promptTokens === "number" || typeof r.completionTokens === "number") {
+      ledger = recordSpend(ledger, {
+        promptTokens: typeof r.promptTokens === "number" ? r.promptTokens : 0,
+        completionTokens: typeof r.completionTokens === "number" ? r.completionTokens : 0,
+      });
+    }
+  }
+  const usage = {
+    promptTokens: ledger.promptTokens,
+    completionTokens: ledger.completionTokens,
+    totalTokens: totalTokens(ledger),
+  };
+  let estimatedCostUsd = null;
+  let costBasis;
+  if (records.length === 0) {
+    estimatedCostUsd = 0;
+    costBasis = "no model call recorded in this trial's window (nothing billed)";
+  } else {
+    const pricing = resolvePricesForModels(servedModels);
+    if (pricing.prices) {
+      estimatedCostUsd = Number(estimateCostUsd(usage, pricing.prices).toFixed(6));
+    }
+    costBasis = pricing.basis;
+  }
+  return {
+    servedModels,
+    usage,
+    estimatedCostUsd,
+    costBasis,
+    llmCalls: records.length,
+    failedCalls,
+    noBalance: records.some((r) => r && r.code === "RT_E_LLM_NO_BALANCE"),
+  };
+}
+
+/** The active trial's tap buffer (one process = one sequential run, so one
+ *  slot is honest — nothing to interleave). */
+let activeTrialTap = null;
+let llmCallTapInstalled = false;
+
+/** Install the provider call tap once per process (keyed runs only). Returns
+ *  false when the provider surface lacks the tap — the caller records nulls
+ *  and says so, never invents usage. */
+export async function installLlmCallTap() {
+  if (llmCallTapInstalled) return true;
+  try {
+    const ds = await import(pathToFileURL(join(LIB_DIR, P6_DS_SPEC)).href);
+    if (typeof ds.setLlmCallTap !== "function") return false;
+    ds.setLlmCallTap((record) => {
+      if (activeTrialTap) activeTrialTap.push(record);
+    });
+    llmCallTapInstalled = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function llmCallTapIsInstalled() {
+  return llmCallTapInstalled;
+}
+
+/** Open a trial's measurement window (resets the buffer — a crashed trial's
+ *  leftover records can never leak into the next trial's row). */
+export function beginTrialCallTap() {
+  activeTrialTap = [];
+}
+
+/** Close the window and return the trial's records. */
+export function endTrialCallTap() {
+  const records = activeTrialTap ?? [];
+  activeTrialTap = null;
+  return records;
+}
+
+/**
+ * W23-L1 — the per-trial CLEAN emit target. Run #3 hit `foreign files in emit
+ * dir: src/generated/get-property.ts` — a stale tree from an earlier run at
+ * the same path. `--force` would NOT be the honest fix (force KEEPS foreign
+ * files, so the tree-run verdict would weight a tree the current run never
+ * emitted); instead the driver removes its OWN previous workspace at this
+ * exact path before emitting, so every trial's emit starts empty and the
+ * verdict judges exactly the current tree.
+ *
+ * Guards: only paths INSIDE the eval out dir are ever removed (EVAL_OUT_DIR
+ * is operator-supplied; the driver never deletes outside its own output
+ * tree), and a clean failure is recorded and left to the emitter's normal
+ * foreign-file rules (never silently swallowed).
+ */
+export function prepareCleanEmitDir(dir, outDir = OUT_DIR) {
+  const target = resolve(dir);
+  const root = resolve(outDir);
+  const rel = relative(root, target);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+    return {
+      dir: target,
+      cleaned: false,
+      note: `refused to clean ${target}: outside the eval out dir ${root} — the driver only cleans its own output tree`,
+    };
+  }
+  if (!existsSync(target)) {
+    return { dir: target, cleaned: false, note: "no prior workspace at this path — first emit into it" };
+  }
+  try {
+    rmSync(target, { recursive: true, force: true });
+    return {
+      dir: target,
+      cleaned: true,
+      note: "prior workspace removed before emit (per-trial clean target — no foreign-file refusal, no mixed trees)",
+    };
+  } catch (e) {
+    return {
+      dir: target,
+      cleaned: false,
+      note: `clean failed (${e instanceof Error ? e.message : String(e)}) — emit proceeds under the normal foreign-file rules`,
+    };
+  }
+}
+
 const LEAK_SKIP_DIRS = new Set(["node_modules", ".git"]);
 
 /** Every text file of an emitted tree (relative posix paths), bounded. */
@@ -637,6 +888,75 @@ export function graderLeakScan(emittedDir, grader, opts = {}) {
   return { scanned: files.length, markers: markers.map((m) => m.label), hits, leaked: hits.length > 0 };
 }
 
+// ---------------------------------------------------------------------------
+// OV-7 (W19-L4) — the grader FREEZE property + the brief leak scan.
+//
+// 107 lesson 5: graders freeze OUTSIDE the agent — a grader written (or edited)
+// after seeing the run it grades is not a grader. Two facts make the recorded
+// bar trustworthy here:
+//   1. LOAD-ONCE — `planTargets` resolves each case's grader exactly once,
+//      before the first trial; every trial of that case scores against the same
+//      in-memory object (never a per-trial re-read of the file).
+//   2. UNMOVED — the raw bytes of every grader file are fingerprinted before
+//      the first entry runs and re-verified before results.json / history.json
+//      are written. A byte change mid-run means the bar moved while the run was
+//      in flight: the run is stamped `graderFreeze.ok=false` with the changed
+//      paths, the affected scores are INVALID, and the fact is printed LOUDLY —
+//      never silently averaged in.
+// FNV-1a is an integrity hash (house rule: not cryptographic): it detects an
+// edit, not an adversary. A file edited and reverted between the two reads is
+// outside this check's reach — that residual is stated, not hidden.
+// ---------------------------------------------------------------------------
+
+/** Raw-byte fingerprint of one grader file: the bytes an editor mutates. */
+export function graderFreezeFingerprint(graderPath) {
+  try {
+    const raw = readFileSync(graderPath, "utf8");
+    return { path: graderPath, bytes: raw.length, hash: String(fnv1a(raw)), readable: true };
+  } catch {
+    return { path: graderPath, bytes: null, hash: null, readable: false };
+  }
+}
+
+/** Re-verify the fingerprints taken before the run. `changed` lists every
+ *  grader whose file is now missing/unreadable or byte-different; `ok` is true
+ *  only when every frozen grader is byte-identical. `slug` rides through when
+ *  the fingerprints were built per corpus entry. */
+export function verifyGraderFreeze(fingerprints) {
+  const changed = [];
+  for (const fp of fingerprints) {
+    const now = graderFreezeFingerprint(fp.path);
+    if (!now.readable) {
+      changed.push({ slug: fp.slug ?? null, path: fp.path, reason: "unreadable-since-start", hashAtStart: fp.hash ?? null, hashNow: null });
+    } else if (now.hash !== fp.hash || now.bytes !== fp.bytes) {
+      changed.push({ slug: fp.slug ?? null, path: fp.path, reason: "bytes-changed-mid-run", hashAtStart: fp.hash ?? null, hashNow: now.hash });
+    }
+  }
+  return { checked: fingerprints.length, ok: changed.length === 0, changed };
+}
+
+/** OV-7 leak audit — the AGENT-FACING surface of a corpus case. `graderLeakScan`
+ *  covers the emitted tree; the brief is the OTHER direction grader text can
+ *  escape through: `createProject` receives `entry.brief` + `entry.name`, so any
+ *  acceptance-bar text (or grader file name) baked into the brief hands the
+ *  agent the bar it is graded against (230 §OV-7 trap: "a leak scan that only
+ *  checks the emitted tree misses grader text baked into the *brief*"). Pure;
+ *  markers are the grader's own bar + file name (graderLeakMarkers). */
+export function briefLeakScan(entry, grader) {
+  const fields = [
+    { field: "brief", text: typeof entry.brief === "string" ? entry.brief : "" },
+    { field: "name", text: typeof entry.name === "string" ? entry.name : "" },
+  ];
+  const markers = graderLeakMarkers(grader);
+  const hits = [];
+  for (const { field, text } of fields) {
+    for (const m of markers) {
+      if (text.includes(m.text)) hits.push({ field, marker: m.label });
+    }
+  }
+  return { fields: fields.map((f) => f.field), markers: markers.map((m) => m.label), hits, leaked: hits.length > 0 };
+}
+
 /** Honest mode notices: what a keyless run does NOT do (and what a `--keyed`
  *  request degrades into without the key). Structurally key-free — only
  *  booleans enter, so the key value can never be printed. */
@@ -685,7 +1005,10 @@ function probeErrorText(e) {
 /** One coded class per preflight ending (OV-35(b), the `235` §2 row-3 pin).
  *  The four demanded endings are class- AND code-distinct: not-configured →
  *  RT_E_LLM_NOT_CONFIGURED · 401 → RT_E_LLM_REJECTED (the registry's own 401
- *  doc) · 402 → RT_E_BUDGET_EXHAUSTED (vendor balance) · 400 →
+ *  doc) · 402 → RT_E_LLM_NO_BALANCE (W23-L1: the vendor's balance class has
+ *  its OWN code — never conflated with the session budget
+ *  RT_E_BUDGET_EXHAUSTED or a generic refusal; a broke wallet is not a
+ *  budget stop) · 400 →
  *  RT_E_VALIDATION (the request the vendor received failed its validation; the
  *  detail carries the requested model id — D1.4's drift question). Every other
  *  ending classifies too; a `null` code means "not a failure" (wire-ok) or "no
@@ -730,11 +1053,12 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
     };
   if (status === 402)
     return {
-      class: "balance-exhausted",
-      code: "RT_E_BUDGET_EXHAUSTED",
+      class: "no-balance",
+      code: "RT_E_LLM_NO_BALANCE",
       ok: false,
       wireReached: true,
-      detail: "the vendor answered HTTP 402 — account balance exhausted; a keyed run would refuse per call, never measure quality",
+      detail:
+        "the vendor answered HTTP 402 — account balance exhausted (Insufficient Balance); the keyed leg CANNOT run (every call would refuse), so NO scored trial may proceed — top up and re-run",
     };
   if (status === 400)
     return {
@@ -810,6 +1134,19 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       wireReached: true,
       detail: "the vendor answered but returned no text content — wire reach proven; the model OUTPUT was refused (thinking/truncation class — read the provider's diagnostic)",
     };
+  // W23-L1 (fixes/262): the provider's own no-balance class — reached when the
+  // 402 status was not observed by the recording wrapper but the coded refusal
+  // (or an "Insufficient Balance" body) says the account is unfunded. Same
+  // class/code as the status-402 branch above: ONE no-balance ending.
+  if (wireCode === "RT_E_LLM_NO_BALANCE" || /insufficient balance/i.test(String(wire.error ?? "")))
+    return {
+      class: "no-balance",
+      code: "RT_E_LLM_NO_BALANCE",
+      ok: false,
+      wireReached: true,
+      detail:
+        "the provider refused with the no-balance class (Insufficient Balance — the 402 status was not observed by the probe wrapper, but the coded refusal is unambiguous) — NO scored trial may proceed",
+    };
   return {
     class: "internal",
     code: wireCode && /^RT_E_/.test(wireCode) ? wireCode : "RT_E_INTERNAL",
@@ -832,10 +1169,10 @@ export function preflightLimits(cls) {
         proves: "the wire is reachable from this host and the request shape passes to the auth check",
         cannotProve: "that the key can run anything (it was refused) — a real key must pass this probe before any keyed reading",
       };
-    case "balance-exhausted":
+    case "no-balance":
       return {
-        proves: "the wire is reachable from this host",
-        cannotProve: "that any call can succeed (vendor balance exhausted) — top up before any keyed reading",
+        proves: "the wire is reachable from this host and the vendor's billing check answered (HTTP 402)",
+        cannotProve: "that ANY call can succeed (account balance exhausted) — top up before any keyed reading; a run in this state is not a measurement",
       };
     case "unreachable":
       return {
@@ -973,6 +1310,147 @@ export async function probeP6Reachability({ fetchImpl = null, wire = true, timeo
   out.wireReached = c.wireReached;
   out.detail = c.detail;
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// W23-L1 (fixes/262) — the FUNDEDNESS probe: the cheapest possible live call
+// (maxTokens 1), performed when `--keyed` runs with the key set.
+//
+// The reachability probe above answers "does a request arrive at the vendor".
+// It cannot answer "can this account PAY" — run #3 proved the difference: the
+// wire was fine, the wallet was empty, and every synthesis call refused with
+// HTTP 402 while the run still produced a scored 3/9 row. This probe is the
+// Step-0 gate that closes that hole: ONE 1-output-token call through the SAME
+// P6 concatenated-specifier provider the keyed leg uses, classified by the
+// SAME `classifyLlmPreflight` (so HTTP 402 is `class: "no-balance"`,
+// `code: RT_E_LLM_NO_BALANCE`). `funded` is the probe's own verdict:
+//   true  — the vendor served (or billed) the call (HTTP 200 / wire-ok /
+//           empty-completion: an answered 200 means the account paid);
+//   false — HTTP 402 / the provider's no-balance class ⇒ A SCORED TRIAL MUST
+//           NOT RUN (a broke wallet is not a measurement);
+//   null  — the probe cannot answer (401 auth, network, timeout) — reported,
+//           never guessed into a pass or a fail.
+// The key VALUE never enters the result (booleans/enums/statuses only).
+// ---------------------------------------------------------------------------
+
+/** One minimal fundedness call. `fetchImpl` is injectable — tests stub it and
+ *  NEVER hit the network. The key value never enters the result. */
+export async function probeFundedness({ fetchImpl = null, timeoutMs = 20_000 } = {}) {
+  const out = {
+    probe: "W23-L1-fundedness",
+    checkedAt: new Date().toISOString(),
+    configured: false,
+    attempted: false,
+    ok: false,
+    funded: null,
+    class: null,
+    code: null,
+    httpStatus: null,
+    requestedModel: null,
+    servedModel: null,
+    detail: null,
+  };
+  let ds = null;
+  try {
+    ds = await import(pathToFileURL(join(LIB_DIR, P6_DS_SPEC)).href);
+  } catch (e) {
+    out.class = "internal";
+    out.code = "RT_E_INTERNAL";
+    out.detail = `the provider specifier did not resolve on this host: ${probeErrorText(e)}`;
+    return out;
+  }
+  out.configured =
+    typeof ds.isDeepSeekConfigured === "function" && ds.isDeepSeekConfigured() === true;
+  if (!out.configured) {
+    out.class = "not-configured";
+    out.code = "RT_E_LLM_NOT_CONFIGURED";
+    out.detail =
+      "no DEEPSEEK_API_KEY in the environment — fundedness is unaskable by construction (never faked)";
+    return out;
+  }
+  if (typeof ds.completeDeepSeek !== "function") {
+    out.class = "internal";
+    out.code = "RT_E_INTERNAL";
+    out.detail = "the provider specifier resolved without completeDeepSeek — cannot probe";
+    return out;
+  }
+  const requestedModel =
+    ds.DEEPSEEK_MODELS && typeof ds.DEEPSEEK_MODELS.flash === "string"
+      ? ds.DEEPSEEK_MODELS.flash
+      : null;
+  out.requestedModel = requestedModel;
+  const statuses = [];
+  const baseFetch = fetchImpl ?? globalThis.fetch;
+  const recordingFetch = async (...args) => {
+    const res = await baseFetch(...args);
+    try {
+      statuses.push(res && typeof res.status === "number" ? res.status : null);
+    } catch {
+      statuses.push(null);
+    }
+    return res;
+  };
+  let result;
+  try {
+    // THE cheapest call: one output token. maxTokens 1 keeps even a funded
+    // probe at ~1 completion token (+ the prompt) — the smallest possible bill.
+    result = await ds.completeDeepSeek("OK", {
+      maxTokens: 1,
+      timeoutMs,
+      fetch: recordingFetch,
+    });
+  } catch (e) {
+    result = { ok: false, error: `fundedness probe call threw: ${probeErrorText(e)}`, code: "RT_E_INTERNAL" };
+  }
+  const wire = {
+    attempted: true,
+    ok: result && result.ok === true,
+    httpStatus: statuses.length > 0 ? statuses[statuses.length - 1] : null,
+    code: result && typeof result.code === "string" ? result.code : null,
+    error: result && result.ok !== true ? String(result.error ?? "").slice(0, 400) : null,
+    model: result && result.ok === true ? result.model ?? null : null,
+    requestedModel,
+  };
+  const c = classifyLlmPreflight({ configured: true, wire });
+  out.attempted = true;
+  out.ok = c.ok;
+  out.class = c.class;
+  out.code = c.code;
+  out.httpStatus = wire.httpStatus;
+  out.servedModel = wire.model;
+  out.detail = c.detail;
+  out.funded =
+    c.class === "no-balance"
+      ? false
+      : c.class === "wire-ok" || c.class === "empty-completion"
+        ? true
+        : null;
+  return out;
+}
+
+/** One-line stdout renderings for the fundedness probe (booleans/enums/
+ *  statuses only — the key VALUE can never appear: nothing key-shaped enters
+ *  this function). */
+export function formatFundednessLines(p) {
+  const lines = [];
+  lines.push(
+    `preflight: fundedness (1-token probe) · configured=${p.configured} · funded=${p.funded === null ? "unknown" : p.funded} · class=${p.class}${p.code ? ` · code ${p.code}` : ""} · httpStatus=${p.httpStatus ?? "n/a"}`,
+  );
+  if (p.detail) lines.push(`preflight: fundedness detail: ${p.detail}`);
+  if (p.funded === false) {
+    lines.push(
+      "preflight: NO-BALANCE — the account cannot pay for a single call; a scored keyed trial will NOT run (top up the account or switch keys and re-run)",
+    );
+  } else if (p.funded === true) {
+    lines.push(
+      `preflight: fundedness proven — the account served a ${p.servedModel ? `"${p.servedModel}" ` : ""}completion (HTTP ${p.httpStatus ?? "200"})`,
+    );
+  } else {
+    lines.push(
+      "preflight: fundedness unproven — this class cannot answer whether the account can pay; it is neither a pass nor a fail",
+    );
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -1232,6 +1710,9 @@ function attemptLogOutcomeIsOk(detail) {
  *  from the RUN-SIDE `grader` passed in — never from the corpus frontmatter. */
 async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   const { slug } = entry;
+  // W23-L1 (fixes/262): open the trial's model-call measurement window BEFORE
+  // the first keyed call (the journey's synthesis). Keyless trials never tap.
+  if (mode === "keyed") beginTrialCallTap();
   // fixes/215: corpus `kind` is the delivery contract ("webapp"/"tool"/"game"/
   // "cli-tool"/"library"/"service"). Map it onto Project.kind ("app"|"tool"|
   // "game") so keyed synthesis routes to the chunked multi-file tree for every
@@ -1291,6 +1772,16 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   //    benchmark, but it must NOT emit silently either: the emitted README.md
   //    is stamped with the unmissable red-tree banner and the honest
   //    `redTreeBanner` metric rides handover evidence below.
+  //
+  //    W23-L1 (fixes/262): the per-trial CLEAN target runs FIRST — the
+  //    driver's own prior workspace at this path is removed, so the emit can
+  //    never refuse on stale foreign files (run #3's
+  //    `src/generated/get-property.ts`) and the tree-run below can never
+  //    weight a mixed tree the current run did not emit.
+  const cleanReport = prepareCleanEmitDir(emitDir);
+  if (cleanReport.cleaned) {
+    console.log(`      emit-dir: removed the trial's prior workspace at ${cleanReport.dir} (per-trial clean target)`);
+  }
   const emitResult = await emitProject(finalProject, emitDir, { redTree: "banner" });
   let handoverEv = null;
   let treeEv = null;
@@ -1352,6 +1843,18 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     console.log("");
   }
 
+  // OV-7: the agent-facing surface is the OTHER leak direction — the brief must
+  // not carry the bar the case is graded against. Printed once per case (trial
+  // 1), recorded on every trial's row.
+  const briefLeak = briefLeakScan(entry, grader);
+  if (briefLeak.leaked && trial === 1) {
+    console.log("");
+    console.log(`!!!!! GRADER TEXT IN THE AGENT-FACING BRIEF — ${slug}:`);
+    for (const h of briefLeak.hits) console.log(`      ${h.marker} in ${h.field}`);
+    console.log("      the agent would read the bar it is graded against — that case's score is not a measurement");
+    console.log("");
+  }
+
   // 4) Score with the pure rubric.
   const logs = Array.isArray(finalProject.logs) ? finalProject.logs : [];
   const refusedSignal =
@@ -1372,6 +1875,23 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     mode === "keyed"
       ? logs.some((l) => l && l.event === "p6.synthesis.attempt" && attemptLogOutcomeIsOk(l.detail))
       : undefined;
+  // W23-L1 (fixes/262) — close the trial's measurement window and fold the
+  // provider's own call records (keyed only) into the row evidence. Keyless →
+  // null: nothing was measured, so the row records nulls, never zeros.
+  const callRecords = mode === "keyed" ? endTrialCallTap() : null;
+  const llmEvidence = llmEvidenceFromCallRecords(callRecords);
+  // A no-balance ending is signalled by ANY of the trial's own evidence: the
+  // tap (the provider's coded refusal), a p6.synthesis.* log detail, or the
+  // journey's refusal string. The trial then ends `no-balance` — NOT a scored
+  // `dod` (run #3's shape: wallet at zero, a 3/9 floor card recorded as if a
+  // measurement). A broke wallet must never again be scored as a trial.
+  const noBalance =
+    mode === "keyed" &&
+    Boolean(
+      (llmEvidence && llmEvidence.noBalance) ||
+        logs.some((l) => l && typeof l.detail === "string" && l.detail.includes("RT_E_LLM_NO_BALANCE")) ||
+        (journeyEv && typeof journeyEv.refusal === "string" && journeyEv.refusal.includes("RT_E_LLM_NO_BALANCE")),
+    );
   const sealedFlag = drain.res ? drain.res.sealedWithFailures === true : false;
   // fixes/237 (C-2): the drain's OWN coded terminal stop wins — a hard-DoD
   // stop parks with RT_E_GATE_PENDING (the wild path's code for the same
@@ -1380,15 +1900,21 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   // stall code remain the fallbacks.
   const drainStopCode =
     typeof drain.code === "string" && /^RT_E/.test(drain.code) ? drain.code : null;
-  const stopCode = drainStopCode
-    ? drainStopCode
-    : refusedSignal
-      ? typeof refusedCode === "string" && /RT_E/.test(refusedCode)
-        ? refusedCode.match(/RT_E[A-Z_0-9]*/)?.[0] ?? "RT_EVAL_REFUSED"
-        : "RT_EVAL_REFUSED"
-      : drain.stall
-        ? "RT_EVAL_STALL"
-        : null;
+  // W23-L1 (fixes/262): the no-balance ending wins — the coded stop that
+  // actually explains this trial is the wallet, not the drain's downstream
+  // gate code (a 402-saturated keyed leg parks on a hard DoD whose REAL cause
+  // is the unfunded account).
+  const stopCode = noBalance
+    ? "RT_E_LLM_NO_BALANCE"
+    : drainStopCode
+      ? drainStopCode
+      : refusedSignal
+        ? typeof refusedCode === "string" && /RT_E/.test(refusedCode)
+          ? refusedCode.match(/RT_E[A-Z_0-9]*/)?.[0] ?? "RT_EVAL_REFUSED"
+          : "RT_EVAL_REFUSED"
+        : drain.stall
+          ? "RT_EVAL_STALL"
+          : null;
   const card = scoreMaker({
     project: finalProject,
     // W5-L5 T-107.5: grading inputs come from the RUN-SIDE grader
@@ -1455,13 +1981,26 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     domain: entry.domain || null,
     domainMatch: domainMatch(entry, finalProject),
     kind: entry.kind || null,
-    status: drain.res ? drain.res.outcome : "stalled",
+    // W23-L1 (fixes/262): a no-balance trial ends as its own status — it is
+    // NOT the drain's downstream `dod`, and it is NOT a measurement.
+    status: noBalance ? "no-balance" : drain.res ? drain.res.outcome : "stalled",
     mode,
     criteria: card.criteria,
     total: card.total,
     mean: Number(card.mean.toFixed(4)),
     baseline: entry.baseline,
     coverage,
+    // --- W23-L1 additive keys (keyed-run model/usage/cost evidence) ---
+    // servedModels: ids the provider READ BACK (a refusal served nothing).
+    // usage/estimatedCostUsd: null when nothing was measured (keyless, or a
+    // keyed run whose tap could not install) — never fabricated zeros.
+    servedModels: llmEvidence ? llmEvidence.servedModels : [],
+    usage: llmEvidence ? llmEvidence.usage : null,
+    estimatedCostUsd: llmEvidence ? llmEvidence.estimatedCostUsd : null,
+    costBasis: llmEvidence
+      ? llmEvidence.costBasis
+      : "keyless trial — no model call and nothing measured",
+    // --- end W23-L1 additive keys ---
     // --- W5-L5 additive keys ---
     trial,
     emitDir,
@@ -1476,6 +2015,8 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     },
     acceptance: { ...acceptance, pass: false }, // `pass` filled per-trial by evaluateEntry
     graderLeak: { scanned: graderLeak.scanned, leaked: graderLeak.leaked, hits: graderLeak.hits },
+    // OV-7: the agent-facing half of the leak audit (brief + name vs the bar).
+    briefLeak: { fields: briefLeak.fields, leaked: briefLeak.leaked, hits: briefLeak.hits },
     // --- end W5-L5 additive keys ---
     notes: {
       approvedGates: drain.approved,
@@ -1483,7 +2024,8 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       journey: journeyEv ? journeyEv.outcome : null,
       stall: drain.stall,
       // fixes/237 (C-2): the coded terminal stop (null when the drain had no
-      // code) — the row evidence M9's loud-stop branch cites.
+      // code) — the row evidence M9's loud-stop branch cites. W23-L1: a
+      // no-balance trial carries RT_E_LLM_NO_BALANCE here (see above).
       stopCode,
       emitError: handoverEv && !handoverEv.emitted ? handoverEv.emitError ?? null : null,
       p6Refused: refusedSignal,
@@ -1491,9 +2033,22 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       // under — true = ≥1 ok synthesis attempt, false = none (floor card),
       // absent = keyless run (legacy scoring).
       synthesisSucceeded,
+      // W23-L1: the no-balance marker — the trial could not run keyed because
+      // the account is unfunded; excluded from scoring (see evaluateEntry).
+      ...(noBalance
+        ? {
+            noBalance: true,
+            capability: "cannot-run-keyed (account unfunded)",
+          }
+        : {}),
+      // W23-L1: measured call counts (null when the tap was unavailable).
+      llmCalls: llmEvidence ? llmEvidence.llmCalls : null,
+      failedLlmCalls: llmEvidence ? llmEvidence.failedCalls : null,
+      // W23-L1: what the per-trial clean emit target did before this emit.
+      emitDirClean: cleanReport,
     },
   };
-  return { entryRow, card, acceptance };
+  return { entryRow, card, acceptance, noBalance };
 }
 
 /** W5-L5 T-107.5 — the run-side pass predicate for one trial: the rubric met
@@ -1505,6 +2060,31 @@ export function passesAcceptance(row, acceptance, grader) {
   if (grader.passWhen.requireExpectedFiles && acceptance.filesOk !== true) return false;
   if (grader.passWhen.requireExpectedContent && acceptance.contentOk !== true) return false;
   return true;
+}
+
+/** 255 (W20-L2): the pass verdict above is a boolean asked of FOUR clauses —
+ *  a finite mean, the rubric threshold, the expectedFiles check and the
+ *  expectedContent check. Only the last two write anything into the record's
+ *  missingFiles/failedContent lists, so a threshold-only failure (the run-2
+ *  shape: `acceptance.pass:false` with filesOk+contentOk true and an EMPTY
+ *  shortfall list) used to be indistinguishable from a crash at a glance.
+ *  This names the FIRST false clause in the SAME order and with the SAME
+ *  leniency gates as passesAcceptance (kept adjacent so the two can never
+ *  drift); null when the row passes. Additive: it never changes a verdict. */
+export function acceptanceFailReason(row, acceptance, grader) {
+  if (!row || typeof row.mean !== "number" || !Number.isFinite(row.mean)) {
+    return "mean missing — the rubric never produced a number (crashed trial)";
+  }
+  if (row.mean < grader.passWhen.meanAtLeast) {
+    return `mean ${row.mean} < ${grader.passWhen.meanAtLeast} (rubric threshold — files/content are not the cause)`;
+  }
+  if (grader.passWhen.requireExpectedFiles && acceptance.filesOk !== true) {
+    return `expected files missing: ${acceptance.missingFiles.join(", ")}`;
+  }
+  if (grader.passWhen.requireExpectedContent && acceptance.contentOk !== true) {
+    return `expected content missing: ${acceptance.failedContent.join("; ")}`;
+  }
+  return null;
 }
 
 /** W5-L5 T-107.5 — run TRIALS fresh trials of one case (fresh project + fresh
@@ -1521,24 +2101,55 @@ async function evaluateEntry(entry, mode, grader, graderPath) {
     const t0 = Date.now();
     const r = await runTrial(entry, mode, grader, { trial, emitDir, graderPath });
     const durationSec = Number(((Date.now() - t0) / 1000).toFixed(1));
-    const pass = passesAcceptance(r.entryRow, r.acceptance, grader);
+    // W23-L1 (fixes/262): a no-balance trial is NOT scored. Its floor card is
+    // preserved as evidence, but `pass` stays null and the trial is excluded
+    // from pass@k / pass^n / flakiness below — a broke wallet never counts as
+    // a measurement (run #3's 3/9 read as a score; it was an empty wallet).
+    let pass = null;
+    let passReason = null;
+    if (r.noBalance === true) {
+      passReason =
+        "no-balance: the account is unfunded — this trial is NOT a measurement (capability: cannot-run-keyed (account unfunded))";
+    } else {
+      pass = passesAcceptance(r.entryRow, r.acceptance, grader);
+      // 255 (W20-L2): name the false clause in the record AND the log — a
+      // threshold-only failure must not read as an unexplained `pass=no`.
+      passReason = acceptanceFailReason(r.entryRow, r.acceptance, grader);
+    }
+    if (passReason !== null) r.acceptance.passReason = passReason;
     r.entryRow.acceptance.pass = pass;
+    if (passReason !== null) r.entryRow.acceptance.passReason = passReason;
     r.entryRow.durationSec = durationSec;
     trialRows.push(r.entryRow);
-    acceptances.push({ ...r.acceptance, pass });
+    acceptances.push({ ...r.acceptance, pass, ...(passReason !== null ? { passReason } : {}) });
     if (trial === 1) firstCard = r.card;
     const shortfalls = [
       ...r.acceptance.missingFiles.map((f) => `missing ${f}`),
       ...r.acceptance.failedContent.slice(0, 2),
     ];
     console.log(
-      `     trial ${trial}/${TRIALS}: ${r.entryRow.status} · ${r.entryRow.total}/9 (mean ${r.entryRow.mean.toFixed(2)}) · pass=${pass ? "yes" : "no"}` +
+      `     trial ${trial}/${TRIALS}: ${r.entryRow.status} · ${r.entryRow.total}/9 (mean ${r.entryRow.mean.toFixed(2)}) · pass=${pass === null ? "n/a (no-balance)" : pass ? "yes" : "no"}` +
         (shortfalls.length > 0 ? ` · acceptance: ${shortfalls.slice(0, 3).join("; ")}` : "") +
+        (passReason !== null ? ` · why: ${passReason}` : "") +
         ` · ${durationSec}s`,
     );
   }
-  const outcomes = trialRows.map((row) => row.acceptance.pass === true);
+  // W23-L1 (fixes/262): only SCORED trials enter the outcomes vector; an
+  // unfunded trial is counted separately and can never buy a pass or a fail.
+  const scoredTrialRows = trialRows.filter((row) => row.acceptance.pass !== null);
+  const noBalanceTrials = trialRows.length - scoredTrialRows.length;
+  const outcomes = scoredTrialRows.map((row) => row.acceptance.pass === true);
   const trialsBlock = trialsSummary(outcomes, { k: K });
+  if (noBalanceTrials > 0) {
+    trialsBlock.noBalanceTrials = noBalanceTrials;
+    trialsBlock.note =
+      `${noBalanceTrials}/${TRIALS} trial(s) ended no-balance (account unfunded) — excluded from pass@1/pass@k/flakiness (NOT measurements)` +
+      (trialsBlock.note ? `; ${trialsBlock.note}` : "");
+    console.log("");
+    console.log(`!!!!! NO-BALANCE — ${entry.slug}: ${noBalanceTrials}/${TRIALS} trial(s) could not run keyed (account unfunded)`);
+    console.log("      those trials are excluded from every score; top up the account and re-run before reading any number");
+    console.log("");
+  }
   const row = {
     ...trialRows[0],
     rowSource: "trial-1",
@@ -1554,10 +2165,18 @@ async function evaluateEntry(entry, mode, grader, graderPath) {
       status: r.status,
       total: r.total,
       mean: r.mean,
-      pass: r.acceptance.pass === true,
+      // W23-L1 (fixes/262): null = NOT scored (no-balance trial) — distinct
+      // from a measured `false`; `scored` names it explicitly.
+      pass: r.acceptance.pass === null ? null : r.acceptance.pass === true,
+      scored: r.acceptance.pass !== null,
+      noBalance: Boolean(r.notes && r.notes.noBalance === true),
       emitDir: r.emitDir,
       durationSec: r.durationSec,
       graderLeak: r.graderLeak.leaked === true,
+      // W23-L1: the trial's measured model evidence rides the per-trial block.
+      servedModels: r.servedModels ?? [],
+      usage: r.usage ?? null,
+      estimatedCostUsd: r.estimatedCostUsd ?? null,
       acceptance: acceptances[i],
     })),
   };
@@ -1642,7 +2261,17 @@ export function buildSummary(rows, skips = [], trials = TRIALS) {
   const cases = rows.length;
   const flaky = rows.filter((r) => r.entryRow.trials && r.entryRow.trials.flaky === true).map((r) => r.entryRow.slug);
   const leaked = rows.filter((r) => r.entryRow.graderLeak && r.entryRow.graderLeak.leaked === true).map((r) => r.entryRow.slug);
-  const passed = rows.filter((r) => r.entryRow.trials && r.entryRow.trials.passes === r.entryRow.trials.trials).map((r) => r.entryRow.slug);
+  // W23-L1 (fixes/262): the `trials > 0` guard — a case whose EVERY trial
+  // ended no-balance (0 scored trials, 0 passes) must never satisfy
+  // `passes === trials` and read as "passed". Unfunded cases are also named
+  // in their own summary list, whose key appears ONLY when non-empty (the
+  // keyless key-set contract for buildSummary holds — W16-L1's pin).
+  const passed = rows
+    .filter((r) => r.entryRow.trials && r.entryRow.trials.trials > 0 && r.entryRow.trials.passes === r.entryRow.trials.trials)
+    .map((r) => r.entryRow.slug);
+  const unfunded = rows
+    .filter((r) => r.entryRow.trials && r.entryRow.trials.trials === 0)
+    .map((r) => r.entryRow.slug);
   const withTrials = rows.filter((r) => r.entryRow.trials && typeof r.entryRow.trials.passAt1 === "number");
   const meanPassAt1 = withTrials.length ? round4(withTrials.reduce((a, r) => a + r.entryRow.trials.passAt1, 0) / withTrials.length) : 0;
   return {
@@ -1651,12 +2280,15 @@ export function buildSummary(rows, skips = [], trials = TRIALS) {
     passAtK: { k: trials, cases, passed: passed.length, passedSlugs: passed, meanPassAt1 },
     flakyCases: flaky,
     graderLeaks: leaked,
+    ...(unfunded.length > 0
+      ? { noBalanceCases: unfunded, noBalanceNote: "these cases recorded 0 scored trials — the account was unfunded; they are not passes and not failures" }
+      : {}),
     skipped: skips.length,
     skips,
   };
 }
 
-function persist(rows, mode, skips = []) {
+function persist(rows, mode, skips = [], extra = {}) {
   mkdirSync(OUT_DIR, { recursive: true });
   const results = {
     generatedAt: new Date().toISOString(),
@@ -1664,6 +2296,9 @@ function persist(rows, mode, skips = []) {
     corpusDir: CORPUS_DIR,
     // W5-L5 additive: where the run-side acceptance bars came from.
     graderDir: GRADER_DIR,
+    // OV-7 additive: the grader-freeze verdict for this run — { checked, ok,
+    // changed }; a moved grader invalidates the scores it graded.
+    ...(extra.graderFreeze ? { graderFreeze: extra.graderFreeze } : {}),
     entries: rows.map((r) => r.entryRow),
     summary: {
       entries: rows.length,
@@ -1893,6 +2528,14 @@ async function main() {
   for (const s of plan.skips) console.log(`skip ${s.slug}: ${s.reason}`);
   const targets = plan.targets;
 
+  // OV-7 grader freeze: fingerprint every run-side grader BEFORE the first
+  // entry runs (same ordering discipline as the keyed run marker) and re-verify
+  // before persist below — a bar that moved mid-run cannot grade that run.
+  const graderFreezeAtStart = targets.map((t) => ({
+    slug: t.entry.slug,
+    ...graderFreezeFingerprint(t.graderPath),
+  }));
+
   // Keyed default: ONE entry (cost guard). `--all` or `--limit=N` lifts it.
   const cap = EVAL_ALL ? targets.length : Number.isFinite(EVAL_LIMIT) && EVAL_LIMIT > 0 ? EVAL_LIMIT : mode === "keyed" ? 1 : targets.length;
   const selected = targets.slice(0, cap);
@@ -1973,10 +2616,33 @@ async function main() {
   });
   rows.push(...ran.rows);
 
+  // OV-7 grader freeze verification: the bar must not have moved while the run
+  // was in flight. Each row is stamped with the fingerprint its grader carried
+  // at run start + the run-level verdict; a moved grader is printed LOUDLY and
+  // recorded (results.json.graderFreeze) — the affected scores are invalid.
+  const graderFreeze = verifyGraderFreeze(graderFreezeAtStart);
+  const startFpBySlug = new Map(graderFreezeAtStart.map((f) => [f.slug, f]));
+  for (const r of ran.rows) {
+    const fp = startFpBySlug.get(r.entryRow.slug);
+    if (fp && r.entryRow.grader && typeof r.entryRow.grader === "object") {
+      r.entryRow.grader.fileHashAtStart = fp.hash;
+      r.entryRow.grader.fileFrozen = graderFreeze.ok;
+    }
+  }
+  if (!graderFreeze.ok) {
+    console.log("");
+    console.log("!!!!! GRADER MOVED MID-RUN — the acceptance bar changed while the run was in flight:");
+    for (const c of graderFreeze.changed) {
+      console.log(`      ${c.slug ?? c.path}: ${c.reason} (hash ${c.hashAtStart ?? "?"} -> ${c.hashNow ?? "unreadable"})`);
+    }
+    console.log("      the scores recorded for the affected cases are INVALID — re-run against a frozen grader");
+    console.log("");
+  }
+
   console.log("");
   printTable(rows);
   printTrialsSummary(rows);
-  const results = persist(rows, mode, skips);
+  const results = persist(rows, mode, skips, { graderFreeze });
   if (mode === "keyed") {
     // OV-35 — the ≤4/9 decision rule: the score is routed to a named branch
     // (re-trace vs band-expected vs above) instead of a bare number.

@@ -27,12 +27,15 @@ import {
   approveHitl,
   emptyProject,
   inferName,
+  liveDegradeRow,
   liveLayer,
+  liveLayerFailureRow,
   rejectHitl,
   researchQueryFor,
   sealHonesty,
   stampPacket,
   unlockRetry,
+  withLiveDegradeRows,
 } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
 import { failedGates, hardDodBlockInto, hardDodMessage, recordGateInto, runGate } from "./dod.ts";
@@ -52,6 +55,7 @@ import type {
   ArtifactKind,
   GeneratedTreeFile,
   HitlDecision,
+  JsonLog,
   ModelRoute,
   PhaseId,
   PhaseStatus,
@@ -188,6 +192,11 @@ async function bareNodeLiveOverlay(project: Project, phase: PhaseId): Promise<Pr
   let cited = false;
   let provider: string | null = null;
   let narrative: string | null = null;
+  // OV-29 (fixes/252, W19-L1): coded rows for the two degrades below that used
+  // to be comment-only. Folded into OV-13's shape — a keyed failure (or a
+  // failed keyless search) must leave a coded, visible row, never a silent
+  // degrade that reads like a clean keyless run. Empty ⇒ byte-identical return.
+  const degradeRows: JsonLog[] = [];
 
   // 1) Real web research — Tavily when keyed, else the free keyless fallback.
   try {
@@ -204,9 +213,23 @@ async function bareNodeLiveOverlay(project: Project, phase: PhaseId): Promise<Pr
         typeof (result as { provider?: unknown }).provider === "string"
           ? ((result as { provider?: string }).provider as string)
           : null;
+    } else if (!result || result.ok !== true) {
+      // A coded refusal (RT_E_RESEARCH_UNAVAILABLE from either backend) — the
+      // row carries the backend's OWN code. `ok:true` with zero items is NOT a
+      // degrade: the backend ran and found nothing.
+      degradeRows.push(
+        liveDegradeRow(
+          phase,
+          "research",
+          result ?? new Error("research backend returned no result"),
+          "RT_E_RESEARCH_UNAVAILABLE",
+        ),
+      );
     }
-  } catch {
-    /* research unavailable → items stay empty, not cited */
+  } catch (err) {
+    /* research unavailable → items stay empty, not cited (recorded, never
+       silent — OV-29, fixes/252) */
+    degradeRows.push(liveDegradeRow(phase, "research", err, "RT_E_RESEARCH_UNAVAILABLE"));
   }
 
   // 2) LLM phase narrative — fires whenever DeepSeek is configured, independent
@@ -226,13 +249,27 @@ async function bareNodeLiveOverlay(project: Project, phase: PhaseId): Promise<Pr
       );
       if (comp && comp.ok === true && typeof comp.text === "string" && comp.text.trim()) {
         narrative = comp.text.trim();
+      } else {
+        // OV-29's real case: the key IS present but the call failed — without
+        // this row the run read exactly like a keyless one. `comp.code` carries
+        // the provider's registered class (RT_E_LLM_REJECTED / …).
+        degradeRows.push(
+          liveDegradeRow(
+            phase,
+            "narrative",
+            comp ?? new Error("narrative call returned no result"),
+            "RT_E_LLM_REJECTED",
+          ),
+        );
       }
     }
-  } catch {
+  } catch (err) {
     narrative = null;
+    /* recorded, never silent — OV-29, fixes/252 */
+    degradeRows.push(liveDegradeRow(phase, "narrative", err, "RT_E_LLM_REJECTED"));
   }
 
-  if (items.length === 0 && !narrative) return project;
+  if (items.length === 0 && !narrative) return withLiveDegradeRows(project, degradeRows);
 
   const now = Date.now();
   const researchArtifacts = items.map((it, i) => ({
@@ -280,28 +317,31 @@ async function bareNodeLiveOverlay(project: Project, phase: PhaseId): Promise<Pr
       ? "deepseek-flash"
       : project.modelRoute;
 
-  return {
-    ...project,
-    ...(metaChanged ? { meta } : {}),
-    ...(narrative && route !== project.modelRoute ? { modelRoute: route } : {}),
-    // M-01: real findings live in the research corpus; template competitor
-    // rows stay "illustrative" (never bulk-promoted to "cited").
-    research: cited
-      ? [
-          ...(project.research ?? []),
-          {
-            query: researchQueryFor(project, phase),
-            provider: provider ?? undefined,
-            items: items.map((it) => ({
-              title: it.title,
-              url: it.url,
-              content: it.content ?? "",
-            })),
-          },
-        ]
-      : project.research,
-    artifacts: [...(project.artifacts ?? []), ...researchArtifacts, ...narrativeArtifacts],
-  };
+  return withLiveDegradeRows(
+    {
+      ...project,
+      ...(metaChanged ? { meta } : {}),
+      ...(narrative && route !== project.modelRoute ? { modelRoute: route } : {}),
+      // M-01: real findings live in the research corpus; template competitor
+      // rows stay "illustrative" (never bulk-promoted to "cited").
+      research: cited
+        ? [
+            ...(project.research ?? []),
+            {
+              query: researchQueryFor(project, phase),
+              provider: provider ?? undefined,
+              items: items.map((it) => ({
+                title: it.title,
+                url: it.url,
+                content: it.content ?? "",
+              })),
+            },
+          ]
+        : project.research,
+      artifacts: [...(project.artifacts ?? []), ...researchArtifacts, ...narrativeArtifacts],
+    },
+    degradeRows,
+  );
 }
 
 /** Synthesize a single phase. `live` adds best-effort research/narrative; any
@@ -327,8 +367,15 @@ export async function runPhase(
       (viaEngine.research?.length ?? 0) > (floor.research?.length ?? 0);
     if (engineDidLive || !RESEARCH_PHASES.has(phase)) return viaEngine;
     return bareNodeLiveOverlay(viaEngine, phase);
-  } catch {
-    return applyPhaseResult(project, phase);
+  } catch (err) {
+    // fixes/255 (W20-L3 · OV-13, the "silent-skip region"): a thrown live pass
+    // used to skip silently to the deterministic floor — under a key that read
+    // exactly like a keyless run. Mint G2's own row (engine's runPhaseAsync
+    // records the same throw the same way), never a silent skip. Non-live runs
+    // record nothing: no live layer ran.
+    const floor = applyPhaseResult(project, phase);
+    if (!opts.live) return floor;
+    return { ...floor, logs: [...floor.logs, liveLayerFailureRow(phase, err)].slice(-200) };
   }
 }
 

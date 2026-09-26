@@ -16,6 +16,16 @@ W18 incident) · claims: **17 OK / 0 wrong / 1 watch** · at-risk: **L3** (`RT_E
 registered in `src/lib/errors.ts`; the header claims a coded git-absent path) · mid-flight: L1 tests, L5
 io.test/codegen.test, all six lane logs still carry PENDING bottom lines.
 
+> **[RECORDER note — W23 LANE 7]** *[RECORDER-FILLED from the author's own summary; author absent]* The
+> author's final summary supersedes this freeze's counts: **claims: 20 OK / 0 wrong / 1 WATCH** · incidents: **0
+> P1** (the scaffold.ts movement resolved to W17-L4's own G5 landing) · per-lane: L1/L2/L4/L5/L6 on-track,
+> **L3 at-risk** on the registration gap. **Hand-off items (author's own list):** (1) run the two planned
+> foreground suites (§4) and paste results — **never executed by this lane** (iteration cap; report froze
+> INTERIM; no fabricated results); (2) confirm L3's `RT_E_GIT_UNAVAILABLE` registration — **CLOSED** (W23-L7
+> re-read 2026-09-26: registered in `src/lib/errors.ts` — ERROR_CODE_DOC `:62`, registry `:482`; 9 uses in
+> `git.server.ts`); (3) flip INTERIM→FINAL — **not done** (the runs remain owed; residuals register row 25
+> marks this report SUPERSEDED by the W22-WD — which itself never landed; see ledger v4).
+
 ## 1 · Timestamped poll log (read-only snapshots; more polls follow)
 
 | # | ts | lane activity observed | bytes changed (sha1 drift) | notes |
@@ -76,6 +86,13 @@ io.test/codegen.test, all six lane logs still carry PENDING bottom lines.
 ## 4 · Foreground test re-runs (≤2 total) — PENDING
 
 Plan: Run A = `node --experimental-strip-types --test --test-concurrency=2 src/lib/doctor.test.ts src/lib/plugin.test.ts src/lib/git.server.test.ts` (L1/L4/L3); Run B = same runner over `src/lib/knowledge.test.ts src/lib/io.test.ts` + `node --test scripts/rapidtool-cli-lesson.test.mjs` (L2/L5) — held until the lanes close (L1/L5 tests still in flight). L6 is docs-only (no test; its checks are verified by path existence).
+
+> **[RECORDER note — W23 LANE 7]** Both planned runs were **never executed** by this lane and no fabricated
+> results exist. Dated downstream runs on the same boxes (cited, not re-run here): `doctor.test.ts` **20/20**
+> (W18-L1's own landing run) — later re-derived **19 pass / 1 fail** on the live worktree (the live-artifact
+> red, register row 6); `plugin.test.ts` **23/23** (W18-L4's own landing run); `git.server.test.ts` inside
+> W22-L1's **65/65** pair. `knowledge.test.ts` / `io.test.ts` were **not** re-measured in the W20–W22 sweeps —
+> labelled as not-re-measured, not claimed.
 
 ## 5 · No-mock / no-stub hunt — IN PROGRESS
 

@@ -3,12 +3,24 @@ import type { PhaseCoverage } from "./phases.ts";
 import { fnv1a, fusionRank } from "./algorithms.ts";
 import { sandboxClaim } from "./sandbox.ts";
 import type { MemoryEntry, PhaseDef, Project } from "./types.ts";
+// OV-41 (W23 · L4, fixes/262): the T-107.6 token ledger — client-safe (its
+// graph is pure arithmetic; no node:fs). Consumed for measured spend ONLY:
+// fields + the ledger's own helpers, never a recomputed number.
+import { estimateCostUsd, totalTokens } from "./token-ledger.ts";
+import type { TokenLedger, TokenPrices, TokenSpend } from "./token-ledger.ts";
 
 /**
  * Packet format version (T7/Q-303). v2 = version-stamped, ledger-aware, honest
  * copy. v3 (E-11/E-22) = the System JSON envelope adds agent capabilities, the
  * machine report_schema the ingest seam validates, and a corpus research_hash;
  * the prose output contract now asks for ONE JSON report per report_schema.
+ *
+ * W23-L4 (OV-41): the envelope gains an ADDITIVE `spend` block (null when no
+ * measured ledger is present) and an optional `## Measured spend` section —
+ * rendered only when the project / `opts.spend` carries usable ledger fields,
+ * so every no-spend packet stays byte-identical. The version stays 3:
+ * additive envelope keys follow T-14's `phase_coverage` precedent, and
+ * `packet.test.ts` pins 3 (not this lane's file to change).
  */
 export const PACKET_VERSION = 3;
 
@@ -87,6 +99,7 @@ function systemJson(
   compiledAt: string,
   loop: { count: number; note: string | null },
   coverage: PhaseCoverage,
+  spend: PacketSpend | null,
 ): string {
   // SWEEP-2 (esc-1): escape raw backticks as \u0060 so the envelope stays a
   // single parseable ```json block. JSON.stringify does NOT escape backticks,
@@ -150,6 +163,10 @@ function systemJson(
         total: coverage.total,
         artifacts_from_p7_p12: coverage.tailArtifacts,
       },
+      // OV-41 (W23-L4): measured spend from the T-107.6 ledger — null = no
+      // measured sample (never a fabricated 0). Additive key (T-14
+      // `phase_coverage` precedent); PACKET_VERSION stays 3.
+      spend: spendBlock(spend),
     },
     null,
     2,
@@ -197,6 +214,135 @@ function compiledAtFor(project: Project): string {
   return new Date(Math.min(latest, 8.64e15)).toISOString();
 }
 
+// ---------------------------------------------------------------------------
+// OV-41 (W23 · L4, fixes/262) — measured spend, read from the T-107.6 ledger
+// ---------------------------------------------------------------------------
+
+/**
+ * Measured spend carried in the packet, read from the T-107.6 token ledger.
+ * Every number is a `token-ledger.ts` field or one of its own helpers
+ * (`totalTokens`, `estimateCostUsd`) — CONSUMED, never recomputed, never
+ * fabricated:
+ *
+ *   - the source is `Project.tokenUsage` (types.ts:435 — the persisted run
+ *     slice) or a caller-threaded full `TokenLedger` via `opts.spend`;
+ *   - `estimatedCostUsd` is null unless CALLER prices were supplied — the
+ *     ledger deliberately ships no price catalog (107 §11);
+ *   - hostile/missing base fields ⇒ null summary (the section is omitted)
+ *     rather than a printed garbage number.
+ */
+export type PacketSpend = {
+  /** Always the ledger — this type never carries a recomputed number. */
+  source: "token-ledger";
+  promptTokens: number;
+  completionTokens: number;
+  /** `totalTokens(ledger)` — the ledger's own sum. */
+  totalTokens: number;
+  /** Ledger fields carried only when the fuller shape was threaded; else null. */
+  calls: number | null;
+  cachedPromptTokens: number | null;
+  cacheWriteTokens: number | null;
+  reasoningTokens: number | null;
+  /** `estimateCostUsd(ledger, prices)` under caller prices; null when none. */
+  estimatedCostUsd: number | null;
+};
+
+/** Positive-finite gate for caller prices (mirror of doctor.ts's gate): an
+ *  estimate is emitted only when BOTH per-1M prices are usable — the ledger
+ *  floors bad prices to 0, this surface refuses them instead of printing $0. */
+function packetPricesUsable(prices: TokenPrices | null | undefined): prices is TokenPrices {
+  return Boolean(
+    prices &&
+      typeof prices === "object" &&
+      Number.isFinite(prices.inputPerMillion) &&
+      prices.inputPerMillion > 0 &&
+      Number.isFinite(prices.outputPerMillion) &&
+      prices.outputPerMillion > 0,
+  );
+}
+
+function packetNum(v: number | undefined): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** Deterministic USD rendering (6 decimals; no scientific notation for
+ *  sub-cent estimates). */
+function packetUsd(usd: number): string {
+  return `$${usd.toFixed(6)}`;
+}
+
+/**
+ * Read a ledger slice into the packet's spend summary (OV-41). Pure; never
+ * throws. Returns null when no usable measured fields exist — absence is the
+ * honest "unmetered" state (the section/block are omitted), not a 0.
+ */
+export function packetSpendSummary(
+  source: TokenSpend | TokenLedger | null | undefined,
+  prices?: TokenPrices | null,
+): PacketSpend | null {
+  if (!source || typeof source !== "object") return null;
+  const promptTokens = packetNum(source.promptTokens);
+  const completionTokens = packetNum(source.completionTokens);
+  if (
+    promptTokens === null ||
+    promptTokens < 0 ||
+    completionTokens === null ||
+    completionTokens < 0
+  ) {
+    return null;
+  }
+  const ledger = source as TokenLedger;
+  const calls = packetNum(ledger.calls);
+  const priced = packetPricesUsable(prices);
+  return {
+    source: "token-ledger",
+    promptTokens,
+    completionTokens,
+    totalTokens: totalTokens({ promptTokens, completionTokens, calls: calls ?? 0 }),
+    calls,
+    cachedPromptTokens: packetNum(ledger.cachedPromptTokens),
+    cacheWriteTokens: packetNum(ledger.cacheWriteTokens),
+    reasoningTokens: packetNum(ledger.reasoningTokens),
+    estimatedCostUsd: priced ? estimateCostUsd(source, prices) : null,
+  };
+}
+
+/** The `## Measured spend` prose block — rendered ONLY when a measured ledger
+ *  is present, so every unmetered packet stays byte-identical. */
+function packetSpendSection(spend: PacketSpend): string[] {
+  const cacheBits: string[] = [];
+  if (spend.cachedPromptTokens !== null) cacheBits.push(`cached prompt reads ${spend.cachedPromptTokens}`);
+  if (spend.cacheWriteTokens !== null) cacheBits.push(`cache writes ${spend.cacheWriteTokens}`);
+  if (spend.reasoningTokens !== null) cacheBits.push(`reasoning output ${spend.reasoningTokens}`);
+  return [
+    `## Measured spend`,
+    `tokens: ${spend.totalTokens} total (prompt ${spend.promptTokens} + completion ${spend.completionTokens}${spend.calls !== null ? ` · ${spend.calls} recorded call(s)` : ""})`,
+    ...(cacheBits.length
+      ? [`cache-aware detail: ${cacheBits.join(" · ")} (subsets already inside the counts above)`]
+      : []),
+    spend.estimatedCostUsd !== null
+      ? `estimated cost: ${packetUsd(spend.estimatedCostUsd)} — caller-supplied prices (an estimate, not a vendor bill)`
+      : `estimated cost: not computed — no caller prices supplied (the ledger ships no price catalog)`,
+    `scope: measured — fields read back from the T-107.6 token ledger, never re-derived or estimated from prose; the P6 synthesis path is the recording seam landed today.`,
+  ];
+}
+
+/** The envelope's `spend` block (snake_case, machine-readable) — or null. */
+function spendBlock(spend: PacketSpend | null): Record<string, unknown> | null {
+  if (!spend) return null;
+  return {
+    source: spend.source,
+    prompt_tokens: spend.promptTokens,
+    completion_tokens: spend.completionTokens,
+    total_tokens: spend.totalTokens,
+    calls: spend.calls,
+    cached_prompt_tokens: spend.cachedPromptTokens,
+    cache_write_tokens: spend.cacheWriteTokens,
+    reasoning_tokens: spend.reasoningTokens,
+    estimated_cost_usd: spend.estimatedCostUsd,
+  };
+}
+
 /** A4 — Agent Packet Compiler: turn the graph into a paste-ready agent prompt. */
 
 /** Tier-1 seed row (fixes/144 M5-3): an OPTIONAL cross-project lesson row that
@@ -215,7 +361,15 @@ export type PacketProvenSeed = {
 
 export function compileAgentPacket(
   project: Project,
-  opts?: { proven?: readonly PacketProvenSeed[] },
+  opts?: {
+    proven?: readonly PacketProvenSeed[];
+    /** OV-41 (W23-L4): a caller-threaded measured ledger — wins over the
+     *  project's persisted `tokenUsage` slice. Absent ⇒ the project field. */
+    spend?: TokenSpend | TokenLedger | null;
+    /** OV-41: CALLER-supplied per-1M prices for `estimateCostUsd` (the ledger
+     *  ships no catalog — 107 §11). Absent ⇒ tokens only, no dollar figure. */
+    spendPrices?: TokenPrices | null;
+  },
 ): string {
   // CORE-03 (defense-in-depth): never index PHASES[] with an unvalidated
   // currentPhase — hydrateProject clamps it, but a hand-built Project with a
@@ -228,6 +382,11 @@ export function compileAgentPacket(
   const lattice = project.lattice;
   const schedule = project.schedule;
   const memoryRows = project.memory ?? [];
+  // OV-41 (W23-L4): measured spend from the T-107.6 ledger — a caller-threaded
+  // ledger wins over the project's persisted slice (`types.ts:435`); every
+  // number is a ledger field or a ledger-helper output. Absent ⇒ null ⇒ the
+  // section and the envelope block stay empty (byte-identical, unmetered).
+  const spend = packetSpendSummary(opts?.spend ?? project.tokenUsage, opts?.spendPrices);
   // Tier-1 (fixes/144 M5-3): cross-project proven rows join the pool as
   // research-sourced pseudo-memory rows (E-18 cited boost + "lesson" tag —
   // LESSON_TAG literal mirrors knowledge.ts; packet.ts cannot import it
@@ -349,7 +508,14 @@ export function compileAgentPacket(
     : "";
   // H-05 (fixes/115): deterministic — derived from project state, never wall clock.
   const compiledAt = compiledAtFor(project);
-  const sysJson = systemJson(project, phase, compiledAt, { count: loopCount, note: lastLoopNote }, coverage);
+  const sysJson = systemJson(
+    project,
+    phase,
+    compiledAt,
+    { count: loopCount, note: lastLoopNote },
+    coverage,
+    spend,
+  );
 
   const notes = (project.notes ?? "").trim();
   // BUG WAVE 27: empty collections must render an explicit "(none)" placeholder —
@@ -502,6 +668,7 @@ export function compileAgentPacket(
           `Attack vectors: ${project.scorecard.attackVectors.join("; ")}`,
         ].join("\n")
       : "Not written — run Phase 0 first.",
+    ...(spend ? packetSpendSection(spend) : []),
     ``,
     `## Artifacts (trimmed)`,
     artifacts || "(none yet)",

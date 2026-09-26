@@ -631,6 +631,8 @@ assert.equal(effectCreate.json.ok, true, `effect fixture create failed: ${effect
   ];
   writeFileSync(EFFECT, JSON.stringify(project, null, 2), "utf8");
 }
+/** The fixture's real memory size (the `create` verb already seeds rows). */
+const EFFECT_MEMORY_ROWS = JSON.parse(readFileSync(EFFECT, "utf8")).memory.length;
 
 test("W18-L2 lesson: --effect reports the recurrence census from real memory rows, read-only", () => {
   const before = fileDigest(EFFECT);
@@ -655,7 +657,7 @@ test("W18-L2 lesson: --effect reports the recurrence census from real memory row
   assert.equal(j.sufficientSample, true, "n=2 meets the n≥2 floor");
   assert.match(j.claim, /1\/2 lesson targets recurred after minting \(n=2\)/);
   assert.match(j.claim, /recurrence ≠ causation/);
-  assert.deepEqual(j.censusWindow, { totalRows: 3, lessonRows: 2, cap: 80, atCap: false });
+  assert.deepEqual(j.censusWindow, { totalRows: EFFECT_MEMORY_ROWS, lessonRows: 2, cap: 80, atCap: false });
 
   assert.deepEqual(
     j.perClass.map((c) => [c.class, c.total, c.reproduced, c.recurrenceRate]),

@@ -51,6 +51,7 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --verify (--knowledge-file lessons.json | --project build.json) --anchor <path> [--mark-stale] [--limit N]   # 216s (112 T5): re-hash the anchor's current bytes against each row's recorded evidenceHash= token → ok | stale | anchor-missing; READ-ONLY unless --mark-stale (store counterEvidence telemetry only, never content)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --effect --project build.json   # F3 (221 §F3): read-only cross-run learning MEASUREMENT — recurrence census of the project's lesson rows (reproduced/unreproduced, per-class rates, per-row evidence with the lesson.reproduced ledger rows that accrued it); recurrence ≠ causation label + census window + n≥2 "baseline only" floor ride inside the JSON
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs packet  --project build.json [--knowledge lessons.json]        # tier-1: seed Ranked memory with accepted cross-project lessons
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs eval    [--dir research/eval-out] [--slug <slug>]              # T5.3 (262 LANE 5): read-only M1-M9 eval scorecard + history deltas from the eval-out documents — no keyed calls, no writes
 // ---------------------------------------------------------------------------
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -240,6 +241,27 @@ let compileCheck = null;
 async function checkDriver() {
   if (!compileCheck) compileCheck = await import(CHECK_PATH);
   return compileCheck;
+}
+
+// ---------------------------------------------------------------------------
+// T5.3 (fixes/262 LANE 5 · W23): the eval scorecard reader
+// (src/lib/scorecard.ts — PURE: it parses the eval-out documents and builds the
+// printable scorecard; THIS verb owns the fs reads, so the module stays
+// client-safe per AGENTS.md's "never import node:fs into client-safe modules").
+// Same lazy .ts mechanics as the driver. `eval` also honors $EVAL_OUT_DIR
+// exactly like scripts/run-eval.mjs does, so a scratch run's out-dir can be
+// read back with the same env var that produced it (`--dir` overrides both).
+// ---------------------------------------------------------------------------
+const SCORECARD_PATH = pathToFileURL(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "scorecard.ts"),
+).href;
+/** Default eval-out dir: <repo>/research/eval-out (run-eval.mjs's own default). */
+const EVAL_OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "research", "eval-out");
+
+let scorecardMod = null;
+async function scorecardDriver() {
+  if (!scorecardMod) scorecardMod = await import(SCORECARD_PATH);
+  return scorecardMod;
 }
 
 // ---------------------------------------------------------------------------
@@ -984,6 +1006,142 @@ async function main() {
         return;
       }
 
+      case "eval": {
+        // T5.3 (fixes/262 LANE 5 · W23): READ-ONLY scorecard over the keyed-eval
+        // harness's own documents under research/eval-out (results.json +
+        // history.json + the W16-L1 kill-safety run marker). Prints ONE JSON
+        // object: the M1–M9 rubric (per-criterion aggregates + verbatim
+        // evidence), one row per corpus case (criteria / acceptance / grader
+        // facts / coverage gaps), the history deltas (the LAST recorded history
+        // row per slug vs the current results row) and the per-slug trend.
+        //
+        // READ-ONLY in the strictest sense: no writes, no decision-ledger rows,
+        // no DEEPSEEK_API_KEY touch, no network, no model call — the reader is a
+        // pure parse+build over bytes already on disk. Exit taxonomy: 0 = the
+        // scorecard printed; 1 = usage/validation class (no readable/malformed
+        // results.json, unknown --slug) carrying RT_E_VALIDATION; 4 =
+        // RT_E_INTERNAL only if the reader itself throws. Exit 3 is unreachable
+        // by design — this verb has no keyed path to be "not configured".
+        const envDir =
+          typeof process.env.EVAL_OUT_DIR === "string" && process.env.EVAL_OUT_DIR.trim() !== ""
+            ? resolve(process.env.EVAL_OUT_DIR)
+            : null;
+        const dir =
+          typeof args.dir === "string" && args.dir.trim() !== ""
+            ? resolve(args.dir)
+            : envDir ?? EVAL_OUT_DIR;
+        const slug =
+          typeof args.slug === "string" && args.slug.trim() !== "" ? args.slug.trim() : null;
+        try {
+          const sc = await scorecardDriver();
+          const resultsPath = join(dir, "results.json");
+          // --history overrides just the trend document (a scratch history file
+          // for a scratch eval-out dir); the default is <dir>/history.json.
+          const historyPath =
+            typeof args.history === "string" && args.history.trim() !== ""
+              ? resolve(args.history)
+              : join(dir, "history.json");
+          const markerPath = join(dir, "run-in-progress.json");
+          const readText = (p) => {
+            try {
+              return { ok: true, text: readFileSync(p, "utf8") };
+            } catch (err) {
+              return { ok: false, error: err instanceof Error ? err.message : String(err) };
+            }
+          };
+
+          const resultsRead = readText(resultsPath);
+          if (!resultsRead.ok) {
+            return respond(
+              {
+                ok: false,
+                dir,
+                error: `eval: no readable results.json under ${dir} (${resultsRead.error}) — run the harness first (npm run eval / scripts/run-eval.mjs); this verb never fabricates a scorecard`,
+                code: "RT_E_VALIDATION",
+              },
+              1,
+            );
+          }
+          const parsed = sc.parseEvalResults(resultsRead.text);
+          if (!parsed.ok) {
+            return respond(
+              { ok: false, dir, error: `eval: ${resultsPath}: ${parsed.error}`, code: "RT_E_VALIDATION" },
+              1,
+            );
+          }
+          const results = parsed.value;
+          if (slug && !results.entries.some((e) => e.slug === slug)) {
+            const known = results.entries.map((e) => e.slug);
+            return respond(
+              {
+                ok: false,
+                dir,
+                error: `eval: unknown --slug ${JSON.stringify(slug)} — results.json carries: ${
+                  known.length > 0 ? known.join(", ") : "(no entries)"
+                }`,
+                code: "RT_E_VALIDATION",
+              },
+              1,
+            );
+          }
+
+          // history + marker are ADVISORY context: a missing or malformed one
+          // degrades to an honest note (deltas/trend unavailable) — it never
+          // hides the scorecard, and it is never turned into a fake delta.
+          const historyRead = readText(historyPath);
+          let historyRows = [];
+          let historyPresent = false;
+          let historyProblem = null;
+          if (historyRead.ok) {
+            const hp = sc.parseEvalHistory(historyRead.text);
+            if (hp.ok) {
+              historyRows = hp.value;
+              historyPresent = true;
+            } else {
+              historyProblem = `${historyPath}: ${hp.error}`;
+            }
+          }
+          const markerRead = readText(markerPath);
+          let marker = null;
+          let markerProblem = null;
+          if (markerRead.ok) {
+            const mp = sc.parseEvalRunMarker(markerRead.text);
+            if (mp.ok) marker = mp.value;
+            else markerProblem = `${markerPath}: ${mp.error}`;
+          }
+
+          const scorecard = sc.buildScorecard({
+            results,
+            history: historyRows,
+            historyPresent,
+            marker,
+            dir,
+            resultsPath,
+            historyPath,
+            runMarkerPath: markerPath,
+            slug,
+          });
+          const notes = [...scorecard.notes];
+          if (historyProblem) {
+            notes.push(`history.json unreadable — ${historyProblem} (deltas/trend unavailable; never fabricated).`);
+          }
+          if (markerProblem) {
+            notes.push(`run-in-progress.json unreadable — ${markerProblem}`);
+          }
+          respond({ ...scorecard, notes, trends: sc.buildTrends(historyRows) }, 0);
+        } catch (err) {
+          respond(
+            {
+              ok: false,
+              error: `eval: ${err instanceof Error ? err.message : String(err)}`,
+              ...errCode(err, "RT_E_INTERNAL"),
+            },
+            4,
+          );
+        }
+        return;
+      }
+
       case "tree-run": {
         // fixes/149 P0-1 (150-G1): the emit→edit→re-emit seam's ORACLE — run
         // compile-check's dir-based treeRun over an EXISTING emitted dir.
@@ -1610,6 +1768,43 @@ async function main() {
           // fixes/135: an expected any-fail verdict is NOT an unknown error —
           // carry the honest per-file verdicts with a check-specific code.
           return respond({ ok: false, error: reason, code: "RT_E_CHECK_FAILED", ...result }, 1);
+        } catch (err) {
+          return respond(
+            {
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+              ...errCode(err, "RT_E_INTERNAL"),
+            },
+            4,
+          );
+        }
+      }
+
+      case "scan": {
+        // W23 L6 (G4 · 249 SPEC 3, OV-21 fold): an ADVISORY error-signal scan
+        // over an EMITTED (or any) dir — read-only, no project needed, no
+        // policy seam, no writes (structure mirrors the `tree-run` arm). The
+        // rules are lexer-level heuristics: R1 catch-empty, R2 catch-swallowed,
+        // R3 neutral-return-unimplemented (OV-21's fold). Findings → exit 1;
+        // a clean tree → 0; an unreadable dir → 1 + RT_E_VALIDATION. This verb
+        // is NEVER wired into a gate and never blocks an emit (218 §3.4/OV-21).
+        const scanDir = requireArg(args, "dir", "scan");
+        if (scanDir.error) return respond({ ok: false, error: scanDir.error, code: "RT_E_VALIDATION" }, 1);
+        try {
+          const { scanTreeErrorSignals } = await import("../src/lib/error-scan.server.ts");
+          const scan = scanTreeErrorSignals(resolve(scanDir.value));
+          if (scan.ok !== true) {
+            return respond({ ok: false, dir: scan.dir, error: scan.error, code: scan.code }, 1);
+          }
+          const payload = {
+            ok: scan.findings.length === 0,
+            dir: scan.dir,
+            scanned: scan.scanned,
+            findings: scan.findings,
+            advisory: true,
+            note: "advisory finding surface — never blocks an emit (218 §3.4 / OV-21)",
+          };
+          return respond(payload, payload.ok ? 0 : 1);
         } catch (err) {
           return respond(
             {
@@ -2979,6 +3174,7 @@ const USAGE = {
     export: "export --project <file.json> [--out <file.json>]",
     emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse)",
     fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR human-approve selected/all ids — never auto-approves",
+    eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, no writes, nothing fabricated — a missing history prints as 'no history', never a fake 0 delta",
     "tree-run": "tree-run --dir <dir> [--project <file.json>]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0; red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
     repair: "repair --dir <dir> --project <file.json> [--budget N]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (path→content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun → red tail → one bounded synthesis repair call with deps.treeFailure → apply repaired files in place → re-import → treeRun again); green → tested-equivalent mint + honest P6 gate + converged (0); budget exhausted → honest failed (1, RT_E_REPAIR_FAILED); the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
     edit: "edit --dir <dir> --file <relpath> --find <old> --replace <new> [--write] [--project <file.json>]  # 216s (108-T1): ONE in-place str_replace on an emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, nothing is written); --write (requires --project) applies atomically only after evaluatePolicy(\"repair.apply\", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes); ambiguous / missing / no-op matches are coded refusals",
@@ -2988,6 +3184,7 @@ const USAGE = {
     crew: "crew --project <file.json> [--max-steps <n>]  # advisory multi-agent crew (needs DEEPSEEK_API_KEY)",
     verify: "verify --project <file.json> [--apply]      # machine verify-fix on generatedSource; --apply persists the verdict",
     check: "check --dir <path>                          # per-file compile verdicts over an emitted dir (.js via node --check; .ts via the typescript devDep)",
+    scan: "scan --dir <dir>                            # W23 L6 (G4 · OV-21): ADVISORY error-signal scan over an emitted dir — catch-empty + catch-swallowed + neutral-return-unimplemented; read-only, never a gate and never blocks an emit; exit 0 clean / 1 findings (RT_E_VALIDATION for an unreadable dir)",
     design: "design --project <file.json> [--html <out.html>]  # design tokens (+ standalone HTML when --html)",
     diagram: "diagram --project <file.json> --kind phases|architecture|flow [--out <file.svg>]  # SVG diagram",
     artifacts: "artifacts --project <file.json>           # index of project artifacts (id/phase/kind/title/bytes)",

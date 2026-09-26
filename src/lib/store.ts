@@ -88,7 +88,7 @@ type RapidState = {
   select: (id: string | null) => void;
   execute: (id: string) => ApproveResult;
   runUntilHitl: (id: string) => RunResult;
-  approve: (id: string, opts?: { force?: boolean; requestedAt?: number }) => ApproveResult;
+  approve: (id: string, opts?: { force?: boolean; requestedAt?: number; note?: string }) => ApproveResult;
   reject: (id: string, note: string) => ApproveResult;
   rejectAsync: (id: string, note: string) => Promise<ApproveResult>;
   retry: (id: string) => void;
@@ -1525,12 +1525,33 @@ export const useRapid = create<RapidState>()(
             error: "Failing sandbox output requires explicit override — tick 'I reviewed the failure'.",
           };
         }
+        // DF-09 (W23 L6 · 249 SPEC 1): a forced override of a FAILED P6 sandbox is a
+        // red gate a human waves through — it must carry a caller-supplied rationale
+        // (≥12 trimmed chars, the SAME floor the reject path below enforces). Refused
+        // HERE as a typed refusal; the engine's approveHitl throws the same verdict as
+        // coded RT_E_VALIDATION for every non-store caller (defense in depth). A
+        // rubber-stamp override is never ledger'd.
+        const rationale = (opts?.note ?? "").trim();
+        if (
+          opts?.force &&
+          project.currentPhase === 6 &&
+          project.lastTest &&
+          !project.lastTest.ok &&
+          rationale.length < 12
+        ) {
+          return {
+            ok: false,
+            error:
+              "Overriding a FAILED P6 sandbox requires a rationale — at least 12 characters (pass { note }).",
+          };
+        }
         // Engine stamps the packet + packet artifact + A4 trace on approval (B-19); the journal
         // entry records the human actor (T2).
         const approved = approveHitl(project, {
           decidedBy: "human",
           force: opts?.force,
           requestedAt: opts?.requestedAt,
+          note: opts?.note,
         });
         // T8: the just-approved gate phase gets its DoD verdict recorded too.
         const recorded = recordGate(approved, project.currentPhase);

@@ -28,9 +28,9 @@
   "engines": {
     "node": ">=22"
   },
-  "generatedBy": "RapidTool scaffold emitter — machine-generated from RapidTool packet aa185020-cfff-49ac-9224-25b108274a17; regenerate, don't hand-edit.",
+  "generatedBy": "RapidTool scaffold emitter — machine-generated from RapidTool packet 6007f9af-f6d5-4b2e-9eaa-ede6f800cb6e; regenerate, don't hand-edit.",
   "rapidtool": {
     "producer": "llm",
-    "packetId": "aa185020-cfff-49ac-9224-25b108274a17"
+    "packetId": "6007f9af-f6d5-4b2e-9eaa-ede6f800cb6e"
   }
 }

@@ -21,9 +21,23 @@ import {
   CHAT_READ_MAX,
   CHAT_TOOLS,
 } from "./chat.server.ts";
-import { chatHistoryTurns, chatStampVersion, failedSendPrompt } from "./chat.ts";
+import {
+  chatHistoryTurns,
+  chatStampVersion,
+  chatStreamNdjson,
+  encodeChatFrame,
+  failedSendPrompt,
+  parseChatFrame,
+  segmentChatReply,
+} from "./chat.ts";
+import type {
+  ChatStreamChunkFrame,
+  ChatStreamFrame,
+  ChatStreamTerminalFrame,
+  ChatStreamTurn,
+} from "./chat.ts";
 import { emptyProject } from "./engine.ts";
-import type { ChatTurn } from "./chat.server.ts";
+import type { ChatResult, ChatTurn } from "./chat.server.ts";
 import type { Project } from "./types.ts";
 
 const KEY = "DEEPSEEK_API_KEY";
@@ -1227,5 +1241,289 @@ describe("216p T-107.2 — registry migration pin (chat seam)", () => {
       else process.env.DEEPSEEK_MODEL_MAIN = savedPin;
       globalThis.fetch = realFetch;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T5.1 · streaming-output NDJSON leg (W19 LANE 3 — transport spike first).
+// Spike verdict in fixes/252_lane3_t51.md: incremental NDJSON over a real byte
+// sink needs ZERO new dependencies (S1b/S3), while the createServerFn transport
+// is request/response and not invocable outside the Start runtime (S2) — so the
+// tests below drive the REAL turn via `chatOnceServer` (the module the server
+// fn delegates to, chat.test.ts:28 pattern) and assert on REAL emitted frames.
+// ---------------------------------------------------------------------------
+
+/** Parse every line as a well-formed frame (a bad line fails the whole test). */
+function framesOf(lines: string[]): ChatStreamFrame[] {
+  return lines.map((line) => {
+    const frame = parseChatFrame(line);
+    assert.ok(frame, `not a well-formed stream frame: ${JSON.stringify(line)}`);
+    return frame;
+  });
+}
+
+/** Narrow a frame to the ONE terminal envelope (fails the test if it is not). */
+function terminalOf(frame: ChatStreamFrame | undefined): ChatStreamTerminalFrame {
+  if (frame === undefined || !("done" in frame)) {
+    assert.fail(`expected the terminal envelope, got ${JSON.stringify(frame)}`);
+  }
+  return frame;
+}
+
+describe("segmentChatReply — deterministic, byte-exact chunking (T5.1)", () => {
+  it("splits blank-line paragraphs in order and reassembles byte-exactly", () => {
+    const text = "Para one.\n\nPara two.\n\n\nPara three.";
+    const chunks = segmentChatReply(text);
+    assert.deepEqual(chunks, ["Para one.\n\n", "Para two.\n\n\n", "Para three."]);
+    assert.equal(chunks.join(""), text, "joined chunks are the original bytes");
+    assert.deepEqual(segmentChatReply(text), chunks, "deterministic — same input, same chunks");
+  });
+
+  it("splits over-long paragraphs at newlines, then hard at the cap — still byte-exact", () => {
+    const long = `${"x".repeat(300)}\n${"y".repeat(300)}`;
+    const chunks = segmentChatReply(long, 100);
+    assert.equal(chunks.length, 7);
+    for (const c of chunks) assert.ok(c.length <= 100, `chunk exceeds cap: ${c.length}`);
+    assert.equal(chunks[3], "\n", "a whitespace run on a cap boundary travels as its own chunk");
+    assert.equal(chunks.join(""), long);
+    const hard = segmentChatReply("z".repeat(250), 100);
+    assert.deepEqual(hard, ["z".repeat(100), "z".repeat(100), "z".repeat(50)]);
+    assert.equal(hard.join(""), "z".repeat(250));
+    // A leading whitespace run merges FORWARD when it fits (no orphan chunk).
+    assert.deepEqual(segmentChatReply("\n\nHello.", 100), ["\n\nHello."]);
+  });
+
+  it("returns [] for empty or non-string text — never a fabricated chunk", () => {
+    assert.deepEqual(segmentChatReply(""), []);
+    assert.deepEqual(segmentChatReply(undefined as unknown as string), []);
+    assert.deepEqual(segmentChatReply(123 as unknown as string), []);
+  });
+});
+
+describe("chat stream frame codec — coded-terminal invariant (T5.1)", () => {
+  it("round-trips every frame shape; a chunk holding newlines stays ONE NDJSON line", () => {
+    const chunk: ChatStreamFrame = { seq: 1, chunk: "line one\nline two\n```code```" };
+    const encoded = encodeChatFrame(chunk);
+    assert.ok(encoded.endsWith("\n"), "each frame is newline-terminated");
+    assert.equal(encoded.split("\n").length, 2, "one NDJSON line + the trailing newline");
+    assert.deepEqual(parseChatFrame(encoded), chunk);
+    const okFrame: ChatStreamFrame = {
+      done: true,
+      ok: true,
+      reply: "r",
+      grounded: true,
+      provenance: "Grounded in build context v1 as of P1/2026-01-01 00:00:00Z",
+    };
+    assert.deepEqual(parseChatFrame(encodeChatFrame(okFrame)), okFrame);
+    const failFrame: ChatStreamFrame = {
+      done: true,
+      ok: false,
+      reason: "not-configured",
+      error: "no key",
+      code: "RT_E_LLM_NOT_CONFIGURED",
+    };
+    assert.deepEqual(parseChatFrame(encodeChatFrame(failFrame)), failFrame);
+  });
+
+  it("rejects garbage and uncoded failure terminals (never a guess)", () => {
+    const bad: unknown[] = [
+      undefined,
+      "",
+      "not json",
+      "[1,2,3]",
+      '"a string"',
+      JSON.stringify({ seq: 0, chunk: "x" }),
+      JSON.stringify({ seq: 1, chunk: "" }),
+      JSON.stringify({ chunk: "x" }),
+      JSON.stringify({ done: true, ok: false, reason: "error", error: "boom" }),
+      JSON.stringify({ done: true, ok: false, reason: "error", code: "BOOM" }),
+      JSON.stringify({ done: true, ok: false, reason: "oops", code: "RT_E_INTERNAL" }),
+      JSON.stringify({ done: true, ok: true, reply: "x", grounded: true }),
+      JSON.stringify({ done: true, ok: true, reply: "x", grounded: false, provenance: "p" }),
+    ];
+    for (const line of bad) {
+      assert.equal(parseChatFrame(line as string), null, `must reject: ${String(line)}`);
+    }
+  });
+});
+
+describe("chatStreamNdjson — ordered NDJSON over a real turn (T5.1)", () => {
+  const REPLY =
+    "Paragraph one of the reply.\n\nParagraph two, still here.\n\nParagraph three closes it.";
+
+  /** Keyed env + the repo's mocked-transport device: a real turn, canned reply. */
+  function mockReply(reply: string): void {
+    process.env[KEY] = "sk-test";
+    globalThis.fetch = (async () =>
+      okResponse({
+        model: "deepseek-v4-flash",
+        choices: [{ message: { role: "assistant", content: reply } }],
+      })) as typeof fetch;
+  }
+  /** The real turn seam: the exact function the server fn delegates to. */
+  const realTurn = (): ChatStreamTurn => (project, userText, history) =>
+    chatOnceServer(project, userText, history);
+  function collect(): { lines: string[]; write: (line: string) => void } {
+    const lines: string[] = [];
+    return { lines, write: (line) => void lines.push(line) };
+  }
+
+  it("streams ≥2 ORDERED chunks then ONE terminal envelope (real frames, byte-exact reassembly)", async () => {
+    mockReply(REPLY);
+    const { lines, write } = collect();
+    const summary = await chatStreamNdjson({
+      project: fixture(),
+      userText: "Summarize the state.",
+      turn: realTurn(),
+      write,
+    });
+    const frames = framesOf(lines);
+    const chunks = frames.filter((f): f is ChatStreamChunkFrame => !("done" in f));
+    assert.ok(chunks.length >= 2, `expected ≥2 ordered chunks, got ${chunks.length}`);
+    assert.deepEqual(
+      chunks.map((c) => c.seq),
+      chunks.map((_, i) => i + 1),
+      "seq is strictly ordered 1..N",
+    );
+    assert.equal(
+      chunks.map((c) => c.chunk).join(""),
+      REPLY,
+      "chunk text reassembles byte-exactly into the reply",
+    );
+    const terminal = terminalOf(frames[frames.length - 1]);
+    if (terminal.ok !== true) assert.fail("the last frame must be the ok terminal envelope");
+    assert.equal(terminal.reply, REPLY);
+    assert.match(terminal.provenance, /^Grounded in build context v\d+/);
+    assert.deepEqual(summary, { ok: true, chunks: chunks.length, frames: lines.length, aborted: false });
+  });
+
+  it("keyless turn: NO chunks, one coded terminal byte-identical to the one-shot result", async () => {
+    const direct = await chatOnceServer(fixture(), "hello"); // KEY deleted in beforeEach
+    assert.equal(direct.ok, false);
+    const { lines, write } = collect();
+    const summary = await chatStreamNdjson({
+      project: fixture(),
+      userText: "hello",
+      turn: realTurn(),
+      write,
+    });
+    assert.equal(lines.length, 1, "exactly one frame — no chunk frames");
+    const frame = terminalOf(framesOf(lines)[0]);
+    assert.equal(frame.ok, false, "the keyless terminal is the failure envelope");
+    if (direct.ok === false && !frame.ok) {
+      assert.equal(frame.code, direct.code);
+      assert.equal(frame.reason, direct.reason);
+      assert.equal(frame.error, direct.error, "the terminal is the one-shot envelope, not a paraphrase");
+      assert.equal(summary.code, direct.code);
+    }
+    assert.deepEqual(summary, {
+      ok: false,
+      code: direct.ok === false ? direct.code : "RT_E_INTERNAL",
+      chunks: 0,
+      frames: 1,
+      aborted: false,
+    });
+  });
+
+  it("abort before the turn starts: no turn call, one RT_E_ABORTED terminal", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    let calls = 0;
+    const turn: ChatStreamTurn = async () => {
+      calls += 1;
+      return { ok: true, reply: "never streamed", grounded: true, provenance: "p" };
+    };
+    const { lines, write } = collect();
+    const summary = await chatStreamNdjson({
+      project: fixture(),
+      userText: "x",
+      turn,
+      write,
+      signal: ac.signal,
+    });
+    assert.equal(calls, 0, "an aborted leg never drives the turn");
+    const frame = terminalOf(framesOf(lines)[0]);
+    assert.equal(frame.ok, false);
+    if (!frame.ok) assert.equal(frame.code, "RT_E_ABORTED");
+    assert.deepEqual(summary, { ok: false, code: "RT_E_ABORTED", chunks: 0, frames: 1, aborted: true });
+  });
+
+  it("abort mid-reply: closes with RT_E_ABORTED instead of stopping silently", async () => {
+    mockReply(REPLY);
+    const ac = new AbortController();
+    const { lines, write } = collect();
+    const summary = await chatStreamNdjson({
+      project: fixture(),
+      userText: "stream",
+      turn: realTurn(),
+      signal: ac.signal,
+      write: (line) => {
+        write(line);
+        if (lines.length === 1) ac.abort(); // the consumer stops the stream after chunk 1
+      },
+    });
+    const frames = framesOf(lines);
+    assert.equal(frames.length, 2, "the already-written chunk + the abort terminal");
+    const terminal = terminalOf(frames[1]);
+    assert.equal(terminal.ok, false);
+    if (!terminal.ok) assert.equal(terminal.code, "RT_E_ABORTED");
+    assert.deepEqual(summary, { ok: false, code: "RT_E_ABORTED", chunks: 1, frames: 2, aborted: true });
+  });
+
+  it("a thrown turn closes with its classified code — never a throw, never fabricated text", async () => {
+    const coded: ChatStreamTurn = async () => {
+      throw Object.assign(new Error("token expired"), { code: "RT_E_LLM_TIMEOUT" });
+    };
+    const first = collect();
+    const s1 = await chatStreamNdjson({ project: fixture(), userText: "x", turn: coded, write: first.write });
+    const f1 = terminalOf(framesOf(first.lines)[0]);
+    assert.equal(f1.ok, false);
+    if (!f1.ok) assert.equal(f1.code, "RT_E_LLM_TIMEOUT");
+    assert.deepEqual(s1, { ok: false, code: "RT_E_LLM_TIMEOUT", chunks: 0, frames: 1, aborted: false });
+
+    const plain: ChatStreamTurn = async () => {
+      throw new Error("boom");
+    };
+    const second = collect();
+    const s2 = await chatStreamNdjson({ project: fixture(), userText: "x", turn: plain, write: second.write });
+    const f2 = terminalOf(framesOf(second.lines)[0]);
+    assert.equal(f2.ok, false);
+    if (!f2.ok) {
+      assert.equal(f2.code, "RT_E_INTERNAL");
+      assert.equal(f2.error, "boom");
+    }
+    assert.equal(s2.ok, false);
+    assert.equal(s2.chunks, 0);
+  });
+
+  it("an ok:true turn without a grounded string reply is refused (RT_E_INTERNAL)", async () => {
+    const malformed: ChatStreamTurn = async () =>
+      ({ ok: true, reply: 42, grounded: true, provenance: "p" }) as unknown as ChatResult;
+    const { lines, write } = collect();
+    const summary = await chatStreamNdjson({ project: fixture(), userText: "x", turn: malformed, write });
+    const frame = terminalOf(framesOf(lines)[0]);
+    assert.equal(frame.ok, false);
+    if (!frame.ok) {
+      assert.equal(frame.code, "RT_E_INTERNAL");
+      assert.match(frame.error ?? "", /fabricated/);
+    }
+    assert.equal(lines.length, 1, "no chunk frames for a malformed turn");
+    assert.equal(summary.ok, false);
+  });
+
+  it("a dead sink (EPIPE-style) stops the leg with a coded summary — never a throw", async () => {
+    mockReply(REPLY);
+    let writes = 0;
+    const summary = await chatStreamNdjson({
+      project: fixture(),
+      userText: "x",
+      turn: realTurn(),
+      write: () => {
+        writes += 1;
+        if (writes === 2) throw new Error("EPIPE: consumer closed the pipe");
+      },
+    });
+    assert.deepEqual(summary, { ok: false, code: "RT_E_INTERNAL", chunks: 1, frames: 1, aborted: false });
+    assert.equal(writes, 2, "the failing write ended the leg — nothing after it was attempted");
   });
 });

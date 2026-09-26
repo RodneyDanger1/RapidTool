@@ -38,11 +38,12 @@
 //      (so later files call earlier exports by name in the assembled bundle),
 //      deterministic per-file validation, deterministic assembly into
 //      Project.generatedTree (per-file fnv1a hash + attempt:0) with
-//      generatedSource = the assembled ENTRY file (each tree file wrapped in a
-//      scope that binds the earlier files' exports — collision-free
-//      concatenation: the entry evaluates and exposes the union of the tree's
-//      exports even when per-file helper names collide; byte-identical to the
-//      single-file source when the tree is one file). A chunk refusal keeps
+//      generatedSource = the materialized ENTRY file's own bytes
+//      (`materializeImportableTree`: every tree — one chunk or many — is
+//      rewritten to real ESM, with `src/generated.ts` as the barrel entry;
+//      fixes/258 closed the single-chunk identity path that shipped raw
+//      CommonJS into the `"type":"module"` tenant and killed the emitted spec
+//      at import). A chunk refusal keeps
 //      the prior chunks' files on the returned project + records
 //      p6.synthesis.refused naming the chunk index (honest partial — never a
 //      fabricated full pass).
@@ -241,6 +242,26 @@ const PROSE_EXCERPT_MAX = 80;
 const PROSE_CODE_CHARS = "()[]{}<>=|&+*_\\/@#$%^~";
 /** Sentence-shaped ASCII line; parentheses are admitted but gated separately. */
 const PROSE_LINE_SHAPE = /^[A-Za-z][A-Za-z0-9 ,.:;!?'"()-]*$/;
+/**
+ * W23-262 (B1): arithmetic-minus code shape — `<operand> <spaced minus> <operand>`
+ * with an identifier-ish, ≥2-char operand on each side. `-` is the ONE arithmetic
+ * operator whose character is not in PROSE_CODE_CHARS, so a legal expression whose
+ * only punctuation is a spaced minus still reads as sentence-shaped ASCII text and
+ * tripped the prose gate. Proven cost: run #2's chunk 2/7 was refused as
+ * `prose-in-code … line 40: "balance: amountDue - amountPaid"` (fixes/255 §2); the
+ * refusal cascaded through `partialTreeRefuse` into a 1-file partial tree and the
+ * emitted suite could then only report capability.9–36 red (fixes/260 §2: 43 tests,
+ * 9 pass / 28 fail / 6 skip). A spaced minus between two ≥2-char operands is a code
+ * position: none of the pinned prose fixtures (`LEAKED_BLOB_PROSE`, the chunk-e2e
+ * blob) carries that shape, and the legal shipped-code shapes it must never refuse
+ * (object-literal entries like `balance: amountDue - amountPaid`, `return net -
+ * fees;`, budget/payroll arithmetic) all do. The deliberate narrowing is the trade
+ * this fix makes — a legal-code false refusal costs a whole chunk (and, via the
+ * partial-tree cascade, up to 8 capability rows), while the residual prose shape it
+ * no longer catches (a spaced dash between two ≥2-char English words) is rare in
+ * the deliberation this gate exists for.
+ */
+const PROSE_ARITH_MINUS = /\b[A-Za-z_$0-9][\w$]+\s+-\s+[A-Za-z_$0-9][\w$]+\b/;
 
 /**
  * 216f (T-09 / F-04): bare English prose written into a module body as code —
@@ -253,7 +274,11 @@ const PROSE_LINE_SHAPE = /^[A-Za-z][A-Za-z0-9 ,.:;!?'"()-]*$/;
  * sentence-shaped ASCII text and no code-significant character at all. No
  * legal top-level statement in the generated subset (functions, consts, object
  * literals, `module.exports` assigns, `'use strict';`) can match that shape —
- * prose-as-code always can.
+ * prose-as-code always can. The one legal shape the raw sentence test WOULD
+ * match — a spaced arithmetic minus between two operands (`balance: amountDue -
+ * amountPaid`) — is excluded up front by PROSE_ARITH_MINUS (W23-262/B1: that
+ * exact line refused run #2's chunk 2/7 and cascaded into 28 honest coverage
+ * reds in the emitted suite; fixes/255 §2 + fixes/260 §2).
  *
  * The masking here is deliberately LINE-SCOPED, not `maskLiteralsAndComments`:
  * the leaked blob's own deliberation quotes (`"implement every one"`) leave
@@ -385,6 +410,10 @@ export function proseLineHits(source: string): ProseLineHit[] {
     const t = visible.trim();
     if (t.length === 0) continue;
     const flat = t.replace(/([A-Za-z])'([A-Za-z])/g, "$1$2"); // "I'll write" → "Ill write"
+    // W23-262 (B1): a spaced arithmetic minus with a ≥2-char operand on each side
+    // is a code position (see PROSE_ARITH_MINUS) — never prose. Tested on the
+    // MASKED text, so a dash inside a string/comment was already blanked above.
+    if (PROSE_ARITH_MINUS.test(flat)) continue;
     const hasParens = flat.includes("(") || flat.includes(")");
     const codeProbe = hasParens ? flat.replace(/[()]/g, "") : flat;
     // 216f (W2·R3 tightening): every code-significant char vetoes a line as
@@ -1283,9 +1312,11 @@ export function p6SynthesisChunkUserPrompt(
  *  pro call (121: expansion → brief-fit → runtime-binding → oracle). */
 export const P6_SYNTH_CHUNK_SIZE = 8;
 
-/** Entry-file tree path. Chunk 0 (and the whole single-chunk legacy tree)
- *  lives here — parity with scaffold's generatedSource fallback host path
- *  (scaffold.ts `src/generated.ts`), so a one-file tree needs no remap.
+/** Entry-file tree path. `materializeImportableTree` writes the ESM barrel
+ *  (every tree, one chunk or many) here — parity with scaffold's
+ *  generatedSource fallback host path (scaffold.ts `src/generated.ts`). A
+ *  planned chunk whose own path IS this one is relocated to
+ *  `src/generated/chunk-0.ts` so the barrel can own the entry path.
  *  Later chunks live under `src/generated/<slug>.ts`. */
 export const TREE_ENTRY_PATH = "src/generated.ts";
 
@@ -1609,11 +1640,10 @@ export function orderTreeChunks(plan: readonly TreeChunk[]): TreeChunk[] {
  *   - `module.exports.<name> = …` reaches the shared outer exports object.
  * Pure + deterministic: identical files ⇒ identical entry bytes.
  *
- * A0 (fixes/162): this concatenation is NOT what hits disk for multi-chunk
- * trees — `materializeImportableTree` rewrites those into real ESM files
- * with cross-file `import`/`export`. Single-chunk disk bytes stay the raw
- * chunk source (this IIFE lives only on generatedSource).
- */
+ * A0 (fixes/162) + W21-258: this concatenation is NOT what hits disk —
+ * `materializeImportableTree` rewrites EVERY tree (N=1 included) into real ESM
+ * files with cross-file `import`/`export`. The IIFE lives only on the
+ * brief-fit vocabulary scan input and on the single-module-legacy path. */
 export function assembleTreeEntry(files: readonly { source: string; exports?: readonly string[] }[]): string {
   const parts: string[] = [];
   const priorNames: string[] = [];
@@ -1696,6 +1726,130 @@ function bracketDelta(line: string): number {
   return d;
 }
 
+/** JS keywords that are valid property names but never legal binding
+ *  identifiers — `module.exports.default = …` can therefore not become
+ *  `const default = …`. */
+const RESERVED_BINDING_WORDS = new Set([
+  "await", "break", "case", "catch", "class", "const", "continue", "debugger",
+  "default", "delete", "do", "else", "enum", "export", "extends", "false",
+  "finally", "for", "function", "if", "implements", "import", "in",
+  "instanceof", "interface", "let", "new", "null", "package", "private",
+  "protected", "public", "return", "static", "super", "switch", "this",
+  "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield",
+]);
+
+/** Net `{`/`[`/`(` depth of one line, ignoring quoted strings and `//` comments.
+ *  Same shape as `bracketDelta`, parens included: the skip/keep consumer for
+ *  residual CJS statements must follow a multi-line call value to its close. */
+function cjsStatementDelta(line: string): number {
+  let d = 0;
+  let q: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (q !== null) {
+      if (c === "\\") i++;
+      else if (c === q) q = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      q = c;
+      continue;
+    }
+    if (c === "/" && line[i + 1] === "/") break;
+    if (c === "{" || c === "[" || c === "(") d++;
+    else if (c === "}" || c === "]" || c === ")") d--;
+  }
+  return d;
+}
+
+/** Top-level binding names the file already declares (function / class /
+ *  const / let / var) — the same shapes `declaredNames` scans, minus its
+ *  `module.exports.NAME =` rule: a residual CJS assignment must never mint a
+ *  SECOND declaration of a name the file already binds. */
+function localBindingNames(source: string): Set<string> {
+  const code = stripComments(String(source ?? ""));
+  const names = new Set<string>();
+  for (const m of code.matchAll(/^(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/gm)) names.add(m[1]!);
+  for (const m of code.matchAll(/^(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/gm)) names.add(m[1]!);
+  for (const m of code.matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/gm)) names.add(m[1]!);
+  return names;
+}
+
+/**
+ * W21-258: neutralize every CJS export-surface statement
+ * `stripCjsExportAssignments` leaves behind, so a file rewritten to ESM is
+ * valid ESM and never references `module`/`exports` at all.
+ *
+ * Why this exists (proven on run #2's emitted tree, fixes/255 §1): the P6
+ * envelope's `exports` list is the DECLARED surface, but an accepted module may
+ * carry extra CJS surface the model wrote on its own — run #2's
+ * `src/generated/get-property.ts` ends
+ * `module.exports._internals = { LEDGER: …, DEALS: … };`. The declared-name
+ * strip left that line in place, so even a fully materialized tree still died
+ * at import in the `"type":"module"` tenant (`ReferenceError: module is not
+ * defined in ES module scope` — zero spec assertions ever ran).
+ *
+ * Rules (deterministic, line-based; comments can never match because a CJS
+ * statement must START with its prefix — `// module.exports.x = x` is inert):
+ *   • `module.exports.NAME = EXPR` / `exports.NAME = EXPR` where NAME is
+ *     already a top-level binding of the file → drop the statement (the binding
+ *     stays); NAME is reported so the ESM `export { … }` line keeps the surface.
+ *   • … where NAME is NOT bound → rewritten as `const NAME = EXPR` (value kept,
+ *     multi-line values included) and reported as exported.
+ *   • NAME that cannot be a binding identifier (a reserved word) → dropped, not
+ *     reported (a contract-violating extra the ESM conversion cannot carry).
+ *   • bare `module.exports = …` / `exports = …` and computed
+ *     `module.exports[…]/exports[…] = …` → dropped whole (depth-consumed).
+ * Pure + deterministic: identical input ⇒ identical output + name order.
+ */
+export function neutralizeResidualCjsExports(source: string): { source: string; exported: string[] } {
+  const text = String(source ?? "");
+  const lines = text.split("\n");
+  const bound = localBindingNames(text);
+  const kept: string[] = [];
+  const exported: string[] = [];
+  let skipDepth = 0; // >0 while consuming a statement that is being DROPPED
+  let keepDepth = 0; // >0 while consuming the value lines of a CONVERTED statement
+  for (const line of lines) {
+    if (skipDepth > 0) {
+      skipDepth += cjsStatementDelta(line);
+      continue;
+    }
+    if (keepDepth > 0) {
+      kept.push(line);
+      keepDepth += cjsStatementDelta(line);
+      continue;
+    }
+    const t = line.trim();
+    const assign =
+      /^(?:module\.)?exports(?:\.([A-Za-z_$][\w$]*)|\[\s*"([A-Za-z_$][\w$]*)"\s*\]|\[\s*'([A-Za-z_$][\w$]*)\s*'\])\s*=/.exec(t);
+    if (assign !== null) {
+      const name = assign[1] ?? assign[2] ?? assign[3] ?? "";
+      const reserved = RESERVED_BINDING_WORDS.has(name);
+      if (reserved || bound.has(name)) {
+        // The binding already exists (or can never be an ESM binding) — only
+        // the CJS assignment statement itself goes.
+        skipDepth = Math.max(0, cjsStatementDelta(line));
+      } else {
+        // The CJS assignment implied a binding: `module.exports.x = EXPR`
+        // becomes `const x = EXPR` (multi-line value lines kept verbatim).
+        const indent = line.slice(0, line.length - line.trimStart().length);
+        kept.push(`${indent}const ${name} = ${t.slice(assign[0].length).trimStart()}`);
+        keepDepth = Math.max(0, cjsStatementDelta(line));
+      }
+      if (!reserved && !exported.includes(name)) exported.push(name);
+      continue;
+    }
+    if (t.startsWith("module.exports") || t.startsWith("exports[") || t.startsWith("exports =")) {
+      // Bare/computed CJS surface — nothing to bind: drop the statement whole.
+      skipDepth = Math.max(0, cjsStatementDelta(line));
+      continue;
+    }
+    kept.push(line);
+  }
+  return { source: kept.join("\n"), exported };
+}
+
 /** Drop CJS `module.exports.NAME = NAME` (and a whole-object assign) so a file can become ESM.
  *
  *  216 (T-01): a whole-object assign is now removed as a COMPLETE CONSTRUCT. The previous
@@ -1747,14 +1901,25 @@ export type ImportableTreeFile = {
 };
 
 /**
- * A0: turn N>1 IIFE-scope-shared chunks into real ESM files with cross-file
+ * A0: turn IIFE-scope-shared chunks into real ESM files with cross-file
  * imports. Chunk 0 moves off TREE_ENTRY_PATH so that path can be an `export *`
- * barrel the oracle/job-bridge/treeRun entry already import. Single-file
- * input is returned unchanged (legacy disk bytes).
+ * barrel the oracle/job-bridge/treeRun entry already import.
+ *
+ * W21-258: EVERY tree goes through this rewrite — single-chunk trees included.
+ * They used to be returned unchanged ("legacy disk bytes", fixes/175), which
+ * put raw P6 CommonJS into the emitted `"type":"module"` tenant and killed the
+ * tenant's own spec at IMPORT (`ReferenceError: module is not defined in ES
+ * module scope` → zero assertions → treeRunOk:false). A one-chunk tree now
+ * materializes exactly like an N-chunk one: the chunk file (relocated off the
+ * entry path when its planned path IS the entry path) + an ESM barrel at
+ * TREE_ENTRY_PATH. `neutralizeResidualCjsExports` additionally removes the
+ * non-listed `module.exports.*` surface a chunk may carry, so no emitted file
+ * can reference the CJS `module` bindings at all.
  *
  * Later files import prior files (acyclic). The barrel imports every chunk
  * (does not get imported by them). Named exports are the envelope `exports`
- * list. Deterministic: identical input ⇒ identical files + barrel.
+ * list plus any extra CJS surface the chunk itself wrote. Deterministic:
+ * identical input ⇒ identical files + barrel.
  */
 export function materializeImportableTree(
   files: readonly {
@@ -1772,11 +1937,9 @@ export function materializeImportableTree(
       exports: (Array.isArray(f.exports) ? f.exports : []).filter((n): n is string => typeof n === "string" && isIdent(n.trim()) && n.trim() === n),
       reqTrace: { ...(f.reqTrace ?? {}) },
     }));
-  if (raw.length <= 1) {
-    return {
-      files: raw.map((f) => ({ ...f, exports: [...f.exports], reqTrace: { ...f.reqTrace } })),
-      entrySource: assembleTreeEntry(raw),
-    };
+  if (raw.length === 0) {
+    // Defensive only: every caller guards on a non-empty accepted list.
+    return { files: [], entrySource: assembleTreeEntry(raw) };
   }
   const taken = new Set(raw.map((f) => f.path));
   let chunk0Path = TREE_CHUNK0_RELOCATED_PATH;
@@ -1800,10 +1963,15 @@ export function materializeImportableTree(
       if (names.length === 0) continue;
       importLines.push(`import { ${names.join(", ")} } from ${JSON.stringify(relTsImport(f.path, prior.path))};`);
     }
-    const body = stripCjsExportAssignments(f.source, f.exports).replace(/^\n+/, "").replace(/\n+$/, "");
-    const exportLine = f.exports.filter(isIdent).length > 0 ? `export { ${f.exports.filter(isIdent).join(", ")} };` : "";
+    // W21-258: strip the declared-name CJS assigns, THEN neutralize whatever
+    // CJS surface remains (a chunk's own extra exports) — the union of the
+    // envelope exports and the converted names is the file's real ESM surface.
+    const residual = neutralizeResidualCjsExports(stripCjsExportAssignments(f.source, f.exports));
+    const body = residual.source.replace(/^\n+/, "").replace(/\n+$/, "");
+    const exportNames = [...new Set([...f.exports.filter(isIdent), ...residual.exported])];
+    const exportLine = exportNames.length > 0 ? `export { ${exportNames.join(", ")} };` : "";
     const source = [...importLines, body, exportLine].filter((s) => s.length > 0).join("\n") + "\n";
-    rewritten.push({ path: f.path, source, exports: [...f.exports], reqTrace: { ...f.reqTrace } });
+    rewritten.push({ path: f.path, source, exports: exportNames, reqTrace: { ...f.reqTrace } });
   }
   const barrelLines = rewritten.map(
     (f) => `export * from ${JSON.stringify(relTsImport(TREE_ENTRY_PATH, f.path))};`,
@@ -2883,6 +3051,11 @@ async function synthesizeChunkedTree(
   };
   const accepted: { path: string; source: string; exports: string[]; reqTrace: Record<string, string> }[] = [];
   const prior: ChunkPriorFile[] = [];
+  // T5.4: the SERVED model id of the first accepted chunk's primary synthesis
+  // call — every chunk of one tree uses the same opts/model resolution, so the
+  // first served id is the tree's served id. Null until a chunk is accepted
+  // (⇒ no artifact stamp, fail closed).
+  let servedModel: string | null = null;
   // fixes/216k (105 TA-15, W6-L1 D1/D3): the chunk→file plan + its consumption
   // order are computed here from the project's own spec graph. `plan[i].path`
   // IS the file path (a job node's `src/jobs/<label>.ts` for job-keyed chunks);
@@ -2940,6 +3113,7 @@ async function synthesizeChunkedTree(
     // included via jobSiblingPath).
     const path = chunk.path;
     accepted.push({ path, source: synth.envelope.module, exports: [...synth.envelope.exports], reqTrace: { ...synth.envelope.reqTrace } });
+    if (servedModel === null) servedModel = synth.servedModel;
     prior.push({ path, exports: [...synth.envelope.exports], reqTrace: { ...synth.envelope.reqTrace } });
   }
 
@@ -2965,6 +3139,7 @@ async function synthesizeChunkedTree(
     materialized.files,
     materialized.entrySource,
     accepted.length,
+    servedModel,
   );
 }
 
@@ -3151,6 +3326,10 @@ function treeUpgraded(
   accepted: { path: string; source: string; exports: string[]; reqTrace: Record<string, string> }[],
   entry: string,
   chunkCount?: number,
+  /** T5.4: the id the provider actually served for this tree's chunk
+   *  syntheses (the first accepted chunk's `LlmResult.model`). Null ⇒ no
+   *  stamp — fail closed. */
+  servedModel: string | null = null,
 ): Project {
   const treeFiles = accepted.map((f) => toGeneratedTreeFile(f.path, f.source));
   const chunks = typeof chunkCount === "number" && chunkCount > 0 ? chunkCount : accepted.length;
@@ -3158,13 +3337,18 @@ function treeUpgraded(
     .map((f) => `// ${f.path} · fnv1a ${f.hash} · ${f.source.split("\n").length} lines · attempt ${f.attempt}`)
     .join("\n");
   const evidenceHash = String(fnv1a(entry));
-  const codeArtifact: Artifact = {
+  // T5.4: the tree artifact's stamp — the SERVED model id + the synthesis
+  // input hash (the persisted brief hash); absent when the served id is
+  // unusable (never a guessed producer).
+  const prov = modelProvenance(servedModel, specRecord.briefHash);
+  const codeArtifact: StampedArtifact = {
     id: `6-code-tree-${evidenceHash.slice(0, 8)}`,
     phase: 6,
     kind: "code",
     title: `Generated source tree (LLM — ${treeFiles.length} files, chunked synthesis)`,
     body: `${manifest}\n\n${entry}`,
     language: "javascript",
+    ...(prov ? { provenance: prov } : {}),
   };
   const memoryId = "6-episodic-tree-0.9";
   const memory = [

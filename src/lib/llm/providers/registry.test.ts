@@ -10,6 +10,11 @@
  *   3. the EXPLICIT-MODEL RULE — a call-site id or env pin that is not in
  *      `KNOWN_MODEL_IDS` is REFUSED with `RT_E_VALIDATION` BEFORE any network
  *      I/O; it is never silently replaced by a default.
+ *   4. (F2 · W19-L5, fixes/252) the SECOND provider family — a live-probed
+ *      candidate whose id/endpoints are pinned from the 2026-09-24 probe
+ *      (raw evidence: fixes/252_lane5_f2.md §1); it can never be dispatched or
+ *      defaulted to until a probe read model ids back, and the DeepSeek path
+ *      above stays byte-identical.
  *
  * Every `callModel` test injects its `fetch` through the documented seam
  * (fixes/152) — no global stub, no network, no real key.
@@ -27,10 +32,24 @@ import {
   getProvider,
   isKnownModelId,
   isModelRole,
+  resolveExplicitProvider,
   resolveRoleModel,
   roleModelEnvKey,
 } from "./registry.ts";
 import { DEEPSEEK_BASE_URL, DEEPSEEK_MODELS, completeDeepSeek } from "./deepseek.ts";
+import {
+  XAI_API_KEY_ENV,
+  XAI_BASE_URL,
+  XAI_MODELS_ENDPOINT,
+  XAI_PROVIDER,
+  XAI_PROVIDER_ID,
+  applyProbedModels,
+} from "./openai-compatible.ts";
+import {
+  PROBE_TIMEOUT_MS,
+  probeProviderModels,
+  resolveProbeTimeoutMs,
+} from "./probe.ts";
 import { createLlmTasks } from "../../llm-tasks.ts";
 import type { CompleteOptions } from "../../llm-tasks.ts";
 import type { PhaseDef } from "../../types.ts";
@@ -73,6 +92,10 @@ function rejectionFetch(calls: Captured[], status: number, body: unknown): typeo
 }
 
 const KEY = "DEEPSEEK_API_KEY";
+/** F2 · W19-L5 (fixes/252): the second family's key is cleared by the shared
+ *  helper too — a developer machine carrying a real XAI_API_KEY must never be
+ *  able to make a "keyless" test lie. */
+const XAI_KEY = XAI_API_KEY_ENV;
 const PIN_KEYS = ["DEEPSEEK_MODEL_MAIN", "DEEPSEEK_MODEL_REASONING", "DEEPSEEK_MODEL_WEAK"];
 
 /** Set (or delete, via `undefined`) env vars for one test; returns the restorer. */
@@ -94,7 +117,7 @@ function withEnv(vars: Record<string, string | undefined>): () => void {
 /** Clear the key + every role pin for one test; returns the restorer. */
 function withCleanLlmEnv(vars: Record<string, string> = {}): () => void {
   const cleared: Record<string, undefined> = {};
-  for (const k of [KEY, ...PIN_KEYS]) cleared[k] = undefined;
+  for (const k of [KEY, XAI_KEY, ...PIN_KEYS]) cleared[k] = undefined;
   // Compose two restorers; reverse order: applied vars first, then the cleared originals.
   const restoreCleared = withEnv(cleared);
   const restoreVars = withEnv(vars);
@@ -134,15 +157,39 @@ describe("registry — provider lookup (T-107.2)", () => {
     assert.equal(getProvider(undefined as unknown as string), undefined);
   });
 
-  it("PROVIDERS is frozen, lists exactly DeepSeek today, and only requestable ids", () => {
+  it("PROVIDERS is frozen, lists DeepSeek first + the probed candidate, and only requestable ids", () => {
     assert.equal(Object.isFrozen(PROVIDERS), true);
-    assert.equal(PROVIDERS.length, 1, "one provider today — the array is the extension point");
+    assert.equal(
+      PROVIDERS.length,
+      2,
+      "two providers today: DeepSeek (role-routed) + the live-probed candidate (F2 · W19-L5)",
+    );
+    assert.equal(PROVIDERS[0]!.id, "deepseek", "preference order never moves DeepSeek");
+    assert.equal(PROVIDERS[1]!.id, XAI_PROVIDER_ID, "the second family is the probed one");
+    assert.deepEqual(
+      PROVIDERS[0]!.verification,
+      {
+        kind: "static",
+        note:
+          "request-path ids live-verified 2026-09-16 against https://api.deepseek.com/models (two keys) — " +
+          "served deepseek-flash for alias deepseek-v4-flash, plus deepseek-v4-pro; refresh path in ./deepseek.ts header",
+      },
+      "the DeepSeek provider declares its own (static) verification evidence",
+    );
     for (const p of PROVIDERS) {
       for (const id of p.requestModelIds) {
         assert.equal(isKnownModelId(id), true, `${p.id} request id ${id} must be a known id`);
         assert.ok(KNOWN_MODEL_IDS.includes(id), `${id} must be in KNOWN_MODEL_IDS`);
       }
     }
+    // F2 · W19-L5: the candidate contributes NO request ids — never an
+    // unprobed model claim — and KNOWN_MODEL_IDS stays DeepSeek-scoped.
+    assert.deepEqual([...PROVIDERS[1]!.requestModelIds], []);
+    assert.deepEqual(
+      [...KNOWN_MODEL_IDS],
+      [DEEPSEEK_MODELS.flash, DEEPSEEK_MODELS.pro],
+      "a second family never widens the global id namespace (221 F2 rule 6)",
+    );
   });
 
   it("the role vocabulary is exactly main/reasoning/weak, frozen, with a hostile-value guard", () => {
@@ -642,6 +689,350 @@ describe("registry — alias-death refusals name the requested id (OV-37)", () =
       }
     } finally {
       restore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F2 · W19-L5 (fixes/252) — the SECOND provider family. Started by the dead
+// W19 lane, COMPLETED by W20-L4 (fixes/255): these are the resolution/probe
+// pins the W19 lane imported but never wrote. Every id/endpoint below is from
+// the 2026-09-24 LIVE probe pasted in fixes/255_lane4_t51_f2.md §3 (docs.x.ai
+// vendor docs + api.x.ai's own 401/400/404 answers) — never an unprobed id.
+// Reverting the registration, the candidate refusal, or either probe seam
+// turns this block RED: it is load-bearing, not decoration.
+// ---------------------------------------------------------------------------
+
+/** A probe transport answering one JSON body with a recorded-free call (the
+ *  probe has only a URL + init to inspect; nothing else is ever asserted). */
+function jsonProbeFetch(body: unknown, status = 200): typeof fetch {
+  return (async () =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch;
+}
+
+/** A probe transport recording the URL it was asked for, answering 200 + [] —
+ *  used to prove that NO call happened (keyless / no-endpoint refusals). */
+function recordingProbeFetch(calls: string[]): typeof fetch {
+  return (async (url: unknown) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify({ object: "list", data: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+}
+
+describe("registry — second family: the live-probed candidate (F2 · W19-L5)", () => {
+  it("resolves by its probed id, with the probe's endpoints stamped as live-probe", () => {
+    const restore = withCleanLlmEnv();
+    try {
+      const xai = getProvider(XAI_PROVIDER_ID);
+      assert.ok(xai, `getProvider("${XAI_PROVIDER_ID}") resolves the probed family`);
+      if (!xai) return;
+      // The pins ARE the probe evidence (fixes/255 §3):
+      //   · `export XAI_API_KEY=…` — docs.x.ai/developers/quickstart.md
+      //   · the bare `GET https://api.x.ai/v1` 404 + live 401s ⇒ base is /v1
+      //   · openapi.json `GET /v1/models` — "List all models available to the
+      //     authenticating API key"
+      assert.equal(XAI_PROVIDER_ID, "xai");
+      assert.equal(XAI_API_KEY_ENV, "XAI_API_KEY");
+      assert.equal(XAI_BASE_URL, "https://api.x.ai/v1");
+      assert.equal(XAI_MODELS_ENDPOINT, "https://api.x.ai/v1/models");
+      assert.equal(xai.id, "xai");
+      assert.deepEqual(
+        xai.verification,
+        { kind: "live-probe", modelsEndpoint: "https://api.x.ai/v1/models" },
+        "the candidate names the endpoint a probe reads ids back from",
+      );
+      assert.deepEqual([...xai.requestModelIds], [], "no unprobed id is ever requestable");
+      assert.equal(xai.isConfigured(), false, "keyless ⇒ not configured, even past resolution");
+    } finally {
+      restore();
+    }
+  });
+
+  it("an unprobed candidate is refused by the explicit path BEFORE any network I/O", async () => {
+    const restore = withCleanLlmEnv();
+    const calls: Captured[] = [];
+    try {
+      const xai = getProvider(XAI_PROVIDER_ID)!;
+      const sel = resolveExplicitProvider(xai, { model: "grok-4" });
+      assert.equal(sel.ok, false, "nothing is requestable until a probe read ids back");
+      if (!sel.ok) {
+        assert.equal(sel.code, "RT_E_VALIDATION");
+        assert.match(sel.error, /requestModelIds/);
+      }
+      const res = await callModel("main", "hello candidate", {
+        provider: xai,
+        fetch: capturingFetch(calls),
+      });
+      assert.equal(res.ok, false, "the candidate never dispatches");
+      if (!res.ok) assert.equal(res.code, "RT_E_VALIDATION");
+      assert.deepEqual(calls, [], "the refusal happens before any request may leave");
+    } finally {
+      restore();
+    }
+  });
+
+  it("applyProbedModels mints a dispatchable descriptor from EXACTLY the probed ids — the candidate is never mutated", () => {
+    const probed = {
+      configured: true,
+      reachable: true,
+      authenticated: true,
+      models: ["grok-4", "grok-4-mini", "grok-4"],
+    };
+    const minted = applyProbedModels(XAI_PROVIDER_ID, probed);
+    assert.equal(minted.ok, true);
+    if (!minted.ok) return;
+    assert.deepEqual(
+      [...minted.descriptor.requestModelIds],
+      ["grok-4", "grok-4-mini"],
+      "exactly the probe's ids, deduped in probe order",
+    );
+    assert.notEqual(minted.descriptor, XAI_PROVIDER, "a fresh descriptor — never the registry's candidate");
+    assert.deepEqual([...XAI_PROVIDER.requestModelIds], [], "the candidate stays a candidate forever");
+    assert.equal(
+      KNOWN_MODEL_IDS.includes("grok-4"),
+      false,
+      "a second family never widens the global id namespace (221 F2 rule 6)",
+    );
+    const sel = resolveExplicitProvider(minted.descriptor, { model: "grok-4-mini" });
+    assert.equal(sel.ok, true, "a probe-verified descriptor IS requestable");
+  });
+
+  it("applyProbedModels refuses failed probes, empty id lists and unknown families — all coded", () => {
+    const base = {
+      configured: true,
+      reachable: true,
+      authenticated: true,
+      models: ["grok-4"],
+    };
+    const refusals: Array<[string, typeof base]> = [
+      ["unauthenticated", { ...base, authenticated: false }],
+      ["unreachable", { ...base, reachable: false }],
+      ["unconfigured", { ...base, configured: false }],
+      ["reachable-but-empty", { ...base, models: [] }],
+    ];
+    for (const [why, probe] of refusals) {
+      const r = applyProbedModels(XAI_PROVIDER_ID, probe);
+      assert.equal(r.ok, false, why);
+      if (!r.ok) assert.equal(r.code, "RT_E_VALIDATION", why);
+    }
+    const unknown = applyProbedModels("openai", base);
+    assert.equal(unknown.ok, false, "an unknown vendor is never minted a descriptor");
+    if (!unknown.ok) assert.equal(unknown.code, "RT_E_VALIDATION");
+  });
+
+  // W21-L2 (fixes/258): the adapter's OWN header claims ("keyless ⇒ the exact
+  // legacy envelope BEFORE any network I/O"; "forwards NO reasoning field and
+  // does NOT silently translate `opts.thinking` … pinned by a test so a silent
+  // translation is RED, not invisible") were unpinned — these two tests make
+  // them load-bearing. Reverting the floor, a substitution, or a reasoning
+  // translation turns them RED.
+
+  it("the adapter floor: keyless ⇒ the legacy envelope, an id no probe returned / no id at all ⇒ RT_E_VALIDATION — all before any I/O", async () => {
+    // (a) keyless, on a FULLY verified descriptor: the floor precedes model
+    //     checks and any request (mirror of completeDeepSeek's keyless floor).
+    const restore = withCleanLlmEnv();
+    const calls: Captured[] = [];
+    try {
+      const minted = applyProbedModels(XAI_PROVIDER_ID, {
+        configured: true,
+        reachable: true,
+        authenticated: true,
+        models: ["grok-4", "grok-4-mini"],
+      });
+      assert.equal(minted.ok, true);
+      if (!minted.ok) return;
+      const keyless = await callModel("main", "hello", {
+        provider: minted.descriptor,
+        model: "grok-4",
+        fetch: capturingFetch(calls),
+      });
+      assert.equal(keyless.ok, false);
+      if (!keyless.ok) {
+        assert.equal(keyless.reason, "not-configured");
+        assert.equal(keyless.code, "RT_E_LLM_NOT_CONFIGURED");
+      }
+      assert.deepEqual(calls, [], "the keyless floor fires before any request may leave");
+    } finally {
+      restore();
+    }
+    // (b) keyed, but the requested id is NOT one the probe returned: refuse —
+    //     never substitute, never default (the module header's core claim).
+    const restoreKeyed = withEnv({ [XAI_KEY]: "sk-xai-spike" });
+    const calls2: Captured[] = [];
+    try {
+      const minted = applyProbedModels(XAI_PROVIDER_ID, {
+        configured: true,
+        reachable: true,
+        authenticated: true,
+        models: ["grok-4"],
+      });
+      assert.equal(minted.ok, true);
+      if (!minted.ok) return;
+      const unverified = await callModel("main", "hello", {
+        provider: minted.descriptor,
+        model: "gpt-4o",
+        fetch: capturingFetch(calls2),
+      });
+      assert.equal(unverified.ok, false);
+      if (!unverified.ok) assert.equal(unverified.code, "RT_E_VALIDATION");
+      const unset = await minted.descriptor.complete("hello", { fetch: capturingFetch(calls2) });
+      assert.equal(unset.ok, false, "no default model exists — an absent id refuses too");
+      if (!unset.ok) assert.equal(unset.code, "RT_E_VALIDATION");
+      assert.deepEqual(calls2, [], "both refusals precede any request");
+    } finally {
+      restoreKeyed();
+    }
+  });
+
+  it("the adapter wire: the verified id dispatches to the probed base — no reasoning knob, no deprecated field, no invented budget", async () => {
+    const restore = withEnv({ [XAI_KEY]: "sk-xai-spike" });
+    const calls: Captured[] = [];
+    try {
+      const minted = applyProbedModels(XAI_PROVIDER_ID, {
+        configured: true,
+        reachable: true,
+        authenticated: true,
+        models: ["grok-4", "grok-4-mini"],
+      });
+      assert.equal(minted.ok, true);
+      if (!minted.ok) return;
+      const res = await callModel("main", "hello", {
+        provider: minted.descriptor,
+        model: "grok-4",
+        // DeepSeek-only knobs: `thinking` must NOT become a reasoning field
+        // (unprobed for this family — the file header's honesty claim).
+        thinking: true,
+        maxTokens: 1234,
+        json: true,
+        fetch: capturingFetch(calls),
+      });
+      assert.equal(res.ok, true);
+      if (res.ok) assert.equal(res.text, "ok");
+      assert.equal(calls.length, 1, "one attempt on a 200 — no retry");
+      const call = calls[0]!;
+      assert.equal(call.url, `${XAI_BASE_URL}/chat/completions`, "the probed base + chat path");
+      assert.equal(
+        new Headers(call.init?.headers).get("authorization"),
+        "Bearer sk-xai-spike",
+        "the family's own key rides the wire",
+      );
+      const body = bodyOf(call);
+      assert.equal(body.model, "grok-4");
+      assert.equal(body.max_completion_tokens, 1234);
+      assert.equal(body.max_tokens, undefined, "the deprecated field is never sent");
+      assert.equal(body.reasoning_effort, undefined, "thinking:true must not become a reasoning field");
+      assert.deepEqual(body.response_format, { type: "json_object" });
+      assert.equal(body.stream, false);
+      // …and with no caller budget the vendor's own default applies: nothing
+      // budget-shaped (and nothing JSON-shaped) is invented.
+      const plainCalls: Captured[] = [];
+      const plain = await callModel("main", "hello", {
+        provider: minted.descriptor,
+        model: "grok-4-mini",
+        fetch: capturingFetch(plainCalls),
+      });
+      assert.equal(plain.ok, true);
+      const plainBody = bodyOf(plainCalls[0]!);
+      assert.equal(plainBody.max_completion_tokens, undefined, "no budget is invented when the caller passed none");
+      assert.equal(plainBody.response_format, undefined);
+    } finally {
+      restore();
+    }
+  });
+
+  it("probeProviderModels: keyless ⇒ configured:false + RT_E_LLM_NOT_CONFIGURED with ZERO network I/O", async () => {
+    const restore = withCleanLlmEnv();
+    const calls: string[] = [];
+    try {
+      const res = await probeProviderModels(getProvider(XAI_PROVIDER_ID)!, {
+        fetch: recordingProbeFetch(calls),
+      });
+      assert.equal(res.configured, false);
+      assert.equal(res.reachable, false);
+      assert.equal(res.authenticated, false);
+      assert.equal(res.status, null);
+      assert.equal(res.code, "RT_E_LLM_NOT_CONFIGURED");
+      assert.deepEqual(calls, [], "no probe request may leave the machine keyless");
+    } finally {
+      restore();
+    }
+  });
+
+  it("probeProviderModels: a descriptor with no live-probe endpoint is refused (static ≠ probed)", async () => {
+    const restore = withEnv({ [KEY]: "sk-spike" });
+    const calls: string[] = [];
+    try {
+      const res = await probeProviderModels(getProvider("deepseek")!, {
+        fetch: recordingProbeFetch(calls),
+      });
+      assert.equal(res.code, "RT_E_VALIDATION");
+      assert.equal(res.status, null, "no request left the machine");
+      assert.deepEqual(calls, []);
+    } finally {
+      restore();
+    }
+  });
+
+  it("probeProviderModels: the wire matrix — 401 never reachable, a 200 reads ids back, an empty 200 is not usable", async () => {
+    const restore = withEnv({ [XAI_API_KEY_ENV]: "sk-xai-spike" });
+    try {
+      const xai = getProvider(XAI_PROVIDER_ID)!;
+      // (a) the live probe's own observed refusal, replayed byte-for-byte.
+      const calls: Captured[] = [];
+      const unauthorized = await probeProviderModels(xai, {
+        fetch: rejectionFetch(calls, 401, {
+          code: "unauthenticated:no-credentials",
+          error: "No credentials presented.",
+        }),
+      });
+      assert.equal(unauthorized.status, 401);
+      assert.equal(unauthorized.reachable, false, "HTTP ≥ 400 is never reachable");
+      assert.equal(unauthorized.authenticated, false);
+      assert.equal(unauthorized.code, "RT_E_LLM_REJECTED");
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0]!.url, XAI_MODELS_ENDPOINT, "the probe hits the descriptor's own probed endpoint");
+      assert.equal(
+        new Headers(calls[0]!.init?.headers).get("authorization"),
+        "Bearer sk-xai-spike",
+        "the family's own key rides the probe",
+      );
+      // (b) a 200 reads ids back from the vendor's own body — and then mints.
+      const okProbe = await probeProviderModels(xai, {
+        fetch: jsonProbeFetch({ object: "list", data: [{ id: "grok-4" }, { id: "grok-4-mini" }] }, 200),
+      });
+      assert.equal(okProbe.reachable, true);
+      assert.equal(okProbe.authenticated, true);
+      assert.deepEqual([...okProbe.models], ["grok-4", "grok-4-mini"]);
+      assert.equal(
+        applyProbedModels(XAI_PROVIDER_ID, okProbe).ok,
+        true,
+        "a genuine probe result is mintable evidence",
+      );
+      // (c) 200 with ZERO models: reachable + authenticated, but NOT usable.
+      const emptyProbe = await probeProviderModels(xai, {
+        fetch: jsonProbeFetch({ object: "list", data: [] }, 200),
+      });
+      assert.equal(emptyProbe.reachable, true);
+      assert.deepEqual([...emptyProbe.models], []);
+      const fromEmpty = applyProbedModels(XAI_PROVIDER_ID, emptyProbe);
+      assert.equal(fromEmpty.ok, false, "reachable is not usable — nothing is minted from an empty list");
+    } finally {
+      restore();
+    }
+  });
+
+  it("resolveProbeTimeoutMs caps at the documented 3 s budget — a caller may ask for less, never more", () => {
+    assert.equal(PROBE_TIMEOUT_MS, 3_000);
+    assert.equal(resolveProbeTimeoutMs(60_000), 3_000);
+    assert.equal(resolveProbeTimeoutMs(1_000), 1_000);
+    for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
+      assert.equal(resolveProbeTimeoutMs(bad), 3_000, `unset/hostile budget ⇒ the cap: ${String(bad)}`);
     }
   });
 });

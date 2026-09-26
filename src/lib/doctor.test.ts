@@ -385,15 +385,20 @@ describe("OV-9 — productComplete derives from real project state", () => {
     assert.ok(Array.isArray(tree) && tree.length > 0, "the tracked export still carries a generatedTree");
 
     assert.equal(productCompleteFromProject(real), false, "the real product is not product-complete");
-    const t = archTrace(real);
+    // `readRealExport` yields the tracked blob as a loose record; `archTrace`
+    // takes the typed shape. Same seam-cast the product itself uses
+    // (doctor.ts `productCompleteFromProject`: validate, then `as Project`).
+    const t = archTrace(real as Project);
     assert.deepEqual(t.stubFiles, ["src/generated.ts"], "refusal names the real leftover (a reexport-only barrel)");
     assert.deepEqual(t.missing, [], "…and it is NOT a missing capability — the leftover IS the reason");
 
     // Differential on real bytes: this export with ONLY the named leftover
     // dropped is arch-complete → the verdict tracks content, not a flag.
+    const before = JSON.stringify(real);
     const kept = tree.filter((f) => !t.stubFiles.includes(f.path));
     assert.equal(kept.length, tree.length - 1);
     assert.equal(productCompleteFromProject({ ...real, generatedTree: kept }), true);
+    assert.equal(JSON.stringify(real), before, "the producer reads the blob, it never mutates it");
 
     // End-to-end evidence build over the real tree dir's own bytes (the census)
     // + the real export: the 214 census cross-gate still refuses this tree.
@@ -409,7 +414,8 @@ describe("OV-9 — productComplete derives from real project state", () => {
   it("REFUSES when the real state lacks it — tree-absent export, dropped tree, stubs, non-object state", () => {
     // A real tracked export with NO tree (keyless single-module floor): a SKIP.
     const floored = readRealExport("real-estate-crm");
-    assert.equal(archTrace(floored).skipped, true, "the real floor is a SKIP, not complete");
+    // Same seam-cast as above — the loader's record vs the typed trace input.
+    assert.equal(archTrace(floored as Project).skipped, true, "the real floor is a SKIP, not complete");
     assert.equal(productCompleteFromProject(floored), false, "skip ≠ green");
 
     // The keyed shape with the tree dropped / a capability dropped / a stub kept.

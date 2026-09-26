@@ -60,6 +60,13 @@ export const ERROR_CODES = [
   // and its agentAction would misdirect a git caller). Append-only; consumers
   // match string literals, never array position.
   "RT_E_GIT_UNAVAILABLE",
+  // W23 lane-1 (fixes/262): HTTP 402 / "Insufficient Balance" is a first-class
+  // ending — a broke wallet is NOT a generic refusal (RT_E_LLM_REJECTED's
+  // class) and NOT a session budget stop (RT_E_BUDGET_EXHAUSTED, which the
+  // caller's own cap triggers — 226 A3). Run #3 scored a 402-saturated keyed
+  // leg as a trial; that must never read as a quality measurement again.
+  // Append-only; consumers match string literals, never array position.
+  "RT_E_LLM_NO_BALANCE",
 ] as const;
 
 /**
@@ -389,9 +396,15 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
       "Retry once if the task is idempotent, otherwise fall back to the deterministic path and report the timeout honestly.",
   },
   RT_E_LLM_REJECTED: {
-    meaning: "The LLM provider refused the request (401 auth, 402 billing, 429 rate limit, invalid params, or empty content).",
+    meaning: "The LLM provider refused the request (401 auth, 429 rate limit, invalid params, or empty content).",
     agentAction:
-      "Do not retry blindly; check key/balance/parameters, and surface the provider's own message to the user.",
+      "Do not retry blindly; check the key or the parameters, and surface the provider's own message to the user.",
+  },
+  RT_E_LLM_NO_BALANCE: {
+    meaning:
+      "The LLM provider refused the call because the account balance is exhausted (DeepSeek HTTP 402 / \"Insufficient Balance\").",
+    agentAction:
+      "Stop consuming this account: do not retry (billing is not transient) and read NO keyed score from a run in this state — top up the account or switch keys, re-pass the fundedness probe, then re-run.",
   },
   RT_E_RESEARCH_UNAVAILABLE: {
     meaning: "The live web-research backend is not configured or unreachable.",

@@ -32,10 +32,19 @@
  * before any network I/O. The registry NEVER fabricates model text and NEVER
  * substitutes a different provider silently.
  *
- * Not yet in this module (deliberately deferred, fixes/216p §4): multi-provider
- * env selection (`RAPIDTOOL_PROVIDER`), failover, probes/doctor surfacing, and
- * per-call telemetry — all specified in research/multiagent/101_provider_integration.md §4
- * and owned by later waves.
+ * OV-1 (W23 · L4, fixes/262) landed multi-provider ENV SELECTION: the
+ * `RAPIDTOOL_PROVIDER` deployment choice now resolves through the registry's
+ * own `PROVIDERS` descriptors (`resolveEnvProvider` / `resolveEnvSelectedRoute`
+ * below; unknown id ⇒ coded RT_E_VALIDATION refusal, never a silent default;
+ * unset ⇒ source:"default" ⇒ the byte-identical deepseek path), and the doctor
+ * surfaces the resolved provider/model honestly (doctor.ts `envSelection` —
+ * "cloud-by-default, keyless floor"). Still deliberately deferred (step 2 /
+ * later waves): failover, `RAPIDTOOL_FALLBACK_PROVIDERS` / autodetect, and
+ * per-call telemetry — all specified in
+ * research/multiagent/101_provider_integration.md §4. (F2 · W19-L5, fixes/252,
+ * landed the PROBE half beside the providers — `./probe.ts` — and registers
+ * the probed `xai` candidate; with OV-1 landed, a verified family becomes
+ * env-selectable once a probe has read its ids back.)
  *
  * T-107.10 (W7 · L4, fixes/216t) added ONE seam here, additively: an EXPLICIT
  * provider selection (`CallModelOptions.provider` + `resolveExplicitProvider`)
@@ -48,6 +57,18 @@
  * falls back to the role tier. The default path is byte-identical: with no
  * `provider` passed, resolution and dispatch are exactly `resolveRoleModel` →
  * `PROVIDERS` as before, and the keyless floor is untouched.
+ *
+ * F2 · W19-L5 (fixes/252) added the SECOND provider family, additively:
+ * `./openai-compatible.ts` registers ONE OpenAI-compatible family (`xai`) whose
+ * id and endpoints came from a LIVE probe (raw evidence in that module's
+ * header), and `LlmProviderDescriptor` gained the optional `verification`
+ * marker. The family registers as a CANDIDATE with an EMPTY `requestModelIds`
+ * — resolving it as an explicit provider refuses (`RT_E_VALIDATION`) until a
+ * probe read model ids back and `applyProbedModels` minted a verified
+ * descriptor from exactly those ids (221 F2 rule 3). NOTHING else moves:
+ * `KNOWN_MODEL_IDS` stays DeepSeek-scoped, `ROLE_TIERS` still routes every
+ * role to DeepSeek (byte-identical), and a provider with no probed ids can
+ * never be silently defaulted to.
  */
 
 import {
@@ -57,6 +78,7 @@ import {
   isDeepSeekConfigured,
 } from "./deepseek.ts";
 import type { DeepSeekCompleteOptions, DeepSeekMessage } from "./deepseek.ts";
+import { XAI_PROVIDER } from "./openai-compatible.ts";
 import type { LlmModel, LlmResult } from "../../llm.ts";
 import type { ErrorCode } from "../../errors.ts";
 
@@ -90,8 +112,11 @@ export function isModelRole(value: unknown): value is RapidToolModelRole {
 /** Ids the registry knows. Additive: one per provider file under this dir.
  *  `mock` (T-107.10, fixes/216t) is the explicitly-passed test provider from
  *  `./mock.ts` — it is a legal provider ID for the EXPLICIT path only and is
- *  deliberately absent from `PROVIDERS`/`ROLE_TIERS`/`KNOWN_MODEL_IDS`. */
-export type LlmProviderId = "deepseek" | "mock";
+ *  deliberately absent from `PROVIDERS`/`ROLE_TIERS`/`KNOWN_MODEL_IDS`.
+ *  `xai` (F2 · W19-L5, fixes/252) is the probed second family from
+ *  `./openai-compatible.ts` — registered as a CANDIDATE (empty request ids;
+ *  nothing requestable until a probe read ids back). */
+export type LlmProviderId = "deepseek" | "mock" | "xai";
 
 /** Request-path model ids whose acceptance is live-verified for the DeepSeek
  *  API (2026-09-16, two keys — see `./deepseek.ts` header). `deepseek-flash`
@@ -134,6 +159,16 @@ export type LlmProviderDescriptor = {
    *  model id — the registry validates an explicit provider's model against
    *  ITS OWN list, never against DeepSeek's. */
   readonly requestModelIds: readonly string[];
+  /** OPTIONAL and additive (F2 · W19-L5, fixes/252): how this provider's model
+   *  ids were verified. Absent ⇒ nothing changes (behaviour byte-identical).
+   *  `live-probe` names the vendor endpoint a probe reads ids back from
+   *  (`./probe.ts`); `static` records that the ids were verified by other live
+   *  evidence (DeepSeek's header). A `live-probe` family whose ids no probe has
+   *  read back yet stays a CANDIDATE: empty `requestModelIds`, dispatch refused,
+   *  never defaulted to. */
+  readonly verification?:
+    | { readonly kind: "live-probe"; readonly modelsEndpoint: string }
+    | { readonly kind: "static"; readonly note: string };
   readonly isConfigured: () => boolean;
   readonly complete: (
     prompt: string,
@@ -141,8 +176,11 @@ export type LlmProviderDescriptor = {
   ) => Promise<LlmResult>;
 };
 
-/** The registered providers, in preference order. One today; the array shape
- *  is the multi-provider extension point (101 §4.5). */
+/** The registered providers, in preference order. TWO today — the array shape
+ *  is the multi-provider extension point (101 §4.5). DeepSeek first (the only
+ *  role-routed family; `ROLE_TIERS` below is unchanged); `xai` second as the
+ *  probed CANDIDATE, `verification` naming the endpoint a probe reads ids back
+ *  from. Adding an entry here is visible, additive and never re-routes a role. */
 export const PROVIDERS: readonly LlmProviderDescriptor[] = Object.freeze([
   {
     id: "deepseek",
@@ -151,15 +189,179 @@ export const PROVIDERS: readonly LlmProviderDescriptor[] = Object.freeze([
     modelEnvPrefix: "DEEPSEEK",
     defaultBaseUrl: DEEPSEEK_BASE_URL,
     requestModelIds: DEEPSEEK_REQUEST_MODEL_IDS,
+    verification: {
+      kind: "static",
+      note:
+        "request-path ids live-verified 2026-09-16 against https://api.deepseek.com/models (two keys) — " +
+        "served deepseek-flash for alias deepseek-v4-flash, plus deepseek-v4-pro; refresh path in ./deepseek.ts header",
+    },
     isConfigured: isDeepSeekConfigured,
     complete: completeDeepSeek,
   },
+  XAI_PROVIDER,
 ]);
 
 /** Look a provider up by id. Unknown id ⇒ `undefined` (never a silent fallback;
  *  `callModel` converts a missing tier provider into a coded refusal). */
 export function getProvider(id: string): LlmProviderDescriptor | undefined {
   return PROVIDERS.find((p) => p.id === id);
+}
+
+// ---------------------------------------------------------------------------
+// OV-1 (W23 · L4, fixes/262) — `RAPIDTOOL_PROVIDER` env selection
+// ---------------------------------------------------------------------------
+
+/** The ONE env var that selects a deployment provider (101_provider_integration
+ *  §4.4 — precedence rung 2). Unset ⇒ rung 4: `DEFAULT_PROVIDER_ID`. */
+export const PROVIDER_ENV_VAR = "RAPIDTOOL_PROVIDER";
+
+/** Rung 4 of the spec's precedence (101 §4.4): unset env ⇒ deepseek — exactly
+ *  today's byte-identical role-routed behavior. */
+export const DEFAULT_PROVIDER_ID: LlmProviderId = "deepseek";
+
+/**
+ * Result of resolving `RAPIDTOOL_PROVIDER` against the registry's OWN
+ * descriptor list. `requested` is the raw env value (null when unset/blank);
+ * `source` says which precedence rung fired. An unknown id is a coded
+ * `RT_E_VALIDATION` refusal — never a silent fallback to the default provider
+ * (the header's refusal-not-substitution doctrine; the OV-1 playbook's
+ * explicit trap: "A silent fallback to DeepSeek when `RAPIDTOOL_PROVIDER`
+ * names something unknown is exactly the lie the header forbids — refuse,
+ * don't default.").
+ */
+export type EnvProviderSelection =
+  | {
+      ok: true;
+      provider: LlmProviderDescriptor;
+      /** Trimmed env value, or null when unset/blank (the default rung). */
+      requested: string | null;
+      source: "env" | "default";
+    }
+  | { ok: false; code: ErrorCode; error: string };
+
+/**
+ * Resolve the env-selected provider (OV-1 step 1 · W23-L4). Pure: `PROVIDERS`
+ * is the only source of truth — `mock` is absent from it, so it can never be
+ * selected by env (it stays explicit-only, T-107.10). Unset/blank ⇒ the
+ * default rung (byte-identical behavior); unknown ⇒ a refusal naming the
+ * registered ids.
+ */
+export function resolveEnvProvider(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): EnvProviderSelection {
+  const raw = env?.[PROVIDER_ENV_VAR];
+  if (typeof raw !== "string" || !raw.trim()) {
+    const provider = getProvider(DEFAULT_PROVIDER_ID) ?? PROVIDERS[0];
+    if (!provider) {
+      return {
+        ok: false,
+        code: "RT_E_INTERNAL",
+        error: "provider registry is empty — no provider can serve the default role route",
+      };
+    }
+    return { ok: true, provider, requested: null, source: "default" };
+  }
+  const requested = raw.trim();
+  const provider = getProvider(requested);
+  if (!provider) {
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error:
+        `${PROVIDER_ENV_VAR}="${requested}" is not a registered provider — known: ` +
+        `${PROVIDERS.map((p) => p.id).join(", ")}. Refusing rather than silently ` +
+        `defaulting to "${DEFAULT_PROVIDER_ID}".`,
+    };
+  }
+  return { ok: true, provider, requested, source: "env" };
+}
+
+/** Successful env-selected route: the provider descriptor + the model id the
+ *  registry would SEND for the role, plus which rung selected the provider. */
+export type EnvSelectedRoute =
+  | { ok: true; provider: LlmProviderDescriptor; model: string; source: "env" | "default" }
+  | { ok: false; code: ErrorCode; error: string };
+
+/**
+ * Resolve role → provider+model under the env selection — the ONE place the
+ * `RAPIDTOOL_PROVIDER` route branch lives (the doctor's surfacing and
+ * `callModel`'s dispatch both read THIS, so the reported route can never
+ * drift from the dispatched one).
+ *
+ *   - default rung / env-selected provider === the role tier's provider ⇒ the
+ *     role-tier path (`resolveRoleModel`) — byte-identical to today;
+ *   - env-selected OTHER provider ⇒ model resolution is PROVIDER-SCOPED:
+ *     explicit model → `<PREFIX>_MODEL_<ROLE>` pin → the descriptor's own
+ *     first request id (the same no-model rule `resolveExplicitProvider` uses),
+ *     every form validated against THAT provider's `requestModelIds` (ids are
+ *     provider-scoped — `KNOWN_MODEL_IDS` stays DeepSeek-only). An empty
+ *     namespace (a candidate that no probe has read ids back for yet) is a
+ *     coded `RT_E_VALIDATION` refusal naming the probe path — never a
+ *     defaulted/substituted id.
+ * Pure: no I/O; `env` is a parameter.
+ */
+export function resolveEnvSelectedRoute(
+  role: RapidToolModelRole,
+  opts: { model?: unknown; env?: NodeJS.ProcessEnv } = {},
+): EnvSelectedRoute {
+  const env = opts.env ?? process.env;
+  const selection = resolveEnvProvider(env);
+  if (!selection.ok) return selection;
+  if (!isModelRole(role)) {
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error: `unknown model role "${String(role)}" — known roles: ${RAPIDTOOL_MODEL_ROLES.join(", ")}`,
+    };
+  }
+  const tier = ROLE_TIERS[role];
+  if (selection.source === "default" || selection.provider.id === tier.provider) {
+    const resolved = resolveRoleModel(role, { model: opts.model, env });
+    return resolved.ok
+      ? { ok: true, provider: selection.provider, model: resolved.model, source: selection.source }
+      : resolved;
+  }
+  const provider = selection.provider;
+  const bad = (error: string): EnvSelectedRoute => ({ ok: false, code: "RT_E_VALIDATION", error });
+  const ids = provider.requestModelIds.filter(
+    (m): m is string => typeof m === "string" && m.trim().length > 0,
+  );
+  if (ids.length === 0) {
+    const how =
+      provider.verification?.kind === "live-probe"
+        ? `a probe must read model ids back from ${provider.verification.modelsEndpoint} and applyProbedModels must mint a verified descriptor`
+        : "no verified request ids are registered for it";
+    return bad(
+      `${PROVIDER_ENV_VAR} selects provider "${provider.id}" but it declares no request model ids — ${how}. ` +
+        `Refusing role "${role}" rather than defaulting to "${DEFAULT_PROVIDER_ID}" or substituting an id.`,
+    );
+  }
+  const explicit = opts.model;
+  if (explicit !== undefined) {
+    if (typeof explicit !== "string" || explicit.trim() === "") {
+      return bad(
+        `${PROVIDER_ENV_VAR}=${provider.id}: an explicit model id must be a non-empty string — got ${JSON.stringify(explicit)}. Refusing rather than silently defaulting.`,
+      );
+    }
+    const wanted = explicit.trim();
+    if (!ids.includes(wanted)) {
+      return bad(
+        `${PROVIDER_ENV_VAR}=${provider.id}: model "${wanted}" is not in that provider's request ids (${ids.join(", ")}) — ids are provider-scoped; refusing rather than substituting.`,
+      );
+    }
+    return { ok: true, provider, model: wanted, source: selection.source };
+  }
+  const pinKey = `${provider.modelEnvPrefix}_MODEL_${role.toUpperCase()}`;
+  const pinned = env?.[pinKey]?.trim();
+  if (pinned) {
+    if (!ids.includes(pinned)) {
+      return bad(
+        `${PROVIDER_ENV_VAR}=${provider.id}: ${pinKey}="${pinned}" is not in that provider's request ids (${ids.join(", ")}) — refusing rather than substituting.`,
+      );
+    }
+    return { ok: true, provider, model: pinned, source: selection.source };
+  }
+  return { ok: true, provider, model: ids[0]!, source: selection.source };
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +560,11 @@ function checked(
   return { ok: true, role, provider: provider.id, model: id };
 }
 
-/** Every model id the registry may send (the explicit-model rule's universe). */
+/** Every model id the registry may send (the explicit-model rule's universe).
+ *  F2 · W19-L5 (fixes/252): this stays DeepSeek-scoped BY DESIGN (221 F2 rule
+ *  6) — a second family's ids live in that provider's OWN `requestModelIds`
+ *  namespace (`resolveExplicitProvider` validates against them there), so no
+ *  other family's id can ever masquerade as a globally-known id. */
 export const KNOWN_MODEL_IDS: readonly string[] = Object.freeze([
   ...DEEPSEEK_REQUEST_MODEL_IDS,
 ]);
@@ -415,6 +621,31 @@ export async function callModel(
     // to this one forwarding boundary — `DeepSeekCompleteOptions.model` is
     // deliberately NOT widened (deepseek request shapes stay untouched).
     return selection.descriptor.complete(prompt, { ...rest, model: selection.model as LlmModel });
+  }
+  // OV-1 (W23 · L4, fixes/262): the `RAPIDTOOL_PROVIDER` env selection
+  // (precedence rung 2, 101 §4.4) — precedence rung 1 above keeps winning.
+  // Unset ⇒ source:"default" ⇒ everything below is byte-identical to the
+  // pre-OV-1 dispatch. An unknown id (or a candidate provider no probe has
+  // read ids back for yet) is a coded refusal BEFORE any network I/O —
+  // never a silent deepseek fallback.
+  const envSelection = resolveEnvProvider(process.env);
+  if (!envSelection.ok) {
+    return { ok: false, reason: "error", error: envSelection.error, code: envSelection.code };
+  }
+  if (
+    envSelection.source === "env" &&
+    isModelRole(role) &&
+    ROLE_TIERS[role].provider !== envSelection.provider.id
+  ) {
+    const route = resolveEnvSelectedRoute(role, { model: opts.model });
+    if (!route.ok) {
+      return { ok: false, reason: "error", error: route.error, code: route.code };
+    }
+    const { model: _envModel, provider: _envProvider, ...rest } = opts;
+    // Same opaque-id boundary as the explicit path above: the id was validated
+    // against the SELECTED provider's own request namespace; the cast is
+    // confined to this one forwarding site.
+    return route.provider.complete(prompt, { ...rest, model: route.model as LlmModel });
   }
   const resolved = resolveRoleModel(role, { model: opts.model });
   if (!resolved.ok) {

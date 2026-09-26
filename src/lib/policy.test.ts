@@ -105,6 +105,18 @@ describe("policy — seat rule (Rule A: autopilot, or verified human)", () => {
     assert.equal(reasonId(verdict), "unknown-seat");
     assert.equal(verdict.fallback, "autopilot-seat");
   });
+
+  it("accepts an untrusted, unknown-typed actor claim verbatim and ECHOES it in the deny (W22-L1 · ledger #52)", () => {
+    // git.server.ts's seatCtxOf holds the presented claim as `unknown` (it must
+    // not trust any shape). With the widened PolicyCtxInput this call needs no
+    // cast — and the refusal still names the malformed claim instead of erasing
+    // it (the caller-side-narrowing alternative was rejected for exactly this).
+    const untrusted: unknown = { decidedBy: "human" }; // malformed: no `seat` field
+    const verdict = evaluatePolicy("repair.apply", "tree:C:/x", { actor: untrusted });
+    assert.equal(verdict.decision, "deny");
+    assert.equal(reasonId(verdict), "unknown-seat");
+    assert.match(verdict.reason, /human\/undefined/);
+  });
 });
 
 describe("policy — default-deny on unknown action / resource", () => {

@@ -314,7 +314,13 @@ async function describeError(res: Response): Promise<string> {
   }
 }
 
-export async function completeDeepSeek(
+/**
+ * The provider body (unchanged behavior). Exported through the tap wrapper
+ * `completeDeepSeek` below — the wrapper adds ONE opt-in telemetry record per
+ * call (W23-L1, fixes/262) and forwards the result untouched. Never import
+ * this inner name from outside this module.
+ */
+async function completeDeepSeekInner(
   prompt: string,
   opts: DeepSeekCompleteOptions = {},
 ): Promise<LlmResult> {
@@ -418,15 +424,23 @@ export async function completeDeepSeek(
       // Retry-count honesty: a call that exhausted its transient retries says
       // so; a first-attempt refusal keeps the byte-identical historic message.
       const exhausted = attempts > 1 ? ` (after ${attempts} attempts)` : "";
+      // OV-37 (W17 · L3): the refusal NAMES the requested model id next to
+      // the vendor's own text — a dead/renamed alias (400 "model not
+      // found") is then human-visible without parsing prose (the row's
+      // explicit constraint). No model substitution, no fallback.
+      // W23-L1 (fixes/262): HTTP 402 / "Insufficient Balance" gets its OWN
+      // code — a broke wallet is not a generic refusal (RT_E_LLM_REJECTED)
+      // and not our session budget (RT_E_BUDGET_EXHAUSTED, 226 A3). The
+      // vendor text comes from the SAME describeError() string the refusal
+      // already carried, so the message stays byte-identical; only the code
+      // changes for the 402 class.
+      const refusalText = await describeError(res);
+      const noBalance = res.status === 402 || /insufficient balance/i.test(refusalText);
       return {
         ok: false,
         reason: "error",
-        // OV-37 (W17 · L3): the refusal NAMES the requested model id next to
-        // the vendor's own text — a dead/renamed alias (400 "model not
-        // found") is then human-visible without parsing prose (the row's
-        // explicit constraint). No branch, no classification, no fallback.
-        error: `${await describeError(res)} — requested model: "${model}"${exhausted}`,
-        code: "RT_E_LLM_REJECTED",
+        error: `${refusalText} — requested model: "${model}"${exhausted}`,
+        code: noBalance ? "RT_E_LLM_NO_BALANCE" : "RT_E_LLM_REJECTED",
       };
     }
 
@@ -520,4 +534,84 @@ export async function completeDeepSeek(
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ---------------------------------------------------------------------------
+// W23-L1 (fixes/262) — the opt-in CALL TAP: the smallest seam that carries
+// every keyed call's outcome (served model id + measured usage + failure code)
+// to a driver that otherwise has no channel into the provider.
+//
+// Why here: engine's P6 door (`./deepseek.` + `server.ts`), codegen's
+// synthesis and the registry ALL route to this file's `completeDeepSeek`, so
+// ONE tap at this funnel observes every keyed call without touching a single
+// seam. A driver (run-eval, per keyed run) installs it explicitly; with NO tap
+// installed this module is byte-identical to pre-tap behavior.
+//
+// Telemetry contract (AGENTS.md honesty rule 7): a tap may never change the
+// observed call's behavior and may never throw into it — the dispatch below is
+// wrapped, and only a bounded per-call record (never a prompt, never a key) is
+// handed over.
+// ---------------------------------------------------------------------------
+
+/** One observed provider call — the per-call evidence the eval driver folds
+ *  into its trial rows (`servedModels` / `usage` / refusal codes). */
+export type LlmCallTapRecord = {
+  /** Epoch ms the call finished. */
+  at: number;
+  ok: boolean;
+  /** The id RapidTool REQUESTED (the alias). */
+  requestedModel: string;
+  /** The id the provider SAID it served (read back from the response) — null
+   *  when the call was refused, because nothing was served. */
+  servedModel: string | null;
+  /** Coded failure class (errors.ts) — null on success. */
+  code: string | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+};
+
+let llmCallTap: ((record: LlmCallTapRecord) => void) | null = null;
+
+/** Install a tap; `null` (or any non-function) clears it. */
+export function setLlmCallTap(tap: ((record: LlmCallTapRecord) => void) | null): void {
+  llmCallTap = typeof tap === "function" ? tap : null;
+}
+
+/** Remove the tap (back to the byte-identical no-op path). */
+export function clearLlmCallTap(): void {
+  llmCallTap = null;
+}
+
+/** Best-effort record — never throws into the call it observes. */
+function tapLlmCall(record: LlmCallTapRecord): void {
+  const tap = llmCallTap;
+  if (!tap) return;
+  try {
+    tap(record);
+  } catch {
+    /* telemetry must never throw into the call it observes */
+  }
+}
+
+/**
+ * The provider entry point (unchanged signature + behavior). `completeDeepSeekInner`
+ * computes the result; this wrapper forwards it untouched and, when a tap is
+ * installed, appends ONE record for the call (success or refusal).
+ */
+export async function completeDeepSeek(
+  prompt: string,
+  opts: DeepSeekCompleteOptions = {},
+): Promise<LlmResult> {
+  const res = await completeDeepSeekInner(prompt, opts);
+  tapLlmCall({
+    at: Date.now(),
+    ok: res.ok === true,
+    requestedModel:
+      typeof opts.model === "string" && opts.model ? opts.model : DEEPSEEK_MODELS.flash,
+    servedModel: res.ok === true ? res.model : null,
+    code: res.ok === true ? null : res.code ?? null,
+    promptTokens: res.ok === true && res.usage ? res.usage.promptTokens : null,
+    completionTokens: res.ok === true && res.usage ? res.usage.completionTokens : null,
+  });
+  return res;
 }

@@ -39,6 +39,10 @@ import { BRIEF_TEMPLATES } from "@/lib/templates";
 import { estimateTokens } from "@/lib/algorithms";
 import { DOD } from "@/lib/dod";
 import { approvalHealth } from "@/lib/gate-stats";
+// F4 (fixes/252 LANE 2 · 221 §F4): the per-ACTION allow-list reader. policy.ts
+// is a no-import pure leaf, so the console can surface a coded refusal without
+// dragging any server code into the client bundle.
+import { policyOverlayRefusal } from "@/lib/policy";
 import { downloadFilename, exportPacketText, exportProjectJson, slugName } from "@/lib/io";
 import { phaseHandoff } from "@/lib/handoff";
 import type { Artifact, ChatLogRow, JsonLog, PhaseId, PhaseRecord, PhaseStatus, Project, ProjectStatus } from "@/lib/types";
@@ -297,6 +301,16 @@ function hitlNeedsOverride(project: Project): boolean {
     project.lastTest !== null &&
     !project.lastTest.ok
   );
+}
+
+/**
+ * F4 (fixes/252 LANE 2 · 221 §F4): the build's per-action allow-lists, read
+ * defensively. The field is additive on the project payload and absent on every
+ * build that predates it — `undefined` means "no narrowing declared", never a
+ * guessed default: the console must not invent authority the build never gave.
+ */
+function policyAllowListsOf(project: Project): unknown {
+  return (project as { wildPolicy?: unknown }).wildPolicy;
 }
 
 /**
@@ -1857,7 +1871,24 @@ export function RunScreen({ id }: { id: string }) {
   function onApprove(force = false) {
     setError(null);
     setNotice(null);
-    const res = approve(projectId, { force });
+    // F4 (fixes/252 LANE 2): every approve path (dock button, action bar, the
+    // `a` shortcut) funnels through this ONE handler, so the build's per-action
+    // list is consulted once, before store state can move. An off-list action
+    // is refused with its OWN code; a build with no list is byte-unchanged.
+    const narrowed = policyOverlayRefusal(
+      policyAllowListsOf(current),
+      force ? "hitl.force" : "hitl.approve",
+      `gate:P${current.currentPhase}`,
+    );
+    if (narrowed) {
+      setError(`${narrowed.code} — ${narrowed.detail}`);
+      return;
+    }
+    // DF-09 (W23 L6 · 249 SPEC 1): the forced-override path must carry a rationale —
+    // the SAME note field the rejection path uses (≥12 chars; enforced by the store
+    // pre-check + the engine's coded refusal, so the error surfaces here via setError).
+    // Passed ONLY when force is set: a normal approval never inherits a stale note.
+    const res = approve(projectId, { force, note: force ? note.trim() : undefined });
     if (!res.ok) setError(res.error);
     else setNote(""); // UI-5: clear any stale rejection note after an approval
   }
@@ -3440,6 +3471,11 @@ function HitlDock({
   // approval (E-20 logs autopilot.gate_denied with the unmet criteria), show
   // the machine-readable reason under the dock instead of a bare "waiting".
   const denial = latestAutopilotDenial(project);
+  // F4 (fixes/252 LANE 2): the per-action allow-list narrows THIS decision
+  // before any click can pass — an off-list action is refused with its OWN
+  // code (never a generic error). A build with no list is byte-unchanged.
+  const gateAction = forceOverride ? "hitl.force" : "hitl.approve";
+  const allowListRefusal = policyOverlayRefusal(policyAllowListsOf(project), gateAction, `gate:P${project.currentPhase}`);
   return (
     <div className="border-b border-line bg-raised px-5 py-5">
       <p className="font-mono text-xs text-warn">
@@ -3509,7 +3545,12 @@ function HitlDock({
         <button
           type="button"
           onClick={() => onApprove(forceOverride)}
-          disabled={needsOverride && !forceOverride}
+          disabled={(needsOverride && !forceOverride) || allowListRefusal !== null}
+          aria-label={
+            allowListRefusal
+              ? `Approve disabled — ${allowListRefusal.code} refuses ${gateAction} for this build`
+              : undefined
+          }
           className="btn-solid inline-flex min-h-11 items-center gap-2 rounded-md bg-fg px-4 text-sm font-medium text-bg disabled:opacity-40"
         >
           <Check className="h-4 w-4" />
@@ -3535,6 +3576,22 @@ function HitlDock({
             : "Reject enabled"}
         </span>
       </div>
+      {allowListRefusal ? (
+        <p
+          role="status"
+          className="mt-3 rounded-md border border-danger/40 bg-raised px-3 py-2 font-mono text-[11px] leading-relaxed text-danger"
+        >
+          {allowListRefusal.code}
+          <span className="mt-0.5 block text-faint">
+            {allowListRefusal.detail}{" · "}
+            {allowListRefusal.fallback === "human-seat-token"
+              ? "fallback: a human seat presenting the out-of-band token"
+              : allowListRefusal.fallback === "autopilot-seat"
+                ? "fallback: claim the autopilot seat"
+                : "fallback: none — the request or the build's list must change"}
+          </span>
+        </p>
+      ) : null}
       {denial ? (
         <p
           role="status"

@@ -48,7 +48,7 @@ passing `tests/oracle.spec.ts` with 1 executed assertion:
 - **Unlocks:** M4 becomes satisfiable (the mint is the promotion path for chunked trees), and M3 becomes
   reachable whenever the gate's other probes pass — i.e. the journey can actually converge keyed.
 - **Does not:** fix the other probes (`p6-brief-fit` etc. still decide convergence honestly), touch
-  `verifyAndServever`, or claim any keyed run happened. **Step 0 is still unrun and still required.**
+  `verifyAndFixServer`, or claim any keyed run happened. **Step 0 is still unrun and still required.**
 - **Next in W0:** C-2 (make a `dod` hard stop a coded terminal stop → M9), then OV-35's preflight.
 
 ---

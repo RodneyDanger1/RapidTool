@@ -1,5 +1,6 @@
 import { PHASES, PHASE_BY_ID, canEnter, phaseDef, priorsSealed } from "./phases.ts";
 import type { ErrorCode } from "./errors.ts";
+import { classifyError, ERROR_CODES } from "./errors.ts";
 import { flattenStack } from "./rt-events.ts";
 import type { RtEventSeed } from "./rt-events.ts";
 import { compileAgentPacket } from "./packet.ts";
@@ -1658,6 +1659,20 @@ export function approveHitl(
   });
   const forcedOverride =
     Boolean(opts?.force) && phase === 6 && project.lastTest !== null && !project.lastTest.ok;
+  // DF-09 (W23 L6 · 249 SPEC 1): an override of a FAILED gate is
+  // indistinguishable from a rubber stamp unless the caller states WHY. The
+  // caller-supplied rationale floor mirrors rejectHitl's ≥12-char minimum
+  // below; the code is RT_E_VALIDATION so a CLI/engine caller classifies a
+  // coded refusal (exit 1) — never a bare RT_E_INTERNAL. Autopilot is exempt:
+  // its self-approval carries its own note and can never mint a forced
+  // override (R3/B-03 above keeps a forceHuman gate human-only).
+  if (forcedOverride && decidedBy === "human" && (opts?.note ?? "").trim().length < 12) {
+    const err = new Error(
+      `Approving a FAILED P${phase} gate with force requires a rationale — at least 12 characters of note ("why is the red gate being overridden?").`,
+    ) as Error & { code?: string };
+    err.code = "RT_E_VALIDATION";
+    throw err;
+  }
   const decision: HitlDecision = {
     id: `hitl-${phase}-${now}`,
     phase,
@@ -2914,6 +2929,10 @@ export async function liveLayer(project: Project, phase: PhaseId, deps?: LiveLay
   const extras: Artifact[] = [];
   // E-14: true only when a real DeepSeek call succeeded in this live pass.
   let llmRan = false;
+  // fixes/252 (W19-L1 · OV-13): coded rows for keyed degrades that used to be
+  // comment-only. Empty on every clean/keyless pass, so the returned project is
+  // then byte-identical to before — the row is evidence, never behavior.
+  const degradeRows: JsonLog[] = [];
 
   // Apply the E-13/E-14 provenance stamps to whichever branch result wins.
   const stamp = (base: Project): Project => {
@@ -3010,9 +3029,15 @@ export async function liveLayer(project: Project, phase: PhaseId, deps?: LiveLay
         extras.push(
           art(phase, "docs", "Phase narrative (LLM)", `${narrative.text}${NARRATIVE_UNGROUNDED_FOOTER}`, "markdown"),
         );
+      } else {
+        // OV-13 (fixes/252): a keyed narrative refusal used to be silent here —
+        // the run then read exactly like a keyless one. Record it, coded.
+        degradeRows.push(liveDegradeRow(phase, "narrative", narrative, "RT_E_LLM_REJECTED"));
       }
-    } catch {
-      /* narrative unavailable → deterministic result stands */
+    } catch (err) {
+      /* narrative unavailable → deterministic result stands (recorded, never
+         silent — OV-13, fixes/252) */
+      degradeRows.push(liveDegradeRow(phase, "narrative", err, "RT_E_LLM_REJECTED"));
     }
     if (phase === 2) {
       try {
@@ -3028,15 +3053,26 @@ export async function liveLayer(project: Project, phase: PhaseId, deps?: LiveLay
               "markdown",
             ),
           );
+        } else if (!cons.ok) {
+          // OV-13 (fixes/252): a failed keyed constraint extraction used to be
+          // comment-only. `ok:true` with zero constraints is deliberately NOT
+          // recorded — the call ran and found none; only a coded refusal (or a
+          // throw, below) is a degrade.
+          degradeRows.push(liveDegradeRow(phase, "constraints", cons, "RT_E_LLM_REJECTED"));
         }
-      } catch {
-        /* constraints unavailable → deterministic result stands */
+      } catch (err) {
+        /* constraints unavailable → deterministic result stands (recorded,
+           never silent — OV-13, fixes/252) */
+        degradeRows.push(liveDegradeRow(phase, "constraints", err, "RT_E_LLM_REJECTED"));
       }
     }
   }
 
-  if (extras.length === 0) return done;
-  return stamp({ ...done, artifacts: [...done.artifacts, ...extras] });
+  if (extras.length === 0) return withLiveDegradeRows(done, degradeRows);
+  return withLiveDegradeRows(
+    stamp({ ...done, artifacts: [...done.artifacts, ...extras] }),
+    degradeRows,
+  );
 }
 
 /**
@@ -3232,7 +3268,10 @@ export function verifyPriorPhases(
  */
 const LIVE_FAILURE_MESSAGE_BUDGET = 160;
 
-function liveLayerFailureRow(phase: PhaseId, thrown: unknown): JsonLog {
+/** Exported for headless.runPhase's outer catch (fixes/255 · W20-L3): the CLI
+ *  path must record a thrown live pass with this same G2 row, never silently
+ *  skip to the floor. */
+export function liveLayerFailureRow(phase: PhaseId, thrown: unknown): JsonLog {
   const message = thrown instanceof Error ? thrown.message : String(thrown);
   const clipped = message.slice(0, LIVE_FAILURE_MESSAGE_BUDGET);
   return {
@@ -3244,6 +3283,106 @@ function liveLayerFailureRow(phase: PhaseId, thrown: unknown): JsonLog {
       message.length > LIVE_FAILURE_MESSAGE_BUDGET ? "…" : ""
     } — deterministic floor used instead`,
   };
+}
+
+/**
+ * fixes/252 (W19-L1 · OV-13 + OV-29): a CODED row for a live-layer degrade that
+ * used to be comment-only — a keyed failure must never read like a keyless run.
+ *
+ * Reuses the G2 shape (`liveLayerFailureRow` above): same `warn` level, same
+ * `p<phase>.live.*` event family, same bounded detail + explicit "deterministic
+ * result used instead" statement. Unlike G2's deliberately unclassified row,
+ * this one LEADS with an `RT_E_*` code: the failure arrives already classified
+ * (llm.ts / llm-tasks carry the provider's code; the research backends return
+ * coded refusals), so no cause is ever invented — an unregistered string is not
+ * trusted, and a thrown error is classified with the caller's domain fallback
+ * (errors.ts `classifyError`, whose own doc names the LLM caller's
+ * `RT_E_LLM_REJECTED` default for exactly this use).
+ *
+ * Telemetry purity (AGENTS.md #7): the factory NEVER throws — even a hostile
+ * failure value (a throwing getter, an unprintable object) degrades to a bare
+ * coded row — so recording a degrade can never break the run it observes.
+ */
+export type LiveDegradeKind = "narrative" | "constraints" | "research";
+
+/** Message budget: code + kind + message + statement stay ≤240 chars total. */
+const LIVE_DEGRADE_MESSAGE_BUDGET = 140;
+
+/** Never-trusted code rule: a coded failure's OWN code wins, but only when it
+ *  is registered in errors.ts; else the honest fallback (or the registered
+ *  not-configured code for the LLM family). */
+function liveDegradeCode(failure: unknown, fallback: ErrorCode): ErrorCode {
+  if (failure !== null && typeof failure === "object") {
+    const raw = (failure as { code?: unknown }).code;
+    if (typeof raw === "string" && (ERROR_CODES as readonly string[]).includes(raw)) {
+      return raw as ErrorCode;
+    }
+    if ((failure as { reason?: unknown }).reason === "not-configured") {
+      // A configured-gate pass whose call then found no key. The research
+      // backends always carry their own code, so this arm is the LLM family.
+      return fallback === "RT_E_RESEARCH_UNAVAILABLE" ? fallback : "RT_E_LLM_NOT_CONFIGURED";
+    }
+  }
+  if (failure instanceof Error) return classifyError(failure, fallback);
+  return fallback;
+}
+
+/** Human-visible detail source: an Error's message, a coded result's `error`
+ *  prose, else an honest "no failure detail" — never an empty string. */
+function liveDegradeMessage(failure: unknown): string {
+  if (failure instanceof Error) return failure.message;
+  if (failure !== null && typeof failure === "object") {
+    const err = (failure as { error?: unknown }).error;
+    if (typeof err === "string" && err.trim()) return err.trim();
+    const reason = (failure as { reason?: unknown }).reason;
+    if (typeof reason === "string" && reason.trim()) return `result reason: ${reason}`;
+  }
+  if (typeof failure === "string" && failure.trim()) return failure.trim();
+  return "no failure detail";
+}
+
+export function liveDegradeRow(
+  phase: PhaseId,
+  kind: LiveDegradeKind,
+  failure: unknown,
+  fallbackCode: ErrorCode,
+): JsonLog {
+  try {
+    const code = liveDegradeCode(failure, fallbackCode);
+    const message = liveDegradeMessage(failure);
+    const clipped = message.slice(0, LIVE_DEGRADE_MESSAGE_BUDGET);
+    return {
+      ts: Date.now(),
+      phase,
+      level: "warn",
+      event: `p${phase}.live.${kind}.failed`,
+      detail: `${code} · live ${kind} failed: ${clipped}${
+        message.length > LIVE_DEGRADE_MESSAGE_BUDGET ? "…" : ""
+      } — deterministic result used instead`,
+    };
+  } catch {
+    // Hostile failure value (throwing getter / unprintable) → bare coded row.
+    return {
+      ts: Date.now(),
+      phase,
+      level: "warn",
+      event: `p${phase}.live.${kind}.failed`,
+      detail: `${fallbackCode} · live ${kind} failed: no failure detail — deterministic result used instead`,
+    };
+  }
+}
+
+/**
+ * Append coded degrade rows to a live-layer result. Returns the SAME reference
+ * when there is nothing to add — a clean or keyless pass stays byte-identical
+ * (the OV-13 invariant: the row is evidence, never a behavior change) — and
+ * rides the same ≤200-row window as every other log writer. Shared by the
+ * engine's liveLayer and headless's bare-node overlay (OV-29 folds into the
+ * same shape).
+ */
+export function withLiveDegradeRows(base: Project, rows: readonly JsonLog[]): Project {
+  if (rows.length === 0) return base;
+  return { ...base, logs: [...(base.logs ?? []), ...rows].slice(-200) };
 }
 
 /**

@@ -9,8 +9,8 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { applyPhaseResult, emptyProject, runPhaseAsync, sealHonesty } from "./engine.ts";
-import { applyVerifyOutcome, approve, runUntilGate } from "./headless.ts";
+import { applyPhaseResult, emptyProject, liveDegradeRow, runPhaseAsync, sealHonesty } from "./engine.ts";
+import { applyVerifyOutcome, approve, runPhase, runUntilGate } from "./headless.ts";
 import { runSummaryLesson, verifyOutcomeLesson } from "./knowledge.ts";
 import { runToGate, seedProject } from "./testing/fixtures.ts";
 import type { JsonLog, PhaseId, Project } from "./types.ts";
@@ -405,5 +405,275 @@ describe("fixes/217f (216y §2.3 G2) — a live-layer throw is recorded, never s
     const floor = applyPhaseResult(p, 0);
     assert.equal(out.status, floor.status);
     assert.deepEqual(stripTs(out.logs), stripTs(floor.logs));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/252 (W19-L1 · OV-13 + OV-29) — a live degrade is a CODED visible row:
+// a KEYED failure must never read like a keyless run (OV-29's real case at
+// `headless.ts:231`), and a failed keyless web search is recorded too (:208).
+//
+// Half 1 pins the exported row factory + its append helper. The engine's two
+// keyed catch sites in `liveLayer` sit behind `if ((await llmStatus()).configured)`,
+// and `llmStatus` is a TanStack server-fn whose own catch reports
+// `configured: false` under bare Node — a keyless suite cannot enter that branch
+// by construction (241 §OV-13), so those sites' wiring is the keyed follow-up
+// fixes/252 registers; their row shape is pinned here instead.
+//
+// Half 2 IS the real end-to-end case, no production test seam: `runPhase(...,
+// { live: true })` drives the shipped overlay path with the key present and
+// global `fetch` stubbed to the providers' own refusal (HTTP 401) — the keyed
+// failure must leave its coded row, and the same input run keyless must differ
+// by exactly that row.
+// ---------------------------------------------------------------------------
+describe("fixes/252 (W19-L1 · OV-13 + OV-29) — keyed live failures leave coded rows, never a keyless look", () => {
+  /** The row set this row (OV-13/OV-29) owns, for one phase. */
+  const liveRowEvents = (proj: Project, phase: PhaseId = 0) =>
+    proj.logs.filter(
+      (l) =>
+        l.event === `p${phase}.live.research.failed` || l.event === `p${phase}.live.narrative.failed`,
+    );
+  /** Everything except the OV-13/OV-29 rows (G2's stamp-stripping idiom). */
+  const stripTs = (rows: JsonLog[]) =>
+    rows.map((r) => ({ phase: r.phase, level: r.level, event: r.event, detail: r.detail }));
+  const nonLiveRows = (proj: Project) =>
+    stripTs(proj.logs.filter((l) => !l.event.includes(".live.")));
+
+  const KEY = "DEEPSEEK_API_KEY";
+  const TAVILY = "TAVILY_API_KEY";
+  const realFetch = globalThis.fetch;
+
+  /** Run `fn` under a stubbed network + explicit key state; always restored. */
+  async function withStubbedNet(
+    env: Record<string, string | undefined>,
+    fn: () => Promise<void>,
+  ): Promise<void> {
+    const saved: Record<string, string | undefined> = {};
+    for (const k of [KEY, TAVILY]) saved[k] = process.env[k];
+    try {
+      for (const [k, v] of Object.entries(env)) process.env[k] = v;
+      await fn();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  /** Every request is refused with the provider's own 401 shape (no network). */
+  const stubRefusal = (async () =>
+    new Response("stub: this suite never touches the network", { status: 401 })) as typeof fetch;
+
+  /** DuckDuckGo/SearXNG refused; Wikipedia (keyless provider) really served. */
+  const stubWikipedia = (async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : String(input);
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    if (/wikipedia\.org/.test(url) && /list=search/.test(url)) {
+      return json({ query: { search: [{ title: "Rapid tool", snippet: "<b>stub</b> finding" }] } });
+    }
+    if (/wikipedia\.org/.test(url) && /prop=extracts/.test(url)) {
+      return json({ query: { pages: { "1": { extract: "Stub extract body." } } } });
+    }
+    return new Response("stub: refusal", { status: 401 });
+  }) as typeof fetch;
+
+  it("liveDegradeRow: a coded failure keeps its own registered code, bounded, with the explicit floor statement", () => {
+    const row = liveDegradeRow(
+      0,
+      "narrative",
+      {
+        ok: false,
+        reason: "error",
+        error: 'DeepSeek API key is invalid (HTTP 401) — requested model: "deepseek-v4-pro"',
+        code: "RT_E_LLM_REJECTED",
+      },
+      "RT_E_LLM_REJECTED",
+    );
+    assert.equal(row.level, "warn");
+    assert.equal(row.event, "p0.live.narrative.failed");
+    assert.equal(row.phase, 0);
+    assert.ok(
+      row.detail.startsWith("RT_E_LLM_REJECTED · live narrative failed: "),
+      `coded, layer-named detail (got: ${row.detail})`,
+    );
+    assert.ok(row.detail.endsWith(" — deterministic result used instead"));
+    assert.ok(row.detail.includes("HTTP 401"), "the provider's own prose rides along");
+    assert.ok(row.detail.length <= 240, "bounded detail (H43-P2-2-style budget)");
+  });
+
+  it("liveDegradeRow: an unregistered code is NOT trusted, a throw is classified by the caller's fallback", () => {
+    const bogus = liveDegradeRow(
+      7,
+      "research",
+      { code: "RT_E_NOT_A_REGISTERED_CODE", error: "made up" },
+      "RT_E_RESEARCH_UNAVAILABLE",
+    );
+    assert.ok(
+      bogus.detail.startsWith("RT_E_RESEARCH_UNAVAILABLE · "),
+      "a foreign/typo label must not mint a fake code",
+    );
+    const plain = liveDegradeRow(2, "constraints", new Error("boom"), "RT_E_LLM_REJECTED");
+    assert.ok(plain.detail.startsWith("RT_E_LLM_REJECTED · live constraints failed: boom"));
+    // classifyError's tier-1 matchers still win for a real classed throw.
+    const aborted = Object.assign(new Error("request aborted"), { name: "AbortError" });
+    const timeout = liveDegradeRow(7, "narrative", aborted, "RT_E_LLM_REJECTED");
+    assert.ok(timeout.detail.startsWith("RT_E_LLM_TIMEOUT · "));
+    // A configured-gate pass whose call then found no key is its own registered code.
+    const vanished = liveDegradeRow(3, "narrative", { ok: false, reason: "not-configured" }, "RT_E_LLM_REJECTED");
+    assert.ok(vanished.detail.startsWith("RT_E_LLM_NOT_CONFIGURED · "));
+  });
+
+  it("liveDegradeRow: clips on the budget (marked, tail never leaks) and NEVER throws on a hostile failure", () => {
+    const long = new Error("x".repeat(500) + "TAIL-MARKER");
+    const row = liveDegradeRow(2, "constraints", long, "RT_E_LLM_REJECTED");
+    assert.ok(row.detail.length <= 240, `bounded detail (got ${row.detail.length})`);
+    assert.ok(row.detail.includes("…"), "truncation is marked, never a silent cut");
+    assert.ok(!row.detail.includes("TAIL-MARKER"), "the clipped tail never leaks into the row");
+
+    const hostile: Record<string, unknown> = {};
+    for (const prop of ["code", "error"]) {
+      Object.defineProperty(hostile, prop, {
+        enumerable: true,
+        configurable: true,
+        get() {
+          throw new Error("hostile getter");
+        },
+      });
+    }
+    const safe = liveDegradeRow(3, "narrative", hostile, "RT_E_LLM_REJECTED");
+    assert.equal(safe.level, "warn", "telemetry never throws into the code it observes");
+    assert.ok(safe.detail.startsWith("RT_E_LLM_REJECTED · live narrative failed: "));
+    assert.ok(safe.detail.length <= 240);
+  });
+
+  it("headless.ts:231 — the KEYED failure's row set differs from the keyless run's by exactly its coded row", async () => {
+    await withStubbedNet({ [KEY]: "", [TAVILY]: "" }, async () => {
+      globalThis.fetch = stubRefusal;
+      const keyless = await runPhase(seedProject(), 0, { live: true });
+
+      const keyedProject = seedProject();
+      process.env[KEY] = "sk-stub-not-a-real-key";
+      const keyed = await runPhase(keyedProject, 0, { live: true });
+
+      // (a) The keyed narrative failure is VISIBLE and CODED (the OV-29 case:
+      // without this row the run is indistinguishable from the keyless one).
+      const keyedNarr = liveRowEvents(keyed).filter((l) => l.event === "p0.live.narrative.failed");
+      assert.equal(keyedNarr.length, 1, "one row per failed keyed narrative");
+      const narr = keyedNarr[0];
+      assert.equal(narr.level, "warn");
+      assert.ok(
+        narr.detail.startsWith("RT_E_LLM_REJECTED · live narrative failed: "),
+        `the provider's own registered class leads the row (got: ${narr.detail})`,
+      );
+      assert.ok(narr.detail.endsWith(" — deterministic result used instead"));
+
+      // (b) The keyless run must NOT carry it — the difference IS the proof.
+      assert.equal(
+        liveRowEvents(keyless).some((l) => l.event === "p0.live.narrative.failed"),
+        false,
+        "a keyless run mints no narrative row (the key gates it)",
+      );
+      assert.notDeepEqual(
+        stripTs(liveRowEvents(keyed)),
+        stripTs(liveRowEvents(keyless)),
+        "a keyed failure and a keyless run are never the same record",
+      );
+
+      // (c) The failed web-search leg is coded in BOTH runs (keyless included).
+      for (const [label, proj] of [["keyless", keyless], ["keyed", keyed]] as const) {
+        const search = liveRowEvents(proj).filter((l) => l.event === "p0.live.research.failed");
+        assert.equal(search.length, 1, `${label}: one row for the failed research leg`);
+        assert.ok(search[0].detail.startsWith("RT_E_RESEARCH_UNAVAILABLE · "), `${label}: coded`);
+      }
+
+      // (d) Evidence only, never behavior: every other byte matches (the
+      // degrade does not change the deterministic outcome).
+      assert.equal(keyed.status, keyless.status);
+      assert.equal(keyed.currentPhase, keyless.currentPhase);
+      assert.deepEqual(keyed.artifacts.map((a) => a.title), keyless.artifacts.map((a) => a.title));
+      assert.deepEqual(nonLiveRows(keyed), nonLiveRows(keyless), "floor logs preserved verbatim");
+    });
+  });
+
+  it("headless.ts:208/231 — a live pass the keyless provider really serves mints NO degrade row (no false positive)", async () => {
+    await withStubbedNet({ [KEY]: "", [TAVILY]: "" }, async () => {
+      globalThis.fetch = stubWikipedia;
+      const clean = await runPhase(seedProject(), 0, { live: true });
+      assert.ok(
+        clean.research?.some((e) => e.provider === "wikipedia"),
+        "the stub really served the live leg (assertion below is not vacuous)",
+      );
+      assert.equal(liveRowEvents(clean).length, 0, "a served live pass stays row-free");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/255 (W20-L3 · pickup of OV-13) — the "silent-skip region": a THROWN
+// live pass under headless.runPhase is recorded with G2's own row, never a
+// silent skip to the floor. Proven pre-fix 2026-09-24 (W20-L3 probe): the same
+// injected throw that mints `p0.live.failed` under engine.runPhaseAsync left
+// ZERO rows under the CLI path — a keyed failure read exactly like a keyless
+// run (raw probe output in fixes/255_lane3_ov13.md).
+// ---------------------------------------------------------------------------
+describe("fixes/255 (W20-L3) — headless.runPhase's outer catch records G2's row, never a silent skip", () => {
+  /** G2's detonator idiom (lesson-writers.test.ts:336) — a live-only step. */
+  function detonatorMeta(message: string): NonNullable<Project["meta"]> {
+    const meta = {} as NonNullable<Project["meta"]>;
+    Object.defineProperty(meta, "w20-l3-detonator", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        throw new Error(message);
+      },
+    });
+    return meta;
+  }
+
+  const stripTs = (rows: JsonLog[]) =>
+    rows.map((r) => ({ phase: r.phase, level: r.level, event: r.event, detail: r.detail }));
+
+  it("a thrown live layer leaves G2's p0.live.failed row + the deterministic floor", async () => {
+    const hostile: Project = {
+      ...seedProject(),
+      meta: detonatorMeta("w20-l3: live-layer exploded: provider reply was not JSON"),
+    };
+    const out = await runPhase(hostile, 0, { live: true });
+    const floor = applyPhaseResult(hostile, 0);
+    // Floor outcome preserved (evidence only, never behavior).
+    assert.equal(out.status, floor.status);
+    assert.equal(out.currentPhase, floor.currentPhase);
+    assert.deepEqual(out.artifacts.map((a) => a.title), floor.artifacts.map((a) => a.title));
+    // Exactly one row appended, and it is G2's row.
+    assert.equal(out.logs.length, floor.logs.length + 1, "exactly one row is appended");
+    assert.deepEqual(
+      stripTs(out.logs.slice(0, -1)),
+      stripTs(floor.logs),
+      "floor logs preserved verbatim (timestamps aside)",
+    );
+    const row = out.logs.at(-1)!;
+    assert.equal(row.level, "warn");
+    assert.equal(row.event, "p0.live.failed");
+    assert.equal(row.phase, 0);
+    assert.equal(
+      row.detail,
+      "live layer failed (unclassified): w20-l3: live-layer exploded: provider reply was not JSON — deterministic floor used instead",
+    );
+    assert.ok(row.detail.length <= 240, "bounded detail (H43-P2-2-style budget)");
+  });
+
+  it("a non-live run mints no live-failure row (the guard arm is silent by design)", async () => {
+    const out = await runPhase(seedProject(), 0);
+    assert.equal(
+      out.logs.some((l) => l.event.includes(".live.")),
+      false,
+      "no live layer ran → nothing recorded",
+    );
   });
 });

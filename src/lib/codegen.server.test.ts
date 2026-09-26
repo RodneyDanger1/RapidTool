@@ -8,6 +8,10 @@
 // ---------------------------------------------------------------------------
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   assembleTreeEntry,
   briefFitSatisfied,
@@ -19,6 +23,7 @@ import {
   injectMissingExports,
   liveP6Synthesis,
   materializeImportableTree,
+  neutralizeResidualCjsExports,
   nondeterministicPrimitiveHit,
   parseSynthesisEnvelope,
   parseSynthesisPatchEnvelope,
@@ -68,6 +73,7 @@ import type { ExpandBriefResult } from "./prompt-engine.ts";
 import type { VerifyOutcome } from "./verify.server.ts";
 import type { LlmResult } from "./llm.ts";
 import type { Project } from "./types.ts";
+import { exportProjectJson, importProject, type ArtifactProvenance } from "./io.ts";
 
 // --- fixtures -----------------------------------------------------------------
 
@@ -847,6 +853,49 @@ function evalEntry(entry: string): Record<string, unknown> {
   return mod.exports;
 }
 
+/**
+ * W21-258: load a materialized tree the way the EMITTED tenant does — the
+ * scaffold writes `package.json` `"type":"module"` + every tree file verbatim,
+ * and `tests/oracle.spec.ts` statically imports the tree ENTRY as ESM. This
+ * writes the files into a temp tenant, imports the ENTRY exactly as the
+ * scaffold resolves it (scaffold.ts:2385-2394: the file at `src/generated.ts`
+ * when the tree has one, else the alphabetically-first accepted row) and
+ * returns the real `node` process verdict. Deterministic, no network.
+ */
+function importMaterializedTree(m: {
+  files: readonly { path: string; source: string }[];
+}): { status: number | null; stdout: string; stderr: string; entry: string } {
+  const dir = mkdtempSync(join(tmpdir(), "rt-w21l1-tree-"));
+  try {
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ type: "module" }, null, 2) + "\n");
+    for (const f of m.files) {
+      const abs = join(dir, f.path);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, f.source);
+    }
+    const sorted = [...m.files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    const entry = (m.files.find((f) => f.path === TREE_ENTRY_PATH) ?? sorted[0])!.path;
+    writeFileSync(
+      join(dir, "spec.ts"),
+      `import * as treeModule from ${JSON.stringify("./" + entry)};\n` +
+        `console.log("TREE_IMPORT_OK exports=[" + Object.keys(treeModule).sort().join(",") + "]");\n`,
+    );
+    const run = spawnSync(process.execPath, ["--experimental-strip-types", "spec.ts"], {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return {
+      status: run.status,
+      stdout: String(run.stdout ?? ""),
+      stderr: String(run.stderr ?? ""),
+      entry,
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 describe("chunked synthesis pure helpers (fixes/144 M2 / S-01 T2)", () => {
   it("chunkTypeSignatures: ≤8 per chunk, expand order kept; 20 sigs → 8/8/4; junk/dupes never fork", () => {
     const sigs = ledgerSignatures(20);
@@ -993,13 +1042,23 @@ describe("chunked synthesis pure helpers (fixes/144 M2 / S-01 T2)", () => {
     assert.doesNotThrow(() => new Function(out));
   });
 
-  it("A0 materializeImportableTree: single file is identity (legacy disk bytes)", () => {
+  it("W21-258: materializeImportableTree has NO single-file identity path — one chunk is materialized like N", () => {
+    // fixes/175 returned single-file input unchanged ("legacy disk bytes");
+    // fixes/258 removed that path: the emitted tenant always declares
+    // `"type":"module"`, so a 1-chunk tree must be real ESM like every other
+    // tree (the identity path is what killed the emitted spec at import:
+    // `module is not defined in ES module scope`).
     const one = [{ path: TREE_ENTRY_PATH, source: "function a() {}\nmodule.exports.a = a;\n", exports: ["a"] }];
     const m = materializeImportableTree(one);
-    assert.equal(m.files.length, 1);
-    assert.equal(m.files[0]!.path, TREE_ENTRY_PATH);
-    assert.equal(m.files[0]!.source, one[0]!.source);
-    assert.equal(m.entrySource, assembleTreeEntry(one));
+    assert.deepEqual(m.files.map((f) => f.path), [TREE_ENTRY_PATH, TREE_CHUNK0_RELOCATED_PATH]);
+    assert.equal(m.entrySource, m.files[0]!.source, "entrySource is the entry file's own bytes");
+    assert.ok(m.entrySource.includes(`export * from "./generated/chunk-0.ts";`), "the entry path is an ESM barrel");
+    assert.ok(!m.entrySource.includes("module.exports"), "barrel is ESM");
+    assert.equal(m.files[1]!.path, TREE_CHUNK0_RELOCATED_PATH, "the entry-path chunk moved off the barrel");
+    assert.ok(!m.files[1]!.source.includes("module.exports"), "the chunk's CJS assigns are gone");
+    assert.ok(m.files[1]!.source.includes("export { a };"), "the chunk exports its names as ESM");
+    assert.deepEqual(materializeImportableTree(one), m, "deterministic: identical input ⇒ identical files");
+    assert.deepEqual(materializeImportableTree([]), { files: [], entrySource: "" }, "empty input stays empty");
   });
 
   it("A0 materializeImportableTree: N>1 files become ESM with cross-file imports + barrel at TREE_ENTRY_PATH", () => {
@@ -1025,6 +1084,107 @@ describe("chunked synthesis pure helpers (fixes/144 M2 / S-01 T2)", () => {
     assert.ok(later.source.includes("export { b };"));
     assert.ok(!later.source.includes("module.exports"));
     assert.ok(later.source.includes("function b() { return a(); }"), "bare-name call kept; import binds it");
+  });
+
+  it("W21-258: a residual CJS extra in a MULTI-chunk tree is neutralized too (no module refs in any emitted file)", () => {
+    const m = materializeImportableTree([
+      {
+        path: TREE_ENTRY_PATH,
+        source: "function a() { return 1; }\nmodule.exports.a = a;\nmodule.exports._kit = { a: a };\n",
+        exports: ["a"],
+      },
+      { path: "src/generated/b.ts", source: "function b() { return a(); }\nmodule.exports.b = b;\n", exports: ["b"] },
+    ]);
+    for (const f of m.files) assert.ok(!f.source.includes("module.exports"), `${f.path} is pure ESM`);
+    const chunk0 = m.files.find((f) => f.path === TREE_CHUNK0_RELOCATED_PATH)!;
+    assert.ok(chunk0.source.includes("const _kit = { a: a };"), "the extra surface is converted, never left as CJS");
+    assert.ok(chunk0.source.includes("export { a, _kit };"), "the file exports its whole real surface");
+    const later = m.files.find((f) => f.path === "src/generated/b.ts")!;
+    assert.ok(later.source.includes(`import { a, _kit } from "./chunk-0.ts";`), "later files import the full prior surface");
+    const run = importMaterializedTree(m);
+    assert.equal(run.status, 0, `the emitted tree must import under type:module — stderr:\n${run.stderr}`);
+    assert.equal(run.stdout.trim(), "TREE_IMPORT_OK exports=[_kit,a,b]", "the barrel exposes the union");
+  });
+
+  it("W21-258 RED→GREEN: a single-chunk tree materializes as ESM importable under the tenant's `\"type\":\"module\"`", () => {
+    // Run #2's artifact shape (fixes/255 §1): ONE accepted chunk at its own
+    // planned path, raw P6 CommonJS bytes — including a NON-listed export
+    // surface the model added on its own (`module.exports._internals`, the
+    // 258-line get-property.ts's last line). The emitted tenant declares
+    // `"type":"module"` and its spec statically imports the tree ENTRY as ESM:
+    // before the fix that import died with `ReferenceError: module is not
+    // defined in ES module scope` at the chunk's last line, so ZERO spec
+    // assertions ever ran (treeRunOk:false → the C-1 mint stayed silent).
+    const chunk = {
+      path: "src/generated/get-property.ts",
+      source: [
+        "const LEDGER = { entries: [] };",
+        "function getProperty(propertyId) {",
+        "  return { propertyId: propertyId, ledger: LEDGER };",
+        "}",
+        "module.exports.getProperty = getProperty;",
+        "module.exports._internals = { LEDGER: LEDGER };",
+        "",
+      ].join("\n"),
+      exports: ["getProperty"],
+    };
+    const m = materializeImportableTree([chunk]);
+    // THE PIN — the emitted spec's load, executed by real `node` in a real
+    // `"type":"module"` tenant (RED before the fix: the crash below).
+    const run = importMaterializedTree(m);
+    assert.equal(
+      run.status,
+      0,
+      `the tenant's ESM import of the tree entry must succeed (entry: ${run.entry}) — stderr:\n${run.stderr}`,
+    );
+    assert.ok(!run.stderr.includes("module is not defined"), "no CJS-in-ESM crash (fixes/255 layer 1)");
+    assert.equal(
+      run.stdout.trim(),
+      "TREE_IMPORT_OK exports=[_internals,getProperty]",
+      "the entry re-exports the chunk's real surface (listed + converted names)",
+    );
+    // Shape: the single chunk goes through the SAME materialization as N>1 —
+    // ESM barrel at TREE_ENTRY_PATH + the chunk file, no CJS bytes in either.
+    assert.equal(m.files.length, 2, "1 chunk → ESM barrel + the chunk file");
+    assert.equal(m.files[0]!.path, TREE_ENTRY_PATH, "the barrel is the tree entry");
+    assert.equal(m.entrySource, m.files[0]!.source, "entrySource is the entry file's own bytes");
+    assert.ok(m.entrySource.includes(`export * from "./generated/get-property.ts";`), "barrel re-exports the chunk");
+    const chunkFile = m.files.find((f) => f.path === chunk.path)!;
+    assert.ok(!chunkFile.source.includes("module.exports"), "no CJS export bytes survive into the emitted tree");
+    assert.ok(chunkFile.source.includes("export { getProperty, _internals };"), "listed + converted names exported");
+  });
+
+  it("W21-258: neutralizeResidualCjsExports clears every remaining CJS export statement (real-artifact shape)", () => {
+    // The shape run #2's accepted chunk shipped (fixes/255 §1): declared-name
+    // assigns go first (stripCjsExportAssignments), then whatever CJS surface
+    // the chunk itself wrote must not survive into the ESM file.
+    const src = [
+      "const LEDGER = { entries: [] };",
+      "const counter = 1;",
+      "function getProperty(id) { return { id: id, ledger: LEDGER }; }",
+      "module.exports._internals = { LEDGER: LEDGER };", // not bound → const + exported
+      "module.exports.counter = counter;", // bound → statement dropped, name kept exported
+      "module.exports.default = counter;", // reserved word → dropped, never exported
+      "module.exports.registry = {",
+      "  LEDGER: LEDGER,",
+      "};", // multi-line value → const, value lines kept verbatim
+      "module.exports[globalThis.key] = 1;", // computed → dropped
+      "",
+    ].join("\n");
+    const out = neutralizeResidualCjsExports(src);
+    assert.ok(!/^[ \t]*(module\.)?exports[\s.[]/m.test(out.source), "no CJS export statement survives");
+    assert.deepEqual(out.exported, ["_internals", "counter", "registry"], "surface names, source order, reserved skipped");
+    assert.ok(out.source.includes("const _internals = { LEDGER: LEDGER };"), "unbound CJS name minted as a const binding");
+    assert.ok(out.source.includes("const registry = {"), "multi-line value keeps its lines");
+    assert.ok(out.source.includes("  LEDGER: LEDGER,"), "multi-line value body kept verbatim");
+    assert.equal(out.source.split("const counter =").length - 1, 1, "an already-bound name is never re-declared");
+    assert.ok(!out.source.includes("const default"), "a reserved word is never minted as a binding");
+    assert.ok(!out.source.includes("globalThis.key"), "computed CJS surface is dropped whole");
+    assert.doesNotThrow(() => new Function(out.source), "the neutralized body still parses");
+    // A comment mentioning the pattern is inert — a statement must START with it.
+    const commented = neutralizeResidualCjsExports("// module.exports.x = x;\nfunction x() {}\n");
+    assert.deepEqual(commented.exported, []);
+    assert.ok(commented.source.includes("// module.exports.x = x;"), "comments are never rewritten");
   });
 
   it("toGeneratedTreeFile: content-addressed fnv1a hash + attempt stamp", () => {
@@ -1311,20 +1471,30 @@ describe("liveP6Synthesis kind-scoped tree trigger (fixes/148 F1)", () => {
     const { calls, deps } = fakeDeps();
     const q = await liveP6Synthesis(base, deps);
     const tree = q.generatedTree ?? [];
-    assert.equal(tree.length, 1, "≤8 signatures on a webapp → the chunked path still fires");
-    assert.equal(tree[0]!.path, TREE_ENTRY_PATH, "the single chunk is the tree entry file");
+    assert.equal(tree.length, 2, "≤8 signatures on a webapp → the chunked path still fires (barrel + 1 chunk)");
+    assert.equal(tree[0]!.path, TREE_ENTRY_PATH, "the ESM barrel is the tree entry");
+    assert.equal(tree[1]!.path, TREE_CHUNK0_RELOCATED_PATH, "the chunk moved off the entry path");
     for (const t of tree) {
       assert.equal(t.hash, String(fnv1a(t.source)), "content-addressed hash");
       assert.equal(t.attempt, 0);
       assert.ok(t.source.trim().length > 0);
     }
-    // generatedSource = the assembled ENTRY (scoped concatenation) — the tree
-    // is what scaffold hosts verbatim and treeRun runs (the M2=1 path from
-    // fixes/145), not the machine-verified single module.
-    assert.equal(q.generatedSource, assembleTreeEntry([{ source: tree[0]!.source }]), "entry == assembled tree");
-    assert.ok(q.generatedSource.includes(KANBAN_MODULE.trim()), "entry carries the synthesized file source");
-    const exports_ = evalEntry(q.generatedSource);
-    assert.equal(typeof exports_.createBoard, "function", "assembled entry exposes the tree's exports");
+    // generatedSource = the materialized ENTRY file's own bytes — the tree is
+    // what scaffold hosts verbatim and treeRun runs (the M2=1 path from
+    // fixes/145), never the machine-verified single module. fixes/258: a
+    // single-chunk tree is materialized like any other, so the entry is the ESM
+    // barrel instead of an IIFE concat of raw CommonJS.
+    assert.equal(q.generatedSource, tree[0]!.source, "generatedSource is the entry barrel's own bytes");
+    assert.ok(q.generatedSource.includes(`export * from "./generated/chunk-0.ts";`), "barrel re-exports the chunk");
+    // The emitted artifact under the tenant's module system: a real ESM import
+    // of the entry must load and expose the synthesized module's exports.
+    const run = importMaterializedTree({ files: tree });
+    assert.equal(run.status, 0, `the emitted ≤8-signature tree must import under type:module — stderr:\n${run.stderr}`);
+    assert.equal(
+      run.stdout.trim(),
+      "TREE_IMPORT_OK exports=[addColumn,createBoard,dragCard,kanbanBoard]",
+      "the entry exposes the synthesized module's exports",
+    );
     // No machine verify at synthesis: the chunked path's tested mint is the
     // tree-run lane's step (fixes/147 E2) — never fabricated here.
     assert.deepEqual(calls, ["expand", "complete"], "chunked path: one synthesis call, NO verify leg");
@@ -1345,7 +1515,7 @@ describe("liveP6Synthesis kind-scoped tree trigger (fixes/148 F1)", () => {
     for (const kind of ["tool", "game"] as const) {
       const { calls, deps } = fakeDeps();
       const q = await liveP6Synthesis({ ...p6Base(), kind }, deps);
-      assert.equal((q.generatedTree ?? []).length, 1, `${kind}: ≤8 sigs → chunked tree`);
+      assert.equal((q.generatedTree ?? []).length, 2, `${kind}: ≤8 sigs → chunked tree (barrel + chunk)`);
       assert.deepEqual(calls, ["expand", "complete"], `${kind}: no single-module verify leg`);
       assert.equal(
         (q.lastTest as { label?: string } | null)?.label,
@@ -2542,8 +2712,122 @@ describe("217k envelope read-failure signals (G6 silent sinks)", () => {
     );
     const refusal = (q.logs ?? []).find((l) => l.event === "p6.synthesis.refused");
     assert.ok(refusal && /chunk 2\/3 refused/.test(refusal.detail), "the terminal honest-partial refusal is unchanged");
-    assert.ok(!(q.generatedSource ?? "").includes("collectRent8"), "the refused chunk's export is absent from the assembled entry");
-    assert.ok((q.generatedSource ?? "").includes("collectRent0"), "the prior chunk's real file stays on the project");
+    assert.ok(
+      !(q.generatedSource ?? "").includes("collectRent8"),
+      "the refused chunk's export is absent from the entry barrel",
+    );
+    // fixes/258: the entry IS the ESM barrel, so the prior chunk's code lives
+    // in its own file — assert on the tree, not on the entry's text.
+    const prior = (q.generatedTree ?? []).find((t) => t.path === "src/jobs/rent.ts");
+    assert.ok(prior !== undefined && prior.source.includes("collectRent0"), "the prior chunk's real file stays on the project");
+    assert.ok(
+      (q.generatedTree ?? []).some((t) => t.path === TREE_ENTRY_PATH),
+      "the entry barrel is on the project too",
+    );
+    assert.ok(!(q.generatedTree ?? []).some((t) => t.path === "src/jobs/rent-2.ts"), "the refused chunk never lands");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T5.4 (W18 LANE 5) — artifact provenance from REAL emit data. Every artifact
+// record codegen emits carries `provenance = { producer, model?, timestamp,
+// inputHash }` derived from the run itself: the SERVED model id (the provider
+// LlmResult, never the requested constant), the emit-time clock, and the
+// hashed derivation input. The block survives the io serializer round-trip
+// (export → import; boundary laws pinned in io.test.ts).
+// ---------------------------------------------------------------------------
+
+/** The stamp on a record, read through the widen-in-place seam (the types.ts
+ *  `Artifact` does not carry `provenance` yet — io.ts owns the shape). */
+const provenanceOf = (a: { id: string }): ArtifactProvenance | undefined =>
+  (a as unknown as { provenance?: ArtifactProvenance }).provenance;
+
+describe("T5.4 artifact provenance (real emit data)", () => {
+  it("single-module success: the model artifact names the SERVED model + brief hash; the verify record is deterministic", async () => {
+    const base = p6Base();
+    const t0 = Date.now();
+    const { deps } = fakeDeps();
+    const q = await liveP6Synthesis(base, deps);
+    const t1 = Date.now();
+
+    const code = q.artifacts.find((a) => a.title === "Generated module (LLM, machine-verified)");
+    assert.ok(code, "precondition: the model-produced code artifact exists");
+    const codeProv = provenanceOf(code!);
+    assert.ok(codeProv, "the model-produced artifact must carry a provenance stamp");
+    assert.equal(codeProv!.producer, "model");
+    assert.equal(
+      codeProv!.model,
+      "deepseek-v4-flash",
+      "the SERVED id off the LlmResult — never the requested P6_SYNTH_MODEL constant",
+    );
+    assert.ok(codeProv!.timestamp >= t0 && codeProv!.timestamp <= t1, "timestamp is the real emit-time clock");
+    assert.equal(codeProv!.inputHash, String(fnv1a(KANBAN_BRIEF)), "input hash = the synthesis brief hash");
+    assert.equal(codeProv!.inputHash, q.implementationSpec?.briefHash, "and equals what the implementationSpec persisted");
+
+    const verify = q.artifacts.find((a) => a.title.includes("Verify outcome"));
+    assert.ok(verify, "precondition: the machine verify artifact exists");
+    const vProv = provenanceOf(verify!);
+    assert.ok(vProv, "the machine verify record must carry a provenance stamp");
+    assert.equal(vProv!.producer, "deterministic", "machine-run evidence is machine-derived, never model-stamped");
+    assert.equal("model" in vProv!, false, "a deterministic record carries no model key at all");
+    const evidence = "3/3 machine-run cases passed on iteration 1"; // fakeDeps default
+    assert.equal(
+      vProv!.inputHash,
+      String(fnv1a(`${q.generatedSource}${evidence}`)),
+      "input hash = fnv1a(verified module + evidence) — the record's real derivation input",
+    );
+  });
+
+  it("chunked tree success: the tree artifact stamps the served model + brief hash", async () => {
+    const base = p6Base(LEDGER_BRIEF);
+    const f = chunkedDeps();
+    const q = await liveP6Synthesis(base, f.deps);
+    const treeArt = q.artifacts.find((a) => a.title.includes("chunked synthesis"));
+    assert.ok(treeArt, "precondition: the tree code artifact exists");
+    const prov = provenanceOf(treeArt!);
+    assert.ok(prov, "the chunked tree artifact must carry a provenance stamp");
+    assert.equal(prov!.producer, "model");
+    assert.equal(prov!.model, "deepseek-v4-flash");
+    assert.equal(prov!.inputHash, q.implementationSpec?.briefHash, "the chunked synthesis input hash is the shared brief hash");
+    assert.ok(prov!.timestamp > 0);
+  });
+
+  it("an unnamed served model yields NO stamp (fail closed — never a guessed producer)", async () => {
+    const base = p6Base();
+    const { deps } = fakeDeps();
+    // A rogue provider reply with no servable model id: the module is still
+    // accepted, but its provenance can name nothing — so it stamps nothing.
+    deps.complete = async (): Promise<LlmResult> => ({ ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "" });
+    const q = await liveP6Synthesis(base, deps);
+    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "precondition: the synthesis still succeeded");
+    const code = q.artifacts.find((a) => a.title === "Generated module (LLM, machine-verified)");
+    assert.ok(code, "precondition: the code artifact exists");
+    assert.equal(provenanceOf(code!), undefined, "no stamp is better than a guessed one (declare-or-strike)");
+    // The verify record's stamp needs no model id — it is still minted.
+    const verify = q.artifacts.find((a) => a.title.includes("Verify outcome"));
+    assert.equal(provenanceOf(verify!)?.producer, "deterministic");
+  });
+
+  it("provenance populates from real emit data AND survives the io save/load round-trip", async () => {
+    const base = p6Base();
+    const { deps } = fakeDeps();
+    const q = await liveP6Synthesis(base, deps);
+    const before = q.artifacts.map((a) => provenanceOf(a));
+    assert.ok(before.some((p) => p?.producer === "model"), "precondition: a model stamp exists to survive");
+
+    const res = importProject(exportProjectJson(q));
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.deepEqual(
+      res.project.artifacts.map((a) => provenanceOf(a)),
+      before,
+      "stamps identical after save → load (producer + served model + clock + input hash)",
+    );
+    assert.equal(
+      JSON.stringify(res.project.artifacts),
+      JSON.stringify(q.artifacts),
+      "the artifact rows round-trip byte-identically",
+    );
   });
 });
 

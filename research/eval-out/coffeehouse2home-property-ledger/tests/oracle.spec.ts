@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // tests/oracle.spec.ts — acceptance tests from the A7 oracle (project.oracle)
-// machine-generated from RapidTool packet aa185020-cfff-49ac-9224-25b108274a17; regenerate, don't hand-edit.
+// machine-generated from RapidTool packet 6007f9af-f6d5-4b2e-9eaa-ede6f800cb6e; regenerate, don't hand-edit.
 // REAL assertions, no todo stubs (fixes/135). Row ids are PINNED: the verify
 // harness seeds + pins orc-* ids across runs (E-08) — never rename or drop
 // one. Each test asserts what the emitted modules ACTUALLY do today:
@@ -10,6 +10,10 @@
 //   * an oracle row whose target seam is a TODO(E-15) stub asserts the seam
 //     rejects — that test FAILS the moment the seam is implemented, which is
 //     the signal to replace it with the row's real acceptance assertion;
+//   * an oracle row with NO emitted module surface to assert against (106
+//     T-08 / F-05) is a visibly-marked test.skip("<id> — NOT IMPLEMENTED") —
+//     never an always-true assertion; node:test reports it as skipped (never
+//     a pass) and the README counts it separately from the assertable rows;
 //   * nothing here pretends a stub satisfies its brief.
 // Run: node --experimental-strip-types --test tests/oracle.spec.ts
 // TREE mode (fixes/144 M2): this project carries a generatedTree, so the
@@ -24,7 +28,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as treeModule from "../src/generated/check-reorder-flags.ts";
+import * as treeModule from "../src/generated/get-property.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Tree truth — the generated tree ENTRY module (project.generatedTree,
@@ -37,74 +41,83 @@ import * as treeModule from "../src/generated/check-reorder-flags.ts";
 // ---------------------------------------------------------------------------
 
 // Emitted generated-tree files:
-//   src/generated/check-reorder-flags.ts  (entry)
-//   src/generated/chunk-0.ts
-//   src/generated/compute-rent-roll.ts
-//   src/generated/create-flip-project.ts
+//   src/generated/get-property.ts  (entry)
 
 test("tree.entry — the generated tree entry module loads and cross-file imports resolve", () => {
-  assert.ok(treeModule, "entry namespace present after import");
-  assert.equal(typeof treeModule, "object");
+  // The import at the top of this spec IS the load assertion: a missing entry
+  // or an unresolvable cross-file import fails the spec before any test runs.
+  // Export names are generated content — the one stable assertion is that the
+  // namespace carries at least one real export. (106 T-08 / F-05: the pre-fix
+  // `assert.ok(treeModule)` / `typeof === "object"` pair could never fail, so
+  // it was removed rather than left to read as evidence.)
   const names = Object.keys(treeModule);
   assert.ok(names.length > 0, "entry exports real names: " + names.join(", "));
 });
 
 // ---------------------------------------------------------------------------
-// 4. Oracle rows (A7) — one test per row under its PINNED id.
+// 4. Oracle rows (A7) — one test per row under its PINNED id; a row with no
+// emitted module surface is a visible test.skip("<id> — NOT IMPLEMENTED")
+// (fixes/216b) — skipped, never green, and counted by the README census.
 // ---------------------------------------------------------------------------
 
-test("orc-1", async () => {
+test.skip("orc-1 — NOT IMPLEMENTED", () => {
   // A7 row "orc-1" "job.track.happy" — Authorized operator submits “track” with a valid buyer => 200 + persisted entity + checkpoint written
-  // No emitted module surface targets this row yet (no endpoint, no P6
-  // template host). Honest floor: the pinned id + prose are recorded so a
-  // later emit (after P0/P1) upgrades this to a real assertion.
-  assert.ok("orc-1".length > 0, "row id is pinned");
-  assert.ok("job.track.happy".length >= 0, "row prose recorded");
+  // NOT IMPLEMENTED: no emitted module surface targets this row yet (106
+  // T-08 / F-05). The pre-fix emission asserted "orc-1".length > 0 —
+  // which cannot fail, so it was not evidence; this row is skipped instead.
+  // Replace the skip with the row's real acceptance assertion when the
+  // seam (HTTP endpoint or P6 host) lands.
+  assert.fail("orc-1 is NOT IMPLEMENTED — replace this skip with the row's real acceptance assertion");
 });
 
-test("orc-2", async () => {
+test.skip("orc-2 — NOT IMPLEMENTED", () => {
   // A7 row "orc-2" "job.record.happy" — Authorized operator submits “record” with a valid buyer => 200 + persisted entity + checkpoint written
-  // No emitted module surface targets this row yet (no endpoint, no P6
-  // template host). Honest floor: the pinned id + prose are recorded so a
-  // later emit (after P0/P1) upgrades this to a real assertion.
-  assert.ok("orc-2".length > 0, "row id is pinned");
-  assert.ok("job.record.happy".length >= 0, "row prose recorded");
+  // NOT IMPLEMENTED: no emitted module surface targets this row yet (106
+  // T-08 / F-05). The pre-fix emission asserted "orc-2".length > 0 —
+  // which cannot fail, so it was not evidence; this row is skipped instead.
+  // Replace the skip with the row's real acceptance assertion when the
+  // seam (HTTP endpoint or P6 host) lands.
+  assert.fail("orc-2 is NOT IMPLEMENTED — replace this skip with the row's real acceptance assertion");
 });
 
-test("orc-3", async () => {
+test.skip("orc-3 — NOT IMPLEMENTED", () => {
   // A7 row "orc-3" "job.flip.happy" — Authorized operator submits “flip” with a valid buyer => 200 + persisted entity + checkpoint written
-  // No emitted module surface targets this row yet (no endpoint, no P6
-  // template host). Honest floor: the pinned id + prose are recorded so a
-  // later emit (after P0/P1) upgrades this to a real assertion.
-  assert.ok("orc-3".length > 0, "row id is pinned");
-  assert.ok("job.flip.happy".length >= 0, "row prose recorded");
+  // NOT IMPLEMENTED: no emitted module surface targets this row yet (106
+  // T-08 / F-05). The pre-fix emission asserted "orc-3".length > 0 —
+  // which cannot fail, so it was not evidence; this row is skipped instead.
+  // Replace the skip with the row's real acceptance assertion when the
+  // seam (HTTP endpoint or P6 host) lands.
+  assert.fail("orc-3 is NOT IMPLEMENTED — replace this skip with the row's real acceptance assertion");
 });
 
-test("orc-4", async () => {
+test.skip("orc-4 — NOT IMPLEMENTED", () => {
   // A7 row "orc-4" "job.show.happy" — Authorized operator submits “show” with a valid buyer => 200 + persisted entity + checkpoint written
-  // No emitted module surface targets this row yet (no endpoint, no P6
-  // template host). Honest floor: the pinned id + prose are recorded so a
-  // later emit (after P0/P1) upgrades this to a real assertion.
-  assert.ok("orc-4".length > 0, "row id is pinned");
-  assert.ok("job.show.happy".length >= 0, "row prose recorded");
+  // NOT IMPLEMENTED: no emitted module surface targets this row yet (106
+  // T-08 / F-05). The pre-fix emission asserted "orc-4".length > 0 —
+  // which cannot fail, so it was not evidence; this row is skipped instead.
+  // Replace the skip with the row's real acceptance assertion when the
+  // seam (HTTP endpoint or P6 host) lands.
+  assert.fail("orc-4 is NOT IMPLEMENTED — replace this skip with the row's real acceptance assertion");
 });
 
-test("orc-5", async () => {
-  // A7 row "orc-5" "job.publish.happy" — Authorized operator submits “publish” with a valid buyer => 200 + persisted entity + checkpoint written
-  // No emitted module surface targets this row yet (no endpoint, no P6
-  // template host). Honest floor: the pinned id + prose are recorded so a
-  // later emit (after P0/P1) upgrades this to a real assertion.
-  assert.ok("orc-5".length > 0, "row id is pinned");
-  assert.ok("job.publish.happy".length >= 0, "row prose recorded");
+test.skip("orc-5 — NOT IMPLEMENTED", () => {
+  // A7 row "orc-5" "job.lease.happy" — Authorized operator submits “lease” with a valid buyer => 200 + persisted entity + checkpoint written
+  // NOT IMPLEMENTED: no emitted module surface targets this row yet (106
+  // T-08 / F-05). The pre-fix emission asserted "orc-5".length > 0 —
+  // which cannot fail, so it was not evidence; this row is skipped instead.
+  // Replace the skip with the row's real acceptance assertion when the
+  // seam (HTTP endpoint or P6 host) lands.
+  assert.fail("orc-5 is NOT IMPLEMENTED — replace this skip with the row's real acceptance assertion");
 });
 
-test("orc-phase", async () => {
+test.skip("orc-phase — NOT IMPLEMENTED", () => {
   // A7 row "orc-phase" "graph.no-skip" — Agent requests P9 while P4 is open => Illegal transition; no deploy artifacts
-  // No emitted module surface targets this row yet (no endpoint, no P6
-  // template host). Honest floor: the pinned id + prose are recorded so a
-  // later emit (after P0/P1) upgrades this to a real assertion.
-  assert.ok("orc-phase".length > 0, "row id is pinned");
-  assert.ok("graph.no-skip".length >= 0, "row prose recorded");
+  // NOT IMPLEMENTED: no emitted module surface targets this row yet (106
+  // T-08 / F-05). The pre-fix emission asserted "orc-phase".length > 0 —
+  // which cannot fail, so it was not evidence; this row is skipped instead.
+  // Replace the skip with the row's real acceptance assertion when the
+  // seam (HTTP endpoint or P6 host) lands.
+  assert.fail("orc-phase is NOT IMPLEMENTED — replace this skip with the row's real acceptance assertion");
 });
 
 // ---------------------------------------------------------------------------
@@ -116,7 +129,7 @@ test("orc-phase", async () => {
 // may read (tests/ dir → file, via __capDir). __capCarries() is true when the
 // file exists AND its path or source text contains one of the demanded forms.
 const __capDir = join(fileURLToPath(import.meta.url), "..");
-const __capScanFiles = ["../src/generated/check-reorder-flags.ts","../src/generated/chunk-0.ts","../src/generated/compute-rent-roll.ts","../src/generated/create-flip-project.ts"];
+const __capScanFiles = ["../src/generated/get-property.ts"];
 function __capCarries(relPath: string, forms: string[]): boolean {
   let text = "";
   try {
@@ -129,302 +142,434 @@ function __capCarries(relPath: string, forms: string[]): boolean {
   return forms.some((f) => f.length > 0 && (p.includes(f) || body.includes(f)));
 }
 
-// capability.1 — getPropertyLedgerRecord(propertyId: string): Promise<PropertyLedgerRecord>
+// capability.1 — getProperty(propertyId: string): Promise<PropertyLedgerRecord>
 test("capability.1", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["getpropertyledgerrecord"];
+  const forms = ["getproperty"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"getPropertyLedgerRecord(propertyId: string): Promise<PropertyLedgerRecord>\" has NONE of its demanded identifier forms (getpropertyledgerrecord) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"getProperty(propertyId: string): Promise<PropertyLedgerRecord>\" has NONE of its demanded identifier forms (getproperty) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.2 — appendLedgerEvent(propertyId: string, event: LedgerEvent): Promise<PropertyLedgerRecord>
+// capability.2 — updateProperty(propertyId: string, changes: Partial<PropertyLedgerRecord>): Promise<PropertyLedgerRecord>
 test("capability.2", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["appendledgerevent"];
+  const forms = ["updateproperty"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"appendLedgerEvent(propertyId: string, event: LedgerEvent): Promise<PropertyLedgerRecord>\" has NONE of its demanded identifier forms (appendledgerevent) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"updateProperty(propertyId: string, changes: Partial<PropertyLedgerRecord>): Promise<PropertyLedgerRecord>\" has NONE of its demanded identifier forms (updateproperty) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.3 — createContact(input: ContactInput): Promise<Contact>
+// capability.3 — getPropertyHistory(propertyId: string): Promise<LedgerHistoryEntry[]>
 test("capability.3", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["getpropertyhistory"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"getPropertyHistory(propertyId: string): Promise<LedgerHistoryEntry[]>\" has NONE of its demanded identifier forms (getpropertyhistory) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.4 — createContact(contact: ContactInput): Promise<Contact>
+test("capability.4", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
   const forms = ["createcontact"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"createContact(input: ContactInput): Promise<Contact>\" has NONE of its demanded identifier forms (createcontact) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"createContact(contact: ContactInput): Promise<Contact>\" has NONE of its demanded identifier forms (createcontact) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.4 — createLead(input: LeadInput): Promise<Lead>
-test("capability.4", () => {
-  // Demanded identifier forms (content tokens + canonical stems;
-  // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["createlead"];
-  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
-  assert.ok(
-    carried.length > 0,
-    "capability presence proxy FAILED: capability \"createLead(input: LeadInput): Promise<Lead>\" has NONE of its demanded identifier forms (createlead) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
-  );
-});
-
-// capability.5 — advanceDealStage(dealId: string, stage: DealStage): Promise<Deal>
+// capability.5 — createBuyerLead(lead: BuyerLeadInput): Promise<BuyerLead>
 test("capability.5", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["advancedealstage","advancedealstag"];
+  const forms = ["createbuyerlead"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"advanceDealStage(dealId: string, stage: DealStage): Promise<Deal>\" has NONE of its demanded identifier forms (advancedealstage, advancedealstag) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"createBuyerLead(lead: BuyerLeadInput): Promise<BuyerLead>\" has NONE of its demanded identifier forms (createbuyerlead) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.6 — publishShowingSlots(propertyId: string, slots: ShowingSlotInput[]): Promise<ShowingSlot[]>
+// capability.6 — createSellerLead(lead: SellerLeadInput): Promise<SellerLead>
 test("capability.6", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["createsellerlead"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"createSellerLead(lead: SellerLeadInput): Promise<SellerLead>\" has NONE of its demanded identifier forms (createsellerlead) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.7 — createDeal(contactId: string, propertyId: string): Promise<Deal>
+test("capability.7", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["createdeal"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"createDeal(contactId: string, propertyId: string): Promise<Deal>\" has NONE of its demanded identifier forms (createdeal) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.8 — moveDealStage(dealId: string, stage: DealStage): Promise<Deal>
+test("capability.8", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["movedealstage","movedealstag"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"moveDealStage(dealId: string, stage: DealStage): Promise<Deal>\" has NONE of its demanded identifier forms (movedealstage, movedealstag) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.9 — getDealPipeline(): Promise<DealPipelineView>
+test("capability.9", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["getdealpipeline","getdealpipelin"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"getDealPipeline(): Promise<DealPipelineView>\" has NONE of its demanded identifier forms (getdealpipeline, getdealpipelin) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.10 — publishShowingSlots(propertyId: string, slots: ShowingSlotInput[]): Promise<ShowingSlot[]>
+test("capability.10", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
   const forms = ["publishshowingslots","publishshowingslot"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"publishShowingSlots(propertyId: string, slots: ShowingSlotInput[]): Promise<ShowingSlot[]>\" has NONE of its demanded identifier forms (publishshowingslots, publishshowingslot) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"publishShowingSlots(propertyId: string, slots: ShowingSlotInput[]): Promise<ShowingSlot[]>\" has NONE of its demanded identifier forms (publishshowingslots, publishshowingslot) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.7 — bookShowing(slotId: string, buyerId: string): Promise<ShowingBooking>
-test("capability.7", () => {
+// capability.11 — bookShowing(slotId: string, buyer: BuyerInput): Promise<ShowingBooking>
+test("capability.11", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
   const forms = ["bookshowing","bookshow"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"bookShowing(slotId: string, buyerId: string): Promise<ShowingBooking>\" has NONE of its demanded identifier forms (bookshowing, bookshow) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"bookShowing(slotId: string, buyer: BuyerInput): Promise<ShowingBooking>\" has NONE of its demanded identifier forms (bookshowing, bookshow) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.8 — recordShowingFeedback(bookingId: string, feedback: BuyerFeedback | null): Promise<ShowingBooking>
-test("capability.8", () => {
+// capability.12 — sendShowingConfirmation(bookingId: string): Promise<ConfirmationResult>
+test("capability.12", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["recordshowingfeedback"];
+  const forms = ["sendshowingconfirmation"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"recordShowingFeedback(bookingId: string, feedback: BuyerFeedback | null): Promise<ShowingBooking>\" has NONE of its demanded identifier forms (recordshowingfeedback) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"sendShowingConfirmation(bookingId: string): Promise<ConfirmationResult>\" has NONE of its demanded identifier forms (sendshowingconfirmation) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.9 — createFlipProject(propertyId: string, input: FlipProjectInput): Promise<FlipProject>
-test("capability.9", () => {
+// capability.13 — scheduleShowingReminder(bookingId: string, remindAt: Date): Promise<Reminder>
+test("capability.13", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["createflipproject"];
+  const forms = ["scheduleshowingreminder","scheduleshowingremind"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"createFlipProject(propertyId: string, input: FlipProjectInput): Promise<FlipProject>\" has NONE of its demanded identifier forms (createflipproject) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"scheduleShowingReminder(bookingId: string, remindAt: Date): Promise<Reminder>\" has NONE of its demanded identifier forms (scheduleshowingreminder, scheduleshowingremind) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.10 — addRenovationLineItem(flipProjectId: string, item: RenovationLineItemInput): Promise<FlipProject>
-test("capability.10", () => {
+// capability.14 — syncShowingToCalendar(bookingId: string): Promise<CalendarSyncStubResult>
+test("capability.14", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["addrenovationlineitem"];
+  const forms = ["syncshowingtocalendar"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"addRenovationLineItem(flipProjectId: string, item: RenovationLineItemInput): Promise<FlipProject>\" has NONE of its demanded identifier forms (addrenovationlineitem) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"syncShowingToCalendar(bookingId: string): Promise<CalendarSyncStubResult>\" has NONE of its demanded identifier forms (syncshowingtocalendar) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.11 — submitContractorBid(flipProjectId: string, bid: ContractorBidInput): Promise<ContractorBid>
-test("capability.11", () => {
+// capability.15 — getShowingHistory(propertyId: string): Promise<ShowingRecord[]>
+test("capability.15", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["getshowinghistory"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"getShowingHistory(propertyId: string): Promise<ShowingRecord[]>\" has NONE of its demanded identifier forms (getshowinghistory) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.16 — submitShowingFeedback(bookingId: string, feedback: string): Promise<ShowingFeedback>
+test("capability.16", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["submitshowingfeedback"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"submitShowingFeedback(bookingId: string, feedback: string): Promise<ShowingFeedback>\" has NONE of its demanded identifier forms (submitshowingfeedback) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.17 — recordAcquisition(propertyId: string, acquisition: AcquisitionInput): Promise<Acquisition>
+test("capability.17", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["recordacquisition"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"recordAcquisition(propertyId: string, acquisition: AcquisitionInput): Promise<Acquisition>\" has NONE of its demanded identifier forms (recordacquisition) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.18 — createRenovationBudget(propertyId: string): Promise<RenovationBudget>
+test("capability.18", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["createrenovationbudget"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"createRenovationBudget(propertyId: string): Promise<RenovationBudget>\" has NONE of its demanded identifier forms (createrenovationbudget) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.19 — addBudgetLineItem(budgetId: string, item: LineItemInput): Promise<RenovationBudget>
+test("capability.19", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["addbudgetlineitem"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"addBudgetLineItem(budgetId: string, item: LineItemInput): Promise<RenovationBudget>\" has NONE of its demanded identifier forms (addbudgetlineitem) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.20 — submitContractorBid(propertyId: string, bid: ContractorBidInput): Promise<ContractorBid>
+test("capability.20", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
   const forms = ["submitcontractorbid"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"submitContractorBid(flipProjectId: string, bid: ContractorBidInput): Promise<ContractorBid>\" has NONE of its demanded identifier forms (submitcontractorbid) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"submitContractorBid(propertyId: string, bid: ContractorBidInput): Promise<ContractorBid>\" has NONE of its demanded identifier forms (submitcontractorbid) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.12 — advanceFlipPhase(flipProjectId: string, phase: FlipPhase): Promise<FlipProject>
-test("capability.12", () => {
+// capability.21 — advanceFlipPhase(propertyId: string, phase: FlipPhase): Promise<FlipProject>
+test("capability.21", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
   const forms = ["advanceflipphase","advanceflippha"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"advanceFlipPhase(flipProjectId: string, phase: FlipPhase): Promise<FlipProject>\" has NONE of its demanded identifier forms (advanceflipphase, advanceflippha) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"advanceFlipPhase(propertyId: string, phase: FlipPhase): Promise<FlipProject>\" has NONE of its demanded identifier forms (advanceflipphase, advanceflippha) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.13 — computeJobCost(propertyId: string): Promise<JobCost>
-test("capability.13", () => {
+// capability.22 — getJobCost(propertyId: string): Promise<JobCost>
+test("capability.22", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["computejobcost"];
+  const forms = ["getjobcost"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"computeJobCost(propertyId: string): Promise<JobCost>\" has NONE of its demanded identifier forms (computejobcost) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"getJobCost(propertyId: string): Promise<JobCost>\" has NONE of its demanded identifier forms (getjobcost) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.14 — createLease(propertyId: string, input: LeaseInput): Promise<Lease>
-test("capability.14", () => {
+// capability.23 — createLease(propertyId: string, lease: LeaseInput): Promise<Lease>
+test("capability.23", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
   const forms = ["createlease","createlea"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"createLease(propertyId: string, input: LeaseInput): Promise<Lease>\" has NONE of its demanded identifier forms (createlease, createlea) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"createLease(propertyId: string, lease: LeaseInput): Promise<Lease>\" has NONE of its demanded identifier forms (createlease, createlea) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.15 — recordRentPayment(leaseId: string, payment: RentPaymentInput): Promise<RentPayment>
-test("capability.15", () => {
+// capability.24 — addTenant(leaseId: string, tenant: TenantInput): Promise<Tenant>
+test("capability.24", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["recordrentpayment"];
+  const forms = ["addtenant"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"recordRentPayment(leaseId: string, payment: RentPaymentInput): Promise<RentPayment>\" has NONE of its demanded identifier forms (recordrentpayment) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"addTenant(leaseId: string, tenant: TenantInput): Promise<Tenant>\" has NONE of its demanded identifier forms (addtenant) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.16 — createMaintenanceRequest(propertyId: string, input: MaintenanceRequestInput): Promise<WorkOrder>
-test("capability.16", () => {
+// capability.25 — postRentPayment(leaseId: string, payment: PaymentInput): Promise<PaymentRecord>
+test("capability.25", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["postrentpayment"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"postRentPayment(leaseId: string, payment: PaymentInput): Promise<PaymentRecord>\" has NONE of its demanded identifier forms (postrentpayment) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.26 — getRentRoll(propertyId: string): Promise<RentRollEntry[]>
+test("capability.26", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["getrentroll","getrentrol"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"getRentRoll(propertyId: string): Promise<RentRollEntry[]>\" has NONE of its demanded identifier forms (getrentroll, getrentrol) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.27 — createMaintenanceRequest(propertyId: string, request: MaintenanceRequestInput): Promise<MaintenanceRequest>
+test("capability.27", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
   const forms = ["createmaintenancerequest"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"createMaintenanceRequest(propertyId: string, input: MaintenanceRequestInput): Promise<WorkOrder>\" has NONE of its demanded identifier forms (createmaintenancerequest) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"createMaintenanceRequest(propertyId: string, request: MaintenanceRequestInput): Promise<MaintenanceRequest>\" has NONE of its demanded identifier forms (createmaintenancerequest) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.17 — computeRentRoll(portfolioId: string): Promise<RentRoll>
-test("capability.17", () => {
+// capability.28 — getVacancyStatus(propertyId: string): Promise<VacancyStatus>
+test("capability.28", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["computerentroll","computerentrol"];
+  const forms = ["getvacancystatus","getvacancystatu"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"computeRentRoll(portfolioId: string): Promise<RentRoll>\" has NONE of its demanded identifier forms (computerentroll, computerentrol) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"getVacancyStatus(propertyId: string): Promise<VacancyStatus>\" has NONE of its demanded identifier forms (getvacancystatus, getvacancystatu) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.18 — computeVacancy(portfolioId: string, period: DateRange): Promise<VacancyReport>
-test("capability.18", () => {
+// capability.29 — generateLeaseRenewalReminder(leaseId: string): Promise<RenewalReminder>
+test("capability.29", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["computevacancy"];
+  const forms = ["generateleaserenewalreminder","generateleaserenewalremind"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"computeVacancy(portfolioId: string, period: DateRange): Promise<VacancyReport>\" has NONE of its demanded identifier forms (computevacancy) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"generateLeaseRenewalReminder(leaseId: string): Promise<RenewalReminder>\" has NONE of its demanded identifier forms (generateleaserenewalreminder, generateleaserenewalremind) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.19 — scheduleRenewalReminder(leaseId: string, leadTimeDays: number): Promise<RenewalReminder>
-test("capability.19", () => {
-  // Demanded identifier forms (content tokens + canonical stems;
-  // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["schedulerenewalreminder","schedulerenewalremind"];
-  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
-  assert.ok(
-    carried.length > 0,
-    "capability presence proxy FAILED: capability \"scheduleRenewalReminder(leaseId: string, leadTimeDays: number): Promise<RenewalReminder>\" has NONE of its demanded identifier forms (schedulerenewalreminder, schedulerenewalremind) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
-  );
-});
-
-// capability.20 — raiseWorkOrder(propertyId: string, source: WorkOrderSource, input: WorkOrderInput): Promise<WorkOrder>
-test("capability.20", () => {
+// capability.30 — raiseWorkOrder(source: WorkOrderSource, sourceId: string): Promise<WorkOrder>
+test("capability.30", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
   const forms = ["raiseworkorder","raiseworkord"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"raiseWorkOrder(propertyId: string, source: WorkOrderSource, input: WorkOrderInput): Promise<WorkOrder>\" has NONE of its demanded identifier forms (raiseworkorder, raiseworkord) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"raiseWorkOrder(source: WorkOrderSource, sourceId: string): Promise<WorkOrder>\" has NONE of its demanded identifier forms (raiseworkorder, raiseworkord) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.21 — assignCrewTask(workOrderId: string, crewMemberId: string): Promise<CrewTask>
-test("capability.21", () => {
+// capability.31 — buildCrewTaskList(workOrderId: string): Promise<CrewTask[]>
+test("capability.31", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["assigncrewtask"];
+  const forms = ["buildcrewtasklist"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"assignCrewTask(workOrderId: string, crewMemberId: string): Promise<CrewTask>\" has NONE of its demanded identifier forms (assigncrewtask) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"buildCrewTaskList(workOrderId: string): Promise<CrewTask[]>\" has NONE of its demanded identifier forms (buildcrewtasklist) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.22 — recordTimesheet(crewMemberId: string, entry: TimesheetEntry): Promise<Timesheet>
-test("capability.22", () => {
+// capability.32 — logCrewTimeSheet(entry: TimeSheetEntryInput): Promise<TimeSheetEntry>
+test("capability.32", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["recordtimesheet"];
+  const forms = ["logcrewtimesheet"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"recordTimesheet(crewMemberId: string, entry: TimesheetEntry): Promise<Timesheet>\" has NONE of its demanded identifier forms (recordtimesheet) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"logCrewTimeSheet(entry: TimeSheetEntryInput): Promise<TimeSheetEntry>\" has NONE of its demanded identifier forms (logcrewtimesheet) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.23 — runWeeklyPayroll(week: DateRange): Promise<PayrollRun>
-test("capability.23", () => {
+// capability.33 — computeWeeklyPayroll(weekStart: Date): Promise<PayrollSummary>
+test("capability.33", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["runweeklypayroll","runweeklypayrol"];
+  const forms = ["computeweeklypayroll","computeweeklypayrol"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"runWeeklyPayroll(week: DateRange): Promise<PayrollRun>\" has NONE of its demanded identifier forms (runweeklypayroll, runweeklypayrol) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"computeWeeklyPayroll(weekStart: Date): Promise<PayrollSummary>\" has NONE of its demanded identifier forms (computeweeklypayroll, computeweeklypayrol) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.24 — recordPurchase(materialId: string, purchase: PurchaseInput): Promise<PurchaseRecord>
-test("capability.24", () => {
+// capability.34 — addSupplyItem(propertyId: string, item: SupplyItemInput): Promise<SupplyItem>
+test("capability.34", () => {
+  // Demanded identifier forms (content tokens + canonical stems;
+  // stopword-free): presence of ANY of them in the scanned files counts.
+  const forms = ["addsupplyitem"];
+  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
+  assert.ok(
+    carried.length > 0,
+    "capability presence proxy FAILED: capability \"addSupplyItem(propertyId: string, item: SupplyItemInput): Promise<SupplyItem>\" has NONE of its demanded identifier forms (addsupplyitem) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+  );
+});
+
+// capability.35 — recordPurchase(supplyItemId: string, purchase: PurchaseInput): Promise<PurchaseRecord>
+test("capability.35", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
   const forms = ["recordpurchase","recordpurcha"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"recordPurchase(materialId: string, purchase: PurchaseInput): Promise<PurchaseRecord>\" has NONE of its demanded identifier forms (recordpurchase, recordpurcha) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"recordPurchase(supplyItemId: string, purchase: PurchaseInput): Promise<PurchaseRecord>\" has NONE of its demanded identifier forms (recordpurchase, recordpurcha) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
 
-// capability.25 — checkReorderFlags(): Promise<ReorderFlag[]>
-test("capability.25", () => {
+// capability.36 — checkReorderFlag(supplyItemId: string): Promise<ReorderFlagResult>
+test("capability.36", () => {
   // Demanded identifier forms (content tokens + canonical stems;
   // stopword-free): presence of ANY of them in the scanned files counts.
-  const forms = ["checkreorderflags","checkreorderflag"];
+  const forms = ["checkreorderflag"];
   const carried = __capScanFiles.filter((f) => __capCarries(f, forms));
   assert.ok(
     carried.length > 0,
-    "capability presence proxy FAILED: capability \"checkReorderFlags(): Promise<ReorderFlag[]>\" has NONE of its demanded identifier forms (checkreorderflags, checkreorderflag) in any emitted file — ../src/generated/check-reorder-flags.ts, ../src/generated/chunk-0.ts, ../src/generated/compute-rent-roll.ts, ../src/generated/create-flip-project.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
+    "capability presence proxy FAILED: capability \"checkReorderFlag(supplyItemId: string): Promise<ReorderFlagResult>\" has NONE of its demanded identifier forms (checkreorderflag) in any emitted file — ../src/generated/get-property.ts. Identifier presence is a PROXY: this row checks name/source-text presence only, never behavior."
   );
 });
