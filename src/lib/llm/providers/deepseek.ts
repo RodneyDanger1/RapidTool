@@ -587,7 +587,20 @@ function tapLlmCall(record: LlmCallTapRecord): void {
   const tap = llmCallTap;
   if (!tap) return;
   try {
-    tap(record);
+    const ret = (tap as (r: LlmCallTapRecord) => unknown)(record);
+    // W26 H3 (fixes/266): the try/catch alone only contained SYNCHRONOUS
+    // throws. A tap may be async (an `async` function is assignable to the
+    // `=> void` tap type), and a rejection it returns would surface as an
+    // unhandled rejection — which Node turns into a fatal error, killing the
+    // very CLI run this telemetry observes (repro before the fix:
+    // probe-h3-tap-crash.ts exits 1 at this call). Contain the promise
+    // channel too: swallow the rejection here, never leave it floating.
+    const maybeThenable = ret as { then?: unknown } | null | undefined;
+    if (maybeThenable !== null && maybeThenable !== undefined && typeof maybeThenable.then === "function") {
+      (ret as PromiseLike<unknown>).then(undefined, () => {
+        /* telemetry must never throw into the call it observes */
+      });
+    }
   } catch {
     /* telemetry must never throw into the call it observes */
   }

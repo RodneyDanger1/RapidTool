@@ -6,7 +6,8 @@ synthesis → verification → a paste-ready **Agent Packet** — all behind evi
 gates, an append-only decision ledger, and a hard no-fabrication **honesty contract**.
 
 **Two surfaces, one engine:** a browser app (TanStack Start + React 19, `http://localhost:8080`)
-and a file-based headless CLI (`scripts/rapidtool-cli.mjs`, **35 verbs**) that drives the same
+and a file-based headless CLI (`scripts/rapidtool-cli.mjs`, **37 verbs** — re-derived:
+`grep -c 'case "' scripts/rapidtool-cli.mjs` = 37) that drives the same
 pure engine with no browser and no server.
 
 > **Status (2026-09-24 — the W12 boundary gate, the latest full gate of record, `fixes/218` §5):**
@@ -79,7 +80,7 @@ brief ──► intake ──► P0..P12 phase engine (pure, deterministic, head
 Key files: `src/lib/engine.ts` · `headless.ts` · `codegen.server.ts` (P6 + chunk planning) ·
 `scaffold.ts` (tree writer) · `compile-check.server.ts` + `node-runner.server.ts` (bounded
 runner — **not a sandbox**) · `verify.server.ts` + `dod.ts` (oracles) · `doctor.ts` (environment
-truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-cli.mjs` (35 verbs).
+truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-cli.mjs` (37 verbs).
 
 ---
 
@@ -100,7 +101,7 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
 | `str_replace` patch primitive (unique-match + graded fuzzy) | ✅ core | `src/lib/patch.ts` (21 tests). **Not yet wired into P6/repair — carried past W6 (see `remainingwaves.md`)** |
 | One-seam policy engine (default-deny approvals) | ✅ core | `src/lib/policy.ts` (27 tests). **Routing wired in W5** (all 3 sites, seats byte-identical; bypass pins → W6-L2) |
 | UI: console, phase rail, HITL dock, runtime log, **command palette (⌘K)**, typed timeline | ✅ | `console.tsx` + `cmd-palette.tsx` + `runtime-timeline-pane.tsx` |
-| Headless CLI: 35 verbs, JSON output, doctor, eval harness | ✅ | `scripts/rapidtool-cli.mjs`; `README-cli.md` (doc-contract tested) |
+| Headless CLI: 37 verbs, JSON output, doctor, eval harness + the read-only `eval` scorecard verb | ✅ | `scripts/rapidtool-cli.mjs`; `README-cli.md` (doc-contract tested) |
 | Stability gate with flake detection | ✅ | `bash scripts/gate.sh [--double]` (first green run 2026-09-16) |
 
 ## What it does **not** do yet — the honest limits
@@ -142,7 +143,7 @@ src **1811/1811**, second `gate.sh` green. **Every landing is verified against b
 - `fixes/216b…216n_*.md` — per-workstream landing logs (what/why/file:line/evidence).
 - `wave_plans/W4–W6/lane-*.md` — the per-lane dispatch plans the agents actually followed.
 - `RESUME.md` — full session handoff + hard rules + settled decisions.
-- `research/multiagent/*.md` (36 dossiers) — the analysis program behind all of it.
+- `research/multiagent/*.md` (100 files today — `git ls-files research/multiagent/ | wc -l` = 100) — the analysis program behind all of it.
 - **`remainingwaves.md` — every remaining wave, task by task, with the files each touches,
   estimates, likely bugs, and the tests each needs.** ← start there for "what's left".
 
@@ -167,7 +168,7 @@ re-run. Where reality is behind, the docs say so, the packets say so, and `docto
 | `AGENTS.md` | Agent contract: mandatory reads, working rules |
 | `README-cli.md` (in `scripts/`) | CLI verb reference (doc-contract tested) |
 | `AGENT_GUIDE.md`, `packet-e2e.md` | Operational guides |
-| `research/multiagent/` | The 36-dossier analysis program (what/why behind every fix) |
+| `research/multiagent/` | The analysis program (100 files today; what/why behind every fix) |
 
 ## License
 

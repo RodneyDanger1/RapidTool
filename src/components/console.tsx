@@ -68,6 +68,9 @@ import { renderMarkdownBlocks } from "@/lib/render";
 // the history type is declared structurally (matches chat.server.ts's shape).
 import { chatContextInfo, chatHistoryTurns, chatOnce, chatStampVersion, failedSendPrompt } from "@/lib/chat";
 import { fixturesReview } from "@/lib/fixtures.review";
+// W24 U1: the row shape the review surface renders (pure/client-safe data
+// module — types only, so no IO enters the client bundle).
+import type { FixtureReviewRow } from "@/lib/fixtures";
 import { ERROR_CODE_DOC } from "@/lib/errors";
 import { buildClientDiagnosis, reportRt, rtSnapshot, setBusyProbe } from "@/lib/rt-client";
 import { WILD_STEP_BUDGET_MS } from "@/lib/rt-events";
@@ -166,7 +169,11 @@ const RUN_TABS: { id: RunTab; label: string; purpose: string; tier: "primary" | 
   { id: "design", label: "Design", purpose: "Colors, type and spacing from Phase 6", tier: "advanced" },
   { id: "diagram", label: "Diagram", purpose: "A picture of how the build fits together", tier: "advanced" },
   { id: "runtime", label: "Runtime log", purpose: "Operator log and diagnostics", tier: "advanced" },
-  { id: "fixtures", label: "Fixtures", purpose: "Review eval fixtures against their run-side bars", tier: "advanced" },
+  // T5.2-A polish (W24 U1): "Fixtures" collided with the OTHER fixtures concept
+  // the console now surfaces — a project's own `acceptanceFixtures` (brief-
+  // fixtures.ts) in the PendingFixturesBanner. The corpus rows this tab shows
+  // are the eval corpus (`research/eval-corpus`), so the label says so.
+  { id: "fixtures", label: "Eval fixtures", purpose: "Corpus fixtures + their run-side bars (read-only)", tier: "advanced" },
 ];
 
 /** aria-label for one rendered tablist slice — derived from the same array the
@@ -434,10 +441,29 @@ const NEXT_ACTION_BUTTON: Record<UiNextAction["kind"], string | null> = {
  * guard (OpenHands `isServerFallbackSummary`) refuses a `why` that is really
  * serialized JSON and falls back to the documented generic sentence.
  */
-/** T5.2-A — fixtures review surface (the human seat). Read-only: corpus
- *  fixtures next to their run-side grader bars, with the loader's honesty
- *  label carried verbatim. Approving/rejecting records a decision through
- *  the decision path — this pane never edits a bar (run-side authority). */
+/** Plain-language reading of `fixtures.ts`'s `reviewState` vocabulary. The
+ *  machine token stays visible in the title attribute, so the human reads a
+ *  sentence while nothing is hidden or renamed (111 §2 #2, recognition over
+ *  recall). Total by type ⇒ a row can never index a missing key. */
+const FIXTURE_REVIEW_STATE_TEXT: Record<FixtureReviewRow["reviewState"], string> = {
+  "awaiting-decision": "awaiting a human decision",
+  "bar-missing": "no run-side bar for this slug",
+};
+
+/** T5.2-A — fixtures review surface (corpus read-only seat). Corpus fixtures
+ *  next to their run-side grader bars, with the loader's honesty label carried
+ *  verbatim.
+ *
+ *  DECLARE-OR-STRIKE (W24 U1): this panel renders NO approve/reject control,
+ *  and this comment no longer claims one. The decision seat it used to describe
+ *  has no write path: `fixtures.server.ts` is read-only by construction, the
+ *  store has no fixture action, and `fixtures.ts`'s `FixtureVerdict` /
+ *  `FixtureDecisionEntry` have zero consumers in `src/` (grep, W24). An approve
+ *  button here would record nothing — so the pane shows the decision STATE and
+ *  states its own scope, never a fake seat. Approval today is the CLI's single
+ *  flip path (`brief-fixtures.ts approveFixtureCases`, called by `fixtures
+ *  --approve`); the store action that would make this a human seat is registered
+ *  in `fixes/263_lane5_ui_console.md` §3 for the file's real owner. */
 function FixturesPanel() {
   const [data, setData] = useState<Awaited<ReturnType<typeof fixturesReview>> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -457,18 +483,40 @@ function FixturesPanel() {
   }, []);
   if (error) return <p className="px-5 py-4 text-sm text-muted">Fixtures unavailable: {error}</p>;
   if (!data) return <p className="px-5 py-4 text-sm text-muted">Loading fixtures…</p>;
+  const awaiting = data.rows.filter((r) => r.reviewState === "awaiting-decision").length;
+  const barMissing = data.rows.length - awaiting;
   return (
     <div className="scroll-thin max-h-[65vh] overflow-y-auto px-5 py-4">
       <p className="text-xs text-muted">{data.label}</p>
+      {/* The loader's label says "approving here records a decision"; this
+          console has no such control yet, so the scope is stated, not implied. */}
+      <p className="mt-1 text-xs text-faint">
+        This console shows the review rows only — no approve/reject control is wired yet, so nothing
+        here can record a decision. Approving a fixture is a CLI action
+        (<span className="font-mono">fixtures --approve --ids …</span>).
+      </p>
       {data.problems.length > 0 ? (
-        <ul className="mt-2 list-disc pl-5 text-xs text-muted">
+        <ul className="mt-2 list-disc pl-5 text-xs text-warn">
           {data.problems.map((p) => (
             <li key={p}>{p}</li>
           ))}
         </ul>
       ) : null}
-      {!data.ok ? (
+      {data.corpusDir ? (
+        <p className="mt-2 font-mono text-[10px] break-all text-faint">corpus: {data.corpusDir}</p>
+      ) : null}
+      {data.ok ? (
+        <p className="mt-2 text-[11px] text-muted">
+          {data.rows.length} fixture(s) · {awaiting} awaiting a human decision · {barMissing} with no
+          run-side bar
+        </p>
+      ) : (
         <p className="mt-2 text-xs text-muted">corpus dir unreadable — see the problems above.</p>
+      )}
+      {data.ok && data.rows.length === 0 ? (
+        <p className="mt-3 text-xs text-muted">
+          No corpus fixtures under that directory — nothing to review.
+        </p>
       ) : null}
       <ol className="mt-3 space-y-2">
         {data.rows.map((r) => (
@@ -480,15 +528,102 @@ function FixturesPanel() {
             <p className="mt-1 text-xs text-muted">{r.acceptanceBar}</p>
             <p className="mt-1 text-[11px] text-muted">
               {r.requiredIdentifiers.length} required identifier(s) ·{" "}
-              <span className="font-mono">{r.reviewState}</span>
+              <span className="font-mono" title={`fixtures.ts reviewState: ${r.reviewState}`}>
+                {FIXTURE_REVIEW_STATE_TEXT[r.reviewState]}
+              </span>
             </p>
             {r.graderProblem ? (
               <p className="mt-1 text-xs text-muted">bar problem: {r.graderProblem}</p>
+            ) : null}
+            {/* W24 U1: the loader already ships nouns/capabilities/baseline +
+                the fixture body's provenance headings — they were parsed and
+                dropped on the floor here. Additive disclosure, no new source. */}
+            {r.expectedNouns.length || r.expectedCapabilities.length || r.baseline || r.provenanceHeadings.length ? (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-[11px] text-muted">fixture details</summary>
+                <div className="mt-1 space-y-0.5 text-[11px] text-muted">
+                  {r.baseline ? (
+                    <p>
+                      baseline: <span className="font-mono">{r.baseline}</span>
+                    </p>
+                  ) : null}
+                  {r.expectedNouns.length ? <p>expected nouns: {r.expectedNouns.join(", ")}</p> : null}
+                  {r.expectedCapabilities.length ? (
+                    <p>expected capabilities: {r.expectedCapabilities.join(", ")}</p>
+                  ) : null}
+                  {r.provenanceHeadings.length ? (
+                    <p>provenance headings: {r.provenanceHeadings.join(", ")}</p>
+                  ) : null}
+                </div>
+              </details>
             ) : null}
           </li>
         ))}
       </ol>
     </div>
+  );
+}
+
+/**
+ * T5.2-A — the human seat for a project's OWN acceptance fixtures
+ * (`project.acceptanceFixtures`, `brief-fixtures.ts`). W24 U1: before this
+ * banner the console had ZERO fixture hits (the module doc counted 0), so a
+ * project could sit at `approval:"pending"` forever with nothing on screen
+ * saying so — and `approvedAcceptanceFixtures` ships only a FULLY approved set
+ * (a partial set is left out of emit entirely), which made that silence costly.
+ *
+ * READ-ONLY BY CONSTRUCTION. The flip must go through `brief-fixtures.ts
+ * approveFixtureCases` (:588 — strips a forged `decidedBy`, never mints
+ * `"human"`), the single path the CLI's `fixtures --approve` calls; committing
+ * it needs a store action, and the store has none, so a button here would
+ * either record nothing or (worse) mint a second approval path by writing
+ * `approval:"approved"` inline — exactly the T5.2-A trap. So the banner names
+ * the pending cases + the one real path instead (registered in
+ * `fixes/263_lane5_ui_console.md` §3 for store.ts's owner).
+ *
+ * Truth is recomputed from `project` on EVERY render, never cached (the row's
+ * "watch the banner's truth condition"): any case whose `approval` is not
+ * `"approved"` counts as pending — mirroring `chat.server.ts`'s defensive
+ * count — and `engine.ts`'s brief-hash rule reverts approvals to pending when
+ * the brief changes, so the count can rise on its own.
+ */
+function PendingFixturesBanner({ project }: { project: Project }) {
+  const cases = project.acceptanceFixtures ?? [];
+  const pending = cases.filter((c) => c.approval !== "approved");
+  if (pending.length === 0) return null;
+  const ids = pending.map((c) => c.id);
+  const shown = ids.slice(0, 8);
+  const slug = slugName(project.name);
+  return (
+    <section
+      className="border-b border-line bg-warn/5 px-5 py-3"
+      aria-label="Acceptance fixtures awaiting a human decision"
+    >
+      <p className="font-mono text-[10px] font-medium tracking-widest text-warn uppercase">
+        Awaiting your decision · acceptance fixtures
+      </p>
+      <p className="mt-1.5 text-sm text-fg">
+        {pending.length} of {cases.length} acceptance fixture case(s) read{" "}
+        <span className="font-mono">pending</span> — not functional until a human approves the whole
+        set; a partially approved set is left out of the emitted tree entirely.
+      </p>
+      <p className="mt-1 text-xs text-muted">
+        case id(s):{" "}
+        <span className="font-mono">
+          {shown.join(", ")}
+          {ids.length > shown.length ? ` +${ids.length - shown.length} more` : ""}
+        </span>
+      </p>
+      <p className="mt-1 text-xs leading-relaxed text-muted">
+        Approving is a CLI action (the single flip path), run on this project&apos;s exported file
+        from the RapidTool folder:{" "}
+        <code className="rounded-sm bg-raised px-1 font-mono text-[11px]">
+          {`node --experimental-strip-types scripts/rapidtool-cli.mjs fixtures --project "${slug}.json" --approve --ids ${shown.join(",")}`}
+        </code>{" "}
+        (or <span className="font-mono">--approve-all</span>). This console cannot flip the approval
+        itself — no store action exists yet — so re-import the file here after approving.
+      </p>
+    </section>
   );
 }
 
@@ -2316,6 +2451,21 @@ export function RunScreen({ id }: { id: string }) {
       keywords: ["report", "ingest", "json", "paste", "agent"],
       run: () => setReportOpen((v) => !v),
     },
+    // W24 U1 ("link tabs logically"): every panel in the strip is also a palette
+    // entry, generated from the SAME `RUN_TABS` array the triggers render from —
+    // so a panel the strip hides by default (e.g. "Eval fixtures", behind "More
+    // panels") is findable by name from the palette, and `run` is the same
+    // `setTab` the strip's `onValueChange` calls (never a second path). `verb:
+    // null` is the honest chip: switching a UI tab has no CLI verb.
+    ...RUN_TABS.map((t): CmdPaletteEntry => ({
+      id: `tab-${t.id}`,
+      group: "Go to panel",
+      label: `Go to panel: ${t.label}`,
+      description: t.purpose,
+      verb: null,
+      keywords: ["panel", "tab", "switch", t.id],
+      run: () => setTab(t.id),
+    })),
   ];
 
   return (
@@ -2885,6 +3035,8 @@ export function RunScreen({ id }: { id: string }) {
             }
           />
 
+          <PendingFixturesBanner project={project} />
+
           <PhaseProgressRail project={project} />
 
           <WildConsole project={project} />
@@ -2936,6 +3088,11 @@ export function RunScreen({ id }: { id: string }) {
                   type="button"
                   onClick={() => setAdvancedOpen((v) => !v)}
                   aria-expanded={showAdvanced}
+                  title={
+                    activeIsAdvanced && !advancedOpen
+                      ? "The open panel lives in this tier, so its trigger stays visible until you switch back to a primary panel — this pre-collapses the section for when you do."
+                      : undefined
+                  }
                   className="ml-auto inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-muted hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
                   {showAdvanced ? "Fewer panels" : `More panels (${advancedTabCount})`}
@@ -2951,6 +3108,17 @@ export function RunScreen({ id }: { id: string }) {
                     <RunTabTrigger key={t.id} tab={t} />
                   ))}
                 </Tabs.List>
+              ) : null}
+              {/* W24 U1: while an advanced tab is the OPEN panel, `activeIsAdvanced`
+                  keeps the tier open, so the toggle above changes nothing on
+                  screen — a control that reads as broken. State that plainly
+                  instead of leaving the human to guess (the toggle is kept, and
+                  its click still pre-collapses the tier for when they leave). */}
+              {activeIsAdvanced && !advancedOpen ? (
+                <p className="mt-1 text-[10px] leading-tight text-faint">
+                  This panel lives in “More panels”, so its trigger stays visible while it is open —
+                  the toggle collapses the section once you switch back to a primary panel.
+                </p>
               ) : null}
             </div>
 

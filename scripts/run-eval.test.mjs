@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   acceptanceFailReason,
+  beginTrialCallTap,
   briefLeakScan,
   buildSummary,
   checkAcceptance,
@@ -14,15 +15,20 @@ import {
   classifyRunOutcome,
   corpusDomainIndex,
   drainPipeline,
+  endTrialCallTap,
   finishRunMarker,
+  formatFundednessLines,
   formatPreflightLines,
   graderFileFor,
   graderFreezeFingerprint,
   graderLeakScan,
+  installLlmCallTap,
   isTerminalDrainOutcome,
   keyedRunDecision,
   keylessSkipNotices,
   listCorpusEntries,
+  llmCallTapIsInstalled,
+  llmEvidenceFromCallRecords,
   loadGrader,
   markerPathFor,
   parseGrader,
@@ -31,6 +37,7 @@ import {
   passesAcceptance,
   planTargets,
   priorFor,
+  probeFundedness,
   probeP6Reachability,
   readRunMarker,
   RUN_MARKER_NAME,
@@ -621,9 +628,14 @@ test("OV-35: preflight maps not-configured/401/402/400 to distinct coded output"
       "RT_E_LLM_REJECTED",
     ],
     [
+      // W24/B2 (fixes/263): W23-L1 gave the vendor's balance class its OWN
+      // class+code (`RT_E_LLM_NO_BALANCE` — never the session budget
+      // `RT_E_BUDGET_EXHAUSTED`) and the fundedness verdict reads
+      // `class === "no-balance"`; this pin was left on the pre-W23-L1 names and
+      // was RED at HEAD.
       { configured: true, wire: { attempted: true, ok: false, httpStatus: 402, code: "RT_E_LLM_REJECTED", error: "DeepSeek account balance exhausted (HTTP 402)" } },
-      "balance-exhausted",
-      "RT_E_BUDGET_EXHAUSTED",
+      "no-balance",
+      "RT_E_LLM_NO_BALANCE",
     ],
     [
       { configured: true, wire: { attempted: true, ok: false, httpStatus: 400, code: "RT_E_LLM_REJECTED", error: "DeepSeek rejected the request (HTTP 400: model not found)", requestedModel: "deepseek-v4-flash" } },
@@ -1004,3 +1016,177 @@ test("OV-7: M7 prior resolution — rows resolve per slug across domains; a firs
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// W24/B2 (fixes/263_lane2_periphery_bughunt.md) — the W23-L1 eval wires.
+// Every fetch below is STUBBED: no request leaves the process, no keyed call.
+// ---------------------------------------------------------------------------
+
+/** A dummy credential for the stubbed-fetch calls. It can never reach the
+ *  network: each provider call injects its own `fetch`. */
+const W24_B2_DUMMY_KEY = "w24-b2-dummy-not-a-real-key";
+
+test("W24/B2 — a THROWING tap never breaks the call it observes (deepseek.ts tapLlmCall)", async () => {
+  const ds = await import("../src/lib/deepseek.server.ts");
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  // Keyless: the honest not-configured refusal still dispatches the tap, so the
+  // guard is provable without any key, fetch or network.
+  delete process.env.DEEPSEEK_API_KEY;
+  ds.setLlmCallTap(() => {
+    throw new Error("hostile tap — must never reach the caller");
+  });
+  try {
+    const res = await ds.completeDeepSeek("w24/b2 hostile tap");
+    assert.equal(res.ok, false);
+    assert.equal(res.code, "RT_E_LLM_NOT_CONFIGURED", "the refusal is the provider's own, not the tap's");
+  } finally {
+    ds.setLlmCallTap(null); // back to the byte-identical no-op path
+    if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+test("W24/B2 — the provider call tap is WIRED: install → window → live record → folded evidence", async () => {
+  const ds = await import("../src/lib/deepseek.server.ts");
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = W24_B2_DUMMY_KEY;
+  try {
+    // The driver's install must succeed against the real provider surface…
+    assert.equal(await installLlmCallTap(), true, "the provider module must expose setLlmCallTap");
+    assert.equal(llmCallTapIsInstalled(), true);
+    // …and the SAME module instance the keyed leg calls must then be observed.
+    beginTrialCallTap();
+    const bodies = [];
+    const res = await ds.completeDeepSeek("w24/b2 tap wire", {
+      maxTokens: 1,
+      timeoutMs: 5_000,
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(init.body));
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl-w24b2",
+            model: "deepseek-flash",
+            choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 11, completion_tokens: 3 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+    assert.equal(bodies.length, 1, "the stubbed fetch is the only transport — no network");
+    assert.equal(res.ok, true);
+    const records = endTrialCallTap();
+    assert.equal(records.length, 1, "the installed tap must observe the call inside its window");
+    assert.equal(records[0].ok, true);
+    assert.equal(records[0].requestedModel, "deepseek-v4-flash");
+    assert.equal(records[0].servedModel, "deepseek-flash", "the SERVED id is read back, never the requested alias");
+    assert.equal(records[0].promptTokens, 11);
+    assert.equal(records[0].completionTokens, 3);
+    const ev = llmEvidenceFromCallRecords(records);
+    assert.deepEqual(ev.servedModels, ["deepseek-flash"]);
+    assert.equal(ev.usage.totalTokens, 14);
+    assert.equal(ev.llmCalls, 1);
+    assert.equal(ev.failedCalls, 0);
+    assert.equal(typeof ev.estimatedCostUsd, "number");
+    assert.ok(ev.estimatedCostUsd > 0, "a measured call must never price at 0 (the B2-1 fabricated-zero trap)");
+    // The window is per-trial: nothing leaks into the next one, and an empty
+    // window is reported as OBSERVED-nothing (never upgraded into a bill claim).
+    beginTrialCallTap();
+    assert.deepEqual(endTrialCallTap(), []);
+    const none = llmEvidenceFromCallRecords([]);
+    assert.equal(none.llmCalls, 0);
+    assert.match(none.costBasis, /OBSERVED no calls/, "an empty window must not claim 'nothing billed'");
+  } finally {
+    if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+test("W24/B2 — probeFundedness: 402 ⇒ funded:false · answered 200 ⇒ funded:true · keyless ⇒ unaskable", async () => {
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  try {
+    // (a) keyless — unaskable by construction, ZERO network I/O.
+    delete process.env.DEEPSEEK_API_KEY;
+    let keylessFetches = 0;
+    const off = await probeFundedness({
+      fetchImpl: async () => {
+        keylessFetches += 1;
+        throw new Error("a keyless probe must not reach the network");
+      },
+    });
+    assert.equal(keylessFetches, 0);
+    assert.equal(off.configured, false);
+    assert.equal(off.attempted, false);
+    assert.equal(off.funded, null, "keyless is neither funded nor unfunded — it is unaskable");
+    assert.equal(off.code, "RT_E_LLM_NOT_CONFIGURED");
+
+    // (b) dummy key + HTTP 402 ⇒ funded:false, ONE attempt, cheapest call.
+    process.env.DEEPSEEK_API_KEY = W24_B2_DUMMY_KEY;
+    const bodies = [];
+    const p402 = await probeFundedness({
+      fetchImpl: async (_url, init) => {
+        bodies.push(JSON.parse(init.body));
+        return new Response(JSON.stringify({ error: { message: "Insufficient Balance" } }), {
+          status: 402,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    assert.equal(bodies.length, 1, "402 is not retryable — exactly one attempt");
+    assert.equal(bodies[0].max_tokens, 1, "the probe must be the cheapest possible call");
+    assert.equal(p402.funded, false, "a broke wallet stops the scored trials");
+    assert.equal(p402.class, "no-balance");
+    assert.equal(p402.code, "RT_E_LLM_NO_BALANCE");
+    assert.equal(p402.httpStatus, 402);
+    assert.ok(!JSON.stringify(p402).includes(W24_B2_DUMMY_KEY), "the key VALUE never enters the result");
+    const lines = formatFundednessLines(p402);
+    assert.ok(lines.some((l) => l.includes("funded=false")));
+    assert.ok(lines.some((l) => l.includes("NO-BALANCE")), "the ONE renderer must name the stop");
+
+    // (c) an ANSWERED 200 whose 1-token window truncates to empty content ⇒
+    //     funded:true (the account paid). This pins the classify ladder fix:
+    //     before it, the 200 status hit the generic `status !== null` branch and
+    //     `empty-completion` was unreachable whenever a status was recorded.
+    const p200 = await probeFundedness({
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            model: "deepseek-flash",
+            choices: [{ message: { content: "" }, finish_reason: "length" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+    assert.equal(p200.class, "empty-completion");
+    assert.equal(p200.funded, true, "an answered 200 means the account paid — never read as a refusal");
+  } finally {
+    if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+test("W24/B2 — WIRING GUARD: the tap install, the fold gate, the fundedness renderer and its skip row stay wired", () => {
+  // These four seams are only observable in a LIVE keyed run (impossible here:
+  // the account is unfunded), so the regression guard is their call sites in
+  // the driver source. A future edit that re-orphans any of them goes red.
+  const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
+  assert.match(
+    src,
+    /^\s*tapInstalled = await installLlmCallTap\(\);/m,
+    "run-eval.mjs must INSTALL the provider tap (B2-1: it was a dead handler; every keyed trial fabricated $0 evidence)",
+  );
+  assert.match(
+    src,
+    /llmEvidenceFromCallRecords\(\s*\n?\s*mode === "keyed" && !llmCallTapIsInstalled\(\) \? null : callRecords,/,
+    "the fold must be gated on the tap being installed (nulls, never fabricated zeros)",
+  );
+  assert.match(src, /for \(const line of formatFundednessLines\(fundedness\)\) console\.log\(line\);/);
+  assert.match(src, /kind: "account-unfunded"/, "the fundedness stop must record a skip row (it claimed to)");
+  // …and the shape it pushes is the one the summary records verbatim:
+  const summary = buildSummary([], [
+    { slug: null, kind: "account-unfunded", reason: "fundedness probe stopped the run: (RT_E_LLM_NO_BALANCE)" },
+  ]);
+  assert.equal(summary.skipped, 1);
+  assert.equal(summary.skips[0].kind, "account-unfunded");
+});
+

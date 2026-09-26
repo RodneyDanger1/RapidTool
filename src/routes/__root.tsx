@@ -1,9 +1,11 @@
 import { useEffect } from "react";
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { AuthProvider } from "@/lib/auth/provider";
-import { AppNotFoundComponent } from "@/lib/error-component.tsx";
-import { installRtClient } from "@/lib/rt-client.ts";
-import { PreviewHostBridge } from "@/components/preview-host-bridge";
+import { AppNotFoundComponent } from "@/lib/error-component";
+import { installRtClient } from "@/lib/rt-client";
+// Cross-component imports carry explicit extensions, per the in-repo convention
+// (console.tsx docs the same rule; routes import "@/components/console.tsx").
+import { PreviewHostBridge } from "@/components/preview-host-bridge.tsx";
 import appCss from "../styles.css?url";
 
 const APP_NAME = "RapidTool";
@@ -38,7 +40,7 @@ export const Route = createRootRoute({
         content:
           "RapidTool is an autonomous software agency. Research, architect, isolate, and ship through a 13-phase governed graph.",
       },
-      { name: "theme-color", content: "#0b0c0e" },
+      { name: "theme-color", content: "#0a0c0b" },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
@@ -60,13 +62,17 @@ export const Route = createRootRoute({
         {/* Apply the persisted theme before React hydrates so there is no
             flash of the wrong theme. `data-theme` lives on <html>, whose
             suppressHydrationWarning covers this client-only attribute. The
-            theme-color meta defaults to the dark --color-bg (#0b0c0e); when
-            the persisted theme is light it is moved to the light --color-bg
-            (#f6f7f4) so browser/PWA chrome matches the surface. */}
+            theme-color meta defaults to the dark --color-bg (#0a0c0b — the
+            exact value @theme declares in styles.css); when the persisted
+            theme is light it is moved to the light --color-bg (#edf3f0) so
+            browser/PWA chrome matches the surface. W24 U2: both hexes used to
+            be stale copies of an older palette (#0b0c0e / #f6f7f4) that no
+            token in styles.css matched, so the chrome tint drifted from the
+            painted background in both themes. */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              'try{var t=localStorage.getItem("rapid.theme");if(t==="light"){document.documentElement.setAttribute("data-theme","light");var m=document.querySelector("meta[name=theme-color]");if(m)m.setAttribute("content","#f6f7f4");}else if(t==="dark"){document.documentElement.setAttribute("data-theme","dark");}}catch(e){/* best-effort flash prevention: localStorage.getItem throws SecurityError when storage is blocked (sandboxed preview / privacy mode). Ignoring it leaves the default dark theme, which is the documented default; the hydrated toggle in console.tsx still applies and persists the choice for the session. */}',
+              'try{var t=localStorage.getItem("rapid.theme");if(t==="light"){document.documentElement.setAttribute("data-theme","light");var m=document.querySelector("meta[name=theme-color]");if(m)m.setAttribute("content","#edf3f0");}else if(t==="dark"){document.documentElement.setAttribute("data-theme","dark");}}catch(e){/* best-effort flash prevention: localStorage.getItem throws SecurityError when storage is blocked (sandboxed preview / privacy mode). Ignoring it leaves the default dark theme, which is the documented default; the hydrated toggle in console.tsx still applies and persists the choice for the session. */}',
           }}
         />
       </head>

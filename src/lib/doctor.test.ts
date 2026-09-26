@@ -379,7 +379,7 @@ describe("OV-9 — productComplete derives from real project state", () => {
     assert.deepEqual(fired.gaps, []);
   });
 
-  it("the REAL café export refuses on its named leftover; dropping exactly that file flips the verdict", () => {
+  it("the REAL café export refuses on real bytes — the in-tree assembly barrel is exempt (§P2), the counted census is not", () => {
     const real = readRealExport("coffeehouse2home-property-ledger");
     const tree = real.generatedTree as Array<{ path: string }>;
     assert.ok(Array.isArray(tree) && tree.length > 0, "the tracked export still carries a generatedTree");
@@ -389,26 +389,44 @@ describe("OV-9 — productComplete derives from real project state", () => {
     // takes the typed shape. Same seam-cast the product itself uses
     // (doctor.ts `productCompleteFromProject`: validate, then `as Project`).
     const t = archTrace(real as Project);
-    assert.deepEqual(t.stubFiles, ["src/generated.ts"], "refusal names the real leftover (a reexport-only barrel)");
-    assert.deepEqual(t.missing, [], "…and it is NOT a missing capability — the leftover IS the reason");
+    // Drift repair (fixes/263 L1): the live tracked blob is now the later
+    // single-chunk keyed run's export (`src/generated/get-property.ts`, no
+    // barrel), so the refusal ground on the CURRENT bytes is counted, not
+    // named: un-implemented capabilities, with no stub file at all.
+    assert.deepEqual(t.stubFiles, [], "no tree file is a stub on the current tracked bytes");
+    assert.ok(t.missing.length > 0, "the refusal ground is un-implemented capabilities (counted)");
 
-    // Differential on real bytes: this export with ONLY the named leftover
-    // dropped is arch-complete → the verdict tracks content, not a flag.
-    const before = JSON.stringify(real);
-    const kept = tree.filter((f) => !t.stubFiles.includes(f.path));
-    assert.equal(kept.length, tree.length - 1);
-    assert.equal(productCompleteFromProject({ ...real, generatedTree: kept }), true);
-    assert.equal(JSON.stringify(real), before, "the producer reads the blob, it never mutates it");
+    // Differential on real bytes: the historic tracked run export — the bytes
+    // the W23 §P2 exemption was derived from — carries the 5-file tree whose
+    // assembly barrel `src/generated.ts` reexports ONLY in-tree files. That is
+    // exempt, not a leftover: the arch bar is met, so the verdict tracks
+    // content rather than a flag. (E-15-style out-of-tree leftovers stay stubs.)
+    const historic = readRealExport("coffeehouse2home-property-ledger.run-2026-09-10");
+    const htree = historic.generatedTree as Array<{ path: string }>;
+    assert.ok(Array.isArray(htree) && htree.length === 5, "the historic run export carries its 5-file tree");
+    assert.ok(htree.some((f) => f.path === "src/generated.ts"), "…including the assembly barrel");
+    const ht = archTrace(historic as Project);
+    assert.deepEqual(ht.stubFiles, [], "the in-tree reexport barrel is exempt (fixes/255 §P2)");
+    assert.deepEqual(ht.missing, [], "…and every expanded-spec capability maps to a real tree file");
+    assert.equal(productCompleteFromProject(historic), true, "the arch bar alone is met by these real bytes");
 
-    // End-to-end evidence build over the real tree dir's own bytes (the census)
-    // + the real export: the 214 census cross-gate still refuses this tree.
+    // End-to-end evidence build over each real tree dir's own bytes (the 214
+    // census) + the real export: the census is the gate that still refuses.
     const dir = join(REPO_ROOT, "research", "eval-out", "coffeehouse2home-property-ledger");
     const inv = inventoryFromJobSources(readTreeJobSources(dir), dir);
-    assert.equal(inv.reexports, 5);
+    assert.equal(inv.real, 0, "the live dir ships no src/jobs tree: honest zero counts");
     const ev = evidenceFromJobInventory(inv, { project: real });
-    assert.equal(ev.productComplete, false, "the real leftover refuses productComplete");
+    assert.equal(ev.productComplete, false, "a zero-real-job census refuses productComplete");
     assert.equal(ev.leftoverJobsAreReexportsOrStubs, true);
     assert.equal(factoryClaim(ev, {}).autonomousSoftwareFactory, false);
+
+    const hdir = join(REPO_ROOT, "research", "eval-out", "coffeehouse2home-property-ledger.run-2026-09-10");
+    const hinv = inventoryFromJobSources(readTreeJobSources(hdir), hdir);
+    assert.equal(hinv.reexports, 5, "the 5 tree-bridge job files are reexport-only");
+    const hev = evidenceFromJobInventory(hinv, { project: historic });
+    assert.equal(hev.productComplete, false, "the counted leftover census refuses the claim even though the arch bar passed");
+    assert.equal(hev.leftoverJobsAreReexportsOrStubs, true);
+    assert.equal(factoryClaim(hev, {}).autonomousSoftwareFactory, false);
   });
 
   it("REFUSES when the real state lacks it — tree-absent export, dropped tree, stubs, non-object state", () => {

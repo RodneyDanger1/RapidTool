@@ -1,6 +1,6 @@
 /**
  * Mount once in `__root.tsx` so the Grok preview chrome can drive navigation
- * (and later receive registered routes). Noops when the app is not embedded.
+ * and receive the registered route list. Noops when the app is not embedded.
  */
 
 import { useEffect } from "react";

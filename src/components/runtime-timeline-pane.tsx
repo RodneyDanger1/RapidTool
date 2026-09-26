@@ -24,13 +24,15 @@
 //
 // Honesty rules restated for the UI: an unclosed start renders "still running —
 // no finish in the ring yet" (never a fabricated duration); a terminal with no
-// matching start renders "no matching start"; a degraded line renders its raw
-// text verbatim and is counted as "unparsed".
+// matching start renders "no matching start"; a point event — which neither
+// opens nor closes a span — renders no pair provenance at all (W24 U2: it used
+// to be mislabelled "no matching start" like a broken terminal); a degraded
+// line renders its raw text verbatim and is counted as "unparsed".
 // ---------------------------------------------------------------------------
 
 import { useEffect, useMemo, useState } from "react";
-import { rtSnapshot } from "@/lib/rt-client.ts";
-import { parseTimeline, summarizeTimeline, type TimelineRow } from "@/lib/rt-timeline.ts";
+import { rtSnapshot } from "@/lib/rt-client";
+import { parseTimeline, summarizeTimeline, type TimelineRow } from "@/lib/rt-timeline";
 
 /** Locale-independent clock for a row ts (deterministic — no hydration drift). */
 function clockLabel(ts: number | null): string {
@@ -72,7 +74,11 @@ function pairLabel(row: TimelineRow): string | null {
       ? "no finish in the ring yet"
       : `paired with L${row.closedBy}${dur}`;
   }
-  if (row.status === "raw") return null;
+  // A point event (`instant`) neither opens nor closes a span — `closes` stays
+  // null for it by contract (rt-timeline.ts) — and a degraded (`raw`) line has
+  // no parsed pair at all. Neither is a broken terminal, so neither may borrow
+  // the terminal's honest "no matching start" note.
+  if (row.status === "raw" || row.status === "instant") return null;
   return row.closes === null ? "no matching start" : `closes start L${row.closes}${dur}`;
 }
 
@@ -134,80 +140,85 @@ export function RuntimeTimelinePane() {
         </p>
       </div>
 
-      {open ? (
-        <div id="rt-timeline-body" className="mt-3 rounded-md border border-line bg-black/20 p-3">
-          <p className="font-mono text-[11px] text-muted">
-            rows {summary.rows} · completed {summary.ok} · failed {summary.failed} · paused{" "}
-            {summary.paused} · events {summary.instant} · unparsed {summary.raw} · still running{" "}
-            {summary.openSpans}
-            {summary.longestMs !== null ? ` · longest span ${durationLabel(summary.longestMs)}` : ""}
-          </p>
-          <p className="mt-1 text-[11px] leading-relaxed text-faint">
-            Derived from the ring rows above by <span className="font-mono">rt-timeline.ts</span> —
-            the same NDJSON the CLI writes under{" "}
-            <span className="font-mono">&lt;dir&gt;/.rapidtool/logs/</span>. The raw ring list stays
-            above, unchanged.
-          </p>
+      {/* Disclosure body: kept mounted and `hidden` while collapsed (APG
+          disclosure pattern) so `aria-controls` above always resolves to a
+          real element instead of dangling on a conditional render. */}
+      <div
+        id="rt-timeline-body"
+        hidden={!open}
+        className="mt-3 rounded-md border border-line bg-black/20 p-3"
+      >
+        <p className="font-mono text-[11px] text-muted">
+          rows {summary.rows} · completed {summary.ok} · failed {summary.failed} · paused{" "}
+          {summary.paused} · events {summary.instant} · unparsed {summary.raw} · still running{" "}
+          {summary.openSpans}
+          {summary.longestMs !== null ? ` · longest span ${durationLabel(summary.longestMs)}` : ""}
+        </p>
+        <p className="mt-1 text-[11px] leading-relaxed text-faint">
+          Derived from the ring rows above by <span className="font-mono">rt-timeline.ts</span> —
+          the same NDJSON the CLI writes under{" "}
+          <span className="font-mono">&lt;dir&gt;/.rapidtool/logs/</span>. The raw ring list stays
+          above, unchanged.
+        </p>
 
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void copyRaw()}
-              className="rounded-md border border-line px-2.5 py-1 text-xs text-fg transition-colors hover:border-accent/50"
-            >
-              {copied ? "Copied" : "Copy raw NDJSON"}
-            </button>
-            {copyError !== null ? <span className="text-xs text-danger">{copyError}</span> : null}
-          </div>
-
-          {rows.length === 0 ? (
-            <p className="mt-3 rounded-md border border-dashed border-line px-4 py-4 text-center text-xs text-muted">
-              No ring rows to type yet — honest silence, same as the raw view above.
-            </p>
-          ) : (
-            <ol className="scroll-thin mt-3 max-h-[46vh] space-y-1.5 overflow-y-auto pr-1">
-              {rows.map((r) => {
-                const meta = statusMeta(r);
-                const pair = pairLabel(r);
-                return (
-                  <li
-                    key={`${r.line}-${r.event ?? "raw"}`}
-                    className="rounded-md border border-line bg-black/20 px-3 py-2"
-                  >
-                    <span className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
-                      <span className="text-faint tabular-nums">L{r.line}</span>
-                      <span className="text-faint tabular-nums">{clockLabel(r.ts)}</span>
-                      <span className={meta.tone}>{meta.word}</span>
-                      <span className="text-fg">{r.event ?? "(unparsed line)"}</span>
-                      {r.code !== null ? <span className="text-accent">{r.code}</span> : null}
-                      {!r.known && r.event !== null ? (
-                        <span className="text-faint">not in the event catalogue</span>
-                      ) : null}
-                      {pair !== null ? <span className="ml-auto text-faint">{pair}</span> : null}
-                    </span>
-                    {r.status === "raw" ? (
-                      <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-faint">
-                        {r.raw}
-                      </pre>
-                    ) : r.message.length > 0 ? (
-                      <span className="mt-0.5 block break-words text-xs text-fg/90">{r.message}</span>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-
-          <details className="mt-3">
-            <summary className="cursor-pointer font-mono text-[11px] text-muted">
-              Raw NDJSON — the exact {lines.length} line{lines.length === 1 ? "" : "s"} parsed
-            </summary>
-            <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-black/30 p-2 font-mono text-[10px] leading-relaxed text-muted">
-              {lines.join("\n")}
-            </pre>
-          </details>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void copyRaw()}
+            className="rounded-md border border-line px-2.5 py-1 text-xs text-fg transition-colors hover:border-accent/50"
+          >
+            {copied ? "Copied" : "Copy raw NDJSON"}
+          </button>
+          {copyError !== null ? <span className="text-xs text-danger">{copyError}</span> : null}
         </div>
-      ) : null}
+
+        {rows.length === 0 ? (
+          <p className="mt-3 rounded-md border border-dashed border-line px-4 py-4 text-center text-xs text-muted">
+            No ring rows to type yet — honest silence, same as the raw view above.
+          </p>
+        ) : (
+          <ol className="scroll-thin mt-3 max-h-[46vh] space-y-1.5 overflow-y-auto pr-1">
+            {rows.map((r) => {
+              const meta = statusMeta(r);
+              const pair = pairLabel(r);
+              return (
+                <li
+                  key={`${r.line}-${r.event ?? "raw"}`}
+                  className="rounded-md border border-line bg-black/20 px-3 py-2"
+                >
+                  <span className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+                    <span className="text-faint tabular-nums">L{r.line}</span>
+                    <span className="text-faint tabular-nums">{clockLabel(r.ts)}</span>
+                    <span className={meta.tone}>{meta.word}</span>
+                    <span className="text-fg">{r.event ?? "(unparsed line)"}</span>
+                    {r.code !== null ? <span className="text-accent">{r.code}</span> : null}
+                    {!r.known && r.event !== null ? (
+                      <span className="text-faint">not in the event catalogue</span>
+                    ) : null}
+                    {pair !== null ? <span className="ml-auto text-faint">{pair}</span> : null}
+                  </span>
+                  {r.status === "raw" ? (
+                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-faint">
+                      {r.raw}
+                    </pre>
+                  ) : r.message.length > 0 ? (
+                    <span className="mt-0.5 block break-words text-xs text-fg/90">{r.message}</span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+
+        <details className="mt-3">
+          <summary className="cursor-pointer font-mono text-[11px] text-muted">
+            Raw NDJSON — the exact {lines.length} line{lines.length === 1 ? "" : "s"} parsed
+          </summary>
+          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-black/30 p-2 font-mono text-[10px] leading-relaxed text-muted">
+            {lines.join("\n")}
+          </pre>
+        </details>
+      </div>
     </section>
   );
 }

@@ -596,16 +596,16 @@ html[data-theme="light"] {
   color: var(--color-faint);
   font-variant-numeric: tabular-nums;
 }
-/* Darker well inside the frame so the document reads as the "screen". */
+/* Darker well inside the frame so the document reads as the "screen". Section
+   numbering — packet sections become citable (§01, §02 …). W24 U2: the two
+   split `.term-body` blocks are merged (identical selector; background and
+   counter-reset never interact, so this is a no-op in the cascade). */
 .term-body {
   background: color-mix(in oklab, var(--color-bg) 42%, var(--color-surface));
+  counter-reset: packet-section;
 }
 .term-body code {
   font-size: 11.5px;
-}
-/* Section numbering — packet sections become citable (§01, §02 …). */
-.term-body {
-  counter-reset: packet-section;
 }
 .term-body :is(h2, h3, h4)::before {
   counter-increment: packet-section;

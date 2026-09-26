@@ -79,7 +79,7 @@
  *      npm run eval -- --keyed (one bounded keyed entry when the key is set)
  *      npm run eval -- --trials=3 [--all|--limit=N]   (trials + pass@k)
  */
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync, rmSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync, rmSync, renameSync } from "node:fs";
 import { join, dirname, basename, resolve, relative, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -707,7 +707,13 @@ export function llmEvidenceFromCallRecords(records) {
   let costBasis;
   if (records.length === 0) {
     estimatedCostUsd = 0;
-    costBasis = "no model call recorded in this trial's window (nothing billed)";
+    // W24/B2 (fixes/263): name the assumption — an empty window proves the TAP
+    // observed nothing, which is not the same claim as "the vendor billed
+    // nothing" (a call through a non-tapped provider path would not appear
+    // here). `llmCalls: 0` below is the measurement; this string must not
+    // overclaim it.
+    costBasis =
+      "the provider call tap OBSERVED no calls in this trial's window (no cost estimate; a call through a non-tapped provider path would not appear here)";
   } else {
     const pricing = resolvePricesForModels(servedModels);
     if (pricing.prices) {
@@ -1092,7 +1098,17 @@ export function classifyLlmPreflight({ configured, wire = null } = {}) {
       wireReached: true,
       detail: `the vendor answered HTTP ${status} — the wire is reached; the provider itself is erroring`,
     };
-  if (status !== null)
+  // W24/B2 (fixes/263): only a ≥400 status is a vendor REFUSAL. The old
+  // unguarded `status !== null` catch-all swallowed every observed sub-400
+  // ending — including a 200 whose content came back EMPTY — as
+  // "provider-refused" before the coded branches below could classify it, so
+  // `empty-completion` was UNREACHABLE whenever the status was recorded (it
+  // always is, via the probe's recording wrapper). The fundedness probe's own
+  // contract (`probeFundedness`: "HTTP 200 / wire-ok / empty-completion: an
+  // answered 200 means the account paid") depends on this branch being
+  // reachable: a funded account whose 1-token probe truncates now reads
+  // funded:true instead of funded:null.
+  if (status !== null && status >= 400)
     return {
       class: "provider-refused",
       code: "RT_E_LLM_REJECTED",
@@ -1430,11 +1446,13 @@ export async function probeFundedness({ fetchImpl = null, timeoutMs = 20_000 } =
 
 /** One-line stdout renderings for the fundedness probe (booleans/enums/
  *  statuses only — the key VALUE can never appear: nothing key-shaped enters
- *  this function). */
+ *  this function). W24/B2 (fixes/263): this is the ONE fundedness renderer —
+ *  the call site in `main()` prints these lines instead of hand-rolling a
+ *  second, already-drifted copy of line 1 (the old dead-export + duplicate). */
 export function formatFundednessLines(p) {
   const lines = [];
   lines.push(
-    `preflight: fundedness (1-token probe) · configured=${p.configured} · funded=${p.funded === null ? "unknown" : p.funded} · class=${p.class}${p.code ? ` · code ${p.code}` : ""} · httpStatus=${p.httpStatus ?? "n/a"}`,
+    `preflight: fundedness (1-token probe) · configured=${p.configured} · funded=${p.funded === null ? "unknown" : p.funded}${p.class ? ` · class=${p.class}` : ""}${p.code ? ` · code ${p.code}` : ""}${p.httpStatus !== null && p.httpStatus !== undefined ? ` · httpStatus=${p.httpStatus}` : ""}${p.servedModel ? ` · served=${p.servedModel}` : ""}`,
   );
   if (p.detail) lines.push(`preflight: fundedness detail: ${p.detail}`);
   if (p.funded === false) {
@@ -1878,8 +1896,14 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   // W23-L1 (fixes/262) — close the trial's measurement window and fold the
   // provider's own call records (keyed only) into the row evidence. Keyless →
   // null: nothing was measured, so the row records nulls, never zeros.
+  // W24/B2 (fixes/263): the fold is ALSO gated on the tap actually being
+  // installed — an uninstalled tap measured nothing, and folding its empty
+  // list would fabricate `usage:{0,0,0}` / `estimatedCostUsd:0` (see the
+  // install site in main()).
   const callRecords = mode === "keyed" ? endTrialCallTap() : null;
-  const llmEvidence = llmEvidenceFromCallRecords(callRecords);
+  const llmEvidence = llmEvidenceFromCallRecords(
+    mode === "keyed" && !llmCallTapIsInstalled() ? null : callRecords,
+  );
   // A no-balance ending is signalled by ANY of the trial's own evidence: the
   // tap (the provider's coded refusal), a p6.synthesis.* log detail, or the
   // journey's refusal string. The trial then ends `no-balance` — NOT a scored
@@ -1999,7 +2023,9 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     estimatedCostUsd: llmEvidence ? llmEvidence.estimatedCostUsd : null,
     costBasis: llmEvidence
       ? llmEvidence.costBasis
-      : "keyless trial — no model call and nothing measured",
+      : mode === "keyed"
+        ? "no measurement — the provider call tap was unavailable this run; usage/cost were NOT recorded (this is not a zero-cost claim)"
+        : "keyless trial — no model call and nothing measured",
     // --- end W23-L1 additive keys ---
     // --- W5-L5 additive keys ---
     trial,
@@ -2356,6 +2382,22 @@ export function markerPathFor(outDir) {
   return join(outDir, RUN_MARKER_NAME);
 }
 
+/** Write `marker` onto the marker path ATOMICALLY (same-dir temp + rename).
+ *  A plain writeFileSync truncates the target before it writes, so a kill
+ *  between the open and the write leaves a 0-byte (or partial) file — and
+ *  `runMarkerState` reads an unparseable marker as `none`, i.e. "no run ever",
+ *  silently dropping the killed-run warning this marker exists to carry
+ *  (W16-L1 / WB-6: the stale results.json then reads as current again).
+ *  rename(2) is atomic within one filesystem: a reader sees the previous
+ *  bytes or the new ones, never a tear. */
+function writeMarkerAtomic(outDir, marker) {
+  mkdirSync(outDir, { recursive: true });
+  const target = markerPathFor(outDir);
+  const tmp = `${target}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(marker, null, 2)}\n`, "utf8");
+  renameSync(tmp, target);
+}
+
 /** Write the run-start marker (overwrites any previous one). */
 export function writeRunStartMarker(outDir, info = {}) {
   const marker = {
@@ -2369,8 +2411,7 @@ export function writeRunStartMarker(outDir, info = {}) {
     preflightClass: info.preflightClass ?? null,
     pid: process.pid,
   };
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(markerPathFor(outDir), `${JSON.stringify(marker, null, 2)}\n`, "utf8");
+  writeMarkerAtomic(outDir, marker);
   return marker;
 }
 
@@ -2389,16 +2430,33 @@ export function readRunMarker(outDir) {
 export function finishRunMarker(outDir, patch = {}) {
   const prev = readRunMarker(outDir) ?? { markerVersion: 1, mode: "keyed", startedAt: null };
   const marker = { ...prev, ...patch, finishedAt: new Date().toISOString(), done: true };
-  writeFileSync(markerPathFor(outDir), `${JSON.stringify(marker, null, 2)}\n`, "utf8");
+  writeMarkerAtomic(outDir, marker);
   return marker;
 }
 
 /** The torn-pair read (WB-6): `unfinished` means a run started and was never
  *  finalized — the results.json on disk may be the PREVIOUS run's and must not
- *  be read as this one's. */
+ *  be read as this one's. A marker file that EXISTS but cannot be read/parsed is
+ *  `unfinished` too — fail-SAFE, never fail-open: a kill between writeFileSync's
+ *  truncating open and its write left exactly that shape (the atomic write above
+ *  makes a tear impossible now), and reading it as `none` ("no run ever")
+ *  silently dropped the killed-run warning the marker exists to carry. */
 export function runMarkerState(outDir) {
   const marker = readRunMarker(outDir);
-  if (!marker) return { state: "none", marker: null, note: null };
+  if (!marker) {
+    let present = false;
+    try {
+      present = existsSync(markerPathFor(outDir));
+    } catch {
+      present = false;
+    }
+    if (!present) return { state: "none", marker: null, note: null };
+    return {
+      state: "unfinished",
+      marker: null,
+      note: `${RUN_MARKER_NAME} is present but unreadable / not valid JSON — treat it as a run that started and was never finalized (a kill can leave a torn marker file); any results.json present predates or is torn relative to it and must not be read as this run's result`,
+    };
+  }
   if (marker.done !== true || !marker.finishedAt) {
     return {
       state: "unfinished",
@@ -2421,7 +2479,7 @@ export async function runWithMarker(selected, { mode, outDir, runner, markerExtr
     if (prev.state === "unfinished") {
       previousUnfinished = prev.marker;
       console.log(
-        `note: an earlier keyed run marker (started ${prev.marker.startedAt ?? "?"}) was NEVER finalized — that run was killed; its results.json must not be read as a completed result`,
+        `note: an earlier keyed run marker (started ${prev.marker?.startedAt ?? "(marker unreadable)"}) was NEVER finalized — that run was killed; its results.json must not be read as a completed result`,
       );
     }
     writeRunStartMarker(outDir, { mode, entries: selected.length, ...markerExtra });
@@ -2567,15 +2625,25 @@ async function main() {
   let fundedness = null;
   if (KEYED_OK) {
     fundedness = await probeFundedness({});
-    console.log(
-      `preflight: fundedness · configured=${fundedness.configured} · funded=${fundedness.funded === null ? "unknown" : fundedness.funded}${fundedness.class ? ` · class=${fundedness.class}` : ""}${fundedness.code ? ` · code ${fundedness.code}` : ""}${fundedness.httpStatus !== null ? ` · httpStatus=${fundedness.httpStatus}` : ""}${fundedness.servedModel ? ` · served=${fundedness.servedModel}` : ""}`,
-    );
+    // W24/B2 (fixes/263): the ONE renderer (`formatFundednessLines`) — the
+    // old inline copy had already drifted from it and the helper was a dead
+    // export.
+    for (const line of formatFundednessLines(fundedness)) console.log(line);
     if (fundedness.funded === false) {
       console.log(
         `FUNDEDNESS STOP: the account is UNFUNDED (${fundedness.code ?? "no-balance"}) — a scored trial would measure the wallet, not the product. Top up, then re-run. No trial runs; results will record the skip.`,
       );
       // The existing downstream path records "nothing gradeable" with reasons —
-      // reuse it rather than duplicating the results writer here.
+      // reuse it rather than duplicating the results writer here. W24/B2
+      // (fixes/263): that path only records the reasons it is HANDED, so this
+      // stop must record its own skip row — without it the empty results.json
+      // carried NO reason (the line above claims "results will record the
+      // skip"; it did not).
+      skips.push({
+        slug: null,
+        kind: "account-unfunded",
+        reason: `fundedness probe stopped the run: the account cannot pay (${fundedness.code ?? "no-balance"}) — no scored trial ran; top up and re-run (this is a wallet skip, not a measurement)`,
+      });
       selected.length = 0;
     }
   }
@@ -2583,6 +2651,23 @@ async function main() {
   const rows = [];
   if (selected.length === 0) {
     console.log("note: nothing gradeable — every corpus entry was skipped above (results recorded with the skip reasons, exit 0)");
+  }
+  // W24/B2 (fixes/263) — THE TAP MUST BE INSTALLED. The W23-L1 per-trial model
+  // evidence (servedModels / usage / estimatedCostUsd) is fed by the provider's
+  // opt-in call tap through `beginTrialCallTap`/`endTrialCallTap` — but nothing
+  // ever called `installLlmCallTap` (the install has no other call site), so
+  // every keyed trial folded an EMPTY record list and recorded `usage:{0,0,0}`
+  // + `estimatedCostUsd:0` + "nothing billed": fabricated zeros, exactly what
+  // `llmEvidenceFromCallRecords`'s own contract forbids. Installed once per
+  // process, before any scored trial can make a keyed call.
+  let tapInstalled = false;
+  if (KEYED_OK) {
+    tapInstalled = await installLlmCallTap();
+    console.log(
+      tapInstalled
+        ? "preflight: provider call tap installed — per-trial served-model/usage/cost evidence will be recorded"
+        : "preflight: provider call tap UNAVAILABLE on this host — per-trial model evidence will record nulls (never zeros)",
+    );
   }
   const runner = async ({ entry, grader, graderPath }) => {
     try {

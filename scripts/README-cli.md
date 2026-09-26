@@ -21,10 +21,10 @@ macro-runs (enable/start/pause/resume/stop), a grounded copilot turn, the E-13
 research-deepen recovery, a capability pre-flight, the brief-fixture
 drafter/approver (`fixtures` `--draft` / `--approve` — drafted cases stay
 pending until a human approves), the in-place edit verb (`edit` — dry-run by
-default, row #34 below), and the emit→edit→re-emit
+default, its own [Edit section](#edit-edit) below), and the emit→edit→re-emit
 continuation verbs `tree-run` + `repair` (rows #31–32 below).
 
-> **`tree-run` + `repair` + `edit` shipped (fixes/150 G1 + 216s); `emit --verify-kind` is in
+> **`tree-run` + `repair` + `edit` shipped (fixes/150 wave G1 + 216s); `emit --verify-kind` is in
 > flight.** The dir-based continuation verbs are callable today — rows #31–32
 > below and the [Tree-run and repair (landed); emit verify-kind (in flight)](#tree-run-and-repair-landed-emit-verify-kind-in-flight)
 > section describe their real envelopes (`edit`'s own section: [Edit (`edit`)](#edit-edit)). `emit --verify-kind` has **NOT landed as
@@ -33,6 +33,12 @@ continuation verbs `tree-run` + `repair` (rows #31–32 below).
 > `verifyKindDir` at `compile-check.server.ts:770`) and the scratch-copy + install
 > leg is still open (TA-16) — treat its row as the
 > agreed contract, not proven behavior, and re-check before calling it.
+
+> **Ref note (W24-B4 · docs lane):** `fixes/150` is a **wave** reference — the per-lane logs
+> `fixes/150_g*.md` were **never filed** (`fixes/151_watchdog.md:19`: "No `fixes/150_g*.md` logs
+> exist yet (all 5 lanes)"; `:162`: "All 5 lanes owe fixes/150_gN.md logs"). `fixes/151_watchdog.md`
+> §1 is their record. Mentions of `fixes/150 wave G1` in this file mean that wave's G1 lane
+> (`tree-run` + `repair`) — there is no `fixes/150_g1.md` to read.
 
 Every subcommand prints a **single JSON object** to stdout (parseable by an AI
 agent) whose envelope always carries `schema_version: 1`, `cmd` and
@@ -172,11 +178,11 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs lesson --accept --proj
 node --experimental-strip-types scripts/rapidtool-cli.mjs lesson --supersede --knowledge-file lessons.json --id K1a2b3c4d [--evidence "newer guidance replaces this"]
 node --experimental-strip-types scripts/rapidtool-cli.mjs lesson --refute --knowledge-file lessons.json --id K1a2b3c4d [--evidence "observed the opposite"]
 
-# 31. tree-run (SHIPPED — fixes/150 G1): standalone dir-based treeRun over an EXISTING
+# 31. tree-run (SHIPPED — fixes/150 wave G1): standalone dir-based treeRun over an EXISTING
 #     emitted dir — read-only, never re-emits over the dir (an edited file is never
 #     clobbered); green → exit 0; red → exit 1 with the first not-ok tail +
 #     RT_E_TREE_RUN_FAILED. --project adds the read-only hash-checked dirDirty report.
-# 32. repair (SHIPPED — fixes/150 G1): hash-checked re-import of an EDITED emitted dir
+# 32. repair (SHIPPED — fixes/150 wave G1): hash-checked re-import of an EDITED emitted dir
 #     into the ledger (refused paths listed, never silently dropped), re-run the oracle,
 #     bounded repair cycles against the dir (the dir is never re-emitted over); converged
 #     → exit 0 (minted/gate/cycles/import in the envelope), budget exhausted → exit 1
@@ -188,6 +194,13 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs lesson --refute --know
 node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir emitted/          # standalone dir-based treeRun — no re-emit
 node --experimental-strip-types scripts/rapidtool-cli.mjs repair --dir emitted/ --project build.json   # re-import edited tree, re-run oracle, bounded repair cycles
 # node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json --out emitted/ --verify-kind   # NOT callable yet — no case arm exists
+# 34. eval (W23-L5 · T5.3 — SHIPPED, read-only): the M1–M9 rubric + per-case rows + history
+#     deltas/trend over the keyed-eval harness's own documents (research/eval-out/results.json
+#     + history.json + the run marker; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides
+#     the dir, --history overrides just the trend file, --slug filters to one corpus case).
+#     No keyed calls, no writes, no network, nothing fabricated — a missing history prints as
+#     'no history', never a fake 0 delta.
+node --experimental-strip-types scripts/rapidtool-cli.mjs eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]
 ```
 
 `run` performs exactly **one** `advanceOnce` step; `gate` loops until parked.
@@ -360,7 +373,7 @@ the CLI.
 > **In flight (fixes/149 P1-2):** opt-in `--verify-kind` — a bounded
 > `npm install` + `vite build` leg for webapp/game kinds in a temp dir (never
 > mutating the emitted dir), asserting the kind's declared build actually runs.
-> NOT proven at this write — none of the 35 case arms is `verify-kind`
+> NOT proven at this write — none of the 37 case arms is `verify-kind`
 > (`grep -c 'case "' scripts/rapidtool-cli.mjs` reads 37); the flag rides inside
 > `emit` (`rapidtool-cli.mjs:768` → `verifyKindDir`), whose scratch-copy + install
 > leg is still open (TA-16); see the
@@ -424,14 +437,14 @@ Exit **0** clean · **1** findings (the `check-assertion-gaps.mjs` idiom) ·
 resolvable files (the scan is never silently empty). **Posture: this verb is
 never wired into `scripts/gate.sh`, is never called by `emit`, and blocks
 nothing** — the rules are heuristics, so every finding carries `advisory: true`
-(218 §3.4 / OV-21).
+(fixes/218 §3 item 4 / OV-21).
 
 ## Tree-run and repair (landed); emit verify-kind (in flight)
 
-> **Status at this write: `tree-run --dir` and `repair --dir` SHIPPED (fixes/150
+> **Status at this write: `tree-run --dir` and `repair --dir` SHIPPED (fixes/150 wave
 > G1, case arms present, `grep -c 'case "'` = 37). `emit --verify-kind` is IN
 > FLIGHT — the fixes/149 P1-2 contract below describes what will land, but none
-> of the 35 case arms is `verify-kind` (the flag rides inside `emit`) and the
+> of the 37 case arms is `verify-kind` (the flag rides inside `emit`) and the
 > scratch-copy + install leg is still open (TA-16).
 > Re-check before calling it.**
 
@@ -875,7 +888,7 @@ registry: `harvest` never fails for missing keys (keyless; honest-empty rows +
 exit 0), `knowledge`/`mine`/`lesson` pin `RT_E_VALIDATION` for malformed input
 (exit 1), `wild` pins `RT_E_PHASE_ILLEGAL` for not-wild/not-active refusals (exit 1), and
 `prompt` exits 3 → `RT_E_LLM_NOT_CONFIGURED` exactly like `crew`/`verify`.
-The emit→edit→re-emit verbs (`tree-run`/`repair`, fixes/150 G1) set their codes
+The emit→edit→re-emit verbs (`tree-run`/`repair`, fixes/150 wave G1) set their codes
 **directly in their case arms** (not via the classifier): red tree →
 `RT_E_TREE_RUN_FAILED`, exhausted repair → `RT_E_REPAIR_FAILED`.
 

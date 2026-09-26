@@ -26,14 +26,17 @@ export {
   DEEPSEEK_MODELS,
   RETRY_BASE_MS,
   RETRY_MAX_JITTER_MS,
+  clearLlmCallTap,
   completeDeepSeek,
   cutMarked,
   deepSeekModelIds,
   deepseekApiKey,
   isDeepSeekConfigured,
   jitteredBackoffDelayMs,
+  setLlmCallTap,
 } from "./llm/providers/deepseek.ts";
 export type {
   DeepSeekCompleteOptions,
   DeepSeekMessage,
+  LlmCallTapRecord,
 } from "./llm/providers/deepseek.ts";
