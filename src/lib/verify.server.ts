@@ -966,7 +966,15 @@ export async function verifyAndFixServer(
     budget?: TokenBudget;
   } = {},
 ): Promise<VerifyOutcome> {
-  const maxIterations = Math.min(Math.max(opts.maxIterations ?? MAX_ITERATIONS, 1), 5);
+  // W40·K4: normalize the caller knob — `Math.max(NaN, 1)` propagates NaN, so
+  // `for (i < NaN)` ran ZERO iterations and the tail evidence read "exhausted
+  // NaN iterations". Non-finite/unset → the default; fractional → floored (the
+  // loop's `i === maxIterations - 1` check needs an integer count).
+  const requestedIterations = opts.maxIterations;
+  const maxIterations =
+    typeof requestedIterations === "number" && Number.isFinite(requestedIterations)
+      ? Math.min(Math.max(Math.floor(requestedIterations), 1), 5)
+      : MAX_ITERATIONS;
   if (!isDeepSeekConfigured()) {
     return { status: "not-configured", iterations: 0, evidence: "no DEEPSEEK_API_KEY server-side" };
   }

@@ -17,7 +17,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 // R11-f07: the shared physical-containment helper (one implementation, three
 // call sites — see scripts/path-safety.mjs).
-import { physicalInside } from "./path-safety.mjs";
+import { physicalInside, relativeEscapes } from "./path-safety.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 

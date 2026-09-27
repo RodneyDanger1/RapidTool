@@ -16,7 +16,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import pg from "pg";
-import { authSchemaRefusal, pendingMigrations } from "./migration-plan.mjs";
+import { authSchemaRefusal, outOfOrderMigrations, pendingMigrations } from "./migration-plan.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -52,7 +52,17 @@ async function main() {
         .filter((entry) => entry.endsWith(".sql"))
         .map((name) => readFile(join(migrationsDir, name), "utf8")),
     );
-    const refusal = authSchemaRefusal({ authEnabled, names: entries, sql: sqlTexts });
+    // K2 (W39): the auth SOURCE dir's listing feeds the copy-up completeness
+    // check — a partially copied-up auth schema (0001 in, 0002 out) silently
+    // loses every later auth migration, R15-f02's unique-index fix included.
+    // An absent migrations/auth/ (app deleted the opt-in schema) reads as [].
+    let authDirNames = [];
+    try {
+      authDirNames = (await readdir(join(migrationsDir, "auth"))).filter((name) => name.endsWith(".sql"));
+    } catch {
+      /* no migrations/auth/ — nothing to check */
+    }
+    const refusal = authSchemaRefusal({ authEnabled, names: entries, sql: sqlTexts, authDirNames });
     if (refusal) {
       console.error(`[migrate] ${refusal.code}: ${refusal.message}`);
       process.exit(1);
@@ -74,6 +84,17 @@ async function main() {
       (r) => r.name,
     );
 
+    // K2 (W39): warn loudly when a pending file sorts BEFORE an already-applied
+    // one (the version-gap / partial-application hazard). Not a refusal — a
+    // legitimate hotfix can arrive with a lower number — the ledger's primary
+    // key keeps a re-run safe; this makes the order visible instead of silent.
+    const outOfOrder = outOfOrderMigrations(entries, applied);
+    if (outOfOrder.length > 0) {
+      console.warn(
+        `[migrate] WARNING: ${outOfOrder.join(", ")} sorts before an already-applied migration — applying out of order. ` +
+          "Verify its SQL does not assume a schema state a later migration already changed.",
+      );
+    }
     let count = 0;
     for (const { name } of pendingMigrations(entries, applied)) {
       const text = await readFile(join(migrationsDir, name), "utf8");

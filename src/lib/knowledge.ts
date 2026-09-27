@@ -24,7 +24,7 @@
 // The file format is `{ version: 1, entries: KnowledgeEntry[] }`. A store
 // with no file yet is treated as empty and created on first save.
 // ---------------------------------------------------------------------------
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fnv1a, fusionRank, tokenizeWords } from "./algorithms.ts";
 import type { ErrorCode } from "./errors.ts";
@@ -523,9 +523,25 @@ export class KnowledgeStore {
 
   private writeStore(entries: KnowledgeEntry[]): void {
     mkdirSync(dirname(this.filePath), { recursive: true });
-    const tmp = `${this.filePath}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ version: STORE_VERSION, entries }, null, 2), "utf8");
-    renameSync(tmp, this.filePath);
+    // K2 (W39): a UNIQUE staging name per writer (the checkpoint.module's A1-08
+    // idiom). The fixed `${filePath}.tmp` let two writers — two KnowledgeStore
+    // instances/processes saving the same file, which mergeWithDisk explicitly
+    // supports — interleave on one staging path: writer A would rename B's
+    // bytes (or B's rename would ENOENT and throw after a successful write).
+    // rename is atomic, so the store is never torn either way; the staging
+    // name is what was shared.
+    const tmp = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      writeFileSync(tmp, JSON.stringify({ version: STORE_VERSION, entries }, null, 2), "utf8");
+      renameSync(tmp, this.filePath);
+    } catch (err) {
+      try {
+        if (existsSync(tmp)) unlinkSync(tmp);
+      } catch {
+        /* best-effort staging sweep */
+      }
+      throw err;
+    }
   }
 
   /**

@@ -28,6 +28,21 @@ const TIMEOUT_MS = 20_000;
 const RETRYABLE_STATUS = new Set([429, 500, 503]);
 const MAX_ATTEMPTS = 2;
 
+/** setTimeout's overflow ceiling — Node fires longer delays immediately and
+ *  warns; anything at or below this stays a real timer. */
+const MAX_TIMER_MS = 2_147_483_647;
+/** RapidTool's own max_results ceiling (defensive): a tampered/absurd knob must
+ *  never ride into the vendor body asking for thousands of entries. */
+const MAX_RESULTS_CEILING = 20;
+
+/** Sanitize a caller knob: finite integer in [min, max], else the fallback.
+ *  A hostile/typo'd value (NaN, Infinity, -5, 1e9) never reaches the wire. */
+function boundedInt(v: unknown, fallback: number, min: number, max: number): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= min
+    ? Math.min(Math.max(Math.floor(v), min), max)
+    : fallback;
+}
+
 function env(key: string): string | undefined {
   const v = process.env[key]?.trim();
   return v || undefined;
@@ -141,8 +156,12 @@ export async function tavilySearch(
       error: "empty search query",
     };
   }
-  const maxResults = opts.maxResults ?? DEFAULT_MAX_RESULTS;
-  const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
+  // W40·K4: both knobs are sanitized before use — an unvalidated
+  // `maxResults` (NaN / -5 / 1e9) used to be forwarded verbatim into the
+  // vendor body, and a non-positive `timeoutMs` aborted the request on the
+  // first tick (a "timeout" the caller never asked for).
+  const maxResults = boundedInt(opts.maxResults, DEFAULT_MAX_RESULTS, 1, MAX_RESULTS_CEILING);
+  const timeoutMs = boundedInt(opts.timeoutMs, TIMEOUT_MS, 1, MAX_TIMER_MS);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -186,7 +205,11 @@ export async function tavilySearch(
     // Honesty filter: an entry without a usable http(s) URL is not a citable
     // result — keep it and an agent may cite a bare string. Entries that only
     // carry a URL stay (title/content are best-effort enrichments).
+    // W40·K4: non-object entries (e.g. a stray `null` in the results array)
+    // are dropped BEFORE the field reads — one malformed entry used to throw
+    // a TypeError that failed the whole search instead of being filtered.
     const items = (body.results as Array<Record<string, unknown>>)
+      .filter((r) => r !== null && typeof r === "object")
       .map((r) => ({
         title: typeof r.title === "string" ? r.title : "",
         url: typeof r.url === "string" ? r.url : "",

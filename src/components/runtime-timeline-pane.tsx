@@ -103,9 +103,13 @@ export function RuntimeTimelinePane() {
     return () => clearInterval(id);
   }, []);
 
-  // B1/288: clear the copy-flash timer on unmount (the pane unmounts whenever
-  // RunScreen remounts per project — `key={id}` in routes/run.$id.tsx), so a
-  // pending flash can never fire a setState into an unmounted pane.
+  // B1/288 + K1/290: clear the copy-flash timer on unmount (the pane unmounts
+  // whenever RunScreen remounts per project — `key={id}` in routes/run.$id.tsx),
+  // so a pending flash can never fire a setState into an unmounted pane. The id
+  // is stored by `flashCopied` below; B1's half-landed version read the ref in
+  // cleanup but never wrote it anywhere, so this cleanup was dead code — the
+  // react-hooks "ref value will likely have changed" warning it raised was the
+  // honest tell (only React-managed refs, never assigned, trigger it).
   useEffect(() => {
     return () => {
       if (copyFlashRef.current !== null) window.clearTimeout(copyFlashRef.current);
@@ -120,7 +124,7 @@ export function RuntimeTimelinePane() {
   // ORDER, so feeding the newest-first array made every completed span mispair:
   // the terminal rendered "no matching start", the start rendered a fabricated
   // "still running — no finish in the ring yet", and durations/longest were
-  // never computed (probe evidence: fixes/288_b1_components.md §F1). Feed the
+  // never computed (probe evidence: fixes/290_k1_components.md §F1). Feed the
   // window oldest-first — the rows below, their `L{n}` chips and the raw-NDJSON
   // disclosure then share one chronological order (matching what the CLI
   // appends on disk). The raw ring list ABOVE stays newest-first, unchanged.
@@ -129,8 +133,16 @@ export function RuntimeTimelinePane() {
   const summary = useMemo(() => summarizeTimeline(rows), [rows]);
 
   function flashCopied() {
+    // K1/290: one live flash timer at a time — re-copying mid-flash restarts
+    // the window (the old form let the first timer cut the second flash short),
+    // and the id lands in `copyFlashRef` so the unmount cleanup above can
+    // actually cancel it.
+    if (copyFlashRef.current !== null) window.clearTimeout(copyFlashRef.current);
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+    copyFlashRef.current = window.setTimeout(() => {
+      copyFlashRef.current = null;
+      setCopied(false);
+    }, 1600);
   }
 
   async function copyRaw() {
@@ -144,7 +156,11 @@ export function RuntimeTimelinePane() {
     }
   }
 
-  const paired = rows.filter((r) => r.durationMs !== null).length;
+  // K1/290: count SPANS, not rows — `parseTimeline` stamps pair provenance on
+  // BOTH ends of a pair, so the old `durationMs !== null` count doubled every
+  // completed span ("2 paired" for one span) and missed pairs whose `ts` is
+  // missing. A terminal row IS one closed span: `closes !== null`.
+  const paired = rows.filter((r) => r.closes !== null).length;
 
   return (
     <section className="border-t border-line px-5 py-3 text-sm" aria-label="Typed timeline">
@@ -159,7 +175,7 @@ export function RuntimeTimelinePane() {
           {open ? "Hide typed timeline" : "Typed timeline — pair starts with finishes"}
         </button>
         <p className="font-mono text-[11px] text-faint">
-          {summary.rows} row{summary.rows === 1 ? "" : "s"} · {paired} paired ·{" "}
+          {summary.rows} row{summary.rows === 1 ? "" : "s"} · {paired} pair{paired === 1 ? "" : "s"} ·{" "}
           {summary.openSpans} still running · {summary.raw} unparsed
         </p>
       </div>

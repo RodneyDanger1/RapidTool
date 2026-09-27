@@ -111,7 +111,11 @@ export function emptyLedger(): TokenLedger {
 }
 
 export function totalTokens(ledger: TokenLedger): number {
-  return ledger.promptTokens + ledger.completionTokens;
+  // K15 thrown-shape sweep (W-35): same guard idiom as isBudgetExhausted /
+  // assertBudgetHeadroom — foreign input reads as EMPTY (0 tokens), never a
+  // TypeError escape; token counts floor like every other count in this file.
+  if (!ledger || typeof ledger !== "object") return 0;
+  return floorNonNeg(ledger.promptTokens) + floorNonNeg(ledger.completionTokens);
 }
 
 function floorNonNeg(n: unknown): number {

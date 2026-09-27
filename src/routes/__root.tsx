@@ -13,8 +13,9 @@ const APP_NAME = "RapidTool";
 /**
  * CAP-1 late-safe telemetry boot (fixes/124 A3-01): router.tsx installs the
  * global capture handlers at module scope so nothing can crash before them;
- * this layout effect re-arms the host after hydration for cases where the
+ * this mount effect re-arms the host after hydration for cases where the
  * router module evaluated on the server only (SSR bail-out / soft nav).
+ * (K1/290 wording fix: this is a plain `useEffect`, never a React layout effect.)
  * installRtClient is idempotent (module latch), so exactly ONE install ever
  * runs — the ring + Long-Tasks observer + heartbeat + crash snapshot are live
  * in the browser either way.

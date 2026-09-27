@@ -46,3 +46,28 @@ N/A = not-a-pointer.
 _(rows land below as verified — append-only)_
 
 ## Log (append-only)
+
+## [W40 K8 · 2026-09-27] THE OWED POINTER-MAP ROWS — appended from the lane's delegation summary
+
+**Why here:** G1 (W38) died capped **before any map rows or fixes landed** ("The map rows + fix evidence are NOT yet appended (owed)"). The delegation summary (`~/AppData/Local/hermes/cache/delegation/subagent-summary-0-20260926_203728_538352.txt`) is the only persisted record — re-landed below verbatim. Byte-verified at lane time (tree `0f85c32` + W29–W38 era; **later waves may have landed some — re-verify before acting**). Appended by W40 K8 as the Z4 payout's G-map record.
+
+### G1 · VERIFIED ✓ (real reads, this tree)
+- **Routes→components:** `src/routeTree.gen.ts:11-24` (note: it lives at `src/routeTree.gen.ts`, not `src/routes/` — R14-f05's path is off) → `/` + `/run/$id` → console's `HomeScreen`/`RunScreen`. `run.$id.tsx:16` passes required `id` ✓.
+- **Root wiring:** `__root.tsx:8`+`:81` PreviewHostBridge · `:22-27`+`:80` TelemetryBoot · `:48` manifest link (`/__grok/manifest.webmanifest`).
+- **All 12 createServerFn sites / 8 facades** — every lazy import path resolves and every imported name exists at the exact source: `chatOnceServer`(chat.server.ts:486) · `buildChatContext`:127/`chatContextVersion`:334/`CHAT_CONTEXT_MAX_CHARS`:53 · `runCrewServer`(crew.server.ts:1382) · `completeDeepSeek`(:30←deepseek.ts:635)/`isDeepSeekConfigured`/`deepSeekModelIds` · `runNodeBounded`/`runnerAvailable` · `loadFixtureReviewRows`:34 · `tavilySearch`/`isTavilyConfigured`/`freeWebSearch` · `verifyAndFixServer`:946 · `callModel`(registry.ts:662). Signatures match the call sites ✓.
+- **Store pointers:** all 7 `useRapid.getState().X(...)` call sites → real `RapidState` exports (store.ts:88-197) ✓.
+- **Handler sweep:** exhaustive callee scan of console.tsx (comments/strings stripped, 352 callees vs 401 defs/79 imports) → **zero undefined/typo callees**; all residue is builtins/member calls ✓.
+- **R6/fixes already landed ✓:** f01 (module latch :2238-2264 + `"module"` union) · f02 (all 4 surfaces + `og/site.json:1`) · f03 (fixtures labels ×3) · f07 (How-it-works :1731 + `{n}/12` :1789) · f11 (`wildPaused()` :1292-1318) · **f12 (PaneBoundary :1642-1690, `ui.pane_crash` emitter fires :1654, registered :141)** · f13 (:1834 "Phase n of 13") · f14 (:6307 `?? null`) · SHORTCUTS table ↔ key handler exact match.
+
+### G1 · BROKEN POINTERS FOUND (NOT yet fixed at lane death)
+1. **`console.tsx:1186`** — emits registered `sys.heartbeat` with `scope: "wild-driver"`; registry binds `sys.heartbeat`→`sys`. One-token fix.
+2. **`error-component.tsx:60`** — emits `ui.boundary_crash`, **not in the registry**; the registered twin is `boundary.crash` (→ scope `boundary`, pinned rt-events.test.ts:45). Fires on every route crash. One-token fix.
+3. **R6-f12 gap** — `PaneBoundary` wraps **HomeScreen only** (:1745); RunScreen unwrapped (done-when names both). Additive wrap owed.
+4. **W-38 still open** — `store.runP6Journey` has **zero console callers** (dead edge confirmed).
+5. **R14-f04** — deepen seam still a string lookup (`DEEPEN_ACTION_NAMES` :6163 *does* resolve today — `deepenResearch` is real, store.ts:122/:930 — but degrades silently on rename; no test pins the names).
+
+### G1 · ISSUES (verbatim)
+- Cap hit mid-verification; **no product edits landed** and the map's fix/✓ rows remain to be appended to `fixes/284_wiring_guarantee.md`.
+- Registry cross-check (55 names): ~30 registered events (llm.\*, runner.\*, verify.\*, crew.\*, ui.action_error, store.action_error…) show no emitter in the client graph — needs the CLI-sink question settled before calling them consumed-but-never-emitted.
+
+_— appended by W40 K8, 2026-09-27 (markerless append at EOF; the lane's own sections above were not edited)._

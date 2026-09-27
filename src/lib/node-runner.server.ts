@@ -53,7 +53,14 @@ function withSandbox(r: NodeRunCore): NodeRunResult {
   return { ...r, sandbox: false };
 }
 
-/** Hard cap before Node kills the child on a runaway writer (maxBuffer). */
+/**
+ * W-26 (fixes/292_l1_register): the output-bomb bound. `maxBuffer` on
+ * `spawn()` is NOT a real Node option (proved inert on Node 22 — a 2 MB write
+ * under `maxBuffer: 1 MB` closes code 0), so enforcement is the streaming
+ * byte counter in the data handlers below: once the child has written this
+ * many bytes across stdout+stderr the tree is killed and the run reports a
+ * coded failure — never a silent over-budget pass.
+ */
 const MAX_BUFFER = 1_000_000; // 1 MB
 /** How much of each stream we keep in the returned result. */
 const MAX_OUTPUT = 1_000_000; // 1 MB
@@ -284,8 +291,16 @@ export async function runNodeBounded(
       error: "empty source",
     });
   }
+  // W40·K4: a non-finite timeout used to slip through — `Infinity` passes
+  // `> 0`, then `setTimeout(fn, Infinity)` fires IMMEDIATELY (Node clamps
+  // overflows and warns), so the run was killed on the first tick and the
+  // result read "killed after Infinitys". Finite + floored + timer-bounded now.
+  const MAX_TIMEOUT_MS = 2_147_483_647;
+  const requestedMs = opts?.timeoutMs;
   const timeoutMs =
-    typeof opts?.timeoutMs === "number" && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_TIMEOUT_MS;
+    typeof requestedMs === "number" && Number.isFinite(requestedMs) && requestedMs > 0
+      ? Math.min(Math.floor(requestedMs), MAX_TIMEOUT_MS)
+      : DEFAULT_TIMEOUT_MS;
 
   let dir: string;
   let ownsScratchDir = true;
@@ -303,9 +318,10 @@ export async function runNodeBounded(
   try {
     // process.execPath = the exact Node binary (no PATH surprises); `-e` passes
     // code as an ARGUMENT (never through a shell), so quoting is a non-issue.
-    // maxBuffer is a real Node spawn option (output-bomb kill), but this
-    // @types/node build only exposes it on the stdio-tuple overload, so a narrow
-    // structural cast keeps the guard without widening to `any`.
+    // W-26: `maxBuffer` is kept ONLY as forward-compat intent — on today's
+    // Node it is inert for spawn() (proved: no kill at a 2 MB write) and the
+    // real enforcement is the streaming counter below. The structural cast
+    // covers the stdio-tuple overload — never `any`.
     const spawnOpts = {
       cwd: dir,
       env: scrubbedEnv(),
@@ -326,10 +342,29 @@ export async function runNodeBounded(
 
   let stdout = "";
   let stderr = "";
+  // W-26: streaming output-bomb counter — the ONLY live enforcement of
+  // MAX_BUFFER. Kills the tree once the child has written more bytes than the
+  // cap across both pipes; settle() then reports the coded bomb failure.
+  let receivedBytes = 0;
+  let outputBombed = false;
+  const bombCheck = (d: Buffer): void => {
+    receivedBytes += d.length;
+    if (receivedBytes > MAX_BUFFER && !outputBombed) {
+      outputBombed = true;
+      try {
+        treeKill(child.pid ?? -1);
+        child.kill("SIGKILL");
+      } catch {
+        // already gone.
+      }
+    }
+  };
   child.stdout?.on("data", (d: Buffer) => {
+    bombCheck(d);
     stdout = (stdout + d.toString()).slice(-MAX_OUTPUT);
   });
   child.stderr?.on("data", (d: Buffer) => {
+    bombCheck(d);
     stderr = (stderr + d.toString()).slice(-MAX_OUTPUT);
   });
 
@@ -382,6 +417,18 @@ export async function runNodeBounded(
     // classification (timeout vs signal-kill vs exited) instead of whichever
     // event happened to arrive last.
     const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
+      if (outputBombed) {
+        // W-26: the streaming counter killed the tree — the honest cause is
+        // NOT a timeout/signal teardown; report the bomb with the cap + the
+        // observed byte count.
+        finish({
+          ok: false,
+          reason: "error",
+          code: "RT_E_RUNNER_FAILED",
+          error: `killed: output exceeded the ${MAX_BUFFER / 1_000_000} MB cap (${receivedBytes} bytes written)`,
+        });
+        return;
+      }
       if (timedOut) {
         // The wall-clock timer fired and killed the tree — the ONLY honest
         // "timeout" reason.

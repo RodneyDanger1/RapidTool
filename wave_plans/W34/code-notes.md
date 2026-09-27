@@ -648,4 +648,57 @@ export async function complete(prompt: string, opts?: {
 14. **Sync/async twins get paired patches in ONE commit** (or a shared core) — the repo history shows every mirror fix applied twice (A1-45).
 15. **Comments are contracts under audit:** declare-or-strike applies to them; grep the symbols your comment cites (the comment at `store.ts:102` cites `CHAT_LOG_MAX_ROWS`, which does not exist — A1-20); a shelved feature gets a coded refusal, never a silent no-op or a doc claim (registry's unarmed-failover refusal — A1-43 — is the model to copy). And log-and-continue: no test runs/builds/keyed calls from an audit lane; land findings in the log file EARLY, fix product code never.
 
+## §A2 — THE PERIPHERY HALF (W34 lane A2 · read-only) — appended 2026-09-27 by W40 K8 (N4 → Z4 payout)
+
+**Status:** OWED SINCE W34 — the lane hit its tool ceiling **before appending §A2**; its log `fixes/279_a2_codenotes.md` stayed a stub. This block is the lane's **findings inventory** verbatim from its delegation summary (`~/AppData/Local/hermes/cache/delegation/subagent-summary-1-20260926_195032_506645.txt`), re-landed here as the owed record. All items were byte-checked via grep/read at lane time (2026-09-26 ~19:50 CDT); lines cited are from that read — re-verify against current bytes before acting (sibling lanes were landing). **Items marked as unverified at the end were never verified — do not publish them as fact.**
+
+### A2 · FINDINGS INVENTORY (all byte-checked at lane time)
+
+**Contracts that lie (highest value)**
+1. `AGENTS.md:18` — "the dev server binds `0.0.0.0:8080` (vite.config.ts). Do not change the host/port contracts" **vs** `vite.config.ts` R11-f01 block + `README.md:29` ("loopback by default"). The repo-level contract doc states the pre-R11-f01 (unauthenticated-RCE) behavior. Fix: amend AGENTS.md to loopback + `RAPIDTOOL_BIND_ALL=1`. Done-when: AGENTS.md ≠ `0.0.0.0` as the default.
+2. `AGENTS.md:50` "35 verbs" **vs** `grep -c 'case "'` = **37** **vs** `README-cli.md:10` "**37 subcommands**". `README-cli.test.mjs` binds README↔dispatcher; **nothing binds AGENTS.md**. Fix: strike/repin. (The `USAGE.commands` object is a *third* copy of the verb list — no test binding its strings was found.)
+3. `rapidtool-cli.mjs:602` + `:1567` cite `scripts/cli-exit-taxonomy.test.mjs` as a static guard — **the file does not exist**. Create-or-strike.
+
+**Latent crash / data-loss**
+4. `rapidtool-cli.mjs:165-166` — `respond()` does `process.stdout.write(…); process.exit(code)`. On Windows `process.exit` truncates a pending async stdout write **on the very surfaces whose contract is stdout purity** (`emit --check`, `eval`, `packet` >64 KB piped). The repo already knows the fix: `gate.sh:213-216` uses `fs.writeSync(process.stdout.fd, …)` + `process.exitCode` and documents why. Fix: adopt the same idiom.
+5. `run-eval.mjs:2798` — `main().catch()` writes `results.json` as `{entries: [], error}` and **exits 0**, clobbering the previous run's results with a crash stub — while the run *marker* (`writeMarkerAtomic`, `:2396`) exists precisely to stop stale/absent results being misread. Fix: write the crash stub elsewhere (or preserve prior bytes) and keep the marker semantics.
+6. `run-eval.mjs:2346/2364` — `results.json`/`history.json` written with plain non-atomic `writeFileSync`, while the marker protecting them *is* atomic. Inconsistent atomicity. Also **`history.json` is unbounded**: no `slice`/cap found (grep for `history.slice|MAX_HISTORY|history.length` = 0).
+
+**Vacuous tests / weak guards**
+7. `migration-plan.test.mjs:84-97` — "the copy check reads both files and catches an edit" **re-implements `authSchemaCopy` inline** instead of importing it (:29-34). Passes while the real helper drifts.
+8. `migration-plan.test.mjs:72-82` — byte-identity test `if (pair === null) return` → **vacuous in the shipped state** (`migrations/` contains only `auth/`; `.grok/app-env.json` = `"VITE_AUTH_ENABLED": "false"`). Green by absence.
+9. `gate.sh:171-176` — a leg that **exits 0 with a log that produced no `# pass` lines at all** still yields `gates[id].ok = true, pass: 0`. `noTapNames` only fires when `exit ≠ 0`. The gate's verdict depends on node's *default* reporter staying TAP-ish; nothing pins `--test-reporter` or asserts `pass > 0`. False-green blind spot (sibling of the `--test-name-pattern` no-op trap codified in `test-name-pattern-guard.test.mjs:5-27`).
+10. `gate.sh:221-224` — the stderr tail loop covers only `typecheck lint assertionGaps testsScripts testsLib build`; under `--double` the **second-run logs (`testsScripts2`/`testsLib2`) are never tailed**, so a flake is named with no diagnostic.
+
+**Migrations resilience**
+11. Preflight (`authSchemaRefusal`, `migration-plan.mjs:77-91`) only checks for a migration creating the Better Auth `user` table. But `migrations/auth/` held **two** files (`0001_auth.sql`, new `0002_account_unique.sql`, mtime Sep 26 18:06). Copying up only `0001` **passes the preflight** and runs without the uniqueness constraint. The refusal text says "plus any later migrations/auth/*.sql" — nothing enforces it.
+12. `migrate.mjs:81-85` — relies on pg simple-query multi-statement inside `BEGIN`/`COMMIT`; a future migration file carrying its own `BEGIN;`/`COMMIT;` silently escapes the one-transaction + `_migrations` record guarantee. Latent resilience gap.
+
+**UI (console.tsx / routes) — state holes & render**
+13. `console.tsx:3824` — `HitlDock`'s `forceOverride` ("I approve anyway") is local state and the dock is **not keyed by phase**; a ticked override carries into the next phase's gate. Fix: reset on `h.phase` change / key the dock.
+14. `console.tsx:1745` — `PaneBoundary` wraps **only `HomeScreen`**; `RunScreen` (~40 panes) has none, so its doc-comment claim (`:1632-1641`) is true only for Home. `ui.pane_crash` is registered (`rt-events.ts:141`) and pinned (`rt-events.test.ts:82`) but emitted by nothing else.
+15. `console.tsx:3261-3472` — all 10 `Tabs.Content` use `forceMount` + `data-[state=inactive]:hidden`, so **every pane stays mounted** with its own poller (`RuntimeLogPane :4409`, `RuntimeTimelinePane :97`, `ChatPane :5885` at 2 s/1 s). Pollers run even for hidden tabs, for every project.
+16. `runtime-timeline-pane.tsx:39` — `clockLabel` uses `toISOString().slice(11,23)` = **UTC**, labelled a clock; `console.tsx:760-763` `fmtClock` uses **local** `getHours()`. Same ts → two different displayed times in one console.
+17. `console.tsx:2406/2419/4620/5163/5438` — `URL.revokeObjectURL` on a fixed `setTimeout(…, 1000)` (5+ copies) — the classic truncated-download race, no unmount revoke. Should be one helper.
+18. `console.tsx:2005-2010` — the global keydown guard queries `[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]` to detect "ANY modal dialog", but Radix dropdowns/popovers/tooltips (Export menu `:1872`, Term tooltips) carry neither attribute → `e`/`g`/`a` shortcuts still fire behind them. Documented over-claim.
+19. `console.tsx:1697/1700-1715` — `HomeScreen`'s `busy` latch is vacuous: `setBusy(true)` then immediately `setBusy(false)` around a synchronous `create()`, feeding `disabled={… || busy}`. And hydration seeding rides a magic `setTimeout(…, 80)`.
+
+**scripts/** quality**
+20. `parseArgs` (`rapidtool-cli.mjs:62-97`) treats a value starting with `--` as boolean → `edit --find x --replace "-- foo"` **refuses** ("missing required --replace", `:1552`) though a value was given. Workaround `--replace=…`; a legal replacement starting with dashes is a false refusal.
+21. Three implementations of one "am I main?" predicate: `with-app-env.mjs:97` (realpath — correct), `run-eval.mjs:2787` (lowercased resolve), and the naive `pathToFileURL` form in `brand-check.mjs:196`, `preview.mjs:332`, `write-atomic.mjs:78` — the last makes those scripts silent no-ops under a symlinked path (the helper's own docstring says so).
+22. `rapidtool-cli.mjs:3308` hardcodes `budgetsMs: { wildStep: 255_000, chat: 60_000 }` with a "keep in sync" comment while `diagnose.ts:156` **imports** the same constants (`rt-events.ts:213-220`). Values correct today; pure drift hazard.
+23. `write-atomic.mjs:64` — `mkdirSync(dirname(target))` runs **before** the rename try, so a failed EXDEV rename has already created target dirs; the test "a failed hand-over creates no directory" (`write-atomic.test.mjs:101-106`) only passes because ENOENT throws earlier.
+24. `browser-guard.mjs:49-58` — on win32 *any* POSIX-literal entry makes the whole check fail closed, discarding legitimate later Windows dirs; and `LOOPBACK_HOSTNAMES` carries a dead `"::1"` (URL.hostname yields `"[::1]"`).
+25. `docs-module-parity.mjs:96` — `--self-check` changes only a *label string*; the `fixtures` booleans are computed unconditionally. The flag is decorative.
+26. `package.json` — no `format:check` (only write-mode `"format": "prettier --write ."`), no `--test-reporter` pin on either leg, and `"sideEffects": false` at an app root whose telemetry/router install side-effects at module scope.
+27. `tsconfig.json` `"include": ["src","server"]` → the 165 KB CLI, 130 KB run-eval and all guards are **untypechecked** in the gate (`tsconfig.scripts.json` documents 1030 errors, staged, honest).
+28. `README-cli.md:1001-1007` "## Tests" lists only two `src/lib` suites while `npm test` runs all of `src/lib/**`.
+
+### A2 · UNVERIFIED (do not publish as fact)
+
+- The exact `USAGE.commands`-vs-arm diff, and whether any test binds `USAGE` strings.
+
+### A2 · NEXT STEP FOR WHOEVER PICKS THIS UP (verbatim)
+
+Read `wave_plans/W34/code-notes.md`, re-check these 28 against current bytes (sibling lanes are landing), then append `§A2` with ①②③④ per item + the FOR-THE-CODERS guide (test contracts; the no-tty/`--test-name-pattern` green-lie; fuzzy-patch is opt-in-only in `patch.ts` but the **CLI `edit` never exposes it**; declare-or-strike; collision etiquette; E-15/RT_E_VALIDATION; log-and-continue).
 <!-- END-OF-FILE-MARKER-NOTES · every lane appends ABOVE this line · never edit or delete this line -->

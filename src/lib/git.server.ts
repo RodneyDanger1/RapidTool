@@ -37,7 +37,7 @@
 // Server-only: never import this module into a client bundle.
 // ---------------------------------------------------------------------------
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { classifyError, type ErrorCode } from "./errors.ts";
@@ -645,19 +645,32 @@ function hasLandingMarker(dir: string): boolean {
 function writeLandingMarker(dir: string): void {
   const p = markerPath(dir);
   mkdirSync(join(dir, ".rapidtool"), { recursive: true });
-  writeFileSync(
-    p,
-    `${JSON.stringify(
-      {
-        landing: GIT_LANDING_MARKER_KIND,
-        version: GIT_LANDING_MARKER_VERSION,
-        initializedAt: new Date().toISOString(),
-      },
-      null,
-      2,
-    )}\n`,
-    "utf8",
-  );
+  const text = `${JSON.stringify(
+    {
+      landing: GIT_LANDING_MARKER_KIND,
+      version: GIT_LANDING_MARKER_VERSION,
+      initializedAt: new Date().toISOString(),
+    },
+    null,
+    2,
+  )}\n`;
+  // K2 (W39): atomic hand-over — the marker is read back as the "already
+  // initialized here" proof (hasLandingMarker). An in-place write interrupted
+  // mid-bytes leaves invalid JSON, which reads as "no marker" (fail-safe) but
+  // sends the next run down the re-init path, and a half-written proof file is
+  // exactly the kind of lie the landing contract exists to prevent.
+  const staging = `${p}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(staging, text, "utf8");
+    renameSync(staging, p);
+  } catch (err) {
+    try {
+      if (existsSync(staging)) unlinkSync(staging);
+    } catch {
+      /* best-effort staging sweep */
+    }
+    throw err;
+  }
 }
 
 function isDirectoryOf(dir: string): "ok" | "missing" | "not-a-directory" {

@@ -872,18 +872,63 @@ function quotaSafePersistStorage(): PersistStorage<PersistedSlice> | undefined {
  *  demo seed run (the seed's persist write also overwrites the corrupt blob,
  *  so the next load rehydrates cleanly). Never strands hydration. */
 function recoverFromCorruptPersistence(): void {
+  preserveUnreadableBlob();
   useRapid.setState({ hydrated: true, projects: [], activeId: null, demoSeeded: false });
   useRapid.getState().seedIfEmpty();
 }
 
+const PERSIST_NAME = "rapidtool.v4";
+/** K2: the one-slot rescue copy of a blob this build could not read. */
+const PERSIST_RESCUE_NAME = `${PERSIST_NAME}.rescue`;
+/** K2: cap so the rescue copy itself cannot blow a localStorage-class budget. */
+const PERSIST_RESCUE_MAX_CHARS = 2_000_000;
+
+/**
+ * K2 (W39): before recovery OVERWRITES the persisted blob, keep a one-slot copy
+ * of its raw bytes under `<name>.rescue`.
+ *
+ * Why: recovery is destructive by design (clean re-seed), but not every blob it
+ * drops is junk. A blob whose `version` is NEWER than this build (a downgrade,
+ * or a stale tab after a deploy) is a v(n+1) payload this build cannot read —
+ * `migrate` throws for it on purpose (never guess a future shape), and the old
+ * comment claimed "the blob is never overwritten on a version mismatch". That
+ * claim was already false once H4's recovery landed: `setState` → the seed's
+ * persist write replaces the blob, so a downgrade silently destroyed the
+ * user's newer data. The rescue copy makes the recovery non-destructive in
+ * fact: bytes are preserved, loudly (console.warn names the key), and the
+ * operator can hand them to a newer build.
+ *
+ * Best-effort by contract: an absent/blocked/quota-full storage skips the copy
+ * (in-memory state is authoritative either way) and nothing here throws —
+ * it runs INSIDE the hydration callback. */
+function preserveUnreadableBlob(): void {
+  try {
+    const store = currentStorage();
+    if (!store) return;
+    const raw = store.getItem(PERSIST_NAME);
+    if (raw === null || raw.length === 0 || raw.length > PERSIST_RESCUE_MAX_CHARS) return;
+    store.setItem(PERSIST_RESCUE_NAME, raw);
+    console.warn(
+      `[store] persisted state at "${PERSIST_NAME}" was unreadable — a rescue copy is kept at ` +
+        `"${PERSIST_RESCUE_NAME}" before the clean re-seed overwrites the original.`,
+    );
+  } catch {
+    /* rescue is best-effort — never let it throw out of the hydration callback */
+  }
+}
+
 const persistOptions: PersistOptions<RapidState, PersistedSlice> = {
-  name: "rapidtool.v4",
+  name: PERSIST_NAME,
   // T0.1 (fixes/162): version the blob BEFORE any schema add. zustand defaults
   // version:0 with no migrate — a later bump would wipe every user and re-wipe
   // every reload (the blob is never overwritten on a version mismatch).
   // v0 → v1 is an identity migrate (legacy blobs keep their projects).
-  // A FUTURE blob (fromVersion > 1) throws so onRehydrateStorage recovers
-  // via recoverFromCorruptPersistence (clean re-seed), never silent-drop.
+  // A FUTURE blob (fromVersion > 1) throws so onRehydrateStorage recovers via
+  // recoverFromCorruptPersistence (clean re-seed), never silent-drop.
+  // K2 (W39): "never silent-drop" is now literally true — the throw path
+  // preserves the future blob under PERSIST_RESCUE_NAME before the re-seed
+  // write overwrites it (preserveUnreadableBlob; the old comment stopped being
+  // true the moment H4's recovery started persisting the seed).
   version: 1,
   migrate: (persistedState, fromVersion) => {
     if (typeof fromVersion === "number" && fromVersion > 1) {
@@ -1357,7 +1402,14 @@ export const useRapid = create<RapidState>()(
                 const live = byId(s.projects, id);
                 if (!live) return s;
                 return {
-                  projects: s.projects.map((p) => (p.id === id ? next.project : p)),
+                  // F3-10 (fixes/293 M2): the denial-log commit is the async
+                  // branch's twin of the wrapped success path below — a stale
+                  // execute snapshot must not clobber operator-owned fields
+                  // (name/notes/enforceDod/wildMode/chatLog/kind) or an
+                  // in-flight wild run.
+                  projects: s.projects.map((p) =>
+                    p.id === id ? keepLiveWildRun(rebaseUserFields(next.project, live), live) : p,
+                  ),
                 };
               });
             }

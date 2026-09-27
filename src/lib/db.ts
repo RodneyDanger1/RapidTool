@@ -1,4 +1,8 @@
-import { authSchemaRefusal, pendingMigrations } from "../../scripts/migration-plan.mjs";
+import {
+  authSchemaRefusal,
+  outOfOrderMigrations,
+  pendingMigrations,
+} from "../../scripts/migration-plan.mjs";
 
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
@@ -148,6 +152,16 @@ async function createPgliteSql(): Promise<Sql> {
       import: "default",
       eager: true,
     }) as Record<string, string>;
+    // K2 (W39): the auth SOURCE dir's KEYS, for the copy-up completeness check
+    // (parity with scripts/migrate.mjs, which listings the dir with readdir).
+    // Lazy glob — keys only, so the opt-in auth SQL never enters this path's
+    // bundle and is definitely never applied here (the eager glob above is
+    // non-recursive by pattern). Absent dir → empty object → unknown, and the
+    // preflight skips the copy-up half rather than guessing.
+    const authSources = import.meta.glob("/migrations/auth/*.sql") as Record<
+      string,
+      () => Promise<unknown>
+    >;
     const doneRows = await pg.query<{ name: string }>(
       "select name from _migrations",
     );
@@ -155,16 +169,29 @@ async function createPgliteSql(): Promise<Sql> {
     // R15-f02: sign-in enabled + no migration here creating the Better Auth
     // `user` table -> refuse with the copy-up fix instead of serving sign-in
     // against a schema-less database. Mirrors the deploy-side preflight in
-    // scripts/migrate.mjs; pinned in scripts/migration-plan.test.mjs.
+    // scripts/migrate.mjs; pinned in scripts/migration-plan.test.mjs. K2 (W39):
+    // a PARTIAL copy-up (0001 in, a later auth migration out — e.g. the
+    // R15-f02 0002 unique index) is refused too, not silently half-applied.
     const authRefusal = authSchemaRefusal({
       authEnabled: authEnabledByEnv,
       names: Object.keys(migrations),
       sql: Object.values(migrations),
+      authDirNames: Object.keys(authSources),
     });
     if (authRefusal) {
       const err = new Error(authRefusal.message) as Error & { code: string };
       err.code = authRefusal.code;
       throw err;
+    }
+    // K2 (W39): the version-gap / partial-application hazard — a pending file
+    // that sorts BEFORE an already-applied one applies in an order the schema
+    // history never saw. Warn loudly (parity with scripts/migrate.mjs).
+    const outOfOrder = outOfOrderMigrations(Object.keys(migrations), done);
+    if (outOfOrder.length > 0) {
+      console.warn(
+        `[db] WARNING: ${outOfOrder.join(", ")} sorts before an already-applied migration — applying out of order. ` +
+          "Verify its SQL does not assume a schema state a later migration already changed.",
+      );
     }
     for (const { name, path } of pendingMigrations(Object.keys(migrations), done)) {
       // Apply + record atomically (parity with scripts/migrate.mjs) so a failed

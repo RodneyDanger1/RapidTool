@@ -28,12 +28,45 @@ export type LlmModel = "deepseek-v4-flash" | "deepseek-v4-pro";
  * server modules. */
 export type { RapidToolModelRole };
 
+/**
+ * W39·K6 (completing C2 · fixes/288): measured token usage for one provider
+ * call, shared by both LlmResult arms (success AND the I2 refusal contract —
+ * a refusal that burned tokens stays meterable).
+ *
+ * The two cache fields are ADDITIVE and CONDITIONAL: a provider response (or
+ * an old cassette tape) without them keeps the exact legacy 2-key usage
+ * object, so every deepEqual pin and every legacy consumer stays green.
+ * `cachedPromptTokens` is the token-ledger / packet / doctor vocabulary
+ * (`TokenSpend.cachedPromptTokens`, packet `cached_prompt_tokens`) — the
+ * pass-through ledger seams accumulate it automatically; the cost derivation
+ * (`estimateCostUsd`) re-prices it at the cache-read price.
+ */
+export type LlmUsage = {
+  promptTokens: number;
+  completionTokens: number;
+  /**
+   * Prompt tokens served FROM the provider's context cache — DeepSeek
+   * `usage.prompt_cache_hit_tokens` (api-docs.deepseek.com/guides/kv_cache,
+   * "Checking Cache Hit Status"), OpenAI-style `prompt_tokens_details.
+   * cached_tokens`. Subset of `promptTokens`; billed at the cache-hit price.
+   */
+  cachedPromptTokens?: number;
+  /**
+   * Prompt tokens that MISSED the context cache — DeepSeek
+   * `usage.prompt_cache_miss_tokens` (prompt_tokens = hit + miss). Kept for
+   * cache-discipline diagnostics (a miss-heavy ledger means the prompt
+   * assembly defeated the prefix cache); cost derivation uses the hit field
+   * (the miss is simply the full-price remainder).
+   */
+  cacheMissTokens?: number;
+};
+
 export type LlmResult =
   | {
       ok: true;
       text: string;
       model: string;
-      usage?: { promptTokens: number; completionTokens: number };
+      usage?: LlmUsage;
     }
   | {
       ok: false;
@@ -41,7 +74,7 @@ export type LlmResult =
       error?: string;
       // Y1's I2 contract (codegen FM-03): a REFUSAL may still report usage at runtime; the type now
       // carries it so accountSynthUsage can meter it without narrowing gymnastics.
-      usage?: { promptTokens: number; completionTokens: number };
+      usage?: LlmUsage;
       /** Machine-readable class of the failure (errors.ts); always present on
        *  provider-side failures so callers never parse prose. */
       code?: ErrorCode;
@@ -84,6 +117,13 @@ export async function complete(
     system?: string;
     maxTokens?: number;
     json?: boolean;
+    /** fixes/156 E1 parity (C1-f08 · W39·K6): the server validator (:50-62)
+     *  always accepted `thinking` and the runtime forwards the whole opts
+     *  object verbatim, but this public TYPE omitted it — only llm-tasks'
+     *  own Completer typing kept the structured-envelope override working.
+     *  Forwarded to the provider, where it can only ever turn the pro tier
+     *  OFF (flash keeps its disabled shape; deepseek.ts :161-172). */
+    thinking?: boolean;
   },
 ): Promise<LlmResult> {
   try {

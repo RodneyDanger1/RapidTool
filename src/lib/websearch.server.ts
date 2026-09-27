@@ -39,6 +39,20 @@ const SEARXNG_INSTANCES = [
 const TIMEOUT_MS = 20_000;
 const MAX_ATTEMPTS = 2;
 const BASE_BACKOFF_MS = 400;
+/** setTimeout's overflow ceiling — Node fires longer delays immediately and
+ *  warns; anything at or below this stays a real timer. */
+const MAX_TIMER_MS = 2_147_483_647;
+/** RapidTool's own max_results ceiling (defensive): a tampered/absurd knob must
+ *  never reach a provider asking for thousands of entries. */
+const MAX_RESULTS_CEILING = 20;
+
+/** Sanitize a caller knob: finite integer in [min, max], else the fallback.
+ *  A hostile/typo'd value (NaN, Infinity, -5, 1e9) never reaches a provider. */
+function boundedInt(v: unknown, fallback: number, min: number, max: number): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= min
+    ? Math.min(Math.max(Math.floor(v), min), max)
+    : fallback;
+}
 const MAX_WIKI_EXTRACTS = 2;
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RapidTool/1.0 (keyless-research)";
@@ -176,6 +190,10 @@ async function searxngSearch(
       }
       const items = body.results
         .slice(0, maxResults)
+        // W40·K4: drop non-object entries BEFORE the field reads — a stray
+        // `null` in `results` used to throw a TypeError that discarded the
+        // whole instance's usable rows instead of being filtered out.
+        .filter((r) => r !== null && typeof r === "object")
         .map((r) => ({
           title: typeof r.title === "string" ? stripHtml(r.title) : "",
           url: typeof r.url === "string" ? r.url : "",
@@ -203,14 +221,20 @@ async function wikipediaSearch(
   const body = JSON.parse(raw) as {
     query?: { search?: Array<{ title?: string; snippet?: string }> };
   };
-  const results = body.query?.search ?? [];
-  return results.slice(0, maxResults).map((r) => ({
-    title: typeof r.title === "string" ? r.title : "",
-    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(
-      (r.title ?? "").replace(/ /g, "_"),
-    )}`,
-    content: typeof r.snippet === "string" ? stripHtml(r.snippet) : "",
-  }));
+  // W40·K4: `search` may be any hostile shape — a non-array is treated as no
+  // results, and non-object entries are dropped before the field reads (a
+  // stray `null` used to throw a TypeError that failed the whole provider).
+  const results = Array.isArray(body.query?.search) ? body.query.search : [];
+  return results
+    .filter((r) => r !== null && typeof r === "object")
+    .slice(0, maxResults)
+    .map((r) => ({
+      title: typeof r.title === "string" ? r.title : "",
+      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(
+        (r.title ?? "").replace(/ /g, "_"),
+      )}`,
+      content: typeof r.snippet === "string" ? stripHtml(r.snippet) : "",
+    }));
 }
 
 /**
@@ -323,11 +347,15 @@ export async function freeWebSearch(
       error: "empty search query",
     };
   }
-  const maxResults = opts.maxResults ?? 5;
+  // W40·K4: every knob is sanitized before use — previously a NaN / negative /
+  // absurd value rode straight into the provider URLs (srlimit=…) and timers:
+  // a non-positive timeoutMs aborted on the first tick, a NaN maxResults made
+  // every provider loop match zero entries, and a huge srlimit 400s MediaWiki.
+  const maxResults = boundedInt(opts.maxResults, 5, 1, MAX_RESULTS_CEILING);
   const fetchOpts: FetchOptions = {
-    timeoutMs: opts.timeoutMs ?? TIMEOUT_MS,
-    attempts: opts.attempts ?? MAX_ATTEMPTS,
-    backoffMs: opts.backoffMs ?? BASE_BACKOFF_MS,
+    timeoutMs: boundedInt(opts.timeoutMs, TIMEOUT_MS, 1, MAX_TIMER_MS),
+    attempts: boundedInt(opts.attempts, MAX_ATTEMPTS, 1, 5),
+    backoffMs: boundedInt(opts.backoffMs, BASE_BACKOFF_MS, 0, 10_000),
   };
 
   // Root cause of the most recent provider failure, surfaced verbatim in the

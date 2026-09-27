@@ -63,9 +63,23 @@ export function physicalInside(rootDir, target) {
   if (root === null || tgt === null) return null;
   const rel = relative(root, tgt);
   if (rel === "") return false; // strict containment: the root itself never counts
-  // "..foo" is a legal sibling name — only a bare `..` or a `..`-prefixed
-  // SEGMENT is an escape (win32 sep-aware; relative() is case-folded there).
-  return rel !== ".." && !rel.startsWith(`..${sepOf(rel)}`) && !isAbsolute(rel);
+  return !relativeEscapes(rel);
+}
+
+/**
+ * Does a `relative()` result denote a path OUTSIDE its base? True for a bare
+ * `..`, a `..`-prefixed SEGMENT (win32 sep-aware — relative() is
+ * platform-shaped, so the separator is derived, never guessed), or an
+ * absolute result (a different drive on win32). `""` (the base itself) is
+ * NOT an escape — strict containment is each caller's own extra condition.
+ * `..foo` is a legal sibling name and stays INSIDE: the naive
+ * `rel.startsWith("..")` overreach read it as an escape (refused a legal
+ * path; write-atomic.mjs and run-eval.mjs carried copies of that form).
+ * @param {string} rel
+ * @returns {boolean}
+ */
+export function relativeEscapes(rel) {
+  return rel === ".." || rel.startsWith(`..${sepOf(rel)}`) || isAbsolute(rel);
 }
 
 /**

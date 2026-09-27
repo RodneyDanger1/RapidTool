@@ -102,16 +102,24 @@ async function boundedExcerpt(res: Response): Promise<string> {
 }
 
 /**
- * Contain the injectable clock seam (R4-f09 · W39·B4): this module is
- * documented never-throwing, but `opts.now` is caller-supplied — a broken or
- * hostile hook (NaN / Infinity / a thrower) must yield the real clock instead
- * of a RangeError escaping BEFORE the try below. A non-finite result can never
- * become `probedAt`.
+ * Contain the injectable clock seam (R4-f09 · W39·B4, completed W40·K4): this
+ * module is documented never-throwing, but `opts.now` is caller-supplied — a
+ * broken or hostile hook (NaN / Infinity / a thrower) must yield the real
+ * clock instead of a RangeError escaping BEFORE the try below.
+ *
+ * W40·K4 completion: `Number.isFinite` alone still let a finite-but-out-of-
+ * range clock through — ECMAScript time values only span ±8.64e15 ms, so
+ * `new Date(1e300).toISOString()` throws `RangeError: Invalid time value`.
+ * The value must land inside the date range, not merely be finite.
  */
+const MAX_ECMA_TIME_VALUE = 8.64e15; // ±100,000,000 days from the epoch
+
 function safeNow(now?: () => number): number {
   try {
     const t = (now ?? Date.now)();
-    return typeof t === "number" && Number.isFinite(t) ? t : Date.now();
+    return typeof t === "number" && Number.isFinite(t) && Math.abs(t) <= MAX_ECMA_TIME_VALUE
+      ? t
+      : Date.now();
   } catch {
     return Date.now();
   }

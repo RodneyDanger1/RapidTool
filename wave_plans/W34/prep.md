@@ -188,4 +188,77 @@ DONE-WHEN: every owed section present above the marker; source paths attributed;
 
 **PARENT — CLOSE:** hygiene sweep (root strays/`.t4scratch`; W-36 keep-list) → §P3.4 legs in order (typecheck → lint UNPIPED → legs → gate.sh) → §P3.6 commit → then the owner items (O-1/O-4 keyed runs, AGENTS.md consent act, R13-f04 host decision).
 
+## §P2 — THE CODER CARDS (W34 lane P2 · read-only planner) — appended 2026-09-27 by W40 K8 (N4 → Z4 payout)
+
+**Status:** OWED SINCE W34 — the lane burned its budget on byte-level recon across 12 items and **never wrote `fixes/278_p2_howto.md` nor appended §P2** ("Outcome: recon complete, deliverable NOT written — honest gap first"). This block is the lane's verified analysis verbatim from its delegation summary (`~/AppData/Local/hermes/cache/delegation/subagent-summary-1-20260926_194745_119606.txt`), re-landed as the owed record. **Critical caveat (verbatim):** "L2 landed WHILE I read — the item set moved" — the mtimes/state below were as of that read (2026-09-26 ~19:45 CDT); re-verify before coding.
+
+### P2 · THE ITEM SET MOVED (bytes at lane read)
+
+| File | mtime | State at my read |
+|---|---|---|
+| `src/lib/checkpoint.server.ts` | 19:28 | COMPLETE (203 ln) — full API, **zero consumers** |
+| `src/lib/headless.ts` | **19:41** | L2 LANDED `checkpointDir?` opt at `:676`, `commitRunCheckpoint` `:640`, `clearRunCheckpoint` `:652` |
+| `scripts/rapidtool-cli.mjs` | **18:12** | still **NO `resume` / `unattended` verb** (37 arms) |
+| `src/lib/engine.ts` | 17:45 | **NO `readWildPlan`** (only types.ts prose) |
+| `src/lib/store.ts` | 19:07 | wild reviewer LANDED `:29/:1122/:1126` |
+| `scripts/README-cli.md` | 15:44 | not yet updated for a new arm |
+
+`fixes/277_l2_integration.md` (19:33) is a plan-only board, all rows `_in progress_` — **do not trust it as landed**. His A1 verification matches bytes.
+
+### P2 · BYTE-VERIFIED CODER CARDS (condensed — cause / files / done-when)
+
+**C1 · checkpoint wiring (half-landed)**
+- Cause: `headless.ts:663 runUntilGate` commits at `:691`, but only CLI `run`/`gate` (`rapidtool-cli.mjs:480-551`) has a real dir; the browser/store path never does. Nothing calls `commitRunCheckpoint`.
+- Files: `scripts/rapidtool-cli.mjs:485` (`h.runUntilGate(project, { autopilot, live, maxSteps })`) → add `checkpointDir: dirname(requireProjectPath(args, cmd))`; `headless.ts:640/:652`. Also `wildStartRun`/`wildStartHeadless`.
+- Done-when: `node --experimental-strip-types scripts/rapidtool-cli.mjs run --project tmp.json` → `.rapidtool/checkpoint.json` exists with `{version:1,run:{phase,mode},project:{...}}`; complete run clears it.
+- Traps: `boundProjectForCheckpoint` **slices** `logs/decisions/memory/artifacts/research` → a resume that hydrates from the checkpoint silently LOSES older rows. `types.ts` `Project` must stay byte-compatible; browser path must remain a no-op.
+
+**C2 · `resume` verb**
+- Files: new `case "resume"` in `rapidtool-cli.mjs`; **four** doc-parity contracts in `scripts/README-cli.test.mjs`: headline `**N subcommands**` (`:99-105`), the verb list block, lines quoting `grep -c 'case "'` (`:158`, `:119`), and `USAGE.commands === case-arm set` (`:260-276`, `assert.equal(keys.length, realCount)`).
+- Approach: `readCheckpoint` → `checkpointAdmits(cp, {projectId, mode})` → `RT_E_CHECKPOINT_MISSING` / `RT_E_VALIDATION`; re-entry = `runUntilGate(hydrateFromCheckpoint(cp))`. Phase range 1..13 belongs to the caller (the module is deliberately table-free, `checkpoint.server.ts:184-187`).
+- Done-when: `resume --project <no-cp>` exit 1 + code; `--list` read-only; `node --test scripts/README-cli.test.mjs` green.
+
+**C3 · `run --unattended`**
+- Cause: `scripts/unattended-shell.mjs` **does not exist**; no `unattended` verb in the 37 arms.
+- Approach: `--unattended` flag on the real `run` arm (U2's verb was already upgraded to "real drive; host scheduler named in help"), refuse `RT_E_UNATTENDED_UNSUPPORTED` naming W-01/W-02; **do not recreate** the never-built `unattended-shell.mjs`.
+- Traps: exit class must be **2** (blocked), `errors.ts:80`/`:514` carries the code; real unattended needs a non-TTY-safe gate path — the non-TTY approve guard at `rapidtool-cli.mjs:579-589` is load-bearing.
+
+**C4 · `readWildPlan` + plan gen**
+- Cause: `WildPlan`/`WildPlanStep`/`Project.wildPlan` exist (`types.ts:172-183/:433`), `readWildPlan` does not; `planning.ts` IS callable (`planSteps` `:326`, `MAX_PLAN_STEPS=8`).
+- Files: `engine.ts` (near `wildStep`), `headless.ts:33` (already imports it — **build is currently broken**), `store.ts` read path.
+- Done-when: keyless → `{steps:[], source:"empty", note:"…R13-f02"}` byte-identical; keyed → `source:"planner"`.
+
+**C5 · the E-25 red + the TWO hidden reds (the "nested subtest")**
+- `src/lib/headless.test.ts:606` **"W-02 keyless floor: runP6Edge without deps is the deterministic floor (no mint, no journey rows)"** is the nested subtest. Capture `/tmp/wdx3_headless2.log:265` proves the only diff is volatile bytes: `compiled_at` in packet text **and** embedded JSON, `phases[].startedAt/completedAt`, `traces[].ranAt`. The strip at `:633-655` misses `compiled_at` inside the **packet artifact bodies**.
+- **The 96/94/2 = 96 tests / 94 pass / 2 fail tally the top-level only.** There are **FOUR** reds, three of them nested: (1) `headless.test.ts:606`; (2) `headless.test.ts:1608` "CLI: --i-am-human WITH the out-of-band token records the human seat (exit 0)" → **1 !== 0**; (3) `headless.test.ts:1741` "CLI — an approve landed by the CLI carries the provenance on the row it mints" → **1 !== 0**; (4) `describe "E-25 — CLI machine contract"` (`:1220`).
+- **ROOT CAUSE (2)+(3) = the same one bug — the biggest find.** `scripts/rapidtool-cli.mjs:3408 humanSeatClaim` (W29 R5-f12 two-channel) does `if (process.stdin.isTTY !== true) return { error }`. Spawned CLI children have **no TTY** → the human seat is **unreachable from any subprocess**. HEAD's tests pass `RT_HUMAN_SEAT_TOKEN` in the child env and expect exit 0. Confirmed: `scripts/rapidtool-cli-edit.test.mjs:401-427` still pins the OLD allow contract.
+- **The owner is owed a Track-1 vs Track-2 ruling** (§R5-f12 track 2 = "keep + strike the README claim"). Either flip those pins to expect exit 1 `/human-seat-unverified/` (honest, fail-closed) **or** exempt the scripts leg — but `cliJson` (`rapidtool-cli-edit.test.mjs:78`) asserts `envelope.exit_code === process.exit code`, so a fake-TTY can't be faked inside a child.
+- Two stale comments to fix regardless: `rapidtool-cli.mjs:602` and `:1567` claim the statically forbidden same-env degenerate guard lives in `scripts/cli-exit-taxonomy.test.mjs` — **that file does not exist**.
+
+**C6 · the 4 kind emitters**
+- Bytes: `PKG_SCRIPTS:552-579` (game declares `build:"vite build"` at `:560-566` with **no config**); `packageJson:581-605` has no `bin`/`main`/`exports`/`files`; boot files pushed only for webapp|game at `:2573-2578` with `if (kind === "webapp") push("vite.config.ts", …)` at `:2576` (function `emitViteConfig:1817` — game may reuse it, drop the react plugin); throwing entries at `emitUi:936-962` (`service`/`cli-tool` flavors).
+- Contracts: `scaffold.test.ts:338` sweeps **every** file mentioning `E-15` for the canonical `TODO(E-15) stub` form (paren closes after 15); `emitted-honesty.test.ts:42` requires `RT_E_VALIDATION · ` on every stub throw; `doctor.ts:90` classifies anything containing `TODO(E-15)` as a **stub** — so the structured stub must KEEP the marker or the census flips.
+- Traps: `PKG_SCRIPTS` is `Partial<Record<…>>` — adding `start` to `service` changes the emitted `package.json` bytes; `scaffold.test.ts:221-232` pins an exact 10-file path list for intake-only webapp, so any unconditional new push breaks it.
+
+**C7 · graders + `verification` label**
+- Bytes: `run-eval.mjs:318 parseGrader` / `:370 loadGrader` / `:561 checkAcceptance` → returns exactly `checked:{expectedFiles,expectedContent}` (`:593`), pinned by `run-eval.test.mjs:381` `assert.deepEqual(res.checked, {expectedFiles:3, expectedContent:1})`. `verification` grep = **0 hits**.
+- Approach: `expectedBehavior` + `verification` ride as **ADDITIVE envelope/row keys** (`entryRow` `:2002` already seeds `acceptance:{...acceptance, pass:false}` at `:2042`) — never inside `checked`. `passesAcceptance:2083` is the four-clause predicate; keep it adjacent to `acceptanceFailReason`.
+- Done-when: `node --test scripts/run-eval.test.mjs` green incl. the pinned deepEqual.
+
+**C8 · UI panes**
+- Bytes: `RUN_TABS` `console.tsx:161-177` (11 entries, primary/advanced tiers); `Tabs.Content` blocks `:3261-3474`; Wild Mode block `:765-772` explicitly claims "no local-only fallback, **no 'not wired' labels remain**" while `setWildMode/startWildRun/toggleWildPause` are called statically at `:963/:970/:1248/:1263/:1276`; `:3508` renders "Empty until Phase 0 writes a checkpoint" for `project.memory` — **a write-time checkpoint, unrelated to `runCheckpoint`; the trap is a coder "surfacing the checkpoint" by editing that string.**
+- Honesty pattern to copy: `:3915-3932` — `disabled={… || allowListRefusal !== null}` + `title={\`Approve disabled — ${code} refuses…\`}` and the `:3954` fallback label ladder.
+- Console is **browser-only**: it cannot read a checkpoint file → read-only line must come from a store/server-fn read path, or be a disabled-with-reason label.
+
+**C9 · the records-paste mechanics**
+- `finalsprint.md` is uncommitted (untracked at lane time) and read_file flagged it binary → use terminal `sed`. Marker = `<!-- END-OF-FILE-MARKER-SPRINT … -->` **last line**; §S1–§S4 placeholders at `:34/:37/:40/:43`.
+- 8 owed appends, each VERBATIM in its lane log: §S1 (but **its board is false**: 3/4 items absent), §S2, §S3, §S4, §T1–§T5, §WDX-2 (incl. **RS-01…RS-04**), §WDX-3. Plus a `§MASTER-CORRECTIONS` block (append-only; never edit the table in place).
+- Traps: `prep.md` append marker is `<!-- END-OF-FILE-MARKER-PREP … -->` last line; re-read before every append; §P1 (`fixes/278_p1_remainders.md`, 19:32) is **also plan-only** — no true-state table yet.
+
+### P2 · PROCESS NOTES (verbatim)
+
+- **`grep -c 'case "'` will move 37→39** the moment C2+C3 land → §T/README headline must be re-derived, not copied (W-31 class of drift).
+- `scripts/README-cli.test.mjs` already carries `countClaimOffenders` (`:80-81`, `:171-180`) — R5-f13's widening has landed.
+- The no-tty quirk is not just a *test-leg* hazard (foreground legs) — it is the **root cause of two of the four reds** and blocks all headless human-seat approvals.
+- 8GB box: `docs-module-parity.mjs` (T5's V29) + full `arm -parity` scans are fine; avoid `npm test` (both legs) mid-wave — the src leg alone took 137s in the WDX-3 capture.
 <!-- END-OF-FILE-MARKER-PREP · every planner appends ABOVE this line · never edit or delete this line -->

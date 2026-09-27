@@ -1722,3 +1722,41 @@ test("A1: hydrate pending-ifies approved fixtures when acceptanceBriefHash ≠ f
   assert.equal(matching.acceptanceFixtures?.[0]?.approval, "approved", "matching hash keeps approval");
   assert.equal(matching.acceptanceApprovedAt, 99);
 });
+
+// ---------------------------------------------------------------------------
+// K2 (W39) — the future-version blob is NOT destroyed by recovery
+// ---------------------------------------------------------------------------
+
+test("K2: a FUTURE-version blob recovers loudly and is preserved under the .rescue key", async () => {
+  // The old comment claimed "the blob is never overwritten on a version
+  // mismatch", but H4's recovery persists the re-seed, which OVERWRITES it —
+  // a downgrade (or a stale tab after a deploy) silently destroyed newer data.
+  // The rescue copy keeps the raw bytes the new build could still read.
+  useRapid.setState({ projects: [], activeId: null, hydrated: false, autopilot: false, demoSeeded: false });
+  const future = JSON.stringify({
+    state: {
+      projects: [{ id: "future-1", name: "From A Newer Build", phases: [] }],
+      activeId: "future-1",
+      autopilot: false,
+      demoSeeded: true,
+    },
+    version: 2, // this build reads version 1; migrate() refuses to guess
+  });
+  localStorage.setItem("rapidtool.v4", future);
+  localStorage.removeItem("rapidtool.v4.rescue");
+  try {
+    await useRapid.persist.rehydrate(); // must resolve, never reject/throw
+    const st = useRapid.getState();
+    assert.equal(st.hydrated, true, "hydration completes for a future-version blob");
+    assert.equal(st.projects.length, 1, "clean re-seed ran (the newer payload is not guessed at)");
+    assert.equal(
+      localStorage.getItem("rapidtool.v4.rescue"),
+      future,
+      "the newer build's raw blob is preserved byte-for-byte under the rescue key",
+    );
+    const healed = localStorage.getItem("rapidtool.v4") ?? "";
+    assert.doesNotThrow(() => JSON.parse(healed), "the main key is rewritten with this build's valid JSON");
+  } finally {
+    localStorage.removeItem("rapidtool.v4.rescue");
+  }
+});

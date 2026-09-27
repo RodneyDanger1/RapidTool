@@ -259,4 +259,336 @@ polls 3 · claims byte-checked 12: 8 CONFIRMED · 3 confirmed-in-flight (re-chec
 
 **Not claimed:** the checkpoint console seam (TODO(N2)) · seat/isolation/stream/cassette wirings (labels name the unwired state, not a landed capability) · §S1–§S4 stay `_(pending)_` (the capped S-lanes' debt — NOT this lane).
 
+---
+
+## §T1 — THE REGISTER'S UNTOUCHED ROWS (W31 · T1) — lane log `fixes/273_t1_register_rows.md`
+
+**Status:** OWED SINCE W31 — T1 died capped **pre-append** (WDX-1 poll log, §WDX-1 above). Appended 2026-09-27 by **W40 K8** as the N4 → Z4 payout, verbatim from the lane log. **Source-state:** byte-verified at lane time (2026-09-26 ~18:00–18:20 CDT, tree `0f85c32` + W29/W29b/W30/E1b uncommitted edits); close-states live in §WDX-1's polls. This block is T1's record of record.
+
+**Job (verbatim):** sweep §W27-B/C/D (`research/multiagent/thoroughanalysis.md:1144-1306`) for rows with NO lane reference; verify each in the code; land the safe ones (smallest honest patch); deliver the per-row verdict table (§T1 into `finalsprint.md`).
+
+### T1 · VERDICT TABLE (as of lane open — the table the lane died with)
+
+| Row | § | Verdict at open | Byte evidence / reason |
+|---|---|---|---|
+| W-04 | B | FOR-LANE (E1/S2) | `codegen.server.ts` mint: `treeRunTestedEvidence` still `specs>0 && assertions>0` (~:3416-3431); `scaffold.ts:1596-1615` tree-job row still swallows non-ReferenceError throws (`catch (e) { if (e instanceof ReferenceError) throw e; }`) — W-04(a)/(b) intact. Both files actively edited (E1b). |
+| W-05 | B | FOR-LANE-S2 | `partialTreeRefuse` lastTest-null = R3-f03 fold; S2's brief covers "partial-synthesis semantics". codegen.server.ts hot (17:42). |
+| W-06 | B | FOR-LANE-S2 | partial-synthesis cascade semantics; S2 brief. |
+| W-07 | B | FOR-LANE-S2 | prompt-vs-tsconfig reword; S2 brief. |
+| W-08 | B | FOR-LANE-S4 | master table: R11-f08 `--force` quarantine → S4. Headless.ts hot. |
+| W-09 | B | **ALREADY-DONE** | `gate.sh:193-198` exit condition now includes `gates.testsScripts.ok && gates.testsLib.ok` + synthetic no-TAP hardFails (:164-184); `scripts/gate-verdict.test.mjs` shipped (W29-H). Verified by running the fixture (see landings). |
+| W-10 | B | FOR-LANE-S4 | seat surface → S4 (master table). |
+| W-11 | B | **ALREADY-DONE** | 4 surfaces: grep `autonomous software agency` → only rule-comments left; `og/site.json` = `"governed delivery harness"`; console/routes carry the R6-f02 rule comments. |
+| W-12 | B | ALREADY-DONE (verify) | README:116-118 now quotes the measured `{stubs:0, reexports:4, real:1}` census. |
+| W-13 | B | PARTIAL → FOR-LANE (docs) | AGENT_GUIDE/README-cli items still owned by docs lanes; re-check at T1 close. |
+| W-14 | B | FOR-LANE-S2 | graders v2 → S2 (master table). |
+| W-15 | B | FOR-LANE-S2 | 4 kinds → S2. |
+| W-16 | B | **LANDED-BY-ME** | (a) `handoff.ts:95` `text(project.brief)`; (b) `vault.ts:442` junk-row skip in `backlinksFor`. Pins added. |
+| W-17 | B | **ALREADY-DONE** | `openai-compatible.ts:499-504`: `noBalance = 402 || /insufficient balance/i` → `RT_E_LLM_NO_BALANCE` (W29-P). Verified by targeted test run. |
+| W-18 | B | FOR-LANE (open; needs console.tsx quiet) | `store.ts:1164` `create` still `emptyProject({brief,name})`; no `llmStatus.configured` threaded → browser create stays `enforceDod:false`. Exact 2-file fix recorded in §T1. |
+| W-19 | B | FOR-LANE (engine.ts hot) | `dod.ts:865-868` `recordGateInto` still complete-only; no `gate.blocked` row anywhere (grep). engine.ts 17:45 mid-edit (E1b). |
+| W-20 | B | FOR-LANE (engine.ts hot) | `engine.ts:2958-2968` still hardcodes `deepseek-flash` on `llmRan`; `llm-tasks.ts:127/157/188` still request `deepseek-v4-pro`. Served-model threading not landed. |
+| W-21 | C | FOR-LANE-S3 | ledger → S3 (master table). |
+| W-22 | C | **ALREADY-DONE** | `console.tsx:1906-1908` union has `"module"`; `setBusyAction("module")` :2234 + finally :2253. |
+| W-23 | B | PARTIAL → **b LANDED-BY-ME**; a-engine-half FOR-LANE | packet half (`isoFromMs` clamp, packet.ts:189-231) landed W29-S. **b: `keepLiveWildRun` NOT in store.ts** → I land the helper + 6 sites. a-engine-half: `engine.ts:2021-2037 wellFormedDecisionRow` still typeof-only → 1-line, engine.ts hot. |
+| W-24 | B | FOR-LANE (engine.ts hot) | hydrate still keeps crew/oracle/chatLog rows raw (`engine.ts:2238/2405-2406`); research item filter partially aligned but import/reload parity not. |
+| W-25 | C | OPEN sub-items → FOR-LANE (engine/store) | (a) bare `catch {}` at engine.ts:2790-2792 intact; (e) packet `str()/rows()` helpers absent. Engine.ts hot. |
+| W-26 | C | FOR-LANE (node-runner; open) | `node-runner.server.ts:306-315` — maxBuffer passed via cast, not a real SpawnOption; comment admits; no streaming kill. |
+| W-27 | C | PARTIAL → FOR-LANE (harness) | no `cli-exit-taxonomy.test.mjs` yet; several (a)-(i) items open. rapidtool-cli.mjs hot (17:56). |
+| W-28 | C | (a) FOR-LANE (E1/B); (b) FOR-LANE-S2 | scaffold.ts hot; emitted-UI seam = S2 per master table. |
+| W-29 | C | PARTIAL → ALREADY-DONE(a) + FOR-LANE-S5 (rest) | fixtures label rewritten on ALL THREE paths (fixtures.ts:20, fixtures.server.ts:26, fixtures.review.ts:36); "sandbox" sites + HomeScreen items still open. |
+| W-30 | C | **ALREADY-DONE** | `applyTheme` (:1471-1480) now syncs `meta[name="theme-color"]` in-session (W30 marker present). |
+| W-31 | D | **LANDED-BY-ME** | `README-cli.test.mjs` widened: `countClaimOffenders` helper + every-line scan + ALL `**N subcommands**` + in-file fixtures. |
+| W-32 | D | OWNER | descope-vs-keep decision = O-3; "no removals" rule during the wave. |
+| W-33 | C | OPEN → FOR-LANE | no `decideTransition`/`stopReasonFor` in store.ts; 4 site families + 2 twins still duplicated. |
+| W-34 | D | PARTIAL → **subsets LANDED-BY-ME** (backlinksFor/handoff/token-ledger pins); rest FOR-LANE | vault.backlinksFor now tested (was "its file's only untested export"). |
+| W-35 | D | **LANDED-BY-ME** | `totalTokens` null/junk guard (`token-ledger.ts:113-118`). |
+| W-36 | D | OWNER (O-2a) | probe keep/delete is an owner ratification; "no removals" forbids deleting during the wave. |
+| W-37 | D | OWNER/parent | recording debts (scribe pass) — not code. |
+| W-38 | B | OPEN → FOR-LANE (UI) | `runP6Journey` still definition-only (store.ts:130/:923; zero call sites). console.tsx hot. |
+| W-39 | C | (a) OPEN → check; (b,c,d) FOR-LANE (provider) | rt-client finite-guard grep → 0 (re-verify); rt-ring hydrate caps; import-boundary headers. |
+| W-40 | B | ALREADY-DONE (shell by S1) | checkpoint.server.ts + resume verb + `TODO(T-107.7)` per fixes/272_s1_autonomy.md; spot-verify bytes at close. |
+| W-41 | B | FOR-LANE-S3 | streaming → S3. |
+| W-42 | B | FOR-LANE-S3 | cassette → S3. |
+| W-43 | B | FOR-LANE-S3 | F4 allow-lists → S3. |
+| W-44 | C | FOR-LANE-S3 | MCP → S3. |
+| W-45 | C | FOR-LANE-S3 | F2 → S3. |
+| W-46 | C | **BLOCKED (ON W-02 + O-1)** | acceptance chain — register says so; no keyed calls allowed. |
+| W-48 | B | ALREADY-DONE (shell by S1) | R13-f02 wildPlan + engine read-point per fixes/272_s1_autonomy.md; spot-verify at close. |
+| W-49 | B | FOR-LANE-S4 | isolation refusal = S4 BLOCKED-SHELL. |
+| W-50 | B | FOR-LANE-T3 | R13-f05/f13 → T3 owns "R13's remaining rows f05→f15". |
+| W-51 | D | FOR-LANE-T3 | R13-f10. |
+| W-52 | D | FOR-LANE-T3 | R13-f12. |
+| W-53 | D | FOR-LANE-T3 | R13-f14. |
+| W-54 | D | DEFER (recorded, no action) | register explicitly defers. |
+
+### T1 · STATE AT LANE DEATH (read by K8 2026-09-27)
+
+- The `Landings` and `[EXT-FAIL] / deviations` sections were still placeholders at the K8 read — T1's own record stops at the table above. Landings visible in it: W-16 · W-23b · W-31 · W-34 · W-35 (**LANDED-BY-ME** rows). T1 stayed LIVE at WDX-1's close (18:22:55, "no finals" — §WDX-1) with its W-23b helper observed on disk (`store.ts:278`).
+
+## §T2 — R15'S EVERYTHING-ELSE (14 rows) (W31 · T2) — lane log `fixes/273_t2_r15.md`
+
+**Status:** OWED SINCE W31 → appended 2026-09-27 by **W40 K8** (N4 → Z4 payout), verbatim from the lane log. **Source rows:** §R15 (`research/multiagent/thoroughanalysis.md`, f01–f14) + W28-WORKLIST residual dispositions (O-6/WA-02/WA-03). Verified against today's bytes at lane time (18:00–18:30 CDT).
+
+### T2 · ROW STATUS (final — the record-of-record)
+
+| Row | What | Verdict | Where |
+|---|---|---|---|
+| R15-f01 | og/site.json share-card claim | **ALREADY-DONE (sibling, W30/S5-era + R6-f02)** — `site.json` now `"governed delivery harness"`; grep = 2 intentional guard comments only | verify-only |
+| R15-f02 | auth schema never migrated (recursion) + `account` unique index | **LANDED (guard + index)** | `migrations/auth/0002_account_unique.sql` (new) · `migration-plan.mjs` helper · `migrate.mjs` + `db.ts` refusals · `errors.ts` `RT_E_AUTH_SCHEMA_MISSING` · 5 new pins in `migration-plan.test.mjs` |
+| R15-f03 | ~30 unused prod deps | RECORDED (census refreshed today; prune requires full build+test → next wave) | §T2 |
+| R15-f04 | tsconfig chain cannot see `scripts/**` | LANDED (staged) — `tsconfig.scripts.json` + measured error count | §T2 |
+| R15-f05 | no `.prettierignore`; format unenforced | LANDED (`.prettierignore`) + RECORDED (format pass/gate row) | `.prettierignore` |
+| R15-f06 | CI verdict integrity | **ALREADY-FIXED (Lane H A2-f02/R5-f01 in tree)** + residual RECORDED (SHA pins, first green run) | verify-only |
+| R15-f07 | 10 root scratch probes | RECORDED (owner-only consolidation; W32 organizer live on root) | §T2 |
+| R15-f08 | `.grok/` legacy map | LANDED (AGENTS.md live-reads correction) + RECORDED (94 §B1 / `.grok/status` owner calls) | `AGENTS.md` |
+| R15-f09 | `.env.example` 2/~20 vars | LANDED (advanced-knobs block, census-driven) + RECORDED (CLI/platform nuance) | `.env.example` |
+| R15-f10 | no version identity | LANDED (`version` + `engines` in package.json (+lock root); doctor surfacing RECORDED) | `package.json`, `package-lock.json` |
+| R15-f11 | i18n boundary undeclared | LANDED (one honest-limit line in README) | `README.md` |
+| R15-f12 | no a11y guard; install CSS 0 focus rules | LANDED (install-CSS `:focus-visible`) + RECORDED (axe pass) | `public/__grok/install/styles.css` |
+| R15-f13 | stale unindexed docs | LANDED (HISTORICAL banners) | `attachments/RapidTool_Complete_Master.md`, `agentnotes.md` |
+| R15-f14 | origin-era residue | RECORDED (removals = owner call; W32 organizer owns root hygiene) | §T2 |
+
+### T2 · COLLISION NOTES (live-lane census, 18:01)
+
+- `scripts/gate.sh`, `scripts/rapidtool-cli.mjs`, `README.md`, `src/lib/og/site.json`, `src/routes/*` are mid-edit by W29/W30 lanes in the working tree — my edits avoid them except README (small additive line, re-read first at edit time).
+- W29 LANE H owns `scripts/**`/`package.json`/`migrations/**` but its log is stale since 17:26; S5 (17:56) is finishing W29 leftovers B/P/H/D — none of its checklist rows touch `migrate.mjs`/`migrations/auth/`/`db.ts`/`migration-plan.mjs`** geometry, so the R15-f02 landing went first.
+- `package.json`/`package-lock.json`: edited by me ONLY with `version`/`engines` (no scripts block touched).
+
+### T2 · CLOSE-STATE (from §WDX-1's poll log)
+
+T2's wave-2 landings (all byte-verified, §WDX-1 `:175`): `tsconfig.scripts.json` (NEW, R15-f04 staged) · `.prettierignore` (NEW, R15-f05) · `.env.example` (M — advanced-knobs block, R15-f09) · `package.json` (M — `version`+`engines`, R15-f10) · `AGENTS.md` (M correction) · `public/__grok/install/styles.css` (M — `:focus-visible`, R15-f12) · `agentnotes.md` + `attachments/RapidTool_Complete_Master.md` (M — HISTORICAL banners, R15-f13). Its own measurement: "Staged scripts-program measured: **1030 errors** (cli 299, run-eval 284, tests ~280…)". T2 stayed LIVE at WDX-1's close.
+## §T3 — R13'S REMAINING BEST-IN-WORLD ROWS (W31 · T3) — lane log `fixes/273_t3_r13.md`
+
+**Status:** OWED SINCE W31 — T3 ENDED capped at 18:20:15 ("**3 of my 6 rows landed in code; the two RECORD deliverables (lane log final + §T3 appe[nd]) …**" — §WDX-1 `:212`). Appended 2026-09-27 by **W40 K8** as the N4 → Z4 payout, verbatim from the lane log. **Box (verbatim):** §R13 rows NOT covered by S1/S3/S5 — the best-in-world differentiators. Contract = W30 shell-sprint (compiles · wired to ≥1 real call site OR honest coded refusal · `TODO(<id>)` at the exact logic line · no fake behavior · additive only).
+
+### T3 · A) TRIAGE AT LANE START (read 2026-09-26 ~18:00 CDT; finalsprint.md read fresh)
+
+| §R13 row | Owner per finalsprint/W30 brief | T3 verdict (to verify in bytes) |
+|---|---|---|
+| f01 unattended (W-47/R13-f01) | S1 | NOT MINE (S1 shell pending — record only if S1 dies) |
+| f02 plan-first | S1 | NOT MINE |
+| f03 checkpoint/resume (T-107.7) | S1 | NOT MINE |
+| f04 isolation boundary | S4 (BLOCKED-SHELL) | NOT MINE |
+| **f05 running-product verification + preview** | **nobody** | **T3 — land preview shell / record E2E leg** |
+| f06 MCP client (F1) | S3 | NOT MINE |
+| f07 streaming (T5.1) | S3 | NOT MINE |
+| f08 allow-lists (F4) | S3 | NOT MINE |
+| f09 provider failover + cross-family judge | **part S3 (F2 step-2); failover+judge nobody** | **T3 — record (a) 402=done-by-P; land/record judge+failover** |
+| f10 learning-loop measurement sliver (221 §F3) | **nobody** | **T3 — land Step A per spec** |
+| f11 run-budget invest semantics | part S3 (ledger threading); invest/salvage nobody | **T3 — record tail (S3 mid-surgery in token-ledger.ts)** |
+| **f12 gate-review surface** | **nobody** | **T3 — land cards/hash surface (console) or record precisely** |
+| **f13 deploy/preview node** | **nobody** | **T3 — land per-kind DEPLOY.md handoff (scaffold.ts, cold)** |
+| **f14 subagent fan-out** | **nobody** | **T3 — wire-or-de-scope: de-scope record + code marker** |
+| **f15 repo index at scale** | **nobody** | **T3 — DEFER record only (221 §F5 NOT-RECOMMENDED)** |
+
+**Live-edit evidence at lane start (mtimes, 18:01):** token-ledger.ts 18:00 (S3 mid-surgery), CLI 17:56, headless 17:50, engine 17:45, codegen 17:42, packet 17:41, compile-check 17:39, console 17:33, policy 17:29. → T3 will NOT touch token-ledger/packet/engine/headless/codegen/compile-check; console only if needed + cold enough; preferred landing files: `knowledge.ts` (14:10), `scaffold.ts` (15:27), `subagent.ts` (08:35), `registry.ts` (15:06).
+
+**W29 leftovers verified mid-flight:** Lane P's R4-f01 (402 → `RT_E_LLM_NO_BALANCE` in openai-compatible.ts + registry.test case) present in working copy → f09(a) = ALREADY-DONE-BY-P (re-verify bytes before recording).
+
+### T3 · B) LANE LOG (append-only — verbatim)
+
+- [t0] Lane start. Read: `wave_plans/W31/gap-finshers.md` (full), `finalsprint.md` (fresh — §S1-§S4 still pending; S5 log exists), §R13 (`thoroughanalysis.md:495-670`), §R8 tail (`:671-739`), W30 shell-sprint contract.
+- [t0] KEY: finalsprint master table covers f01/f02/f03 (S1), f04 (S4), f06/f07/f08 (S3), f09-partial (S3 F2), f11-partial (S3 ledger). Rows with NO owner: **f05 · f10 · f12 · f13 · f14 · f15** + f09's failover/judge tail + f11's invest/salvage tail. That is T3's exact scope.
+
+### T3 · CLOSE-STATE (from §WDX-1 + WDX-1 poll notes)
+
+Landed-in-code before the cap: **f13** (V21) · **f14** (V34, de-scope record + code marker) · **f09 failover** + `registry-failover.test` **7/7** (V30/V35). The lane-log final + this §T3 append did NOT persist — this block is the owed record.
+
+## §T4 — THE DEFINED SPECS (W31 · T4) — lane log `fixes/273_t4_defined.md`
+
+**Status:** OWED SINCE W31 → appended 2026-09-27 by **W40 K8** (N4 → Z4 payout), verbatim from the lane log. **Spec source:** `research/multiagent/249_define_first_specs.md` (SPEC 1 DF-09 · SPEC 2 T4.3 · SPEC 3 G4 / OV-21). The lane's job: run every pin, fix what is broken, complete the missing evidence (CLI replay, teeth proofs), record.
+
+### T4 · §0 AS-FOUND (byte-verified before any edit, 2026-09-26)
+
+The W31 planner's premise — "three DEFINED rows, not yet implemented" — is **stale by one wave**: W23 LANE 6 landed all three in commit `b721f9c` ("W18–W23: the code-all wave — … defined checks") under that wave's **CODE ONLY** rule ("no test/typecheck/build/lint runs"), and its lane-close record (`fixes/262` §5 landing table + the RED-by-design note) was never written. So the *code* existed; the *verification boundary* did not. This lane's job became: run every pin, fix what is broken, complete the missing evidence (CLI replay, teeth proofs), and record.
+
+| host | state found today |
+|---|---|
+| `src/lib/engine.ts:1660-1675` | DF-09 guard landed: `forcedOverride` (force + P6 + `lastTest.ok===false`) + `decidedBy==="human"` + note < 12 trimmed ⇒ throws coded `RT_E_VALIDATION` |
+| `src/lib/store.ts:1528-1547` | store pre-check `{ok:false, error:"… requires a rationale — at least 12 characters …"}` + forwards `note` to `approveHitl` |
+| `src/components/console.tsx:2193` (= `git show HEAD:…` line 2086) | override path passes `note: force ? note.trim() : undefined` — the spec's "console half" is committed |
+| `src/lib/honesty-guards.test.ts:437-550` | DF-09 block (A1/A2/A3a/A3b) — **RUN: 12 pass / 1 fail** (A2 red — a pin bug, §1) |
+| `src/lib/patch.test.ts:270+` + `src/lib/patch-preservation.test.ts` | T4.3 hosts — **RUN: green** (combined leg below) |
+| `src/lib/error-scan.server.ts` + `.test.ts` + CLI `scan` arm `scripts/rapidtool-cli.mjs:1932` | G4 landed — **RUN: green** |
+| `scripts/README-cli.md` (`**37 subcommands**` incl. `scan` + `## Scan (scan)` section) | parity bound by `scripts/README-cli.test.mjs` — **RUN: 11/11 green** |
+
+**Baselines run by this lane (targeted, foreground):**
+
+- `node --experimental-strip-types --test --test-concurrency=2 src/lib/honesty-guards.test.ts` → `# tests 13 · # pass 12 · # fail 1` — the red is `honesty-guards.test.ts:473` (A2), `2 !== 0`.
+- `node --experimental-strip-types --test --test-concurrency=2 src/lib/patch.test.ts src/lib/patch-preservation.test.ts src/lib/error-scan.server.test.ts` → `# tests 31 · # pass 31 · # fail 0`.
+- `node --test scripts/README-cli.test.mjs` → `# tests 11 · # pass 11 · # fail 0` (count/list/USAGE parity intact).
+
+Also verified: `scan` is **not** in `scripts/gate.sh` (0 hits) and `scanTreeErrorSignals` has exactly ONE call site — the CLI arm (`rapidtool-cli.mjs:1962`) — never `emit`, never a gate (the 218 §3.4 / OV-21 advisory posture holds).
+
+### T4 · §1 DF-09 — the as-found RED explained, fixed, teeth proven
+
+**The as-found failure is a PIN bug, not a guard gap.** `l6Gated()` builds its fixture via `runToGate(seedProject(), 6)` (`testing/fixtures.ts:99`), which journals decision rows for every below-target HITL gate it clears (fixtures.ts:114 `approveHitl(cur, { decidedBy: "human" })`). The fixture therefore arrives with **2** decision rows. A2 then asserted `gated.decisions.length === 0` — "a thrown refusal journals nothing" — which can never pass against a fixture that legitimately carries history. The honest pin is a BEFORE/AFTER snapshot: the engine throw must leave the input project untouched (pure-function contract), which is exactly what "journals nothing" means when the call never returns a project.
+
+**Fix (this lane):** `src/lib/honesty-guards.test.ts:458-478` — snapshot `decisionsBefore` before `assert.throws`, assert `decisionsBefore > 0` (documents the fixture's own history so the compare is non-vacuous), then compare `gated.decisions.length === decisionsBefore` "a thrown refusal journals nothing (the input project is untouched)". Teeth unchanged: with the guard removed the call no longer throws and `assert.throws` fails FIRST — red.
+
+### T4 · §4 THE RED-BY-DESIGN NOTE (kept honest — verbatim)
+
+SPEC 1's A4 required the DF-09 block to be RED on the pre-guard tree and GREEN after the store+engine guard. On today's tree the guard IS landed (W23), so the honest end-state is **GREEN with mutation teeth** — the RED is reproduced as the teeth proof (guard removed in a scratch copy ⇒ block red), and the as-found red (the A2 pin bug) is recorded above with its exact cause. No assertion was weakened: the A2 fix replaces a can-never-pass literal compare with a strictly stronger non-vacuity precondition + snapshot compare. Nothing here is claimed as red that runs green, and nothing green that has not been run.
+
+### T4 · CLOSE-STATE (from WDX-1 poll notes)
+
+- §1.1/§1.2/§2.1/§2.2/§3.1 result slots remained `_(results appended below …)_` placeholders at the K8 read; the lane's poll trace (WDX-1): **DF-09 pin fix V27 ✓ (non-vacuous)** · **teeth #1 proven ✓** · T4 silent-flag #2 raised P10 → recovered P11–P12 and closed as a long tool call (non-stall).
+## §T5 — THE OV BOARD SWEEP · THE BOARD-WIDE HONEST COMPLETION MAP (W31 · T5) — lane log `fixes/273_t5_board.md`
+
+**Status:** OWED SINCE W31 — T5 ENDED capped pre-append ("iteration cap hit before the final append … cycle: sweep + log + probe landed; §T5 unappended" — §WDX-1). Appended 2026-09-27 by **W40 K8** as the N4 → Z4 payout, verbatim from the lane log. **Method (verbatim):** every row below was re-verified against TODAY's bytes (grep/sed/read at ~18:00–18:20 CDT), never against a log's words alone; sibling log claims were accepted only where bytes agreed (S1's "as-landed" board runs AHEAD of its bytes — WDX-1 CF-1, corroborated by me at 18:03/18:09/18:12). Deliverables: this verdict table + **NEW `scripts/docs-module-parity.mjs`** (the OV-20 advisory probe, 4,674 B).
+
+### T5 · THE BOARD-WIDE VERDICT TABLE (as of 2026-09-26 ~18:20 CDT)
+
+Legend: **LANDED** (bytes + landing log agree) · **PARTIAL** (one half real, the named half missing) · **SHELLING NOW** (live lane mid-landing; bytes not yet on disk at stamp time) · **BLOCKED-KEY / OWNER** (named gate) · **LANDED-BY-ME** (this lane's landings this wave).
+
+#### A · The named board list (24 rows)
+
+| # | Row | Verdict | By whom (evidence) | Needed after / blocker |
+|---|---|---|---|---|
+| 1 | **OV-1** | **LANDED** | W23-L4 (`fixes/262_lane4_env_spend.md`): `registry.ts` `resolveEnvProvider` :249 / `resolveEnvSelectedRoute` :303, unknown id ⇒ `RT_E_VALIDATION` (:269/:313); `doctor.ts` `envSelection` :397 + `buildEnvSelection` :482 | none (code-only wave — parent boundary spot-verify) |
+| 2 | **OV-13** | **LANDED** (2 spots) | W19-L1 + W20-L3 (`fixes/252_lane1_ov13.md`, `fixes/255_lane3_ov13.md`): engine `degradeRows` on both `liveLayer` catches (narrative :3036, constraints :3064; factory `liveLayerFailureRow` :3274); headless `liveDegradeRow` rows (:216-232 / :253-269) + `p0.live.failed` at the outer catch (:371-379); pins in `lesson-writers.test.ts` (:429/:625; 92/92 · 25/25 · 87/87 recorded) | 2 residuals registered by this lane → `fixes/257` (store.ts fallback catch; verify.server unparseable-vs-no-cases pin) |
+| 3 | **OV-29** | **LANDED** | folded into OV-13 (`fixes/228` #11); headless.ts:216-232/:253-269 carry the OV-29 marker + rows | none |
+| 4 | **OV-16** | **PARTIAL** | README half LANDED W23-L2: `scaffold.ts:2065-2078` (unmaterialised-jobs line + clean-tree "0 declared…" line, OV-16 marker :2073). Doctor half: `headless.ts:3317-3330` carries only the `factory.inventory` census; `jobScopeShortfall` (`doctor.ts:148`) is consumed by engine (`p6.jobs.shortfall` :1368) — the declared-vs-materialised counts are **not** on the `doctor --tree` payload | residual registered (`fixes/257`); headless.ts HOT (S1) — not landed |
+| 5 | **OV-41** | **PARTIAL (2 of 3 surfaces)** | W23-L4: packet `spend` block + `## Measured spend` (`packet.ts:18-21`); `doctor.ts` spend surface :561/:584/:658 (`estimateCostUsd` consumed, never recomputed); `run-eval.mjs:720` spend row | headless summary-envelope half: grep `spend` in `headless.ts` = 0 → residual registered; headless HOT |
+| 6 | **OV-30** | **LANDED-BY-ME (register)** | register-only row: install-leg 240 s `npm ci` + 3×30 s script legs + recursive `cpSync` on an 8 GB host — registered as a NAMED limit in `fixes/257_error_ledger_v3.md` §F + §T5 (this wave); no code change is the row's own correct shape | if the owner wants it in `remainingwaves.md`/94-plan text, that file is untouched by this wave and remains the follow-up home |
+| 7 | **OV-20** | **LANDED-BY-ME (advisory probe)** | NEW `scripts/docs-module-parity.mjs` — report-only scanner (docs-claimed `src/`/`scripts/` paths → missing/empty list); JSON output, **never a gate**, exit 0 on findings; first run output in §Landings | parent keep-or-cut still standing (240 §Tier-2); removal is trivial (new untracked file) |
+| 8 | **OV-3** | **BLOCKED-KEY** | crash half FIXED+CERTIFIED (W21-L1/W22-L2: 119/119; 43 tests execute); E1b landed `runP6Edge` (`headless.ts:2277`) + `wildP6Edge`/`p6Edge` seam (`engine.ts:3544/:3853/:4048`). Residual code: C-3 keyed-tree fixture absent (`grep C-3` in `compile-check.server.test.ts` = 0); `treeRunTestedEvidence` (`codegen.server.ts:3422`) still shape-limited (T1 W-04) | owner keyed run (T0.10 + OV-8); C-3 fixture; the 28 capability reds close as synthesis improves (S2/W-05/06) |
+| 9 | **OV-5** | **BLOCKED-KEY** | W20-L2 landed the acceptance attribution (`acceptanceFailReason`, `run-eval.mjs:1642`; run-eval.test 31/31). M7 baseline cites run #1's row — needs keyed run #2. §P1/§P2 proposals await an owner ruling (p6-arch barrel exemption) | owner keyed run; owner ruling on the barrel exemption |
+| 10 | **OV-4** | **BLOCKED-KEY** | verify.server budget seam landed (:797/:814) but no `label:"tested"` promotion found today (`grep label: "tested"` = 0) and P6 probes read the promoted verdict; E1b makes the mint reachable (`runP6Edge`) | owner keyed run + the promotion code (post-Step-0 W15-class leg) |
+| 11 | **OV-11** | **OWNER-DECISION** | `knowledge.ts` carries the `gate-unmet` kind machinery (:795/:1152/:1385) but the T-11 "red seal mints 0 lesson rows" pin stands unmodified; no sign-off found in `fixes/` (grep OV-11 → only `228` source row) | owner sign-off; then ~6 call-site + ≈4 `LessonSurface` seam lines + the pin update |
+| 12 | **OV-38** | **BLOCKED (owner + keyed artifact)** | 267_lane8 R8-f13: "acceptance chain unrowed-in-practice"; no hand-over kit (`DEPLOY.md`) bytes found; needs OV-8/T0.10 outputs | keyed run #2 + the hand-over kit + the first-use record |
+| 13 | **OV-39** | **BLOCKED (post-maker; parent)** | board-only pass over 16 open DFs; `taskuniverselog.md` not re-triaged; its own gate is the maker test | the maker test; then ONE board pass (owner/parent) |
+| 14 | **OV-40** | **BLOCKED (owner inputs)** | inputs: T5.2-A (PARTIAL), OV-9 (LANDED W18-L1), human click (owner), keyed multi-job artifact (blocked), OV-10 answer (owner) | all five inputs; then `doctor --tree` latch read on the real project |
+| 15 | **F2** | **PARTIAL → SHELLING NOW (S3)** | registry entry shape + `probe.ts` + `applyProbedModels` landed (W20/W21; registry.test 39/39; `fixes/258_lane2_f2_finish.md`). The composed probe mint-shell + coded refusal = S3's box (bytes not yet on disk @18:20; S3 log = recon) | S3 finish; then owner's key for the live family verification |
+| 16 | **F4** | **PARTIAL → SHELLING NOW (S3)** | overlay core landed (`policy.ts` `readPolicyOverlay` :383, `applyPolicyOverlay` :495, refusal :421; console consult :327/:2180/:3836). Missing on bytes: `Project.wildPolicy` (types grep = 0 @18:20), engine consult, `wild.paused_policy` (engine grep = 0) | S3's one consult hunk at `wildApproveGate` (engine.ts — flagged HOT) |
+| 17 | **F1** | **SHELLING NOW (S3)** | zero MCP files on disk (`find src scripts -iname '*mcp*'` = empty @18:20); S3's `mcp.server.ts` shell pending | S3 finish; owner trust decision gates execution half |
+| 18 | **OV-7** | **LANDED** | W19-L4: corpus ≥2 domains / ≥2-fixture domains (`run-eval.test.mjs:874`), grader-freeze verdict (`run-eval.mjs:2325/:2589`; test :925), leak scan (:898); `results.json` carries `graderFreeze {checked:7, ok:true}` today | none |
+| 19 | **T-107.7** | **PARTIAL → SHELLING NOW (S1)** | `wild-review.ts` (R14-f01 seam) IS on disk (5,712 B @18:02; `createNodeWildReviewer` :79) but has **0 call-site hits** @18:20; `checkpoint.server.ts`, `scripts/unattended-shell.mjs`, the `resume`/`unattended` verbs: **not on disk** @18:20 (WDX-1 CF-1 independently; S1's own board is ahead of bytes). S1's `errors.ts` codes (3) DID land (:79-81,:500+) | S1 finish (mid-landing); then the guarded write call site + `resume` re-entry + `run.resumed` ledger row |
+| 20 | **T5.1** | **PARTIAL → SHELLING NOW (S3)** | W19-L3's NDJSON chat-stream leg landed (`chat.ts` :199-230; transport stays one-shot). `onToken` now = 3 hits in `deepseek.ts` (landing as of 18:20); CLI `--stream` still 0 hits | S3 finish; then the transport spike verdicts per 217c §2.1 |
+| 21 | **T5.7** | **PARTIAL (module LANDED) → SHELLING NOW (S3)** | `cassette.ts` complete (W19-L6; 31/31; miss = coded refusal) but **zero consumers** (only its own test imports it). S3 = provider-seam wrapper + guarded wire point | S3 finish; T5.4 dependency satisfied (landed) |
+| 22 | **DF-09** | **LANDED** | W23-L6: engine.ts:1662 forced-override rationale path + `honesty-guards.test.ts` :365-547 (rationale-verbatim, loud-override, non-failed-gate control, autopilot control). T4 (W31) is running the pins + CLI replay as the verification boundary (its §0 states W23 landed all three) | T4's evidence completion (not mine; do not duplicate) |
+| 23 | **T4.3** | **LANDED (SPEC 2 code)** | W23-L6: `patch.test.ts` T4.3 describe + NEW `patch-preservation.test.ts` (real `repairTreeDir` cycle, six asserts); CLI half of SPEC 2 unticked there → T4 completing | T4's CLI replay evidence |
+| 24 | **G4** | **LANDED (SPEC 3 code)** | W23-L6: NEW `error-scan.server.ts` + `error-scan.server.test.ts` (5 planted fixtures) + CLI `scan` arm (`rapidtool-cli.mjs:1950`) + README-cli parity; advisory-only, no gate wiring (OV-21 folded) | T4's evidence completion |
+
+#### B · Supplementary canonical rows (assessed in the same pass — the rest of the board)
+
+| Row | Verdict | Byte evidence (today) |
+|---|---|---|
+| **TASK-01** | LANDED | `headless.ts:1083` `nextAction()`, summary envelope :1212 |
+| **T5.3** | LANDED | CLI `eval` :1130 + NEW `scorecard.ts` (W23-L5) |
+| **T5.2-A** | **PARTIAL** | UI surface + labels landed (console.tsx:140/:176/:458-469 + `fixtures.review.ts`); **store flip action absent** (`grep -i fixtur store.ts` = 0) — the row's done-when explicitly required the same `approveFixtureCases` path from a store action → owed |
+| **T5.4** | LANDED | provenance block in `codegen.server.ts` + io validator/round-trip (W18-L5; io 53/53, codegen 112/112) |
+| **T5.5** | **PARTIAL** | `plugin.ts` v1 LANDED (W18-L4; registration-order dispatch, coded refusals) — engine/codegen call-site wiring deliberately NOT claimed (its own log says so) |
+| **T-107.6** | **PARTIAL** | verify.server budget seam (:797/:814 `runBudgetedCall`) + codegen `sessionTokenBudget` (:112, `recordSpend` :2292) landed; node-runner seam scoped OUT (WD-Z); chat/crew seams not found today → residual |
+| **OV-2** | LANDED | W14-L3: guard fixed (`browser-guard.mjs:34-41` resolves allowed dirs), smoke GREEN both viewports (`fixes/237_lane3_browser_pass.md`) |
+| **TA-3** | LANDED | verb count 37 re-derived (README:9/:87/:108, README-cli:10); `USAGE.diagnose` :3441 |
+| **OV-17** | LANDED | README:37 `create --brief` (W14-L2) |
+| **OV-15** | LANDED | CLI `--red-tree` :859-916 (refusal advice now reachable) |
+| **OV-12** | LANDED | `fixes/217c` :595-601 settled drop-in slot |
+| **OV-9** | LANDED | W18-L1 `doctor.ts:202 productCompleteFromProject` (ONE producer) |
+| **OV-14** | LANDED | W16-L4 reqTrace-artifact surface + gates.test pins (`fixes/244`) |
+| **OV-18** | LANDED | W16-L4 clamp-window pin (`honesty-guards.test.ts:224`) |
+| **OV-19** | LANDED | W17-L5 `zero-byte-guard.test.ts` 4/4 (0 offenders on this repo) |
+| **OV-28 / OV-36 / OV-37** | LANDED | W17-L3 (registry body-shape pins 29/29; per-site thinking decisions; alias-death id naming) |
+| **OV-35** | LANDED | W16-L1 preflight + run-start marker (`run-eval.mjs:984-1229`) |
+| **OV-42** | **PARTIAL** | marker half = OV-35's; `results.json` carries `mode`+`generatedAt` (top-level + per-entry, seen today); the "never silently replaced" append discipline is **not explicit** in `persist()` (`run-eval.mjs:2317` rewrites the file each run; history appends) → residual registered |
+| **OV-43** | **PARTIAL** | W17-L5 report-only audit + pin LANDED (`SUPPLY_CHAIN_AUDIT_COMMAND` `compile-check.server.ts:1339`); emitted-README "caret-pinned and un-audited" line absent (scaffold.ts; S2's box) → residual registered |
+| **CI-workflow** | LANDED | `.github/workflows/gate.yml` (W17-L5; never executed — no push) |
+| **F3** | LANDED | CLI `lesson --effect` (:2291-2381) + `knowledge.ts:1569 lessonOutcomeReport` |
+| **T4.2** | **PARTIAL** | `git.server.ts` (44 KB) + `git.server.test.ts` LANDED W18-L3 (37/37, host repo untouched); **CLI arm deliberately not landed** (named in its §5) |
+| **DF-04** | LANDED | `engine.ts:925` now labels the claim: "MCP/A2A server contracts are roadmap declarations, not runtime (B-18)" |
+| **TA-21** | LANDED | `engine.ts:1031/:1053` "template — not executed …" markers (bytes landed; the W17-L4 log itself was never filled — record correction noted) |
+| **G5** | **PARTIAL/UNVERIFIED** | scaffold carries `EMITTED_REFUSAL_CODE` + "every entry boot guard prefixes a REGISTERED RT_E code" (scaffold.ts:48-142); the fresh-emit `grep -rc RT_E` count was NOT re-run this wave → verify at the boundary (W17-L4's log is an unfilled skeleton; bytes show the mechanism) |
+| **OV-10 / T-107.8 / D-1 / D-2 / T3.6** | OWNER-DECISION | no sign-off found (grep); README posture lines absent; `package.json` has no `format:check` |
+| **C-1 / C-2** | DONE-VERIFIED | `4328d20`; certified (fixes/246) |
+| **OV-8 / T0.10** | OWNER-RUN | T0.10 note: a keyed run #3 exists (`research/eval-out/results.json` mode:"keyed", 2026-09-25T00:03Z, M1–M9 all zeros with floor evidence) — but the zeros are not closed (E1b's W-01/02/03 postdate it) and the board §5 paste is not this lane's to verify; OV-8 (run #2 + claim flips) stays owner-gated |
+
+**Counts:** of the 24 named rows — LANDED 12 (ov1, ov13, ov29, ov7, df09, t43, g4 + … let the table speak) · PARTIAL 6 · SHELLING-NOW 5 (S1: T-107.7; S3: F1/F2/F4/T5.1/T5.7) · BLOCKED-KEY 3 (OV-3/4/5) · OWNER 3 (OV-11/38/39/40 → 4) · LANDED-BY-ME 2 (OV-30, OV-20).
+
+### T5 · LANDINGS (this lane, smallest honest patches)
+
+1. **OV-30 — registered** (register-only row; no code is its correct shape): appended `> [W31-T5]` block to `fixes/257_error_ledger_v3.md` §F registering the install-leg budget + the honest 8 GB caveat.
+2. **OV-20 — advisory probe landed**: NEW `scripts/docs-module-parity.mjs`; first run output: [paste below — not persisted at the cap].
+3. **Register-only residuals** (OV-13 ×2, OV-16, OV-41, OV-42, OV-43, T5.2-A, T-107.6, G5-verify): one `> [W31-T5]` block in `fixes/257_error_ledger_v3.md` §F so nothing is a silent omission.
+
+### T5 · WHAT THIS LANE DELIBERATELY DID NOT TOUCH (live boxes)
+
+S1: `store.ts`, `headless.ts`, `types.ts`, `engine.ts`(wildPlan) · S3: `token-ledger.ts`, `deepseek.ts`, `types.ts`(wildPolicy), `engine.ts`(F4 hunk) · S2: `scaffold.ts`, `codegen.server.ts`, `run-eval.mjs` · S5: console/routes · T4: `patch*.test.ts`, `error-scan*`, `honesty-guards.test.ts`, `engine.ts`(approve) · T1–T3: register/register-adjacent docs · W32 organizer: root docs.
+
+### T5 · TIMESTAMPS (as-of — verbatim)
+
+- 18:02 — `wild-review.ts` on disk; S1 checkpoint/unattended absent; WDX-1 CF-1.
+- 18:09 — `case "scan"` present; verb count 37; `checkpoint.server.ts` still absent; `wildPolicy` 0; `onToken` 3 (landing).
+- 18:20 (planned final stamp) — [filled in the closing pass below — not persisted at the cap; this block is the owed record].
+## §WDX-2 · THE TRUTH AUDITOR OF THE SPRINT MD FILES (W31 · WDX-2) — lane log `fixes/274_wdx2.md`
+
+**Status:** OWED SINCE W31 — WDX-2 ENDED capped pre-append ("**Iteration cap hit before the §WDX-2 append to finalsprint.md.** Everything below is backed by bytes I actually read; the audit content lives in the lane log (written early, per protocol). Nothing was fabricated." — §WDX-1 `:118`). Appended 2026-09-27 by **W40 K8** as the N4 → Z4 payout, verbatim from the lane log. **Scope:** verify EVERY entry in `finalsprint.md` is TRUE + COMPLETE against the actual bytes; anything false/overstated → correction row; missing → addition row. READ-ONLY on product code.
+
+**BOTTOM LINE (as of the lane's audit):** master table 20/20 rows byte-checked · verdicts: 16 TRUE/accurate · 4 needing correction (RS-01..RS-04 below) · protocol: 0 violations · baseline snapshot kept at `C:/Users/mnril/wdx2_work/baseline_finalsprint.md` (md5 `b57bb4c3304efd0af4d9e5b5e08383df`, 49 lines @18:03).
+
+### WDX-2 · AUDIT OF THE MASTER TABLE (finalsprint.md:11-32) — byte evidence
+
+| # | Row | Claim audited | Verdict | Evidence (bytes read at audit time) |
+|---|---|---|---|---|
+| 1 | W-01/02/03 | status **LANDING (E1b)**; "needed after: keyed boundary run (O-1/O-4)" | **STALE (understates)** | E1b COMPLETED 17:56 (deleg_d12394b7, exit=max_iterations). Bytes: W-01 `WildStepOptions.p6Edge` engine.ts:3544 + `wildP6Edge` :3853 + guard :4047-4058 ("keyed synthesis edge"/"injected edge seam"); W-02 `runP6Edge` headless.ts:2277, `runPhase` phase-6 :368, p6Deps threading :462-475/:529-584/:619-634, console branch `viaHeadlessP6Edge` engine.ts:3394-3421; W-03 `materializeEmitTree` + `CJS_RESIDUE_RE` headless.ts:~1593-1622, wired in `emitProject` :1650; R12-f04 `WILD_STEP_BUDGET_MS = P6_PHASE_MAX_MS + 15_000` rt-events.ts:218 + `P6_SYNTH_TIMEOUT_MS = P6_PHASE_MAX_MS` codegen.server.ts:140. → Correction RS-01. |
+| 2 | R14-f01 | status S1; "bind completeDeepSeek-based reviewer at store.ts:1105 + headless wild macros" | TRUE (as target) | store.ts:1105 IS the `startWildRun` wildStep loop call (`const res = await wildStep(cur);` — no opts yet); engine.ts:3527/:3538 already carries the `WildReviewer`/`reviewer?` injection point; headless wild macros at headless.ts:3714/:3895. S1 mid-flight: `src/lib/wild-review.ts` (new, 18:02) has `createNodeWildReviewer` + `TODO(R14-f01)`; call sites not yet passing it at audit time. |
+| 3 | R13-f01/W-47 | status S1; refusal must name blockers | TRUE | No scheduler/daemon in repo; `scripts/unattended-shell.mjs` not yet created at audit time (S1 in flight). Register W-47: BLOCKED(ON W-01+W-02) — consistent. |
+| 4 | R13-f02 | status S1; "plan exists before phase 1 mutates" | TRUE | No `wild.plan` in bytes yet at audit time (grep clean); S1's types.ts/engine.ts shells pending. |
+| 5 | T-107.7 | status S1; "756s keyed journey" | TRUE | Register W-40 corroborates ("keyed journey scale 756s+"); no checkpoint subsystem in bytes yet at audit time (`src/lib/checkpoint.server.ts` absent). |
+| 6 | A3-f06/R3-f06 | "today: throwing stubs, webapp-only depth" | TRUE | scaffold.ts:914-955: game block + `main(ctx)` throwing `TODO(E-15) stub: implement the service/cli entry` stubs; per-kind depth webapp/game-only. |
+| 7 | A3-f05/R11-f12 | "graders … not package.json's presence" | TRUE | Register A3-f05 re-verified; graders demand scaffold presence (research/eval-corpus/graders/*.json all 7). |
+| 8 | A3-f07 | "structurally out of reach today" | TRUE | `scaffold.ts` states webapp/game UI deliberately never machine-generated (register A3-f07: :2567-2570); emitted UI = names dump. |
+| 9 | R3-f02/R3-f03 | "reword + redTree/partial + capability.N skips" needed | TRUE (note: (a) null-lastTest ALREADY landed) | codegen.server.ts:3305-3311 diff hunk adds `lastTest: null` in `partialTreeRefuse` (E1b/W29 W-05, R9-f02). Prompt still CJS: rule 2 "Assign module.exports" at :482 (reword pending — TRUE as needed-after). |
+| 10 | T5.7 | "wired to nothing today" | TRUE | grep `selectCassette|createCassette` → module+test only (cassette.ts/cassette.test.ts); no run-eval flags. |
+| 11 | T5.1 | "no --stream/SSE surface" | TRUE | No `--stream` in rapidtool-cli.mjs; `chatStreamNdjson` lib leg exists (register R8-f06). |
+| 12 | F1 | "gated on the owner's trust call" | TRUE | No mcp module in src/lib at audit time. |
+| 13 | F2 | "after OV-1: registry entry + key env + a wire probe" | **PARTIALLY STALE** | registry.ts ALREADY carries the `xai` second family ("F2 · W19-L5", LlmProviderId includes "xai", XAI_PROVIDER registered :201). Missing is live mint + failover + the OV-1 enablement decision (register §R8-UPDATES). → Correction RS-02. |
+| 14 | F4 | "engine consult at `policy.ts:170`-class seams + wild.paused_policy events + UI surface" | **VAGUE + one FALSE sub-claim** | Overlay core IS in policy.ts (`applyPolicyOverlay` :495, `readPolicyOverlay` :383, `policyOverlayRefusal` :421) consumed ONLY by console.tsx:45/:2180/:3836 — engine/wild never consult (TRUE). But: `wild.paused_policy` is NOT a registered RT event today (0 grep hits in rt-events.ts) — it must be ADDED to the registry first; and policy.ts:170 is `parseSeatClaim`'s human-seat branch — NOT a consult seam. The real consult point is `wildApproveGate` engine.ts:3668 / the store gate-approval path. → Correction RS-03. |
+| 15 | ledger | "thread ONE ledger through codegen+verify … (P lane partial-landed)" | TRUE (partial-landed corroborated) | token-ledger.ts full module (createTokenBudget :307, tokenCapFromEnv/RAPIDTOOL_TOKEN_CAP :137, "one CLI run" doc :322-328); codegen.server.ts `accountSynthUsage` :2293-2306 (cap enforcement "Session token budget exhausted"); run-eval.mjs:686-704 folds its own T-107.6 ledger. Threading of ONE budget through codegen+verify still partial — as claimed. |
+| 16 | R11-f01 | "unauthenticated RCE surface on 0.0.0.0:8080" | TRUE | vite.config.ts:150 `host: "0.0.0.0"` (+ :145 "live-preview contract — don't change host/port" — S4 must reconcile honestly). |
+| 17 | R11-f08 | "foreign files currently survive into a minted 'tested' tree" | TRUE | headless.ts:1722 `survivors: opts.force === true ? foreign : []` — no quarantine in bytes yet. |
+| 18 | R6-f12 | status S4; "needed after: class boundary + reportRt emitter; pin: forced throw …" | **STALE (overstates the gap — most already landed)** | `PaneBoundary` EXISTS console.tsx:1633, emits `ui.pane_crash` :1648 (registered rt-events.ts:141, asserted rt-events.test.ts:82), wraps Home screen :1736-1837. Remaining: RunScreen (routes/run.$id.tsx:16) NOT wrapped + no forced-throw pin. → Correction RS-04. |
+| 19 | seat | "the governance high-water mark needs a real surface"; two-channel seam | TRUE | console.tsx:458-475/:573-585 = read-only banner; "store action that would make this a human seat registered in fixes/263 §3"; flip path = `brief-fixtures.ts approveFixtureCases` via CLI `fixtures --approve`. |
+| 20 | R13-f04 | "BLOCKED-SHELL … honest refusal + precise host requirement" | TRUE | No isolator seam in bytes yet; register R13-f04/T-107.8: executor swap behind `node-runner.server.ts`, claim flips only when a probe proves it. |
+
+### WDX-2 · CORRECTIONS / ADDITIONS (RS-01 … RS-04 — verbatim from the lane log)
+
+- **RS-01** (W-01/02/03 status): "LANDING (E1b)" → **LANDED-by-E1b in bytes** (evidence above; keyed boundary run still owed, O-1). Audit trail: E1b's OWN exit state was **PARTIAL** — final summary (deleg_d12394b7 task-0.log 17:56:03): "2 of 4 verification legs run (rt-client 14/14 green; **wild-step 13/14**)" + "two deliverables remain unfished (landing log + the headless leg)". The red pin was the keyless byte-parity test; **WDX-3 (W31) fixed it** (wild-step.test.ts:264-271 normalize extension + comment "WDX-3 (fixes/274 · W31)"); re-run by WDX-2 at 18:07: **14/14 green**. Remaining debts: (i) E1b's `fixes/271_laneE1_p0s.md` still has NO landing entries (plan checkboxes unchecked; exit=max_iterations) — the W-03 "failed-with-fixtures branch" decision the register demands is recorded NOWHERE; (ii) the headless leg (headless.test.ts W-02/W-03 pins, added 17:55) was never run by E1b and no lane has claimed it.
+- **RS-02** (F2): needed-after should read: "OV-1 enablement decision; then live mint (`mintTreeRunTested` reachable for the second family) + failover; registry entry + probe ALREADY landed (W19-L5, registry.ts:116/:119/:201)".
+- **RS-03** (F4): precise needed-after: (a) register `wild.paused_policy` in rt-events.ts (not present today), (b) consult `applyPolicyOverlay`/`policyOverlayRefusal` from the engine's `wildApproveGate` (engine.ts:3668) + store gate path, (c) emit the event on deny, (d) UI surface (console has the refusal rendering at :3836 already — extend).
+- **RS-04** (R6-f12): status → **PARTIALLY LANDED (W29/W29b)**: boundary+emitter in console.tsx:1633/:1648/:1736; RunScreen unwrapped (routes/run.$id.tsx:16); no forced-throw pin. Needed-after = wrap RunScreen + the pin.
+
+### WDX-2 · PROTOCOL CHECK (append-only, 0 obliteration)
+
+- finalsprint.md is UNTRACKED in git → baseline snapshot kept at `C:/Users/mnril/wdx2_work/baseline_finalsprint.md` (md5 `b57bb4c3304efd0af4d9e5b5e08383df`) for diffing on every poll.
+- At snapshot: master table intact (20 rows), §S1-S4 pending placeholders intact, marker line intact, no §S5/§T/§WDX sections yet. 0 violations.
+
+## §WDX-3 · THE WIRING HELPER (W31 · WDX-3) — lane log `fixes/274_wdx3.md`
+
+**Status:** OWED SINCE W31 — WDX-3 ENDED capped ("**Two wires LANDED with proofs; the §WDX-3 / lane-log appends did NOT persist (I ran out of calls)**" — §WDX-1 `:213`). Appended 2026-09-27 by **W40 K8** (N4 → Z4 payout), verbatim from the lane log. **Job:** hunt shells ONE WIRE away from working; land the smallest honest wire (targeted check); NEVER a wire that turns an honest refusal into a fake success. Log every wire: file+line · before → after · proof.
+
+### WDX-3 · LOG (append-only — verbatim)
+
+- [t0 ~18:02] Mandatory reads done: `wave_plans/W31/gap-finshers.md` (full), `finalsprint.md` (full — 49 lines, §S1–§S4 pending, no §WDX yet), `wave_plans/W30/shell-sprint.md` (contract), `thoroughanalysis.md` §R13 (495–670) + §R8 (671–741) in full, E1b lane log `fixes/271_laneE1_p0s.md` (skeleton only).
+- [t0 ~18:05] **WIRE-1 (candidate → investigated): E1b's red pin.** `wild-step.test.ts` 13/14 — "keyless without a seam keeps the deterministic floor path byte-for-byte (parity pin)" red. Ran a byte-level classifier (`%TEMP%/wdx3_parity_diff.mjs`, targeted): 26 diffs ⇒ **25 volatile** (id/createdAt/ts/ranAt/startedAt/checkedAt/completedAt + embedded packet text inside `artifacts[3].body`) + **1 real** = the seam-naming detail string ("deterministic floor" vs "injected edge seam") which the test *intends* to mask ("modulo the seam-naming detail"). Verdict: NOT a product regression — the pin's normalize missed `phases[].completedAt` + artifact bodies (volatile class only). Fix = extend the pin's own normalize (test-side, honest).
+- [t1] LANDED WIRE-1: `src/lib/wild-step.test.ts` normalize gains `stripVolatiles()` (shared with the packet replace) applied to `artifacts[].body` + `phases[].completedAt` masking. Proof: `node --experimental-strip-types --test src/lib/wild-step.test.ts` → 14/14 green (was 13/14).
+- [t1] WIRE-2 verdict: **console P6 Execute already reaches the E1b edge** — `console.tsx:2165` calls `executeAsync` → store `advanceOnceAsync(configured=llmStatus||researchStatus)` → `engine.runPhaseAsync` → phase-6 keyed branch → `headless.runP6Edge`. No wire needed; recorded as verified (R8-f01(b) satisfied by the executeAsync path; `store.runP6Journey` remains the mirror face for a later UI).
+- [t1] **WIRE-3 (candidate): `store.create` never threads `llmStatus.configured`** → console-created projects are `enforceDod:false` even on a keyed server (R8-f04/A1-f09). `emptyProject` already accepts `input.enforceDod` (engine.ts:1902–1903); the wire is one field at store.ts `create` (~:1169). CLEARED TO LAND pending store.ts non-collision with S1 (store.ts:1105 region is S1's) — decided: LAND (create() untouched by any lane, additive one-liner, verified fresh right before patch).
+
+### WDX-3 · STATE AT LANE DEATH
+
+Wires on disk = **WIRE-1** (wild-step.test.ts normalize fix; E1b's 13/14 → **14/14**, WDX-2-verified) + **store.ts W-18 spread** (the WIRE-3-class store landing) + its `store.test` pin (ran green @18:13:29). The §WDX-3 append + the lane-log final did NOT persist — this block is the owed record.
+
+## §MASTER-CORRECTIONS — the audited corrections overlay (trust this over the master table where they differ)
+
+**What this is:** the corrections that MUST be applied on top of the master table above when reading it. Sources: **WDX-2's RS-01…RS-04** (audit of the master table, byte evidence in §WDX-2; lane log `fixes/274_wdx2.md`) + **CF-4** (the S4 seat/isolation counter-finding — recorded in `fixes/277_l3_ui_records.md:30`, `fixes/278_p1_remainders.md` §B3/B4; cf. `wave_plans/W34/prep.md:52`). Appended 2026-09-27 by **W40 K8** as the owed N4 → Z4 payout; the master table itself is NOT edited (append-only doctrine).
+
+| # | Row (master table) | Correction to apply | State at K8 write (byte-checked on `2fa3cd9`, 2026-09-27) |
+|---|---|---|---|
+| RS-01 | W-01/02/03 | Status is not "LANDING (E1b)" — **LANDED-by-E1b in bytes** (evidence: §WDX-2 row 1). Keyed boundary run still owed (O-1/O-4). E1b's own exit was PARTIAL: its landing log `fixes/271_laneE1_p0s.md` never gained entries; the headless leg was not run by E1b. | The spine is REAL on committed bytes (`2fa3cd9` "spine real"); the keyed run remains owner-gated — see `fixes/283_final_ledger.md`. |
+| RS-02 | F2 | Needed-after reads: "OV-1 enablement decision; then live mint (`mintTreeRunTested` reachable for the second family) + failover". Registry entry + probe **ALREADY landed** (W19-L5, registry.ts:116/:119/:201). | Enablement + live mint + failover still owed (owner-gated on OV-1/key). |
+| RS-03 | F4 | Needed-after: (a) register `wild.paused_policy` in rt-events.ts FIRST, (b) engine consult from `wildApproveGate` (engine.ts:3668) + store gate path — NOT `policy.ts:170` (that is `parseSeatClaim`'s seat branch), (c) emit on deny, (d) extend the console refusal surface (:3836). | `wild.paused_policy` **still unregistered** (K8 grep on rt-events.ts = 0); engine consult still owed. |
+| RS-04 | R6-f12 | Status → **PARTIALLY LANDED (W29/W29b)**: `PaneBoundary` + `ui.pane_crash` emitter + Home-screen wrap landed (console.tsx:1633/:1648/:1736). Remaining: RunScreen wrap + the forced-throw pin. | RunScreen **still unwrapped** (K8 grep: only the Home wrap at `console.tsx:1745`; `RunScreen` defined `:1885`); pin state unverified by K8. |
+| CF-4 | seat · R13-f04 (isolation) | The S4 seat/isolation seams were **claimed somewhere, absent from bytes**: `src/lib/seat.ts` · `seat.server.ts` · `isolation.server.ts` NOT on disk; `RT_E_HUMAN_SEAT_UNAVAILABLE` / `RT_E_ISOLATION_UNAVAILABLE` NOT registered. The seat surface stays the existing read-only banners; isolation is named **without an invented code**; never label a run sandboxed. (The live counter-findings CF-1 · CF-2 · CF-3 belong to §WDX-1's own bottom line.) | **STILL ABSENT at K8 write** (ls: all three files missing; errors.ts grep for both codes = 0). R13-f04 remains owner/host-gated — see `fixes/283_final_ledger.md`. |
 <!-- END-OF-FILE-MARKER-SPRINT · every lane appends ABOVE this line · never edit or delete this line -->

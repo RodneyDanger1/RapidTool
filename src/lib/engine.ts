@@ -1385,7 +1385,7 @@ export function p6JobsShortfallLog(project: Project): JsonLog | null {
 export function applyPhaseResult(project: Project, phase: PhaseId): Project {
   // CORE-01 (defensive): refuse a truly invalid phase id before any array
   // indexing — a corrupt caller throws loudly, never crashes mid-graph.
-  if (!Number.isInteger(phase) || phase < 0 || phase > 12) {
+  if (!Number.isInteger(phase) || phase < 0 || phase > PHASE_LAST) {
     throw new Error(`applyPhaseResult: invalid phase ${String(phase)}`);
   }
   const rec = project.phases.find((p) => p.id === phase);
@@ -2256,7 +2256,18 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
     typeof raw.name === "string" && raw.name.trim().length > 0 ? raw.name : "Untitled project";
   const brief = typeof raw.brief === "string" ? raw.brief : "";
   const domain = typeof raw.domain === "string" ? raw.domain : inferDomain(brief);
-  const scalarRepaired = name !== raw.name || brief !== raw.brief || domain !== raw.domain;
+  // A1-28: type-junk in the sandbox scalars is coerced above (timeoutS /
+  // isolated / ramMb) — a coercion is a REPAIR, so it is reported like
+  // name/brief/domain instead of passing silently.
+  const sandboxScalarsRepaired =
+    (raw.sandbox?.timeoutS !== undefined &&
+      !(typeof raw.sandbox.timeoutS === "number" && Number.isFinite(raw.sandbox.timeoutS))) ||
+    (raw.sandbox?.isolated !== undefined && typeof raw.sandbox.isolated !== "boolean") ||
+    (raw.sandbox?.ramMb !== undefined &&
+      raw.sandbox.ramMb !== null &&
+      typeof raw.sandbox.ramMb !== "number");
+  const scalarRepaired =
+    name !== raw.name || brief !== raw.brief || domain !== raw.domain || sandboxScalarsRepaired;
   const rowRepaired =
     rawArtifacts.length !== artifacts.length ||
     rawLogs.length !== logs.length ||
@@ -2548,6 +2559,7 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
           name !== raw.name ? "name:default" : null,
           brief !== raw.brief ? "brief:empty" : null,
           domain !== raw.domain ? "domain:reinferred" : null,
+          sandboxScalarsRepaired ? "sandbox:coerced" : null,
         ]
           .filter((s): s is string => s !== null)
           .join(",")}`

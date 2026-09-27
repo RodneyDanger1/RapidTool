@@ -534,6 +534,29 @@ async function completeDeepSeekInner(
             usage: {
               promptTokens: usage.prompt_tokens,
               completionTokens: usage.completion_tokens,
+              // W39·K6 (completes C2 · fixes/288_c2): the context-cache split
+              // the vendor reports on every response — "Checking Cache Hit
+              // Status" (api-docs.deepseek.com/guides/kv_cache): hit tokens
+              // are billed at the cache-hit price, miss tokens at the full
+              // input price (the docs' own 50x spread). The TYPE carried these
+              // fields since C2's 00:21 patch; this parse completes the job.
+              // Additive + conditional: a response without the fields (old
+              // cassette tapes, other providers) keeps the EXACT legacy 2-key
+              // usage object, so the deepEqual pins at
+              // deepseek.server.test.ts:389 and the cassette copy semantics
+              // stay green. `cachedPromptTokens` is the token-ledger /
+              // packet / doctor vocabulary (`TokenSpend.cachedPromptTokens`,
+              // packet `cached_prompt_tokens`) — the pass-through ledger
+              // seams (token-ledger `recordBudgetSpend(budget, res.usage)`
+              // merges CACHE_FIELDS off the spend object) accumulate it with
+              // no further wiring; hand-built spends in codegen/crew/subagent
+              // are logged in fixes/290_k6 for their owners.
+              ...(typeof usage.prompt_cache_hit_tokens === "number"
+                ? { cachedPromptTokens: usage.prompt_cache_hit_tokens }
+                : {}),
+              ...(typeof usage.prompt_cache_miss_tokens === "number"
+                ? { cacheMissTokens: usage.prompt_cache_miss_tokens }
+                : {}),
             },
           }
         : {}),

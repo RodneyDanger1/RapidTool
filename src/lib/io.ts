@@ -196,8 +196,11 @@ function sanitizeImportPayload(raw: Record<string, unknown>): string[] {
 
   // research — the known H-03 vector: a non-array value survives hydrate and
   // throws inside compileAgentPacket's researchHash/researchSources. Entries
-  // must be {query, items[]} with plain-object items (researchHash reads
-  // item.url, researchSources reads item.title — a null item throws).
+  // must be {query, items[]} with plain-object items carrying a STRING url
+  // (researchHash reads item.url; researchSources reads item.title) — the
+  // same predicate hydrateProject applies engine-side (A1-24). A url-less
+  // item is dropped LOUDLY here; the old weaker filter kept rows that the
+  // first localStorage round-trip silently dropped (import said "clean").
   if (raw.research !== undefined && !Array.isArray(raw.research)) {
     raw.research = [];
     notes.push("research:dropped");
@@ -207,7 +210,13 @@ function sanitizeImportPayload(raw: Record<string, unknown>): string[] {
     let itemsDropped = 0;
     for (const e of raw.research) {
       if (isPlainObject(e) && Array.isArray(e.items)) {
-        const items = e.items.filter((it): it is Record<string, unknown> => isPlainObject(it));
+        // A1-24: mirror hydrate's url-required item predicate — divergence made
+        // import→reload lossy with no note (io kept, the packet render then
+        // printed `undefined` urls and hydrate dropped the row).
+        const items = e.items.filter(
+          (it): it is Record<string, unknown> =>
+            isPlainObject(it) && typeof (it as { url?: unknown }).url === "string",
+        );
         itemsDropped += e.items.length - items.length;
         // {...e, items} keeps the original key order (items was already present).
         keptEntries.push({ ...e, items });

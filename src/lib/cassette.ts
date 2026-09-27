@@ -232,10 +232,30 @@ export function createFileCassetteStore(tapePath: string): CassetteStore {
       }
     },
     async write(text: string): Promise<void> {
-      const { mkdir, writeFile } = await import("node:fs/promises");
+      const { mkdir, rename, rm, writeFile } = await import("node:fs/promises");
       const { dirname } = await import("node:path");
       await mkdir(dirname(tapePath), { recursive: true });
-      await writeFile(tapePath, text, "utf8");
+      // K2 (W39): atomic hand-over, same discipline as checkpoint.server.ts /
+      // saveProject — a plain writeFile truncates the tape first, so a kill or
+      // a full disk mid-write leaves a torn tape, and parseTape (correctly)
+      // refuses corrupt JSON: one interrupted recording would turn the whole
+      // recorded run into a wall of misses. Write a UNIQUE staging file
+      // (pid + ms — two concurrent recorders cannot interleave on one name),
+      // then rename: the destination is replaced only by a completed
+      // same-volume rename. No fsync — a power-loss window can still lose the
+      // rename; stated, not over-claimed (the checkpoint module's stance).
+      const staging = `${tapePath}.${process.pid}.${Date.now()}.tmp`;
+      try {
+        await writeFile(staging, text, "utf8");
+        await rename(staging, tapePath);
+      } catch (err) {
+        try {
+          await rm(staging, { force: true });
+        } catch {
+          /* best-effort staging sweep */
+        }
+        throw err;
+      }
     },
   };
 }
@@ -312,11 +332,32 @@ function validateResponse(v: unknown): LlmResult | null {
     if (v.reason !== "not-configured" && v.reason !== "error") return null;
     if (v.error !== undefined && typeof v.error !== "string") return null;
     if (v.code !== undefined && (typeof v.code !== "string" || !isErrorCode(v.code))) return null;
+    // K2 (W39, for B4's tape seam): a REFUSAL may still carry usage (Y1's I2
+    // contract in llm.ts — a refusal that burned tokens must stay meterable).
+    // copyEnvelope preserves it on record and replay, but this load-path
+    // validator silently DROPPED it, so a refusal round-tripped through a tape
+    // replayed with less information than the live call returned (silent
+    // under-count of a recorded run). Validated with the same strictness as
+    // the ok:true arm; a malformed usage block still fails the tape closed.
+    let usage: { promptTokens: number; completionTokens: number } | undefined;
+    if (v.usage !== undefined) {
+      if (!isPlainObject(v.usage)) return null;
+      if (
+        typeof v.usage.promptTokens !== "number" ||
+        !Number.isFinite(v.usage.promptTokens) ||
+        typeof v.usage.completionTokens !== "number" ||
+        !Number.isFinite(v.usage.completionTokens)
+      ) {
+        return null;
+      }
+      usage = { promptTokens: v.usage.promptTokens, completionTokens: v.usage.completionTokens };
+    }
     return {
       ok: false,
       reason: v.reason,
       ...(typeof v.error === "string" ? { error: v.error } : {}),
       ...(typeof v.code === "string" ? { code: v.code } : {}),
+      ...(usage ? { usage } : {}),
     };
   }
   return null;
