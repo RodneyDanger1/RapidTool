@@ -194,4 +194,12 @@ describe("conventionsMap + respectConventions", () => {
     assert.match(fileVerdict.advisories[0], /file "src\/lib\/bad_name.ts" uses snake_case stem/);
     assert.match(fileVerdict.advisories[0], /is kebab-case paths \(3\/5\)/);
   });
+
+  it("returns the honest empty verdict for a foreign packet shape (H1 probe)", () => {
+    // W40 N1: probe case ast.respectConventions-empty — a junk packet (no
+    // string name) must yield the empty advisory verdict, never a crash.
+    const conv = conventionsMap("rapidtool", convFiles);
+    const verdict = respectConventions({ conventions: [] } as unknown as ConventionPacket, conv);
+    assert.deepEqual(verdict, { advisories: [], injected: "" });
+  });
 });

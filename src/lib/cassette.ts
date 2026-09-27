@@ -55,7 +55,7 @@ import { classifyError, ERROR_CODES } from "./errors.ts";
 import type { ErrorCode } from "./errors.ts";
 import { coerceArtifactProvenance } from "./io.ts";
 import type { ArtifactProducer, ArtifactProvenance } from "./io.ts";
-import type { LlmResult } from "./llm.ts";
+import type { LlmResult, LlmUsage } from "./llm.ts";
 import type { DeepSeekCompleteOptions } from "./llm/providers/deepseek.ts";
 
 // ---------------------------------------------------------------------------
@@ -285,6 +285,43 @@ function isErrorCode(s: string): s is ErrorCode {
   return (ERROR_CODES as readonly string[]).includes(s);
 }
 
+// ---------------------------------------------------------------------------
+// W40·N4 (F6 — W3's cassette-strip find): the ONE usage rebuild.
+//
+// K6 (W39) added the optional cache-token fields to `LlmUsage` (llm.ts:44-62)
+// and every ledger seam downstream accumulates them — but this module rebuilt
+// `usage` as exactly {promptTokens, completionTokens} in THREE hand-written
+// literals (two in `copyEnvelope`, one in `validateResponse`), so a
+// cassette-wrapped run recorded a STRIPPED usage on the tape and replayed with
+// LESS information than the live call returned (a silent under-count, and a
+// 3-way copy of one shape waiting to drift). One helper, called at all three
+// sites; the optional fields stay optional — an old tape's legacy 2-key object
+// round-trips byte-identically (the deepEqual pins depend on it).
+// ---------------------------------------------------------------------------
+
+/** Copy a usage candidate, keeping every field this module knows. `strict`
+ *  additionally requires every PRESENT numeric field to be FINITE (the load
+ *  validator's rule — parsed tape JSON cannot carry NaN/Infinity, but a
+ *  hand-written tape is untrusted input; the live-copy path trusts the typed
+ *  envelope instead). Returns null when the candidate is not a usage block. */
+export function copyUsage(u: unknown, { strict = false } = {}): LlmUsage | null {
+  if (!isPlainObject(u)) return null;
+  const p = u.promptTokens;
+  const c = u.completionTokens;
+  const cp = u.cachedPromptTokens;
+  const cm = u.cacheMissTokens;
+  const okNum = (x: unknown): x is number => typeof x === "number" && (!strict || Number.isFinite(x));
+  if (!okNum(p) || !okNum(c)) return null;
+  if (cp !== undefined && !okNum(cp)) return null;
+  if (cm !== undefined && !okNum(cm)) return null;
+  return {
+    promptTokens: p,
+    completionTokens: c,
+    ...(typeof cp === "number" ? { cachedPromptTokens: cp } : {}),
+    ...(typeof cm === "number" ? { cacheMissTokens: cm } : {}),
+  };
+}
+
 function validateCanonicalRequest(v: unknown): CanonicalRequest | null {
   if (!isPlainObject(v)) return null;
   if (typeof v.prompt !== "string") return null;
@@ -319,14 +356,13 @@ function validateResponse(v: unknown): LlmResult | null {
     if (typeof v.model !== "string" || v.model.trim().length === 0) return null;
     const usage = v.usage;
     if (usage === undefined) return { ok: true, text: v.text, model: v.model };
-    if (!isPlainObject(usage)) return null;
-    if (typeof usage.promptTokens !== "number" || typeof usage.completionTokens !== "number") return null;
-    return {
-      ok: true,
-      text: v.text,
-      model: v.model,
-      usage: { promptTokens: usage.promptTokens, completionTokens: usage.completionTokens },
-    };
+    // W40·N4 (F6): one shared rebuild (copyUsage) — the cache fields K6 added
+    // to `LlmUsage` ride the tape too; W3's F1: every present field must be a
+    // FINITE number, exactly the refusal arm's strictness (the "same
+    // strictness" claim below is now literally true, not aspirational).
+    const copied = copyUsage(usage, { strict: true });
+    if (copied === null) return null;
+    return { ok: true, text: v.text, model: v.model, usage: copied };
   }
   if (v.ok === false) {
     if (v.reason !== "not-configured" && v.reason !== "error") return null;
@@ -338,19 +374,14 @@ function validateResponse(v: unknown): LlmResult | null {
     // validator silently DROPPED it, so a refusal round-tripped through a tape
     // replayed with less information than the live call returned (silent
     // under-count of a recorded run). Validated with the same strictness as
-    // the ok:true arm; a malformed usage block still fails the tape closed.
-    let usage: { promptTokens: number; completionTokens: number } | undefined;
+    // the ok:true arm (W40·N4/F1: now literally — copyUsage(strict) is the ONE
+    // rebuild both arms share); a malformed usage block still fails the tape
+    // closed.
+    let usage: LlmUsage | undefined;
     if (v.usage !== undefined) {
-      if (!isPlainObject(v.usage)) return null;
-      if (
-        typeof v.usage.promptTokens !== "number" ||
-        !Number.isFinite(v.usage.promptTokens) ||
-        typeof v.usage.completionTokens !== "number" ||
-        !Number.isFinite(v.usage.completionTokens)
-      ) {
-        return null;
-      }
-      usage = { promptTokens: v.usage.promptTokens, completionTokens: v.usage.completionTokens };
+      const copied = copyUsage(v.usage, { strict: true });
+      if (copied === null) return null;
+      usage = copied;
     }
     return {
       ok: false,
@@ -481,28 +512,26 @@ export type CassetteInitResult =
   | { ok: false; code: ErrorCode; error: string };
 
 function copyEnvelope(env: LlmResult): LlmResult {
+  // W40·N4 (F6): both arms rebuild `usage` through the ONE shared helper — the
+  // old hand-written {promptTokens, completionTokens} literals stripped K6's
+  // cache fields off the tape (a cassette-wrapped run under-counted its own
+  // usage). Absent usage stays absent (the legacy 2-key object round-trips
+  // byte-identically).
   if (env.ok) {
-    return env.usage
-      ? {
-          ok: true,
-          text: env.text,
-          model: env.model,
-          usage: { promptTokens: env.usage.promptTokens, completionTokens: env.usage.completionTokens },
-        }
-      : { ok: true, text: env.text, model: env.model };
+    const usage = env.usage === undefined ? null : copyUsage(env.usage);
+    return { ok: true, text: env.text, model: env.model, ...(usage ? { usage } : {}) };
   }
   // W39·B4 sweep: LlmResult's refusal arm may carry `usage` (Y1's I2 contract —
   // a refusal that still burned tokens must stay meterable). The tape must
   // round-trip that field byte-honestly, or a recorded refusal replays with
   // LESS information than the live call returned (silent under-count).
+  const usage = env.usage === undefined ? null : copyUsage(env.usage);
   return {
     ok: false,
     reason: env.reason,
     ...(env.error !== undefined ? { error: env.error } : {}),
     ...(env.code !== undefined ? { code: env.code } : {}),
-    ...(env.usage
-      ? { usage: { promptTokens: env.usage.promptTokens, completionTokens: env.usage.completionTokens } }
-      : {}),
+    ...(usage ? { usage } : {}),
   };
 }
 

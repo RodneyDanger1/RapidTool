@@ -18,6 +18,9 @@
  */
 
 import type { ResearchResult } from "./research.ts";
+// W40·N4: the shared knob sanitizer (this file used to carry its own copy —
+// byte-identical to websearch.server.ts's, one shape with two homes).
+import { boundedInt } from "./bounded-int.ts";
 
 export const TAVILY_BASE_URL = "https://api.tavily.com";
 
@@ -36,12 +39,9 @@ const MAX_TIMER_MS = 2_147_483_647;
 const MAX_RESULTS_CEILING = 20;
 
 /** Sanitize a caller knob: finite integer in [min, max], else the fallback.
- *  A hostile/typo'd value (NaN, Infinity, -5, 1e9) never reaches the wire. */
-function boundedInt(v: unknown, fallback: number, min: number, max: number): number {
-  return typeof v === "number" && Number.isFinite(v) && v >= min
-    ? Math.min(Math.max(Math.floor(v), min), max)
-    : fallback;
-}
+ *  A hostile/typo'd value (NaN, Infinity, -5, 1e9) never reaches the wire.
+ *  W40·N4: moved to the shared `./bounded-int.ts` (this file's copy had a
+ *  byte-identical twin in websearch.server.ts). */
 
 function env(key: string): string | undefined {
   const v = process.env[key]?.trim();

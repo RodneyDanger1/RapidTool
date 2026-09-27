@@ -155,10 +155,18 @@ function respond(result, exitCode) {
       cliLogEvent({
         level: exitCode === 0 ? "info" : "error",
         scope: "cli-command",
-        event: `cli.${CMD ?? "command"}.${exitCode === 0 ? "ok" : "exit"}`,
-        message: out.ok === false && typeof out.error === "string" ? out.error.slice(0, 200) : `exit ${exitCode}`,
+        // OPS-4 (K13, W40 N5): emit the CATALOGUED name. The old free-form
+        // `cli.<cmd>.ok|exit` strings are in no registry (RT_EVENT_NAMES has
+        // only cli.invocation/cli.error on this scope) and the catalogued
+        // cli.invocation was never emitted — the verb + outcome now ride the
+        // payload instead of an invented event name.
+        event: "cli.invocation",
+        message:
+          out.ok === false && typeof out.error === "string"
+            ? out.error.slice(0, 200)
+            : `${CMD ?? "command"} exit ${exitCode}`,
         code: typeof out.code === "string" ? out.code : undefined,
-        payload: { exitCode },
+        payload: { cmd: CMD ?? null, exitCode },
       });
     }
   } catch {
@@ -261,7 +269,19 @@ async function checkDriver() {
 // rerouted resume through the headless seam, and the 0-warning gate forbids
 // dead code. Reintroduce it (same lazy .ts mechanics as the scorecard driver
 // below) if a read-only CLI use lands, e.g. a `resume --list`.
+// W40 N5 (K7 item 9): the predicted read-only consumer landed — `diagnose`
+// surfaces `checkpoint: {present, path, savedAt}` through this loader. Read
+// ONLY: never admits, never hydrates, never writes.
 // ---------------------------------------------------------------------------
+const CHECKPOINT_PATH = pathToFileURL(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "checkpoint.server.ts"),
+).href;
+
+let checkpointServer = null;
+async function checkpointDriver() {
+  if (!checkpointServer) checkpointServer = await import(CHECKPOINT_PATH);
+  return checkpointServer;
+}
 
 // ---------------------------------------------------------------------------
 // T5.3 (fixes/262 LANE 5 · W23): the eval scorecard reader
@@ -319,9 +339,16 @@ const RT_PATH = pathToFileURL(
 const RT_DIAG_PATH = pathToFileURL(
   join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "diagnose.ts"),
 ).href;
+// W40 N5 (OPS-10): the budget constants' single authority — `diagnose.ts`
+// itself imports WILD_STEP_BUDGET_MS / CHAT_STEP_BUDGET_MS from here, so the
+// CLI reads them too instead of duplicating their values as literals.
+const RT_EVENTS_PATH = pathToFileURL(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "rt-events.ts"),
+).href;
 
 let rtServer = null;
 let rtDiag = null;
+let rtEvents = null;
 let rtSessionId = `cli-${Date.now().toString(36)}`;
 let CLI_PROJECT = null;
 
@@ -3408,7 +3435,10 @@ async function main() {
           respond(
             {
               ok: true,
-              path: res.changed ? path : undefined,
+              // K7 item 8 (W40 N5): a bare `undefined` here made JSON.stringify
+              // DROP the key for unchanged no-ops — consumers saw no `path` at
+              // all. null is the explicit, shape-stable "not persisted".
+              path: res.changed ? path : null,
               phase: res.phase,
               changed: res.changed,
               liveUnavailable: res.liveUnavailable,
@@ -3455,9 +3485,27 @@ async function main() {
         // required; --project targets its .rapidtool/logs. Never throws.
         try {
           if (!rtDiag) rtDiag = await import(RT_DIAG_PATH);
+          if (!rtEvents) rtEvents = await import(RT_EVENTS_PATH);
           const rows = rtServer
             ? rtServer.readRtTail(rtServer.resolveLogDir(CLI_PROJECT), 200)
             : [];
+          // OPS-9 (K13, W40 N5): readRtTail returns NEWEST-first; the diagnosis
+          // contract documents `errors` as OLDEST-first (diagnose.ts:83 — the
+          // cited `errors[i]` evidence indices assume it) and the UI path
+          // presents a chronological timeline. One reversed copy feeds both.
+          const chronological = rows.slice().reverse();
+          // OPS-10 helpers: the newest row for an event (chronological ⇒ scan back).
+          const newestRow = (event) => {
+            for (let i = chronological.length - 1; i >= 0; i -= 1) {
+              if (chronological[i].event === event) return chronological[i];
+            }
+            return null;
+          };
+          const asFiniteNumber = (value) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+          const heartbeatRow = newestRow("sys.heartbeat");
+          const hbLagRow = heartbeatRow ?? newestRow("sys.heartbeat_lag");
+          const longTaskRow = newestRow("sys.longtask");
+          const stallRow = newestRow("sys.mainthread_stall");
           let persistHealth = { ok: true, lastError: null };
           let name = null;
           let status = null;
@@ -3503,6 +3551,25 @@ async function main() {
               };
             }
           }
+          // K7 item 9 (W40 N5): the checkpoint snapshot `resume`/`unattended`
+          // would re-enter, read-only via checkpoint.server.ts:readCheckpoint
+          // (present/path/savedAt only — never admits, never hydrates). The dir
+          // is the project file's home (same resolution as the log dir above);
+          // no --project → honest null (nothing to look beside).
+          let checkpoint = null;
+          if (typeof CLI_PROJECT === "string" && CLI_PROJECT.trim()) {
+            try {
+              const cpModule = await checkpointDriver();
+              const cp = cpModule.readCheckpoint(resolveCheckpointTarget(CLI_PROJECT).dir);
+              checkpoint = cp.ok
+                ? { present: true, path: cp.path, savedAt: cp.checkpoint.savedAt }
+                : cp.code === "RT_E_CHECKPOINT_MISSING"
+                  ? { present: false, path: cp.path, savedAt: null }
+                  : { present: false, path: cp.path, savedAt: null, code: cp.code, error: cp.error };
+            } catch {
+              /* checkpoint surface is advisory — the honest null stands */
+            }
+          }
           const diagnosis = rtDiag.buildDiagnosis({
             source: "cli",
             now: Date.now(),
@@ -3514,8 +3581,10 @@ async function main() {
               currentPhase,
               wildRun,
             },
-            errors: rows.filter((r) => r.level === "error" || r.level === "critical"),
-            timeline: rows.slice(-50).map((r) => ({
+            errors: chronological.filter((r) => r.level === "error" || r.level === "critical"),
+            // OPS-9: the NEWEST 50 rows, presented oldest-first (was
+            // `rows.slice(-50)` = the window's OLDEST rows, in reverse).
+            timeline: chronological.slice(-50).map((r) => ({
               ts: r.ts,
               kind: "telemetry",
               event: r.event,
@@ -3524,17 +3593,37 @@ async function main() {
               detailOrMessage: r.message,
             })),
             watchdog: {
-              lastHeartbeatAt: null,
-              heartbeatLagMs: null,
-              stall: null,
-              lastLongTaskMs: null,
-              budgetsMs: { wildStep: 255_000, chat: 60_000 }, // P6_PHASE_MAX_MS (240_000) + 15_000 — keep in sync with rt-events.ts WILD_STEP_BUDGET_MS (was 90_000; W-01 makes legal keyed steps exceed it)
+              // OPS-10 (K13, W40 N5): derive from the same read — the old
+              // hardcoded nulls hid rows that were sitting right here; an
+              // absent row still lands as an honest null.
+              lastHeartbeatAt: heartbeatRow ? heartbeatRow.ts : null,
+              heartbeatLagMs: asFiniteNumber(hbLagRow?.payload?.lagMs),
+              // A logged stall row is an OBSERVATION: the live latch is
+              // client-side and cleared on resolve (rt-client.ts:344-357), so a
+              // static log cannot prove `active`. since/stepElapsedMs carry the
+              // observation; its presence still feeds diagnose's evidence line.
+              stall: stallRow
+                ? {
+                    active: false,
+                    since: stallRow.ts,
+                    stepElapsedMs: asFiniteNumber(stallRow.payload?.lagMs) ?? 0,
+                    class: "mainthread-stall",
+                  }
+                : null,
+              lastLongTaskMs: asFiniteNumber(longTaskRow?.payload?.durationMs),
+              // OPS-10b: budgets from their single authority (rt-events.ts —
+              // the module diagnose.ts itself imports them from); the old
+              // 255_000/60_000 literals + "keep in sync" note are gone.
+              budgetsMs: { wildStep: rtEvents.WILD_STEP_BUDGET_MS, chat: rtEvents.CHAT_STEP_BUDGET_MS },
             },
             growth: {
               rows: { ledger: ledgerRowCount, telemetryRing: rows.length, chatLog: chatLogRowCount },
               bytes: {
                 projectFile: projectFileBytes,
-                logDirBytes: rtServer ? rtServer.logDirBytes(rtServer.resolveLogDir(CLI_PROJECT)) : 0,
+                // K7 item-5 class (W40 N5): module-absent = genuinely NOT
+                // measured → null, never a fake 0 (the type permits null and
+                // the UI path already reports null for what it cannot measure).
+                logDirBytes: rtServer ? rtServer.logDirBytes(rtServer.resolveLogDir(CLI_PROJECT)) : null,
                 localStorageEstimate: null,
               },
               counts: {},

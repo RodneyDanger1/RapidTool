@@ -697,12 +697,16 @@ function topo(nodes: SpecNode[]): string[] {
 
 /** A5 — Spec Graph Planner */
 export function planSpecGraph(lattice: IntentLattice, domain: string): SpecGraph {
+  // W40 N1 (H1 leftover): same foreign-domain coercion as intentLattice —
+  // a null/non-string domain (hand-built / post-hydrate payload) must never
+  // crash the schema file path; the honest fallback domain is custom-software.
+  const dom = typeof domain === "string" && domain.length > 0 ? domain : "custom-software";
   const jobs = lattice.jobs.slice(0, 5);
   const jobIds = jobs.map((_, i) => `job-${i}`);
   const nodes: SpecNode[] = [
     {
       id: "schema",
-      file: `src/domain/${domain.replace(/-/g, "_")}.ts`,
+      file: `src/domain/${dom.replace(/-/g, "_")}.ts`,
       purpose: "Typed entities from the lattice",
       dependsOn: [],
       owner: "architect",

@@ -761,6 +761,19 @@ describe("runAlgorithms", () => {
     assert.ok(out.crew.some((s) => s.active));
     assert.ok(out.contracts.entities.length >= 1);
   });
+
+  it("coerces a foreign domain instead of crashing the spec graph (H1 probe)", () => {
+    // W40 N1: probe case algs.runAlgorithms-junk-project — null domain must
+    // coerce exactly like intentLattice's guard (custom-software), not crash.
+    const out = runAlgorithms({
+      brief: 42,
+      domain: null,
+      memory: null,
+      currentPhase: 12,
+    } as never);
+    const schema = out.specGraph.nodes.find((n) => n.id === "schema");
+    assert.equal(schema?.file, "src/domain/custom_software.ts");
+  });
 });
 
 // ---------------------------------------------------------------------------

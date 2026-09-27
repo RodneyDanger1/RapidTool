@@ -118,6 +118,9 @@ export type VerifyOutcomeShape = {
  * source already exports or declares no top-level functions.
  */
 export function withCommonJsExports(source: string): string {
+  // W40 N1 (H1 leftover): a non-string source has no top-level functions to
+  // bind — the honest transform result is the empty source, never a crash.
+  if (typeof source !== "string") return "";
   const fns = [...source.matchAll(/^function\s+([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
   const unique = [...new Set(fns)];
   if (unique.length === 0) return source; // not a function-module source — honest no-op
@@ -155,7 +158,9 @@ export function withCommonJsExports(source: string): string {
  * returns the same reference — no duplicate verify artifacts/logs.
  */
 export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape): Project {
-  if (outcome.status === "not-configured") return project;
+  // W40 N1 (H1 leftover): a junk outcome (null/non-object/statusless) is the
+  // same no-state-change path as not-configured — never deref a foreign shape.
+  if (!outcome || typeof outcome.status !== "string" || outcome.status === "not-configured") return project;
   const passed = outcome.status === "passed";
   const now = Date.now();
   const evidence = typeof outcome.evidence === "string" ? outcome.evidence : "";

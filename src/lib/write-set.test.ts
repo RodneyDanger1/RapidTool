@@ -99,6 +99,12 @@ describe("write-set — snapshotPaths / applyWrite / rollback", () => {
     assert.throws(() => applyWrite(tmp(), "../escape.ts", "x"), /escape|absolute/i);
   });
 
+  it("assertSafeRelPath refuses the empty string (by-design refusal, H1 probe)", () => {
+    // W40 N1: ws.assertSafeRelPath-empty is a REFUSAL by design (H1 probe
+    // case) — pin it so the refusal claim is genuinely "by design — tested".
+    assert.throws(() => assertSafeRelPath(""), /relative path required/i);
+  });
+
   it("applyWrites rolls back the whole set when a later write fails", () => {
     const root = tmp();
     try {

@@ -281,6 +281,13 @@ describe("projectedTime (phase-weighted minutes)", () => {
     });
     assert.deepEqual(r, again);
   });
+
+  it("defaults a null phase id through minutesForPhase (30 min) in totals", () => {
+    // W40 N1: minutesForPhase's id:null branch was never exercised via totals
+    // (existing pins use numbers; 99 hits the out-of-range branch only).
+    const r = projectedTime({ phases: [{ id: null as unknown as number, status: "complete" }] });
+    assert.equal(r.minutes, 30);
+  });
 });
 
 describe("shared text primitives", () => {

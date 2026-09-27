@@ -568,6 +568,9 @@ export interface ConventionVerdict {
  * name follows the dominant style receives zero advisories.
  */
 export function respectConventions(packet: ConventionPacket, map: ConventionsMap): ConventionVerdict {
+  // W40 N1 (H1 leftover): a foreign packet shape (missing/non-string name)
+  // offers nothing to judge — the honest verdict is empty, never a crash.
+  if (!packet || typeof packet.name !== "string") return { advisories: [], injected: "" };
   const advisories: string[] = [];
   const name = packet.name.replace(/^[.#!]+/, "");
 

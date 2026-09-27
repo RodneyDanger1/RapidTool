@@ -339,6 +339,23 @@ export function parseGrader(raw, slug) {
         .filter((c) => c && typeof c.file === "string" && typeof c.contains === "string")
         .map((c) => ({ file: c.file, contains: c.contains }))
     : [];
+  // W40·N4 (§R7-f04): the DECLARED delivery kind this grader demands of the
+  // emitted tree — asserted against the emitted README's "**Kind:** <kind>"
+  // line by checkExpectedKind, so a keyword-table edit (or a dropped declared
+  // kind) can never silently mis-kind a fixture. Absent = a v1 grader (no
+  // kind assertion; v1 back-compat). Values = the scaffold taxonomy
+  // (scaffold.ts projectKindOf): webapp | cli-tool | library | game | service.
+  const EXPECTED_KINDS = new Set(["webapp", "cli-tool", "library", "game", "service"]);
+  let expectedKind = null;
+  if (doc.expectedKind !== undefined) {
+    if (typeof doc.expectedKind !== "string" || !EXPECTED_KINDS.has(doc.expectedKind.trim())) {
+      return {
+        ok: false,
+        error: `expectedKind must be one of ${[...EXPECTED_KINDS].join(" | ")} (got ${JSON.stringify(doc.expectedKind)})`,
+      };
+    }
+    expectedKind = doc.expectedKind.trim();
+  }
   // A3-f05/R11-f12 (W36 · N5 — landing the structure W30 §Graders spec'd):
   // optional per-kind expectedBehavior rows over the EMITTED TREE (not text
   // presence). Shape-checked here — a grader that cannot be trusted never
@@ -401,6 +418,9 @@ export function parseGrader(raw, slug) {
       requiredCapabilities: capabilities,
       expectedFiles,
       expectedContent,
+      // W40·N4 (§R7-f04): the declared delivery kind the emitted tree must
+      // land (null = v1 grader — no assertion).
+      expectedKind,
       // W36 · N5: the checked expectedBehavior rows ([] = legacy grader — the
       // verification label then reads "files+content only", exactly the
       // pre-expectedBehavior contract).
@@ -411,8 +431,11 @@ export function parseGrader(raw, slug) {
         requireExpectedContent: pw.requireExpectedContent !== false,
         // A declared bar is mandatory by default — same doctrine as files/content;
         // `false` is the explicit leniency opt-out (a declared row that FAILED
-        // is never a pass unless the grader says so).
+        // is never a pass unless the grader says so; a `pending` runtime row
+        // never fails a tree — it is visible in the verification label).
         requireExpectedBehavior: pw.requireExpectedBehavior !== false,
+        // Same doctrine for the declared kind; a no-op when expectedKind is absent.
+        requireExpectedKind: pw.requireExpectedKind !== false,
       },
     },
   };
@@ -608,11 +631,188 @@ export function trialsSummary(outcomes, opts = {}) {
   };
 }
 
+/** Normalize an emitted-file manifest for path matching (posix separators). */
+function normalizeEmittedFiles(emittedFiles) {
+  return Array.isArray(emittedFiles) ? emittedFiles.map((f) => String(f).replace(/\\/g, "/")) : [];
+}
+
+/** Every path a package.json target value declares (string | nested object to
+ *  depth 2 | string array) — the paths `package-target-exists` must resolve. */
+function packageTargetPaths(value) {
+  const out = [];
+  const visit = (v, depth) => {
+    if (depth > 2) return;
+    if (typeof v === "string") {
+      out.push(v);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const x of v) visit(x, depth + 1);
+      return;
+    }
+    if (v && typeof v === "object") {
+      for (const x of Object.values(v)) visit(x, depth + 1);
+    }
+  };
+  visit(value, 0);
+  return out;
+}
+
+/** W40·N4 (§R7-f03/f04): evaluate the grader's declared `expectedBehavior`
+ *  rows against the EMITTED TREE (the manifest + package.json), never against
+ *  text presence in the brief. Row statuses:
+ *    file-exists           — pass/fail: the declared path resolves in the manifest;
+ *    package-target-exists — pass/fail: every path the package.json target
+ *                            declares resolves to an emitted file (a declared-
+ *                            but-dangling target, or an undeclared target,
+ *                            FAILS);
+ *    entry-runs            — `pending`: the runtime row stays pending until
+ *                            runtime evidence is wired into acceptance
+ *                            (TODO(A3-f05)); it is visible in `behavior.rows`
+ *                            + the verification label, never silently skipped
+ *                            and never counted as a pass.
+ *  `ok` = no row FAILED (pending rows do not fail a tree); `complete` records
+ *  whether any runtime row is still pending. Reads files only; never writes. */
+export function checkExpectedBehavior(grader, emittedDir, emittedFiles) {
+  const files = normalizeEmittedFiles(emittedFiles);
+  const declaredRows = Array.isArray(grader.expectedBehavior) ? grader.expectedBehavior : [];
+  const has = (p) => files.some((f) => f === p || f.endsWith(`/${p}`));
+  let pkg = null;
+  let pkgRel = null;
+  if (declaredRows.some((r) => r.check === "package-target-exists")) {
+    pkgRel = files.find((f) => f === "package.json" || f.endsWith("/package.json")) || null;
+    if (pkgRel) {
+      try {
+        pkg = JSON.parse(readFileSync(join(emittedDir, pkgRel), "utf8"));
+      } catch {
+        pkg = null;
+      }
+    }
+  }
+  const rows = [];
+  for (const row of declaredRows) {
+    if (row.check === "package-target-exists") {
+      const target = row.target;
+      let status = "fail";
+      let detail;
+      if (!pkg) {
+        detail = pkgRel === null ? "package.json absent from the emitted tree" : `${pkgRel} is not readable JSON`;
+      } else if (pkg[target] === undefined) {
+        detail = `package.json declares no "${target}"`;
+      } else {
+        const paths = packageTargetPaths(pkg[target]);
+        if (paths.length === 0) {
+          detail = `package.json "${target}" declares no path`;
+        } else {
+          const missing = paths
+            .map((t) => String(t).replace(/^\.\//, "").replace(/^\/+/, ""))
+            .filter((t) => !has(t));
+          if (missing.length === 0) {
+            status = "pass";
+            detail = `package.json "${target}" → ${paths.join(", ")} (emitted)`;
+          } else {
+            detail = `package.json "${target}" → ${missing.join(", ")} not emitted`;
+          }
+        }
+      }
+      rows.push({ id: row.id, check: row.check, target, status, detail });
+      continue;
+    }
+    if (row.check === "entry-runs") {
+      rows.push({
+        id: row.id,
+        check: row.check,
+        status: "pending",
+        detail:
+          "runtime row — pending until runtime evidence is wired into acceptance (TODO(A3-f05)); visible here + in the verification label, never silently skipped",
+      });
+      continue;
+    }
+    // file-exists (the only remaining parse-validated check)
+    const hit = has(row.path);
+    rows.push({
+      id: row.id,
+      check: row.check,
+      path: row.path,
+      status: hit ? "pass" : "fail",
+      detail: hit ? `emitted: ${row.path}` : `absent from the emitted tree: ${row.path}`,
+    });
+  }
+  return {
+    declared: rows.length,
+    rows,
+    passed: rows.filter((r) => r.status === "pass").length,
+    failed: rows.filter((r) => r.status === "fail").length,
+    pending: rows.filter((r) => r.status === "pending").length,
+    ok: rows.every((r) => r.status !== "fail"),
+    complete: rows.every((r) => r.status !== "pending"),
+    note: rows.length === 0 ? 'no expectedBehavior rows declared (v1 grader — the verification label reads "files+content only")' : null,
+  };
+}
+
+/** W40·N4 (§R7-f04): assert the emitted README's Kind line against the
+ *  grader's declared `expectedKind`. Returns null when the grader declares no
+ *  kind (a v1 grader — nothing to assert). Fail-closed: a tree without a
+ *  readable README Kind line FAILS the assertion rather than skipping it. */
+export function checkExpectedKind(grader, emittedDir, emittedFiles) {
+  const expected = typeof grader.expectedKind === "string" && grader.expectedKind.trim() ? grader.expectedKind.trim() : null;
+  if (expected === null) return null;
+  const files = normalizeEmittedFiles(emittedFiles);
+  const rel = files.find((f) => f === "README.md" || f.endsWith("/README.md")) || null;
+  let text = null;
+  if (rel) {
+    try {
+      text = readFileSync(join(emittedDir, rel), "utf8");
+    } catch {
+      text = null;
+    }
+  }
+  if (text === null) {
+    return {
+      expected,
+      actual: null,
+      ok: false,
+      reason: "README.md absent/unreadable in the emitted tree — the Kind line cannot be verified",
+    };
+  }
+  const m = text.match(/\*\*Kind:\*\*\s*([a-z-]+)/);
+  const actual = m ? m[1] : null;
+  if (actual === null) {
+    return {
+      expected,
+      actual,
+      ok: false,
+      reason: 'README.md carries no "**Kind:** <kind>" line — the emitted kind cannot be verified',
+    };
+  }
+  return actual === expected
+    ? { expected, actual, ok: true }
+    : {
+        expected,
+        actual,
+        ok: false,
+        reason: `emitted kind "${actual}" ≠ expectedKind "${expected}" — the fixture was mis-kinded (keyword table / declared-kind drop)`,
+      };
+}
+
+/** W40·N4: the honest one-line verification label the acceptance record and
+ *  the CLI carry: what was actually verified for this trial. Legacy graders
+ *  read "files+content only"; a declared behavior block names its row math. */
+function verificationLabel(behavior) {
+  if (!behavior || behavior.declared === 0) return "files+content only";
+  const bits = [`${behavior.passed}/${behavior.declared} rows pass`];
+  if (behavior.failed > 0) bits.push(`${behavior.failed} FAILED`);
+  if (behavior.pending > 0) bits.push(`${behavior.pending} pending runtime evidence`);
+  return `files+content+behavior (${bits.join(", ")})`;
+}
+
 /** Run-side acceptance assertions (107 §8 steal): the grader's declared
  *  expectedFiles / expectedContent checked against the EMITTED tree by the
- *  driver — declared before the run, applied from outside the tree. */
+ *  driver — declared before the run, applied from outside the tree. W40·N4:
+ *  the same record also carries the evaluated `expectedBehavior` rows, the
+ *  declared-kind assertion and the honest `verification` label. */
 export function checkAcceptance(grader, emittedDir, emittedFiles) {
-  const files = Array.isArray(emittedFiles) ? emittedFiles.map((f) => String(f).replace(/\\/g, "/")) : [];
+  const files = normalizeEmittedFiles(emittedFiles);
   const missingFiles = [];
   if (grader.passWhen.requireExpectedFiles) {
     for (const want of grader.expectedFiles) {
@@ -638,12 +838,22 @@ export function checkAcceptance(grader, emittedDir, emittedFiles) {
       if (!text.includes(want.contains)) failedContent.push(`${want.file}: missing ${JSON.stringify(want.contains)}`);
     }
   }
+  // W40·N4: the behavioral + kind halves ride the same acceptance record (all
+  // read from OUTSIDE the tree). `behaviorOk` follows checkExpectedBehavior's
+  // no-FAILED-row rule; `kindOk` is null when the grader declares no kind.
+  const behavior = checkExpectedBehavior(grader, emittedDir, files);
+  const kind = checkExpectedKind(grader, emittedDir, files);
   return {
     filesOk: missingFiles.length === 0,
     missingFiles,
     contentOk: failedContent.length === 0,
     failedContent,
     checked: { expectedFiles: grader.expectedFiles.length, expectedContent: grader.expectedContent.length },
+    behavior,
+    behaviorOk: behavior.ok,
+    kind,
+    kindOk: kind === null ? null : kind.ok,
+    verification: verificationLabel(behavior),
   };
 }
 
@@ -2091,6 +2301,9 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       barChars: grader.acceptanceBar.length,
       requiredIdentifiers: grader.requiredIdentifiers.length,
       requiredCapabilities: grader.requiredCapabilities.length,
+      // W40·N4: the declared-kind + behavior-row facts (evidence, not a copy).
+      expectedKind: grader.expectedKind ?? null,
+      expectedBehaviorRows: grader.expectedBehavior.length,
     },
     acceptance: { ...acceptance, pass: false }, // `pass` filled per-trial by evaluateEntry
     graderLeak: { scanned: graderLeak.scanned, leaked: graderLeak.leaked, hits: graderLeak.hits },
@@ -2131,25 +2344,32 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
 }
 
 /** W5-L5 T-107.5 — the run-side pass predicate for one trial: the rubric met
- *  the grader's threshold AND every declared run-side file/content assertion
- *  held. A crash/missing mean is a FAIL, never a default pass. */
+ *  the grader's threshold AND every declared run-side assertion held (files /
+ *  content / the declared behavior rows / the declared kind). A crash/missing
+ *  mean is a FAIL, never a default pass. W40·N4: the behavior and kind clauses
+ *  only bite on an EXPLICIT failed verdict (`=== false`): a `pending` runtime
+ *  row and a v1 grader's acceptance object (neither key present) never invent
+ *  a failure. */
 export function passesAcceptance(row, acceptance, grader) {
   if (!row || typeof row.mean !== "number" || !Number.isFinite(row.mean)) return false;
   if (row.mean < grader.passWhen.meanAtLeast) return false;
   if (grader.passWhen.requireExpectedFiles && acceptance.filesOk !== true) return false;
   if (grader.passWhen.requireExpectedContent && acceptance.contentOk !== true) return false;
+  if (grader.passWhen.requireExpectedBehavior && acceptance.behaviorOk === false) return false;
+  if (grader.passWhen.requireExpectedKind && acceptance.kindOk === false) return false;
   return true;
 }
 
-/** 255 (W20-L2): the pass verdict above is a boolean asked of FOUR clauses —
- *  a finite mean, the rubric threshold, the expectedFiles check and the
- *  expectedContent check. Only the last two write anything into the record's
- *  missingFiles/failedContent lists, so a threshold-only failure (the run-2
- *  shape: `acceptance.pass:false` with filesOk+contentOk true and an EMPTY
- *  shortfall list) used to be indistinguishable from a crash at a glance.
- *  This names the FIRST false clause in the SAME order and with the SAME
- *  leniency gates as passesAcceptance (kept adjacent so the two can never
- *  drift); null when the row passes. Additive: it never changes a verdict. */
+/** 255 (W20-L2): the pass verdict above is a boolean asked of SIX clauses —
+ *  a finite mean, the rubric threshold, the expectedFiles check, the
+ *  expectedContent check, the declared behavior rows and the declared kind.
+ *  Only some write into the record's shortfall lists, so a threshold-only
+ *  failure (the run-2 shape: `acceptance.pass:false` with filesOk+contentOk
+ *  true and an EMPTY shortfall list) used to be indistinguishable from a
+ *  crash at a glance. This names the FIRST false clause in the SAME order and
+ *  with the SAME leniency gates as passesAcceptance (kept adjacent so the two
+ *  can never drift); null when the row passes. Additive: it never changes a
+ *  verdict. */
 export function acceptanceFailReason(row, acceptance, grader) {
   if (!row || typeof row.mean !== "number" || !Number.isFinite(row.mean)) {
     return "mean missing — the rubric never produced a number (crashed trial)";
@@ -2162,6 +2382,15 @@ export function acceptanceFailReason(row, acceptance, grader) {
   }
   if (grader.passWhen.requireExpectedContent && acceptance.contentOk !== true) {
     return `expected content missing: ${acceptance.failedContent.join("; ")}`;
+  }
+  if (grader.passWhen.requireExpectedBehavior && acceptance.behaviorOk === false) {
+    const rows = acceptance.behavior && Array.isArray(acceptance.behavior.rows) ? acceptance.behavior.rows : [];
+    const failed = rows.filter((r) => r.status === "fail");
+    const named = failed.slice(0, 3).map((r) => `${r.id}${r.path ? ` (${r.path})` : r.target ? ` (${r.target})` : ""}`).join("; ");
+    return `expected behavior failed: ${named || "declared row(s) failed"}`;
+  }
+  if (grader.passWhen.requireExpectedKind && acceptance.kindOk === false) {
+    return `expected kind mismatch: ${(acceptance.kind && acceptance.kind.reason) || "emitted kind does not match expectedKind"}`;
   }
   return null;
 }
@@ -2367,6 +2596,26 @@ export function buildSummary(rows, skips = [], trials = TRIALS) {
   };
 }
 
+/** W40·N4 (L3 item): the END CLASS of one recorded trial, on the
+ *  funded | unfunded | unmeasured axis the campaign reads history by:
+ *    "funded"     — a SCORED trial (pass true|false) in a KEYED run: the
+ *                   account could pay, the model ran, the verdict is a real
+ *                   measurement;
+ *    "unfunded"   — a no-balance trial: the wallet refused; never a
+ *                   measurement (excluded from every score);
+ *    "unmeasured" — every other ending: a keyless trial (the deterministic
+ *                   floor — real data, but NO WALLET was involved, so it is
+ *                   deliberately NOT classed funded), a crashed/skipped
+ *                   trial, or a row that never reached a verdict.
+ *  Exported so history.json's recorder and the CLI scorecard's reader name
+ *  the same classes — one definition, no drift. */
+export function historyEndClass(row, mode) {
+  if (row && row.notes && row.notes.noBalance === true) return "unfunded";
+  const pass = row && row.acceptance ? row.acceptance.pass : undefined;
+  if ((pass === true || pass === false) && mode === "keyed") return "funded";
+  return "unmeasured";
+}
+
 function persist(rows, mode, skips = [], extra = {}) {
   mkdirSync(OUT_DIR, { recursive: true });
   const results = {
@@ -2399,7 +2648,12 @@ function persist(rows, mode, skips = [], extra = {}) {
         // W5-L5 additive: which trial of how many produced this row.
         trial: typeof t.trial === "number" ? t.trial : 1,
         trials: TRIALS,
-        pass: t.acceptance ? t.acceptance.pass === true : null,
+        // W40·N4 (L3 item): tri-state pass — null means NOT scored (an
+        // unfunded trial is not a failure); a boolean is a real verdict.
+        pass: t.acceptance && typeof t.acceptance.pass === "boolean" ? t.acceptance.pass : null,
+        // W40·N4 (L3 item): the funded | unfunded | unmeasured end class —
+        // see historyEndClass; history rows are only as readable as this axis.
+        endClass: historyEndClass(t, mode),
         m1: t.criteria.M1.score,
         m2: t.criteria.M2.score,
         m3: t.criteria.M3.score,
@@ -2814,8 +3068,13 @@ async function main() {
       meanOfNine: Number((results.summary.meanTotal * 9).toFixed(4)),
       decision: decision.branch,
       preflightClass: preflight ? preflight.class : null,
-      resultsWritten: true,
-      historyWritten: true,
+      // W40·N4 (L3 item — finalize-after-persist): this call site is reached
+      // ONLY after persist() returned (results.json, then history.json were
+      // written in that order). The two flags are read from the filesystem at
+      // finalize time, never hardcoded: if a file were absent here, the marker
+      // would say so instead of claiming a write that never happened.
+      resultsWritten: existsSync(RESULTS_PATH),
+      historyWritten: existsSync(HISTORY_PATH),
     });
     console.log(
       "marker: keyed run finalized (finishedAt set) — results.json AND history.json are both written; a killed run would have left finishedAt:null",

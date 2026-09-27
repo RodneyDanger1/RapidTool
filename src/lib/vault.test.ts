@@ -841,4 +841,23 @@ describe("backlinksFor (W-16 junk-row guard)", () => {
     ] as unknown as VaultNote[];
     assert.deepEqual(backlinksFor(notes, "Target"), ["A", "B"]);
   });
+
+  it("excludes true self-links, dedupes repeat titles, and keeps vault order (not alphabetical)", () => {
+    // W40 N1: the remaining doc-contract cases beyond junk rows + the [A, B]
+    // graph — a true self-link row, a duplicate-title row, and order-vs-sort.
+    const notes = [
+      { title: "Zed", links: ["Target"] },
+      { title: "Target", links: ["Target", "Zed"] }, // true self-link → excluded
+      { title: "Alpha", links: ["Target"] },
+      { title: "Alpha", links: ["Target"] }, // duplicate title → one backlink
+      { title: "Plain", links: [] },
+    ] as unknown as VaultNote[];
+    assert.deepEqual(backlinksFor(notes, "Target"), ["Zed", "Alpha"]);
+  });
+
+  it("yields [] for an unknown title and for the empty vault", () => {
+    const notes = [{ title: "A", links: ["B"] }] as unknown as VaultNote[];
+    assert.deepEqual(backlinksFor(notes, "Missing"), []);
+    assert.deepEqual(backlinksFor([], "Any"), []);
+  });
 });

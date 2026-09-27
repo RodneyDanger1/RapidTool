@@ -3727,10 +3727,20 @@ export function treeRunTestedEvidence(o: TreeRunOutcome): {
 } {
   const specs = (Array.isArray(o.tests) ? o.tests : []).filter((t) => t.run === "pass");
   const assertions = specs.reduce((n, t) => n + (t.tests?.pass ?? 0), 0);
+  // F3-16 (fixes/294 N2): identify WHICH specs passed — counts alone let two
+  // different trees (equal compile/spec/assertion numbers) mint the identical
+  // evidence hash. Sorted rel spec paths restore the "rel spec paths" the doc
+  // above promises; deterministic + host-independent (never the run dir,
+  // timings or detail prose), so the hash still reproduces across hosts.
+  const specPaths = specs
+    .map((t) => t.file)
+    .filter((f): f is string => typeof f === "string" && f.length > 0)
+    .sort();
   const run = o.run;
   const summary = [
     `compile ${o.compile.passed}/${o.compile.checked} file(s)`,
     `${specs.length} spec file(s) pass · ${assertions} assertion(s)`,
+    ...(specPaths.length > 0 ? [`specs [${specPaths.join(", ")}]`] : []),
     ...(run ? [`entry ${run.kind} ${run.run}`] : []),
   ].join(" · ");
   return { executed: specs.length > 0 && assertions > 0, specFiles: specs.length, assertions, summary };

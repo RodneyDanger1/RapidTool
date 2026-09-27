@@ -32,7 +32,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { PHASES, phaseDef } from "@/lib/phases";
+import { PHASES, PHASE_BY_ID, phaseDef } from "@/lib/phases";
 import { runCrew } from "@/lib/crew";
 import { persistStorageHealth, useRapid } from "@/lib/store";
 import { BRIEF_TEMPLATES } from "@/lib/templates";
@@ -72,7 +72,7 @@ import { fixturesReview } from "@/lib/fixtures.review";
 // module — types only, so no IO enters the client bundle).
 import type { FixtureReviewRow } from "@/lib/fixtures";
 import { ERROR_CODE_DOC } from "@/lib/errors";
-import { buildClientDiagnosis, reportRt, rtSnapshot, setBusyProbe } from "@/lib/rt-client";
+import { buildClientDiagnosis, markBoundaryError, reportRt, rtSnapshot, setBusyProbe } from "@/lib/rt-client";
 import { WILD_STEP_BUDGET_MS } from "@/lib/rt-events";
 // 216m · 111 TASK-10 / TASK-11 (W4 · L4): the cmdk command palette and the
 // typed timeline sibling pane. Explicit extensions, per the in-repo convention
@@ -1651,6 +1651,11 @@ class PaneBoundary extends Component<
   }
 
   componentDidCatch(error: unknown, info: { componentStack?: string | null }) {
+    // R6-f12 (S4 hunk, re-applied): dev re-bubble dedupe. React re-throws a
+    // boundary-caught error to window in dev, so the global handler and this
+    // boundary can both see it — first reporter wins, others skip, and exactly
+    // ONE ui.pane_crash row lands.
+    if (!markBoundaryError(error)) return;
     try {
       reportRt({
         level: "error",
@@ -2145,6 +2150,11 @@ export function RunScreen({ id }: { id: string }) {
   // don't carry the control-flow narrowing into their bodies — so capture a
   // plain `Project` alias for the helper functions below.
   const current = project;
+  // W-29(h): honest phase-def guards — an out-of-graph currentPhase (legacy or
+  // hand-built state) renders as itself instead of throwing on PHASES[id]
+  // (phases.ts F3-20: look ids up in PHASE_BY_ID, never index PHASES by position).
+  const currentDef = PHASE_BY_ID.get(project.currentPhase) ?? null;
+  const currentCode = currentDef?.code ?? `P${project.currentPhase}`;
   // 111 TASK-02: one derived next action and its single primary handler. The
   // handler is the SAME function the action bar uses — never a second path to
   // run/approve (the stated risk of TASK-02).
@@ -2727,6 +2737,10 @@ export function RunScreen({ id }: { id: string }) {
           viewPhase={viewPhase}
           onViewPhase={(phase) => setViewPhase((prev) => (prev === phase ? null : phase))}
         />
+        {/* R6-f12 (S4 hunk, re-applied): the Run content boundary — a render
+            throw here keeps the Run header + phase rail + diagnostics mounted
+            and lands one `ui.pane_crash` row. */}
+        <PaneBoundary label="Run screen">
         <section
           className="min-w-0 border-b border-line lg:border-b-0 lg:border-r"
           aria-busy={running || undefined}
@@ -2744,7 +2758,7 @@ export function RunScreen({ id }: { id: string }) {
           <div className="border-b border-line px-5 py-5">
             <div className="flex flex-wrap items-center gap-2">
               <p className="font-mono text-xs text-accent">
-                {PHASES[project.currentPhase].code}
+                {currentCode}
               </p>
               <p className="font-mono text-xs text-faint">
                 {rec ? PHASE_STATUS_META[rec.status].label : null}
@@ -2752,10 +2766,11 @@ export function RunScreen({ id }: { id: string }) {
               {rec ? <StatusBadge project={project} phase={project.currentPhase} /> : null}
             </div>
             <h1 className="mt-1 text-2xl font-medium tracking-tight [overflow-wrap:anywhere]">
-              {PHASES[project.currentPhase].title}
+              {currentDef?.title ?? `Unknown phase P${project.currentPhase}`}
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-              {PHASES[project.currentPhase].summary}
+              {currentDef?.summary ??
+                `No phase definition — P${project.currentPhase} is not in this build's phase graph (legacy or hand-built state).`}
             </p>
             <p className="mt-4 max-w-2xl text-sm leading-relaxed text-fg/90 [overflow-wrap:anywhere]">{project.brief}</p>
 
@@ -2815,7 +2830,7 @@ export function RunScreen({ id }: { id: string }) {
                     ) : (
                       <Play className="h-4 w-4" />
                     )}
-                    {busyAction === "step" ? "Running…" : `Execute ${PHASES[project.currentPhase].code}`}
+                    {busyAction === "step" ? "Running…" : `Execute ${currentCode}`}
                   </button>
                   {/* UI-16 (W12 Lane D): the ONE solid/primary button on this
                       screen is the "Run to next gate" / "Approve" button in the
@@ -3479,6 +3494,7 @@ export function RunScreen({ id }: { id: string }) {
             </>
           )}
         </section>
+        </PaneBoundary>
 
         <aside className="bg-surface px-4 py-4">
           <EnforceDodToggle project={project} llmConfigured={llmStatus.configured} />
@@ -3624,7 +3640,7 @@ function PhaseProgressRail({ project }: { project: Project }) {
       <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
         <span className="text-faint">Now:</span>
         <span className={`font-medium ${currentTone}`}>
-          {PHASES[project.currentPhase].code} · {currentWord}
+          {PHASE_BY_ID.get(project.currentPhase)?.code ?? `P${project.currentPhase}`} · {currentWord}
         </span>
       </p>
       {attention.length ? (

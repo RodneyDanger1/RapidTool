@@ -24,6 +24,8 @@
  */
 
 import type { ResearchResult } from "./research.ts";
+// W40·N4: the shared knob sanitizer (this file used to carry its own copy).
+import { boundedInt } from "./bounded-int.ts";
 
 const DDG_LITE = "https://lite.duckduckgo.com/lite/";
 const WIKI_API = "https://en.wikipedia.org/w/api.php";
@@ -47,12 +49,10 @@ const MAX_TIMER_MS = 2_147_483_647;
 const MAX_RESULTS_CEILING = 20;
 
 /** Sanitize a caller knob: finite integer in [min, max], else the fallback.
- *  A hostile/typo'd value (NaN, Infinity, -5, 1e9) never reaches a provider. */
-function boundedInt(v: unknown, fallback: number, min: number, max: number): number {
-  return typeof v === "number" && Number.isFinite(v) && v >= min
-    ? Math.min(Math.max(Math.floor(v), min), max)
-    : fallback;
-}
+ *  A hostile/typo'd value (NaN, Infinity, -5, 1e9) never reaches a provider.
+ *  W40·N4: moved to the shared `./bounded-int.ts` (byte-identical twin in
+ *  tavily.server.ts — one shape, one home). Reported above stays the caller's
+ *  contract; the helper never logs. */
 const MAX_WIKI_EXTRACTS = 2;
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RapidTool/1.0 (keyless-research)";

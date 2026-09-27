@@ -44,6 +44,7 @@ import {
   canonicalizeRequest,
   canonRequest,
   cassetteKey,
+  copyUsage,
   createCassette,
   createFileCassetteStore,
   createMemoryCassetteStore,
@@ -342,6 +343,104 @@ describe("record → replay round-trip", () => {
     assert.equal(rec.provenanceFor(1)?.inputHash, served[1].key);
     assert.equal(rec.provenanceFor(99), null);
     assert.match(rec.describe(), /mode=record/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2b. W40·N4 (F6 — W3's cassette-strip find): usage round-trips the tape
+// byte-honestly, cache fields included. Before the shared `copyUsage` helper,
+// both cassette copies rebuilt `usage` as exactly {promptTokens,
+// completionTokens}, so a cassette-wrapped run recorded/replayed LESS usage
+// than the live call returned.
+// ---------------------------------------------------------------------------
+
+describe("usage fidelity through the tape (W40·N4 / W3-F6)", () => {
+  const CACHED: LlmResult = {
+    ok: true,
+    text: "cached call",
+    model: "deepseek-v4-flash",
+    usage: { promptTokens: 11, completionTokens: 7, cachedPromptTokens: 9, cacheMissTokens: 2 },
+  };
+
+  it("copyUsage keeps every known field; absent fields stay absent (never fabricated)", () => {
+    const legacy = copyUsage({ promptTokens: 3, completionTokens: 5 });
+    assert.deepEqual(legacy, { promptTokens: 3, completionTokens: 5 });
+    assert.equal("cachedPromptTokens" in (legacy ?? {}), false);
+    assert.equal("cacheMissTokens" in (legacy ?? {}), false);
+    assert.deepEqual(copyUsage(CACHED.usage), CACHED.usage);
+    assert.equal(copyUsage(undefined), null);
+    assert.equal(copyUsage("nope"), null);
+  });
+
+  it("copyUsage strict mode refuses present-but-malformed fields (the load validator's rule)", () => {
+    assert.equal(copyUsage({ promptTokens: 1, completionTokens: 2, cachedPromptTokens: "lots" }, { strict: true }), null);
+    assert.equal(copyUsage({ promptTokens: Number.NaN, completionTokens: 2 }, { strict: true }), null);
+    // The non-strict (live-copy) path only shape-checks — the typed envelope is
+    // trusted, and NaN cannot survive a JSON tape round-trip anyway.
+    assert.deepEqual(copyUsage({ promptTokens: Number.NaN, completionTokens: 2 }), {
+      promptTokens: Number.NaN,
+      completionTokens: 2,
+    });
+  });
+
+  it("record → tape entry → replay is byte-identical WITH the cache fields (the F6 regression)", async () => {
+    const store = createMemoryCassetteStore();
+    const rec = unwrap(await createCassette({ mode: "record", store, now: () => FIXED_NOW }));
+    const recorded = await rec.wrap(async () => CACHED)("cached call", {});
+    assert.deepEqual(recorded, CACHED);
+    const entry = rec.entries()[0];
+    assert.deepEqual(entry.response, CACHED, "the tape entry must not strip the cache fields");
+    const rawTape = JSON.parse((await store.read()) ?? "{}") as { entries: { response: LlmResult }[] };
+    assert.deepEqual(rawTape.entries[0].response.usage, CACHED.usage, "the bytes on the tape carry the full usage");
+
+    const rep = unwrap(await createCassette({ mode: "replay", store }));
+    const served = await rep.wrap(forbiddenTransport)("cached call", {});
+    assert.deepEqual(served, CACHED, "replay must serve the full usage, not a stripped 2-key object");
+  });
+
+  it("a REFUSAL that burned cache-divisible tokens keeps its usage through the tape too", async () => {
+    const store = createMemoryCassetteStore();
+    const refusal: LlmResult = {
+      ok: false,
+      reason: "error",
+      code: "RT_E_LLM_TIMEOUT",
+      error: "timed out after burning input tokens",
+      usage: { promptTokens: 1200, completionTokens: 3, cachedPromptTokens: 1100, cacheMissTokens: 100 },
+    };
+    const rec = unwrap(await createCassette({ mode: "record", store, now: () => FIXED_NOW }));
+    assert.deepEqual(await rec.wrap(async () => refusal)("doomed cached call", {}), refusal);
+    const rep = unwrap(await createCassette({ mode: "replay", store }));
+    assert.deepEqual(await rep.wrap(forbiddenTransport)("doomed cached call", {}), refusal);
+  });
+
+  it("fail-closed: a hand-written tape with a malformed cache field is refused at load", async () => {
+    const response: unknown = {
+      ok: true,
+      text: "t",
+      model: "m",
+      usage: { promptTokens: 1, completionTokens: 2, cachedPromptTokens: "lots" },
+    };
+    const entry = { ...entryBody({ prompt: "bad cache field" }), response };
+    const res = await createCassette({ mode: "replay", store: createMemoryCassetteStore(tapeText([entry])) });
+    assert.equal(res.ok, false);
+    if (!res.ok) {
+      assert.equal(res.code, "RT_E_VALIDATION");
+      assert.match(res.error, /malformed response envelope/);
+    }
+  });
+
+  it("legacy 2-key tapes still round-trip byte-identically (no fabricated cache keys)", async () => {
+    const store = createMemoryCassetteStore();
+    const rec = unwrap(await createCassette({ mode: "record", store, now: () => FIXED_NOW }));
+    await rec.wrap(liveTransport([]))("legacy call", {});
+    const rep = unwrap(await createCassette({ mode: "replay", store }));
+    const served = await rep.wrap(forbiddenTransport)("legacy call", {});
+    assert.deepEqual(served, envelope("legacy call"));
+    assert.equal(
+      "cachedPromptTokens" in (served.ok && served.usage ? served.usage : {}),
+      false,
+      "the legacy 2-key shape must round-trip untouched",
+    );
   });
 });
 

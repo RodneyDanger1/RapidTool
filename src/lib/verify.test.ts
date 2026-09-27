@@ -8,6 +8,8 @@ import {
   lintFailures,
 } from "./verify.server.ts";
 import { runnerAvailable } from "./node-runner.server.ts";
+import { applyVerifyOutcome, withCommonJsExports } from "./verify.ts";
+import { seedProject } from "./testing/fixtures.ts";
 
 const available = runnerAvailable();
 
@@ -249,5 +251,23 @@ describe("lintFailures (advisory lint heuristics)", () => {
     assert.deepEqual(lintFailures(undefined), []);
     assert.deepEqual(lintFailures(42), []);
     assert.deepEqual(lintFailures(null), []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W40 N1 — foreign-shape guards (H1 probe leftovers): both seams are
+// documented "never throws / no state change"; junk input must hold to that.
+// ---------------------------------------------------------------------------
+
+describe("foreign-shape guards (W40 N1)", () => {
+  it("withCommonJsExports: non-string source → empty transform, never a crash", () => {
+    assert.equal(withCommonJsExports(null as never), "");
+    assert.equal(withCommonJsExports(undefined as never), "");
+  });
+
+  it("applyVerifyOutcome: null or statusless outcome → same reference, no state change", () => {
+    const p = seedProject();
+    assert.equal(applyVerifyOutcome(p, null as never), p);
+    assert.equal(applyVerifyOutcome(p, {} as never), p);
   });
 });
