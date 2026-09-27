@@ -52,7 +52,7 @@ export type PolicySeat =
   | { decidedBy: "autopilot"; seat: "harness" | "autopilot" };
 
 /** The registered action ids. Anything else is default-DENY. */
-export type PolicyAction = "hitl.approve" | "hitl.force" | "tree.emit" | "repair.apply";
+export type PolicyAction = "hitl.approve" | "hitl.force" | "tree.emit" | "repair.apply" | "fixtures.approve";
 
 /**
  * The sanctioned alternative when a decision is denied.
@@ -133,6 +133,12 @@ const POLICY_RULES: ReadonlyMap<PolicyAction, ActionRule> = new Map<PolicyAction
   ],
   ["tree.emit", { resource: /^tree:.+$/, resourceHint: "tree:<path>", requiresHumanSeat: false }],
   ["repair.apply", { resource: /^tree:.+$/, resourceHint: "tree:<path>", requiresHumanSeat: false }],
+  // R5-f02 (W29 · A2-f01 · R11-f05): `fixtures --approve` mints an acceptance
+  // approval — the same class of human decision `hitl.approve` guards — so it
+  // routes through this seam with requiresHumanSeat:true. Contract: the CLI
+  // stamps `decidedBy` from the VERDICT (never forged), and a deny writes
+  // nothing (scripts/rapidtool-cli.mjs fixtures arm).
+  ["fixtures.approve", { resource: /^fixtures:.+$/, resourceHint: "fixtures:<project>", requiresHumanSeat: true }],
 ]);
 
 /** The registry surface — W5 iterates this to prove every action is routed. */

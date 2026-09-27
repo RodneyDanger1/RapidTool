@@ -26,10 +26,14 @@ import {
   applyPhaseResult,
   approveHitl,
   emptyProject,
+  hydrateProject,
   inferName,
   liveDegradeRow,
   liveLayer,
   liveLayerFailureRow,
+  // W36 N2 (fixes/281): F3-01 residue closed — engine.ts exports readWildPlan (R13-f02 landed it;
+  // store.ts consumes it); the former inline accessor in generateWildPlan is re-pointed to it.
+  readWildPlan,
   rejectHitl,
   researchQueryFor,
   sealHonesty,
@@ -46,10 +50,23 @@ import { applyReportResult, validateReport, type ReportApplyReason } from "./rep
 import { canEnter, PHASES, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
 import { evaluatePolicy, seatLabel } from "./policy.ts";
 import { applyWrite, rollback, snapshotPaths } from "./write-set.ts";
+// T-107.7 (W33 lane L2 write half · W36 lane N2 read half): the real run
+// checkpoint. headless IS the bare-Node host whose runs know a project working
+// dir — the per-phase commit below writes the bounded snapshot beside
+// `.rapidtool/` and completion clears it; `loadResumableCheckpoint` (below) is
+// the read/admit/hydrate seam the CLI `resume`/`unattended` verbs consume.
+// Static import is safe here: headless is a backend module (node:fs already
+// top-level) and never enters the client graph (store.ts lazy-imports it).
+import { classifyError, type ErrorCode } from "./errors.ts";
+import { checkpointAdmits, clearCheckpoint, readCheckpoint, writeCheckpoint } from "./checkpoint.server.ts";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+// R14-f01 (W33 lane F1): Node-side Auto-Review supervisor binding — headless IS
+// the bare-Node host where the wild loop runs; null (keyless) keeps the engine's
+// existing default byte-identical.
+import { createNodeWildReviewer } from "./wild-review.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 import type {
   ArtifactKind,
@@ -60,6 +77,7 @@ import type {
   PhaseId,
   PhaseStatus,
   Project,
+  WildPlan,
 } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -350,11 +368,22 @@ async function bareNodeLiveOverlay(project: Project, phase: PhaseId): Promise<Pr
 export async function runPhase(
   project: Project,
   phase: PhaseId,
-  opts: { live?: boolean } = {},
+  opts: {
+    live?: boolean;
+    /** W-02 (fixes/271 · §R1-f02): injection seam for the phase-6 edge
+     *  (driveP6Journey deps). Production callers omit it — the default is the
+     *  real keyed journey. */
+    p6Deps?: Partial<P6JourneyDeps>;
+  } = {},
 ): Promise<Project> {
   if (!Number.isInteger(phase) || phase < 0 || phase > 12) return project;
   try {
     if (!opts.live) return applyPhaseResult(project, phase);
+    // W-02 (fixes/271 · §R1-f02): phase 6 owns the tested-mint edge — route it
+    // through the ONE runP6Edge seam (keyed ⇒ driveP6Journey synthesis +
+    // tree-run mint; keyless ⇒ the same deterministic floor liveLayer(…, 6)
+    // produces). Before this, run/gate could synthesize but never mint.
+    if (phase === 6) return await runP6Edge(project, opts.p6Deps);
     // E-12: delegate to the engine's liveLayer (single live implementation).
     const viaEngine = await liveLayer(project, phase);
     // Detect whether the engine layer actually produced live content. Under
@@ -447,6 +476,8 @@ async function runReady(
   phase: PhaseId,
   autopilot: boolean,
   live: boolean,
+  /** W-02 (fixes/271): threaded injection seam for the phase-6 edge. */
+  p6Deps?: Partial<P6JourneyDeps>,
 ): Promise<{ project: Project; stopped: boolean; error?: string; dodBlocked?: boolean }> {
   if (!priorsSealed(project.phases, phase)) {
     return { project, error: `Cannot enter P${phase} — prior phases are not sealed.`, stopped: true };
@@ -459,7 +490,7 @@ async function runReady(
     ),
     status: "running" as const,
   };
-  const updated = await runPhase(running, phase, { live });
+  const updated = await runPhase(running, phase, { live, p6Deps });
   return finishPhase(updated, phase, autopilot);
 }
 
@@ -512,6 +543,8 @@ async function advanceOnce(
   project: Project,
   autopilot: boolean,
   live: boolean,
+  /** W-02 (fixes/271): threaded injection seam for the phase-6 edge. */
+  p6Deps?: Partial<P6JourneyDeps>,
 ): Promise<{ project: Project; stopped: boolean; error?: string; dodBlocked?: boolean }> {
   const phase = project.currentPhase;
   const rec = project.phases.find((p) => p.id === phase);
@@ -563,10 +596,10 @@ async function advanceOnce(
     if (!priorsSealed(project.phases, next)) {
       return { project, error: `P${phase} must stay sealed.`, stopped: true };
     }
-    return runReady(advanceTo(project, next), next, autopilot, live);
+    return runReady(advanceTo(project, next), next, autopilot, live, p6Deps);
   }
   if (rec.status === "complete") return { project, error: "Pipeline complete.", stopped: true };
-  return runReady(project, phase, autopilot, live);
+  return runReady(project, phase, autopilot, live, p6Deps);
 }
 
 /** Why a run/gate invocation ended (F-02/F-04 closure — store's stoppedReason
@@ -592,11 +625,121 @@ export type RunResult = {
   sealedWithFailures: boolean;
 };
 
+/**
+ * T-107.7 (W33 lane L2) — the per-phase commit checkpoint (WRITE side).
+ *
+ * Called from `runUntilGate` NEXT TO the existing per-phase commit: every loop
+ * iteration that actually moved the run (phase edge advanced, or artifacts
+ * landed — the same predicate the `steps` counter uses) persists
+ * `writeCheckpoint(dir, project, { phase, step, mode })` — the bounded, atomic
+ * snapshot at `<dir>/.rapidtool/checkpoint.json` that `rapidtool resume`
+ * re-enters from (`cp.run.phase`). `step` stays 0: this driver's unit of work
+ * IS the phase (phase-granular resume), per the CheckpointRun contract.
+ *
+ * GUARD (load-bearing): no `dir` ⇒ NO-OP. headless runs are the only host with
+ * a writable project dir; the browser/console path (store's per-phase commit —
+ * zustand + engine.runPhaseAsync) has no filesystem at all, and in-process
+ * callers (tests, eval) pass no `checkpointDir`, so every pre-existing path
+ * keeps its exact bytes. A checkpoint failure NEVER throws into the run and
+ * never changes its outcome (writeCheckpoint is itself corrupt-safe/coded).
+ */
+function commitRunCheckpoint(dir: string | undefined, project: Project): void {
+  if (typeof dir !== "string" || dir.length === 0) return;
+  try {
+    writeCheckpoint(dir, project, { phase: project.currentPhase, step: 0, mode: runModeFor() });
+  } catch {
+    /* persistence never throws into the code it observes */
+  }
+}
+
+/** T-107.7 (W33 lane L2): clear-on-complete — a terminal seal has no successor
+ *  state to re-enter, so the bounded checkpoint is removed (best-effort; a
+ *  missing file is already the desired state). */
+function clearRunCheckpoint(dir: string | undefined): void {
+  if (typeof dir !== "string" || dir.length === 0) return;
+  try {
+    clearCheckpoint(dir);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * T-107.7 (W36 lane N2) — the READ side of the checkpoint seam: read → admit → hydrate, so the
+ * CLI `resume`/`unattended` verbs share ONE implementation of the read-side law.
+ *
+ * - A1-09/fixes/281: the reader proves only a MINIMAL shape — `hydrateProject` repairs it here
+ *   (readers refuse; hydrators repair), so callers never touch an unhydrated snapshot.
+ * - A1-07: `checkpointAdmits` owns the coded admission (identity + mode + integer phase/step);
+ *   the mode is recomputed from THIS process's env (`runModeFor`) — a keyed snapshot never
+ *   resumes keyless and vice versa. A named project file may pin the expected identity via
+ *   `ask.projectId` (an id reused by a different brief fails closed).
+ * - A20: the recorded `run.phase` is the re-entry point only when the snapshot's own phase
+ *   records carry it — anything else is internally incoherent and refused here.
+ */
+export type CheckpointResumeResult =
+  | { ok: true; project: Project; path: string; savedAt: number; resumedFrom: { phase: number; step: number } }
+  | { ok: false; code: ErrorCode; error: string; path: string };
+
+export function loadResumableCheckpoint(
+  dir: string,
+  ask: { projectId?: string; mode?: "keyless" | "keyed" } = {},
+): CheckpointResumeResult {
+  const read = readCheckpoint(dir);
+  if (!read.ok) return { ok: false, code: read.code, error: read.error, path: read.path };
+  const checkpoint = read.checkpoint;
+  const admitted = checkpointAdmits(checkpoint, {
+    projectId: typeof ask.projectId === "string" && ask.projectId.length > 0 ? ask.projectId : checkpoint.project.id,
+    mode: ask.mode ?? runModeFor(),
+  });
+  if (!admitted.ok) return { ok: false, code: admitted.code, error: admitted.error, path: read.path };
+  // A20: re-enter by RECORD ID — refuse a snapshot that cannot describe its own re-entry phase.
+  const phases = Array.isArray(checkpoint.project.phases) ? checkpoint.project.phases : [];
+  const hasRecord = phases.some(
+    (record) => (record as { id?: unknown } | null | undefined)?.id === checkpoint.run.phase,
+  );
+  if (!hasRecord) {
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error: `checkpoint: snapshot has no phase record for P${checkpoint.run.phase} — refusing a re-entry the snapshot cannot describe`,
+      path: read.path,
+    };
+  }
+  try {
+    const project = hydrateProject({
+      ...checkpoint.project,
+      currentPhase: checkpoint.run.phase as Project["currentPhase"],
+    });
+    return {
+      ok: true,
+      project,
+      path: read.path,
+      savedAt: admitted.savedAt,
+      resumedFrom: { phase: checkpoint.run.phase, step: checkpoint.run.step },
+    };
+  } catch (error) {
+    return { ok: false, code: classifyError(error, "RT_E_VALIDATION"), error: `checkpoint: hydrate failed (${String(error)})`, path: read.path };
+  }
+}
+
 /** Advance the pipeline until it parks (awaiting_hitl / complete / blocked) or
  *  hits `maxSteps` (default 40 — 13 phases × ~2 iterations + margin). */
 export async function runUntilGate(
   project: Project,
-  opts: { autopilot?: boolean; live?: boolean; maxSteps?: number } = {},
+  opts: {
+    autopilot?: boolean;
+    live?: boolean;
+    maxSteps?: number;
+    /** W-02 (fixes/271): threaded injection seam for the phase-6 edge. */
+    p6Deps?: Partial<P6JourneyDeps>;
+    /** T-107.7 (W33 lane L2): the project's working dir. When present, every
+     *  committed phase writes the bounded run checkpoint beside `.rapidtool/`
+     *  (`commitRunCheckpoint`) and a terminal complete clears it
+     *  (`clearRunCheckpoint`). Absent (browser/console path, in-process
+     *  callers) ⇒ no-op: no dir, no write, byte-identical runs. */
+    checkpointDir?: string;
+  } = {},
 ): Promise<RunResult> {
   const autopilot = Boolean(opts.autopilot);
   const live = Boolean(opts.live);
@@ -610,7 +753,7 @@ export async function runUntilGate(
   while (iterations < maxSteps) {
     iterations += 1;
     const before = p;
-    const r = await advanceOnce(p, autopilot, live);
+    const r = await advanceOnce(p, autopilot, live, opts.p6Deps);
     p = r.project;
     if (r.error) events.push(r.error);
     if (r.dodBlocked) dodBlocked = true;
@@ -624,9 +767,16 @@ export async function runUntilGate(
       (p.artifacts?.length ?? 0) > (before.artifacts?.length ?? 0)
     ) {
       steps += 1;
+      // T-107.7 (W33 lane L2): the per-phase commit just landed — snapshot it
+      // (guarded no-op without a dir; see commitRunCheckpoint).
+      commitRunCheckpoint(opts.checkpointDir, p);
     }
     if (r.stopped) break;
   }
+  // T-107.7 (W33 lane L2): a COMPLETE seal is terminal — nothing to resume ⇒
+  // the checkpoint is cleared. Parks / caps / errors keep theirs: those ARE the
+  // crash-recovery states `resume` exists for.
+  if (p.status === "complete") clearRunCheckpoint(opts.checkpointDir);
   // Outcome derives from the parked state first, then from whether this
   // invocation made progress or burned its iteration bound on nothing.
   // T0.4: a hard-DoD block is its own terminal outcome (not "error") so CLI
@@ -1545,6 +1695,54 @@ export type EmitProjectOptions = {
   redTree?: "refuse" | "banner" | "probe";
 };
 
+/** W-03 (fixes/271 · §R3-f01 + AMENDMENT): CJS residue the emit-time
+ *  materializer exists to rewrite — `module.exports` anywhere, or a bare
+ *  `exports.`/`exports =` assignment head (never `xexports.`/`reexports.`
+ *  look-alikes). The GUARD IS RESIDUE-BASED, deliberately NOT a byte-diff:
+ *  `materializeImportableTree` is NOT idempotent (proved live on the W29 E1
+ *  lane — a recompute-and-compare guard would re-rewrite endlessly), while
+ *  clean ESM bytes carry no residue and must pass through VERBATIM (the
+ *  scaffold.test.ts verbatim pin + the 2-file fixture). */
+const CJS_RESIDUE_RE = /module\.exports|(?:^|[^\w$.])exports\s*(?:\.|=[^=])/;
+
+/**
+ * W-03 (fixes/271 · §R3-f01 PROVEN REPAIR): emit-time materialization. A
+ * stored tree that still carries CJS residue is rewritten through codegen's
+ * materializeImportableTree into real ESM (chunk file(s) + the
+ * TREE_ENTRY_PATH barrel) BEFORE the scaffold runs — so BOTH the emitted tree
+ * files AND the `.rapidtool/project.json` record (exportProjectJson inside
+ * scaffoldProject) carry the SAME materialized bytes, and the emitted
+ * `"type":"module"` tenant can actually import them (the old verbatim push
+ * shipped `module.exports.*` bytes the tenant died on at import). `exports:
+ * []` is deliberate: GeneratedTreeFile stores no exports list, and
+ * neutralizeResidualCjsExports alone recovers the surface from the residue
+ * (proven live). Record fields are recomputed through codegen's own
+ * toGeneratedTreeFile (fnv1a hash + preserved attempt) so the stored row never
+ * disagrees with the emitted bytes. Returns the SAME project reference when
+ * there is no tree or no residue (exact current bytes); a seam-load failure
+ * also returns the project untouched — never a half-materialized tree.
+ */
+async function materializeEmitTree(project: Project): Promise<Project> {
+  const rows = Array.isArray(project.generatedTree) ? project.generatedTree : [];
+  if (rows.length === 0) return project;
+  if (!rows.some((r) => CJS_RESIDUE_RE.test(String(r?.source ?? "")))) return project;
+  try {
+    const codegen = await import("./codegen.server.ts");
+    const { files, entrySource } = codegen.materializeImportableTree(
+      rows.map((r) => ({ path: r.path, source: r.source, exports: [] })),
+    );
+    if (files.length === 0) return project;
+    const attempts = new Map(rows.map((r) => [r.path, typeof r.attempt === "number" ? r.attempt : 0]));
+    return {
+      ...project,
+      generatedTree: files.map((f) => codegen.toGeneratedTreeFile(f.path, f.source, attempts.get(f.path) ?? 0)),
+      generatedSource: entrySource,
+    };
+  } catch {
+    return project;
+  }
+}
+
 /**
  * fixes/126 (W2 #1): the CODE → RUNNABLE-APP path. A7: never silently merge
  * leftover tests/*.spec.ts (treeRun would execute ghost specs). Snapshot the
@@ -1581,7 +1779,13 @@ export async function emitProject(
     };
   }
   const scaffold = await import("./scaffold.ts");
-  const result = scaffold.scaffoldProject(project);
+  // W-03 (fixes/271 · §R3-f01 + AMENDMENT): emit-time materialization — a
+  // stored tree that still carries CJS residue is rewritten to importable ESM
+  // BEFORE the scaffold runs (so the tree files AND the exported
+  // `.rapidtool/project.json` record carry the same bytes). Clean / no-tree
+  // projects return the same reference: byte-identical emits.
+  const emitProjectInput = await materializeEmitTree(project);
+  const result = scaffold.scaffoldProject(emitProjectInput);
   if (!result.ok) return { ok: false, error: result.error };
   // 216 (T-07): under the `banner` policy the banner is prepended to the
   // README.md body BEFORE the lock and the file loop below, so it lands
@@ -1636,7 +1840,7 @@ export async function emitProject(
         /* leftover already gone */
       }
     }
-    const moduleEmbedded = files.some((f) => f.body.includes(project.generatedSource ?? ""));
+    const moduleEmbedded = files.some((f) => f.body.includes(emitProjectInput.generatedSource ?? ""));
     return {
       ok: true,
       dir: target,
@@ -1810,6 +2014,24 @@ async function p6JourneyIsKeyed(): Promise<boolean> {
     return typeof ds.isDeepSeekConfigured === "function" ? ds.isDeepSeekConfigured() : false;
   } catch {
     return false;
+  }
+}
+
+/**
+ * T-107.7 (W33 lane L2): the key state a checkpoint records as `run.mode` —
+ * and the exact probe `checkpointAdmits` compares on resume (a keyed snapshot
+ * never resumes keyless, and vice versa). Plain sync env read with
+ * `engine.keyedDeepSeekConfigured` (:1820) / `deepseek.server.isDeepSeekConfigured`
+ * trim semantics. Bare-Node hosts only; a browser host never reaches a
+ * checkpoint write (no dir — see commitRunCheckpoint).
+ */
+export function runModeFor(): "keyless" | "keyed" {
+  try {
+    if (typeof process === "undefined") return "keyless";
+    const value = process.env?.DEEPSEEK_API_KEY;
+    return typeof value === "string" && value.trim().length > 0 ? "keyed" : "keyless";
+  } catch {
+    return "keyless";
   }
 }
 
@@ -2187,6 +2409,21 @@ export async function driveP6Journey(
     }`,
   );
   return { outcome: "failed", project: p, cycles: budget, budget, treeTail, refusal, gate: null, events };
+}
+
+/**
+ * W-02 (fixes/271 · §R1-f02 + §W27-A — the ONE P6-edge seam): phase 6's keyed
+ * path for run / gate / wild / console-live. Wraps driveP6Journey — keyless
+ * (no injected synthesize + no key) ⇒ the deterministic floor, byte-identical
+ * to today's liveLayer(p, 6). The "failed" branch is decided explicitly: a
+ * journey that RAN but did not converge returns j.project — its synthesis/
+ * gate/mint evidence (including the failed-with-fixtures shape) must reach the
+ * caller (repair/journey parity); only "keyless" (nothing ran) swaps back to
+ * the floor, so a failed cycle is never silently hidden behind it.
+ */
+export async function runP6Edge(project: Project, deps?: Partial<P6JourneyDeps>): Promise<Project> {
+  const j = await driveP6Journey(project, deps ? { deps } : {});
+  return j.outcome === "keyless" ? applyPhaseResult(project, 6) : j.project;
 }
 
 // ---------------------------------------------------------------------------
@@ -3024,7 +3261,14 @@ export async function verifyGeneratedSource(project: Project): Promise<VerifyOut
     throw new Error("Project has no generatedSource yet — run the codegen phases (P10+) before verify.");
   }
   const { verifyAndFixServer } = await import("./verify.server.ts");
-  return (await verifyAndFixServer(withCommonJsExports(source), project.brief)) as VerifyOutcomeShape;
+  // R4-f03 (W30 · LANE S3): thread the PROCESS session budget into the verify
+  // seam — the same ledger `synthWithBackoff` records into, so the token cap
+  // binds the whole run across codegen + verify (R12-f02). Unmetered (no
+  // RAPIDTOOL_TOKEN_CAP) ⇒ the seam's no-op path, byte-identical.
+  const { sessionTokenBudget } = await import("./token-ledger.ts");
+  return (await verifyAndFixServer(withCommonJsExports(source), project.brief, {
+    budget: sessionTokenBudget(),
+  })) as VerifyOutcomeShape;
 }
 
 // ---------------------------------------------------------------------------
@@ -3602,6 +3846,104 @@ export type WildStartShape =
   | { ok: false; reason: "not-wild" | "not-active"; error: string };
 
 /**
+ * R13-f02 (W33 lane L2) — the minimal REAL `wild.plan` generation.
+ *
+ * The seam: `planning.planSteps(goal, context)` — that module's own honesty
+ * contract already encodes the key rule (keyed ⇒ one bounded flash JSON call;
+ * keyless ⇒ `{ ok: false, reason: "not-configured" }`, never a fabricated
+ * plan). This function: returns the stored plan when one exists (idempotent),
+ * else asks the planner; a REAL plan lands as `source: "planner"`; every
+ * refusal/failure returns `engine.readWildPlan`'s honest empty plan with the
+ * reason appended to its note — never invented rows. Lazy computed-specifier
+ * import keeps planning.ts (server-only: deepseek.server) out of any static
+ * graph.
+ *
+ * TODO(R13-f02): classifier review of the rows + pause-before-first-mutation
+ * unless an auto-plan policy approves — the POLICY layer only; generation is
+ * real here.
+ */
+export async function generateWildPlan(project: Project): Promise<WildPlan> {
+  // W36 N2 (fixes/281): F3-01 residue closed — engine.readWildPlan IS the single source for the
+  // stored-plan / honest-empty accessor (record shape-guarded there); this function only appends
+  // the planner outcome to its note. No inline copy left to drift.
+  const honest: WildPlan = readWildPlan(project);
+  if (honest.source === "planner") return honest;
+  const goal =
+    typeof project.brief === "string" && project.brief.trim().length > 0
+      ? project.brief.trim()
+      : project.name;
+  const context = [
+    `Project: ${project.name} (kind: ${project.kind})`,
+    `Current phase: P${project.currentPhase} — ${phaseDef(project.currentPhase)?.title ?? ""}`.trim(),
+    `Governed phases: ${PHASES.length} (P0–P12)`,
+  ].join("\n");
+  try {
+    const planningSpec = "./plan" + "ning.ts";
+    const planning = (await import(planningSpec)) as {
+      planSteps?: (
+        goal: string,
+        context: string,
+        opts?: { maxSteps?: number },
+      ) => Promise<
+        | { ok: true; steps: WildPlan["steps"] }
+        | { ok: false; reason: string; error?: string }
+      >;
+    };
+    if (typeof planning.planSteps !== "function") return honest;
+    const res = await planning.planSteps(goal, context, { maxSteps: 8 });
+    if (res.ok === true && Array.isArray(res.steps) && res.steps.length > 0) {
+      return {
+        goal,
+        steps: res.steps,
+        source: "planner",
+        plannedAt: Date.now(),
+        note:
+          "planner rows (R13-f02 minimal: generation only) — classifier review + " +
+          "pause-before-mutation remain TODO(R13-f02)",
+      };
+    }
+    const why =
+      res.ok === false && res.reason === "not-configured"
+        ? "planner not configured (no DEEPSEEK_API_KEY)"
+        : `planner failed: ${res.ok === false ? (res.error ?? res.reason) : "no rows returned"}`;
+    return { ...honest, note: `${honest.note} · ${why}` };
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    return { ...honest, note: `${honest.note} · planner import/call failed: ${why}` };
+  }
+}
+
+/**
+ * R13-f02 (W33 lane L2): attach a REAL planner plan to a wild run when — and
+ * only when — the planner is actually configured (keyed). Keyless ⇒ the
+ * project is returned UNCHANGED (no planner call, no field, no log row: the
+ * keyless wild-run bytes stay exactly as they are); keyed + planner refusal ⇒
+ * also unchanged (the honest empty plan stays readable via `readWildPlan` but
+ * is never written into the record as if it were a plan). A real plan lands
+ * with the `wild.plan` ledger row (the event named in the R13-f02 spec).
+ */
+async function attachWildPlan(project: Project): Promise<Project> {
+  if (project.wildPlan && project.wildPlan.source === "planner") return project;
+  if (runModeFor() !== "keyed") return project;
+  const plan = await generateWildPlan(project);
+  if (plan.source !== "planner") return project;
+  return {
+    ...project,
+    wildPlan: plan,
+    logs: [
+      ...(project.logs ?? []),
+      {
+        ts: Date.now(),
+        phase: project.currentPhase,
+        level: "info" as const,
+        event: "wild.plan",
+        detail: `wild.plan (planner): ${plan.steps.length} step(s) for "${plan.goal.slice(0, 80)}"`,
+      },
+    ].slice(-200),
+  };
+}
+
+/**
  * Wrapper over engine.wildStep — one bounded macro-run (default 24 steps,
  * clamped 1–48). Stops on any non-"advanced" outcome (paused/completed/noop)
  * and returns the final project; the CLI persists it. Honest refusal when the
@@ -3616,12 +3958,18 @@ export async function wildStartHeadless(project: Project, opts: { maxSteps?: num
     return { ok: false, reason: "not-active", error: "No active wild run (project.wildRun.active !== true) — start a wild run first." };
   }
   const { wildStep } = await import("./engine.ts");
-  let current = project;
+  // R14-f01 (W33 lane F1): bind the reviewer once per macro-run — bare Node +
+  // key ⇒ the classifier actually verdicts; null ⇒ the engine default (the
+  // keyless runs keep their exact bytes).
+  const reviewer = await createNodeWildReviewer();
+  // R13-f02 (W33 lane L2): a keyed host plans before the loop advances; keyless
+  // ⇒ attachWildPlan returns the project unchanged (no field, no log row).
+  let current = await attachWildPlan(project);
   let steps = 0;
   let outcome = "advanced";
   let lastError: string | undefined;
   while (steps < maxSteps) {
-    const res = await wildStep(current);
+    const res = await wildStep(current, reviewer ? { reviewer } : undefined);
     steps += 1;
     current = res.project;
     outcome = res.outcome;
@@ -3777,6 +4125,9 @@ export async function wildStartRun(
     };
   }
   const { wildStep, wildLog } = await import("./engine.ts");
+  // R14-f01 (W33 lane F1): bind the Node-side Auto-Review classifier once for
+  // the whole driven run (bare Node + key); null keeps the engine default.
+  const reviewer = await createNodeWildReviewer();
   const now = Date.now();
   const started: Project = {
     ...project,
@@ -3798,11 +4149,14 @@ export async function wildStartRun(
     "wild.start",
     `Wild Mode run started at P${started.currentPhase}.`,
   );
+  // R13-f02 (W33 lane L2): plan-before-execute for the keyed journey (keyless ⇒
+  // unchanged bytes — see attachWildPlan).
+  current = await attachWildPlan(current);
   let steps = 0;
   let outcome = "advanced";
   let lastError: string | undefined;
   while (steps < maxSteps) {
-    const res = await wildStep(current);
+    const res = await wildStep(current, reviewer ? { reviewer } : undefined);
     steps += 1;
     current = res.project;
     outcome = res.outcome;

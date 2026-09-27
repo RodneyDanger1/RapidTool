@@ -450,11 +450,18 @@ function copyEnvelope(env: LlmResult): LlmResult {
         }
       : { ok: true, text: env.text, model: env.model };
   }
+  // W39·B4 sweep: LlmResult's refusal arm may carry `usage` (Y1's I2 contract —
+  // a refusal that still burned tokens must stay meterable). The tape must
+  // round-trip that field byte-honestly, or a recorded refusal replays with
+  // LESS information than the live call returned (silent under-count).
   return {
     ok: false,
     reason: env.reason,
     ...(env.error !== undefined ? { error: env.error } : {}),
     ...(env.code !== undefined ? { code: env.code } : {}),
+    ...(env.usage
+      ? { usage: { promptTokens: env.usage.promptTokens, completionTokens: env.usage.completionTokens } }
+      : {}),
   };
 }
 

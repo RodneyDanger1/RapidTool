@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   applyVerifyOutcome,
   approve,
@@ -27,6 +27,7 @@ import {
   retry,
   runAcceptance,
   runPhase,
+  runP6Edge,
   runUntilGate,
   saveProject,
   summary,
@@ -41,6 +42,7 @@ import { runGate } from "./dod.ts";
 import { importProject } from "./io.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
+import { fnv1a } from "./algorithms.ts";
 import type { PhaseId, Project } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 
@@ -545,6 +547,117 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
       "green tree-run with executed specs ⇒ tested-equivalent minted (C-1 defuses the gate-before-mint deadlock)",
     );
     assert.ok((lt?.evidenceHash ?? "").length > 0, "the mint carries its evidence hash");
+  });
+
+  it("W-02 (fixes/271 · §R1-f02): the P6 edge reaches the tested mint from runPhase AND through runUntilGate (run/gate/wild — ONE seam)", async () => {
+    const drained = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    assert.notEqual(
+      (drained.lastTest as { label?: string } | null)?.label,
+      "tested",
+      "precondition: the deterministic drain carries no tested verdict",
+    );
+    const w2Verdict: TreeRunOutcome = {
+      ok: true,
+      dir: "",
+      compile: { ...emptyCompile, ok: true, failed: 0, passed: 1, checked: 1 },
+      tests: [
+        { file: "tests/oracle.spec.ts", compile: "pass", run: "pass", tests: { pass: 1, fail: 0 }, detail: "1 passed" },
+      ],
+      run: { kind: "library", run: "skip", detail: "no entry to smoke" },
+    };
+    // The real synthesis seam completes phase 6 (applyPhaseResult does); the
+    // fakes stand in for it exactly like the fixes/159 F4 convergence tests.
+    const synthesize = async (p: Project): Promise<Project> => {
+      const t = withTree(p);
+      return {
+        ...t,
+        phases: (t.phases ?? []).map((ph) => (ph.id === 6 ? { ...ph, status: "complete" as const } : ph)),
+      };
+    };
+    const p6DepsW2 = { synthesize, runTree: async () => w2Verdict, recordGate: greenGateRecord };
+    // (a) the direct run/gate edge — runPhase phase 6 live.
+    const direct = await runPhase(drained, 6, { live: true, p6Deps: p6DepsW2 });
+    const lt = direct.lastTest as { label?: string; evidenceHash?: string } | null | undefined;
+    assert.equal(lt?.label, "tested", "runPhase's P6 edge mints the tested-equivalent (was synthesis-only)");
+    const g = (direct.phases ?? []).find((ph) => ph.id === 6)?.gate;
+    assert.ok(
+      g && typeof g === "object" && (g as { passed?: unknown }).passed === true,
+      "a recorded passing P6 gate rides the same call",
+    );
+    // (b) the advance loop: rewind the real drain to its P6 edge and thread
+    // p6Deps through runUntilGate (run/gate's own driver).
+    const rewound: Project = {
+      ...drained,
+      status: "running",
+      currentPhase: 6,
+      lastTest: null,
+      phases: drained.phases.map((r) =>
+        r.id === 6 ? ({ ...r, status: "ready" as const, gate: null, startedAt: null } as unknown as typeof r) : r,
+      ),
+    };
+    const loop = await runUntilGate(rewound, { live: true, maxSteps: 1, p6Deps: p6DepsW2 });
+    assert.equal(
+      (loop.project.lastTest as { label?: string } | null)?.label,
+      "tested",
+      "runUntilGate threads p6Deps to the P6 edge and reaches the mint",
+    );
+  });
+
+  it("W-02 keyless floor: runP6Edge without deps is the deterministic floor (no mint, no journey rows)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+      const rewound: Project = {
+        ...base,
+        status: "running",
+        currentPhase: 6,
+        lastTest: null,
+        phases: base.phases.map((r) =>
+          r.id === 6 ? ({ ...r, status: "ready" as const, gate: null, startedAt: null } as unknown as typeof r) : r,
+        ),
+      };
+      const floored = await runP6Edge(rewound);
+      assert.equal((floored.lastTest as { label?: string } | null)?.label, undefined, "no tested mint keyless");
+      assert.ok(
+        (floored.logs ?? []).every((l) => l.event !== "p6.journey.converged" && l.event !== "p6.journey.failed"),
+        "the keyless passthrough writes no journey verdict rows",
+      );
+      // Byte-shape parity with the plain deterministic floor for the same edge.
+      // W33 lane F1 (not-ok-10, WDX-3 precedent): two live runs stamp their own
+      // wall-clocks — the byte diff is EXACTLY the volatile class (packet
+      // `compiled_at` text+embed inside artifact bodies, phase record
+      // startedAt/completedAt + gate.checkedAt, trace ranAt; logs ts was
+      // already masked). Strip those; every behavior byte stays compared.
+      const floor = await runPhase(rewound, 6);
+      const stripVolatiles = (s: string) =>
+        s
+          .replace(/compiled_at: [^\n]+/g, "compiled_at: FIXED")
+          .replace(/"compiled_at": "[^"]+"/g, '"compiled_at": "FIXED"');
+      const strip = (p: Project) => ({
+        ...p,
+        logs: (p.logs ?? []).map((l) => ({ ...l, ts: 0 })),
+        traces: (p.traces ?? []).map((a) => ({ ...a, ranAt: 0 })),
+        artifacts: (p.artifacts ?? []).map((a) => ({
+          ...a,
+          body: typeof a.body === "string" ? stripVolatiles(a.body) : a.body,
+        })),
+        packet: stripVolatiles(p.packet),
+        phases: (p.phases ?? []).map((r) => ({
+          ...r,
+          startedAt: typeof r.startedAt === "number" ? 0 : r.startedAt,
+          completedAt: typeof r.completedAt === "number" ? 0 : r.completedAt,
+          gate:
+            r.gate && typeof r.gate === "object"
+              ? { ...(r.gate as object), checkedAt: 0 }
+              : r.gate,
+        })),
+      });
+      assert.deepEqual(strip(floored), strip(floor), "keyless runP6Edge === applyPhaseResult(project, 6)");
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
   });
 
   it("green treeRun but NO recorded P6 gate (phase 6 not complete) → FAILED, never a bare converged (fixes/159 F4)", async () => {
@@ -1492,7 +1605,17 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
       }
     });
 
-    it("CLI: --i-am-human WITH the out-of-band token records the human seat (exit 0)", () => {
+    it("CLI: a non-TTY --i-am-human is refused even WITH the env token — the two-channel seat needs the TTY re-entry (R5-f12 Track 1)", () => {
+      // R5-f12 (W29 · spec `thoroughanalysis.md:869-877`): the human seat is
+      // TWO channels — the env token (claim) PLUS an interactive TTY re-entry
+      // (confirmation). This child process has no TTY, so the claim is refused
+      // by `humanSeatClaim` BEFORE the policy seam: no second channel exists
+      // here, so no human row may be minted. This pin replaces the old
+      // expectation (env-token-alone ⇒ exit 0) — exactly the
+      // "env-var-non-empty ⇒ human" degeneracy R5-f12 closed ("it must never
+      // be VACUOUS again"). The TTY-positive path is deliberately NOT
+      // automated (a TTY cannot be faked from an agent; verified manually per
+      // R5-f12 §verify) — the positive rows above stay at the library seam.
       const dir = tempDir();
       try {
         const path = join(dir, "seated.json");
@@ -1500,16 +1623,18 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
         const ap = runCli(["approve", "--project", path, "--i-am-human"], {
           env: { RT_HUMAN_SEAT_TOKEN: "test-seat-token" },
         });
-        assert.equal(ap.code, 0, `the keyed human seat path must succeed; stderr: ${ap.stderr.slice(0, 300)}`);
-        assert.equal(ap.json.ok, true);
+        assert.equal(ap.code, 1, `a non-TTY human-seat claim must be refused; stderr: ${ap.stderr.slice(0, 300)}`);
+        assert.equal(ap.json.ok, false);
+        assert.equal(ap.json.code, "RT_E_VALIDATION");
+        assert.match(String(ap.json.error), /needs an interactive confirmation/);
+        assert.match(String(ap.json.error), /not a TTY/);
+        assert.match(String(ap.json.error), /RT_HUMAN_SEAT_TOKEN/);
         const raw = JSON.parse(readFileSync(path, "utf8")) as {
           decisions?: Array<{ decidedBy?: string; note?: string }>;
           status?: string;
         };
-        const row = (raw.decisions ?? []).at(-1);
-        assert.equal(row?.decidedBy, "human", "the CLI --i-am-human + token path mints the human seat");
-        assert.match(String(row?.note), /RT_HUMAN_SEAT_TOKEN verified/);
-        assert.equal(raw.status, "running", "the approval advanced the edge");
+        assert.equal((raw.decisions ?? []).length, 0, "a refused seat claim mints no row (never a vacuous pass)");
+        assert.equal(raw.status, "awaiting_hitl", "the gate stays parked");
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -1625,24 +1750,42 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
       assert.match(String(row?.decidedVia?.reason), /^autopilot-seat — hitl\.approve on gate:P4/);
     });
 
-    it("CLI — an approve landed by the CLI carries the provenance on the row it mints", () => {
+    it("CLI — a non-TTY approve mints NO row: no provenance may land from a machine", () => {
+      // R5-f12 Track 1 (see the TA-2 re-point above): a child process cannot
+      // furnish the human seat's second channel, so the CLI mints nothing.
+      // The old expectation (a CLI-minted hitl.approve row, decidedVia
+      // tokenPath:true) is unreachable without a TTY BY DESIGN — what is
+      // pinned here instead is the machine-safe half: the refused claim must
+      // leave the ledger byte-identical (BEFORE/AFTER snapshot, non-vacuous).
+      // Row-level provenance coverage stays at the library seam (POSITIVE
+      // CONTROL + default-approve cases above).
       const dir = tempDir();
       try {
         const path = join(dir, "cli-provenance.json");
         saveProject(path, parkAt(createProject({ brief: FIXTURE_BRIEF }), 4));
+        const before = JSON.parse(readFileSync(path, "utf8")) as {
+          decisions?: Array<{ decidedBy?: string }>;
+        };
         const ap = runCli(["approve", "--project", path, "--i-am-human"], {
           env: { RT_HUMAN_SEAT_TOKEN: "test-seat-token" },
         });
-        assert.equal(ap.code, 0, `CLI approve must succeed; stderr: ${ap.stderr.slice(0, 300)}`);
+        assert.equal(ap.code, 1, `a non-TTY approve must be refused; stderr: ${ap.stderr.slice(0, 300)}`);
+        assert.equal(ap.json.ok, false);
+        assert.equal(ap.json.code, "RT_E_VALIDATION");
         const raw = JSON.parse(readFileSync(path, "utf8")) as {
-          decisions?: Array<{ decidedBy?: string; note?: string; decidedVia?: Record<string, unknown> }>;
+          decisions?: Array<{ decidedBy?: string; decidedVia?: Record<string, unknown> }>;
+          status?: string;
         };
-        const row = (raw.decisions ?? []).at(-1);
-        assert.equal(row?.decidedBy, "human");
-        assert.equal(row?.decidedVia?.action, "hitl.approve");
-        assert.equal(row?.decidedVia?.resource, "gate:P4");
-        assert.equal(row?.decidedVia?.label, "human/human-cli-i-am-human");
-        assert.equal(row?.decidedVia?.tokenPath, true);
+        assert.equal(
+          (raw.decisions ?? []).length,
+          (before.decisions ?? []).length,
+          "a refused machine claim mints no row — the ledger stays byte-identical",
+        );
+        assert.ok(
+          (raw.decisions ?? []).every((d) => d.decidedBy !== "human"),
+          "no machine path may mint decidedBy:human",
+        );
+        assert.equal(raw.status, "awaiting_hitl", "the gate stays parked");
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -1892,6 +2035,100 @@ describe("A7 emitProject wipes ghost specs and refuses foreign files", () => {
       const res = await emitProject(p, dir);
       assert.equal(res.ok, true, res.ok ? "" : res.error);
       assert.equal(existsSync(join(dir, ".rapidtool-emit.lock")), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W-03 (fixes/271 · §R3-f01 + AMENDMENT) — emit-time materialization. The
+// stored-bytes-verbatim emit shipped `module.exports.*` into a `"type":
+// "module"` tenant (import-time TypeError). The repair: emitProject feeds a
+// CJS-residue-carrying tree through codegen.materializeImportableTree BEFORE
+// the scaffold, so the emitted files AND the `.rapidtool/project.json` record
+// carry the same importable ESM bytes. The guard is residue-based (the
+// materializer is NOT idempotent — a ≠-guard would re-rewrite endlessly).
+// ---------------------------------------------------------------------------
+describe("W-03 (fixes/271 · §R3-f01) — emit-time materialization of CJS-residue trees", () => {
+  const cjsSource = [
+    "function getProperty(state, id) { return state[id] ?? null; }",
+    "module.exports.getProperty = getProperty;",
+    "module.exports.getPropertyCount = function () { return 1; };",
+  ].join("\n");
+  const residueProject = (): Project => {
+    const p = createProject({ brief: FIXTURE_BRIEF, name: "EmitCjs" });
+    return {
+      ...p,
+      generatedTree: [{ path: "src/generated/get-property.ts", source: cjsSource, hash: String(fnv1a(cjsSource)), attempt: 2 }],
+    };
+  };
+
+  it("RED-first (pre-fix bytes carry module.exports): a stored CJS tree emits importable ESM — 0 residue, consistent record, real import", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-emit-cjs-"));
+    try {
+      const res = await emitProject(residueProject(), dir);
+      assert.equal(res.ok, true, res.ok ? "" : res.error);
+      assert.ok(res.files.includes("src/generated.ts"), "the ESM barrel lands at the tree entry path");
+      assert.ok(res.files.includes("src/generated/get-property.ts"), "the chunk keeps its declared path");
+      const chunk = readFileSync(join(dir, "src/generated", "get-property.ts"), "utf8");
+      assert.equal(chunk.includes("module.exports"), false, "0 module.exports in the emitted chunk");
+      assert.ok(chunk.includes("export {"), "the recovered surface lands as ESM named exports");
+      const record = JSON.parse(readFileSync(join(dir, ".rapidtool", "project.json"), "utf8")) as {
+        generatedTree: { path: string; source: string; hash: string; attempt: number }[];
+      };
+      const paths = record.generatedTree.map((r) => r.path);
+      assert.ok(paths.includes("src/generated.ts") && paths.includes("src/generated/get-property.ts"), JSON.stringify(paths));
+      for (const row of record.generatedTree) {
+        assert.equal(/module\.exports/.test(row.source), false, `record row ${row.path} carries no CJS residue`);
+        assert.equal(row.hash, String(fnv1a(row.source)), `record row ${row.path} hash matches its emitted bytes`);
+      }
+      const chunkRow = record.generatedTree.find((r) => r.path === "src/generated/get-property.ts");
+      assert.equal(chunkRow?.attempt, 2, "the row keeps its synthesis attempt");
+      // A REAL import smoke under this `node --test` run: the emitted barrel
+      // must load as an ES module and expose the recovered surface.
+      const mod = (await import(pathToFileURL(join(dir, "src/generated.ts")).href)) as {
+        getProperty?: unknown;
+        getPropertyCount?: unknown;
+      };
+      assert.equal(typeof mod.getProperty, "function", "the emitted barrel imports");
+      assert.equal(typeof mod.getPropertyCount, "function", "the residual export survived the rewrite");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("emit-twice is byte-stable (the residue guard never re-rewrites) and clean trees stay verbatim", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-emit-cjs2-"));
+    try {
+      const q = residueProject();
+      const a = await emitProject(q, dir);
+      assert.equal(a.ok, true, a.ok ? "" : a.error);
+      const snap = (files: readonly string[]): [string, string][] =>
+        files.map((p) => [p, readFileSync(join(dir, p), "utf8")]);
+      const first = snap(a.ok ? a.files : []);
+      const b = await emitProject(q, dir);
+      assert.equal(b.ok, true, b.ok ? "" : b.error);
+      assert.deepEqual(snap(b.ok ? b.files : []), first, "second emit is byte-identical to the first");
+      // A clean (residue-free) tree still passes through VERBATIM — the
+      // scaffold verbatim pin + 2-file fixture class.
+      const cleanSrc = 'export * from "./generated/chunk-0.ts";\n';
+      const clean: Project = {
+        ...createProject({ brief: FIXTURE_BRIEF, name: "EmitClean" }),
+        generatedTree: [{ path: "src/generated.ts", source: cleanSrc, hash: String(fnv1a(cleanSrc)), attempt: 0 }],
+      };
+      const dir2 = mkdtempSync(join(tmpdir(), "rt-emit-clean-"));
+      try {
+        const c = await emitProject(clean, dir2);
+        assert.equal(c.ok, true, c.ok ? "" : c.error);
+        assert.equal(
+          readFileSync(join(dir2, "src/generated.ts"), "utf8"),
+          cleanSrc,
+          "no residue ⇒ exact stored bytes on disk (guard byte-parity)",
+        );
+      } finally {
+        rmSync(dir2, { recursive: true, force: true });
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

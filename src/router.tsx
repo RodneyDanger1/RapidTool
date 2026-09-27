@@ -1,7 +1,7 @@
 import { createRouter } from "@tanstack/react-router";
 import { AppErrorComponent, AppNotFoundComponent } from "@/lib/error-component.tsx";
 import { installRtClient } from "@/lib/rt-client.ts";
-import { routeTree } from "./routeTree.gen";
+import { routeTree } from "./routeTree.gen.ts";
 
 // CAP-1: global window error/unhandledrejection capture (idempotent,
 // browser-only). Module scope installs before any route can crash.

@@ -1,9 +1,9 @@
 import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { Navigate } from "@tanstack/react-router";
-import { GROK_PROVIDERS, authEnabled, signIn, signOut } from "./client";
-import { hasGateSessionMarker } from "./gate-session-marker";
-import { resolveSignInGateState } from "./sign-in-gate";
-import { useCurrentUser, useCurrentUserState } from "./use-current-user";
+import { GROK_PROVIDERS, authEnabled, signIn, signOut } from "./client.ts";
+import { hasGateSessionMarker } from "./gate-session-marker.ts";
+import { resolveSignInGateState } from "./sign-in-gate.ts";
+import { useCurrentUser, useCurrentUserState } from "./use-current-user.ts";
 
 const subscribeToNothing = () => () => {};
 const noGateSessionOnServer = () => false;

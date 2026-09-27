@@ -102,6 +102,22 @@ async function boundedExcerpt(res: Response): Promise<string> {
 }
 
 /**
+ * Contain the injectable clock seam (R4-f09 · W39·B4): this module is
+ * documented never-throwing, but `opts.now` is caller-supplied — a broken or
+ * hostile hook (NaN / Infinity / a thrower) must yield the real clock instead
+ * of a RangeError escaping BEFORE the try below. A non-finite result can never
+ * become `probedAt`.
+ */
+function safeNow(now?: () => number): number {
+  try {
+    const t = (now ?? Date.now)();
+    return typeof t === "number" && Number.isFinite(t) ? t : Date.now();
+  } catch {
+    return Date.now();
+  }
+}
+
+/**
  * Probe one provider: `GET <descriptor.verification.modelsEndpoint>` with the
  * family's bearer key. Never throws; never caches; never invents an id.
  */
@@ -110,7 +126,7 @@ export async function probeProviderModels(
   opts: ProviderProbeOptions = {},
 ): Promise<ProviderProbeResult> {
   const env = opts.env ?? process.env;
-  const probedAt = new Date((opts.now ?? Date.now)()).toISOString();
+  const probedAt = new Date(safeNow(opts.now)).toISOString();
   const keyEnv = typeof descriptor.apiKeyEnv === "string" ? descriptor.apiKeyEnv : "";
   const key = keyEnv ? String(env[keyEnv] ?? "").trim() : "";
   const endpoint =

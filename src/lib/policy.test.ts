@@ -38,6 +38,7 @@ const VALID_RESOURCE: Record<PolicyAction, string> = {
   "hitl.force": "gate:P4",
   "tree.emit": "tree:src/lib/patch.ts",
   "repair.apply": "tree:src/lib/patch.ts",
+  "fixtures.approve": "fixtures:build.json",
 };
 
 describe("policy — seat rule (Rule A: autopilot, or verified human)", () => {
@@ -151,8 +152,11 @@ describe("policy — default-deny on unknown action / resource", () => {
     assert.equal(evaluatePolicy("repair.apply", "gate:P4", { actor: HARNESS }).decision, "deny");
   });
 
-  it("registers exactly the four documented actions", () => {
-    assert.deepEqual([...KNOWN_POLICY_ACTIONS].sort(), ["hitl.approve", "hitl.force", "repair.apply", "tree.emit"]);
+  it("registers exactly the five documented actions", () => {
+    assert.deepEqual(
+      [...KNOWN_POLICY_ACTIONS].sort(),
+      ["fixtures.approve", "hitl.approve", "hitl.force", "repair.apply", "tree.emit"],
+    );
   });
 
   it("every registered action returns a branchable verdict for a valid ctx (registry consistency)", () => {

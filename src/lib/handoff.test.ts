@@ -163,4 +163,20 @@ describe("phaseHandoff", () => {
     assert.ok(text.length > 50);
     assert.doesNotThrow(() => phaseHandoff(g, 1));
   });
+
+  it("survives a junk/absent brief without throwing (W-16)", () => {
+    const p = seedProject() as unknown as { brief: unknown };
+    p.brief = undefined;
+    assert.doesNotThrow(() => phaseHandoff(p as never, 0));
+    assert.match(phaseHandoff(p as never, 0), /\(no brief recorded\)/);
+    p.brief = 4242;
+    assert.match(phaseHandoff(p as never, 0), /4242/);
+  });
+
+  it("refuses a null project with an honest minimal prompt, never a TypeError (W-16)", () => {
+    assert.doesNotThrow(() => phaseHandoff(null as never, 0));
+    const text = phaseHandoff(null as never, 0);
+    assert.match(text, /# P0 Deep Research & Feasibility — agent handoff/);
+    assert.match(text, /\(no brief recorded\)/);
+  });
 });

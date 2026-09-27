@@ -7,8 +7,8 @@ and dynamically imports the vault (`vault.ts`), crew (`crew.server.ts`),
 verify (`verify.server.ts`), design (`design.ts`) and diagram (`diagram.ts`)
 modules when their subcommands run.
 
-**37 subcommands** (verified on disk: `grep -c 'case "' scripts/rapidtool-cli.mjs` = 37):
-`create` `run` `gate` `approve` `reject` `retry` `ingest` `packet` `export` `emit`
+**39 subcommands** (verified on disk: `grep -c 'case "' scripts/rapidtool-cli.mjs` = 39):
+`create` `run` `gate` `resume` `unattended` `approve` `reject` `retry` `ingest` `packet` `export` `emit`
 `tree-run` `repair` `edit` `summary` `vault` `search` `crew` `verify` `check` `design`
 `diagram` `artifacts` `doctor` `diagnose` `harvest` `swarm` `prompt` `bench`
 `mine` `knowledge` `lesson` `wild` `chat` `deepen` `fixtures` `scan` `eval` — from brief to verified artifact,
@@ -28,8 +28,8 @@ continuation verbs `tree-run` + `repair` (rows #31–32 below).
 > flight.** The dir-based continuation verbs are callable today — rows #31–32
 > below and the [Tree-run and repair (landed); emit verify-kind (in flight)](#tree-run-and-repair-landed-emit-verify-kind-in-flight)
 > section describe their real envelopes (`edit`'s own section: [Edit (`edit`)](#edit-edit)). `emit --verify-kind` has **NOT landed as
-> a documented verb**: `grep -c 'case "'` reads 37 and none of the 37 case arms is
-> `verify-kind` — the flag rides inside `emit` (`rapidtool-cli.mjs:768`, over
+> a documented verb**: `grep -c 'case "'` reads 39 and none of the 39 case arms is
+> `verify-kind` — the flag rides inside `emit` (`rapidtool-cli.mjs:1149`, over
 > `verifyKindDir` at `compile-check.server.ts:770`) and the scratch-copy + install
 > leg is still open (TA-16) — treat its row as the
 > agreed contract, not proven behavior, and re-check before calling it.
@@ -201,6 +201,18 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs repair --dir emitted/ 
 #     No keyed calls, no writes, no network, nothing fabricated — a missing history prints as
 #     'no history', never a fake 0 delta.
 node --experimental-strip-types scripts/rapidtool-cli.mjs eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]
+
+# 35. resume (T-107.7 — REAL, W36): read the per-phase checkpoint that run/gate wrote beside
+#     the project dir, admit it (identity + mode + integer phase sanity), hydrate it, and
+#     re-enter at the recorded phase through the same driver; the envelope prints the
+#     snapshot age — never a silent resume. Exit taxonomy identical to gate (2 = parked).
+node --experimental-strip-types scripts/rapidtool-cli.mjs resume --project build.json [--autopilot] [--live]
+
+# 36. unattended (W-47 — REAL, W36): the scheduler-facing drive — re-enters from a checkpoint
+#     when one exists (crash recovery), else starts from the named project file; autopilot +
+#     live until parked. NOT a daemon: a host hook (Windows Task Scheduler / cron) invokes it
+#     on a cadence; stock HITL gates still park for a human BY DESIGN (exit 2).
+node --experimental-strip-types scripts/rapidtool-cli.mjs unattended --project build.json
 ```
 
 `run` performs exactly **one** `advanceOnce` step; `gate` loops until parked.
@@ -373,9 +385,9 @@ the CLI.
 > **In flight (fixes/149 P1-2):** opt-in `--verify-kind` — a bounded
 > `npm install` + `vite build` leg for webapp/game kinds in a temp dir (never
 > mutating the emitted dir), asserting the kind's declared build actually runs.
-> NOT proven at this write — none of the 37 case arms is `verify-kind`
-> (`grep -c 'case "' scripts/rapidtool-cli.mjs` reads 37); the flag rides inside
-> `emit` (`rapidtool-cli.mjs:768` → `verifyKindDir`), whose scratch-copy + install
+> NOT proven at this write — none of the 39 case arms is `verify-kind`
+> (`grep -c 'case "' scripts/rapidtool-cli.mjs` reads 39); the flag rides inside
+> `emit` (`rapidtool-cli.mjs:1149` → `verifyKindDir`), whose scratch-copy + install
 > leg is still open (TA-16); see the
 > [Tree-run and repair (landed); emit verify-kind (in flight)](#tree-run-and-repair-landed-emit-verify-kind-in-flight)
 > section before relying on it.
@@ -442,9 +454,9 @@ nothing** — the rules are heuristics, so every finding carries `advisory: true
 ## Tree-run and repair (landed); emit verify-kind (in flight)
 
 > **Status at this write: `tree-run --dir` and `repair --dir` SHIPPED (fixes/150 wave
-> G1, case arms present, `grep -c 'case "'` = 37). `emit --verify-kind` is IN
+> G1, case arms present, `grep -c 'case "'` = 39). `emit --verify-kind` is IN
 > FLIGHT — the fixes/149 P1-2 contract below describes what will land, but none
-> of the 37 case arms is `verify-kind` (the flag rides inside `emit`) and the
+> of the 39 case arms is `verify-kind` (the flag rides inside `emit`) and the
 > scratch-copy + install leg is still open (TA-16).
 > Re-check before calling it.**
 
@@ -835,6 +847,35 @@ Wild mode off, no active run, or a lifecycle flag on the wrong state →
 `{ "ok": false, "reason": "not-wild" | "not-active" | "already-active", "code": "RT_E_PHASE_ILLEGAL", … }`, **exit 1**
 (nothing was run, nothing was persisted). More than one of
 `--start|--pause|--resume|--stop` → exit 1 with `RT_E_VALIDATION`.
+
+## Resume and unattended (`resume` · `unattended`)
+
+`run`/`gate` write a **bounded checkpoint** on every committed phase beside the project dir
+(`<dir>/.rapidtool/checkpoint.json` — `checkpoint.server.ts`); a COMPLETE seal clears it. Both
+verbs below are REAL drives wired through the same `runUntilGate` loop the original run used.
+
+- **`resume --project <file.json|dir>`** (T-107.7) — read → admit → hydrate → re-enter. The
+  admission is coded (`checkpointAdmits`): the snapshot's project id must match (a file
+  argument pins the expected id, so an id reused by a different brief fails closed), the mode
+  must match this process (`keyless`/`keyed` — a keyed snapshot never resumes keyless), and
+  `run.phase`/`run.step` must be integers ≥ 0 with the recorded phase present in the
+  snapshot's own phase records. The envelope carries `checkpoint: { path, savedAt, ageMs,
+  resumedFrom }` — the snapshot age is always printed, resume is never silent. Exit taxonomy
+  identical to `gate` (2 = parked; 1 = hard-DoD block / red-gate seal).
+- **`unattended --project <file.json|dir>`** (W-47) — the scheduler-facing drive: re-enter
+  from a checkpoint when one exists, else start from the project file; forces autopilot +
+  live. **NOT a daemon** — there is no scheduler/queue in-product: an external hook (Windows
+  Task Scheduler / cron) invokes this verb on a cadence, and each invocation is idempotent
+  (it resumes instead of restarting). Stock HITL gates (P4/P5/P8/P9) still park for a human
+  BY DESIGN: a parked exit (2) is the honest outcome, never a fake completion.
+
+The earlier `run --unattended` / `gate --unattended` flags remain as the one-shot form of the
+same drive (`--unattended` forces autopilot + live on those verbs). Neither verb is the wild
+lifecycle: `wild --resume` is the wild-mode pause/resume action, unrelated to run resume.
+
+> Honest follow-ups (do not claim them done): plan-before-first-mutation classifier review
+> (`TODO(R13-f02)`), and the shared `HISTORY_CAPS` across store/io/checkpoint (`A1-03` of
+> `wave_plans/W34/code-notes.md`, landed partially in `fixes/281`).
 
 ## Agent contract (exit codes + stdout purity)
 

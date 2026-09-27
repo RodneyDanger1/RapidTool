@@ -339,6 +339,51 @@ export function parseGrader(raw, slug) {
         .filter((c) => c && typeof c.file === "string" && typeof c.contains === "string")
         .map((c) => ({ file: c.file, contains: c.contains }))
     : [];
+  // A3-f05/R11-f12 (W36 · N5 — landing the structure W30 §Graders spec'd):
+  // optional per-kind expectedBehavior rows over the EMITTED TREE (not text
+  // presence). Shape-checked here — a grader that cannot be trusted never
+  // grades; evaluated by checkExpectedBehavior. Checks:
+  //   file-exists           — `path` must exist in the emitted tree manifest
+  //   package-target-exists — the emitted package.json's `bin`|`main`|`exports`
+  //                           target(s) must resolve to emitted files
+  //   entry-runs            — RUNTIME row: stays `pending` until runtime
+  //                           evidence is wired into acceptance (TODO(A3-f05));
+  //                           visible in `behavior.rows` + the `verification`
+  //                           label, never silently skipped.
+  const BEHAVIOR_CHECKS = new Set(["file-exists", "package-target-exists", "entry-runs"]);
+  const expectedBehavior = [];
+  if (doc.expectedBehavior !== undefined) {
+    if (!Array.isArray(doc.expectedBehavior)) {
+      return { ok: false, error: "expectedBehavior must be an array of rows" };
+    }
+    for (const [i, row] of doc.expectedBehavior.entries()) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) {
+        return { ok: false, error: `expectedBehavior[${i}] is not an object` };
+      }
+      const id = typeof row.id === "string" ? row.id.trim() : "";
+      if (!id) return { ok: false, error: `expectedBehavior[${i}] carries no id` };
+      const check = typeof row.check === "string" ? row.check.trim() : "";
+      if (!BEHAVIOR_CHECKS.has(check)) {
+        return {
+          ok: false,
+          error: `expectedBehavior[${i}] (${id}): unknown check ${JSON.stringify(row.check)} — one of ${[...BEHAVIOR_CHECKS].join(" | ")}`,
+        };
+      }
+      if (check === "file-exists" && !(typeof row.path === "string" && row.path.trim().length > 0)) {
+        return { ok: false, error: `expectedBehavior[${i}] (${id}): file-exists needs a non-empty "path"` };
+      }
+      if (check === "package-target-exists" && !(row.target === "bin" || row.target === "main" || row.target === "exports")) {
+        return { ok: false, error: `expectedBehavior[${i}] (${id}): package-target-exists needs "target": "bin" | "main" | "exports"` };
+      }
+      expectedBehavior.push({
+        id,
+        check,
+        ...(typeof row.path === "string" ? { path: row.path.trim() } : {}),
+        ...(typeof row.target === "string" ? { target: row.target } : {}),
+        ...(typeof row.note === "string" && row.note.trim().length > 0 ? { note: row.note.trim() } : {}),
+      });
+    }
+  }
   const graderSlug = typeof doc.slug === "string" && doc.slug.trim() ? doc.slug.trim() : slug;
   if (slug && graderSlug !== slug) {
     return { ok: false, error: `grader slug "${graderSlug}" does not match corpus slug "${slug}"` };
@@ -356,10 +401,18 @@ export function parseGrader(raw, slug) {
       requiredCapabilities: capabilities,
       expectedFiles,
       expectedContent,
+      // W36 · N5: the checked expectedBehavior rows ([] = legacy grader — the
+      // verification label then reads "files+content only", exactly the
+      // pre-expectedBehavior contract).
+      expectedBehavior,
       passWhen: {
         meanAtLeast,
         requireExpectedFiles: pw.requireExpectedFiles !== false,
         requireExpectedContent: pw.requireExpectedContent !== false,
+        // A declared bar is mandatory by default — same doctrine as files/content;
+        // `false` is the explicit leniency opt-out (a declared row that FAILED
+        // is never a pass unless the grader says so).
+        requireExpectedBehavior: pw.requireExpectedBehavior !== false,
       },
     },
   };

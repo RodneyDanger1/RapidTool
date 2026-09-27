@@ -25,6 +25,7 @@ import {
   setStallLatch,
   tryStartWild,
 } from "./rt-client.ts";
+import { P6_PHASE_MAX_MS, WILD_STEP_BUDGET_MS } from "./rt-events.ts";
 
 test("installRtClient is a strict no-op without a window", () => {
   __rtResetForTests();
@@ -163,7 +164,14 @@ test("buildClientDiagnosis: honest none-detected floor on a clean ring", () => {
   assert.equal(diag.generatedAt, 1_000);
   assert.equal(diag.mostLikelyCause.class, "none-detected");
   assert.deepEqual(diag.errors, []);
-  assert.equal(diag.watchdog.budgetsMs.wildStep, 90_000);
+  assert.equal(diag.watchdog.budgetsMs.wildStep, WILD_STEP_BUDGET_MS);
+  // R12-f04 (fixes/271): the reported budget must EXCEED a legal P6 synthesis
+  // step (was 90_000 vs a legal 240_000 — a healthy keyed step read as
+  // frozen). Derived in rt-events.ts from P6_PHASE_MAX_MS; never re-forked.
+  assert.ok(
+    WILD_STEP_BUDGET_MS > P6_PHASE_MAX_MS,
+    "the wild step budget exceeds the P6 synthesis phase max",
+  );
   assert.equal(diag.watchdog.budgetsMs.chat, 60_000);
   assert.equal(diag.persistHealth.ok, true);
   assert.equal(diag.project.wildRun, null);
@@ -211,10 +219,13 @@ test("buildClientDiagnosis: project wildRun + errors flow into the contract", ()
       pause: false,
     },
   };
-  const diag = buildClientDiagnosis({ project: project as never, persistHealth: { ok: true, lastError: null }, counts: { artifacts: 1 } }, 200_000);
+  // R12-f04 (fixes/271): the instant is derived from the budget constant — the
+  // fixture must stay "long enough ago" as the derived budget moves (255_000).
+  const overdueNow = 1_000 + WILD_STEP_BUDGET_MS + 5_000;
+  const diag = buildClientDiagnosis({ project: project as never, persistHealth: { ok: true, lastError: null }, counts: { artifacts: 1 } }, overdueNow);
   assert.equal(diag.project.name, "Demo");
   assert.equal(diag.project.wildRun?.active, true);
-  assert.equal(diag.project.wildRun?.overdueMs, 199_000, "now - lastAutoAt");
+  assert.equal(diag.project.wildRun?.overdueMs, WILD_STEP_BUDGET_MS + 5_000, "now - lastAutoAt");
   assert.equal(diag.errors.length, 1);
   assert.equal(diag.errors[0].code, "RT_E_LLM_TIMEOUT");
   assert.equal(diag.mostLikelyCause.class, "wild-step-timeout", "active run past 1× budget ranks first");

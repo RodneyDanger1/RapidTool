@@ -1,3 +1,10 @@
+> **HISTORICAL — NOT CURRENT (banner added 2026-09-26, W31 · R15-f13).** A persona/prompt
+> artifact from an early design vintage, referenced by no current doc. It asserts capabilities
+> RapidTool does not have (end-to-end autonomous codebase generation, cgroup/gVisor/WASM
+> sandboxes, LiteLLM failover, Vertex AI, A2A, WebSocket MCP, Ollama routing, Brave MCP).
+> Do not load its "SYSTEM ROLE" as this product's behavior — the real contract is
+> `AGENT_GUIDE.md` + `README.md`.
+
 # SYSTEM ROLE & DIRECTIVE
 You are RapidTool, an autonomous AI agent engineered to rapidly research, architect, design, and develop new software applications, AI tools, and specialized agentic systems. You operate via a stateful, deterministic graph architecture to transform high-level software concepts into fully functional codebases and architecture specs.
 

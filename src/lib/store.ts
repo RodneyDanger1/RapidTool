@@ -6,6 +6,7 @@ import {
   emptyProject,
   hydrateProject,
   inferName,
+  readWildPlan,
   rejectHitl,
   runP6Real,
   stampPacket,
@@ -17,13 +18,16 @@ import {
   // own public action below can share the name without shadowing the engine fn.
   deepenResearch as deepenResearchEngine,
 } from "./engine.ts";
-import { canEnter, priorsSealed, phaseDef, STOCK_HITL } from "./phases.ts";
+import { canEnter, PHASE_LAST, priorsSealed, phaseDef, STOCK_HITL } from "./phases.ts";
 import { gateArtifact, hardDodBlockInto, hardDodMessage, runGate } from "./dod.ts";
 import { exportProjectJson, importProject as parseProjectJson } from "./io.ts";
 import { validateReport, applyReportResult, reportGateDelta, type ReportApplyReason } from "./report-intake.ts";
 import { interpretFeedback } from "./llm-tasks.ts";
 import { verifyAndFix, applyVerifyOutcome } from "./verify.ts";
 import { releaseWildStart, reportRt, tryStartWild } from "./rt-client.ts";
+// R14-f01 (W33 lane F1): the Node-side Auto-Review supervisor binding — null
+// on every host/key state that must keep the engine's existing default.
+import { createNodeWildReviewer } from "./wild-review.ts";
 import type {
   Artifact,
   ChatLogRow,
@@ -31,8 +35,9 @@ import type {
   PhaseId,
   Project,
   ResearchCorpusEntry,
+  WildPlan,
 } from "./types";
-import type { ErrorCode } from "./errors.ts";
+import { classifyError, type ErrorCode } from "./errors.ts";
 
 export type ApproveResult = { ok: true } | { ok: false; error: string };
 
@@ -63,10 +68,13 @@ export type P6JourneySurface = {
  * P13 Wild Mode driver result (startWildRun resolves to this). Natural stops:
  * "paused" (classifier/human/hard-DoD/error pause — wildRun.pause stays true),
  * "complete" (P0→P12 sealed), "cap" (defensive driver ceiling — paused too).
+ * "stopped" (an external stop deactivated the run mid-loop — F3-05).
+ * 185-H1/F3-06: ok:true NEVER carries a `code` — the pause class rides as
+ * `note` (the headless/CLI convention); codes ride the refusal arm only.
  */
 export type WildRunResult =
-  | { ok: true; ran: number; stoppedReason: "paused" | "complete" | "cap" | null; code?: ErrorCode }
-  | { ok: false; ran: number; stoppedReason: "paused" | "complete" | "cap" | null; error: string; code?: ErrorCode };
+  | { ok: true; ran: number; stoppedReason: "paused" | "complete" | "cap" | "stopped" | null; note?: string }
+  | { ok: false; ran: number; stoppedReason: "paused" | "complete" | "cap" | "stopped" | null; error: string; code?: ErrorCode };
 
 export type ImportProjectResult =
   | { ok: true; id: string; name: string; replaced: boolean }
@@ -147,7 +155,10 @@ type RapidState = {
   >;
   runModuleReal: (
     id: string,
-  ) => Promise<{ ok: true; result: unknown } | { ok: false; result: unknown; error: string }>;
+  ) => Promise<
+    | { ok: true; result: unknown }
+    | { ok: false; result: unknown; error: string; code?: ErrorCode }
+  >;
   ingestReport: (
     id: string,
     raw: unknown,
@@ -167,6 +178,15 @@ type RapidState = {
         gate_unmet?: string[];
       };
   hasProject: (id: string) => boolean;
+  /**
+   * R13-f02 (W33 lane L2): the store's READ path for the plan-before-execute
+   * surface (the console's "plan" line/section reads this). Returns the stored
+   * `project.wildPlan` when the record carries one, else engine.readWildPlan's
+   * HONEST EMPTY plan (`steps: []`, `source: "empty"`, note naming the row) —
+   * and `null` when the id is unknown. READ-ONLY: no generation here (the
+   * browser has no planner; generation is server-side — headless.generateWildPlan).
+   */
+  wildPlanFor: (id: string) => WildPlan | null;
   // P10: per-project hard-DoD opt-in (off by default — advisory behavior unchanged).
   setEnforceDod: (id: string, on: boolean) => void;
   // P13: Wild Mode opt-in + run lifecycle (B7 contract names).
@@ -264,6 +284,19 @@ function rebaseUserFields(committed: Project, live: Project | undefined): Projec
     chatLog: live.chatLog,
     kind: live.kind,
   };
+}
+
+/**
+ * W-23b (§R2-f02 · C1-f02 · 174-1 widened): a NON-driver commit computed from a
+ * pre-wild snapshot must never clobber an in-flight wild run. rebaseUserFields
+ * deliberately does not copy wildRun (engine-owned); the six non-driver commit
+ * sites wrap their commit in this guard so a started/paused/stopped run (or a
+ * run started mid-flight) survives. Only commitWild (the driver's own
+ * generation) may own wildRun. Minimal condition (`active === true`) — the
+ * phase-2 generalization is a separate scoped change, do not smuggle it in.
+ */
+function keepLiveWildRun(committed: Project, live: Project | undefined): Project {
+  return live?.wildRun?.active === true ? { ...committed, wildRun: live.wildRun } : committed;
 }
 
 /**
@@ -417,7 +450,9 @@ function advanceOnce(
   autopilot: boolean,
 ): { project: Project; error?: string; stopped?: boolean; gateDenied?: boolean; dodBlocked?: boolean } {
   const phase = project.currentPhase;
-  const rec = project.phases[phase];
+  // A20/A1-16: index by record id, not array position — a partial, unsorted,
+  // or sparse phase array must never mis-seal the graph (phases.ts law).
+  const rec = project.phases.find((p) => p.id === phase);
   if (!rec) return { project, error: "Unknown phase." };
   if (project.status === "blocked" && rec.status === "rejected") {
     return { project, error: "Phase rejected — retry with the note applied.", stopped: true };
@@ -448,7 +483,7 @@ function advanceOnce(
     }
     return { project, error: "Waiting on human approval.", stopped: true };
   }
-  if (rec.status === "complete" && phase < 12) {
+  if (rec.status === "complete" && phase < PHASE_LAST) {
     // P10 hard-DoD: advancing means LEAVING the completed current phase — when
     // enforcement is on, its exit gate must pass or the advance is blocked
     // (artifact + dod.blocked log appended, run stops with an honest error).
@@ -516,7 +551,7 @@ function finishPhase(
 ): { project: Project; stopped: boolean; error?: string; dodBlocked?: boolean } {
   updated = recordGate(updated, phase);
   if (updated.status === "blocked") return { project: updated, stopped: true };
-  if (updated.status !== "awaiting_hitl" && phase < 12) {
+  if (updated.status !== "awaiting_hitl" && phase < PHASE_LAST) {
     if (updated.enforceDod === true) {
       const r = runGate(updated, phase);
       if (!r.pass) {
@@ -572,8 +607,25 @@ async function synthesizeAsync(
           return out as Project;
         }
       }
-    } catch {
-      // engine.runPhaseAsync unavailable or threw → deterministic fallback below.
+    } catch (err) {
+      // A1-19: "not configured" stays the quiet expected path; a THROW from
+      // runPhaseAsync is not expected — keep the deterministic fallback but
+      // stamp a coded warn row so the audit trail distinguishes a keyless run
+      // from a broken keyed one (the engine's liveDegrade discipline).
+      const fallback = applyPhaseResult(project, phase);
+      return {
+        ...fallback,
+        logs: [
+          ...(fallback.logs ?? []),
+          {
+            ts: Date.now(),
+            phase,
+            level: "warn" as const,
+            event: "llm.degrade",
+            detail: `runPhaseAsync failed (${classifyError(err)}) — deterministic floor used.`,
+          },
+        ].slice(-200),
+      };
     }
   }
   return applyPhaseResult(project, phase);
@@ -607,7 +659,8 @@ async function advanceOnceAsync(
   configured: boolean,
 ): Promise<{ project: Project; error?: string; stopped?: boolean; gateDenied?: boolean; dodBlocked?: boolean }> {
   const phase = project.currentPhase;
-  const rec = project.phases[phase];
+  // A20/A1-16: id-match (async mirror of advanceOnce's guard).
+  const rec = project.phases.find((p) => p.id === phase);
   if (!rec) return { project, error: "Unknown phase." };
   if (project.status === "blocked" && rec.status === "rejected") {
     return { project, error: "Phase rejected — retry with the note applied.", stopped: true };
@@ -633,7 +686,7 @@ async function advanceOnceAsync(
     }
     return { project, error: "Waiting on human approval.", stopped: true };
   }
-  if (rec.status === "complete" && phase < 12) {
+  if (rec.status === "complete" && phase < PHASE_LAST) {
     // P10 hard-DoD mirror of the sync advanceOnce guard (leave requires a pass).
     if (project.enforceDod === true) {
       const r = runGate(project, phase);
@@ -671,14 +724,23 @@ async function advanceOnceAsync(
 type PersistedSlice = Pick<RapidState, "projects" | "activeId" | "autopilot" | "demoSeeded">;
 
 /**
- * H4: engine/UI caps reused by the quota-salvage write. The engine already
- * trims logs to 200 and chatLog to 40 rows on every append, so a salvage
- * write that trims a project to these same caps loses nothing the engine
- * would not have trimmed on its next write anyway — while keeping the
- * persisted snapshot valid JSON the next reload can hydrate.
+ * H4: the quota-salvage write's caps. They bound logs/chatLog — the two
+ * fields the engine append-trims (200 / 40 via RESCUE_LOG_CAP and
+ * CHAT_LOG_MAX_ROWS) — so a salvage write loses nothing the engine would not
+ * have trimmed on its next append anyway, while keeping the persisted
+ * snapshot valid JSON the next reload can hydrate.
+ *
+ * A1-17: this does NOT make a payload quota-proof — decisions/memory/
+ * artifacts/research are unbounded append targets elsewhere, so a salvage
+ * whose bulk is those arrays can still fail. TODO(A1-17): extend this trim to
+ * the same field set the checkpoint bounds (A1-03), from ONE shared caps
+ * source (A1-44).
  */
 const RESCUE_LOG_CAP = 200;
-const RESCUE_CHAT_CAP = 40;
+/** A1-20: the one chat-row cap — the appendChatRows surface comment and the
+ *  salvage both mean THIS number (it used to cite a symbol that did not exist). */
+const CHAT_LOG_MAX_ROWS = 40;
+const RESCUE_CHAT_CAP = CHAT_LOG_MAX_ROWS;
 
 /** Last fully-failed persist write (quota/blocked AND salvage failed), if any. */
 let lastPersistFailure: string | null = null;
@@ -872,14 +934,15 @@ export const useRapid = create<RapidState>()(
         try {
           const next = await deepenResearchEngine(p, phase);
           set((s) => ({
-            projects: s.projects.map((x) => (x.id === id ? rebaseUserFields(next, x) : x)),
+            projects: s.projects.map((x) => (x.id === id ? keepLiveWildRun(rebaseUserFields(next, x), x) : x)),
           }));
           return { ok: true };
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
       }),
-      runVerifyAsync: async (id: string) => {
+      runVerifyAsync: (id: string) =>
+        serialized(id, async () => {
         const p = get().projects.find((x) => x.id === id);
         if (!p) return { ok: false, error: "Project not found.", code: "RT_E_PROJECT_MISSING" };
         const source = p.generatedSource ?? "";
@@ -903,7 +966,7 @@ export const useRapid = create<RapidState>()(
           if (!fresh) return { ok: false, error: "Project not found." };
           const applied = applyVerifyOutcome(fresh, outcome as never);
           set((s) => ({
-            projects: s.projects.map((x) => (x.id === id ? rebaseUserFields(applied, x) : x)),
+            projects: s.projects.map((x) => (x.id === id ? keepLiveWildRun(rebaseUserFields(applied, x), x) : x)),
           }));
           return {
             ok: true,
@@ -913,14 +976,15 @@ export const useRapid = create<RapidState>()(
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
-      },
+        }),
       // fixes/150 (M4 ms4 — watchdog mirror): async P6-journey face for the
       // console/UI. headless.ts is server-only (node:fs at module top), so the
       // import happens HERE at call time — the client bundle never statically
       // pulls headless in; keyless runs commit nothing (byte-identical
       // passthrough), converged/failed runs commit via rebaseUserFields so
       // user-owned fields (name/notes/chatLog/toggles) survive the commit.
-      runP6Journey: async (id, opts) => {
+      runP6Journey: (id, opts) =>
+        serialized(id, async () => {
         const p = byId(get().projects, id);
         if (!p) return { ok: false, error: "Project not found.", code: "RT_E_PROJECT_MISSING" };
         // fixes/150 (integration): headless.ts statically imports node:fs and is
@@ -951,7 +1015,7 @@ export const useRapid = create<RapidState>()(
             if (!fresh) return { ok: false, error: "Project not found." };
             set((s) => ({
               projects: s.projects.map((x) =>
-                x.id === id ? rebaseUserFields(res.project, fresh) : x,
+                x.id === id ? keepLiveWildRun(rebaseUserFields(res.project, fresh), fresh) : x,
               ),
             }));
           }
@@ -965,7 +1029,7 @@ export const useRapid = create<RapidState>()(
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
-      },
+        }),
       hydrated: false,
       autopilot: false,
       demoSeeded: false,
@@ -1099,10 +1163,15 @@ export const useRapid = create<RapidState>()(
           // Bounded driver loop (engine documents the loop as the caller's
           // job): step until the run parks (pause/error) or completes. Cap =
           // 20 steps so a stuck project can never spin the caller.
+          // R14-f01 (W33 lane F1): bind the Node-side Auto-Review classifier at
+          // the driver's real call site. Bare Node + key ⇒ the classifier can
+          // actually verdict (engine logs `wild.review (classifier)`); browser /
+          // keyless ⇒ null ⇒ wildStep's existing default path, byte-identical.
+          const reviewer = await createNodeWildReviewer();
           let cur = withStartLog;
           for (let step = 0; step < 20; step++) {
             const prev = cur; // the generation this step is computed from
-            const res = await wildStep(cur);
+            const res = await wildStep(cur, reviewer ? { reviewer } : undefined);
             const merged = commitWild(res.project, prev);
             // Continue from the MERGED generation, not the raw step output:
             // the next step's input then already carries the concurrent rows
@@ -1112,13 +1181,17 @@ export const useRapid = create<RapidState>()(
             ran += 1;
             if (cur.wildRun?.pause) {
               // Carry the pause class from the step that parked the run (B5).
-              return { ok: true, ran, stoppedReason: "paused", code: res.code };
+              // F3-06 (185-H1): ok:true never dual-channels — the pause class
+              // rides as `note`; `code` stays on the refusal arm only.
+              return { ok: true, ran, stoppedReason: "paused", ...(res.code ? { note: res.code } : {}) };
             }
             if (cur.status === "complete") {
               return { ok: true, ran, stoppedReason: "complete" };
             }
             if (!cur.wildRun?.active) {
-              return { ok: true, ran, stoppedReason: null };
+              // F3-05: name the class — an external stop (stopWildRun) is a
+              // real stop, not "no reason".
+              return { ok: true, ran, stoppedReason: "stopped" };
             }
           }
           const capped = wildPause(cur, cur.currentPhase, "warn", "wild.cap", "Wild loop step cap (20) reached — run parked.");
@@ -1134,14 +1207,13 @@ export const useRapid = create<RapidState>()(
             error: String(e),
             code: "RT_E_INTERNAL",
           };
-        } finally {
-          // PB-04: release the single-flight latch once the loop ends so a
-          // paused run's resume can re-enter (the auto-expiry is the backstop).
-          releaseWildStart(id);
         }
         } finally {
-          // 174-2: early returns (missing project / wildMode off / already
-          // active / complete) must also release the latch.
+          // A1-13: ONE release path for the whole action — the loop's own
+          // finally was redundant (this finally runs immediately after it)
+          // and read like a latch refcount bug. Early returns (missing
+          // project / wildMode off / already active / complete) land here too
+          // (174-2), and a paused run's resume re-enters (PB-04).
           releaseWildStart(id);
         }
       },
@@ -1165,6 +1237,15 @@ export const useRapid = create<RapidState>()(
         const project = emptyProject({
           brief,
           name: name?.trim() || inferName(brief),
+          // W-18 (fixes/274 · WDX-3 · §W27-B · A1-f09/R8-f04): the browser has no
+          // `process.env`, so emptyProject's keyed default is unreachable there and
+          // the sidebar caption ("On by default when a DeepSeek key is configured")
+          // read false on every console-created project. The status probe is the
+          // console's honest view of the SERVER's key: when it says configured, the
+          // created project joins the keyed default (hard-DoD ON). When it does not
+          // (or has not run), the engine's own default stands untouched — node hosts
+          // with a process key keep today's behavior byte-for-byte.
+          ...(get().llmStatus.configured ? { enforceDod: true } : {}),
         });
         set((s) => ({
           projects: [project, ...s.projects],
@@ -1207,7 +1288,7 @@ export const useRapid = create<RapidState>()(
         let stoppedReason: RunStopReason = null;
         // B-24: the loop bound derives from the graph, not a magic constant. Worst case every
         // remaining phase parks a HITL that autopilot approves (~2 iterations per phase) + 2 margin.
-        const maxRuns = (13 - start.currentPhase) * 2 + 2;
+        const maxRuns = (PHASE_LAST + 1 - start.currentPhase) * 2 + 2;
         for (let i = 0; i < maxRuns; i++) {
           const next = advanceOnce(current, get().autopilot);
           if (next.error && (next.project === current || next.gateDenied || next.dodBlocked)) {
@@ -1288,10 +1369,10 @@ export const useRapid = create<RapidState>()(
             return {
               projects: s.projects.map((p) => {
                 if (p.id !== id) return p;
-                const committed = rebaseUserFields(next.project, live);
-                // 174-1: do not clobber an in-flight wild run with a stale execute snapshot.
-                if (live.wildRun?.active === true) return { ...committed, wildRun: live.wildRun };
-                return committed;
+                // 174-1 (widened by W-23b · §R2-f02): do not clobber an
+                // in-flight wild run with a stale execute snapshot — the guard
+                // now rides keepLiveWildRun, shared with the five siblings.
+                return keepLiveWildRun(rebaseUserFields(next.project, live), live);
               }),
             };
           });
@@ -1306,7 +1387,7 @@ export const useRapid = create<RapidState>()(
           let ran = 0;
           let error: string | undefined;
           let stoppedReason: RunStopReason = null;
-          const maxRuns = (13 - start.currentPhase) * 2 + 2;
+          const maxRuns = (PHASE_LAST + 1 - start.currentPhase) * 2 + 2;
           for (let i = 0; i < maxRuns; i++) {
             const next = await advanceOnceAsync(current, get().autopilot, configured);
             if (next.error && (next.project === current || next.gateDenied || next.dodBlocked)) {
@@ -1346,7 +1427,7 @@ export const useRapid = create<RapidState>()(
             const live = byId(s.projects, id);
             if (!live) return s; // deleted mid-run — never resurrect
             return {
-              projects: s.projects.map((p) => (p.id === id ? rebaseUserFields(current, live) : p)),
+              projects: s.projects.map((p) => (p.id === id ? keepLiveWildRun(rebaseUserFields(current, live), live) : p)),
             };
           });
           const progressed = ran > 0;
@@ -1400,12 +1481,19 @@ export const useRapid = create<RapidState>()(
                 const live = byId(s.projects, id);
                 if (!live) return s; // deleted mid-run — never resurrect
                 return {
-                  projects: s.projects.map((p) => (p.id === id ? rebaseUserFields(updated, live) : p)),
+                  projects: s.projects.map((p) => (p.id === id ? keepLiveWildRun(rebaseUserFields(updated, live), live) : p)),
                 };
               });
               return { ok: true, result: r };
             }
-            return { ok: false, result: out.result, error: "bounded runner unavailable or no generated module" };
+            // F3-08: coded refusal — this seam must not flatten "runner
+            // unavailable / nothing to run" into an uncoded error.
+            return {
+              ok: false,
+              result: out.result,
+              error: "bounded runner unavailable or no generated module",
+              code: "RT_E_RUNNER_UNAVAILABLE",
+            };
           } catch (err) {
             return { ok: false, result: null, error: err instanceof Error ? err.message : String(err) };
           }
@@ -1457,6 +1545,12 @@ export const useRapid = create<RapidState>()(
         };
       },
       hasProject: (id) => Boolean(byId(get().projects, id)),
+      // R13-f02 (W33 lane L2): read-only wildPlan accessor (see the state type
+      // above) — stored plan, else the honest empty plan; null for unknown ids.
+      wildPlanFor: (id) => {
+        const project = byId(get().projects, id);
+        return project ? readWildPlan(project) : null;
+      },
       // Best-effort status probe (in-memory, never persisted): reads llmStatus()
       // and the research backend's status when those modules exist; degrades to
       // the honest "not configured" default otherwise.
@@ -1574,7 +1668,8 @@ export const useRapid = create<RapidState>()(
         if (project.hitl.phase !== project.currentPhase) {
           return { ok: false, error: "HITL phase does not match the current edge." };
         }
-        if (project.phases[project.currentPhase]?.status !== "awaiting_hitl") {
+        // A20: id-match, never array position (same law as the transition guards).
+        if (project.phases.find((p) => p.id === project.currentPhase)?.status !== "awaiting_hitl") {
           return { ok: false, error: "Phase is not awaiting approval." };
         }
         const updated = rejectHitl(project, note.trim());
@@ -1616,7 +1711,7 @@ export const useRapid = create<RapidState>()(
                   const live = byId(s.projects, id);
                   if (!live) return s; // deleted mid-flight — never resurrect
                   return {
-                    projects: s.projects.map((p) => (p.id === id ? rebaseUserFields(updated, live) : p)),
+                    projects: s.projects.map((p) => (p.id === id ? keepLiveWildRun(rebaseUserFields(updated, live), live) : p)),
                   };
                 });
               }
@@ -1665,6 +1760,28 @@ export const useRapid = create<RapidState>()(
             detail: project.id,
           },
         ].slice(-200);
+        // A1-18: hydrate's doctrine — a persisted ACTIVE run is a session
+        // artifact and the copy has no driver, so an active surface would be a
+        // lie (and blocks startWildRun with "already active" until reload).
+        // Stop it + trail it, like hydrateWildRun's stop branch.
+        if (copy.wildRun?.active) {
+          copy.wildRun = {
+            ...copy.wildRun,
+            active: false,
+            pause: false,
+            stoppedAt: copy.wildRun.stoppedAt ?? Date.now(),
+          };
+          copy.logs = [
+            ...copy.logs,
+            {
+              ts: Date.now(),
+              phase: copy.currentPhase,
+              level: "info" as const,
+              event: "wild.stop",
+              detail: "Clone: active wild run stopped — the driver loop is a session artifact (hydrate doctrine).",
+            },
+          ].slice(-200);
+        }
         set((s) => ({ projects: [copy, ...s.projects], activeId: copy.id, demoSeeded: true }));
         return copy.id;
       },
@@ -1691,7 +1808,7 @@ export const useRapid = create<RapidState>()(
         set((s) => ({
           projects: s.projects.map((p) =>
             p.id === id
-              ? { ...p, chatLog: [...(p.chatLog ?? []), ...list].slice(-40) }
+              ? { ...p, chatLog: [...(p.chatLog ?? []), ...list].slice(-CHAT_LOG_MAX_ROWS) }
               : p,
           ),
         }));

@@ -43,7 +43,9 @@ import {
   XAI_MODELS_ENDPOINT,
   XAI_PROVIDER,
   XAI_PROVIDER_ID,
+  XAI_SPEC,
   applyProbedModels,
+  createOpenAiCompatibleProvider,
 } from "./openai-compatible.ts";
 import {
   PROBE_TIMEOUT_MS,
@@ -941,6 +943,42 @@ describe("registry — second family: the live-probed candidate (F2 · W19-L5)",
       const plainBody = bodyOf(plainCalls[0]!);
       assert.equal(plainBody.max_completion_tokens, undefined, "no budget is invented when the caller passed none");
       assert.equal(plainBody.response_format, undefined);
+    } finally {
+      restore();
+    }
+  });
+
+  // §R4-f01 (W29 · LANE P) — the wallet doctrine is PROVIDER-WIDE. The
+  // DeepSeek 402 → RT_E_LLM_NO_BALANCE map (deepseek.ts:437-444, W23-L1) is
+  // mirrored by the OpenAI-compatible adapter: a 402 / "Insufficient Balance"
+  // refusal reads as the wallet class, every other refusal keeps the generic
+  // code. The vendor message must stay byte-identical to the prior shape
+  // (only the code changes for the 402 class).
+  it("R4-f01: a 402 balance refusal maps to RT_E_LLM_NO_BALANCE; a non-402 refusal keeps RT_E_LLM_REJECTED", async () => {
+    const restore = withEnv({ [XAI_KEY]: "sk-xai-spike" });
+    const calls: Captured[] = [];
+    try {
+      const provider = createOpenAiCompatibleProvider(XAI_SPEC, ["probe-model-id"]);
+      // (a) the live 402 shape: {"error":{"message":"Insufficient Balance"}}
+      const res = await provider.complete("hello", {
+        model: "probe-model-id" as never,
+        fetch: rejectionFetch(calls, 402, { error: { message: "Insufficient Balance" } }),
+      });
+      assert.equal(res.ok, false);
+      if (!res.ok) {
+        assert.equal(res.code, "RT_E_LLM_NO_BALANCE", "a broke wallet is not a generic refusal");
+        assert.match(res.error ?? "", /Insufficient Balance/, "the vendor's own text rides along");
+        assert.match(res.error ?? "", /requested model: "probe-model-id"/, "the requested id is named");
+      }
+      assert.equal(calls.length, 1, "402 is not in the retryable set — billing is not transient");
+      // (b) the mirror's other half: any non-402 refusal stays generic.
+      const calls2: Captured[] = [];
+      const other = await provider.complete("hello", {
+        model: "probe-model-id" as never,
+        fetch: rejectionFetch(calls2, 403, { error: { message: "Forbidden" } }),
+      });
+      assert.equal(other.ok, false);
+      if (!other.ok) assert.equal(other.code, "RT_E_LLM_REJECTED");
     } finally {
       restore();
     }

@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["scripts"],
+  "//": "R15-f04 (W31 T2 fixes/273_t2_r15.md) — STAGED, NOT IN gate.sh: tsconfig.json's program sees only src+server, so scripts/** (incl. rapidtool-cli.mjs) is invisible to `npm run typecheck`. Run: npx tsc -p tsconfig.scripts.json --noEmit  |  Measured at land time (2026-09-26): 1030 errors (rapidtool-cli.mjs 299, run-eval.mjs 284, test files ~280; mostly TS7006 implicit-any under checkJs).  |  TODO(R15-f04): fold into gate.sh step 1 next to `tsc --noEmit` the moment it is green."
+}

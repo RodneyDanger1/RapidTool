@@ -14,6 +14,8 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief "..." --name "..." --out build.json
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs run     --project build.json [--live]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs gate    --project build.json [--autopilot] [--live]
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs resume    --project build.json [--autopilot] [--live]   # T-107.7: re-enter from the per-phase checkpoint (prints the snapshot age; never a silent resume)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs unattended --project build.json                         # W-47: scheduler-facing drive — resumes from a checkpoint when present, else starts from the file; autopilot + live until parked (stock HITL gates still park; exit 2)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs approve --project build.json [--force]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs reject  --project build.json --note "..."
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs retry   --project build.json                  # unlock a rejected/blocked phase
@@ -53,10 +55,14 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs packet  --project build.json [--knowledge lessons.json]        # tier-1: seed Ranked memory with accepted cross-project lessons
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs eval    [--dir research/eval-out] [--slug <slug>]              # T5.3 (262 LANE 5): read-only M1-M9 eval scorecard + history deltas from the eval-out documents — no keyed calls, no writes
 // ---------------------------------------------------------------------------
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
+import readline from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// R11-f07: the ONE shared physical-containment helper (scripts/path-safety.mjs)
+// — used by the `edit` verb below so a symlinked parent cannot escape --dir.
+import { physicalInside } from "./path-safety.mjs";
 
 // E-25: every result object carries schema_version + cmd + exit_code.
 const SCHEMA_VERSION = 1;
@@ -244,6 +250,20 @@ async function checkDriver() {
 }
 
 // ---------------------------------------------------------------------------
+// T-107.7 (W33 lane L2): the run-checkpoint seam (src/lib/checkpoint.server.ts)
+// — the read/admission side of the per-phase commit checkpoint that
+// `headless.runUntilGate` writes beside `.rapidtool/`.
+// W36 N2: the `resume`/`unattended` verbs consume the headless seam instead
+// (headless.loadResumableCheckpoint = read→admit→hydrate in ONE place, so the
+// read-side law is not re-derived here).
+// W39 Z1: the direct lazy loader (CHECKPOINT_PATH / checkpointServer /
+// checkpointDriver) was REMOVED here — it never gained a consumer after N2
+// rerouted resume through the headless seam, and the 0-warning gate forbids
+// dead code. Reintroduce it (same lazy .ts mechanics as the scorecard driver
+// below) if a read-only CLI use lands, e.g. a `resume --list`.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // T5.3 (fixes/262 LANE 5 · W23): the eval scorecard reader
 // (src/lib/scorecard.ts — PURE: it parses the eval-out documents and builds the
 // printable scorecard; THIS verb owns the fs reads, so the module stays
@@ -379,6 +399,82 @@ function defaultOutputDir(h, project, ...sub) {
 }
 
 // ---------------------------------------------------------------------------
+// T-107.7 (W33 lane L2): resolve a `resume --project` value to the checkpoint
+// home + the optional project file. A DIRECTORY is its own checkpoint home
+// (`<dir>/.rapidtool/checkpoint.json` — where run/gate wrote it); a file
+// resolves to its containing dir and names the file to save back to.
+// W36 N2 consumes it from the real `resume`/`unattended` arms below.
+// ---------------------------------------------------------------------------
+function resolveCheckpointTarget(value) {
+  const abs = resolve(value);
+  try {
+    if (statSync(abs).isDirectory()) return { dir: abs, file: null };
+  } catch {
+    /* not on disk (yet) — treat as a project file path */
+  }
+  return { dir: dirname(abs), file: abs };
+}
+
+// ---------------------------------------------------------------------------
+// T-107.7/W-47 (W36 lane N2): ONE outcome→envelope mapper for the two drive
+// verbs this lane adds (`resume`, `unattended`). Mirrors the run/gate arm's
+// contract — parked → 2, hard-DoD block → 1 RT_E_GATE_PENDING, a complete seal
+// with failed gates is never a clean 0 → 1 RT_E_GATES_FAILED — and carries the
+// resume provenance (`checkpoint`) + `unattended: true` markers in `extras`.
+// The run/gate arm predates this helper and is intentionally untouched.
+// ---------------------------------------------------------------------------
+function respondDriveOutcome(h, res, { path, extras = {} }) {
+  const sealed = h.summary(res.project);
+  if (res.outcome === "dod") {
+    respond(
+      {
+        ok: false,
+        path,
+        ...extras,
+        code: "RT_E_GATE_PENDING",
+        error:
+          (Array.isArray(res.events) && res.events.length > 0
+            ? res.events[res.events.length - 1]
+            : "Hard DoD block — advance refused") + " — resolve the unmet DoD criteria before advancing.",
+        summary: sealed,
+        steps: res.steps,
+        stopped: res.stopped,
+        events: res.events,
+        outcome: "dod",
+      },
+      1,
+    );
+    return;
+  }
+  if (res.project.status === "complete" && sealed.sealedWithFailures === true) {
+    const census = (sealed.failedGates ?? [])
+      .map((g) => `P${g.phase}(${Array.isArray(g.unmet) && g.unmet.length > 0 ? g.unmet.join(",") : "unmet"})`)
+      .join("; ");
+    respond(
+      {
+        ok: false,
+        path,
+        ...extras,
+        code: "RT_E_GATES_FAILED",
+        error: `run sealed complete with ${sealed.failedGates?.length ?? 0} failed DoD gate(s): ${census} — resolve the red gates (repair the failing phase and re-run) before shipping.`,
+        summary: sealed,
+        steps: res.steps,
+        stopped: res.stopped,
+        events: res.events,
+        sealedWithFailures: true,
+      },
+      1,
+    );
+    return;
+  }
+  const parked = res.project.status === "awaiting_hitl" || res.project.status === "blocked";
+  respond(
+    { ok: true, path, ...extras, summary: sealed, steps: res.steps, stopped: res.stopped, events: res.events },
+    parked ? 2 : 0,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Subcommands.
 // ---------------------------------------------------------------------------
 async function main() {
@@ -453,6 +549,15 @@ async function main() {
         // project JSON is an intermediate control file that every later verb
         // consumes via --project, so it must stay next to the shell chaining the
         // verbs (g4 F1 keeps it; only the DELIVERABLE emit + vault moved home).
+        // R5-f10 (W29 · A2-f11): a valueless --out used to melt into the
+        // default and silently write <slug>.json into the CWD — refuse loudly,
+        // nothing written.
+        if (args.out === true) {
+          return respond(
+            { ok: false, error: "create --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+            1,
+          );
+        }
         const out = resolve(typeof args.out === "string" ? args.out : `${h.filename(project.name)}.json`);
         h.saveProject(out, project);
         // Surface the EFFECTIVE enforcement value (create default policy is
@@ -468,10 +573,25 @@ async function main() {
       case "gate": {
         const project = loadProjectFor(cmd);
         const path = requireProjectPath(args, cmd);
-        const autopilot = cmd === "gate" ? flag(args, "autopilot") : false;
-        const live = flag(args, "live");
-        const maxSteps = cmd === "run" ? 1 : undefined; // run = single step; gate = until parked
-        const res = await h.runUntilGate(project, { autopilot, live, maxSteps });
+        // W-47 / T-107.4 (W33 lane L2): `run --unattended` drives the keyed
+        // journey headless to completion unattended — autopilot ON (machine
+        // gates only) + live ON (P6 through the shared runP6Edge seam; keyless
+        // ⇒ the honest deterministic floor). It is NOT a daemon: a host
+        // scheduler (Windows Task Scheduler / cron) invokes it on a cadence —
+        // and stock HITL gates (P4/P5/P8/P9) still park for a human by design,
+        // so a parked exit (2) is the honest outcome, never a fake completion.
+        const unattended = flag(args, "unattended");
+        const autopilot = unattended ? true : cmd === "gate" ? flag(args, "autopilot") : false;
+        const live = unattended ? true : flag(args, "live");
+        const maxSteps = cmd === "run" && !unattended ? 1 : undefined; // run = single step; gate/unattended = until parked
+        const res = await h.runUntilGate(project, {
+          autopilot,
+          live,
+          maxSteps,
+          // T-107.7 (W33 lane L2): the per-phase commit writes the bounded
+          // checkpoint beside the project dir; a complete seal clears it.
+          checkpointDir: dirname(resolve(path)),
+        });
         h.saveProject(path, res.project);
         // E-25: parked awaiting human / blocked → exit 2 (state fully on
         // stdout); complete / mid-run cap → 0.
@@ -487,6 +607,9 @@ async function main() {
             {
               ok: false,
               path,
+              // W-47: state the drive mode on every outcome (a scheduler that
+              // invoked `run --unattended` must be able to see it parked).
+              ...(unattended ? { unattended: true } : {}),
               code: "RT_E_GATE_PENDING",
               error:
                 (Array.isArray(res.events) && res.events.length > 0
@@ -510,6 +633,7 @@ async function main() {
             {
               ok: false,
               path,
+              ...(unattended ? { unattended: true } : {}),
               code: "RT_E_GATES_FAILED",
               error: `run sealed complete with ${sealed.failedGates?.length ?? 0} failed DoD gate(s): ${census} — resolve the red gates (repair the failing phase and re-run) before shipping.`,
               summary: sealed,
@@ -533,6 +657,105 @@ async function main() {
           },
           parked ? 2 : 0,
         );
+        return;
+      }
+
+      // T-107.7 (W36 lane N2): REAL run resume — read the per-phase checkpoint that
+      // run/gate wrote beside the project dir, admit it (identity + mode + integer
+      // phase/step sanity — checkpointAdmits), hydrate the minimal read shape, and
+      // re-enter at the recorded phase through the same runUntilGate driver the
+      // original run used. Never a silent resume: the envelope names the snapshot
+      // age + the re-entry phase. `--project` accepts a project FILE (its dir is
+      // the checkpoint home; the drive writes the file back) or a DIRECTORY.
+      case "resume": {
+        const target = requireArg(args, "project", "resume");
+        if (target.error) return respond({ ok: false, error: target.error, code: "RT_E_VALIDATION" }, 1);
+        const t = resolveCheckpointTarget(target.value);
+        // Identity guard: when a project FILE was named and exists, admit against ITS
+        // id (an id reused by a different brief must fail closed); a directory names
+        // no expected id — the checkpoint's own identity governs.
+        let expected;
+        if (t.file && existsSync(t.file)) {
+          try {
+            expected = { projectId: h.loadProject(t.file).id };
+          } catch {
+            /* an unreadable file cannot pin identity — the checkpoint's own id governs */
+          }
+        }
+        const resumed = h.loadResumableCheckpoint(t.dir, expected);
+        if (!resumed.ok) {
+          return respond({ ok: false, path: resumed.path, dir: t.dir, code: resumed.code, error: resumed.error }, 1);
+        }
+        const ageMs = Date.now() - resumed.savedAt;
+        const res = await h.runUntilGate(resumed.project, {
+          autopilot: flag(args, "autopilot"),
+          live: flag(args, "live"),
+          checkpointDir: t.dir,
+        });
+        if (t.file) h.saveProject(t.file, res.project);
+        respondDriveOutcome(h, res, {
+          path: t.file ?? t.dir,
+          extras: {
+            resumed: true,
+            checkpoint: { path: resumed.path, savedAt: resumed.savedAt, ageMs, resumedFrom: resumed.resumedFrom },
+          },
+        });
+        return;
+      }
+
+      // W-47/T-107.4 (W36 lane N2): the scheduler-facing drive, REAL where the host
+      // allows — re-enter from a checkpoint when one exists (crash recovery: a Task
+      // Scheduler / cron re-invocation resumes instead of restarting), else start
+      // from the named project file; drive autopilot + live until parked. NOT a
+      // daemon: no scheduler/queue in-product — an external hook invokes this verb
+      // on a cadence. Stock HITL gates (P4/P5/P8/P9) still park for a human BY
+      // DESIGN: exit 2 is the honest outcome, never a fake completion.
+      case "unattended": {
+        const target = requireArg(args, "project", "unattended");
+        if (target.error) return respond({ ok: false, error: target.error, code: "RT_E_VALIDATION" }, 1);
+        const t = resolveCheckpointTarget(target.value);
+        const resumed = h.loadResumableCheckpoint(t.dir);
+        let project;
+        let extras = { unattended: true };
+        if (resumed.ok) {
+          project = resumed.project;
+          extras = {
+            unattended: true,
+            resumed: true,
+            checkpoint: {
+              path: resumed.path,
+              savedAt: resumed.savedAt,
+              ageMs: Date.now() - resumed.savedAt,
+              resumedFrom: resumed.resumedFrom,
+            },
+          };
+        } else if (resumed.code === "RT_E_CHECKPOINT_MISSING" && t.file && existsSync(t.file)) {
+          // No checkpoint: a fresh project (or one whose COMPLETE seal cleared it) —
+          // start from the file; the drive below writes a fresh checkpoint per phase.
+          try {
+            project = h.loadProject(t.file);
+          } catch (err) {
+            return respond(
+              {
+                ok: false,
+                unattended: true,
+                error: `unattended: ${err instanceof Error ? err.message : String(err)}`,
+                ...errCode(err, "RT_E_VALIDATION"),
+              },
+              1,
+            );
+          }
+        } else {
+          // A corrupt/stale/mismatched checkpoint (or a dir with nothing in it) must
+          // never be silently ignored by a scheduler — report the coded refusal.
+          return respond(
+            { ok: false, unattended: true, path: resumed.path, dir: t.dir, code: resumed.code, error: resumed.error },
+            1,
+          );
+        }
+        const res = await h.runUntilGate(project, { autopilot: true, live: true, checkpointDir: t.dir });
+        if (t.file) h.saveProject(t.file, res.project);
+        respondDriveOutcome(h, res, { path: t.file ?? t.dir, extras });
         return;
       }
 
@@ -580,30 +803,39 @@ async function main() {
         // rule). Action routing mirrors headless.approve: --force ⇒ hitl.force
         // (Rule B — the human seat plus the out-of-band token; an autopilot seat
         // can never self-approve a force); otherwise hitl.approve on
-        // gate:P<phase>. The --i-am-human flag is the human-seat claim; the
-        // out-of-band RT_HUMAN_SEAT_TOKEN is read HERE (policy.ts is a pure,
-        // env-free leaf — its purity test pins that it never reads env). The
-        // non-TTY guard above stays deliberately STRICTER than the seam: an
-        // unattended process must name the human seat explicitly.
+        // gate:P<phase>.
+        //
+        // R5-f12 (W29 LANE H · R11-f04/C2-f02): the --i-am-human claim goes
+        // through the TWO-CHANNEL seat (see humanSeatClaim): the TYPED TTY
+        // re-entry is the presented token, the env read the expected one — the
+        // same-env-var-both-sides degeneracy this replaces is statically
+        // forbidden by scripts/cli-exit-taxonomy.test.mjs. A non-TTY
+        // --i-am-human is refused before this seam (no second channel exists
+        // there, so no human row may be minted); the non-TTY guard above still
+        // requires the human seat to be named explicitly for every approval.
         //
         // W6-L2 (ledger PROVENANCE): the row this verb lands is minted by
         // h.approve below, whose seam verdict stamps `decidedVia` onto the row
         // (seat label + action/resource/reason + token-path bool, types.ts) —
         // this verb's consult above and the driver's re-check derive from the
-        // same actor/flags/env in one process, so the recorded provenance is
-        // exactly this verb's enforced verdict. No response-shape change: the
-        // approve JSON contract + exit codes stay byte-identical.
+        // same actor/flags/typed token in one process, so the recorded
+        // provenance is exactly this verb's enforced verdict. No response-shape
+        // change: the approve JSON contract + exit codes stay byte-identical.
         const { evaluatePolicy } = await import("../src/lib/policy.ts");
+        const humanSeat = flag(args, "i-am-human") ? await humanSeatClaim("approve") : null;
+        if (humanSeat && humanSeat.error) {
+          return respond({ ok: false, error: humanSeat.error, code: "RT_E_VALIDATION" }, 1);
+        }
         const policyVerdict = evaluatePolicy(
           flag(args, "force") ? "hitl.force" : "hitl.approve",
           `gate:P${project.hitl.phase}`,
-          {
-            actor: flag(args, "i-am-human")
-              ? { decidedBy: "human", seat: "human-cli-i-am-human" }
-              : { decidedBy: "autopilot", seat: "harness" },
-            humanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN,
-            expectedHumanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN,
-          },
+          humanSeat
+            ? {
+                actor: humanSeat.actor,
+                humanSeatToken: humanSeat.humanSeatToken,
+                expectedHumanSeatToken: humanSeat.expectedHumanSeatToken,
+              }
+            : { actor: { decidedBy: "autopilot", seat: "harness" } },
         );
         if (policyVerdict.decision !== "allow") {
           return respond(
@@ -615,7 +847,7 @@ async function main() {
             1,
           );
         }
-        const updated = h.approve(project, { force: flag(args, "force"), actor: flag(args, "i-am-human") ? { decidedBy: "human", seat: "human-cli-i-am-human" } : undefined, humanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN });
+        const updated = h.approve(project, { force: flag(args, "force"), actor: humanSeat ? humanSeat.actor : undefined, humanSeatToken: humanSeat ? humanSeat.humanSeatToken : undefined });
         h.saveProject(requireProjectPath(args, "approve"), updated);
         respond({ ok: true, path: requireProjectPath(args, "approve"), summary: h.summary(updated) }, 0);
         return;
@@ -754,6 +986,16 @@ async function main() {
         // human-accepted rows only). Requires a LIVE re-compile through
         // packet.ts (exportPacketText would serve the pre-stamped packet);
         // without the flag the verb is byte-identical to h.packet.
+        //
+        // R5-f10 (W29 · A2-f11): a valueless `--out` must never melt away into
+        // the stdout default — parseArgs turns a bare flag into `true`, which
+        // `typeof args.out === "string"` silently ignores. Refuse loudly.
+        if (args.out === true) {
+          return respond(
+            { ok: false, error: "packet --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+            1,
+          );
+        }
         let text;
         if (typeof args.knowledge === "string" && args.knowledge.trim()) {
           try {
@@ -770,7 +1012,7 @@ async function main() {
                 error: `packet: cannot seed tier-1 lessons from ${args.knowledge}: ${err instanceof Error ? err.message : String(err)}`,
                 ...errCode(err, "RT_E_INTERNAL"),
               },
-              1,
+              4,
             );
           }
         } else {
@@ -789,6 +1031,13 @@ async function main() {
 
       case "export": {
         const project = loadProjectFor("export");
+        // R5-f10 (W29 · A2-f11): valueless --out guard (see packet).
+        if (args.out === true) {
+          return respond(
+            { ok: false, error: "export --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+            1,
+          );
+        }
         const json = h.exportJson(project);
         if (typeof args.out === "string") {
           const out = resolve(args.out);
@@ -832,6 +1081,21 @@ async function main() {
               {
                 ok: false,
                 error: `emit --red-tree expects "refuse" or "banner" (got ${JSON.stringify(redTree)})`,
+                code: "RT_E_VALIDATION",
+              },
+              1,
+            );
+          }
+          // R11-f13 (W29 LANE H · A2-f11 re-verified): `--force` is a BOOLEAN
+          // flag; a stray value used to be swallowed by parseArgs so the flag
+          // silently read as absent — the value counterpart of the valueless
+          // `--out` guard above. Accept the boolean spellings only and refuse
+          // the rest loudly: never a silent no-force.
+          if (typeof args.force === "string" && !["true", "1", "false", "0"].includes(args.force)) {
+            return respond(
+              {
+                ok: false,
+                error: `emit --force is a boolean flag (got ${JSON.stringify(args.force)}) — pass it bare (--force) or as --force=true|1|false|0`,
                 code: "RT_E_VALIDATION",
               },
               1,
@@ -937,7 +1201,7 @@ async function main() {
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
-            1,
+            4,
           );
         }
         return;
@@ -962,16 +1226,32 @@ async function main() {
               acceptanceFixtures: merged,
               acceptanceBriefHash: String(fnv1a(project.brief ?? "")),
             };
-            delete next.acceptanceApprovedAt;
+            // R5-f09 (W29 · A2-f10): the stamp must AGREE with the rows — a
+            // blanket delete broke surviving approved rows of their stamp
+            // (hydration demotes approved rows on a brief-hash change; readers
+            // treat the pair as one fact). Keep it iff approved rows survive
+            // the merge AND the prior value was a real finite number.
+            const keptApproved = merged.some((c) => c.approval === "approved");
+            const priorStamp = project.acceptanceApprovedAt;
+            if (!keptApproved || typeof priorStamp !== "number" || !Number.isFinite(priorStamp)) {
+              delete next.acceptanceApprovedAt;
+            }
             h.saveProject(outPath, next);
-            respond({
-              ok: true,
-              drafted: draft.cases.length,
-              redCards: draft.redCards,
-              pending: merged.filter((c) => c.approval === "pending").length,
-              approvedKept: merged.filter((c) => c.approval === "approved").length,
-              note: "draft is pending — run fixtures --approve --ids … or --approve-all (never auto)",
-            });
+            // OPS-1 (W36 · N5): this envelope used respond()'s 1-arg form, so
+            // `exit_code` was left undefined and JSON.stringify dropped the key
+            // entirely (F5's scan: exactly 2 of 177 call sites). Every CLI
+            // envelope carries `exit_code`; the draft landed, so exit 0.
+            respond(
+              {
+                ok: true,
+                drafted: draft.cases.length,
+                redCards: draft.redCards,
+                pending: merged.filter((c) => c.approval === "pending").length,
+                approvedKept: merged.filter((c) => c.approval === "approved").length,
+                note: "draft is pending — run fixtures --approve --ids … or --approve-all (never auto)",
+              },
+              0,
+            );
             return;
           }
           if (flag(args, "approve") || flag(args, "approve-all")) {
@@ -986,21 +1266,88 @@ async function main() {
               respond({ ok: false, error: "fixtures --approve needs --ids id1,id2 or --approve-all", code: "RT_E_VALIDATION" }, 1);
               return;
             }
-            const approved = bf.approveFixtureCases(current, ids);
-            const next = { ...project, acceptanceFixtures: approved, acceptanceApprovedAt: Date.now() };
-            h.saveProject(outPath, next);
-            respond({
-              ok: true,
-              approved: ids,
-              pending: approved.filter((c) => c.approval === "pending").length,
+            // R5-f02 (W29 · A2-f01 · R11-f05): the acceptance approval is a
+            // HUMAN decision — route it through the ONE policy seam
+            // (`fixtures.approve`, requiresHumanSeat) exactly like `approve`
+            // does for a gate. The seat is the two-channel claim (R5-f12): a
+            // non-TTY --i-am-human is refused up front; a denied verdict (e.g.
+            // the autopilot seat, which may never self-approve) writes NOTHING
+            // and returns the reason + sanctioned fallback. The README's
+            // "drafted cases stay pending until a human approves" is now the
+            // enforced truth.
+            const { evaluatePolicy, seatLabel } = await import("../src/lib/policy.ts");
+            const humanSeat = flag(args, "i-am-human") ? await humanSeatClaim("fixtures") : null;
+            if (humanSeat && humanSeat.error) {
+              respond({ ok: false, error: humanSeat.error, code: "RT_E_VALIDATION" }, 1);
+              return;
+            }
+            const actor = humanSeat ? humanSeat.actor : { decidedBy: "autopilot", seat: "harness" };
+            const policyVerdict = evaluatePolicy("fixtures.approve", `fixtures:${outPath}`, {
+              actor,
+              humanSeatToken: humanSeat ? humanSeat.humanSeatToken : undefined,
+              expectedHumanSeatToken: humanSeat ? humanSeat.expectedHumanSeatToken : undefined,
             });
+            if (policyVerdict.decision !== "allow") {
+              respond(
+                {
+                  ok: false,
+                  error:
+                    `fixtures: refused by the policy seam — ${policyVerdict.reason} ` +
+                    `(sanctioned fallback: ${policyVerdict.fallback}); nothing was written. ` +
+                    `A human approves with --i-am-human from a terminal (re-enter RT_HUMAN_SEAT_TOKEN at the prompt).`,
+                  code: "RT_E_VALIDATION",
+                  policy: {
+                    action: "fixtures.approve",
+                    resource: `fixtures:${outPath}`,
+                    decision: "deny",
+                    reason: policyVerdict.reason,
+                    fallback: policyVerdict.fallback,
+                  },
+                },
+                1,
+              );
+              return;
+            }
+            // Provenance comes from the VERDICT's seat, never from the flag
+            // alone: only the verified human-seat reason stamps "human"; the
+            // autopilot seat (allowed by a future non-requiresHumanSeat rule)
+            // would stamp "autopilot".
+            const decidedBy = policyVerdict.reason.startsWith("human-seat-token-verified") ? "human" : "autopilot";
+            const approved = bf.approveFixtureCases(current, ids, { decidedBy });
+            // R5-f09 (the approve half of the pair predicate): stamp Date.now()
+            // only when an approved row is on disk after the flip; otherwise
+            // drop a stamp that no longer describes the rows.
+            const stamped = approved.some((c) => c.approval === "approved");
+            const next = { ...project, acceptanceFixtures: approved };
+            if (stamped) next.acceptanceApprovedAt = Date.now();
+            else delete next.acceptanceApprovedAt;
+            h.saveProject(outPath, next);
+            // OPS-1 (W36 · N5): second and last 1-arg respond() in the file —
+            // `exit_code` was silently dropped from this envelope. The approval
+            // landed (seat-verified or autopilot per the seam verdict), exit 0.
+            respond(
+              {
+                ok: true,
+                approved: ids,
+                decidedBy,
+                decidedVia: {
+                  action: "fixtures.approve",
+                  resource: `fixtures:${outPath}`,
+                  reason: policyVerdict.reason,
+                  label: seatLabel(actor),
+                  tokenPath: decidedBy === "human",
+                },
+                pending: approved.filter((c) => c.approval === "pending").length,
+              },
+              0,
+            );
             return;
           }
           respond({ ok: false, error: "fixtures requires --draft or --approve", code: "RT_E_VALIDATION" }, 1);
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
-            1,
+            4,
           );
         }
         return;
@@ -1015,13 +1362,17 @@ async function main() {
         // facts / coverage gaps), the history deltas (the LAST recorded history
         // row per slug vs the current results row) and the per-slug trend.
         //
-        // READ-ONLY in the strictest sense: no writes, no decision-ledger rows,
-        // no DEEPSEEK_API_KEY touch, no network, no model call — the reader is a
-        // pure parse+build over bytes already on disk. Exit taxonomy: 0 = the
-        // scorecard printed; 1 = usage/validation class (no readable/malformed
-        // results.json, unknown --slug) carrying RT_E_VALIDATION; 4 =
-        // RT_E_INTERNAL only if the reader itself throws. Exit 3 is unreachable
-        // by design — this verb has no keyed path to be "not configured".
+        // READ-ONLY over the eval documents (R5-f04 · W29 · A2-f04 narrowed
+        // this from the old broad claim): never writes results.json /
+        // history.json / run-in-progress.json, no decision-ledger rows, no
+        // DEEPSEEK_API_KEY touch, no network, no model call — the reader is a
+        // pure parse+build over bytes already on disk. But like EVERY verb,
+        // this exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/
+        // (the respond() contract). Exit taxonomy: 0 = the scorecard printed;
+        // 1 = usage/validation class (no readable/malformed results.json,
+        // unknown --slug) carrying RT_E_VALIDATION; 4 = RT_E_INTERNAL only if
+        // the reader itself throws. Exit 3 is unreachable by design — this verb
+        // has no keyed path to be "not configured".
         const envDir =
           typeof process.env.EVAL_OUT_DIR === "string" && process.env.EVAL_OUT_DIR.trim() !== ""
             ? resolve(process.env.EVAL_OUT_DIR)
@@ -1372,6 +1723,21 @@ async function main() {
           );
         }
         const targetPath = resolve(dirPath, relFile);
+        // R11-f07 (S-05): the lexical checks above cannot see a symlinked
+        // parent — verify the PHYSICAL containment too (shared helper).
+        // confirmed-outside → refusal; `null` (unverifiable) keeps the
+        // lexical verdict.
+        if (physicalInside(dirPath, targetPath) === false) {
+          return respond(
+            {
+              ok: false,
+              error: `edit: --file ${JSON.stringify(fileArg.value)} resolves OUTSIDE --dir ${JSON.stringify(dirPath)} on the real filesystem (symlinked parent/junction) — refusing (R11-f07).`,
+              code: "RT_E_VALIDATION",
+              dir: dirPath,
+            },
+            1,
+          );
+        }
         const findArg = requireArg(args, "find", "edit");
         if (findArg.error) {
           return respond(
@@ -1415,15 +1781,36 @@ async function main() {
         // (would --write be allowed?) is exactly what the write then enforces
         // (one rule, no divergence). The env read stays HERE: policy.ts is a
         // pure leaf and never reads env (its purity test pins that).
+        //
+        // R5-f12 (W29 LANE H · R11-f04/C2-f02): the --i-am-human claim is the
+        // TWO-CHANNEL seat (see humanSeatClaim) — typed TTY re-entry presented,
+        // env read expected; a non-TTY claim is refused before this seam (no
+        // second channel exists there). The same-env-var-both-sides
+        // degeneracy is statically forbidden by
+        // scripts/cli-exit-taxonomy.test.mjs.
         const { evaluatePolicy, seatLabel } = await import("../src/lib/policy.ts");
-        const actor = flag(args, "i-am-human")
-          ? { decidedBy: "human", seat: "human-cli-i-am-human" }
-          : { decidedBy: "autopilot", seat: "harness" };
+        const humanSeat = flag(args, "i-am-human") ? await humanSeatClaim("edit") : null;
+        if (humanSeat && humanSeat.error) {
+          return respond(
+            {
+              ok: false,
+              action: "edit",
+              mode: wantWrite ? "write" : "dry-run",
+              written: false,
+              error: humanSeat.error,
+              code: "RT_E_VALIDATION",
+              dir: dirPath,
+              file: relFile,
+            },
+            1,
+          );
+        }
+        const actor = humanSeat ? humanSeat.actor : { decidedBy: "autopilot", seat: "harness" };
         const resource = `tree:${dirPath}`;
         const verdict = evaluatePolicy("repair.apply", resource, {
           actor,
-          humanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN,
-          expectedHumanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN,
+          humanSeatToken: humanSeat ? humanSeat.humanSeatToken : undefined,
+          expectedHumanSeatToken: humanSeat ? humanSeat.expectedHumanSeatToken : undefined,
         });
         if (verdict.decision !== "allow") {
           return respond(
@@ -1646,10 +2033,13 @@ async function main() {
           }
           respond(envelope, 0);
         } catch (err) {
-          // Missing vault module / write failure → clean exit 1 (documented).
+          // R5-f03 (W29 · A2-f03): internal runtime failure → exit 4 per the
+          // documented taxonomy (README-cli.md: "Exit 4 = backend or internal
+          // runtime failure"). The usage-class failures (unreadable project,
+          // bad args) exit 1 with their own codes BEFORE this catch.
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
-            1,
+            4,
           );
         }
         return;
@@ -1667,7 +2057,7 @@ async function main() {
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
-            1,
+            4,
           );
         }
         return;
@@ -1820,6 +2210,13 @@ async function main() {
       case "design": {
         const project = loadProjectFor("design");
         try {
+          // R5-f10 (W29 · A2-f11): valueless --html guard (see packet).
+          if (args.html === true) {
+            return respond(
+              { ok: false, error: "design --html requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+              1,
+            );
+          }
           const tokens = await h.designTokens(project);
           const result = { ok: true, tokens };
           if (typeof args.html === "string") {
@@ -1833,7 +2230,7 @@ async function main() {
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
-            1,
+            4,
           );
         }
         return;
@@ -1858,6 +2255,13 @@ async function main() {
         try {
           const svg = await h.buildDiagram(project, kind.value); // throws on unknown kind / missing module
           const result = { ok: true, kind: kind.value, bytes: Buffer.byteLength(svg, "utf8") };
+          // R5-f10 (W29 · A2-f11): valueless --out guard (see packet).
+          if (args.out === true) {
+            return respond(
+              { ok: false, error: "diagram --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+              1,
+            );
+          }
           if (typeof args.out === "string") {
             const out = resolve(args.out);
             mkdirSync(dirname(out), { recursive: true });
@@ -1868,7 +2272,7 @@ async function main() {
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
-            1,
+            4,
           );
         }
         return;
@@ -1912,7 +2316,7 @@ async function main() {
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
-            1,
+            4,
           );
         }
         return;
@@ -1937,7 +2341,7 @@ async function main() {
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
-            1,
+            4,
           );
         }
         return;
@@ -1987,7 +2391,7 @@ async function main() {
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
-            1,
+            4,
           );
         }
         return;
@@ -2083,7 +2487,7 @@ async function main() {
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
-            1,
+            4,
           );
         }
         return;
@@ -2825,7 +3229,7 @@ async function main() {
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
-            1,
+            4,
           );
         }
         return;
@@ -2904,7 +3308,7 @@ async function main() {
               error: err instanceof Error ? err.message : String(err),
               ...errCode(err, "RT_E_INTERNAL"),
             },
-            1,
+            4,
           );
         }
         return;
@@ -3019,7 +3423,7 @@ async function main() {
               error: err instanceof Error ? err.message : String(err),
               ...errCode(err, "RT_E_INTERNAL"),
             },
-            1,
+            4,
           );
         }
         return;
@@ -3059,9 +3463,22 @@ async function main() {
           let status = null;
           let currentPhase = null;
           let wildRun = null;
+          // R12-f07: the growth surface below must carry REAL counts, not the
+          // hardcoded zeros that made the detector inert (projectFile: 0 even
+          // for a measured 158,302 B file). Filled inside the load block.
+          let projectFileBytes = 0;
+          let ledgerRowCount = 0;
+          let chatLogRowCount = 0;
           if (typeof CLI_PROJECT === "string" && CLI_PROJECT.trim()) {
             try {
               const p = h.loadProject(CLI_PROJECT);
+              try {
+                projectFileBytes = statSync(CLI_PROJECT).size;
+              } catch {
+                /* unstattable project file — honest 0 */
+              }
+              ledgerRowCount = Array.isArray(p.decisions) ? p.decisions.length : 0;
+              chatLogRowCount = Array.isArray(p.chatLog) ? p.chatLog.length : 0;
               name = typeof p.name === "string" ? p.name : null;
               status = typeof p.status === "string" ? p.status : null;
               currentPhase = typeof p.currentPhase === "number" ? p.currentPhase : null;
@@ -3111,12 +3528,12 @@ async function main() {
               heartbeatLagMs: null,
               stall: null,
               lastLongTaskMs: null,
-              budgetsMs: { wildStep: 90_000, chat: 60_000 },
+              budgetsMs: { wildStep: 255_000, chat: 60_000 }, // P6_PHASE_MAX_MS (240_000) + 15_000 — keep in sync with rt-events.ts WILD_STEP_BUDGET_MS (was 90_000; W-01 makes legal keyed steps exceed it)
             },
             growth: {
-              rows: { ledger: 0, telemetryRing: rows.length, chatLog: 0 },
+              rows: { ledger: ledgerRowCount, telemetryRing: rows.length, chatLog: chatLogRowCount },
               bytes: {
-                projectFile: 0,
+                projectFile: projectFileBytes,
                 logDirBytes: rtServer ? rtServer.logDirBytes(rtServer.resolveLogDir(CLI_PROJECT)) : 0,
                 localStorageEstimate: null,
               },
@@ -3160,21 +3577,91 @@ function requireProjectPath(args, cmdName) {
   return proj.value;
 }
 
+// ---------------------------------------------------------------------------
+// The human seat — TWO channels (W29 LANE H · R5-f12 · R11-f04/C2-f02).
+//
+// The defect this closes: `approve` and `edit --write` read BOTH
+// `humanSeatToken` and `expectedHumanSeatToken` from the SAME
+// `process.env.RT_HUMAN_SEAT_TOKEN`, so policy.ts's `isVerifiedHumanSeatToken`
+// collapsed to "the env var is non-empty" and the `human-seat-unverified`
+// deny was unreachable from the CLI — any process that merely exported the
+// variable (its own value!) minted `decidedBy:"human"`.
+//
+// Two channels now:
+//   · Channel A (possession/claim) — RT_HUMAN_SEAT_TOKEN in the environment,
+//     the out-of-band secret the human exports in their own shell.
+//   · Channel B (presence/confirmation) — an interactive re-entry typed at a
+//     TTY prompt; the environment cannot furnish a keystroke from a person.
+// The TYPED value is the presented side; the env read stays the expected side
+// (policy.ts remains a pure, env-free leaf). A non-TTY claim of the human
+// seat is refused outright — no second channel exists there, so no human row
+// may be minted. Honest ceiling: same-OS-user processes can always read
+// env/files; this is an accountability control under the ledger-trust
+// assumption, NOT a security boundary (README-cli.md §The `approve` seat
+// states the same ceiling) — but it must never be VACUOUS again.
+// ---------------------------------------------------------------------------
+async function promptHumanSeatToken() {
+  // The prompt goes to STDERR so stdout stays exactly one JSON object.
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = await new Promise((settle) => {
+      let done = false;
+      const finish = (value) => {
+        if (!done) {
+          done = true;
+          settle(value);
+        }
+      };
+      rl.question("Confirm human seat — re-enter RT_HUMAN_SEAT_TOKEN: ", (a) => finish(a));
+      // EOF (Ctrl-D) closes the interface without answering: treat as an empty
+      // presented token → the seam's human-seat-unverified deny, never a hang.
+      rl.once("close", () => finish(""));
+    });
+    return typeof answer === "string" ? answer.trim() : "";
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * Claim the human seat (Channel A + Channel B) or hand back a refusal.
+ * Returns `{ error }` when no second channel exists, else
+ * `{ actor, humanSeatToken (typed), expectedHumanSeatToken (env) }`.
+ */
+async function humanSeatClaim(cmd) {
+  if (process.stdin.isTTY !== true) {
+    return {
+      error:
+        `${cmd}: --i-am-human refused — the human seat needs an interactive confirmation ` +
+        `(re-enter RT_HUMAN_SEAT_TOKEN at the TTY prompt) and this stdin is not a TTY, so the ` +
+        `environment alone cannot furnish a second channel. Use the autopilot seat instead ` +
+        `(omit --i-am-human) or run the verb from a terminal where a person can confirm.`,
+    };
+  }
+  return {
+    actor: { decidedBy: "human", seat: "human-cli-i-am-human" },
+    humanSeatToken: await promptHumanSeatToken(),
+    expectedHumanSeatToken: process.env.RT_HUMAN_SEAT_TOKEN,
+  };
+}
+
 const USAGE = {
   description: "File-based headless RapidTool driver (no browser).",
   commands: {
     create: "create --brief <text> [--name <text>] [--advisory] [--out <file.json>]   # default out: <slug>.json in the CWD (intermediate control file); --advisory: advisory DoD gates even when DEEPSEEK_API_KEY is set (keyed runs default enforceDod ON)",
-    run: "run --project <file.json> [--live]            # advance one phase",
-    gate: "gate --project <file.json> [--autopilot] [--live]  # advance until parked",
-    approve: "approve --project <file.json> [--force] [--i-am-human]   # --i-am-human: human-seat claim (non-TTY requires it + the out-of-band RT_HUMAN_SEAT_TOKEN)",
+    run: "run --project <file.json> [--live] [--unattended]   # advance one phase; --unattended = autopilot+live forced until parked (the scheduler-facing twin is the `unattended` verb)",
+    gate: "gate --project <file.json> [--autopilot] [--live] [--unattended]  # advance until parked; --unattended forces autopilot+live",
+    resume: "resume --project <file.json|dir> [--autopilot] [--live]  # T-107.7: read the per-phase checkpoint written beside the project dir by run/gate, admit it (identity + mode + integer phase sanity), hydrate it, and re-enter the drive at the recorded phase; prints the snapshot age — exit taxonomy identical to gate (2 = parked). Never a silent resume",
+    unattended: "unattended --project <file.json|dir>  # W-47: scheduler-facing drive — re-enter from a checkpoint when one exists (crash recovery), else start from the named project file; autopilot + live until parked; NOT a daemon (a host hook — Windows Task Scheduler / cron — invokes it on a cadence); stock HITL gates still park for a human by design (exit 2)",
+    approve: "approve --project <file.json> [--force] [--i-am-human]   # --i-am-human: human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY; use `gate --autopilot` for machine approval)",
     reject: "reject --project <file.json> --note <text>",
     retry: "retry --project <file.json>                  # unlock a rejected/blocked phase",
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",
     packet: "packet --project <file.json> [--out <file.md>] [--knowledge <store.json>]  # --knowledge seeds the Ranked-memory section with cross-project accepted lesson rows (tier-1, advisory)",
     export: "export --project <file.json> [--out <file.json>]",
     emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse)",
-    fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR human-approve selected/all ids — never auto-approves",
-    eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, no writes, nothing fabricated — a missing history prints as 'no history', never a fake 0 delta",
+    fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR approve selected/all ids — never auto-approves: --approve routes through the policy seam's human seat (--i-am-human + a TTY re-entry of RT_HUMAN_SEAT_TOKEN; a denied verdict writes nothing and stamps no decidedBy)",
+    eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, nothing fabricated — the eval-out documents are never written (like every verb, the exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/); a missing history prints as 'no history', never a fake 0 delta",
     "tree-run": "tree-run --dir <dir> [--project <file.json>]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0; red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
     repair: "repair --dir <dir> --project <file.json> [--budget N]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (path→content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun → red tail → one bounded synthesis repair call with deps.treeFailure → apply repaired files in place → re-import → treeRun again); green → tested-equivalent mint + honest P6 gate + converged (0); budget exhausted → honest failed (1, RT_E_REPAIR_FAILED); the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
     edit: "edit --dir <dir> --file <relpath> --find <old> --replace <new> [--write] [--project <file.json>]  # 216s (108-T1): ONE in-place str_replace on an emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, nothing is written); --write (requires --project) applies atomically only after evaluatePolicy(\"repair.apply\", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes); ambiguous / missing / no-op matches are coded refusals",

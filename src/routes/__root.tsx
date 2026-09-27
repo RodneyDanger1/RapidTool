@@ -38,7 +38,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "RapidTool is an autonomous software agency. Research, architect, isolate, and ship through a 13-phase governed graph.",
+          "RapidTool is a governed delivery harness. Research, architect, isolate, and ship through a 13-phase audited graph.",
       },
       { name: "theme-color", content: "#0a0c0b" },
     ],

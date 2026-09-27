@@ -2,6 +2,13 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { completeDeepSeek, deepSeekModelIds, isDeepSeekConfigured } from "./deepseek.server.ts";
 import type { DeepSeekMessage } from "./deepseek.server.ts";
+import { ERROR_CODE_DOC } from "./errors.ts";
+import {
+  completeOpenAiCompatible,
+  createOpenAiCompatibleProvider,
+  XAI_API_KEY_ENV,
+  XAI_SPEC,
+} from "./llm/providers/openai-compatible.ts";
 
 const status = () => ({ configured: isDeepSeekConfigured(), models: deepSeekModelIds() });
 
@@ -24,11 +31,13 @@ const realFetch = globalThis.fetch;
 
 beforeEach(() => {
   delete process.env[KEY];
+  delete process.env[XAI_API_KEY_ENV];
 });
 
 afterEach(() => {
   globalThis.fetch = realFetch;
   delete process.env[KEY];
+  delete process.env[XAI_API_KEY_ENV];
 });
 
 describe("llm complete", () => {
@@ -128,7 +137,11 @@ describe("llm complete", () => {
     }
   });
 
-  it("maps a 402 balance refusal to RT_E_LLM_REJECTED", async () => {
+  // §R9-f01 (W29): the W23-L1 wallet doctrine — an HTTP 402 / "Insufficient
+  // Balance" refusal is NOT a generic refusal. It gets its own code, whose
+  // ERROR_CODE_DOC row tells the agent the true next action ("top up and
+  // re-run", never "check the key or the parameters").
+  it("maps a 402 balance refusal to RT_E_LLM_NO_BALANCE", async () => {
     process.env[KEY] = "sk-broke";
     globalThis.fetch = (async () =>
       okResponse({ error: { message: "Insufficient Balance" } }, 402)) as typeof fetch;
@@ -137,7 +150,33 @@ describe("llm complete", () => {
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.equal(result.reason, "error");
-      assert.equal(result.code, "RT_E_LLM_REJECTED");
+      assert.equal(result.code, "RT_E_LLM_NO_BALANCE");
+      assert.match(result.error ?? "", /402|balance/i);
+      // Cite the registry (errors.ts ERROR_CODE_DOC): every surfaced code must
+      // stay documented for the agent that consumes it.
+      const doc = ERROR_CODE_DOC.RT_E_LLM_NO_BALANCE;
+      assert.ok(doc && doc.meaning.length > 0 && doc.agentAction.length > 0);
+    }
+  });
+
+  // §R9-f01 × §R4-f01 (W-17) — the xAI TWIN. The wallet doctrine is
+  // provider-wide: the OpenAI-compatible adapter must read the same class as
+  // NO_BALANCE (its describeError already prints "account balance exhausted").
+  // RED-first at HEAD: openai-compatible.ts maps EVERY refusal to the generic
+  // RT_E_LLM_REJECTED — lane P's R4-f01 owns the product half.
+  it("maps an xAI 402 balance refusal to RT_E_LLM_NO_BALANCE (R4-f01 twin)", async () => {
+    process.env[XAI_API_KEY_ENV] = "sk-broke";
+    globalThis.fetch = (async () =>
+      okResponse({ error: { message: "Insufficient Balance" } }, 402)) as typeof fetch;
+
+    const probed = createOpenAiCompatibleProvider(XAI_SPEC, ["probe-model-id" as never]);
+    const result = await completeOpenAiCompatible(XAI_SPEC, probed.requestModelIds, "hello", {
+      model: "probe-model-id" as never,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.reason, "error");
+      assert.equal(result.code, "RT_E_LLM_NO_BALANCE");
       assert.match(result.error ?? "", /402|balance/i);
     }
   });

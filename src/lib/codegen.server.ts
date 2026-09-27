@@ -35,7 +35,11 @@
 //      with the
 //      shared brief + full req list + THAT chunk's
 //      signatures + the earlier chunks' exported top-level names + reqTrace
-//      (so later files call earlier exports by name in the assembled bundle),
+//      (so later files call earlier exports by name in the assembled bundle)
+//      + the capped DATA CONTRACTS block rendered from project.contracts
+//      (R10-f01 · W39 Z2: both user-prompt builders, non-empty-gated — an
+//      absent/empty contract keeps the exact legacy prompt bytes; ≤12 rows
+//      with a visible elision marker past the cap),
 //      deterministic per-file validation, deterministic assembly into
 //      Project.generatedTree (per-file fnv1a hash + attempt:0) with
 //      generatedSource = the materialized ENTRY file's own bytes
@@ -43,7 +47,10 @@
 //      rewritten to real ESM, with `src/generated.ts` as the barrel entry;
 //      fixes/258 closed the single-chunk identity path that shipped raw
 //      CommonJS into the `"type":"module"` tenant and killed the emitted spec
-//      at import). A chunk refusal keeps
+//      at import; FM-01 (W37 Y1) closed the LAST raw-CJS path — the
+//      single-module branch below materializes at synthesis time through the
+//      same function, so every synthesis is ESM BEFORE emit and the emit-time
+//      residue guard stays purely a backstop). A chunk refusal keeps
 //      the prior chunks' files on the returned project + records
 //      p6.synthesis.refused naming the chunk index (honest partial — never a
 //      fabricated full pass).
@@ -64,11 +71,12 @@
 //      is the tree-run lane's step) — per-file deterministic validation is the
 //      mechanical floor until then.
 //   5. Honest state — on a pass the returned project carries
-//      generatedSource = the verified module, lastTest {label:"tested",
-//      evidenceHash}, the kind-"code" artifact "Generated module (LLM,
-//      machine-verified)", a "verify" outcome artifact, the persisted
-//      implementationSpec, and modelRoute "deepseek-flash" (the tier that
-//      really synthesized it — expand/oracle are flash too). On ANY failure
+//      generatedSource = the materialized ESM entry (the barrel; the verified
+//      module's own bytes live in the tree's chunk file — FM-01), lastTest
+//      {label:"tested", evidenceHash}, the kind-"code" artifact "Generated
+//      module (LLM, machine-verified)", a "verify" outcome artifact, the
+//      persisted implementationSpec, and modelRoute derived from the SERVED
+//      model id (FM-04; expand/oracle are request-pinned flash). On ANY failure
 //      (unparseable envelope ×2, validation, brief-fit, verify failed/error,
 //      chunk refusal) the deterministic floor stands and a `p6.synthesis.refused`
 //      warn log records the RT_E_* code — never a fabricated pass; a multi-chunk
@@ -108,13 +116,16 @@ import { verifyAndFixServer, type VerifyOutcome } from "./verify.server.ts";
 import type { ErrorCode } from "./errors.ts";
 import type { LlmResult } from "./llm.ts";
 import {
-  emptyLedger,
   recordSpend,
+  sessionTokenBudget,
   totalTokens,
   type TokenLedger,
 } from "./token-ledger.ts";
+// R12-f04 (fixes/271): the P6 phase max lives in the client-safe constants
+// table; this module consumes it (single source — no literal fork).
+import { P6_PHASE_MAX_MS } from "./rt-events.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
-import type { Artifact, ArtifactKind, GeneratedTreeFile, JsonLog, PhaseId, Project } from "./types.ts";
+import type { Artifact, ArtifactKind, DataContract, GeneratedTreeFile, JsonLog, ModelRoute, PhaseId, Project } from "./types.ts";
 // T5.4 (W18 LANE 5): the artifact-provenance shape + vocabulary live in io.ts
 // (the serialization boundary that validates and round-trips them). TYPE-ONLY
 // import — erased at runtime, so this server module gains no new runtime edge.
@@ -134,7 +145,7 @@ export const P6_MODULE_MAX_CHARS = 60_000;
 // the abort honesty (a truly hung call still dies loudly) while letting
 // real synthesis finish; fixes/156 E1 turns pro thinking OFF for the
 // envelope (output budget, not CoT), which also shortens the wall clock.
-export const P6_SYNTH_TIMEOUT_MS = 240_000;
+export const P6_SYNTH_TIMEOUT_MS = P6_PHASE_MAX_MS;
 /**
  * 216 (T0.1 — model-tier correction; supersedes fixes/125): the MAIN synthesis
  * call and its repair re-prompts run on the FLASH tier. The original fixes/125
@@ -151,6 +162,34 @@ export const P6_SYNTH_MODEL = DEEPSEEK_MODELS.flash;
 /** Brief budget in the synthesis user prompt (never silently cut — marked). */
 const P6_BRIEF_MAX_CHARS = 2_000;
 const TRUNCATION_MARK = "\n…[TRUNCATED — brief longer than the synthesis budget; the visible prefix governs]";
+
+/**
+ * R12-f01: prior-render cap. Every later chunk re-sent EVERY prior file line
+ * (O(chunks²) prompt growth); the assembled module binds all of them as
+ * parameters regardless, so the render only needs the MOST RECENT exports.
+ * Keep the last N (most recently generated = most likely to be called) and
+ * mark the elision visibly — never silently drop context.
+ */
+export const P6_SYNTH_PRIOR_MAX_FILES = 12;
+
+/**
+ * R12-f01: per-chunk prompt char budget for the PRIOR block. A pathological
+ * prior list (200 files, or one 60k-char exports line) must not blow the
+ * envelope: rendering stops with a visible marker once the block would push
+ * the prompt past this budget. Char length === byte length for the ASCII
+ * prompt shapes here; the marker names the budget so the cut is auditable.
+ */
+export const P6_SYNTH_PROMPT_MAX_CHARS = 60_000;
+
+/**
+ * R10-f01 (W39 Z2 · G3's wire): the DATA CONTRACTS render cap. project.contracts
+ * reached scaffold/packet/engine/diagram but never the synthesis prompt — the
+ * model wrote module bodies blind to the A6 contract. The prompt renders at
+ * most this many contract rows (entity + endpoint combined, entities first);
+ * beyond the cap a visible `…[CONTRACTS-ELIDED: …]` marker names the elision —
+ * never a silent drop.
+ */
+export const P6_SYNTH_CONTRACTS_MAX_ROWS = 12;
 
 /**
  * Forbidden-primitive split (fixes/116 reliability repair). The sandbox's
@@ -914,6 +953,22 @@ async function attemptPatchRepair(input: {
     p6SynthesisPatchRepairPrompt(input.defect, excerpt.windows, input.treeFailure),
     input.opts,
   );
+  // FM-03 (W37 Y1): the patch repair is a bounded repair call too — its spend
+  // is metered like the rest. A budget stop refuses the patch (recorded on the
+  // caller's bounded sink); the caller's legacy repair path then surfaces the
+  // coded stop through its own accounting. TODO(FM-03b): thread a terminal
+  // stop through attemptPatchRepair's result shape so the follow-up call is
+  // skipped entirely (kept out of this window — two callers, byte-parity pins).
+  const patchStop = accountRepairUsage(reply);
+  if (patchStop) {
+    input.log?.(
+      patchRefusalLogEntry(
+        `RT_E_BUDGET_EXHAUSTED · ${patchStop.error ?? "session token budget exhausted during the patch repair call"}`,
+        input.path,
+      ),
+    );
+    return null;
+  }
   if (!reply.ok) {
     input.log?.(
       patchRefusalLogEntry(
@@ -1194,12 +1249,73 @@ export function p6SynthesisBriefFitRepairPrompt(
 }
 
 /**
+ * R10-f01 (W39 Z2 · G3's wire): render `project.contracts` — the persisted A6
+ * `DataContract` (types.ts `:300`) — as a capped DATA CONTRACTS prompt block
+ * for the synthesis builders. Rows mirror the packet's own forms
+ * (packet.ts `:567-570`): entities as `<name> (<field:type, …>)` under an
+ * `entities:` heading, endpoints as `<METHOD> <path> (<job>)` under
+ * `endpoints:`. NON-EMPTY GATE (Y1's FM-08 precedent): a null/absent/
+ * empty/wholly-unrenderable contract returns [] and both builders keep the
+ * exact legacy prompt bytes (keyless byte-parity + the T-01 pins). Total rows
+ * cap at P6_SYNTH_CONTRACTS_MAX_ROWS (entities first, declare order) with a
+ * visible `…[CONTRACTS-ELIDED: …]` marker past the cap (R12-f01's marker
+ * convention — never a silent cut). Values whitespace-collapse to single
+ * spaces so a malformed imported contract can never inject prompt line
+ * structure; rows are plain ASCII bullets — no new raw tokens.
+ */
+export function p6SynthesisContractsLines(contracts: DataContract | null | undefined): string[] {
+  if (contracts === null || contracts === undefined || typeof contracts !== "object") return [];
+  const rows: { kind: "entity" | "endpoint"; text: string }[] = [];
+  const squash = (v: string): string => v.replace(/\s+/g, " ").trim();
+  for (const e of Array.isArray(contracts.entities) ? contracts.entities : []) {
+    if (!e || typeof e.name !== "string") continue;
+    const name = squash(e.name);
+    if (!name) continue;
+    const fields: string[] = [];
+    for (const f of Array.isArray(e.fields) ? e.fields : []) {
+      if (!f || typeof f.name !== "string" || typeof f.type !== "string") continue;
+      const fn = squash(f.name);
+      const ft = squash(f.type);
+      if (fn && ft) fields.push(`${fn}:${ft}`);
+    }
+    rows.push({ kind: "entity", text: `- ${name} (${fields.join(", ") || "no fields declared"})` });
+  }
+  for (const e of Array.isArray(contracts.endpoints) ? contracts.endpoints : []) {
+    if (!e || typeof e.method !== "string" || typeof e.path !== "string") continue;
+    const method = squash(e.method);
+    const path = squash(e.path);
+    if (!method || !path) continue;
+    const job = typeof e.job === "string" ? squash(e.job) : "";
+    rows.push({ kind: "endpoint", text: `- ${method} ${path}${job ? ` (${job})` : ""}` });
+  }
+  if (rows.length === 0) return [];
+  const shown = rows.slice(0, P6_SYNTH_CONTRACTS_MAX_ROWS);
+  const lines: string[] = [
+    "",
+    "DATA CONTRACTS (the project's persisted A6 data contract — implement its entities and endpoints inside existing functions; do NOT add APIs for it):",
+  ];
+  for (const kind of ["entity", "endpoint"] as const) {
+    const group = shown.filter((r) => r.kind === kind);
+    if (group.length === 0) continue;
+    lines.push(kind === "entity" ? "entities:" : "endpoints:");
+    for (const r of group) lines.push(r.text);
+  }
+  if (rows.length > shown.length) {
+    lines.push(
+      `- …[CONTRACTS-ELIDED: ${rows.length - shown.length} row(s) beyond the ${P6_SYNTH_CONTRACTS_MAX_ROWS}-row render cap — the full data contract persists on project.contracts]`,
+    );
+  }
+  return lines;
+}
+
+/**
  * Synthesis user prompt: brief + spec, deterministic and capped. The
  * typeSignatures are the interface definitions the module MUST export
  * (MetaGPT Engineer evidence, [W-META] fixes/97 §W). fixes/144 (M2): thin
  * delegate of the chunked builder with the FULL signature list and no prior
  * files — byte-identical output to the pre-M2 prompt (the ≤8-signature,
- * single-chunk legacy contract; regression-tested).
+ * single-chunk legacy contract; regression-tested). R10-f01 (W39 Z2):
+ * forwards the optional contracts argument (gated in the chunk builder).
  */
 export function p6SynthesisUserPrompt(
   brief: string,
@@ -1212,8 +1328,12 @@ export function p6SynthesisUserPrompt(
     negativeConstraints: string[];
   },
   lessons: readonly string[] = [],
+
+  /** R10-f01 (W39 Z2): project.contracts — rendered by the chunk builder
+   *  behind a non-empty gate; absent/null/empty ⇒ byte-identical legacy. */
+  contracts?: DataContract | null,
 ): string {
-  return p6SynthesisChunkUserPrompt(brief, spec, spec.typeSignatures, [], lessons);
+  return p6SynthesisChunkUserPrompt(brief, spec, spec.typeSignatures, [], lessons, contracts);
 }
 
 /** One already-accepted earlier file of a chunked synthesis run (its exports
@@ -1229,14 +1349,18 @@ export type ChunkPriorFile = {
 
 /**
  * fixes/144 (M2 / S-01 T2): chunked-sequential-synthesis user prompt. The
- * prefix (BRIEF → EDGE CASES) renders byte-identically to the legacy
- * single-module prompt for THIS chunk's signature list; chunks after the
+ * prefix (BRIEF → ERROR HANDLING) renders byte-identically to the legacy
+ * single-module prompt for THIS chunk's signature list (FM-08 renders the
+ * dataFlow/errorHandling blocks in both — the parity is between the builders);
+ * chunks after the
  * first APPEND an "earlier files" context block carrying the earlier chunks'
  * exported top-level names + covered requirements, so a later file can call
  * an earlier export by name in the assembled bundle (never redeclare, never
  * import — the forbidden-primitive contract is unchanged per file). Empty
  * prior files + full signature list ⇒ byte-identical to the legacy prompt
- * (p6SynthesisUserPrompt delegates here).
+ * (p6SynthesisUserPrompt delegates here). R10-f01 (W39 Z2): the optional
+ * contracts argument adds the capped DATA CONTRACTS block (see
+ * p6SynthesisContractsLines); absent/empty keeps the legacy-byte contract.
  */
 export function p6SynthesisChunkUserPrompt(
   brief: string,
@@ -1251,11 +1375,28 @@ export function p6SynthesisChunkUserPrompt(
   chunkSignatures: readonly string[],
   priorFiles: readonly ChunkPriorFile[] = [],
   lessons: readonly string[] = [],
+
+  /** R10-f01 (W39 Z2): project.contracts — the capped DATA CONTRACTS block
+   *  renders only when at least one entity/endpoint row survives
+   *  normalization (non-empty gate, FM-08's precedent). */
+  contracts?: DataContract | null,
 ): string {
   const raw = typeof brief === "string" ? brief.trim() : "";
   const capped =
     raw.length > P6_BRIEF_MAX_CHARS ? `${raw.slice(0, P6_BRIEF_MAX_CHARS).trimEnd()}${TRUNCATION_MARK}` : raw;
   const sigs = Array.isArray(chunkSignatures) ? chunkSignatures.filter((s): s is string => typeof s === "string") : [];
+  // FM-08 (W37 Y1): the two spec fields this prompt used to drop — filtered
+  // non-empty rows only, so a spec without them keeps the exact legacy bytes.
+  const dataFlowEntries = (Array.isArray(spec.dataFlow) ? spec.dataFlow : [])
+    .filter((c): c is string => typeof c === "string" && c.trim() !== "")
+    .map((c) => `- ${c}`);
+  const errorHandlingEntries = (Array.isArray(spec.errorHandling) ? spec.errorHandling : [])
+    .filter((c): c is string => typeof c === "string" && c.trim() !== "")
+    .map((c) => `- ${c}`);
+  // R10-f01 (W39 Z2): the A6 data contract render — [] unless the project
+  // carries at least one renderable entity/endpoint row (the FM-08 non-empty
+  // gate, mirrored); a contract-less project keeps the exact legacy bytes.
+  const contractLines = p6SynthesisContractsLines(contracts);
   const lines = [
     "BRIEF:",
     capped || "(empty brief — implement the spec requirements only)",
@@ -1276,6 +1417,33 @@ export function p6SynthesisChunkUserPrompt(
     "",
     "EDGE CASES (behave sensibly inside existing functions; do NOT add APIs for them):",
     ...spec.edgeCases.map((c) => `- ${c}`),
+    // FM-08 (W37 Y1): prompt-engine expands SIX spec fields and this module
+    // persists all six (requirements/edgeCases/errorHandling/typeSignatures/
+    // dataFlow/negativeConstraints), but this builder rendered only four —
+    // requirements about data ordering and failure handling were generated,
+    // persisted, displayed downstream, and NEVER reached the generator (a
+    // silent spec-to-code loss on every keyed run). Additive rendering behind
+    // the non-empty gates above: a spec without them keeps the legacy prompt
+    // bytes; the render is capped-scope like the neighbours (inside existing
+    // functions, no new APIs).
+    ...(dataFlowEntries.length > 0
+      ? [
+          "",
+          "DATA FLOW (respect this ordering/data shape inside existing functions; do NOT add APIs for it):",
+          ...dataFlowEntries,
+        ]
+      : []),
+    ...(errorHandlingEntries.length > 0
+      ? [
+          "",
+          "ERROR HANDLING (handle these failure modes inside existing functions; do NOT add APIs for it):",
+          ...errorHandlingEntries,
+        ]
+      : []),
+    // R10-f01 (W39 Z2): the persisted A6 contract's entity/endpoint rows —
+    // capped at P6_SYNTH_CONTRACTS_MAX_ROWS with a visible elision marker;
+    // the empty list keeps the legacy prompt bytes (keyless byte-parity).
+    ...contractLines,
   ];
   if (Array.isArray(priorFiles) && priorFiles.length > 0) {
     lines.push(
@@ -1286,13 +1454,38 @@ export function p6SynthesisChunkUserPrompt(
       "re-implement what they already cover, and give this file's own non-exported helpers names no earlier file used.",
       "Implement ONLY the type signatures listed above in THIS file.):",
     );
-    for (const f of priorFiles) {
+    // R12-f01: cap the prior render (last N files) + enforce the byte budget
+    // as lines are appended. Both cuts carry a visible …[PRIOR-ELIDED…] marker
+    // naming what was left out and why; the assembled module still binds every
+    // prior export as a parameter, so nothing callable is lost by the cut.
+    const shown =
+      priorFiles.length > P6_SYNTH_PRIOR_MAX_FILES
+        ? priorFiles.slice(-P6_SYNTH_PRIOR_MAX_FILES)
+        : priorFiles;
+    const overCap = priorFiles.length - shown.length;
+    if (overCap > 0) {
+      lines.push(
+        `- …[PRIOR-ELIDED: ${overCap} earlier file(s) beyond the ${P6_SYNTH_PRIOR_MAX_FILES}-file render cap — their exports remain bound in the assembled module]`,
+      );
+    }
+    let budgetLeft = P6_SYNTH_PROMPT_MAX_CHARS - lines.join("\n").length;
+    let rendered = 0;
+    for (const f of shown) {
       const covered = Object.entries(f.reqTrace ?? {})
         .filter(([, name]) => (Array.isArray(f.exports) ? f.exports.includes(name) : false))
         .map(([req]) => req)
         .sort();
       const reqPart = covered.length > 0 ? ` · covers ${covered.join(", ")}` : "";
-      lines.push(`- ${f.path} exports: ${(f.exports ?? []).join(", ") || "(none)"}${reqPart}`);
+      const line = `- ${f.path} exports: ${(f.exports ?? []).join(", ") || "(none)"}${reqPart}`;
+      if (line.length + 1 > budgetLeft) {
+        lines.push(
+          `- …[PRIOR-ELIDED: ${shown.length - rendered} file(s) beyond the ${P6_SYNTH_PROMPT_MAX_CHARS.toLocaleString("en-US")}-char prompt budget — their exports remain bound in the assembled module]`,
+        );
+        break;
+      }
+      lines.push(line);
+      budgetLeft -= line.length + 1;
+      rendered += 1;
     }
   }
   if (Array.isArray(lessons) && lessons.length > 0) {
@@ -2279,16 +2472,18 @@ function isTransientSynthFailure(res: LlmResult): boolean {
   return res.ok === false && res.code === "RT_E_LLM_TIMEOUT";
 }
 
-/** Optional hard cap. Unset / 0 / NaN → unmetered (byte-identical). */
-export function p6TokenCapFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
-  const raw = env.RAPIDTOOL_TOKEN_CAP;
-  if (typeof raw !== "string" || !raw.trim()) return undefined;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
-}
-
+// R4-f03 (W30 · LANE S3): the duplicate env parser (`p6TokenCapFromEnv`) is
+// GONE — ONE parser for `RAPIDTOOL_TOKEN_CAP` lives in token-ledger.ts
+// (`tokenCapFromEnv`), and the process-scoped ledger + cap come from
+// `sessionTokenBudget()` (the same object every production call site below
+// shares, so the cap binds the RUN, not one call — R12-f02's runaway).
 function accountSynthUsage(ledger: TokenLedger, res: LlmResult, cap: number | undefined): LlmResult | null {
-  if (!res.ok || !res.usage) return null;
+  // FM-03 (W37 Y1): record EVERY response that reports usage — success or not
+  // (the I2 ledger contract, token-ledger.ts: "record every response that
+  // reports usage, success or not"). Before this, a refusal that reported
+  // usage was silently dropped and RAPIDTOOL_TOKEN_CAP under-counted real
+  // spend. Return identity is unchanged when no cap is set.
+  if (!res.usage) return null;
   const next = recordSpend(ledger, {
     promptTokens: res.usage.promptTokens,
     completionTokens: res.usage.completionTokens,
@@ -2307,13 +2502,40 @@ function accountSynthUsage(ledger: TokenLedger, res: LlmResult, cap: number | un
   return null;
 }
 
+/**
+ * FM-03 (W37 Y1): bounded repair re-prompts call `completeCall` directly,
+ * outside `synthWithBackoff` — before this their spend was invisible to the
+ * session ledger (RAPIDTOOL_TOKEN_CAP systematically under-counted by every
+ * repair call, and a budget stop surfaced as a model/provider-failure story).
+ * Record the repair reply against the SAME session budget the primary call
+ * used and hand the caller the coded stop to surface (RT_E_BUDGET_EXHAUSTED),
+ * never a degraded prose refusal.
+ */
+function accountRepairUsage(res: LlmResult): { error: string } | null {
+  const { ledger, cap } = sessionTokenBudget();
+  const stopped = accountSynthUsage(ledger, res, cap);
+  if (!stopped) return null;
+  // W38 boundary fix: narrow at the single point so all 6 call sites read a guaranteed string
+  // (the previous return type echoed the union, so `.error` was a TS2339 on the ok variant).
+  return {
+    error: !stopped.ok
+      ? stopped.error ?? "session token budget exhausted during a repair call"
+      : "session token budget exhausted during a repair call",
+  };
+}
+
 export async function synthWithBackoff(
   complete: (prompt: string, opts?: DeepSeekCompleteOptions) => Promise<LlmResult>,
   prompt: string,
   opts: DeepSeekCompleteOptions,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
-  ledger: TokenLedger = emptyLedger(),
-  cap: number | undefined = p6TokenCapFromEnv(),
+  // R4-f03 (W30 · LANE S3): the defaults are the PROCESS session budget —
+  // every production call site (below) passes neither, so all of them share
+  // ONE ledger + ONE cap: `RAPIDTOOL_TOKEN_CAP` binds the whole RUN, not a
+  // single call (R12-f02's runaway). Explicit callers/tests keep full control
+  // (pass your own ledger+cap, or use token-ledger.ts `resetSessionBudget()`).
+  ledger: TokenLedger = sessionTokenBudget().ledger,
+  cap: number | undefined = sessionTokenBudget().cap,
 ): Promise<LlmResult> {
   let last: LlmResult | null = null;
   for (let attempt = 0; attempt < P6_SYNTH_MAX_ATTEMPTS; attempt++) {
@@ -2518,6 +2740,28 @@ function testedLastTestStamp(detail: string, evidenceHash: string): {
 }
 
 /**
+ * FM-04 (W37 Y1): the packet-facing `project.modelRoute` is DERIVED from the id
+ * the provider actually SERVED — never the old hardcoded flash constant.
+ * Before this, a `DEEPSEEK_MODEL_MAIN=deepseek-v4-pro` pin (or any future
+ * non-flash serve) left the run record claiming `deepseek-flash` while the
+ * artifact provenance correctly named the served id: the declared serve-model
+ * honesty held for artifacts and failed for the run record. The union
+ * (types.ts `ModelRoute`) is closed and DeepSeek-scoped: a `…pro` id maps to
+ * "deepseek-pro", every flash-tier id maps to "deepseek-flash", and an
+ * absent/unrecognized served id keeps the historical flash label (the tier
+ * every synthesis call REQUESTS — P6_SYNTH_MODEL; the unserved case is the
+ * already-declared default, never a guess about a serve that did not report).
+ * A non-DeepSeek provider id is unreachable today — `RAPIDTOOL_PROVIDER=xai`
+ * refuses by construction (FM-11) — TODO(FM-04b): widen the union + the io.ts
+ * validator when a cross-family route becomes reachable (W-45/OWNER keys).
+ */
+function modelRouteForServed(servedModel: string | null | undefined): ModelRoute {
+  const id = typeof servedModel === "string" ? servedModel.trim().toLowerCase() : "";
+  if (id.includes("pro")) return "deepseek-pro";
+  return "deepseek-flash";
+}
+
+/**
  * Upgrade the deterministic P6 result with the machine-verified module.
  * Replaces the placeholder's kind-"code" artifacts (the labeled template +
  * its sandbox result) with the real module + verify outcome; stamps lastTest
@@ -2589,7 +2833,8 @@ function upgraded(
     generatedSource: finalModule,
     lastTest: testedLastTest,
     implementationSpec: specRecord,
-    modelRoute: "deepseek-flash",
+    // FM-04 (W37 Y1): derived from the SERVED id, never a hardcoded constant.
+    modelRoute: modelRouteForServed(servedModel),
     memory,
     artifacts,
     logs: [
@@ -2753,10 +2998,13 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
  * byte-for-byte: one pro-tier call + one bounded repair re-prompt per failure
  * class (envelope / export-binding / forbidden / missing-signature /
  * brief-fit) + deterministic export-injection + machine verify
- * (verifyAndFixServer) + the upgraded honest state. On success the verified
- * module is ALSO recorded as the one-file generatedTree (entry at
- * TREE_ENTRY_PATH, fnv1a hash, attempt 0) — the ≤8-signature legacy contract
- * is unchanged (generatedSource = the verified module, byte-identical).
+ * (verifyAndFixServer) + the upgraded honest state, with the verified module
+ * materialized to ESM at synthesis time (FM-01 · W37 Y1: an ESM barrel at
+ * TREE_ENTRY_PATH + the module relocated to TREE_CHUNK0_RELOCATED_PATH with
+ * its CJS assigns stripped — generatedSource is the barrel entry, never raw
+ * CJS; the machine-verified artifact keeps describing the verified module).
+ * The ≤8-signature legacy PIPELINE is unchanged (one call + bounded repairs +
+ * machine verify, byte-for-byte).
  */
 async function synthesizeSingleModule(
   project: Project,
@@ -2775,7 +3023,9 @@ async function synthesizeSingleModule(
     selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
     { limit: EXPAND_LESSON_RANK_LIMIT },
   );
-  const user = p6SynthesisUserPrompt(brief, specRecord, lessonLines);
+  // R10-f01 (W39 Z2): project.contracts rides the prompt — the model used to
+  // write the module body blind to the A6 data contract (G3's wire).
+  const user = p6SynthesisUserPrompt(brief, specRecord, lessonLines, project.contracts);
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
     json: true,
@@ -2825,6 +3075,12 @@ async function synthesizeSingleModule(
   let envelope = parseSynthesisEnvelope(res.text, readSink);
   if (envelope === null) {
     const repair = await completeCall(p6SynthesisRepairPrompt(treeFailure), opts);
+    // FM-03 (W37 Y1): repair-re-prompt spend is metered against the session
+    // budget; a stop is served as the coded refusal, never as model-failure prose.
+    const repairStop = accountRepairUsage(repair);
+    if (repairStop) {
+      return refuse(withAttemptLogs(project, attemptLogs), "RT_E_BUDGET_EXHAUSTED", repairStop.error ?? "session token budget exhausted during a repair re-prompt");
+    }
     if (repair.ok) envelope = parseSynthesisEnvelope(repair.text, readSink);
   }
   if (envelope === null) {
@@ -2911,6 +3167,11 @@ async function synthesizeSingleModule(
               ? p6SynthesisNondeterministicRepairPrompt(nondet, treeFailure)
               : p6SynthesisProseRepairPrompt(prose, treeFailure);
       const repair = await completeCall(repairPrompt, opts);
+      // FM-03 (W37 Y1): metered like every bounded repair call.
+      const repairStop = accountRepairUsage(repair);
+      if (repairStop) {
+        return refuse(withAttemptLogs(project, attemptLogs), "RT_E_BUDGET_EXHAUSTED", repairStop.error ?? "session token budget exhausted during a repair re-prompt");
+      }
       if (repair.ok) {
         const repaired = parseSynthesisEnvelope(repair.text, readSink);
         if (repaired) {
@@ -2926,6 +3187,11 @@ async function synthesizeSingleModule(
     // fixes/121: the brief-fit class gets ONE bounded repair re-prompt too —
     // the module may have ignored the brief's vocabulary on the first pass.
     const repair = await completeCall(p6SynthesisBriefFitRepairPrompt(fit.missing, treeFailure), opts);
+    // FM-03 (W37 Y1): metered like every bounded repair call.
+    const repairStop = accountRepairUsage(repair);
+    if (repairStop) {
+      return refuse(withAttemptLogs(project, attemptLogs), "RT_E_BUDGET_EXHAUSTED", repairStop.error ?? "session token budget exhausted during a repair re-prompt");
+    }
     if (repair.ok) {
       const repaired = parseSynthesisEnvelope(repair.text, readSink);
       if (repaired) {
@@ -2988,12 +3254,28 @@ async function synthesizeSingleModule(
   // T5.4: the SERVED model id from the primary synthesis LlmResult (never the
   // requested P6_SYNTH_MODEL constant) rides into the artifact provenance.
   const up = upgraded(withAttemptLogs(project, attemptLogs), finalModule, outcome, specRecord, res.model);
-  // fixes/144 (M2): the verified single module is the one-file generatedTree
-  // (entry path; content-addressed hash; attempt 0) — generatedSource stays
-  // byte-identical (== the tree file's source) so every existing consumer
-  // (verify/scaffold/dod) is untouched while the tree shape exists for the
-  // assembly + p6-arch lanes.
-  return { ...up, generatedTree: [toGeneratedTreeFile(TREE_ENTRY_PATH, finalModule)] };
+  // FM-01 (W37 Y1): materialize at SYNTHESIS time — the same seam the chunked
+  // path uses (:3183). Before this the verified single module was recorded as
+  // RAW CommonJS, and only the emit-time residue guard (headless.ts
+  // materializeEmitTree) rewrote it for the `"type":"module"` tenant — so any
+  // consumer that read generatedTree/generatedSource WITHOUT emitting
+  // (inspect/packet/tree-run on a non-emitted project/a new driver) got bytes
+  // that die at import. The recorded shape now equals the chunked path's: an
+  // ESM barrel at TREE_ENTRY_PATH + the module relocated to
+  // TREE_CHUNK0_RELOCATED_PATH with its CJS assigns stripped (module.exports
+  // is what p6SynthesisSystemPrompt still mandates from the MODEL; the harness
+  // rewrites it, never the prompt). generatedSource is the barrel entry's own
+  // bytes. The emit-time guard stays as the backstop — now a no-op over this
+  // tree. The machine-verified artifact (codeArtifact body, verify record,
+  // lastTest evidenceHash) keeps describing the verified CJS module itself.
+  const materialized = materializeImportableTree([
+    { path: TREE_ENTRY_PATH, source: finalModule, exports: envelope.exports, reqTrace: envelope.reqTrace },
+  ]);
+  return {
+    ...up,
+    generatedSource: materialized.entrySource,
+    generatedTree: materialized.files.map((f) => toGeneratedTreeFile(f.path, f.source)),
+  };
 }
 
 /**
@@ -3075,7 +3357,8 @@ async function synthesizeChunkedTree(
       selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
       { limit: EXPAND_LESSON_RANK_LIMIT },
     );
-    const user = p6SynthesisChunkUserPrompt(brief, specRecord, chunk.signatures, prior, lessonLines);
+    // R10-f01 (W39 Z2): the same project-level contract block on every chunk.
+    const user = p6SynthesisChunkUserPrompt(brief, specRecord, chunk.signatures, prior, lessonLines, project.contracts);
     // T-107.1 (216r): per-chunk patch-repair sink — the chunk plan's path IS
     // the emitted tree file's path; absent when the level is off (legacy).
     const patch: PatchRepairOptions | undefined = patchRepairs
@@ -3106,6 +3389,7 @@ async function synthesizeChunkedTree(
         plan.length,
         synth.code,
         synth.error,
+        servedModel,
       );
     }
     // D1/D3: consume the plan row's path directly (no treePathForChunk for a
@@ -3130,6 +3414,7 @@ async function synthesizeChunkedTree(
       plan.length,
       "RT_E_VALIDATION",
       `assembled tree does not implement the brief's required vocabulary (missing: ${fit.missing.slice(0, 12).join(", ")}; tree-level p6-brief-fit after all chunks accepted)`,
+      servedModel,
     );
   }
   const materialized = materializeImportableTree(accepted);
@@ -3182,6 +3467,11 @@ async function synthesizeChunkEnvelope(
   let envelope = parseSynthesisEnvelope(res.text, readSink);
   if (envelope === null) {
     const repair = await completeCall(p6SynthesisRepairPrompt(treeFailure), opts);
+    // FM-03 (W37 Y1): metered like every bounded repair call.
+    const repairStop = accountRepairUsage(repair);
+    if (repairStop) {
+      return { ok: false, code: "RT_E_BUDGET_EXHAUSTED", error: repairStop.error ?? "session token budget exhausted during a repair re-prompt" };
+    }
     if (repair.ok) envelope = parseSynthesisEnvelope(repair.text, readSink);
   }
   if (envelope === null) {
@@ -3254,6 +3544,11 @@ async function synthesizeChunkEnvelope(
               ? p6SynthesisNondeterministicRepairPrompt(nondet, treeFailure)
               : p6SynthesisProseRepairPrompt(prose, treeFailure);
       const repair = await completeCall(repairPrompt, opts);
+      // FM-03 (W37 Y1): metered like every bounded repair call.
+      const repairStop = accountRepairUsage(repair);
+      if (repairStop) {
+        return { ok: false, code: "RT_E_BUDGET_EXHAUSTED", error: repairStop.error ?? "session token budget exhausted during a repair re-prompt" };
+      }
       if (repair.ok) {
         const repaired = parseSynthesisEnvelope(repair.text, readSink);
         if (repaired) {
@@ -3279,12 +3574,12 @@ async function synthesizeChunkEnvelope(
 /**
  * fixes/144 (M2): honest partial refusal for the chunked path. Prior chunks'
  * accepted files stay REAL on the returned project (generatedTree +
- * generatedSource = the assembled partial entry + modelRoute deepseek-pro —
- * the pro tier really synthesized them), and a p6.synthesis.refused warn log
- * records the refused chunk index (chunkIndex -1 = all chunks accepted but
- * the tree-level brief-fit gate failed). When chunk 0 itself refuses nothing
- * real exists — the deterministic floor stands untouched. Never a fabricated
- * full pass.
+ * generatedSource = the assembled partial entry; modelRoute derives from the
+ * SERVED model of the first accepted chunk — FM-04), and a p6.synthesis.refused
+ * warn log records the refused chunk index (chunkIndex -1 = all chunks
+ * accepted but the tree-level brief-fit gate failed). When chunk 0 itself
+ * refuses nothing real exists — the deterministic floor stands untouched.
+ * Never a fabricated full pass.
  */
 function partialTreeRefuse(
   project: Project,
@@ -3293,6 +3588,9 @@ function partialTreeRefuse(
   chunkTotal: number,
   code: ErrorCode,
   detail: string,
+  /** FM-04 (W37 Y1): the SERVED model id of the first accepted chunk (null
+   *  when chunk 0 itself refused) — the route label derives from it. */
+  servedModel: string | null = null,
 ): Project {
   const materialized = accepted.length > 0 ? materializeImportableTree(accepted) : null;
   const base: Project =
@@ -3301,7 +3599,14 @@ function partialTreeRefuse(
           ...project,
           generatedTree: materialized.files.map((f) => toGeneratedTreeFile(f.path, f.source)),
           generatedSource: materialized.entrySource,
-          modelRoute: "deepseek-flash",
+          // FM-04 (W37 Y1): the SERVED route of the first accepted chunk.
+          modelRoute: modelRouteForServed(servedModel),
+          // 216 (T-06 / F-02) + W-05 (W29 · R9-f02): the partial tree REPLACED
+          // the artifact the floor's `tests.pass` stamp describes, so carrying
+          // that stamp forward let `p6-test` (dod.ts probe) read green for
+          // untested code. Invalidate EXACTLY as treeUpgraded does; the only
+          // re-mint path stays mintTreeRunTested() after a green tree-run.
+          lastTest: null,
         }
       : project;
   const where = chunkIndex < 0 ? `tree ${chunkTotal}/${chunkTotal} chunks accepted` : `chunk ${chunkIndex + 1}/${chunkTotal} refused`;
@@ -3382,7 +3687,8 @@ function treeUpgraded(
     // stamp, which is the honest direction (never claim tested when unsure).
     lastTest: null,
     implementationSpec: specRecord,
-    modelRoute: "deepseek-flash",
+    // FM-04 (W37 Y1): derived from the SERVED id of the first accepted chunk.
+    modelRoute: modelRouteForServed(servedModel),
     memory,
     artifacts,
     logs: [

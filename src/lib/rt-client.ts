@@ -193,7 +193,11 @@ function safeFlatten(err: unknown): string | null {
 }
 
 function stampSeed(seed: RtEventSeed, host: RtHost): RtEvent {
-  const r = ring ?? createRtRing();
+  // A1-40: never stamp from a throwaway ring — sessionId is the correlation
+  // key for the whole diagnosis story, so a row stamped before the singleton
+  // exists must initialize THE singleton (`getRtRing`), never a discarded twin
+  // whose sessionId matches no ring, no persisted blob, no crash snapshot.
+  const r = ring ?? (ring = getRtRing());
   const ts = Date.now();
   const row: RtEvent = {
     schema_version: RT_SCHEMA_VERSION,
@@ -261,7 +265,13 @@ function importPreviousCrash(target: RtRing): void {
   if (!raw) return;
   try {
     const parsed = JSON.parse(raw) as { at?: unknown; href?: unknown; ring?: unknown };
-    const at = typeof parsed.at === "number" ? parsed.at : Date.now();
+    // R4-f06 (W39·B4 sweep): the crash blob is localStorage — user-writable, so
+    // `at` may be any JSON number. `{"at":1e999}` parses to Infinity, which the
+    // typeof check below let through: the poisoned snapshot then survived into
+    // `crashSnapshot` (assigned before the `new Date(at)` stamp threw) and
+    // diagnose's freeze-pre-capture summary RangeError'd out of the Runtime Log
+    // pane. Finite-guard at the source so only a real timestamp can be imported.
+    const at = typeof parsed.at === "number" && Number.isFinite(parsed.at) ? parsed.at : Date.now();
     const href = typeof parsed.href === "string" ? parsed.href.slice(0, 200) : "";
     crashSnapshot = { at, href };
     storageRemove(RT_CRASH_KEY);
@@ -657,6 +667,10 @@ export function buildClientDiagnosis(input: ClientDiagnosisInput, now: number = 
     budgetsMs: { wildStep: WILD_STEP_BUDGET_MS, chat: CHAT_STEP_BUDGET_MS },
   };
 
+  // A1-39: the chatLog line below documents optional-chain safety; `logs`
+  // gets the same treatment — a legacy/hand-built project without a `logs`
+  // array must report 0 here, never throw inside the diagnostic builder.
+  const projectLogs = input.project?.logs;
   const counts = input.counts ?? {};
   return buildDiagnosis({
     source: "ui",
@@ -673,7 +687,7 @@ export function buildClientDiagnosis(input: ClientDiagnosisInput, now: number = 
     watchdog,
     growth: {
       rows: {
-        ledger: input.project?.logs.length ?? 0,
+        ledger: Array.isArray(projectLogs) ? projectLogs.length : 0,
         telemetryRing: stats.rows,
         // PB-02: real chat-thread growth — the project's persisted chatLog is
         // present in state, so a zeroed number misled ("0 rows" while the

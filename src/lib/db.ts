@@ -1,4 +1,4 @@
-import { pendingMigrations } from "../../scripts/migration-plan.mjs";
+import { authSchemaRefusal, pendingMigrations } from "../../scripts/migration-plan.mjs";
 
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
@@ -9,6 +9,12 @@ const rawDatabaseUrl =
   typeof process !== "undefined" ? process.env.DATABASE_URL : undefined;
 const databaseUrl =
   rawDatabaseUrl && rawDatabaseUrl.trim() ? rawDatabaseUrl : undefined;
+
+// R15-f02 (fixes/273_t2_r15.md): sign-in is considered enabled unless the flag
+// is explicitly "false" (parity with `src/lib/auth/server.ts`'s `authDisabled`).
+const authEnabledByEnv =
+  (typeof process !== "undefined" ? process.env.VITE_AUTH_ENABLED?.trim() : undefined) !==
+  "false";
 
 /**
  * Active backend: real **Neon** when `DATABASE_URL` is set (deployed / configured
@@ -146,6 +152,20 @@ async function createPgliteSql(): Promise<Sql> {
       "select name from _migrations",
     );
     const done = doneRows.rows.map((r) => r.name);
+    // R15-f02: sign-in enabled + no migration here creating the Better Auth
+    // `user` table -> refuse with the copy-up fix instead of serving sign-in
+    // against a schema-less database. Mirrors the deploy-side preflight in
+    // scripts/migrate.mjs; pinned in scripts/migration-plan.test.mjs.
+    const authRefusal = authSchemaRefusal({
+      authEnabled: authEnabledByEnv,
+      names: Object.keys(migrations),
+      sql: Object.values(migrations),
+    });
+    if (authRefusal) {
+      const err = new Error(authRefusal.message) as Error & { code: string };
+      err.code = authRefusal.code;
+      throw err;
+    }
     for (const { name, path } of pendingMigrations(Object.keys(migrations), done)) {
       // Apply + record atomically (parity with scripts/migrate.mjs) so a failed
       // statement can't leave a file half-applied but untracked.
@@ -183,8 +203,11 @@ async function createSql(): Promise<Sql> {
  * Get the shared, **server-only** SQL client. Neon when `DATABASE_URL` is set,
  * otherwise the local PGLite fallback. Memoized — safe to call per request.
  *
- * Schema comes from `migrations/*.sql`, auto-applied before the first query on
- * both backends — define tables there, never inline in server functions.
+ * Schema comes from `migrations/*.sql`. On the PGLite fallback it is applied
+ * here, before the first query; on Neon it is applied by `scripts/migrate.mjs`
+ * during `npm run build` (this module never migrates a remote pool — a runtime
+ * DATABASE_URL without a build has NO applier; see B2/W39). Define tables in
+ * `migrations/`, never inline in server functions.
  */
 export function getSql(): Promise<Sql> {
   sqlPromise ??= createSql().catch((err) => {

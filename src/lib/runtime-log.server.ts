@@ -137,7 +137,11 @@ export function readRtTail(logDir: string, n: number): RtEvent[] {
     // Read at most the last 256 KB — n rows are ≤ ~2 KB each by construction.
     const stats = statSync(file);
     const start = Math.max(0, stats.size - 256 * 1024);
-    const buf = readFileSync(file, { encoding: "utf8" }).slice(start > 0 ? start : 0);
+    // B2 (W39): `start` is a BYTE offset — slice the Buffer, not a UTF-8-decoded
+    // string's code units (a multibyte character straddling the boundary shifted
+    // the window and left the first line a mojibake fragment; the "last 256 KB"
+    // claim only held for ASCII input).
+    const buf = readFileSync(file).subarray(start).toString("utf8");
     const rows: RtEvent[] = [];
     for (const line of buf.split("\n")) {
       const trimmed = line.trim();

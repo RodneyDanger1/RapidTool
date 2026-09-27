@@ -29,10 +29,13 @@ import { test } from "node:test";
  *      ONE ledger row carrying actor + `decidedVia` provenance + the patch +
  *      before/after hashes — asserted against the bytes on disk (the reported
  *      `hashAfter` is recomputed from the file the write really produced);
- *   4. the ONE policy seam (`evaluatePolicy("repair.apply", tree:<dir>)`) —
- *      an unverified human seat (`--i-am-human` with no `RT_HUMAN_SEAT_TOKEN`)
- *      is DENIED in write mode and in the dry-run pre-flight; the verified
- *      human seat (token presented) is allowed and attributed as human;
+ *   4. the TWO-CHANNEL seat (R5-f12) at the ONE policy seam
+ *      (`evaluatePolicy("repair.apply", tree:<dir>)`) — a non-TTY
+ *      `--i-am-human` claim (this suite's spawned children) is REFUSED before
+ *      the seam: exit 1, coded, nothing written, NO `policy` verdict on the
+ *      envelope — even when `RT_HUMAN_SEAT_TOKEN` is exported. (The seat's
+ *      positive path needs a TTY re-entry a child cannot fake; it stays at
+ *      the library seam — headless.test.ts.)
  *   5. containment — a `--file` that escapes `--dir` (relative `..` segment or
  *      an absolute path) is refused and the outside file is untouched.
  *
@@ -294,10 +297,25 @@ test("W9-L3 edit: --write without --project is refused — an applied edit must 
 });
 
 // ---------------------------------------------------------------------------
-// 3. The policy seam — deny (no token) on write AND dry-run; allow with token.
+// 3. The policy seam — the R5-f12 two-channel seat. A non-TTY claim is refused
+//    BEFORE the seam in write mode AND in the dry-run pre-flight: no policy
+//    verdict is emitted, nothing is written — token exported or not. (The
+//    seat's positive path is the library seam's; a TTY cannot be faked from a
+//    spawned child.)
 // ---------------------------------------------------------------------------
 
-test("W9-L3 edit: policy deny — --i-am-human with no out-of-band token refuses the WRITE, nothing written", () => {
+test("W9-L3 edit: --i-am-human on a non-TTY is refused BEFORE the seam — WRITE mode, coded, nothing written (W36-N6 re-point, R5-f12)", () => {
+  // R5-f12 Track 1 (research/multiagent/thoroughanalysis.md:869-877; L3's
+  // verdict in fixes/277_l3_ui_records.md): the human seat is TWO channels —
+  // the out-of-band RT_HUMAN_SEAT_TOKEN (claim) PLUS a TTY re-entry
+  // (confirmation). A spawned child has no TTY, so `humanSeatClaim` refuses
+  // BEFORE `evaluatePolicy` runs. The pre-two-channel expectations of this pin
+  // (`policy.decision === "deny"` / `policy.reason /^human-seat-unverified/`)
+  // are unreachable BY DESIGN — there is no policy verdict on this envelope —
+  // so the pin now asserts the refusal's ACTUAL bytes (rapidtool-cli.mjs
+  // edit-arm refusal :1621-1635 + the humanSeatClaim text :3459-3467). The
+  // seat's positive path needs a real TTY (unfakeable from a child) and stays
+  // at the library seam (headless.test.ts); this leg pins the machine-safe half.
   const buildBefore = fileDigest(BUILD);
   const out = cliJson(
     [
@@ -312,19 +330,28 @@ test("W9-L3 edit: policy deny — --i-am-human with no out-of-band token refuses
   assert.equal(out.status, 1);
   assert.equal(j.ok, false);
   assert.equal(j.code, "RT_E_VALIDATION");
+  assert.equal(j.action, "edit");
   assert.equal(j.written, false);
   assert.equal(j.mode, "write");
-  assert.equal(j.policy.decision, "deny");
-  assert.equal(j.policy.action, "repair.apply");
-  assert.equal(j.policy.fallback, "human-seat-token");
-  assert.match(j.policy.reason, /^human-seat-unverified/);
-  assert.match(j.error, /refused by the policy seam/);
+  assert.equal(j.dir, resolve(TREE));
+  assert.equal(j.file, "src/deny.ts");
+  // The two-channel refusal fires BEFORE the seam: no verdict may appear.
+  assert.equal("policy" in j, false, "no policy field — the seat refusal precedes the seam");
+  assert.match(j.error, /^edit: --i-am-human refused/);
+  assert.match(j.error, /needs an interactive confirmation/);
+  assert.match(j.error, /not a TTY/);
+  assert.match(j.error, /RT_HUMAN_SEAT_TOKEN/);
+  assert.match(j.error, /autopilot seat instead/);
 
-  assert.equal(readFileSync(join(TREE, "src", "deny.ts"), "utf8"), SEEDED, "a denied write must not touch the target");
-  assert.equal(fileDigest(BUILD), buildBefore, "a denied write must not land a ledger row");
+  assert.equal(readFileSync(join(TREE, "src", "deny.ts"), "utf8"), SEEDED, "a refused seat claim must not touch the target");
+  assert.equal(fileDigest(BUILD), buildBefore, "a refused seat claim must not land a ledger row");
 });
 
-test("W9-L3 edit: the policy deny is surfaced by the DRY-RUN pre-flight too (one rule, no divergence)", () => {
+test("W9-L3 edit: the seat refusal fires in the DRY-RUN pre-flight too — no second channel, no seam verdict, nothing written (W36-N6 re-point, R5-f12)", () => {
+  // Same re-point rationale as the WRITE-mode case above: the two-channel
+  // refusal precedes the seam, so the old `policy.decision === "deny"`
+  // expectation is unreachable. What holds — and is pinned here — is that the
+  // dry-run consults the SAME seat first (one rule, no divergence).
   const before = dirDigest(TREE);
   const out = cliJson(
     ["edit", "--dir", TREE, "--file", "src/deny.ts", "--find", "return a + b;", "--replace", "return a - b;", "--i-am-human"],
@@ -335,14 +362,19 @@ test("W9-L3 edit: the policy deny is surfaced by the DRY-RUN pre-flight too (one
   assert.equal(out.status, 1);
   assert.equal(j.ok, false);
   assert.equal(j.code, "RT_E_VALIDATION");
+  assert.equal(j.action, "edit");
   assert.equal(j.mode, "dry-run");
   assert.equal(j.written, false);
-  assert.equal(j.policy.decision, "deny", "the dry-run answers the exact question --write would ask");
+  assert.equal("policy" in j, false, "no verdict exists — the seat refusal precedes the seam");
+  assert.match(j.error, /--i-am-human refused/);
+  assert.match(j.error, /not a TTY/);
   assert.equal(dirDigest(TREE), before);
 });
 
 // ---------------------------------------------------------------------------
 // 4. Write path — atomic apply + ONE attributed ledger row, asserted on disk.
+//    (The former verified-seat-writes case re-pointed to the two-channel
+//    refusal — a spawned child cannot present the TTY channel. See its name.)
 // ---------------------------------------------------------------------------
 
 test("W9-L3 edit: --write applies + lands ONE ledger row (actor + decidedVia + patch + hashes, asserted on disk)", () => {
@@ -398,32 +430,48 @@ test("W9-L3 edit: --write applies + lands ONE ledger row (actor + decidedVia + p
   assert.equal(j.policy.decision, "allow");
 });
 
-test("W9-L3 edit: the VERIFIED human seat (token presented) writes and is attributed as human", () => {
-  const out = cliJson(
-    [
-      "edit", "--dir", TREE, "--file", "src/human.ts",
-      "--find", "return a + b;", "--replace", "return a / b;",
-      "--write", "--project", BUILD, "--i-am-human",
-    ],
-    { cwd: root, env: { RT_HUMAN_SEAT_TOKEN: "w9-l3-human-seat-token" } },
+test("W9-L3 edit: a non-TTY --i-am-human is refused EVEN WITH the env token — the TTY re-entry is the second channel; nothing written (W36-N6 re-point, R5-f12)", () => {
+  // The old expectation — non-TTY + token ⇒ write + human attribution — is
+  // the very degeneracy R5-f12 closed ("it must never be VACUOUS again"): the
+  // env var alone is only Channel A (possession); Channel B is the typed TTY
+  // re-entry, which a spawned child cannot furnish. So this invocation is
+  // refused BEFORE the seam WHETHER OR NOT the token is exported — proven by
+  // running both variants and pinning the refusal bytes equal. The
+  // human-attributed write path stays at the library seam (headless.test.ts
+  // POSITIVE CONTROL) — a TTY is not fakeable from this leg by design.
+  const buildBefore = fileDigest(BUILD);
+  const targetBefore = readFileSync(join(TREE, "src", "human.ts"), "utf8");
+  const args = [
+    "edit", "--dir", TREE, "--file", "src/human.ts",
+    "--find", "return a + b;", "--replace", "return a / b;",
+    "--write", "--project", BUILD, "--i-am-human",
+  ];
+  const withToken = cliJson(args, { cwd: root, env: { RT_HUMAN_SEAT_TOKEN: "w9-l3-human-seat-token" } });
+  const withoutToken = cliJson(args, { cwd: root });
+
+  for (const out of [withToken, withoutToken]) {
+    const j = out.json;
+    assert.equal(out.status, 1, "a non-TTY seat claim can never exit 0, token or not");
+    assert.equal(j.ok, false);
+    assert.equal(j.code, "RT_E_VALIDATION");
+    assert.equal(j.action, "edit");
+    assert.equal(j.mode, "write");
+    assert.equal(j.written, false);
+    assert.equal("policy" in j, false, "refused before the seam — no verdict exists");
+    assert.match(j.error, /^edit: --i-am-human refused/);
+    assert.match(j.error, /not a TTY/);
+  }
+  assert.equal(
+    withToken.json.error,
+    withoutToken.json.error,
+    "the env token must change NOTHING — the missing TTY is the refusal, not the token",
   );
-  const j = out.json;
 
-  assert.equal(out.status, 0);
-  assert.equal(j.written, true);
-  assert.equal(j.policy.decision, "allow");
-  assert.equal(j.policy.label, "human/human-cli-i-am-human");
-  assert.equal(j.policy.tokenPath, true);
-  assert.equal(j.ledger.decidedVia.label, "human/human-cli-i-am-human");
-  assert.equal(j.ledger.decidedVia.tokenPath, true);
-
-  assert.equal(readFileSync(join(TREE, "src", "human.ts"), "utf8"), PATCHED_DIV);
-  const project = JSON.parse(readFileSync(BUILD, "utf8"));
-  const detail = JSON.parse(project.logs[project.logs.length - 1].detail);
-  assert.equal(detail.actor.decidedBy, "human");
-  assert.equal(detail.actor.seat, "human-cli-i-am-human");
-  assert.match(detail.decidedVia.reason, /^human-seat-token-verified/);
-  assert.equal(detail.decidedVia.tokenPath, true);
+  assert.equal(targetBefore, SEEDED);
+  const afterBytes = readFileSync(join(TREE, "src", "human.ts"), "utf8");
+  assert.equal(afterBytes, targetBefore, "the refused write must leave the target untouched");
+  assert.notEqual(afterBytes, PATCHED_DIV, "the would-be patched bytes must never have landed");
+  assert.equal(fileDigest(BUILD), buildBefore, "no ledger row may be minted by a refused machine claim");
 });
 
 // ---------------------------------------------------------------------------

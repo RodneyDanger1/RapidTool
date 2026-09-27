@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
+import { Component, Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
@@ -263,6 +263,11 @@ const LAST_TEST_LABEL_TEXT: Record<string, string> = {
  * `label` field says where the verdict came from; rows without it (legacy
  * payloads, pre-label real-run merges) get the neutral "last test" wording so
  * the UI never claims a provenance it cannot see.
+ *
+ * Same in-file rule, R6-f02 (W-11): never "autonomous software agency/factory"
+ * while `doctor` prints autonomousSoftwareFactory:false — that claim lived on
+ * four surfaces (Home tagline, both route meta tags, og/site.json) until W29.
+ * The honest descriptor is "governed delivery harness".
  */
 function lastTestCaption(lt: { ok: boolean; detail: string } | null): string | null {
   if (!lt) return null;
@@ -1190,7 +1195,16 @@ function WildConsole({ project }: { project: Project }) {
               level: "error",
               scope: "wild-step",
               event: "wild.step_timeout",
-              message: `Wild run P${run.phase ?? "?"} stale ${Math.round((Date.now() - run.lastAutoAt) / 1000)}s past budget`,
+              // R12-f05: the message must be COALESCER-STABLE — the changing
+              // "stale Ns" used to ride the messageHash, so the dedupe window
+              // never matched and every ~11s tick wrote a fresh row (localStorage
+              // churn). Seconds (and the budget) ride the payload instead; the
+              // message varies only per-phase, which is a bounded key set.
+              message: `Wild run P${run.phase ?? "?"} stale past budget`,
+              payload: {
+                staleSeconds: Math.round((Date.now() - run.lastAutoAt) / 1000),
+                budgetMs: WILD_STEP_BUDGET_MS,
+              },
               capture: "src/components/console.tsx:WildFeed watchdog",
               code: "RT_E_LLM_TIMEOUT",
               phase: run.phase ?? null,
@@ -1285,7 +1299,7 @@ function WildConsole({ project }: { project: Project }) {
           className={`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 font-mono text-[10px] font-medium tracking-wider ${
             running
               ? "border-wild/50 bg-wild/10 text-wild"
-              : wild.run?.paused === true
+              : wildPaused(wild.run)
                 ? "border-warn/40 bg-warn/10 text-warn"
                 : "border-border text-muted"
           }`}
@@ -1295,7 +1309,7 @@ function WildConsole({ project }: { project: Project }) {
               <span aria-hidden="true" className="wild-live-dot h-1.5 w-1.5 rounded-full bg-current" />
               RUNNING
             </>
-          ) : wild.run?.pause === true ? (
+          ) : wildPaused(wild.run) ? (
             "PAUSED"
           ) : wild.run?.active === true ? (
             "STOPPED"
@@ -1467,6 +1481,11 @@ function applyTheme(theme: Theme) {
   if (typeof document === "undefined") return;
   if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
   else document.documentElement.removeAttribute("data-theme");
+  // W30 (B4-f03): the meta theme-color must follow an IN-SESSION toggle too —
+  // before this, only the __root.tsx boot script moved it, so light→dark left
+  // the browser chrome tinted until a reload. Hexes match @theme in styles.css.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", theme === "light" ? "#edf3f0" : "#0a0c0b");
 }
 
 function ThemeToggle() {
@@ -1500,7 +1519,7 @@ function ThemeToggle() {
 const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ["e"], label: "Execute current phase" },
   { keys: ["g"], label: "Run to next gate" },
-  { keys: ["a"], label: "Approve — when a gate is waiting; a failed sandbox gate needs the override tick first" },
+  { keys: ["a"], label: "Approve — when a gate is waiting; a failed bounded-runner gate needs the override tick first" },
   { keys: ["r"], label: "Focus the rejection note" },
   { keys: ["/"], label: "Focus artifact search" },
   { keys: ["?"], label: "Open agent guide" },
@@ -1610,11 +1629,73 @@ function Term({
   );
 }
 
+/**
+ * R6-f12 (WA-01 · fixes/109 §3.4 never landed): pane-level error boundary.
+ * Before this, one pane's render throw unmounted the WHOLE screen — the only
+ * other catch is the router-level `AppErrorComponent` (the white-screen class).
+ * This class boundary keeps the shell mounted (Home header / Run header + rail
+ * + diagnostics) and reports ONE `ui.pane_crash` row; the event is registered
+ * (rt-events.ts:141) and asserted by its test, but nothing ever emitted it
+ * before this boundary. Same honesty doctrine as the rest of the file: name
+ * what happened, keep the rest of the console usable, never fake recovery.
+ */
+class PaneBoundary extends Component<
+  { label: string; children: ReactNode },
+  { crashed: boolean; message: string | null }
+> {
+  state: { crashed: boolean; message: string | null } = { crashed: false, message: null };
+
+  static getDerivedStateFromError(err: unknown): { crashed: boolean; message: string | null } {
+    return { crashed: true, message: err instanceof Error ? err.message : String(err) };
+  }
+
+  componentDidCatch(error: unknown, info: { componentStack?: string | null }) {
+    try {
+      reportRt({
+        level: "error",
+        scope: "ui-render",
+        event: "ui.pane_crash",
+        message: `${this.props.label} area crashed while rendering: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        capture: "src/components/console.tsx:PaneBoundary.componentDidCatch",
+        err: error,
+        stack: info?.componentStack ?? null,
+        ctx: { pane: this.props.label },
+      });
+    } catch {
+      /* telemetry must never throw into the code it observes (AGENTS.md §7) */
+    }
+  }
+
+  render() {
+    if (!this.state.crashed) return this.props.children;
+    return (
+      <div role="alert" className="m-5 rounded-md border border-danger/50 bg-raised px-4 py-4 text-sm">
+        <p className="font-medium text-danger">
+          This area hit a render error — the rest of the console is still live.
+        </p>
+        <p className="mt-1 font-mono text-[11px] leading-relaxed text-muted [overflow-wrap:anywhere]">
+          {this.state.message ?? "unknown error"}
+        </p>
+        <button
+          type="button"
+          onClick={() => this.setState({ crashed: false, message: null })}
+          className="mt-3 inline-flex min-h-9 items-center rounded-md border border-border px-3 text-xs text-fg hover:border-accent/40 focus-visible:ring-2 focus-visible:ring-accent/40"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+}
+
 export function HomeScreen() {
   const nav = useNavigate();
   const { projects, create, select } = useRapid();
   const [brief, setBrief] = useState("");
   const [busy, setBusy] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -1640,12 +1721,28 @@ export function HomeScreen() {
           <Mark />
           <div>
             <p className="font-medium tracking-tight">RapidTool</p>
-            <p className="font-mono text-xs text-muted">autonomous software agency</p>
+            <p className="font-mono text-xs text-muted">governed delivery harness</p>
           </div>
         </div>
-        <p className="hidden font-mono text-xs text-faint sm:block">phases 0–12 · graph locked</p>
+        <div className="flex items-center gap-3">
+          <p className="hidden font-mono text-xs text-faint sm:block">phases 0–12 · graph locked</p>
+          {/* R6-f07 (A4-f06): a help entry on the FIRST screen — before this
+              the Guide was reachable only after creating a build. */}
+          <button
+            type="button"
+            onClick={() => setGuideOpen(true)}
+            title="What RapidTool is and how a build flows (same agent guide as the run screen)"
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-sm border border-border px-2 text-xs text-muted hover:border-accent/40 hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            <span>How it works</span>
+          </button>
+        </div>
       </header>
 
+      {/* R6-f12: pane boundary — a render throw in the home content keeps the
+          header (shell) mounted and lands one `ui.pane_crash` row. */}
+      <PaneBoundary label="Home screen">
       <main className="mx-auto grid max-w-6xl gap-10 px-5 py-10 lg:grid-cols-[1.15fr_0.85fr] lg:py-16">
         <section>
           <p className="font-mono text-xs tracking-widest text-accent uppercase">Governed delivery</p>
@@ -1681,6 +1778,19 @@ export function HomeScreen() {
               <ArrowRight className="h-4 w-4" />
             </button>
             <p className="font-mono text-xs text-faint">Phase 0 starts locked to the brief</p>
+            {/* R6-f07: the launch button is disabled under 12 characters — say
+                why, with the same live counter shape as the rejection note. */}
+            <p
+              aria-live="polite"
+              className={`w-full font-mono text-[11px] ${
+                brief.trim().length > 0 && brief.trim().length < 12 ? "text-warn" : "text-faint"
+              }`}
+            >
+              {brief.trim().length}/12
+              {brief.trim().length > 0 && brief.trim().length < 12
+                ? " · brief too short — 12+ characters required before a build can open"
+                : ""}
+            </p>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             {BRIEF_TEMPLATES.map((t) => (
@@ -1720,7 +1830,9 @@ export function HomeScreen() {
                     <span>
                       <span className="block text-sm font-medium">{p.name}</span>
                       <span className="mt-0.5 block font-mono text-xs text-muted">
-                        {p.domain} · P{p.currentPhase} · {PROJECT_STATUS_LABEL[p.status]}
+                        {p.domain} ·{" "}
+                        <span title={`P${p.currentPhase}`}>Phase {p.currentPhase + 1} of 13</span> ·{" "}
+                        {PROJECT_STATUS_LABEL[p.status]}
                       </span>
                     </span>
                     <ChevronRight className="h-4 w-4 text-faint" />
@@ -1731,6 +1843,8 @@ export function HomeScreen() {
           </ul>
         </aside>
       </main>
+      </PaneBoundary>
+      <GuideDialog open={guideOpen} onClose={() => setGuideOpen(false)} />
     </div>
   );
 }
@@ -1798,7 +1912,9 @@ export function RunScreen({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [crewRun, setCrewRun] = useState<CrewRunView | null>(null);
-  const [busyAction, setBusyAction] = useState<null | "step" | "run" | "approve" | "reject" | "crew">(null);
+  const [busyAction, setBusyAction] = useState<
+    null | "step" | "run" | "approve" | "reject" | "crew" | "module"
+  >(null);
   const busyRef = useRef(false);
   const copyTs = useRef(0);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -1962,7 +2078,7 @@ export function RunScreen({ id }: { id: string }) {
               // shortcut never approves here — it surfaces one plain sentence
               // naming the real control and puts focus on it (noteRef pattern).
               setError(
-                "This gate needs the override first — tick “I reviewed the failing sandbox output and approve anyway.” below, then approve.",
+                "This gate needs the override first — tick “I reviewed the failing bounded-runner output and approve anyway.” below, then approve.",
               );
               overrideRef.current?.focus();
             } else {
@@ -2120,19 +2236,31 @@ export function RunScreen({ id }: { id: string }) {
   }
 
   async function onRunModule() {
+    if (busyRef.current) return; // UI-4 latch (R6-f01): double-click must fire ONE bounded run
     setError(null);
     setNotice(null);
-    const res = await runModuleReal(projectId);
-    if (!res.ok) {
-      setError(res.error ?? "bounded runner unavailable");
-      return;
+    busyRef.current = true;
+    setBusyAction("module");
+    try {
+      const res = await runModuleReal(projectId);
+      if (!res.ok) {
+        setError(res.error ?? "bounded runner unavailable");
+        return;
+      }
+      const r = res.result as { ok?: boolean; exitCode?: number; durationMs?: number };
+      setNotice(
+        r && r.ok
+          ? `Module ran: exit ${r.exitCode} in ${r.durationMs}ms`
+          : "Module run failed — see the “Real module run” artifact for details.",
+      );
+    } catch (e) {
+      // R6-f01: this was the ONLY async handler without try/catch — a throwing
+      // runner must surface a coded error, never reject into the void.
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      busyRef.current = false;
+      setBusyAction(null);
     }
-    const r = res.result as { ok?: boolean; exitCode?: number; durationMs?: number };
-    setNotice(
-      r && r.ok
-        ? `Module ran: exit ${r.exitCode} in ${r.durationMs}ms`
-        : "Module run failed — see the “Real module run” artifact for details.",
-    );
   }
 
   function onIngestReport() {
@@ -2188,7 +2316,7 @@ export function RunScreen({ id }: { id: string }) {
             : rawSummary ||
               `Crew run ${partial ? "partial" : "complete"} — ${res.messages.length} turn${
                 res.messages.length === 1 ? "" : "s"
-              } on ${PHASES[current.currentPhase].title}.`;
+              } on ${PHASES[current.currentPhase]?.title ?? `phase ${current.currentPhase}`}.`;
         const ingested = ingestReport(projectId, {
           phase: current.currentPhase,
           status: partial ? "partial" : "complete",
@@ -2555,7 +2683,9 @@ export function RunScreen({ id }: { id: string }) {
               checked={autopilot}
               onChange={(e) => setAutopilot(e.target.checked)}
             />
-            <span>Autopilot · extra gates</span>
+            <span title="Auto-approves eligible gates only: non-stock gates whose DoD check passed. Stock P4/P5/P8/P9 gates and human-only gates still stop for you.">
+              Autopilot · auto-approve eligible gates
+            </span>
           </label>
           <WildToggle project={project} />
           <button
@@ -2714,7 +2844,12 @@ export function RunScreen({ id }: { id: string }) {
                       disabled={busyAction !== null}
                       className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-4 text-sm text-fg disabled:opacity-40"
                     >
-                      Run module (bounded)
+                      {busyAction === "module" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Play className="h-4 w-4" />
+                      )}
+                      {busyAction === "module" ? "Running…" : "Run module (bounded)"}
                     </button>
                   ) : null}
                   {busyAction !== null ? (
@@ -3404,6 +3539,12 @@ export function RunScreen({ id }: { id: string }) {
 
           <GateHealthCard project={project} />
 
+          {/* W36 N3: the additive read-only shell surfaces (plan · checkpoint/
+              resume · unattended · stream · cassette · seat · isolation).
+              Text-only rows — no control added, moved or removed; see
+              ShellSurfacesCard's doc for the per-row truth sources. */}
+          <ShellSurfacesCard project={project} />
+
           <h2 className="mt-8 text-xs font-medium tracking-wide text-muted uppercase">Diagnostics</h2>
           <ol className="scroll-thin mt-3 max-h-[38vh] space-y-2 overflow-y-auto pr-1 font-mono text-[11px] leading-relaxed text-muted">
             {project.logs.slice(-10).reverse().map((l, i) => (
@@ -3770,7 +3911,7 @@ function HitlDock({
             onChange={(e) => setForceOverride(e.target.checked)}
             className="mt-0.5 h-4 w-4"
           />
-          <span>I reviewed the failing sandbox output and approve anyway.</span>
+          <span>I reviewed the failing bounded-runner output and approve anyway.</span>
         </label>
       )}
       <div className="mt-3 flex flex-wrap gap-2">
@@ -6154,11 +6295,16 @@ function PhaseRecordView({
 }) {
   const def = PHASES[phase];
   const rec = project.phases[phase];
-  const meta = PHASE_STATUS_META[rec.status];
+  const meta =
+    PHASE_STATUS_META[rec.status] ?? {
+      glyph: null,
+      tone: "text-muted",
+      label: String(rec.status),
+    };
   const arts = project.artifacts.filter((a) => a.phase === phase);
   const active = !arts.length
     ? null
-    : (selected ? arts.find((a) => a.id === selected) : undefined) ?? arts[arts.length - 1];
+    : (selected ? arts.find((a) => a.id === selected) : undefined) ?? arts[arts.length - 1] ?? null;
   const gateDecisions = project.decisions.filter((d) => d.phase === phase);
   return (
     <div className="min-w-0">
@@ -6533,5 +6679,154 @@ function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void
         Shortcuts are ignored while you're typing in an input or textarea.
       </p>
     </Modal>
+  );
+}
+
+/**
+ * W36 N3 — THE HONEST READ-ONLY SHELL SURFACES (plan · checkpoint/resume ·
+ * unattended · stream · cassette · seat · isolation).
+ *
+ * ADDITIVE by construction: every row is text — no control was added, moved or
+ * removed, and nothing here can mutate a project. The fixtures-panel doctrine
+ * applies: state visible, refusal NAMED, coded reason in `title`; an enabled
+ * no-op is never honest, so no no-op control exists below. The only real paths
+ * the copy names are ones that exist on disk (the in-session Resume above, the
+ * CLI verbs).
+ *
+ * Truth sources (verified on disk at W36 N3; log `fixes/281_n3_ui.md`):
+ *  - plan — `Project.wildPlan` (types.ts:172-183). While the planner is unwired
+ *    (R13-f02) `engine.readWildPlan` returns the honest empty shape
+ *    (`steps: []`, `source: "empty"`, a note naming the row); steps are never
+ *    invented. This card renders a stored plan when the record carries one,
+ *    else the honest absence line.
+ *  - checkpoint/resume — `checkpoint.server.ts` is SERVER-ONLY (node:fs; atomic,
+ *    corrupt-safe, `RT_E_CHECKPOINT_MISSING` when absent / `RT_E_VALIDATION` on
+ *    junk), so the console has no read seam yet: this card shows the
+ *    store-level truth it CAN see (the wild run state) + TODO(N2) for the seam.
+ *  - unattended — `RT_E_UNATTENDED_UNSUPPORTED` (errors.ts:508; W-47).
+ *  - stream — T5.1 shell: one-shot transport, no `--stream`, no console pane.
+ *  - cassette — T5.7 shell: library on disk, zero wire points.
+ *  - seat — S4's `seat.ts` never landed (nothing on disk, no registry code);
+ *    the approval dock's policy-fallback text is today's only seat surface.
+ *  - isolation — R13-f04: no isolator; the local runner is bounded, NOT an OS
+ *    sandbox, and is never labelled one.
+ */
+function ShellSurfacesCard({ project }: { project: Project }) {
+  const run = wildStateOf(project).run;
+  const rawPlan = project.wildPlan;
+  // Same guard as engine.readWildPlan: only a plan whose `steps` is an array is
+  // treated as stored; anything else falls to the honest absence line.
+  const plan = rawPlan && Array.isArray(rawPlan.steps) ? rawPlan : null;
+  const stepCount = plan ? plan.steps.length : 0;
+  const resumeLine = run
+    ? run.active === true
+      ? wildPaused(run)
+        ? `resume available — paused in-session${
+            typeof run.phase === "number" ? ` at P${run.phase}` : ""
+          } (Resume above)`
+        : "run active — nothing to resume"
+      : "run stopped — the wild driver is a session artifact; a reload cannot resume it"
+    : "no run on record — nothing to resume";
+  return (
+    <section aria-label="Shell capability state (read-only)">
+      <h2 className="mt-8 text-xs font-medium tracking-wide text-muted uppercase">Shell surfaces</h2>
+      <ul className="mt-3 space-y-3">
+        <li>
+          <p className="text-[11px] font-medium text-fg">
+            Wild plan <span className="text-faint">· R13-f02</span>
+          </p>
+          {plan ? (
+            <>
+              <p className="mt-0.5 font-mono text-[11px] text-muted">
+                source: {plan.source} · {stepCount} step(s)
+                {typeof plan.plannedAt === "number" ? ` · planned ${agoLabel(plan.plannedAt)}` : ""}
+              </p>
+              {plan.goal ? <p className="mt-0.5 text-xs text-muted">{clip60(plan.goal)}</p> : null}
+              {plan.note ? (
+                <p className="mt-0.5 font-mono text-[11px] text-faint">{clip60(plan.note)}</p>
+              ) : null}
+            </>
+          ) : (
+            <p
+              className="mt-0.5 text-xs text-muted"
+              title="R13-f02: the planner is not wired — engine.readWildPlan returns an honest empty plan (steps: [], source: 'empty') with a note naming the row. Steps are never invented."
+            >
+              no plan on record — the planner is not wired yet; the wired reader returns an honest
+              empty plan (<span className="font-mono">source: &quot;empty&quot;</span>), never
+              invented steps.
+            </p>
+          )}
+        </li>
+        <li>
+          <p className="text-[11px] font-medium text-fg">
+            Checkpoint · resume <span className="text-faint">· T-107.7</span>
+          </p>
+          <p className="mt-0.5 text-xs text-muted">{resumeLine}</p>
+          <p
+            className="mt-0.5 font-mono text-[11px] text-faint"
+            title="N2/T-107.7: readCheckpoint / checkpointAdmits live in checkpoint.server.ts (.rapidtool/checkpoint.json) — server-only, so the console has no read seam yet (TODO(N2)); cross-session resume stays a CLI verb until one lands."
+          >
+            cross-session resume: checkpoint reads are server-side — no console read seam yet
+            (TODO(N2)).
+          </p>
+        </li>
+        <li>
+          <p className="text-[11px] font-medium text-fg">
+            Unattended runs <span className="text-faint">· W-47</span>
+          </p>
+          <p
+            className="mt-0.5 text-xs text-muted"
+            title="RT_E_UNATTENDED_UNSUPPORTED — no scheduler/daemon/queue host in this product; blockers W-01 (keyed wild P6 seam) and W-02 (mint reachability) are not landed keyed. Supervised wild/gate runs remain available."
+          >
+            refused by design — no scheduler/daemon host (
+            <span className="font-mono">RT_E_UNATTENDED_UNSUPPORTED</span>)
+          </p>
+        </li>
+        <li>
+          <p className="text-[11px] font-medium text-fg">
+            Token streaming <span className="text-faint">· T5.1</span>
+          </p>
+          <p
+            className="mt-0.5 text-xs text-muted"
+            title="T5.1: the lib leg landed (chat.ts chatStreamNdjson) but the provider transport is one-shot (stream:false) and the CLI has no --stream arm; no console stream pane exists. Replies render whole — not yet incremental."
+          >
+            not wired — one-shot transport; replies render whole
+          </p>
+        </li>
+        <li>
+          <p className="text-[11px] font-medium text-fg">
+            Cassette record/replay <span className="text-faint">· T5.7</span>
+          </p>
+          <p
+            className="mt-0.5 text-xs text-muted"
+            title="T5.7: cassette.ts is built and tested but has zero wire points — no callModel wrapper, no run-eval --record/--replay, no CLI flags. No recorded runs exist yet; a replay can never pass as live."
+          >
+            library only — no wire points; recording is not available
+          </p>
+        </li>
+        <li>
+          <p className="text-[11px] font-medium text-fg">
+            Human seat <span className="text-faint">· R8-f09</span>
+          </p>
+          <p
+            className="mt-0.5 text-xs text-muted"
+            title="R8-f09: console approvals record decidedBy 'human' with no seat token; the planned seat seam (S4 seat.ts / a delivery code) is not on disk (TODO S4). Today's real seat path is the CLI's out-of-band token; the approval dock names the policy fallback."
+          >
+            no console delivery seam yet — the CLI carries the out-of-band token; TODO(seat)
+          </p>
+        </li>
+        <li>
+          <p className="text-[11px] font-medium text-fg">
+            Isolation boundary <span className="text-faint">· R13-f04</span>
+          </p>
+          <p
+            className="mt-0.5 text-xs text-muted"
+            title="R13-f04: no isolator is shipped (isolation.server.ts is not on disk) — generated code runs in the bounded local runner, which is NOT an OS sandbox. Never labelled sandboxed; a fake sandbox label is forbidden."
+          >
+            none — runs are bounded local, not OS-sandboxed; TODO(R13-f04)
+          </p>
+        </li>
+      </ul>
+    </section>
   );
 }

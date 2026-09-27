@@ -373,3 +373,16 @@ html.device-tablet .loc-ipad {
     justify-content: center;
   }
 }
+
+/* R15-f12 (W31 T2 · fixes/273_t2_r15.md): keyboard-visibility pass — this file
+   previously had ZERO :focus rules, so the one interactive element (the
+   desktop fallback link, `.desktop-open`) had hover styling but no focus
+   indicator. One visible ring for every focusable element, on-palette.
+   TODO(R15-f12): add the automated a11y assertion (axe-core pass in
+   scripts/browser-smoke.mjs) so the next regression fails the smoke. */
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--white);
+  outline-offset: 2px;
+}

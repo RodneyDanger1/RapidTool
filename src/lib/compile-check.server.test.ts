@@ -909,12 +909,14 @@ describe("B1 verifyKindDir", () => {
       write(locked, "package-lock.json", "{}");
       const ci = installToolFor(locked);
       assert.equal(ci.tool, "npm ci");
-      assert.equal(ci.command, "npm ci --no-audit --no-fund");
+      assert.equal(ci.command, "npm ci --no-audit --no-fund --ignore-scripts");
       assert.match(ci.reason, /package-lock\.json present/);
+      assert.match(ci.reason, /--ignore-scripts refuses every model-authored lifecycle script/);
       const install = installToolFor(unlocked);
       assert.equal(install.tool, "npm install");
-      assert.equal(install.command, "npm install --no-audit --no-fund");
+      assert.equal(install.command, "npm install --no-audit --no-fund --ignore-scripts");
       assert.match(install.reason, /no package-lock\.json/);
+      assert.match(install.reason, /--ignore-scripts refuses every model-authored lifecycle script/);
     } finally {
       rmSync(locked, { recursive: true, force: true });
       rmSync(unlocked, { recursive: true, force: true });
@@ -1066,7 +1068,7 @@ describe("OV-43 — report-only supply-chain floor (never a gate)", () => {
       const p = supplyChainFloorFor(dir);
       assert.equal(p.lockfile, "present");
       assert.equal(p.installTool, "npm ci");
-      assert.equal(p.installCommand, "npm ci --no-audit --no-fund");
+      assert.equal(p.installCommand, "npm ci --no-audit --no-fund --ignore-scripts");
       assert.equal(p.noAuditFlag, true);
       assert.equal(p.exactPinned, 1, "1.2.3 is an exact pin");
       assert.equal(p.otherRange, 2, "tilde and git ranges are neither caret- nor exact-pinned");

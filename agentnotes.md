@@ -1,3 +1,9 @@
+> **HISTORICAL — NOT CURRENT (banner added 2026-09-26, W31 · R15-f13).** This is the pre-W5
+> master working document (last consolidated 2026-09-04), referenced by no current doc. It
+> predates the W5+ rewrite; do not read its capability claims or status lines as today's
+> behavior. Current state lives in `README.md` (honest limits) · `RESUME.md` ·
+> `research/multiagent/104_factory_upgrade_plan.md`.
+
 # AGENTNOTES — RapidTool · Autonomous Software Agency
 
 > **Master working document** — full codebase analysis, parallel industry research,

@@ -206,8 +206,17 @@ export function isKnownRtEvent(event: string): boolean {
 // §5.6 Constants table (single source of truth).
 // ---------------------------------------------------------------------------
 
-export const WILD_STEP_BUDGET_MS = 90_000;
-export const WILD_STEP_AUTOPAUSE_MS = 180_000;
+/** R12-f04 (fixes/271 · W29): the P6 synthesis phase max — the longest a LEGAL
+ *  keyed P6 step may run. codegen.server.ts's P6_SYNTH_TIMEOUT_MS imports THIS
+ *  value (server module = consumer, this client-safe table = single source —
+ *  never a literal fork). */
+export const P6_PHASE_MAX_MS = 240_000;
+/** R12-f04: the wild step budget must EXCEED a legal step. At 90_000 a legal
+ *  keyed P6 synthesis step (up to P6_PHASE_MAX_MS) read as "overdue" at 1× and
+ *  set the 2× stall latch on resolve — auto-pausing a healthy run mid-
+ *  synthesis. Derived from the phase max + a scheduling margin. */
+export const WILD_STEP_BUDGET_MS = P6_PHASE_MAX_MS + 15_000;
+export const WILD_STEP_AUTOPAUSE_MS = P6_PHASE_MAX_MS + 60_000;
 export const CHAT_STEP_BUDGET_MS = 60_000;
 export const HEARTBEAT_MS = 1_000;
 export const HEARTBEAT_PERSIST_EVERY_MS = 5_000;

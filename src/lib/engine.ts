@@ -1,4 +1,4 @@
-import { PHASES, PHASE_BY_ID, canEnter, phaseDef, priorsSealed } from "./phases.ts";
+import { PHASES, PHASE_BY_ID, PHASE_LAST, canEnter, phaseDef, priorsSealed } from "./phases.ts";
 import type { ErrorCode } from "./errors.ts";
 import { classifyError, ERROR_CODES } from "./errors.ts";
 import { flattenStack } from "./rt-events.ts";
@@ -59,6 +59,7 @@ import type {
   Project,
   ResearchCorpusEntry,
   SchedulerPlan,
+  WildPlan,
 } from "./types";
 
 // knowledge.ts is disk-backed (statically imports node:fs) — a static import
@@ -299,7 +300,11 @@ export function dedupeMemoryIds(rows: MemoryEntry[]): MemoryEntry[] {
     if (n === 1) return m;
     let suffix = n;
     let id = `${m.id}-${suffix}`;
-    while (occupied.has(id) && suffix < 10_000) {
+    // A1-46: the window used to be capped at 10_000 — on exhaustion the loop
+    // exited with `id` STILL colliding (a duplicate id, the exact invariant
+    // H-02 protects). Unbounded now: `occupied` is finite and suffix grows
+    // monotonically, so this always terminates with a unique id.
+    while (occupied.has(id)) {
       suffix += 1;
       id = `${m.id}-${suffix}`;
     }
@@ -355,18 +360,23 @@ export function accrueReproducedCounts(rows: MemoryEntry[]): MemoryEntry[] {
 
 /** Swap the packet artifact body for the freshly compiled packet (B-19/R10). */
 function sealPacketArtifact(project: Project): Project {
-  project.artifacts = [
-    ...project.artifacts.filter((a) => a.kind !== "packet"),
-    {
-      id: `packet-${project.currentPhase}`,
-      phase: project.currentPhase,
-      kind: "packet",
-      title: "Agent packet (A4)",
-      body: project.packet,
-      language: "markdown",
-    },
-  ];
-  return project;
+  // A1-27: immutable spread — every other engine write builds a fresh object;
+  // assigning through the parameter aliased the caller's array (React memo
+  // deps and reused test fixtures saw mutations they never asked for).
+  return {
+    ...project,
+    artifacts: [
+      ...project.artifacts.filter((a) => a.kind !== "packet"),
+      {
+        id: `packet-${project.currentPhase}`,
+        phase: project.currentPhase,
+        kind: "packet",
+        title: "Agent packet (A4)",
+        body: project.packet,
+        language: "markdown",
+      },
+    ],
+  };
 }
 
 /** Recompile packet + A4 trace and refresh the packet artifact (B-06/B-19/R10 — store call sites). */
@@ -2083,7 +2093,8 @@ function hydrateWildRun(
   const intOr = (x: unknown, fallback: number): number =>
     typeof x === "number" && Number.isInteger(x) ? x : fallback;
   const numOrNull = (x: unknown): number | null => (typeof x === "number" ? x : null);
-  const phase = Math.min(12, Math.max(0, intOr(w.phase, currentPhase)));
+  // A1-30: clamp to the graph's last phase via the shared constant, not a bare 12.
+  const phase = Math.min(PHASE_LAST, Math.max(0, intOr(w.phase, currentPhase)));
   const run: NonNullable<Project["wildRun"]> = {
     active: w.active === true,
     phase,
@@ -2102,6 +2113,34 @@ function hydrateWildRun(
     wildRun: { ...run, active: false, pause: false, stoppedAt: run.stoppedAt ?? Date.now() },
     stopped: true,
   };
+}
+
+/** A1-22: structural guards for specGraph/contracts, mirroring io's import
+ *  boundary (io.sanitizeImportPayload). The PERSIST path (localStorage →
+ *  hydrateProject) never passes through io: a stored `{order: 5}` used to pass
+ *  the plain-object guard here and then make compileAgentPacket's `.map()`
+ *  throw — the store answers that throw with recoverFromCorruptPersistence
+ *  (a whole-workspace re-seed). Structurally-broken values are nulled and the
+ *  caller reports the repair (shapeRepaired → anyRepaired → re-stamp). */
+function usableSpecGraph(v: unknown): Project["specGraph"] {
+  if (!isPlainObject(v)) return null;
+  if (!Array.isArray(v.order) || !Array.isArray(v.nodes)) return null;
+  const nodes = v.nodes.filter((n) => isPlainObject(n) && typeof n.id === "string");
+  const order = v.order.filter((id) => typeof id === "string");
+  return { ...v, nodes, order } as unknown as Project["specGraph"];
+}
+
+function usableContracts(v: unknown): Project["contracts"] {
+  if (!isPlainObject(v)) return null;
+  if (v.entities !== undefined && !Array.isArray(v.entities)) return null;
+  if (v.endpoints !== undefined && !Array.isArray(v.endpoints)) return null;
+  const entities = Array.isArray(v.entities)
+    ? v.entities.filter(
+        (e) => isPlainObject(e) && typeof e.name === "string" && Array.isArray(e.fields),
+      )
+    : [];
+  const endpoints = Array.isArray(v.endpoints) ? v.endpoints.filter((e) => isPlainObject(e)) : [];
+  return { ...v, entities, endpoints } as unknown as Project["contracts"];
 }
 
 export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean }): Project {
@@ -2391,8 +2430,13 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
     sandbox: {
       runtime,
       ramMb: typeof raw.sandbox?.ramMb === "number" ? raw.sandbox.ramMb : null,
-      timeoutS: raw.sandbox?.timeoutS ?? 30,
-      isolated: raw.sandbox?.isolated ?? false,
+      // A1-28: typeof-guard the scalars like ramMb/enforceDod — `?? 30` let a
+      // corrupt "30" / "false" ride into arithmetic and boolean slots.
+      timeoutS:
+        typeof raw.sandbox?.timeoutS === "number" && Number.isFinite(raw.sandbox.timeoutS)
+          ? raw.sandbox.timeoutS
+          : 30,
+      isolated: raw.sandbox?.isolated === true,
     },
     lattice,
     schedule,
@@ -2400,8 +2444,9 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
       ? raw.traces.filter((t) => t !== null && typeof (t as { id?: unknown }).id === "string")
       : [],
     packet: typeof raw.packet === "string" ? raw.packet : "",
-    specGraph: isPlainObject(raw.specGraph) ? raw.specGraph : null,
-    contracts: isPlainObject(raw.contracts) ? raw.contracts : null,
+    // A1-22: structural guards, not just plain-object (see usableSpecGraph).
+    specGraph: usableSpecGraph(raw.specGraph),
+    contracts: usableContracts(raw.contracts),
     oracle: Array.isArray(raw.oracle) ? raw.oracle : [],
     crew: Array.isArray(raw.crew) ? raw.crew : [],
     notes: typeof raw.notes === "string" ? raw.notes : "",
@@ -2443,7 +2488,16 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
       },
     ];
   }
-  if (
+  // A1-22: the shape guards above nulled structurally-broken specGraph/
+  // contracts — report + re-stamp like every other repair, never a silent drop.
+  const shapeRepaired =
+    (raw.specGraph !== undefined && raw.specGraph !== null && filled.specGraph === null) ||
+    (raw.contracts !== undefined && raw.contracts !== null && filled.contracts === null);
+  // A1-21: ONE flag list, used by BOTH this log-if and the early-return at the
+  // end — a payload that only triggered hole/chatLog/research/impl/scorecard/
+  // tree/fixtures/shape repair used to return with the PRE-repair packet still
+  // attached (loud in logs, silent in the document).
+  const anyRepaired =
     phaseRepair.repaired ||
     cpRepaired ||
     edgeRepaired ||
@@ -2455,8 +2509,9 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
     implRepaired ||
     scorecardRepaired ||
     treeRepaired ||
-    fixturesRepaired
-  ) {
+    fixturesRepaired ||
+    shapeRepaired;
+  if (anyRepaired) {
     // B-25/R9: repairs are loud, never silent.
     const phaseDetail = phaseRepair.repaired
       ? `dropped:${phaseRepair.dropped.join(",") || "none"} inserted:${phaseRepair.inserted.join(",") || "none"}`
@@ -2486,6 +2541,7 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
     if (fxCoerce.containerDropped) rowTokens.push("acceptanceFixtures:dropped");
     else if (fxCoerce.dropped > 0) rowTokens.push(`acceptanceFixtures:dropped:${fxCoerce.dropped}`);
     if (fixturesStale) rowTokens.push("acceptance.stale");
+    if (shapeRepaired) rowTokens.push("specGraph/contracts:dropped");
     const rowDetail = rowTokens.length ? ` rows:${rowTokens.join(",")}` : "";
     const scalarDetail = scalarRepaired
       ? ` scalars:${[
@@ -2522,17 +2578,9 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
       },
     ].slice(-200);
   }
-  if (
-    filled.packet &&
-    filled.lattice &&
-    filled.specGraph &&
-    !phaseRepair.repaired &&
-    !cpRepaired &&
-    !edgeRepaired &&
-    !rowRepaired &&
-    !scalarRepaired &&
-    !hw.stopped
-  ) {
+  if (filled.packet && filled.lattice && filled.specGraph && !anyRepaired && !hw.stopped) {
+    // A1-21: the same flag list the repair log above used — every repair
+    // re-stamps (attachAlgorithms) instead of shipping a stale packet.
     return filled;
   }
   return attachAlgorithms(filled);
@@ -3386,6 +3434,20 @@ export function withLiveDegradeRows(base: Project, rows: readonly JsonLog[]): Pr
 }
 
 /**
+ * W-02 (fixes/271 · §R1-f02 item 3): console-side loader for the ONE keyed P6
+ * edge. Returns null when headless exports no runP6Edge (old bundle) so the
+ * caller falls back to the existing liveLayer path; a seam THROW propagates
+ * to runPhaseAsync's catch (deterministic floor + a coded failure row —
+ * the same G2 contract every other runPhaseAsync throw gets).
+ */
+async function viaHeadlessP6Edge(project: Project): Promise<Project | null> {
+  const headlessSpec = "./head" + "less.ts";
+  const hl = (await import(headlessSpec)) as { runP6Edge?: (p: Project) => Promise<Project> };
+  if (typeof hl.runP6Edge !== "function") return null;
+  return await hl.runP6Edge(project);
+}
+
+/**
  * Async entry point that wires optional real research (and an optional LLM phase
  * narrative) into the deterministic engine — exactly `liveLayer` with a hard
  * safety net. For research phases it fetches real data and layers it on top of the
@@ -3399,6 +3461,14 @@ export function withLiveDegradeRows(base: Project, rows: readonly JsonLog[]): Pr
  */
 export async function runPhaseAsync(project: Project, phase: PhaseId): Promise<Project> {
   try {
+    // W-02 (fixes/271 · §R1-f02): the console's per-phase live path must reach
+    // the same tested-mint seam run/gate/wild use. Phase 6 + keyed ⇒ route
+    // through headless.runP6Edge (lazily — this module stays client-safe);
+    // keyless/browser (probe false) ⇒ the existing liveLayer path, unchanged.
+    if (phase === 6 && keyedDeepSeekConfigured()) {
+      const reached = await viaHeadlessP6Edge(project);
+      if (reached !== null) return reached;
+    }
     return await liveLayer(project, phase);
   } catch (err) {
     // Any unexpected error must never break a run — the deterministic path is the floor.
@@ -3505,6 +3575,28 @@ export type WildStepResult = {
 export type WildReviewer = (ctx: WildReviewContext) => Promise<WildClassifierResult>;
 
 /**
+ * R13-f02 (W33 lane L2) — the ONE read accessor for `project.wildPlan`
+ * (types.ts:170). Returns the STORED plan when the record carries one; else an
+ * HONEST EMPTY plan (`steps: []`, `source: "empty"`, a note naming the owning
+ * row) — never invented steps. Pure + client-safe: the store's read path
+ * (`wildPlanFor`) and any renderer call this; the real generation lives
+ * server-side (`headless.generateWildPlan` → planning.planSteps, keyed hosts).
+ */
+export function readWildPlan(project: Project): WildPlan {
+  const stored = project.wildPlan;
+  if (stored && typeof stored === "object" && Array.isArray(stored.steps)) return stored;
+  return {
+    goal: typeof project.brief === "string" ? project.brief.trim() : "",
+    steps: [],
+    source: "empty",
+    plannedAt: null,
+    note:
+      "no planner plan on this record yet (TODO(R13-f02): generation runs keyed at wild start — " +
+      "headless.generateWildPlan; classifier review + pause-before-first-mutation remain)",
+  };
+}
+
+/**
  * Wild-step options (fixes/109 CAP-5, additive + purity-preserving). `opts`
  * today carries only the reviewer; `onEvent` is an OPTIONAL telemetry sink the
  * engine invokes with serializable RtEventSeed rows at the defined emission
@@ -3515,6 +3607,11 @@ export type WildReviewer = (ctx: WildReviewContext) => Promise<WildClassifierRes
 export type WildStepOptions = {
   reviewer?: WildReviewer;
   onEvent?: (seed: RtEventSeed) => void;
+  /** W-01 (fixes/271 · §R1-f01): test seam for the P6 execution edge. Present
+   *  ⇒ phase 6 executes through THIS function (any key state); absent ⇒ the
+   *  production guard (keyed ⇒ headless.runP6Edge, keyless ⇒ the deterministic
+   *  floor, byte-identical to the pre-seam engine). */
+  p6Edge?: (p: Project) => Promise<Project>;
 };
 
 export function wildLog(p: Project, phase: PhaseId, level: JsonLog["level"], event: string, detail: string): Project {
@@ -3812,6 +3909,36 @@ function wildFinalize(p: Project, phase: PhaseId): WildStepResult {
 }
 
 /**
+ * W-01/W-02 (fixes/271 · §R1-f01/f02): the wild P6 execution edge — phase 6's
+ * ONE keyed path. Loads headless.runP6Edge (keyed synthesis + the tree-run
+ * mint, the same seam run/gate use) through the concatenated-specifier idiom
+ * (`./head` + `less.ts`, the wildServerSpec precedent above): the TanStack
+ * import-protection plugin statically denies direct `*.server.*`/headless
+ * imports from the client bundle, so the specifier is computed at runtime.
+ * Any load failure / missing export / seam throw falls back to the
+ * deterministic floor with an honest warn row (a wild step must never die on
+ * a seam-load failure, and the log must never claim the keyed edge ran when
+ * it did not).
+ */
+async function wildP6Edge(project: Project): Promise<Project> {
+  const headlessSpec = "./head" + "less.ts";
+  try {
+    const hl = (await import(headlessSpec)) as { runP6Edge?: (p: Project) => Promise<Project> };
+    if (typeof hl.runP6Edge !== "function") throw new Error("headless.runP6Edge export missing");
+    return await hl.runP6Edge(project);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return wildLog(
+      applyPhaseResult(project, 6),
+      6,
+      "warn",
+      "wild.p6.edge_unavailable",
+      `P6 keyed edge unavailable (${msg.slice(0, 160)}) — deterministic floor used.`,
+    );
+  }
+}
+
+/**
  * P13 bounded autonomous step — the headless Wild Mode primitive. See the
  * section header for semantics. Never mutates its input; `opts.reviewer`
  * injects the Auto-Review classifier (tests), defaulting to the real
@@ -3983,8 +4110,23 @@ export async function wildStep(
         r.id === phase ? { ...r, status: "running" as const, startedAt: r.startedAt ?? now } : r,
       ),
     };
-    const executed = applyPhaseResult(running, phase);
-    const done = wildLog(executed, phase, "info", "wild.exec", `P${phase} executed (deterministic floor)`);
+    // W-01 (fixes/271 · §R1-f01): phase 6 on a keyed host executes through the
+    // SHARED keyed P6 edge (headless.runP6Edge — synthesis + the tree-run
+    // mint) instead of the deterministic floor. Keyless hosts (and the
+    // browser, where keyedDeepSeekConfigured() is false) keep the exact floor
+    // bytes; an injected `opts.p6Edge` test seam wins in every key state.
+    const p6Edge =
+      phase === 6 ? (opts?.p6Edge ?? (keyedDeepSeekConfigured() ? wildP6Edge : null)) : null;
+    const executed = p6Edge !== null ? await p6Edge(running) : applyPhaseResult(running, phase);
+    const done = wildLog(
+      executed,
+      phase,
+      "info",
+      "wild.exec",
+      p6Edge === null
+        ? `P${phase} executed (deterministic floor)`
+        : `P6 executed (${opts?.p6Edge ? "injected edge seam" : "keyed synthesis edge"})`,
+    );
     if (done.hitl?.phase === phase) {
       return emitResult(await wildApproveGate(done, phase, reviewer));
     }

@@ -458,6 +458,16 @@ describe("W23 L6 honesty guards — DF-09 approval rationale", () => {
   it("A2 engine seat: the same override THROWS a coded RT_E_VALIDATION (never a bare internal)", () => {
     const gated = l6Gated();
     l6AssertFixture(gated, "A2");
+    // W31 T4 (fixes/273 §1): the fixture is built by runToGate, which journals its
+    // own below-gate approval rows — snapshot the count so the "journals nothing"
+    // compare below is non-vacuous and tests the real guarantee (the throw must
+    // leave the pure-function input untouched). The W23 literal `=== 0` compare
+    // could never hold against this fixture (found red: 2 !== 0, fixes/273 §0).
+    const decisionsBefore = gated.decisions.length;
+    assert.ok(
+      decisionsBefore > 0,
+      "fixture precondition: runToGate journals its below-gate approvals — the compare below is non-vacuous",
+    );
     assert.throws(
       () => approveHitl(gated, { decidedBy: "human", force: true }),
       (err: unknown) => {
@@ -470,7 +480,11 @@ describe("W23 L6 honesty guards — DF-09 approval rationale", () => {
         return true;
       },
     );
-    assert.equal(gated.decisions.length, 0, "a thrown refusal journals nothing");
+    assert.equal(
+      gated.decisions.length,
+      decisionsBefore,
+      "a thrown refusal journals nothing (the input project is untouched)",
+    );
     assert.equal(gated.status, "awaiting_hitl", "the fixture project is untouched (pure-function contract)");
   });
 

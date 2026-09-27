@@ -1,0 +1,34 @@
+# W35 · FACTORY-PROCESS ANALYSIS — 5 lanes: find EVERY issue in how the factory, the agents, the delegation and the AI model work together; prep them as coder cards.
+**Readers share this file.** Repo: `C:\Users\mnril\Desktop\RapidTool Main` (git-bash; SPACE → ripgrep FAILS; `grep`). HEAD `0f85c32` + the W29–W35-in-flight era (L1–L3, P1–P3, A1–A2 may be landing beside you — re-read bytes; NEVER touch product code; no test runs; no builds; no keyed calls; log-and-continue).
+**MISSION:** analyze YOUR slice of the software-factory process END-TO-END — how RapidTool actually works with the AI API model, how its agent/ delegation surfaces work, how the pipeline runs — and find **EVERY issue** (bugs, silent failures, mislabels, dead paths, bad writing, contract drift, gaps vs the mission "truly autonomous software factory / best-in-class harness"). For EACH issue produce a **coder card**: ① WHAT & WHERE (file:line, code quoted) · ② WHY IT'S WRONG (the failure mode — what breaks, when, for whom) · ③ HOW TO FIX (concrete steps, the seams, the contracts to respect, a mini sketch) · ④ DONE-WHEN (the exact proof a verifier runs) · ⑤ TRAPS (collisions/contracts/box rules). Be EXTENSIVE and SEQUENTIAL — think item by item through the real code; every claim byte-checked TODAY.
+**RECORD:** `wave_plans/W35/factory-notes.md` — append-only via END-OF-FILE-MARKER-FACTORY; §F1–§F5 are yours; re-read before EVERY append. Lane logs `fixes/280_f<n>_factory.md` EARLY.
+**READ FIRST (all lanes):** `START-HERE.md` · `finalsprint.md` · `research/multiagent/thoroughanalysis.md` (§W27-WORKLIST + §R1–R15) · the newest lane logs (`fixes/276_*`, `277_*`, `278_*`, `279_*` as they land) · `wave_plans/W34/prep.md` + `code-notes.md` (dedupe against them — cite, don't repeat).
+
+## F1 — THE MODEL PATH (how RapidTool talks to the AI)
+`src/lib/llm/**` (providers, registry, failover, cassette seam, streaming seam) · `codegen.server.ts`'s synthesis chain (prompts, chunking, `materializeImportableTree`, the CJS-residue guard, partial semantics) · the token ledger/budget (`token-ledger.ts`, `synthWithBackoff`) · `wild-review.ts` + the reviewer path · `deepseek.server.ts` facade · redaction · model-id routing. EVERY issue: is the right model asked for; is the answer validated; are failures coded; can a runaway spend happen; does the served-model honesty hold; do the refusals name the truth.
+
+## F2 — THE AGENT + DELEGATION LAYER (how "agents" work with RapidTool)
+The packet (`packet.ts` — the compiled Agent Packet RapidTool ships to downstream agents) · the agent-facing docs (`AGENTS.md`, `AGENT_GUIDE.md`, `START-HERE.md`, the crew/`crew.ts`, `subagent.ts` de-scope) · the HITL/seat/approval/policy chain (policy.ts, seats, the two-channel token) · the handoff (`handoff.ts`, `io.ts` export paths) · the ingest loop (`report-intake.ts`). EVERY issue: does the packet still describe the run truthfully; does the agent get what it needs; do the governance paths actually govern; where do the docs and the code disagree.
+
+## F3 — THE PHASE PIPELINE (the factory floor)
+`engine.ts` · `phases.ts` · `store.ts` · `dod.ts` · the drivers (`liveLayer`, `wildStep`, `runPhaseAsync/runPhase`, console driver) · the gates/mint/promote · the NEW `checkpoint.server.ts` + its integration (as it lands) · `runUntilGate`/`resume`. EVERY issue: any path that can silently no-op; any state that can be clobbered; any gate that can pass hollow; any driver that diverges from its siblings; the mint reachability story post-W-01/02.
+
+## F4 — THE OUTPUT FACTORY (emit → artifact)
+`scaffold.ts` (incl. the 4-kind block as L1 lands it) · `compile-check.server.ts` (treeRun/install/script execution) · `run-eval.mjs` (graders/acceptance/verification label) · `research/eval-corpus/**` · `tree-run` semantics · the emitted artifact's typecheck story (R3-f02/f03). EVERY issue: can a broken artifact pass; is the emitted tree honest; do the kinds work; do the graders grade the product.
+
+## F5 — THE OPERATIONS LAYER (CLI · telemetry · diagnostics · the process itself)
+`scripts/**` (every verb incl. resume/unattended as they land) · `rt-*` telemetry · `doctor.ts`/`diagnose.ts`/`error-scan` · `report-intake` edges · the error taxonomy + exit codes · the docs-as-process (README-cli parity, START-HERE) · the boundary process itself (gate.sh, the legs, the standing reds). EVERY issue: any verb that lies; any envelope that misreports; any diagnostic that reports zeros for unknown; any doc claim the bytes don't back.
+
+## §Y1 — W37 LANE Y1 · THE MODEL-PATH LANDINGS (attribution `fixes/282_y1_model.md`)
+_Appended by W39 Z2 (`fixes/287_z2_contracts.md`): Y1's owed §Y1 record never landed here — and N4's §F1–§F5 paste was still pending at this read — so this is the full record, not the delta-only form Y1's log conditioned on §F1 being live._
+
+**Y1's landing list (each re-verified against the tree at the W39 Z2 read; line numbers = that read, post-Z2's own patch):**
+- **FM-01 LANDED** — single-module synthesis materializes ESM at SYNTHESIS time (`materializeImportableTree` at `codegen.server.ts:3257`, the chunked-path seam mirrored); the emit-time residue guard (`headless.ts` `materializeEmitTree`) stays a backstop. Done-when met: a fresh single-file synthesis is ESM before emit.
+- **FM-03 LANDED** — every bounded repair re-prompt meters spend (`accountRepairUsage`, markers `:956/:2481/:2506`; metered at `:3078/:3170/:3190/:3470/:3547`), and a stop is served as the coded `RT_E_BUDGET_EXHAUSTED` refusal, never model-failure prose. `TODO(FM-03b)` names the remaining terminal-threading item (`:959`).
+- **FM-04 LANDED** — `modelRoute` derives from the SERVED model id (`modelRouteForServed` `:2758`; stamped at `:2836` (upgraded) / `:3602` (treeUpgraded) / `:3690` (partialTreeRefuse)), never the hardcoded constant. `TODO(FM-04b)` names the union-widening item (`:2755`).
+- **FM-08 LANDED** — DATA FLOW + ERROR HANDLING render in both user-prompt builders behind non-empty gates (`codegen.server.ts`, markers `:1388/:1420`), so a spec without them keeps the legacy prompt bytes.
+- **FM-05 / FM-12 (llm/providers) · FM-09 (reviewer) · FM-10 (token-ledger): NOT LANDED at this read** — no attribution markers in their target files (`src/lib/llm/**`, `token-ledger.ts`, `wild-review.ts`); carried forward (Y1's "window permitting" row).
+- **Log-only per Y1's plan (outside the lane's box): FM-02** (rt-events/cli pins) · **FM-06 / FM-07** (prompt-engine/llm-tasks) · **FM-11** (OWNER/keys — the `RAPIDTOOL_PROVIDER=xai` refusal-by-construction note lives at `codegen.server.ts:2754-2756`).
+- **Cross-file:** `src/lib/llm.ts:42` carries Y1's I2 contract note (a REFUSAL may still report usage — the result type reflects it).
+
+<!-- END-OF-FILE-MARKER-FACTORY · every lane appends ABOVE this line · never edit or delete this line -->

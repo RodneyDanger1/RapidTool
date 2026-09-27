@@ -300,7 +300,10 @@ describe("chatOnceServer", () => {
     assert.equal(messages[messages.length - 1]?.content, "now");
   });
 
-  it("maps a 402 provider refusal to RT_E_LLM_REJECTED", async () => {
+  // §R9-f01 (W29): same wallet doctrine on the chat surface — see the
+  // llm.test.ts pin; a broke wallet is RT_E_LLM_NO_BALANCE, not a generic
+  // refusal (ERROR_CODE_DOC drives the agent's next action).
+  it("maps a 402 provider refusal to RT_E_LLM_NO_BALANCE", async () => {
     process.env[KEY] = "sk-bad";
     globalThis.fetch = (async () =>
       okResponse({ error: { message: "Insufficient Balance" } }, 402)) as typeof fetch;
@@ -309,7 +312,7 @@ describe("chatOnceServer", () => {
     assert.equal(res.ok, false);
     if (!res.ok) {
       assert.equal(res.reason, "error");
-      assert.equal(res.code, "RT_E_LLM_REJECTED");
+      assert.equal(res.code, "RT_E_LLM_NO_BALANCE");
       assert.match(res.error ?? "", /402|balance/i);
     }
   });

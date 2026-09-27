@@ -67,6 +67,26 @@ export const ERROR_CODES = [
   // leg as a trial; that must never read as a quality measurement again.
   // Append-only; consumers match string literals, never array position.
   "RT_E_LLM_NO_BALANCE",
+  // W30 lane S1 (fixes/272_s1_autonomy.md): the autonomy SHELL refusals. Each
+  // names a capability whose seam exists but whose host/precondition does not
+  // (yet) — an honest coded refusal, never a fake run. Append-only; consumers
+  // match string literals, never array position.
+  //   - UNATTENDED_UNSUPPORTED: W-47 — no scheduler/daemon host here + the
+  //     W-01/W-02 blockers; the refusal names them (`blockers`).
+  //   - CHECKPOINT_MISSING: T-107.7 `resume` — no checkpoint for the project.
+  //   - NOT_IMPLEMENTED: a coded SHELL — the seam parsed the request but the
+  //     full logic is not wired; the message names the TODO row.
+  "RT_E_UNATTENDED_UNSUPPORTED",
+  "RT_E_CHECKPOINT_MISSING",
+  "RT_E_NOT_IMPLEMENTED",
+  // W31 T2 (fixes/273_t2_r15.md · R15-f02): the auth-schema preflight. Sign-in
+  // enabled while no migration creates the Better Auth `user` table would run
+  // every query against a schema-less database the moment someone signs in —
+  // refuse at startup with the copy-up instruction instead. Emitted by
+  // scripts/migrate.mjs + src/lib/db.ts via authSchemaRefusal.
+  // Append-only; consumers match string literals, never array position.
+  "RT_E_AUTH_SCHEMA_MISSING",
+  "RT_E_MCP_DISABLED",
 ] as const;
 
 /**
@@ -402,7 +422,7 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
   },
   RT_E_LLM_NO_BALANCE: {
     meaning:
-      "The LLM provider refused the call because the account balance is exhausted (DeepSeek HTTP 402 / \"Insufficient Balance\").",
+      "The LLM provider refused the call because the account balance is exhausted (the provider's HTTP 402 / \"Insufficient Balance\" — a wallet class, not a generic refusal).",
     agentAction:
       "Stop consuming this account: do not retry (billing is not transient) and read NO keyed score from a run in this state — top up the account or switch keys, re-pass the fundedness probe, then re-run.",
   },
@@ -484,5 +504,35 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
       "The git binary is not available in this environment, so the git landing tail cannot run.",
     agentAction:
       "Report the absence honestly and leave the tree uninitialized — install git, or run where git exists; never fake a landing or hand-roll repository metadata.",
+  },
+  RT_E_UNATTENDED_UNSUPPORTED: {
+    meaning:
+      "W-47: an unattended end-to-end run was requested before its host and blockers exist — there is no scheduler/daemon/queue in this product (the entry is a dumb external cron/Task-Scheduler hook) and the W-01 (keyed wild P6 seam) / W-02 (mint reachability) blockers are not landed keyed.",
+    agentAction:
+      "Do not fake an unattended run: read the `blockers` list, land W-01+W-02 keyed, then arm the external hook (the refusal payload carries the exact scheduler line) and re-run; manual `wild`/`gate` runs remain available for supervised progress.",
+  },
+  RT_E_CHECKPOINT_MISSING: {
+    meaning:
+      "T-107.7: `resume`/`unattended` found no checkpoint at <projectDir>/.rapidtool/checkpoint.json — the run never committed a phase with a known project dir, or a COMPLETE seal cleared it (completion removes the checkpoint: there is no successor state to re-enter).",
+    agentAction:
+      "Continue with the normal run verbs — `gate`/`run --project` writes a fresh checkpoint on every committed phase (`unattended` starts from the project file when no checkpoint exists); re-run `resume` only after a run has committed a phase beside that dir. Never invent a resumption.",
+  },
+  RT_E_NOT_IMPLEMENTED: {
+    meaning:
+      "The requested capability is a coded SHELL: its seam exists (types/parsing/refusal paths in place) but the full logic is not wired yet — the message names the owning TODO row.",
+    agentAction:
+      "Treat the refusal as the honest state of the build: read the named TODO(<row-id>) / lane log, implement that row, and re-run; never work around it by fabricating the missing behavior.",
+  },
+  RT_E_AUTH_SCHEMA_MISSING: {
+    meaning:
+      "Sign-in is enabled (VITE_AUTH_ENABLED is not \"false\") but no migration creates the Better Auth \"user\" table — migrations/auth/*.sql is never applied (neither the deploy migrator nor the PGLite fallback descends into it).",
+    agentAction:
+      "Copy the auth schema into the migrated directory (`cp migrations/auth/0001_auth.sql migrations/0001_auth.sql`, plus any later migrations/auth/*.sql in name order), restart, and re-run; or set VITE_AUTH_ENABLED=false to run without sign-in. Never let the app serve sign-in against a schema-less database.",
+  },
+  RT_E_MCP_DISABLED: {
+    meaning:
+      "F1 (R8-f11 / R13-f06): the MCP runtime client is owner-gated and DISABLED by default — no child process was spawned and zero network I/O was performed (the shell is discovery-first and inert until the owner's trust decision).",
+    agentAction:
+      "Do not simulate MCP discovery or fabricate tool lists: wait for the owner's trust decision, then set RAPIDTOOL_MCP_ENABLED=1 (once the JSON-RPC 2.0 stdio transport lands, TODO(R8-f11)) and re-run the read-only tools/list discovery.",
   },
 };

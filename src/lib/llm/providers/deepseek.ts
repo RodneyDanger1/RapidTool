@@ -198,7 +198,15 @@ type DeepSeekChatBody = {
     message?: { content?: unknown; reasoning_content?: unknown };
     finish_reason?: unknown;
   }>;
-  usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+  usage?: {
+    prompt_tokens?: unknown;
+    completion_tokens?: unknown;
+    /** Context-cache split (api-docs.deepseek.com/guides/kv_cache — "Checking
+     *  Cache Hit Status"): hit = tokens served from the persisted prefix
+     *  cache, miss = tokens that did not hit. C2 (W39 · fixes/288_c2). */
+    prompt_cache_hit_tokens?: unknown;
+    prompt_cache_miss_tokens?: unknown;
+  };
 };
 
 type DeepSeekFetchDeps = {
@@ -341,6 +349,27 @@ async function completeDeepSeekInner(
   }
 
   const model: LlmModel = opts.model ?? DEEPSEEK_MODELS.flash;
+
+  // R4-f05 · C1-f09 (W29 · LANE P): enforce THIS header's claim — "unknown ids
+  // are refused before any network I/O, and this provider never falls back to
+  // a default". The registry's explicit/env paths enforce their narrower
+  // verified set (registry.ts `isKnownModelId`); a direct facade caller
+  // (llm.ts `complete()`, whose validator is TS-only at runtime) bypasses
+  // them, so the provider re-checks its own REQUEST list here — including the
+  // forward-compat `deepseek-v4-flash-vision-exp` that the explicit rule
+  // deliberately excludes — BEFORE any request leaves. A vendor 400
+  // "model not found" round-trip is not a pre-network refusal: it costs a call.
+  if (!DEEPSEEK_MODEL_IDS.includes(model)) {
+    return {
+      ok: false,
+      reason: "error",
+      error:
+        `DeepSeek cannot request model "${model}" — known request ids: ` +
+        `${DEEPSEEK_MODEL_IDS.join(", ")}. Refusing rather than falling back to a default.`,
+      code: "RT_E_VALIDATION",
+    };
+  }
+
   const isPro = model === DEEPSEEK_MODELS.pro;
   const maxTokens =
     opts.maxTokens ?? (isPro ? DEFAULT_MAX_TOKENS_PRO : DEFAULT_MAX_TOKENS_FLASH);

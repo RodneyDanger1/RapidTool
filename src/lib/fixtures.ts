@@ -17,7 +17,7 @@
 
 /** The one line every review surface must show (T5.2-A honesty label). */
 export const FIXTURE_REVIEW_LABEL =
-  "read-only review — the grader is run-side authority; approving here records a decision, it does not modify the bar";
+  "read-only review — the grader is run-side authority; approval is a CLI action (fixtures --approve --ids …) and this view records no decision";
 
 /** Verdicts the human seat may record for one fixture. */
 export type FixtureVerdict = "approve" | "reject";

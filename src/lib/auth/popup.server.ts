@@ -16,7 +16,7 @@
  * React route here paints the full app shell in the popup. The opener lives in
  * `client.ts` (`signIn` → `openSignInPopup`).
  */
-import { auth, SESSION_TOKEN_COOKIE } from "./server";
+import { auth, SESSION_TOKEN_COOKIE } from "./server.ts";
 
 /** Message shape the popup posts to the opener (must match `client.ts`). */
 type PopupMessage = {

@@ -142,12 +142,22 @@ function authPopupPlugin(): Plugin {
   };
 }
 
-// `0.0.0.0:8080` is the live-preview contract — don't change host/port.
+// R11-f01 (W30 S4): the dev server binds LOOPBACK (`127.0.0.1`) by default —
+// the fix for the unauthenticated-RCE surface (any LAN host could POST
+// `/_serverFn/<id>` JSON → `runNodeBounded`). The `0.0.0.0:8080` bind stays
+// available as a DELIBERATE, EXPLICIT exception for the live-preview
+// panel/iframe cases (the sandbox proxy reaches this port over the network):
+// set `RAPIDTOOL_BIND_ALL=1` in the environment, e.g.
+//   RAPIDTOOL_BIND_ALL=1 npm run dev
+// Port 8080 + strictPort stay byte-identical on both paths — only the
+// interface changes. The `npm run dev` script no longer passes `--host
+// 0.0.0.0` (it used to override this block); the opt-in env is the ONLY way
+// back onto the LAN. Preview (`npm run preview`) was already loopback-only.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
   server: {
-    host: "0.0.0.0",
+    host: process.env.RAPIDTOOL_BIND_ALL === "1" ? "0.0.0.0" : "127.0.0.1",
     port: 8080,
     strictPort: true,
   },

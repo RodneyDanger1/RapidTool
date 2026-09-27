@@ -33,7 +33,7 @@ export async function fixturesReview(): Promise<FixtureLoadResult> {
       corpusDir: "",
       rows: [],
       problems: [`fixtures review unavailable: ${err instanceof Error ? err.message : String(err)}`],
-      label: "read-only review — the grader is run-side authority; approving here records a decision, it does not modify the bar",
+      label: "read-only review — the grader is run-side authority; approval is a CLI action (fixtures --approve --ids …) and this view records no decision",
     };
   }
 }

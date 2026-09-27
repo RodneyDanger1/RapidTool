@@ -438,11 +438,19 @@ export function buildVaultNotes(project: Project): VaultNote[] {
 export function backlinksFor(notes: VaultNote[], title: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
+  // W-16: junk rows (null/scalars) and a non-array notes value yield no
+  // backlink — the documented "unknown/empty input yields []" must hold for
+  // `[null, 5]` too (never throw on foreign input; same row() guard as above).
+  if (!Array.isArray(notes)) return out;
   for (const n of notes) {
-    if (n.title === title) continue; // a note does not link back to itself
-    if (n.links.includes(title) && !seen.has(n.title)) {
-      seen.add(n.title);
-      out.push(n.title);
+    const r = row(n);
+    if (!r) continue;
+    const t = typeof r.title === "string" ? r.title : null;
+    if (t === null || t === title) continue; // a note does not link back to itself
+    const links = Array.isArray(r.links) ? (r.links as string[]) : [];
+    if (links.includes(title) && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
     }
   }
   return out;

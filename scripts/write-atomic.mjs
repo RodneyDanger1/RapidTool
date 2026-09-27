@@ -15,6 +15,9 @@
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// R11-f07: the shared physical-containment helper (one implementation, three
+// call sites — see scripts/path-safety.mjs).
+import { physicalInside } from "./path-safety.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -39,7 +42,11 @@ function isInside(dir, file) {
  */
 export function stagingError({ staged, target, publicDir }) {
   if (staged === target) return `staged file and target are the same path: ${target}`;
-  if (isInside(publicDir, staged)) {
+  // R11-f07 (S-05): also refuse when the PHYSICAL path is under publicDir —
+  // a symlinked public/ or staged path can pass the lexical check while the
+  // bytes would land inside the shipped directory. `null` (unverifiable)
+  // keeps the lexical verdict, never silently "not inside".
+  if (isInside(publicDir, staged) || physicalInside(publicDir, staged) === true) {
     return `stage outside ${publicDir} (vite build ships that directory verbatim): ${staged}`;
   }
   return null;

@@ -143,11 +143,20 @@ const policyConsistentApproval = (row: HitlDecision, phase: number): boolean => 
 };
 
 const approvalActor = (p: Project, phase: number): "human" | "autopilot" | null => {
-  const row = (p.decisions ?? []).find(
-    (d) => d.phase === phase && d.decision === "approve",
-  );
-  if (!row) return null;
-  return policyConsistentApproval(row, phase) ? row.decidedBy : null;
+  // A1-35: the append-only journal's NEWEST approve row speaks for the phase
+  // (mirrors engine.refusalClassOf's newest-first scan) — first-wins let a
+  // stale pre-reject row shadow a later re-approval. The winner's actor is
+  // validated, not trusted: a junk `decidedBy` fails the criterion instead of
+  // riding out through a "human" | "autopilot" signature it never satisfied.
+  const decisions = p.decisions ?? [];
+  for (let i = decisions.length - 1; i >= 0; i--) {
+    const row = decisions[i];
+    if (row?.phase !== phase || row.decision !== "approve") continue;
+    if (!policyConsistentApproval(row, phase)) return null;
+    const actor = row.decidedBy;
+    return actor === "human" || actor === "autopilot" ? actor : null;
+  }
+  return null;
 };
 const approved = (p: Project, phase: number): boolean => approvalActor(p, phase) !== null;
 
@@ -836,14 +845,15 @@ export function gateArtifact(
 
 /**
  * E-02: record a machine-checkable DoD verdict for a just-completed phase —
- * the shared PURE gate-recorder (store.recordGate parity). Semantics mirror
- * store.recordGate (store.ts:83-124) byte-for-byte so the store can delegate
- * to this function and headless.finishPhase can record gates on CLI/headless
- * runs: no-op (same project reference) unless the phase record exists and is
- * "complete"; stamps PhaseRecord.gate {passed, unmet, evidenceHash,
- * checkedAt}, appends a capped `gate.verdict` log, and swaps in a fresh
- * kind-"gate" artifact (a prior gate artifact for the phase is replaced,
- * never duplicated).
+ * the shared DETERMINISTIC gate-recorder (store.recordGate parity; "pure"
+ * would overstate it — the host clock stamps `checkedAt`/`ts` via Date.now(),
+ * see A1-36). Semantics mirror store.recordGate (store.ts:83-124)
+ * byte-for-byte so the store can delegate to this function and
+ * headless.finishPhase can record gates on CLI/headless runs: no-op (same
+ * project reference) unless the phase record exists and is "complete"; stamps
+ * PhaseRecord.gate {passed, unmet, evidenceHash, checkedAt}, appends a capped
+ * `gate.verdict` log, and swaps in a fresh kind-"gate" artifact (a prior gate
+ * artifact for the phase is replaced, never duplicated).
  */
 /** fixes/125 (W1 #2): the failed-gate census — every COMPLETE phase whose DoD
  *  gate recorded `passed:false`. A run must never present as cleanly complete
@@ -930,10 +940,14 @@ export const CAPABILITIES = {
       "Outbound: DeepSeek API + research providers only. No MCP client, no Brave, no repo.fs, no sandbox.exec servers (P2-3 roadmap).",
   },
   memory: {
+    // A1-37: checkpoint.server.ts (T-107.7) ships in-tree with NO call site
+    // yet, so the claim below is still literally true. When the resume wiring
+    // lands, move "durable-checkpoints" to implemented and rewrite this claim
+    // IN THE SAME commit — the claim text copies into user-visible artifacts.
     implemented: ["project-memory-80-row", "knowledge-store-file"],
     declared: ["durable-checkpoints", "cross-encoder-rerank"],
     claim:
-      "Persistence = browser localStorage + JSON project files. No durable checkpoint layer, no RRF/cross-encoder (FusionRank is lexical, deliberately).",
+      "Persistence = browser localStorage + JSON project files. No wired durable checkpoint layer (T-107.7's module is in-tree, no call site yet), no RRF/cross-encoder (FusionRank is lexical, deliberately).",
   },
   model: {
     implemented: ["deepseek-v4-flash", "deepseek-v4-pro"],

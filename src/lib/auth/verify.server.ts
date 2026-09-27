@@ -1,6 +1,6 @@
 import { getRequest } from "@tanstack/react-start/server";
-import { gateIdentityEnabled } from "./gate-identity.server";
-import { auth, authConfigured } from "./server";
+import { gateIdentityEnabled } from "./gate-identity.server.ts";
+import { auth, authConfigured } from "./server.ts";
 
 /**
  * Server-side session resolution (server-only).

@@ -80,7 +80,7 @@ export type MockLlmProvider = {
   reset(envelopes?: readonly MockEnvelope[], opts?: { keepCalls?: boolean }): void;
 };
 
-function copyEnvelope(env: MockEnvelope): LlmResult {
+function copyEnvelope(env: LlmResult): LlmResult {
   if (env.ok) {
     return {
       ok: true,
@@ -89,7 +89,17 @@ function copyEnvelope(env: MockEnvelope): LlmResult {
       ...(env.usage ? { usage: { promptTokens: env.usage.promptTokens, completionTokens: env.usage.completionTokens } } : {}),
     };
   }
-  return { ok: false, reason: env.reason, error: env.error, ...(env.code ? { code: env.code } : {}) };
+  // W39·B4: LlmResult's refusal arm may carry `usage` (Y1's I2 contract —
+  // a refusal that still burned tokens must stay meterable). The mock must
+  // mirror the REAL provider's shape: dropping usage here would make the
+  // fake seam silently under-count where the live seam counts.
+  return {
+    ok: false,
+    reason: env.reason,
+    error: env.error,
+    ...(env.code ? { code: env.code } : {}),
+    ...(env.usage ? { usage: { promptTokens: env.usage.promptTokens, completionTokens: env.usage.completionTokens } } : {}),
+  };
 }
 
 /**

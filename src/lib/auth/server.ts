@@ -35,11 +35,11 @@ import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
-import { ensureDbReady, getPglite } from "../db";
-import { emailAndPasswordEnabled } from "./email-password";
-import { GATE_PROVIDER_ID, gateIdentitySessions } from "./gate-session.server";
-import { GROK_PROVIDERS } from "./providers";
-import { pgliteDialect } from "./pglite-dialect";
+import { ensureDbReady, getPglite } from "../db.ts";
+import { emailAndPasswordEnabled } from "./email-password.ts";
+import { GATE_PROVIDER_ID, gateIdentitySessions } from "./gate-session.server.ts";
+import { GROK_PROVIDERS } from "./providers.ts";
+import { pgliteDialect } from "./pglite-dialect.ts";
 import {
   GROK_ISSUER_DEFAULT,
   PREVIEW_ALLOWED_HOSTS,

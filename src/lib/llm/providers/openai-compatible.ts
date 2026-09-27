@@ -487,11 +487,21 @@ export async function completeOpenAiCompatible(
 
     if (!res.ok) {
       const exhausted = attempts > 1 ? ` (after ${attempts} attempts)` : "";
+      // R4-f01 (W29 · LANE P): the wallet doctrine is PROVIDER-WIDE, not
+      // DeepSeek-only. Mirror of deepseek.ts:437-444 (W23-L1, fixes/262):
+      // HTTP 402 / "Insufficient Balance" is its own class — a broke wallet is
+      // not a generic refusal (RT_E_LLM_REJECTED, whose doc says "check the
+      // key or the parameters") and not our session budget
+      // (RT_E_BUDGET_EXHAUSTED). The vendor text comes from the SAME
+      // describeError() string the refusal already carried, so the message
+      // stays byte-identical; only the code changes for the 402 class.
+      const refusalText = await describeError(spec.label, res);
+      const noBalance = res.status === 402 || /insufficient balance/i.test(refusalText);
       return {
         ok: false,
         reason: "error",
-        error: `${await describeError(spec.label, res)} — requested model: "${model}"${exhausted}`,
-        code: "RT_E_LLM_REJECTED",
+        error: `${refusalText} — requested model: "${model}"${exhausted}`,
+        code: noBalance ? "RT_E_LLM_NO_BALANCE" : "RT_E_LLM_REJECTED",
       };
     }
 

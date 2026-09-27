@@ -153,6 +153,35 @@ export type WildRunState = {
   pause: boolean;
 };
 
+/**
+ * R13-f02 (W30 lane S1 · fixes/272_s1_autonomy.md · spec §R13-f02) — the
+ * plan-before-execute SHELL. Mirrors `planning.ts`'s `Plan`/`PlanStep` shape
+ * (the register's "wild.plan pre-execute from planning.ts's step shape") as an
+ * inline type reference so this module never statically imports the
+ * server-side planner (client-safe `types.ts` stays node:fs-free).
+ *
+ * Honesty semantics: the planner is NOT wired yet, so `engine.readWildPlan`
+ * returns an EMPTY plan (`steps: []`, `source: "empty"`) with a note naming
+ * the owning row — never fabricated steps. The full implementation fills
+ * `steps` from a real planning pass, has the classifier review them, and
+ * pauses before the first mutation unless `autoPlan`/policy approves (the
+ * pin: a plan exists before phase 1 mutates).
+ */
+export type WildPlanStep = import("./planning.ts").PlanStep;
+
+export type WildPlan = {
+  /** The goal the plan executes against (the project brief in the empty shell). */
+  goal: string;
+  /** Ordered steps — `[]` while the planner is unwired (never invented). */
+  steps: WildPlanStep[];
+  /** Provenance: "empty" = the shell's honest placeholder; "planner" = a real planning pass. */
+  source: "empty" | "planner";
+  /** Epoch ms of the planning pass; null while the shell holds no real plan. */
+  plannedAt: number | null;
+  /** Human-readable gap note (names the TODO row) — never blank on `source:"empty"`. */
+  note: string;
+};
+
 export type HitlRequest = {
   phase: PhaseId;
   title: string;
@@ -393,6 +422,15 @@ export type Project = {
   wildMode?: boolean;
   /** P13: live Wild Mode run state (null until a run starts). */
   wildRun?: WildRunState | null;
+  /**
+   * R13-f02 (W30 lane S1 · fixes/272_s1_autonomy.md): the plan the wild loop
+   * must hold BEFORE it mutates phase 1 ("no execution without an approved
+   * plan or an explicit auto-plan policy"). Additive — absent on legacy
+   * payloads; the engine read-point (`engine.readWildPlan`) then returns an
+   * honest EMPTY plan and never fabricates steps. UI/packet surfacing is
+   * TODO(R13-f02).
+   */
+  wildPlan?: WildPlan | null;
   /**
    * P0-2: persisted chat thread (console ChatPane). Absent on legacy/imported
    * payloads; additive — never inferred. Rows mirror the console's ChatMsgView

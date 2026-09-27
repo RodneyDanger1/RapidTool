@@ -69,18 +69,42 @@ function readmeListedVerbs(text) {
   return seen;
 }
 
+/**
+ * W31/T1 (§R5-f13): ONE pure scan for every count-claim phrasing. The historical
+ * drift ("33, not 34", then "35 while 37 arms existed") survived because the
+ * guard only inspected lines that quote the `grep -c 'case "'` command — a
+ * stale "35 case arms" phrased WITHOUT the command passed silently. Offenders =
+ * any line whose number-before-noun disagrees with `realCount`. Scan verified on
+ * today's README: exactly the 4 claim lines (:10/:31/:376/:447) match, all 37.
+ */
+function countClaimOffenders(text, realCount) {
+  const CLAIM_RE = /(\d{1,3})\s+(case arms|case `"` arms|subcommands|verbs)\b/i;
+  const offenders = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    const m = line.match(CLAIM_RE);
+    if (m && Number(m[1]) !== realCount) {
+      offenders.push({ line: i + 1, found: Number(m[1]), text: line.trim() });
+    }
+  });
+  return offenders;
+}
+
 const diskVerbs = caseArmVerbs(cliText);
 const diskVerbSet = new Set(diskVerbs);
 const realCount = diskVerbs.length;
 
 test("TASK-06: the README verb-count claim equals the real `case \"` arm count", () => {
-  const claim = readmeText.match(COUNT_CLAIM_RE);
-  assert.ok(claim, "README-cli.md must state the verb count as `**N subcommands**`");
-  assert.equal(
-    Number(claim[1]),
-    realCount,
-    `README-cli.md claims ${claim[1]} subcommands; rapidtool-cli.mjs has ${realCount} \`case "\` arms`,
-  );
+  // W31/T1 (§R5-f13): ALL `**N subcommands**` occurrences must cite the real
+  // count — the old test checked only the FIRST match.
+  const claims = [...readmeText.matchAll(/\*\*(\d+)\s+subcommands\*\*/g)];
+  assert.ok(claims.length > 0, "README-cli.md must state the verb count as `**N subcommands**`");
+  for (const claim of claims) {
+    assert.equal(
+      Number(claim[1]),
+      realCount,
+      `README-cli.md claims ${claim[1]} subcommands; rapidtool-cli.mjs has ${realCount} \`case "\` arms`,
+    );
+  }
 });
 
 test("TASK-06: one arm per line — the documented `grep -c 'case \"'` reads the real count", () => {
@@ -142,6 +166,24 @@ test("TASK-06: no README line argues from a stale `grep -c 'case \"'` count", ()
     }
   });
   assert.ok(checked.length >= 1, "the count command is quoted nowhere in README-cli.md");
+});
+
+test("W31/T1 (R5-f13): countClaimOffenders catches stale phrasings; today's README is clean", () => {
+  // Fixture strings prove the class the grep-quoting guard missed: a stale
+  // count phrased WITHOUT the command (exactly how "35 while 37 existed" lived).
+  assert.equal(countClaimOffenders("the CLI has 35 case arms today", 37).length, 1);
+  assert.equal(countClaimOffenders("**36 subcommands** shipped now", 37).length, 1);
+  assert.equal(countClaimOffenders("all 40 verbs run", 37).length, 1);
+  assert.equal(countClaimOffenders("the CLI has 37 case arms today", 37).length, 0);
+  // The live README: every matched count claim must cite the real count.
+  const offenders = countClaimOffenders(readmeText, realCount);
+  assert.deepEqual(
+    offenders,
+    [],
+    `README-cli.md carries stale count claim(s): ${offenders
+      .map((o) => `:${o.line} (${o.found}\u2260${realCount})`)
+      .join(", ")}`,
+  );
 });
 
 /**

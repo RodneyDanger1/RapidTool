@@ -43,6 +43,7 @@ const VALID_RESOURCE: Record<PolicyAction, string> = {
   "hitl.force": "gate:P6",
   "tree.emit": "tree:src/lib/patch.ts",
   "repair.apply": "tree:src/lib/patch.ts",
+  "fixtures.approve": "fixtures:build.json",
 };
 
 /** A REAL seam allow (the autopilot seat) for the action — the overlay's input. */

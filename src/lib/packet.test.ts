@@ -171,6 +171,57 @@ test("decision ledger: reject note truncated at 200 chars", () => {
   assert.ok(!out.includes(`"${longNote}"`), "full 250-char note never printed");
 });
 
+// ---------------------------------------------------------------------------
+// W29 · R2-f01 / C1-f01 (W-23a) — the WIPE CLASS. A hostile stamp survives
+// JSON.parse, so the render must be TOTAL: never a RangeError inside
+// compileAgentPacket (that throw walks hydrate → attachAlgorithms →
+// seedIfEmpty → recoverFromCorruptPersistence and re-seeds the store EMPTY,
+// wiping every user project).
+// ---------------------------------------------------------------------------
+
+test("R2-f01: a hostile decidedAt (1e300 / Infinity / NaN) never throws — the ledger renders a total ISO", () => {
+  const p = makeProject();
+  p.decisions = [
+    makeDecision({ id: "h-max", phase: 3, decision: "approve", decidedBy: "human", decidedAt: 1e300 }),
+    makeDecision({ id: "h-inf", phase: 4, decision: "approve", decidedBy: "human", decidedAt: Number.POSITIVE_INFINITY }),
+    makeDecision({ id: "h-nan", phase: 5, decision: "approve", decidedBy: "human", decidedAt: Number.NaN }),
+  ];
+  let out = "";
+  assert.doesNotThrow(() => {
+    out = compileAgentPacket(p);
+  }, "a finite-but-out-of-range stamp is clamped to Date's bound; non-finite degrades to the epoch");
+  assert.ok(
+    out.includes(`- P3 · approve · human · ${new Date(8.64e15).toISOString()}`),
+    "1e300 clamps to Date's maximum instead of throwing RangeError",
+  );
+  assert.ok(
+    out.includes(`- P4 · approve · human · ${new Date(0).toISOString()}`),
+    "Infinity renders the deterministic epoch",
+  );
+  assert.ok(
+    out.includes(`- P5 · approve · human · ${new Date(0).toISOString()}`),
+    "NaN renders the deterministic epoch",
+  );
+});
+
+test("R2-f01: a hostile createdAt (-1e300) can never throw compiled_at (the lower bound was missing)", () => {
+  const p = makeProject();
+  // The sibling clamp was UPPER-bound-only: -1e300 passes Number.isFinite AND
+  // Math.min, then toISOString() throws. Clear logs/decisions so the clamp —
+  // not some newer row — decides the stamp.
+  p.createdAt = -1e300;
+  p.logs = [];
+  p.decisions = [];
+  let out = "";
+  assert.doesNotThrow(() => {
+    out = compileAgentPacket(p);
+  });
+  assert.ok(
+    out.includes(`compiled_at: ${new Date(-8.64e15).toISOString()}`),
+    "the negative overflow clamps to Date's minimum (lower bound now enforced)",
+  );
+});
+
 test("decision ledger section absent when no decisions", () => {
   const p = makeProject();
   assert.equal(p.decisions.length, 0);

@@ -1,0 +1,14 @@
+# R15-f05 (W31 T2 · fixes/273_t2_r15.md): paths `npm run format` (prettier --write .)
+# must NEVER rewrite. The eval trees are committed evidence with an intentional
+# scaffold style (see eslint.config.mjs:18-21); .grok/builds/vault-e2e are
+# platform-era + generated trees; lock/SVG files are machine-generated.
+# TODO(R15-f05): once the tree is formatted, add a `format:check` row
+# (`npx prettier --check src scripts`) to scripts/gate.sh — today the formatter
+# is shipped but never enforced.
+research/eval-out/**
+research/eval-corpus/**
+.grok/**
+builds/**
+vault-e2e/**
+package-lock.json
+*.svg

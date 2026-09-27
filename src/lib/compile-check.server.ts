@@ -21,9 +21,9 @@
 // Run: node --experimental-strip-types --test src/lib/compile-check.server.test.ts
 // ---------------------------------------------------------------------------
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { extname, join, relative, resolve, sep } from "node:path";
 import ts from "typescript";
 import { runNodeBounded } from "./node-runner.server.ts";
 import { maskLiteralsAndComments } from "./sandbox.ts";
@@ -327,6 +327,11 @@ export type TreeProjectScriptVerdict = {
   /** Honest reason a `skip`/`error` verdict is not a pass. Present on every
    *  non-pass; never used to soften a red into a green. */
   note?: string;
+  /** R11-f02: how the declared script was executed — argv-only when the first
+   *  token resolved to a real executable, else the lifecycle-denied npm
+   *  fallback; and the standing refusal: model-authored lifecycle scripts
+   *  (pre/post hooks, install scripts) are NEVER run by this leg. */
+  scriptPolicy?: string;
 };
 
 /** 216 (T-18): the emitted project's OWN toolchain verdict — the scripts it
@@ -509,24 +514,151 @@ function scriptToolResolvable(root: string, command: string): { tool: string; re
   return { tool, resolvable: false };
 }
 
-/** 216 (T-18): the runner wrapper that executes ONE declared project script
- *  (`npm run <script>`) inside the temp copy — the same bounded-runner
- *  contract as the spec/entry wrappers: CJS-safe, inner timeout + maxBuffer,
- *  compact JSON envelope on stdout, exit via process.exitCode. The script
- *  NAME is a constant supplied by this module; npm reads the COMMAND from the
- *  tree's own package.json. */
-function projectScriptRunnerCode(script: string, cwd: string, innerTimeoutMs: number): string {
+/** R11-f02: split a declared script command into argv tokens — quotes group,
+ *  whitespace separates, NO expansion. Returns null when the command cannot
+ *  be faithfully represented as argv (unbalanced quote) so the caller takes
+ *  the lifecycle-denied npm fallback instead of guessing. `shellOps` is set
+ *  when an unquoted shell operator (`& | ; < > $ ` + newline) appears — such
+ *  a command NEEDS a shell to mean what the tree declared, so it too takes
+ *  the fallback (whose argv is a constant, never tree text). */
+function splitCommandTokens(command: string): { tokens: string[]; shellOps: boolean } | null {
+  const tokens: string[] = [];
+  let cur = "";
+  let quote: '"' | "'" | null = null;
+  let has = false;
+  let shellOps = false;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!;
+    if (quote !== null) {
+      if (ch === quote) {
+        quote = null;
+        continue;
+      }
+      cur += ch;
+      has = true;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      has = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (has) {
+        tokens.push(cur);
+        cur = "";
+        has = false;
+      }
+      continue;
+    }
+    if (/[&|;<>$`]/.test(ch)) shellOps = true;
+    cur += ch;
+    has = true;
+  }
+  if (quote !== null) return null;
+  if (has) tokens.push(cur);
+  return { tokens, shellOps };
+}
+
+/** R11-f02: resolve the declared command's first token to a SPAWNABLE path in
+ *  this tree — the node runtime by name, a path-ish token under the root, or
+ *  the tree's own `node_modules/.bin` entry (win suffixes; `.exe` preferred
+ *  because it spawns argv-only). Null = no toolchain for this token. */
+function resolveScriptToolPath(
+  root: string,
+  first: string,
+): { tool: string; path: string; ext: string } | null {
+  if (!first) return null;
+  if (first.includes("/") || first.includes("\\")) {
+    const p = join(root, first);
+    return existsSync(p) ? { tool: first, path: p, ext: extname(p).toLowerCase() } : null;
+  }
+  const lower = first.toLowerCase();
+  if (lower === "node" || lower === "node.exe") return { tool: first, path: first, ext: "" };
+  const win = process.platform === "win32";
+  const binDir = join(root, "node_modules", ".bin");
+  const exts = win ? [".exe", ".cmd", ".ps1", ".bat", ""] : [""];
+  for (const ext of exts) {
+    const p = join(binDir, first + ext);
+    if (existsSync(p)) return { tool: first, path: p, ext: ext.toLowerCase() };
+  }
+  return null;
+}
+
+/** The exec plan for ONE declared project script.
+ *  - `argv`: run `argv[0] argv[1..]` directly. `shell:false` everywhere the
+ *    resolved tool can be spawned argv-only (POSIX bin shims, `.exe`, the
+ *    node runtime); a win32 `.cmd`/`.bat`/`.ps1` shim rides a `cmd.exe
+ *    /d /s /c` host whose command line is built HERE with every token
+ *    double-quoted and `"`/`%`/newline-containing tokens refused (those
+ *    cannot be safely represented) — never `shell:true` over tree text.
+ *  - fallback (`shell:true`): `npm run <script> --ignore-scripts` — a
+ *    CONSTANT argv, and pre/post lifecycle hooks are denied.
+ *  `via` is recorded on the verdict so the refusal/route is auditable. */
+function planScriptExec(root: string, script: string, raw: string): ScriptExecPlan {
+  const parsed = splitCommandTokens(raw);
+  const LIFECYCLE =
+    "lifecycle scripts denied — the tree's pre/post hooks and install scripts never run in this leg";
+  if (parsed !== null && parsed.tokens.length > 0 && !parsed.shellOps) {
+    const [first, ...rest] = parsed.tokens;
+    const tool = resolveScriptToolPath(root, first!);
+    if (tool !== null) {
+      if (tool.ext === "" || tool.ext === ".exe") {
+        return {
+          argv: [tool.path, ...rest],
+          shell: false,
+          via: `argv-only · ${tool.tool}${tool.ext} (no shell) — ${LIFECYCLE}`,
+        };
+      }
+      if (process.platform === "win32" && (tool.ext === ".cmd" || tool.ext === ".bat" || tool.ext === ".ps1")) {
+        const unsafe = (s: string): boolean => /["%\r\n]/.test(s);
+        if (!unsafe(tool.path) && rest.every((a) => !unsafe(a))) {
+          const q = (s: string): string => `"${s}"`;
+          const line = `"${[q(tool.path), ...rest.map(q)].join(" ")}"`;
+          return {
+            argv: [process.env.ComSpec || "cmd.exe", "/d", "/s", "/c", line],
+            shell: false,
+            verbatim: true,
+            via: `argv-only · ${tool.tool}${tool.ext} via cmd.exe host (no outer shell) — ${LIFECYCLE}`,
+          };
+        }
+        return {
+          argv: ["npm", "run", script, "--ignore-scripts"],
+          shell: true,
+          via: `npm run ${script} --ignore-scripts (the declared args cannot be safely argv-spawned on win32) — ${LIFECYCLE}`,
+        };
+      }
+    }
+  }
+  return {
+    argv: ["npm", "run", script, "--ignore-scripts"],
+    shell: true,
+    via: `npm run ${script} --ignore-scripts (shell form) — ${LIFECYCLE}`,
+  };
+}
+
+type ScriptExecPlan = { argv: string[]; shell: boolean; verbatim?: boolean; via: string };
+
+/** R11-f02: the runner wrapper that executes ONE declared project script from
+ *  an APPROVED exec plan — argv-only where the plan resolved a real
+ *  executable (`shell:false`), or the lifecycle-denied npm fallback whose
+ *  argv is a constant. Same bounded-runner contract as before: CJS-safe,
+ *  inner timeout + maxBuffer, compact JSON envelope on stdout, exit via
+ *  process.exitCode. No plan ever passes tree text to a shell. */
+function projectScriptRunnerCode(plan: ScriptExecPlan, cwd: string, innerTimeoutMs: number): string {
   return [
     `const { spawnSync } = require("node:child_process");`,
+    `const argv = ${JSON.stringify(plan.argv)};`,
     `let r = null;`,
     `let caught = null;`,
     `try {`,
-    `  r = spawnSync(${JSON.stringify(`npm run ${script}`)}, {`,
+    `  r = spawnSync(argv[0], argv.slice(1), {`,
     `    encoding: "utf8",`,
     `    timeout: ${innerTimeoutMs},`,
     `    maxBuffer: 4194304,`,
     `    windowsHide: true,`,
-    `    shell: true,`,
+    `    shell: ${plan.shell ? "true" : "false"},`,
+    `    windowsVerbatimArguments: ${plan.verbatim === true ? "true" : "false"},`,
     `    cwd: ${JSON.stringify(cwd)},`,
     `  });`,
     `} catch (e) {`,
@@ -842,38 +974,40 @@ async function runProjectScript(
     };
   }
   const innerTimeout = Math.max(500, timeoutMs - INNER_TIMEOUT_MARGIN_MS);
-  const run = await runNodeBounded(projectScriptRunnerCode(script, root, innerTimeout), { timeoutMs });
+  const plan = planScriptExec(root, script, raw);
+  const run = await runNodeBounded(projectScriptRunnerCode(plan, root, innerTimeout), { timeoutMs });
   if (!run.ok) {
     if (run.reason === "timeout") {
-      return { ...base, command: raw, run: "timeout", detail: `npm run ${script} killed after ${timeoutMs / 1000}s`, durationMs: duration() };
+      return { ...base, command: raw, scriptPolicy: plan.via, run: "timeout", detail: `${script} script killed after ${timeoutMs / 1000}s`, durationMs: duration() };
     }
     if (run.reason === "not-configured") {
-      return { ...base, command: raw, run: "error", detail: `${run.code}: local bounded runner unavailable`, durationMs: duration() };
+      return { ...base, command: raw, scriptPolicy: plan.via, run: "error", detail: `${run.code}: local bounded runner unavailable`, durationMs: duration() };
     }
-    return { ...base, command: raw, run: "error", detail: run.error ?? run.reason, durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, run: "error", detail: run.error ?? run.reason, durationMs: duration() };
   }
   const env = parseWrapperEnvelope(run.stdout);
   if (!env) {
-    return { ...base, command: raw, run: "error", detail: "runner produced no parseable envelope", durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, run: "error", detail: "runner produced no parseable envelope", durationMs: duration() };
   }
   if (env.kind === "error") {
-    return { ...base, command: raw, run: "error", detail: (env.error ?? "npm script runner failed").slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, run: "error", detail: (env.error ?? "npm script runner failed").slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
   }
   const tail = (env.tail ?? "").trim();
   if (env.spawnErr) {
-    return { ...base, command: raw, run: "error", detail: `spawn failed: ${env.spawnErr}`.slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, run: "error", detail: `spawn failed: ${env.spawnErr}`.slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
   }
   if (env.timedOut) {
-    return { ...base, command: raw, run: "timeout", detail: `npm run ${script} killed after ${innerTimeout / 1000}s (inner timeout)`, durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, run: "timeout", detail: `${script} script killed after ${innerTimeout / 1000}s (inner timeout)`, durationMs: duration() };
   }
   const exitCode = typeof env.status === "number" ? env.status : 1;
-  if (exitCode === 0) return { ...base, command: raw, run: "pass", exitCode: 0, durationMs: duration() };
+  if (exitCode === 0) return { ...base, command: raw, scriptPolicy: plan.via, run: "pass", exitCode: 0, durationMs: duration() };
   return {
     ...base,
     command: raw,
+    scriptPolicy: plan.via,
     run: "fail",
     exitCode,
-    detail: (tail || `npm run ${script} exited ${exitCode}`).slice(0, VERDICT_TAIL_MAX),
+    detail: (tail || `the declared "${script}" script exited ${exitCode}`).slice(0, VERDICT_TAIL_MAX),
     durationMs: duration(),
   };
 }
@@ -942,10 +1076,46 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
   const subject = resolve(dir);
   let work = subject;
   let copy: string | null = null;
+  let scratchCleanupFailed = false;
+  const cleanScratch = (): void => {
+    if (!copy) return;
+    try {
+      rmSync(copy, { recursive: true, force: true });
+      copy = null;
+    } catch {
+      scratchCleanupFailed = true; // Windows locks: the dir may outlive this call
+    }
+  };
+  /** R12-f03: cleanup + the honest note ride EVERY return, so a leaked
+   *  scratch dir is never silent. */
+  const finish = (outcome: TreeRunOutcome): TreeRunOutcome => {
+    cleanScratch();
+    if (scratchCleanupFailed) {
+      outcome.note = `${outcome.note ? `${outcome.note} · ` : ""}the temp scratch copy could not be removed (a process may still hold a file in ${work}) — the dir is safe to delete once that process exits`;
+    }
+    return outcome;
+  };
   try {
     copy = mkdtempSync(join(tmpdir(), "rt-treerun-"));
     if (existsSync(subject) && statSync(subject).isDirectory()) {
-      cpSync(subject, copy, { recursive: true });
+      // R12-f03: never deep-copy the dep tree or VCS metadata into %TEMP% —
+      // the same skip-set verifyKindDir already uses. A duplicated
+      // node_modules was the #1 disk/IO hog on this box and its locked files
+      // are what made the cleanup rmSync silently leave temp dirs behind. The
+      // tree's own toolchain stays available through a JUNCTION to the
+      // subject's node_modules (a directory-level hardlink seam — zero bytes
+      // copied); when the junction cannot be created, the declared scripts
+      // fall back to their existing honest UNVERIFIED skip notes.
+      const skip = new Set([join(subject, "node_modules"), join(subject, ".git")]);
+      cpSync(subject, copy, { recursive: true, filter: (src) => !skip.has(src) });
+      const subjectDeps = join(subject, "node_modules");
+      if (existsSync(subjectDeps)) {
+        try {
+          symlinkSync(subjectDeps, join(copy, "node_modules"), "junction");
+        } catch {
+          /* honest fallback: no deps in the run copy → declared scripts skip */
+        }
+      }
     } else {
       rmSync(copy, { recursive: true, force: true });
       copy = null;
@@ -1034,15 +1204,11 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
       (outcome.run.run === "pass" ||
         (outcome.run.run === "skip" && outcome.run.kind === "ui-shell"));
     outcome.ok = compile.ok && specsGreen && entryGreen && projectLeg.verdict.ok;
-    return outcome;
+    return finish(outcome);
   } finally {
-    if (copy) {
-      try {
-        rmSync(copy, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
-    }
+    // Safety net for a throw out of the work block — finish() already cleaned
+    // on every normal return path.
+    cleanScratch();
   }
 }
 
@@ -1104,6 +1270,10 @@ export type VerifyKindStepVerdict = {
   /** install only (OV-43, W17-L5): the report-only supply-chain posture of the
    *  subject tree — evidence, NEVER a gate. See `supplyChainFloorFor`. */
   supplyChain?: SupplyChainPosture;
+  /** R11-f02: the standing script refusal this step ran under — install
+   *  lifecycle scripts are denied (`--ignore-scripts`), so a model-authored
+   *  postinstall/prepare can never execute during verification. */
+  scriptPolicy?: string;
 };
 
 export type VerifyKindResult = {
@@ -1150,13 +1320,15 @@ export function installToolFor(dir: string): { tool: "npm ci" | "npm install"; c
   return lock
     ? {
         tool: "npm ci",
-        command: "npm ci --no-audit --no-fund",
-        reason: "package-lock.json present — npm ci installs exactly the locked tree",
+        command: "npm ci --no-audit --no-fund --ignore-scripts",
+        reason:
+          "package-lock.json present — npm ci installs exactly the locked tree; --ignore-scripts refuses every model-authored lifecycle script (postinstall/prepare) at verification time",
       }
     : {
         tool: "npm install",
-        command: "npm install --no-audit --no-fund",
-        reason: "no package-lock.json — npm install resolves the declared deps and writes a lockfile (nothing to ci from)",
+        command: "npm install --no-audit --no-fund --ignore-scripts",
+        reason:
+          "no package-lock.json — npm install resolves the declared deps and writes a lockfile (nothing to ci from); --ignore-scripts refuses every model-authored lifecycle script (postinstall/prepare) at verification time",
       };
 }
 
@@ -1248,7 +1420,7 @@ export function supplyChainFloorFor(
   const auditNote =
     installTool === "seam"
       ? `report-only: this leg ran the test seam (no npm ran). The default leg runs \`npm ci|install --no-audit --no-fund\` — audit is off by design — so NO advisory audit has happened. Run \`${SUPPLY_CHAIN_AUDIT_COMMAND}\` inside an emitted tree to check for real (network required); a host that cannot audit says so.`
-      : `report-only: this leg ran \`${installCommand}\` — audit is off by design, and emitted trees ship caret-pinned deps with no lockfile, so NO advisory audit has happened here. Run \`${SUPPLY_CHAIN_AUDIT_COMMAND}\` inside the tree to check for real (network required); a host that cannot audit says so — it never reports clean.`;
+      : `report-only: this leg ran \`${installCommand}\` — audit is off by design, install lifecycle scripts are denied by design (--ignore-scripts, R11-f02), and emitted trees ship caret-pinned deps with no lockfile, so NO advisory audit has happened here. Run \`${SUPPLY_CHAIN_AUDIT_COMMAND}\` inside the tree to check for real (network required); a host that cannot audit says so — it never reports clean.`;
   return {
     report: "supply-chain-posture",
     gate: false,
@@ -1336,6 +1508,15 @@ async function runInstallStep(
     run: "skip",
     durationMs: 0,
     ...(seam ? { mocked: true } : {}),
+    // R11-f02: record the standing refusal on every real install verdict —
+    // model-authored lifecycle scripts (postinstall/prepare + dep scripts) are
+    // denied by the flag, so this leg can never execute them.
+    ...(seam
+      ? {}
+      : {
+          scriptPolicy:
+            "lifecycle scripts denied (--ignore-scripts) — a model-authored postinstall/prepare or dependency install script never runs during verification",
+        }),
   };
   const innerTimeout = Math.max(500, timeoutMs - INNER_TIMEOUT_MARGIN_MS);
   const run = await runNodeBounded(cmdRunnerCode(command, copy, innerTimeout), { timeoutMs });

@@ -175,8 +175,25 @@ function systemJson(
 }
 
 /**
+ * W29 · R2-f01/C1-f01 — the ONE total ms→ISO render this module may use. A
+ * JSON-carryable hostile stamp survives `JSON.parse`, so rendering a raw
+ * `1e300` through `toISOString()` threw `RangeError` — a live whole-store wipe
+ * vector: the throw exits `compileAgentPacket` → `attachAlgorithms` →
+ * `seedIfEmpty` (no per-project try/catch) → the store's rehydrate catch →
+ * `recoverFromCorruptPersistence` (`store.ts:812-815`) re-seeds EMPTY over the
+ * user's workspace. Non-finite ⇒ epoch (deterministic, parseable);
+ * finite-but-out-of-range ⇒ clamped to Date's ±8.64e15 ms bounds (the sibling
+ * `compiledAtFor` clamp was UPPER-bound-only — a negative `1e300` passed
+ * `Number.isFinite` AND `Math.min`, then threw).
+ */
+function isoFromMs(ms: number): string {
+  const n = typeof ms === "number" && Number.isFinite(ms) ? ms : 0;
+  return new Date(Math.min(Math.max(n, -8.64e15), 8.64e15)).toISOString();
+}
+
+/**
  * fixes/115 H-05: deterministic compiled_at — a pure function of the project.
- * The old wall-clock stamp (`new Date().toISOString()`) made every re-compile
+ * The old wall-clock stamp (a bare `toISOString()` of "now") made every re-compile
  * of an unchanged graph rewrite the packet artifact body (and the persisted
  * export) with a spurious diff, breaking byte-idempotence at the packet
  * boundary (probe-det.ts: two compiles of the SAME project differed at the
@@ -210,8 +227,8 @@ function compiledAtFor(project: Project): string {
       latest = d.decidedAt;
     }
   }
-  // 8.64e15 ms = 275760-09-13 — Date's max; beyond it toISOString throws.
-  return new Date(Math.min(latest, 8.64e15)).toISOString();
+  // W29 · R2-f01: one total render for BOTH bounds — see isoFromMs.
+  return isoFromMs(latest);
 }
 
 // ---------------------------------------------------------------------------
@@ -470,26 +487,46 @@ export function compileAgentPacket(
   // H43-P2-5 (fixes/106): the packet view renders only the 5 NEWEST corpus
   // entries (5 items each) — an N-run project used to print <= 5N source
   // lines into every later packet (and every crew/chat context embedding it),
-  // unbounded context bloat on research re-runs. Junk entries (null / missing
-  // items on hand-built payloads) contribute nothing instead of throwing.
+  // unbounded context bloat on research re-runs.
+  // A1-31/A1-32: the junk guard covers the WEAKEST case the comment claims —
+  // a non-array `items` container or a null item row (the hand-built/persisted
+  // payload family) contributes nothing instead of throwing; a title-less
+  // citation renders with a placeholder, never `- undefined — url` (the
+  // "cite these" footer stands on this list).
   const researchSources = (project.research ?? [])
     .slice(-5)
-    .flatMap((entry) => (entry?.items ?? []).slice(0, 5).map((it) => `- ${it.title} — ${it.url}`))
+    .flatMap((entry) => {
+      const items = entry?.items;
+      if (!Array.isArray(items)) return [];
+      return items
+        .slice(0, 5)
+        .filter((it) => it !== null && typeof it === "object")
+        .map((it) => {
+          const title =
+            typeof it.title === "string" && it.title.length > 0 ? it.title : "(untitled)";
+          return `- ${title} — ${it.url}`;
+        });
+    })
     .join("\n");
   const hitl = project.hitl
     ? `PENDING HITL: ${project.hitl.title}\n${project.hitl.prompt}\nStakes: ${project.hitl.stakes}`
     : "No pending HITL.";
   // T2/Q-303: append-only decision journal → one row per decision (rejects quote the note).
   const ledgerRows = project.decisions.map((d) => {
-    const when = new Date(d.decidedAt).toISOString();
+    const when = isoFromMs(d.decidedAt);
     const base = `- P${d.phase} · ${d.decision} · ${d.decidedBy} · ${when}`;
     return d.decision === "reject" ? `${base} — "${quoteNote(d.note, 200)}"` : base;
   });
   // T9/B-04: if the CURRENT phase is in a rejection loop, say so with attempt count + last note.
   const curRecord = project.phases.find((p) => p.id === project.currentPhase);
-  const loopCount = curRecord?.rejectionHistory?.length ?? 0;
-  const lastLoopNote =
-    loopCount > 0 ? (curRecord!.rejectionHistory![loopCount - 1]?.note ?? null) : null;
+  // A1-34: `?? []` is not a shape guard on persisted data — a corrupt
+  // non-array rejectionHistory must read as "no rejections" (the old
+  // non-null-assertion pair below it documented a guarantee that did not
+  // exist and is now gone).
+  const curHistory = curRecord?.rejectionHistory;
+  const rejHistory = Array.isArray(curHistory) ? curHistory : [];
+  const loopCount = rejHistory.length;
+  const lastLoopNote = loopCount > 0 ? (rejHistory[loopCount - 1]?.note ?? null) : null;
   // B-04/Q-303: the free-form prior-rejection dump becomes a compact pointer once the ledger
   // can back it; legacy payloads (rejectionNote without ledger rows) keep the detail lines.
   const priorRejected = project.phases.filter(
@@ -722,10 +759,14 @@ export function compileAgentPacket(
  * function of the assembled string.
  */
 function truncateToBudget(assembled: string): string {
+  // A1-33: every path reserves room for the marker LINE, so the doc above
+  // ("the result never exceeds the budget") is true on the legacy/pathological
+  // cuts too, not just on the budget-derived one.
+  const markerLine = `\n${TRUNC_MARKER}`;
   const headingAt = assembled.indexOf(REQUIRED_OUTPUT_HEADING);
   if (headingAt === -1) {
     // No schema section (future format drift): legacy whole-document cut.
-    return `${assembled.slice(0, PACKET_MAX_CHARS)}\n${TRUNC_MARKER}`;
+    return `${assembled.slice(0, PACKET_MAX_CHARS - markerLine.length)}${markerLine}`;
   }
   const tail = assembled.slice(headingAt); // "\n## Required output schema\n…" through the end
   const markerBlock = `\n\n${TRUNC_MARKER}\n`;
@@ -733,7 +774,7 @@ function truncateToBudget(assembled: string): string {
   if (budget <= 0) {
     // Tail + marker alone over budget (pathological): degrade to the legacy
     // cut rather than emit a schema-less head or an over-budget document.
-    return `${assembled.slice(0, PACKET_MAX_CHARS)}\n${TRUNC_MARKER}`;
+    return `${assembled.slice(0, PACKET_MAX_CHARS - markerLine.length)}${markerLine}`;
   }
   const head = assembled.slice(0, headingAt);
   // Cut at the last section boundary that fits (>= half the budget); without

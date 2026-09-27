@@ -1,4 +1,4 @@
-export { P2PRoom, defaultIceServers } from "./p2p";
+export { P2PRoom, defaultIceServers } from "./p2p.ts";
 export type {
   PeerInfo,
   P2PRoomOptions,
@@ -6,4 +6,4 @@ export type {
   PeerRow,
   SignalRow,
   RtcPollResponse,
-} from "./p2p";
+} from "./p2p.ts";

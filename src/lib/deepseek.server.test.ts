@@ -7,12 +7,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  clearLlmCallTap,
   completeDeepSeek,
   isDeepSeekConfigured,
   jitteredBackoffDelayMs,
   RETRY_BASE_MS,
   RETRY_MAX_JITTER_MS,
+  setLlmCallTap,
 } from "./deepseek.server.ts";
+import type { LlmModel } from "./llm.ts";
 
 const KEY = "sk-test-152";
 const SAVE_KEY = process.env.DEEPSEEK_API_KEY;
@@ -514,6 +517,100 @@ describe("completeDeepSeek thinking override (fixes/156 E1)", () => {
         "flash + thinking:false is byte-identical to the flash default",
       );
     } finally {
+      withKey(SAVE_KEY);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R4-f05 · C1-f09 (W29 · LANE P) — the provider-side model-id gate. The header
+// claims "unknown ids are refused before any network I/O, and this provider
+// never falls back to a default"; until W29 that rule lived only in
+// registry.ts's explicit/env paths, so a direct facade caller (llm.ts
+// complete(), whose validator is TS-only at runtime) could ship an out-of-set
+// id to the wire and buy a vendor 400. These pins turn the header claim RED
+// if the gate is dropped.
+// ---------------------------------------------------------------------------
+
+describe("completeDeepSeek model-id validation (R4-f05 · C1-f09)", () => {
+  it("an unknown id is refused PRE-network with RT_E_VALIDATION naming the known request ids", async () => {
+    withKey(KEY);
+    try {
+      const f = fakeFetch([200]);
+      const r = await completeDeepSeek("hi", {
+        model: "deepseek-v4-typo" as LlmModel,
+        fetch: f.fetch,
+      });
+      assert.equal(r.ok, false);
+      if (!r.ok) {
+        assert.equal(r.code, "RT_E_VALIDATION");
+        assert.match(r.error ?? "", /deepseek-v4-typo/, "the refused id is named verbatim");
+        assert.match(r.error ?? "", /deepseek-v4-flash/, "the known ids ride along");
+      }
+      assert.equal(f.calls(), 0, "the refusal precedes any network I/O — never a vendor round-trip");
+    } finally {
+      withKey(SAVE_KEY);
+    }
+  });
+
+  it("the gate is THIS module's REQUEST list (incl. the forward-compat vision-exp id), not the registry's narrower verified set", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const captureModelFetch = (async (_url: unknown, init?: RequestInit) => {
+      if (typeof init?.body === "string") {
+        bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+      }
+      return new Response(
+        JSON.stringify({
+          model: "deepseek-v4-flash",
+          choices: [{ message: { content: "ok" } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+    withKey(KEY);
+    try {
+      const r = await completeDeepSeek("hi", {
+        model: "deepseek-v4-flash-vision-exp" as LlmModel,
+        fetch: captureModelFetch,
+      });
+      assert.equal(r.ok, true, "the forward-compat request id passes the provider gate");
+      assert.equal(
+        bodies[0]?.model,
+        "deepseek-v4-flash-vision-exp",
+        "the requested id is what actually rides the wire (no substitution)",
+      );
+    } finally {
+      withKey(SAVE_KEY);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R4-f02 (W29 · LANE P) — the call tap's PROMISE channel: regression pin for
+// the W26 H3 containment (fixes/266). `run-eval.test.mjs` installs only a
+// SYNC-throwing tap; this pin covers the ASYNC channel (an `async` tap is
+// assignable to the `=> void` type), so a refactor that drops the
+// `.then(undefined, …)` containment leaves a floating rejection — which
+// node:test turns into a RED here (the whole point of the pin).
+// ---------------------------------------------------------------------------
+
+describe("the call tap's promise channel (R4-f02 · W26 H3 containment)", () => {
+  it("an ASYNC-rejecting tap cannot reach the observed call — the refusal survives and no unhandled rejection fires", async () => {
+    withKey(undefined); // keyless: the not-configured refusal must still be the observed result
+    try {
+      setLlmCallTap(async () => {
+        throw new Error("async tap boom");
+      });
+      const r = await completeDeepSeek("hi");
+      assert.equal(r.ok, false);
+      if (!r.ok) assert.equal(r.code, "RT_E_LLM_NOT_CONFIGURED");
+      // Give a floating rejection a full turn to surface: node:test fails the
+      // test file on an unhandled rejection, so WITHOUT the containment this
+      // await is where the red becomes visible.
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      clearLlmCallTap(); // back to the byte-identical no-op path
       withKey(SAVE_KEY);
     }
   });

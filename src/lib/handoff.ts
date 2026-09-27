@@ -39,6 +39,19 @@ function text(v: unknown): string {
 export function phaseHandoff(project: Project, phase: PhaseId): string {
   const def = phaseDef(phase);
 
+  // W-16: phaseHandoff is also called on foreign objects (console paste flows /
+  // hand-edited imports) — a null / non-object project must yield an honest
+  // minimal prompt, never a TypeError from the field reads below.
+  if (!project || typeof project !== "object") {
+    return [
+      `# ${def.code} ${def.title} — agent handoff`,
+      "Project: (no project record)",
+      "",
+      "## Mission",
+      "(no brief recorded)",
+    ].join("\n");
+  }
+
   // Defensive element guard: hydration only guarantees the artifacts ARRAY is
   // an array, not that every row is a well-formed artifact (a hand-edited or
   // foreign import can carry null/garbage rows). Prompt generation must never
@@ -92,7 +105,9 @@ export function phaseHandoff(project: Project, phase: PhaseId): string {
   );
   out.push(``);
   out.push(`## Mission`);
-  out.push(project.brief.trim() || "(no brief recorded)");
+  // W-16: the brief is coerced like every other interpolated field (text() at
+  // the top of this file) — a junk brief must not throw out of prompt gen.
+  out.push(text(project.brief).trim() || "(no brief recorded)");
   out.push(``);
   out.push(`## Context from prior phases`);
   if (priorArts.length > 0) {
@@ -110,6 +125,36 @@ export function phaseHandoff(project: Project, phase: PhaseId): string {
   out.push(``);
   out.push(`## Exit criteria (DoD)`);
   out.push(`Gate ${def.code}: ${gate.pass ? "PASS" : "FAIL"} (${gate.unmet.length} unmet)`);
+  // F2-20 (W37 Y3): the gate line above is the DoD PROBE verdict — it carries
+  // no attribution. When the decision ledger holds a row for this phase, name
+  // the newest one (the same newest-wins read dod.ts:approvalActor documents)
+  // with its seat provenance + token-path truth, so a pasted handoff never
+  // reads as an unattributed "PASS". Additive: phases without a decision row
+  // render byte-identically.
+  const phaseDecisions = (project.decisions ?? []).filter((d) => d && d.phase === phase);
+  const lastDecision = phaseDecisions[phaseDecisions.length - 1];
+  if (lastDecision) {
+    const via = lastDecision.decidedVia;
+    const actor = via?.label ? text(via.label) : text(lastDecision.decidedBy);
+    const viaClause = via
+      ? ` · via ${text(via.action)} on ${text(via.resource)}${
+          via.tokenPath
+            ? " (out-of-band token path verified)"
+            : " (machine seat — no token path claimed)"
+        }`
+      : "";
+    // Hostile/missing stamps degrade to no timestamp, never a throw (the
+    // never-throw prompt contract at the top of this file); the ms value is
+    // clamped into Date's valid range so a far-future stamp cannot RangeError.
+    const ms = lastDecision.decidedAt;
+    const stamp =
+      typeof ms === "number" && Number.isFinite(ms)
+        ? ` · ${new Date(Math.min(Math.max(ms, -8.64e15), 8.64e15)).toISOString()}`
+        : "";
+    out.push(
+      `Last recorded ${def.code} decision: ${text(lastDecision.decision)} · ${actor}${viaClause}${stamp}`,
+    );
+  }
   for (const c of criteria) {
     out.push(`- [${c.met ? "x" : " "}] ${c.criterion}`);
   }

@@ -96,6 +96,14 @@ export type ValidateReportResult =
 const REPORT_ARTIFACT_KIND: Artifact["kind"] = "docs";
 const REPORT_TITLE_PREFIX = "[agent report] ";
 const REPORT_FOOTER = "\n\n> external report — unverified by engine";
+/** F2-21 (W37 Y3): the marker a `blocked` report's rejection record carries.
+ *  Before this, intake appended an untagged `{note, at}` row and the packet's
+ *  `## Rejection loop` / prior-rejection render presented an agent's
+ *  self-reported block as if indistinguishable from a human rejection. Same
+ *  bracket vocabulary as REPORT_TITLE_PREFIX — one marker for agent-origin
+ *  text, visible on every surface that renders the note (packet, steering,
+ *  console) without changing the row's typed shape. */
+const REPORT_BLOCK_MARKER = "[agent report] ";
 
 // H43-P2-3(a) (fixes/106): intake caps on report artifacts. The validator used
 // to enforce shape only — a delegation loop ingesting N reports of M multi-KB
@@ -410,12 +418,18 @@ export function applyReportResult(project: Project, report: AgentReport): ApplyR
   // retry attempt counter + packet loop metadata stay truthful. Phase status
   // is NOT flipped and the decision journal is untouched (rejection-free note
   // semantics preserved); the entry only feeds attempt counting.
+  // F2-21 (W37 Y3): the recorded note carries REPORT_BLOCK_MARKER — an agent's
+  // self-reported block is labeled as such on every surface that renders it
+  // (packet rejection-loop/prior-rejection lines, steering, console), never
+  // presented as a human rejection. Pin re-point owed: report-intake.test.ts
+  // :205/:209 assert the pre-marker bytes (for the test owner).
+  const blockedNote = `${REPORT_BLOCK_MARKER}${report.summary}`;
   const phases: PhaseRecord[] = project.phases.map((p) =>
     p.id === phase && report.status === "blocked"
       ? {
           ...p,
-          rejectionNote: report.summary,
-          rejectionHistory: [...(p.rejectionHistory ?? []), { note: report.summary, at: now }],
+          rejectionNote: blockedNote,
+          rejectionHistory: [...(p.rejectionHistory ?? []), { note: blockedNote, at: now }],
         }
       : p,
   );

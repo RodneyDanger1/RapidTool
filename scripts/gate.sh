@@ -161,8 +161,18 @@ for (const [id, log1, log2] of [["testsScripts", s1, s2], ["testsLib", l1, l2]])
     fail: run1.fail,
     skipped: run1.skipped,
   };
+  // R5-f01 (W29 · A2-f02 · W-09): a leg can exit non-zero WITHOUT a TAP
+  // `not ok` line (runner crash, unresolvable glob, missing file, OOM) — the
+  // flake detector has no test name to key on, but the red must still be loud
+  // and NAMED. Record a synthetic hardFail for the leg. Deliberately NOT a
+  // flake: fixes/173 §F-H11 forbids classifying a runner-level red as one
+  // (--double run-1-crash/run-2-clean must read exit 1, never 3).
+  const noTapNames = (run) => run.failNames.length === 0;
   if (!double) {
     hardFails.push(...run1.failNames);
+    if (exitOf(id) !== 0 && noTapNames(run1)) {
+      hardFails.push(`${id} (exit ${exitOf(id)} — runner produced no TAP failure lines; read the gate log tail)`);
+    }
     continue;
   }
   const run2 = legStats(log2);
@@ -170,12 +180,25 @@ for (const [id, log1, log2] of [["testsScripts", s1, s2], ["testsLib", l1, l2]])
   const f2 = new Set(run2.failNames);
   for (const n of f1) if (f2.has(n)) hardFails.push(n); else flakes.push(n);
   for (const n of f2) if (!f1.has(n)) flakes.push(n);
+  if (exitOf(id) !== 0 && noTapNames(run1) && noTapNames(run2)) {
+    hardFails.push(`${id} (exit ${exitOf(id)} — runner produced no TAP failure lines; read the gate log tail)`);
+  }
 }
 
 let code = 0;
 if (hardFails.length > 0) code = 1;
 else if (flakes.length > 0) code = 3;
-else if (!(gates.typecheck.ok && gates.lint.ok && gates.assertionGaps.ok && gates.build.ok)) code = 1;
+else if (
+  !(
+    gates.typecheck.ok &&
+    gates.lint.ok &&
+    gates.assertionGaps.ok &&
+    gates.testsScripts.ok &&
+    gates.testsLib.ok &&
+    gates.build.ok
+  )
+)
+  code = 1;
 
 const verdict = {
   ok: code === 0,

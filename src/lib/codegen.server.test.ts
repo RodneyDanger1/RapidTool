@@ -57,16 +57,17 @@ import {
   validateSynthesisModule,
   REPAIR_TREE_FAILURE_TAIL_MAX,
   synthWithBackoff,
-  p6TokenCapFromEnv,
   proseLineHits,
   type ChunkPriorFile,
   type EnvelopeReadFailure,
   type P6SynthesisDeps,
 } from "./codegen.server.ts";
 import { applyPhaseResult, emptyProject } from "./engine.ts";
+import { runGate } from "./dod.ts";
 import { buildPhase6Module } from "./sandbox.ts";
 import { briefNounHits, maskLiteralsAndComments } from "./sandbox.ts";
 import { fnv1a } from "./algorithms.ts";
+import { resetSessionBudget, sessionTokenBudget } from "./token-ledger.ts";
 import { oracleBriefGrounded } from "./verify.server.ts";
 import type { DeepSeekCompleteOptions } from "./deepseek.server.ts";
 import type { ExpandBriefResult } from "./prompt-engine.ts";
@@ -144,6 +145,43 @@ const KANBAN_ENVELOPE = {
   exports: ["createBoard", "addColumn", "dragCard", "kanbanBoard"],
   reqTrace: { "req-1": "createBoard", "req-2": "addColumn", "req-3": "dragCard" },
 };
+
+/**
+ * FM-01 (W37 Y1): the single-module (kind-absent, ≤8-signature) synthesis now
+ * records the SAME materialized ESM shape the chunked path records — an ESM
+ * barrel at TREE_ENTRY_PATH + the accepted module relocated to
+ * TREE_CHUNK0_RELOCATED_PATH with its CJS assigns stripped; `generatedSource`
+ * is the barrel's own bytes. These helpers materialize the EXPECTED module
+ * through the same deterministic function the production seam calls, so a pin
+ * on its output stays byte-precise (any drift in the transform — or a
+ * different accepted module — changes the bytes) without the suite having to
+ * run `node` inside the tenant.
+ */
+function materializedSingle(
+  moduleSrc: string,
+  exports: readonly string[] = KANBAN_ENVELOPE.exports,
+): ReturnType<typeof materializeImportableTree> {
+  return materializeImportableTree([{ path: TREE_ENTRY_PATH, source: moduleSrc, exports: [...exports] }]);
+}
+
+/** FM-01: assert the recorded tree == the deterministic materialization of
+ *  `moduleSrc` (barrel + chunk, path/source byte-exact) and return the chunk
+ *  file's source for further byte assertions on the accepted module. */
+function assertRecordedMaterialized(
+  q: Project,
+  moduleSrc: string,
+  exports: readonly string[] = KANBAN_ENVELOPE.exports,
+): string {
+  const m = materializedSingle(moduleSrc, exports);
+  assert.deepEqual(
+    (q.generatedTree ?? []).map((f) => ({ path: f.path, source: f.source })),
+    m.files.map((f) => ({ path: f.path, source: f.source })),
+    "FM-01: the recorded tree is the deterministic materialization of the accepted module (barrel + relocated chunk)",
+  );
+  assert.equal(q.generatedSource, m.entrySource, "FM-01: generatedSource is the entry barrel's own bytes");
+  assert.ok(!(q.generatedSource ?? "").includes("module.exports"), "FM-01: the recorded entry carries no raw CJS");
+  return m.files[1]!.source;
+}
 
 function fakeDeps(overrides: {
   completeText?: string;
@@ -525,7 +563,7 @@ describe("liveP6Synthesis (T4/T5 — fixes/97 P0-01 Part B)", () => {
     const { calls, deps } = fakeDeps();
     const q = await liveP6Synthesis(base, deps);
 
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01: recorded as the materialized ESM tree
     const lt = q.lastTest as { ok: boolean; label?: string; evidenceHash?: string } | null;
     assert.equal(lt?.ok, true);
     assert.equal(lt?.label, "tested");
@@ -560,7 +598,7 @@ describe("liveP6Synthesis (T4/T5 — fixes/97 P0-01 Part B)", () => {
       return { ok: true, spec: KANBAN_SPEC };
     };
     const q = await liveP6Synthesis(withMemory, deps);
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "synthesis still proceeds with lessons present");
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01 re-point: lessons present, recorded materialized
     assert.ok(
       receivedLessons !== undefined && receivedLessons.length > 0,
       "the expansion fn receives lesson lines (self-learning is read-back, not write-only)",
@@ -606,7 +644,7 @@ describe("liveP6Synthesis (T4/T5 — fixes/97 P0-01 Part B)", () => {
     const seeded: Project = { ...base, implementationSpec: spec };
     const { calls, deps } = fakeDeps();
     const q = await liveP6Synthesis(seeded, deps);
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01: recorded as the materialized ESM tree
     assert.deepEqual(calls, ["complete", "verify"]);
     assert.equal(q.implementationSpec?.briefHash, String(fnv1a(KANBAN_BRIEF)));
   });
@@ -674,7 +712,7 @@ describe("liveP6Synthesis (T4/T5 — fixes/97 P0-01 Part B)", () => {
         cases: [],
       }),
     });
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01: recorded as the materialized ESM tree
     assert.equal(n, 2);
   });
 
@@ -1310,7 +1348,24 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     assert.ok(q.generatedSource.includes(`export * from "./jobs/rent-2.ts";`));
     assert.ok(!q.generatedSource.includes("collect-rent16"), "refused chunk 2 is absent from the barrel");
     assert.equal(q.modelRoute, "deepseek-flash");
-    assert.equal(q.lastTest, base.lastTest, "no verified claim on a partial");
+    // R9-f02 (W29 · W-05/A1-f05/R8-f16): identity (`lastTest === base.lastTest`)
+    // was the OPPOSITE guard — it let the floor's green template stamp outlive
+    // the artifact it described, so `p6-test` read green for untested code.
+    // The partial tree REPLACED that artifact: invalidate, never carry.
+    assert.equal(
+      base.lastTest?.detail,
+      "tests.pass",
+      "precondition: the base really carried a template tests.pass stamp (else this test proves nothing)",
+    );
+    assert.equal(q.lastTest, null, "no verified claim on a partial");
+    // …and the MACHINE gate must read the same thing the packet does: the
+    // p6-test probe (dod.ts) can never pass on a null lastTest.
+    const gate = runGate(q, 6);
+    assert.equal(gate.pass, false, "a partial tree never clears the P6 DoD gate");
+    assert.ok(
+      gate.unmet.some((i) => i.id === "p6-test"),
+      "runGate(p,6) reads p6-test UNMET on a partial tree",
+    );
     const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
     assert.ok(refusal, "refusal is logged");
     assert.match(refusal.detail, /chunk 3\/3 refused/, "log names the refused chunk index");
@@ -1349,22 +1404,46 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
   });
 });
 
-describe("liveP6Synthesis ≤8 single-chunk byte-parity regression (fixes/144 M2)", () => {
-  it("2 signatures → legacy path untouched, recorded as the one-file generatedTree", async () => {
+describe("liveP6Synthesis ≤8 single-chunk regression (fixes/144 M2 pipeline; FM-01 records ESM)", () => {
+  it("2 signatures → legacy pipeline untouched, recorded as the materialized ESM tree", async () => {
     const base = p6Base(); // KANBAN (2 signatures)
     const { calls, deps } = fakeDeps();
     const q = await liveP6Synthesis(base, deps);
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "legacy generatedSource byte-parity");
+    // fixes/144 pinned the legacy PIPELINE bytes — one synthesis call + bounded
+    // repair + machine verify; that stands untouched.
     assert.deepEqual(calls, ["expand", "complete", "verify"], "legacy call sequence untouched");
+    // FM-01 (W37 Y1): what changed is the RECORDED artifact — the verified
+    // module is materialized to ESM at synthesis time (barrel + relocated
+    // chunk). The old raw-CJS one-file tree died at import in the
+    // `"type":"module"` tenant whenever a consumer read it without emitting.
+    const chunk = assertRecordedMaterialized(q, KANBAN_MODULE.trim());
     const tree = q.generatedTree ?? [];
-    assert.equal(tree.length, 1, "≤8 signatures → one-file tree");
-    assert.equal(tree[0]!.path, TREE_ENTRY_PATH);
-    assert.equal(tree[0]!.source, q.generatedSource, "tree file source == generatedSource (byte-identical)");
-    assert.equal(tree[0]!.hash, String(fnv1a(KANBAN_MODULE.trim())));
-    assert.equal(tree[0]!.attempt, 0);
+    assert.equal(tree.length, 2, "≤8 signatures → barrel + one chunk file (FM-01)");
+    assert.equal(tree[0]!.path, TREE_ENTRY_PATH, "the barrel is the tree entry");
+    assert.equal(tree[0]!.hash, String(fnv1a(tree[0]!.source)), "content-addressed hash");
+    assert.equal(tree[1]!.path, TREE_CHUNK0_RELOCATED_PATH, "the module moved off the entry path");
+    assert.equal(tree[1]!.hash, String(fnv1a(tree[1]!.source)), "content-addressed hash");
+    assert.equal(tree[1]!.attempt, 0);
+    assert.equal(chunk, tree[1]!.source, "the chunk file carries the accepted module's bytes");
     assert.equal(q.modelRoute, "deepseek-flash");
     assert.ok(q.artifacts.some((a) => a.title === "Generated module (LLM, machine-verified)"));
     assert.equal((q.lastTest as { label?: string } | null)?.label, "tested");
+  });
+
+  it("FM-01: a fresh single-module synthesis ships ESM BEFORE any emit — zero CJS residue in the tree", async () => {
+    const base = p6Base();
+    const { deps } = fakeDeps();
+    const q = await liveP6Synthesis(base, deps);
+    const rows = q.generatedTree ?? [];
+    assert.ok(rows.length > 0, "a generatedTree exists at synthesis time (no emit ran in this test)");
+    // The emit-time residue probe's own shape (headless.ts:1642 CJS_RESIDUE_RE,
+    // mirrored here): a tree that trips it at emit is exactly the defect FM-01
+    // closed at the synthesis seam. `materializeEmitTree` is now a no-op over
+    // this tree — the guard stays as the backstop only.
+    const cjsResidue = /module\.exports|(?:^|[^\w$.])exports\s*(?:\.|=[^=])/;
+    for (const r of rows) {
+      assert.ok(!cjsResidue.test(r.source), `${r.path} carries no CJS residue before emit`);
+    }
   });
 });
 
@@ -1398,7 +1477,7 @@ describe("liveP6Synthesis deps.treeFailure threads into repair re-prompts (fixes
       }),
       treeFailure: TREE_FAILURE,
     });
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "the repair rescued the malformed envelope");
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01 re-point: the repair rescued the malformed envelope, recorded materialized
     const repair = prompts.find((p) => p.startsWith("Your previous reply was not valid JSON"));
     assert.ok(repair, "the bounded envelope repair re-prompt fired");
     assert.ok(repair!.includes("Tree-run failure context (failing file + first not-ok tail):"));
@@ -1429,7 +1508,7 @@ describe("liveP6Synthesis deps.treeFailure threads into repair re-prompts (fixes
         cases: [],
       }),
     });
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01: recorded as the materialized ESM tree
     const repair = prompts.find((p) => p.startsWith("Your previous reply was not valid JSON"));
     assert.ok(repair, "the bounded envelope repair re-prompt fired");
     assert.equal(repair, LEGACY_REPAIR_SNAPSHOT_REPAIR, "no context → exact legacy envelope-repair bytes");
@@ -1530,17 +1609,20 @@ describe("liveP6Synthesis kind-scoped tree trigger (fixes/148 F1)", () => {
     assert.deepEqual(f.calls, ["expand", "complete", "complete", "complete"], "no verify leg on the chunked path");
   });
 
-  it("a kind-absent library-style brief with ≤8 signatures KEEPS the byte-identical single-module path (fixes/148 regression pin)", async () => {
+  it("a kind-absent library-style brief with ≤8 signatures KEEPS the single-module pipeline (fixes/148 pin; FM-01: recorded as ESM)", async () => {
     const base = p6Base(); // no kind — the legacy library/module fixture shape
     assert.equal(singleModuleLibraryKind(base), true, "fixture is single-module-library eligible");
     const { calls, deps } = fakeDeps();
     const q = await liveP6Synthesis(base, deps);
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "legacy generatedSource byte-parity");
     assert.deepEqual(calls, ["expand", "complete", "verify"], "legacy call sequence untouched");
     assert.equal((q.lastTest as { label?: string } | null)?.label, "tested", "machine verify mints tested on the library path");
+    // FM-01 (W37 Y1): the recorded artifact is now the materialized ESM tree
+    // (barrel + chunk) — the PIPELINE above is what stays legacy, not the bytes.
+    const chunk = assertRecordedMaterialized(q, KANBAN_MODULE.trim());
     const tree = q.generatedTree ?? [];
-    assert.equal(tree.length, 1, "≤8 kind-absent → one-file tree");
-    assert.equal(tree[0]!.source, q.generatedSource, "one-file tree source == generatedSource (byte-identical)");
+    assert.equal(tree.length, 2, "≤8 kind-absent → barrel + one chunk file (FM-01)");
+    assert.equal(tree[0]!.path, TREE_ENTRY_PATH);
+    assert.ok(chunk.includes("function createBoard("), "the verified module's bytes live in the chunk file");
   });
 });
 
@@ -1562,7 +1644,7 @@ describe("P6 synthesis budget constants reach both call sites (fixes/154)", () =
       return { ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-pro" };
     };
     const q = await liveP6Synthesis(p6Base(), deps);
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "synthesis still succeeds under the captured opts");
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01 re-point: synthesis still succeeds under the captured opts, recorded materialized
     assert.equal(seen.length, 1, "happy-path single-module synthesis = one complete call");
     const opts = seen[0]!;
     assert.equal(opts.maxTokens, 32_000, "maxTokens rides P6_SYNTH_MAX_TOKENS");
@@ -1609,11 +1691,15 @@ describe("synthWithBackoff token ledger (194/199)", () => {
   });
 
   it("no cap: usage is recorded but the ok result is returned (unmetered)", async () => {
+    // R4-f03 (W30 · LANE S3): `undefined` ledger now means the PROCESS session
+    // budget — reset it so this test starts from an empty ledger (isolation).
+    resetSessionBudget();
     const res = await synthWithBackoff(async () => okWithUsage(99999), "p", {}, async () => {}, undefined, undefined);
     assert.equal(res.ok, true);
   });
 
   it("missing usage is a no-op even with a cap", async () => {
+    resetSessionBudget();
     const res = await synthWithBackoff(
       async () => ({ ok: true, text: "x", model: "deepseek-v4-pro" }),
       "p",
@@ -1626,15 +1712,28 @@ describe("synthWithBackoff token ledger (194/199)", () => {
   });
 
   it("cap exceeded after usage → RT_E_BUDGET_EXHAUSTED (never a green module)", async () => {
+    resetSessionBudget();
     const res = await synthWithBackoff(async () => okWithUsage(50), "p", {}, async () => {}, undefined, 10);
     assert.equal(res.ok, false);
     if (!res.ok) assert.equal(res.code, "RT_E_BUDGET_EXHAUSTED");
   });
 
-  it("p6TokenCapFromEnv: unset/0/NaN undefined; positive int floors", () => {
-    assert.equal(p6TokenCapFromEnv({}), undefined);
-    assert.equal(p6TokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: "0" }), undefined);
-    assert.equal(p6TokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: "12.9" }), 12);
+  it("R4-f03/W-21: the defaults are ONE process session budget — the cap trips ACROSS sub-cap calls (R12-f02)", async () => {
+    const prev = process.env.RAPIDTOOL_TOKEN_CAP;
+    process.env.RAPIDTOOL_TOKEN_CAP = "100";
+    try {
+      resetSessionBudget(); // re-reads env ⇒ cap=100, empty ledger
+      assert.equal(sessionTokenBudget().cap, 100);
+      const first = await synthWithBackoff(async () => okWithUsage(60), "p", {}, async () => {});
+      assert.equal(first.ok, true); // 60 ≤ 100 — call #1 passes
+      const second = await synthWithBackoff(async () => okWithUsage(60), "p", {}, async () => {});
+      assert.equal(second.ok, false); // 120 > 100 — call #2 refuses on the RUN total
+      if (!second.ok) assert.equal(second.code, "RT_E_BUDGET_EXHAUSTED");
+    } finally {
+      if (prev === undefined) delete process.env.RAPIDTOOL_TOKEN_CAP;
+      else process.env.RAPIDTOOL_TOKEN_CAP = prev;
+      resetSessionBudget();
+    }
   });
 });
 
@@ -2238,12 +2337,14 @@ describe("216r patch repair through liveP6Synthesis (W8-L5 pins)", () => {
     assert.ok(rec.unified.length <= PATCH_REPAIR_DIFF_MAX, "diff record is capped");
 
     // The delta's own output IS the accepted module (prose deleted byte-exactly)…
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
-    assert.ok(!(q.generatedSource ?? "").includes("I'll write the code now."), "the prose blob is GONE, not paraphrased");
+    // FM-01 (W37 Y1): the recorded artifact is its deterministic materialization —
+    // assert on the chunk file, which carries those bytes.
+    const chunkA = assertRecordedMaterialized(q, KANBAN_MODULE.trim());
+    assert.ok(!chunkA.includes("I'll write the code now."), "the prose blob is GONE, not paraphrased");
     // …and the result revalidates under the SAME deterministic validator (the
     // acceptance path; a patched module that still failed would be refused).
-    assert.ok(validateSynthesisModule(q.generatedSource ?? "", KANBAN_ENVELOPE.exports, ["createBoard", "addColumn"]).ok);
-    assert.equal((q.generatedTree ?? [])[0]?.source, KANBAN_MODULE.trim(), "the one-file tree carries the patched bytes");
+    assert.ok(validateSynthesisModule(chunkA, KANBAN_ENVELOPE.exports, ["createBoard", "addColumn"]).ok);
+    assert.equal((q.generatedTree ?? [])[1]?.source, chunkA, "the chunk file carries the patched bytes (FM-01)");
     assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"), "no refusal — the patched module was accepted");
   });
 
@@ -2268,8 +2369,10 @@ describe("216r patch repair through liveP6Synthesis (W8-L5 pins)", () => {
     assert.equal(rec.kind, "exact");
     assert.equal(rec.matches, 1);
     assert.equal(rec.unified, "@@ -2,1 +2,1 @@\n-Math.random()\n+name", "single-line hunk, exact bytes");
-    assert.ok(!(q.generatedSource ?? "").includes("Math.random"), "the determinism defect is gone");
-    assert.ok(validateSynthesisModule(q.generatedSource ?? "", KANBAN_ENVELOPE.exports, ["createBoard", "addColumn"]).ok);
+    // FM-01 (W37 Y1): assert on the recorded chunk file (the materialized accepted module).
+    const chunkB = assertRecordedMaterialized(q, NOCOMMENT_NONDET_MODULE.replace("Math.random()", "name").trim());
+    assert.ok(!chunkB.includes("Math.random"), "the determinism defect is gone");
+    assert.ok(validateSynthesisModule(chunkB, KANBAN_ENVELOPE.exports, ["createBoard", "addColumn"]).ok);
   });
 
   it("(b) an AMBIGUOUS delta refuses coded; the legacy full-rewrite repair follows byte-identical and still fixes", async () => {
@@ -2296,7 +2399,7 @@ describe("216r patch repair through liveP6Synthesis (W8-L5 pins)", () => {
     // The legacy path is byte-identical — same prompt the builder produces.
     assert.equal(h.prompts[2], p6SynthesisProseRepairPrompt(proseLineHits(PROSE_REFUSED_ENVELOPE.module)));
     // …and it still lands: the legacy repair's reply is the accepted module.
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01: recorded as the materialized ESM tree
     assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"));
   });
 
@@ -2320,7 +2423,7 @@ describe("216r patch repair through liveP6Synthesis (W8-L5 pins)", () => {
       "src/generated.ts · RT_E_VALIDATION · no exact match for oldStr (0 occurrences) — refusing; a unique match is required.",
     );
     assert.equal(h.prompts[2], p6SynthesisProseRepairPrompt(proseLineHits(PROSE_REFUSED_ENVELOPE.module)));
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01: recorded as the materialized ESM tree
   });
 
   it("(b) a NO-OP delta (oldStr === newStr) refuses coded; the legacy repair bytes and outcome are unchanged", async () => {
@@ -2343,7 +2446,7 @@ describe("216r patch repair through liveP6Synthesis (W8-L5 pins)", () => {
       "src/generated.ts · RT_E_VALIDATION · oldStr and newStr are identical — a no-op is not an edit; refusing to report one.",
     );
     assert.equal(h.prompts[2], p6SynthesisProseRepairPrompt(proseLineHits(PROSE_REFUSED_ENVELOPE.module)));
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim());
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01: recorded as the materialized ESM tree
   });
 
   it("(c) with the patch level OFF, the T-15 repair prompt and the accepted module stay byte-identical", async () => {
@@ -2362,7 +2465,7 @@ describe("216r patch repair through liveP6Synthesis (W8-L5 pins)", () => {
     assert.deepEqual(h.kinds, ["synthesis", "legacy-nondeterministic"], "no patch call when the level is off");
     assert.equal(h.prompts[1], p6SynthesisNondeterministicRepairPrompt("Math.random"), "legacy repair prompt byte-identical to its builder");
     assert.ok(!(q.logs ?? []).some((l) => l.event.startsWith("p6.repair")), "no patch records when the level is off");
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "the accepted module bytes are the legacy repair's, unchanged");
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01 re-point: legacy repair's accepted bytes, recorded materialized
   });
 
   it("(c) a non-patchable defect keeps the legacy prompt/module bytes with the level ON and OFF", async () => {
@@ -2388,7 +2491,7 @@ describe("216r patch repair through liveP6Synthesis (W8-L5 pins)", () => {
         !(r.q.logs ?? []).some((l) => l.event === "p6.repair.delta" || l.event === "p6.repair.patch.refused"),
         "no patch records for a non-patchable defect",
       );
-      assert.equal(r.q.generatedSource, KANBAN_MODULE.trim(), "accepted module bytes unchanged");
+      assertRecordedMaterialized(r.q, KANBAN_MODULE.trim()); // FM-01 re-point: accepted bytes unchanged, recorded materialized
     }
     assert.equal(on.h.prompts[1], off.h.prompts[1], "the level ON changes no prompt byte when no patch is in play");
     assert.deepEqual(on.h.kinds, off.h.kinds, "call sequence unchanged when no patch is in play");
@@ -2449,13 +2552,12 @@ describe("216r patch-path defect fixes (W9-L2)", () => {
     assert.equal(rec.matches, 1);
     assert.equal(rec.unified, "@@ -8,1 +8,1 @@\n-Math.random()\n+name", "the hunk names the RAW line (8) — the masked line (4) never leaks into the record");
 
-    assert.ok(!(q.generatedSource ?? "").includes("Math.random"), "the determinism defect is gone");
-    assert.equal(
-      q.generatedSource,
-      JSDOC_NONDET_MODULE.replace("Math.random()", "name").trim(),
-      "the accepted bytes are the landed delta's module",
-    );
-    assert.ok(validateSynthesisModule(q.generatedSource ?? "", KANBAN_ENVELOPE.exports, ["createBoard", "addColumn"]).ok);
+    // FM-01 (W37 Y1): the accepted module is recorded as its materialized ESM
+    // tree — assert on the chunk file (the accepted bytes live there).
+    const expectedD = JSDOC_NONDET_MODULE.replace("Math.random()", "name").trim();
+    const chunkD = assertRecordedMaterialized(q, expectedD);
+    assert.ok(!chunkD.includes("Math.random"), "the determinism defect is gone");
+    assert.ok(validateSynthesisModule(chunkD, KANBAN_ENVELOPE.exports, ["createBoard", "addColumn"]).ok);
     assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"), "no refusal — the patched module was accepted");
   });
 
@@ -2478,13 +2580,15 @@ describe("216r patch-path defect fixes (W9-L2)", () => {
     assert.equal(h.prompts.length, 2, "the parseable legacy-style reply was never consumed");
     const deltas = (q.logs ?? []).filter((l) => l.event === "p6.repair.delta");
     assert.equal(deltas.length, 1, "the delta landed once");
-    assert.equal(
-      q.generatedSource,
-      NOCOMMENT_NONDET_MODULE.replace("Math.random()", "name").trim(),
-      "the landed delta's bytes survive (the legacy reply did not overwrite them)",
+    // FM-01 (W37 Y1): assert on the recorded chunk file.
+    const expectedE = NOCOMMENT_NONDET_MODULE.replace("Math.random()", "name").trim();
+    const chunkE = assertRecordedMaterialized(q, expectedE);
+    assert.notEqual(
+      chunkE,
+      materializedSingle(KANBAN_MODULE.trim()).files[1]!.source,
+      "the overwrite would have produced the plain kanban module (materialized)",
     );
-    assert.notEqual(q.generatedSource, KANBAN_MODULE.trim(), "the overwrite would have produced the plain kanban module");
-    assert.ok(!(q.generatedSource ?? "").includes("Math.random"));
+    assert.ok(!chunkE.includes("Math.random"));
     assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"));
   });
 });
@@ -2666,7 +2770,7 @@ describe("217k envelope read-failure signals (G6 silent sinks)", () => {
         cases: [],
       }),
     });
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "the bounded repair rescued the cycle (control flow unchanged)");
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01 re-point: the bounded repair rescued the cycle, recorded materialized
     const readWarns = (q.logs ?? []).filter((l) => l.event === "p6.synthesis.envelope.unreadable");
     assert.equal(readWarns.length, 1, "exactly one warn — only the FIRST reply was unreadable");
     assert.ok(readWarns[0]!.detail.includes("%%% not json %%%"));
@@ -2695,7 +2799,7 @@ describe("217k envelope read-failure signals (G6 silent sinks)", () => {
     assert.match(refusal!.detail, /could not be read/);
     assert.match(refusal!.detail, /I could not produce a patch/, "the excerpt carries the received bytes");
     assert.ok(!/refused/i.test(refusal!.detail), "no fabricated refusal story for a reply we merely could not read");
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "the legacy full-rewrite repair still lands");
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01 re-point: the legacy full-rewrite repair still lands, recorded materialized
     assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.repair.delta"), "an unreadable reply never stamps a delta record");
     assert.ok(!(q.logs ?? []).some((l) => l.event === "p6.synthesis.refused"), "no terminal refusal — the cycle was rescued");
   });
@@ -2773,7 +2877,10 @@ describe("T5.4 artifact provenance (real emit data)", () => {
     const evidence = "3/3 machine-run cases passed on iteration 1"; // fakeDeps default
     assert.equal(
       vProv!.inputHash,
-      String(fnv1a(`${q.generatedSource}${evidence}`)),
+      // FM-01 (W37 Y1): the verify record hashes the verified MODULE bytes (its
+      // real derivation input — verifyOutcomeArtifact(finalModule, outcome));
+      // generatedSource is now the materialized barrel, so recompute from the module.
+      String(fnv1a(`${KANBAN_MODULE.trim()}${evidence}`)),
       "input hash = fnv1a(verified module + evidence) — the record's real derivation input",
     );
   });
@@ -2799,7 +2906,7 @@ describe("T5.4 artifact provenance (real emit data)", () => {
     // accepted, but its provenance can name nothing — so it stamps nothing.
     deps.complete = async (): Promise<LlmResult> => ({ ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "" });
     const q = await liveP6Synthesis(base, deps);
-    assert.equal(q.generatedSource, KANBAN_MODULE.trim(), "precondition: the synthesis still succeeded");
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim()); // FM-01 re-point: precondition — the synthesis still succeeded, recorded materialized
     const code = q.artifacts.find((a) => a.title === "Generated module (LLM, machine-verified)");
     assert.ok(code, "precondition: the code artifact exists");
     assert.equal(provenanceOf(code!), undefined, "no stamp is better than a guessed one (declare-or-strike)");

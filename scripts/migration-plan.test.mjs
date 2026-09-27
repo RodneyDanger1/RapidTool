@@ -10,7 +10,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { isMigrationFile, migrationName, pendingMigrations } from "./migration-plan.mjs";
+import {
+  AUTH_SCHEMA_MIGRATION,
+  authSchemaRefusal,
+  createsAuthUserTable,
+  isMigrationFile,
+  migrationName,
+  pendingMigrations,
+} from "./migration-plan.mjs";
 import { projectRoot } from "./with-app-env.mjs";
 
 const AUTH_MIGRATION = "0001_auth.sql";
@@ -87,4 +94,55 @@ test("the copy check reads both files and catches an edit", () => {
   writeFileSync(join(root, "migrations", AUTH_MIGRATION), "create table t (x int);\n");
   const drifted = authSchemaCopy(root);
   assert.notEqual(drifted.copy, drifted.source);
+});
+
+// --- R15-f02 auth-schema preflight (fixes/273_t2_r15.md) ---------------------
+
+test("the preflight is silent when sign-in is off", () => {
+  assert.equal(authSchemaRefusal({ authEnabled: false, names: [], sql: [] }), null);
+  assert.equal(
+    authSchemaRefusal({ authEnabled: false, names: ["0002_todos.sql"], sql: ["create table t ();"] }),
+    null,
+  );
+});
+
+test("the preflight accepts the canonical copy-up name or any user-creating migration", () => {
+  assert.equal(
+    authSchemaRefusal({ authEnabled: true, names: [AUTH_SCHEMA_MIGRATION], sql: ["-- noop"] }),
+    null,
+  );
+  assert.equal(
+    authSchemaRefusal({
+      authEnabled: true,
+      names: ["0005_identity.sql"],
+      sql: ['create table if not exists "user" ("id" text not null primary key);'],
+    }),
+    null,
+  );
+});
+
+test("the preflight names the copy-up fix when the schema is missing", () => {
+  const refusal = authSchemaRefusal({
+    authEnabled: true,
+    names: ["0002_todos.sql", "auth"],
+    sql: ["create table todos ();"],
+  });
+  assert.ok(refusal);
+  assert.equal(refusal.code, "RT_E_AUTH_SCHEMA_MISSING");
+  assert.match(refusal.message, /cp migrations\/auth\/0001_auth\.sql migrations\/0001_auth\.sql/);
+  assert.match(refusal.message, /VITE_AUTH_ENABLED=false/);
+});
+
+test("createsAuthUserTable matches the schema spellings, not lookalikes", () => {
+  assert.equal(createsAuthUserTable('create table if not exists "user" ('), true);
+  assert.equal(createsAuthUserTable('CREATE TABLE "user" (id text);'), true);
+  assert.equal(createsAuthUserTable('create table if not exists "user_session" ('), false);
+  assert.equal(createsAuthUserTable("create table todos ();"), false);
+});
+
+test("the shipped .grok/app-env.json keeps sign-in off (preflight stays silent)", () => {
+  const envPath = join(projectRoot(), ".grok", "app-env.json");
+  if (!existsSync(envPath)) return; // platform-provided on some hosts
+  const shipped = JSON.parse(readFileSync(envPath, "utf8"));
+  assert.equal(shipped.VITE_AUTH_ENABLED, "false");
 });

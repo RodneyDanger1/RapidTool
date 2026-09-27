@@ -4,8 +4,17 @@
  * Both run Chromium with `--no-sandbox` as root and take their URL and output
  * path from argv, so unchecked they will render `file:///root/.grok/auth.json`
  * into a PNG the agent can read, and write it anywhere.
+ *
+ * R11-f06 (S-04): the output-path check FAILS CLOSED on win32 for POSIX-literal
+ * allow-dirs (the `/workspace` contract). `resolve("/workspace")` on win32 is a
+ * drive-relative path (C:\workspace under a C: cwd) — a drive root the caller
+ * never named — and the old accept silently wrote there. Containment is also
+ * PHYSICAL now: both sides are realpath'd (scripts/path-safety.mjs) so a
+ * symlinked/junctioned parent cannot pass the lexical compare while landing
+ * outside the allowed dir.
  */
 import { resolve, sep } from "node:path";
+import { physicalInside } from "./path-safety.mjs";
 
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -32,14 +41,32 @@ export function checkedUrl(url) {
 
 /** Absolute `target` if it is strictly inside `allowedDirs`, else exit 1. */
 export function checkedOutputPath(target, allowedDirs, label = "screenshot") {
-  // Resolve first so `..` cannot slip past the prefix check.
   const abs = resolve(target);
-  // Resolve each allowed dir the same way: callers pass POSIX-style literals
-  // (e.g. "/workspace"), which on Windows resolve to a `C:\...` shape — without
-  // this the prefix test against a resolved `abs` could never pass there.
+  // R11-f06: a POSIX-literal allow-dir (e.g. "/workspace") has no physical
+  // meaning on win32 — resolve() maps it onto a drive root the caller never
+  // granted (C:\workspace). Fail closed instead of writing there.
+  if (process.platform === "win32") {
+    const posixLiteral = allowedDirs.find(
+      (dir) => typeof dir === "string" && dir.startsWith("/") && !dir.startsWith("//"),
+    );
+    if (posixLiteral) {
+      fail(
+        `${label} path check failed closed on win32: allowed dir ${JSON.stringify(posixLiteral)} is a ` +
+          `POSIX-style path, which on win32 silently resolves to ${resolve(posixLiteral)} — a drive ` +
+          `root the caller never named (S-04/R11-f06). Pass a real Windows directory as the allowed dir.`,
+      );
+    }
+  }
   const allowed = allowedDirs.some((dir) => {
     const dirAbs = resolve(dir);
-    return abs.startsWith(dirAbs.endsWith(sep) ? dirAbs : dirAbs + sep);
+    // Resolve first so `..` cannot slip past the prefix check.
+    const prefixOk = abs.startsWith(dirAbs.endsWith(sep) ? dirAbs : dirAbs + sep);
+    if (!prefixOk) return false;
+    // R11-f07 (S-05): physical containment — realpath both sides so a
+    // symlinked/junctioned parent cannot pass the lexical compare while the
+    // bytes land outside. Confirmed-outside refuses; `null` (unverifiable)
+    // keeps the lexical verdict, which is the pre-R11-f07 law.
+    return physicalInside(dirAbs, abs) !== false;
   });
   if (!allowed) {
     fail(`${label} path must be under ${allowedDirs.join(" or ")}, got ${abs}`);

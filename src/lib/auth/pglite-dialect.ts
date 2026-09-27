@@ -112,7 +112,10 @@ class PGliteConnection implements DatabaseConnection {
     const result = await this.client.query(compiledQuery.sql, [
       ...compiledQuery.parameters,
     ]);
-    if (result.affectedRows) {
+    // B2 (W39): `typeof … === "number"` — the old truthiness test dropped the
+    // count for a mutation that matched ZERO rows (0 is falsy), so a no-op
+    // UPDATE/DELETE read as "no count" instead of "0 rows changed".
+    if (typeof result.affectedRows === "number") {
       return {
         numAffectedRows: BigInt(result.affectedRows),
         rows: result.rows as O[],

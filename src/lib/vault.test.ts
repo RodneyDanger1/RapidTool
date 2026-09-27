@@ -5,6 +5,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  backlinksFor,
   buildVaultNotes,
   dailyNote,
   lessonNote,
@@ -817,5 +818,27 @@ describe("vault corrupt-store hardening (strField/tsField/row/rowsOf)", () => {
     const n = dailyNote(p);
     assert.ok(n.title.startsWith("Daily — "));
     assert.ok(n.body.includes("_none_"));
+  });
+});
+
+// W-16: backlinksFor was this file's only untested export; the [null, 5] case
+// threw although the doc block promises "unknown/empty input yields []".
+describe("backlinksFor (W-16 junk-row guard)", () => {
+  it("yields [] for junk rows (null/scalars) instead of throwing", () => {
+    assert.deepEqual(backlinksFor([null, 5, "x"] as unknown as VaultNote[], "Target"), []);
+  });
+
+  it("yields [] for a non-array notes value", () => {
+    assert.deepEqual(backlinksFor(null as unknown as VaultNote[], "Target"), []);
+  });
+
+  it("still inverts a real graph, dedupes, and never self-links", () => {
+    const notes = [
+      { title: "A", links: ["Target"] },
+      { title: "B", links: ["Target", "A"] },
+      { title: "Target", links: ["A"] },
+      { title: "C", links: [] },
+    ] as unknown as VaultNote[];
+    assert.deepEqual(backlinksFor(notes, "Target"), ["A", "B"]);
   });
 });

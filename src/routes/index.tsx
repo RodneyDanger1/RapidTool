@@ -4,7 +4,9 @@ import { HomeScreen } from "@/components/console.tsx";
 export const Route = createFileRoute("/")({
   component: Home,
   head: () => ({
-    meta: [{ title: "RapidTool — autonomous software agency" }],
+    // R6-f02 (W-11): never "autonomous software agency/factory" while `doctor`
+    // prints autonomousSoftwareFactory:false — declare-or-strike.
+    meta: [{ title: "RapidTool — governed 13-phase delivery harness" }],
   }),
 });
 

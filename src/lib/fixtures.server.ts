@@ -23,7 +23,7 @@ export interface FixtureLoadResult {
 }
 
 const LOAD_LABEL =
-  "read-only review — the grader is run-side authority; approving here records a decision, it does not modify the bar";
+  "read-only review — the grader is run-side authority; approval is a CLI action (fixtures --approve --ids …) and this view records no decision";
 
 /**
  * Load every corpus fixture (+ its grader, when present) as review rows.

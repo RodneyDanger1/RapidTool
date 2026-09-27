@@ -62,7 +62,7 @@
 //
 //   export type ProjectKind            "webapp"|"cli-tool"|"library"|"game"|"service"
 //   export function projectKindOf(project: Project): ProjectKind
-//   export function scaffoldProject(project: Project): ScaffoldResult
+//   export function scaffoldProject(project: Project, options?: ScaffoldOptions): ScaffoldResult
 //   export function deplyNotes(project: Project): string   (DEPLOY.md content)
 //
 // Project.kind (types.ts) is a coarse optional 3-way union — "app"|"tool"|"game";
@@ -85,6 +85,33 @@ export type ProjectKind = "webapp" | "cli-tool" | "library" | "game" | "service"
 
 export type ScaffoldFile = { path: string; body: string };
 
+/**
+ * fixes/277 (A3-f07 / W-14 · W-27-C W-28b): the emitted-UI generation seam.
+ * Today the webapp shell's UI is a name-dump (`generated exports (N): names`
+ * — A3-f07) and machine UI generation does not exist; this hook is the stage's
+ * home. A caller MAY supply a `uiGeneration` hook (via `ScaffoldOptions`); it
+ * receives the emit context and returns replacement source lines for the
+ * emitted shell's generated-substance body, or `null` to keep the default.
+ * The DEFAULT hook (`defaultUiGeneration` below) is the current name-dump —
+ * a no-op that reproduces the pre-277 bytes exactly.
+ */
+export type UiGenerationRequest = {
+  project: Project;
+  kind: ProjectKind;
+  /** The imported namespace of the generated entry module in the emitted
+   *  shell (`"generated"`), or null when the emit wrote no generated
+   *  substance at all (the shell then renders the honest no-module notice). */
+  generatedNamespace: string | null;
+};
+
+export type UiGenerationHook = (request: UiGenerationRequest) => string[] | null;
+
+/** Optional inputs to `scaffoldProject` (additive; omitted ⇒ pre-277 bytes). */
+export type ScaffoldOptions = {
+  /** A3-f07: the emitted-UI generation hook (default = the name-dump). */
+  uiGeneration?: UiGenerationHook;
+};
+
 export type ScaffoldResult =
   | {
       ok: true;
@@ -97,6 +124,36 @@ export type ScaffoldResult =
        * emissions never carry it. Callers (CLI emit summary) surface it.
        */
       warnings?: string[];
+      /**
+       * fixes/277 (R3-f03 / W-06): machine-readable trail verdicts on the emit
+       * envelope (see `trailVerdictOf`) — present only when true, so clean
+       * emissions stay byte-identical for every existing consumer.
+       *
+       * `redTree` — the project's own trail's last tree verdict is an uncleared
+       * `p6.tree.failure`: this artifact is a RECORD of a failed tree-run, not
+       * a verified build (the same condition headless's red-tree emit guard
+       * refuses/banners on; this field makes it readable WITHOUT the guard).
+       * `partial` — the last synthesis verdict is a phase-6
+       * `p6.synthesis.refused` while real generated substance exists (prior
+       * chunks kept — `partialTreeRefuse`): the emission is a PARTIAL tree,
+       * neither the floor nor a full pass. The oracle spec's `capability.N`
+       * rows skip-with-reason on a partial emission instead of reddening.
+       */
+      redTree?: true;
+      partial?: true;
+      /**
+       * fixes/277 (A3-f07): which UI-generation path produced the emitted
+       * webapp shell — the default name-dump, or a caller-supplied hook whose
+       * lines were applied. Absent when the emission carried no webapp UI node
+       * (no name-dump was generated, so there is nothing to report).
+       */
+      uiGeneration?: {
+        hook: "default-name-dump" | "caller";
+        /** true when a caller hook's lines replaced the name-dump this emit. */
+        applied: boolean;
+        /** The emitted ui module path the hook's lines landed in. */
+        uiPath: string;
+      };
     }
   | { ok: false; error: string };
 
@@ -575,14 +632,19 @@ const PKG_SCRIPTS: Partial<Record<ProjectKind, Record<string, string>>> = {
   service: {
     typecheck: "tsc --noEmit",
     test: "node --experimental-strip-types --test tests/oracle.spec.ts",
+    // fixes/277 (R3-f06): the service kind's runnable entry — `npm start`
+    // executes src/main.ts (readiness = the entry's structured stub, which
+    // reads PORT and refuses honestly until the service body is implemented).
+    start: "node --experimental-strip-types src/main.ts",
   },
 };
 
 function packageJson(kind: ProjectKind, project: Project, hasTests: boolean): string {
   const scripts = { ...(PKG_SCRIPTS[kind] ?? {}) };
   if (!hasTests) delete scripts.test;
+  const slug = slugName(project.name);
   const pkg: Record<string, unknown> = {
-    name: slugName(project.name),
+    name: slug,
     version: "0.0.0",
     private: kind !== "library",
     type: "module",
@@ -601,6 +663,28 @@ function packageJson(kind: ProjectKind, project: Project, hasTests: boolean): st
       packetId: project.id,
     },
   };
+  // fixes/277 (R3-f06 / W-15): per-kind entry wiring — a real consumer
+  // (a bundler for the game, `npm exec` for a CLI, an import for a library,
+  // `npm start` for a service) needs the entry DECLARED, not just emitted.
+  // Every value names only a file this emitter actually writes
+  // (emitMainEntry / emitKindEntry / emitBinLauncher), never an undeclared
+  // path; webapp is unchanged (its entry is declared by index.html).
+  if (kind === "game") {
+    // the browser entry the emitted index.html script tag loads.
+    pkg.main = "src/main.ts";
+  } else if (kind === "cli-tool") {
+    // the runnable launcher emitBinLauncher writes; it delegates to
+    // src/main.ts (emitKindEntry) with argv passed straight through.
+    pkg.bin = { [slug]: `bin/${slug}.mjs` };
+  } else if (kind === "library") {
+    // the entry emitKindEntry writes, as the package's public module.
+    pkg.main = "./src/main.ts";
+    pkg.exports = { ".": "./src/main.ts" };
+    pkg.files = ["src"];
+  } else if (kind === "service") {
+    // the entry `npm start` runs (PKG_SCRIPTS.service.start).
+    pkg.main = "./src/main.ts";
+  }
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }
 
@@ -854,6 +938,45 @@ function emitTreeBridge(
 }
 
 /**
+ * fixes/277 (A3-f07 / W-14): the DEFAULT emitted-UI generation — the current
+ * name-dump, byte-identical to the pre-277 shell. TODO(A3-f07): machine UI
+ * generation does not exist (the webapp UI is deliberately never
+ * machine-generated); when it lands it replaces THIS body behind the same
+ * UiGenerationHook contract and must clear the ≥2-domain-field / interaction
+ * bar (W-14) before any claim moves. Today a caller-supplied hook may return
+ * replacement body lines; null ⇒ this default is used.
+ */
+const defaultUiGeneration = ({
+  project,
+  generatedNamespace,
+}: UiGenerationRequest): string[] => {
+  if (generatedNamespace === null) {
+    return [
+      `  const [notice] = useState<string>(`,
+      `    "shell — no generated module yet; run P6 then re-emit",`,
+      `  );`,
+      `  return (`,
+      `    <main>`,
+      `      <h1>{${jstr(prose(project.name))}}</h1>`,
+      `      <p>{notice}</p>`,
+      `    </main>`,
+      `  );`,
+    ];
+  }
+  // TODO(A3-f07) at this line: the name-dump is the stage's current output — a
+  // real generator (interactions, ≥2 domain fields per W-14) replaces it here.
+  return [
+    `  const exported = Object.keys(generated);`,
+    `  return (`,
+    `    <main>`,
+    `      <h1>{${jstr(prose(project.name))}}</h1>`,
+    `      <p>generated exports ({exported.length}): {exported.join(", ") || "(none)"}</p>`,
+    `    </main>`,
+    `  );`,
+  ];
+};
+
+/**
  * ui node: kind-appropriate shell (webapp → React; game → canvas; else CLI-ish TS).
  *
  * fixes/216d (106 T-05 / F-03): a shell that surfaces generated exports imports
@@ -863,38 +986,37 @@ function emitTreeBridge(
  * which the path allow-list refuses and nothing ever wrote (a guaranteed
  * dangling specifier in every tree-mode webapp). `genEntry === null` ⇒ no
  * generated substance at all ⇒ no generated import in the shell.
+ *
+ * fixes/277 (A3-f07): the webapp branch's generated-substance body is produced
+ * by the `uiGeneration` hook (the single call point) — default = the
+ * name-dump, byte-identical to the pre-277 shell.
  */
 function emitUi(
   node: { file: string; purpose: string },
   project: Project,
   kind: ProjectKind,
   genEntry: { from: string; path: string } | null,
+  uiGeneration: UiGenerationHook,
 ): string {
   if (kind === "webapp") {
     const genImport = genEntry
       ? [`import * as generated from ${jstr(tsImportPath(dirOf(genEntry.from), genEntry.path))};`, ""]
       : [];
-    const genBody = genEntry
-      ? [
-          `  const exported = Object.keys(generated);`,
-          `  return (`,
-          `    <main>`,
-          `      <h1>{${jstr(prose(project.name))}}</h1>`,
-          `      <p>generated exports ({exported.length}): {exported.join(", ") || "(none)"}</p>`,
-          `    </main>`,
-          `  );`,
-        ]
-      : [
-          `  const [notice] = useState<string>(`,
-          `    "shell — no generated module yet; run P6 then re-emit",`,
-          `  );`,
-          `  return (`,
-          `    <main>`,
-          `      <h1>{${jstr(prose(project.name))}}</h1>`,
-          `      <p>{notice}</p>`,
-          `    </main>`,
-          `  );`,
-        ];
+    // fixes/277 (A3-f07): THE single uiGeneration call point. The hook
+    // (caller-supplied via ScaffoldOptions, or the default name-dump above)
+    // returns the shell's generated-substance body lines ONLY — the
+    // surrounding imports/export wrapper stay scaffold-owned so a hook can
+    // never break the emitted module's shape.
+    // fixes/277 (A3-f07): the hook contract — a `null` return keeps the
+    // default name-dump (which is total: it never returns null), so the
+    // spread below always receives string[] (R3-f03 break fix: the hook's
+    // declared `string[] | null` return must be coalesced, never spread raw).
+    const uiRequest: UiGenerationRequest = {
+      project,
+      kind,
+      generatedNamespace: genEntry ? "generated" : null,
+    };
+    const genBody = uiGeneration(uiRequest) ?? defaultUiGeneration(uiRequest);
     return [
       ...sourceHeader(node.file, node.purpose, project, [
         "// Operator surfaces bound to generated modules (P8). Not a stub wall:",
@@ -1003,6 +1125,19 @@ type OracleSurfaceCtx = {
    * above (byte-identical — the same rules, one place).
    */
   rowSurface?: OracleRowSurface;
+  /**
+   * fixes/277 (R3-f03 / W-06): the emission carries a PARTIAL synthesis tree
+   * (prior chunks' real files kept after a refused chunk — `partialTreeRefuse`,
+   * detected by `trailVerdictOf`). When true, each `capability.N` row is
+   * emitted with a skip-with-reason path: a capability whose demanded
+   * identifier forms appear in NO scanned file names a module that was never
+   * materialised and SKIPS with that reason instead of asserting a red — the
+   * pre-fix 28-red cascade on a 1-file partial tree read as product failure.
+   * Absent/false ⇒ the capability rows are byte-identical to the pre-277
+   * output. TODO(R3-f03): the full capability→node mapping (name WHICH declared
+   * module is missing) once the spec graph carries it.
+   */
+  partial?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -1662,6 +1797,10 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   // (capabilityCoverage / p6-arch) passes — and re-reads the files on every
   // run, so an edit that removes a capability's identifiers turns its row
   // red the next time the suite runs.
+  // fixes/277 (R3-f03 / W-06): partial-emission capability semantics — see
+  // OracleSurfaceCtx.partial. One real skip path (below); a non-partial
+  // emission's capability section stays byte-identical to the pre-277 output.
+  const capPartial = ctx.partial === true;
   if (capSection) {
     lines.push(
       "// ---------------------------------------------------------------------------",
@@ -1686,9 +1825,46 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       "  return forms.some((f) => f.length > 0 && (p.includes(f) || body.includes(f)));",
       "}",
       "",
+      ...(capPartial
+        ? [
+            "// fixes/277 (R3-f03 / W-06): this emission carries a PARTIAL synthesis",
+            "// tree — a capability whose identifiers appear in NO scanned file names a",
+            "// module that was NEVER materialised, so its row SKIPS with that reason",
+            "// instead of reddening (the pre-fix 28-red cascade read as product",
+            "// failure; the reds were assembly, not the product).",
+            "const __capPartial = true;",
+            "",
+          ]
+        : []),
     );
     capDemands.forEach((d, i) => {
       const idName = `capability.${i + 1}`;
+      if (capPartial) {
+        // R3-f03 (W-06): ONE real skip path on a partial emission. The absence
+        // of every demanded form is read as \"this capability's module was never
+        // materialised\" and the row SKIPS with the reason — it can still never
+        // pass silently (a skip is not a green) and presence still passes.
+        // TODO(R3-f03): the full capability→node mapping so the skip reason can
+        // name WHICH declared module is missing instead of the proxy wording.
+        lines.push(
+          `// ${idName} — ${prose(d.label)}`,
+          `test(${jstr(idName)}, (t) => {`,
+          `  // Demanded identifier forms (content tokens + canonical stems;`,
+          "  // stopword-free): presence of ANY of them in the scanned files counts.",
+          `  const forms = ${JSON.stringify(d.forms)};`,
+          "  const carried = __capScanFiles.filter((f) => __capCarries(f, forms));",
+          "  if (__capPartial && carried.length === 0) {",
+          "    t.skip(",
+          `      ${jstr(`capability.${i + 1} — SKIPPED (partial synthesis): no scanned file carries this capability's demanded identifier forms — the module that would carry it was never materialised (TODO(R3-f03): name it via the capability→node mapping).`)}`,
+          "    );",
+          "    return;",
+          "  }",
+          "  // identifiers present — the presence proxy holds (a name is NOT behavior).",
+          "});",
+          "",
+        );
+        return;
+      }
       lines.push(
         `// ${idName} — ${prose(d.label)}`,
         `test(${jstr(idName)}, () => {`,
@@ -1813,8 +1989,28 @@ function emitIndexHtml(project: Project, entryScript: string): string {
   ].join("\n");
 }
 
-/** vite.config.ts — webapp only (react plugin; tsconfig already declares jsx react-jsx). */
-function emitViteConfig(): string {
+/**
+ * vite.config.ts — webapp (react plugin; tsconfig already declares jsx
+ * react-jsx) and, per fixes/277 (R3-f06), game (plain config — the game shell
+ * is canvas-based and the game devDeps carry NO react/@vitejs/plugin-react, so
+ * the webapp config body would break `npm run build` there). Webapp bytes are
+ * unchanged from fixes/135.
+ */
+function emitViteConfig(kind: ProjectKind): string {
+  if (kind === "game") {
+    return [
+      "// ---------------------------------------------------------------------------",
+      "// vite.config.ts — emitted by the RapidTool scaffold (fixes/277 R3-f06).",
+      "// The game package.json declares vite dev/build/preview scripts; this config",
+      "// makes them real: index.html + src/main boot the canvas shell. Plain config",
+      "// — the canvas UI has no framework plugin (game devDeps carry none).",
+      "// ---------------------------------------------------------------------------",
+      'import { defineConfig } from "vite";',
+      "",
+      "export default defineConfig({});",
+      "",
+    ].join("\n");
+  }
   return [
     "// ---------------------------------------------------------------------------",
     "// vite.config.ts — emitted by the RapidTool scaffold (fixes/135 bootability).",
@@ -1903,6 +2099,155 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
     );
   }
   return lines.join("\n");
+}
+
+/**
+ * fixes/277 (R3-f06): the direct-execution guard shared by every emitKindEntry
+ * flavor — the standard ESM main-module check (process.argv[1] vs this
+ * module's own URL). The structured stub stays IMPORTABLE (an import runs
+ * nothing — tests/tooling/the oracle spec never trigger it) while the coded
+ * refusal fires the moment the entry is actually EXECUTED
+ * (`node --experimental-strip-types src/main.ts`, the package bin launcher, or
+ * `npm start`).
+ */
+function directRunGuardLines(): string[] {
+  return [
+    "// Direct-execution guard (the standard ESM main-module check): main runs ONLY",
+    "// when this file is the program being executed — any import (tests, tooling,",
+    "// the oracle spec) never triggers it, which is what makes the stub importable.",
+    "if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {",
+    "  main()",
+    "    .then((code) => {",
+    "      process.exitCode = code;",
+    "    })",
+    "    .catch((error: unknown) => {",
+    "      console.error(error instanceof Error ? error.message : String(error));",
+    "      process.exitCode = 1;",
+    "    });",
+    "}",
+    "",
+  ];
+}
+
+/**
+ * fixes/277 (R3-f06 / W-15): the per-kind RUNNABLE entry the package fields
+ * point at — cli-tool (package `bin` launcher spawns this), library (package
+ * `main`/`exports` module), service (`npm start`). STRUCTURED stub per the
+ * W30 §S2 contract: importable, exports the declared surface, and the coded
+ * refusal fires ONLY when the entry is actually executed. The refusal message
+ * keeps BOTH test contracts — the canonical `TODO(E-15) stub` marker
+ * (scaffold.test.ts:338) and the `RT_E_VALIDATION · ` prefix
+ * (emitted-honesty.test.ts:42) — and names the owning row (`R3-f06`).
+ */
+function emitKindEntry(kind: ProjectKind, project: Project): string {
+  const slug = slugName(project.name);
+  if (kind === "cli-tool") {
+    return [
+      ...sourceHeader("src/main.ts", "CLI entry — the runnable program (package bin delegates here)", project, [
+        "// argv is REAL: --help prints the usage line and exits 0; every other",
+        "// invocation reaches the structured refusal below (RT_E_VALIDATION).",
+      ]),
+      'import { pathToFileURL } from "node:url";',
+      "",
+      `const USAGE = ${jstr(`usage: ${slug} [args] — structured stub, the real CLI is not implemented yet`)};`,
+      "",
+      "export type CliContext = { argv: string[]; env: Record<string, string | undefined> };",
+      "",
+      "/** The entry contract (E-15 #2): argv in, exit code out. */",
+      "export async function main(",
+      "  argv: string[] = process.argv.slice(2),",
+      "  env: Record<string, string | undefined> = process.env,",
+      "): Promise<number> {",
+      "  void env; // TODO(R3-f06): thread env into the job modules once implemented.",
+      '  if (argv.includes("--help") || argv.includes("-h")) {',
+      "    console.log(USAGE);",
+      "    return 0;",
+      "  }",
+      "  // TODO(R3-f06) at this line: parse argv (flags/inputs) and dispatch to the",
+      "  // job modules under src/jobs/. The structured refusal below is the only",
+      "  // throw in this entry and fires only when the CLI is actually RUN.",
+      `  throw new Error(${jstr(emittedRefusal("TODO(E-15) stub: implement the CLI entry per the oracle (R3-f06)"))});`,
+      "}",
+      "",
+      ...directRunGuardLines(),
+    ].join("\n");
+  }
+  if (kind === "service") {
+    return [
+      ...sourceHeader("src/main.ts", "Service entry — resolves PORT, refuses honestly until implemented", project, [
+        "// The PORT wiring is REAL (resolvePort); the listener is not — the",
+        "// structured refusal below fires only when the service is started.",
+      ]),
+      'import { pathToFileURL } from "node:url";',
+      "",
+      "export type ServiceContext = { env: Record<string, string | undefined>; port: number };",
+      "",
+      "/** PORT wiring (pure): a valid 1-65535 integer from the environment, else",
+      " *  the documented local default 8080 (the .env.example PLACEHOLDER pulls). */",
+      "export function resolvePort(env: Record<string, string | undefined> = process.env): number {",
+      '  const raw = Number.parseInt(String(env.PORT ?? ""), 10);',
+      "  return Number.isInteger(raw) && raw > 0 && raw <= 65535 ? raw : 8080;",
+      "}",
+      "",
+      "/** The service contract (E-15 #2): start listening, return an exit code. */",
+      "export async function main(env: Record<string, string | undefined> = process.env): Promise<number> {",
+      "  const ctx: ServiceContext = { env, port: resolvePort(env) };",
+      "  void ctx; // TODO(R3-f06): listen(ctx.port) + the healthcheck once the body lands.",
+      `  throw new Error(${jstr(emittedRefusal("TODO(E-15) stub: implement the service entry per the oracle (R3-f06)"))});`,
+      "}",
+      "",
+      ...directRunGuardLines(),
+    ].join("\n");
+  }
+  // library: the module package.json `main`/`exports` point at.
+  return [
+    ...sourceHeader("src/main.ts", "Library entry — the module package main/exports point at", project, [
+      "// Importable: importing runs nothing. `entry` is real; the implementation",
+      "// surface lands behind the structured refusal below.",
+    ]),
+    'import { pathToFileURL } from "node:url";',
+    "",
+    "export type LibraryInfo = { name: string; version: string };",
+    "",
+    "/** Package identity — REAL values off the emitted package.json contract. */",
+    `export const entry: LibraryInfo = { name: ${jstr(slug)}, version: "0.0.0" };`,
+    "",
+    "/** TODO(R3-f06) at this line: the oracle rows name the functions this module",
+    " *  must export — add them here; the refusal stands until they are real. */",
+    "export async function main(): Promise<number> {",
+    `  throw new Error(${jstr(emittedRefusal("TODO(E-15) stub: implement the library surface per the oracle (R3-f06)"))});`,
+    "}",
+    "",
+    ...directRunGuardLines(),
+  ].join("\n");
+}
+
+/**
+ * fixes/277 (R3-f06): the cli-tool package `bin` launcher — a REAL launcher,
+ * not a stub. It spawns the TypeScript entry with the same node flags the
+ * emitted package.json scripts use (Node >= 22 type stripping — see
+ * engines.node), passing argv straight through; the exit code is the entry's.
+ * The entry's honest refusal surfaces on stderr the moment the CLI is RUN.
+ */
+function emitBinLauncher(project: Project): string {
+  const slug = slugName(project.name);
+  return [
+    "#!/usr/bin/env node",
+    `// bin/${slug}.mjs — package bin launcher, emitted by the RapidTool scaffold`,
+    "// (fixes/277 R3-f06). Delegates to the TypeScript entry (../src/main.ts) with",
+    "// the same flags the package scripts use (Node >= 22 type stripping — see",
+    "// engines.node). argv passes straight through; the entry's structured stub",
+    "// refuses with RT_E_VALIDATION only when the CLI is actually run.",
+    'import { spawnSync } from "node:child_process";',
+    'import { fileURLToPath } from "node:url";',
+    "",
+    'const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));',
+    'const run = spawnSync(process.execPath, ["--experimental-strip-types", entry, ...process.argv.slice(2)], {',
+    '  stdio: "inherit",',
+    "});",
+    "process.exit(run.status === null ? 1 : run.status);",
+    "",
+  ].join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -2185,6 +2530,47 @@ export function deplyNotes(project: Project): string {
     library: "an npm registry publish is the common destination for this kind",
     service: "a container host (e.g. Cloud Run) is a common destination for this kind",
   };
+  // R13-f13 (W31 · T3): the per-kind deploy HANDOFF — commands only, never
+  // credentials. This is the "what do I actually type next" layer the prose
+  // destination above lacked; it assumes your own account/login outside the
+  // repo. Every command here is either backed by a script the emitted
+  // package.json declares (dev/build/preview/typecheck/test per PKG_SCRIPTS)
+  // or an explicitly-marked vendor example. Nothing in this list was executed
+  // or validated by the pipeline — the honesty stamp above governs.
+  const kindHandoff: Record<ProjectKind, string[]> = {
+    webapp: [
+      "npm run build            # vite build → dist/ (declared by the emitted package.json)",
+      "npm run preview          # sanity-check the built output locally",
+      "# then hand dist/ to your static host, after your own login — e.g.:",
+      "#   npx firebase-tools deploy --only hosting      (after `firebase init hosting`)",
+    ],
+    game: [
+      "npm run build            # vite build → dist/",
+      "npm run preview          # play the built bundle locally",
+      "# then publish dist/ to any static host, after your own login — e.g.:",
+      "#   butler push dist <your-user>/<your-game>:html5      (itch.io)",
+    ],
+    "cli-tool": [
+      "npm run typecheck && npm test    # the emitted oracle suite",
+      "npm pack --dry-run               # inspect the package contents",
+      "# the emitted package.json declares `private: true` — flip it deliberately,",
+      "# then publish after your own `npm login`:",
+      "#   npm publish --access public",
+    ],
+    library: [
+      "npm run typecheck && npm test    # the emitted oracle suite",
+      "npm pack --dry-run               # inspect the package contents",
+      "# library trees are emitted NOT private; publish after your own `npm login`:",
+      "#   npm publish --access public",
+    ],
+    service: [
+      "npm run typecheck && npm test    # the emitted oracle suite",
+      "# no Dockerfile is emitted — containerize yourself (`docker init` scaffolds one),",
+      "# then build/push under your own account — e.g.:",
+      "#   docker build -t <image> . && docker run -p 3000:3000 <image>",
+      "#   gcloud run deploy <service> --source .        (the host reads $PORT; see .env.example)",
+    ],
+  };
   const devCommand =
     kind === "webapp" || kind === "game"
       ? [
@@ -2241,6 +2627,12 @@ export function deplyNotes(project: Project): string {
     `- For this kind, ${kindDestinations[kind]}. If you go that route: create the account/project yourself, then fill \`.env\` from \`.env.example\` — and verify credentials before any deploy.`,
     "- RapidTool's own P9 approval was a recorded, advisory gate — re-verify before a real deploy.",
     "",
+    "- Handoff commands (a TEMPLATE — none of it ran here; run from the emitted folder after your own account/login; the scripts used are declared by the emitted package.json):",
+    "",
+    "```text",
+    ...kindHandoff[kind],
+    "```",
+    "",
     "## Assets",
     "",
     "`assets/` and `public/` are expected at the emitted scaffold and are NOT engine-generated" +
@@ -2282,13 +2674,58 @@ function validProject(project: Project): { ok: true } | { ok: false; error: stri
 }
 
 /**
+ * fixes/277 (R3-f03 / W-06): the machine-readable trail verdicts the emit
+ * envelope carries (see `ScaffoldResult.redTree`/`partial`). Read off the
+ * project's own durable log rows — the same signals headless's red-tree guard
+ * (`treeRunTrail`) and codegen's `partialTreeRefuse` write:
+ *
+ *   redTree — the LAST tree verdict on the trail is `p6.tree.failure` with no
+ *             green run since (`p6.journey.converged` / `p6.tree.tested` /
+ *             `p6.tree.tested.skipped`): this artifact is a RECORD of a
+ *             failed tree-run, not a verified build. LAST row wins — a tree
+ *             repaired to green by a later run reads clean.
+ *   partial — a phase-6 `p6.synthesis.refused` on the trail AND real generated
+ *             substance exists (`generatedSource` / `generatedTree`): prior
+ *             chunks' real files were kept — a PARTIAL tree, neither the
+ *             deterministic floor nor a full pass. The oracle spec's
+ *             `capability.N` rows then skip-with-reason instead of reddening
+ *             (the pre-fix 28-red cascade read as product failure).
+ *
+ * Pure + never throws (junk rows are skipped); both flags present only when
+ * true, so clean emissions stay byte-identical for every existing consumer.
+ */
+function trailVerdictOf(project: Project): { redTree: boolean; partial: boolean } {
+  const rows = Array.isArray(project.logs) ? project.logs : [];
+  let redTree = false;
+  for (const row of rows) {
+    const event = typeof row?.event === "string" ? row.event : "";
+    if (event === "p6.tree.failure") {
+      redTree = true;
+    } else if (
+      event === "p6.journey.converged" ||
+      event === "p6.tree.tested" ||
+      event === "p6.tree.tested.skipped"
+    ) {
+      redTree = false;
+    }
+  }
+  const refusedPhase6 = rows.some(
+    (row) => row !== null && typeof row === "object" && row.event === "p6.synthesis.refused" && row.phase === 6,
+  );
+  const hasSubstance =
+    String(project.generatedSource ?? "").trim().length > 0 ||
+    (Array.isArray(project.generatedTree) && project.generatedTree.length > 0);
+  return { redTree, partial: refusedPhase6 && hasSubstance };
+}
+
+/**
  * Derive the full file tree for one project. Pure: returns {path, body} pairs
  * (the CLI writes them); deterministic: same project ⇒ same bytes. File order:
  * root docs → env/package → .rapidtool → boot files (webapp/game) → game
  * manifest → spec-graph modules in topo order (generatedSource hosted on the
  * first job node) → oracle spec.
  */
-export function scaffoldProject(project: Project): ScaffoldResult {
+export function scaffoldProject(project: Project, options: ScaffoldOptions = {}): ScaffoldResult {
   const check = validProject(project);
   if (!check.ok) return check;
 
@@ -2308,6 +2745,30 @@ export function scaffoldProject(project: Project): ScaffoldResult {
   const push = (path: string, body: string): void => {
     files.push({ path, body });
   };
+
+  // fixes/277 (A3-f07): resolve the emitted-UI generation hook for this emit —
+  // the caller's hook (ScaffoldOptions.uiGeneration) with the default
+  // name-dump as the fallback — and track whether a caller's lines actually
+  // landed (the `uiGeneration` record on the result below). The wrapper
+  // always returns string[] (the default is total), satisfying the hook
+  // contract's `null` ("keep the default") without changing emitUi's own
+  // coalescing fallback.
+  let uiHookRan = false;
+  let uiHookApplied = false;
+  const uiGeneration: UiGenerationHook = (request) => {
+    uiHookRan = true;
+    const lines = options.uiGeneration ? options.uiGeneration(request) : null;
+    if (lines !== null) {
+      uiHookApplied = true;
+      return lines;
+    }
+    return defaultUiGeneration(request);
+  };
+
+  // fixes/277 (R3-f03): the emission's trail verdicts (see trailVerdictOf) —
+  // consumed by the oracle-spec ctx (`partial` ⇒ capability skip-with-reason)
+  // and the result envelope (redTree/partial), both below.
+  const verdict = trailVerdictOf(project);
 
   // --- Spec-graph nodes in topo order -----------------------------------------
   // Computed FIRST so every consumer (README table, module emission, oracle
@@ -2521,17 +2982,36 @@ export function scaffoldProject(project: Project): ScaffoldResult {
   push(".rapidtool/project.json", exportProjectJson(project));
 
   // --- Browser boot files (fixes/135): kinds whose package.json declares
-  // vite dev/build scripts get an index.html + entry (+ vite.config for
-  // webapp) so `npm run dev`/`npm run build` actually run in the emitted dir.
+  // vite dev/build scripts get an index.html + entry + vite.config so
+  // `npm run dev`/`npm run build` actually run in the emitted dir.
   if (kind === "webapp" || kind === "game") {
     const entryFile = kind === "webapp" ? "src/main.tsx" : "src/main.ts";
     push("index.html", emitIndexHtml(proj, `/${entryFile}`));
-    if (kind === "webapp") push("vite.config.ts", emitViteConfig());
+    // fixes/277 (R3-f06 / W-15): BOTH vite kinds get their config — webapp
+    // with the react plugin (bytes unchanged from fixes/135), game plain
+    // (its devDeps carry no framework plugin; the webapp body would break
+    // `npm run build` there). emitViteConfig takes the kind.
+    push("vite.config.ts", emitViteConfig(kind));
     push(entryFile, emitMainEntry(kind, proj, uiPath ? relSpecifier("src", uiPath) : null));
   }
 
   if (kind === "game") {
     push("assets/manifest.json", emitGameManifest(proj));
+  }
+
+  // --- fixes/277 (R3-f06): per-kind runnable entries ------------------------
+  // packageJson DECLARES these paths (cli-tool `bin`; library `main`/`exports`;
+  // service `main` + the start script) — emit exactly what it declares so no
+  // emitted package field points at a file that was never written.
+  // cli-tool: the bin launcher (spawns src/main.ts, argv passthrough) + the
+  // entry; library: the importable module entry; service: the `npm start`
+  // entry with the real PORT wiring; each entry's structured refusal keeps
+  // the canonical TODO(E-15) stub marker + the RT_E_VALIDATION · prefix.
+  if (kind === "cli-tool" || kind === "library" || kind === "service") {
+    push("src/main.ts", emitKindEntry(kind, proj));
+    if (kind === "cli-tool") {
+      push(`bin/${slugName(proj.name)}.mjs`, emitBinLauncher(proj));
+    }
   }
 
   // --- Generated tree files (fixes/144 M2) ----------------------------------
@@ -2586,6 +3066,7 @@ export function scaffoldProject(project: Project): ScaffoldResult {
           proj,
           kind,
           generatedEntryPath ? { from: path, path: generatedEntryPath } : null,
+          uiGeneration,
         );
       } else {
         body = emitTreeBridge(
@@ -2633,6 +3114,7 @@ export function scaffoldProject(project: Project): ScaffoldResult {
         proj,
         kind,
         generatedEntryPath ? { from: path, path: generatedEntryPath } : null,
+        uiGeneration,
       );
     } else {
       body = emitJobStub(node, proj, jobLabelOf(node));
@@ -2684,8 +3166,11 @@ export function scaffoldProject(project: Project): ScaffoldResult {
             treeEntryPath,
             treePaths: treeAccepted.map((f) => f.path),
             treeJobModules,
+            // fixes/277 (R3-f03): a partial tree ⇒ capability rows skip with
+            // their reason instead of asserting (non-partial bytes unchanged).
+            partial: verdict.partial,
           })
-        : emitOracleSpec(proj, { storePath, apiPath, hostPath, bridgedJobLabels }),
+        : emitOracleSpec(proj, { storePath, apiPath, hostPath, bridgedJobLabels, partial: verdict.partial }),
     );
   }
 
@@ -2704,10 +3189,26 @@ export function scaffoldProject(project: Project): ScaffoldResult {
     ? `${files.length} files · kind ${kind} · packet ${project.id || "unknown"} — tree files already on disk · generatedTree: ${treeAccepted.length} file${treeAccepted.length === 1 ? "" : "s"} assembled${treeRefusals.length ? `, ${treeRefusals.length} refused (see warnings)` : ""}${unmaterialisedJobs.length ? `, ${unmaterialisedJobs.length} job node${unmaterialisedJobs.length === 1 ? "" : "s"} unmaterialised (never bridged — see warnings)` : ""}${bridgedNonJobPaths.length ? `, ${bridgedNonJobPaths.length} non-job bridge${bridgedNonJobPaths.length === 1 ? "" : "s"}` : ""}`
     : `${files.length} files · kind ${kind} · packet ${project.id || "unknown"} — write them to disk with the emit command`;
   const warnings = [...treeRefusals, ...unmaterialisedWarnings];
+  // fixes/277 (A3-f07): the UI-generation record — present only when a webapp
+  // UI shell was actually emitted this run (the hook ran); `applied` is true
+  // when a caller hook's lines replaced the default name-dump. Absent for
+  // every other kind/path, so existing consumers keep byte-identical output.
+  const uiGenerationRecord =
+    uiHookRan && uiPath !== null
+      ? {
+          hook: uiHookApplied ? ("caller" as const) : ("default-name-dump" as const),
+          applied: uiHookApplied,
+          uiPath,
+        }
+      : undefined;
   return {
     ok: true,
     files,
     summary,
     ...(warnings.length ? { warnings } : {}),
+    // fixes/277 (R3-f03 / W-06): trail verdicts — present only when true.
+    ...(verdict.redTree ? { redTree: true as const } : {}),
+    ...(verdict.partial ? { partial: true as const } : {}),
+    ...(uiGenerationRecord ? { uiGeneration: uiGenerationRecord } : {}),
   };
 }

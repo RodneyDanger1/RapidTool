@@ -30,7 +30,7 @@
 // line renders its raw text verbatim and is counted as "unparsed".
 // ---------------------------------------------------------------------------
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { rtSnapshot } from "@/lib/rt-client";
 import { parseTimeline, summarizeTimeline, type TimelineRow } from "@/lib/rt-timeline";
 
@@ -43,7 +43,11 @@ function clockLabel(ts: number | null): string {
 function durationLabel(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+  // B1/288: round to whole seconds ONCE before splitting minutes out — the old
+  // form rounded the seconds remainder independently and rendered "1m 60s"
+  // for 119_999 ms instead of "2m 0s".
+  const totalSeconds = Math.round(ms / 1000);
+  return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`;
 }
 
 /** Status chip word + tone per row. "still running" is a distinct honest state. */
@@ -91,6 +95,7 @@ export function RuntimeTimelinePane() {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const copyFlashRef = useRef<number | null>(null);
 
   // Same bounded 2 s poll as the raw pane — the ring is tiny; cost is negligible.
   useEffect(() => {
@@ -98,9 +103,28 @@ export function RuntimeTimelinePane() {
     return () => clearInterval(id);
   }, []);
 
+  // B1/288: clear the copy-flash timer on unmount (the pane unmounts whenever
+  // RunScreen remounts per project — `key={id}` in routes/run.$id.tsx), so a
+  // pending flash can never fire a setState into an unmounted pane.
+  useEffect(() => {
+    return () => {
+      if (copyFlashRef.current !== null) window.clearTimeout(copyFlashRef.current);
+    };
+  }, []);
+
   // Re-serialize the ring rows to the exact NDJSON shape the CLI appends, then
   // parse through the module's single code path (no duplicated pairing logic).
-  const lines = useMemo(() => snap.tail.map((row) => JSON.stringify(row)), [snap.tail]);
+  //
+  // B1/288: `rtSnapshot().tail` is NEWEST-first (`rtTail` reverses the ring for
+  // a log tail). `parseTimeline` pairs `*_start` rows with terminals IN LINE
+  // ORDER, so feeding the newest-first array made every completed span mispair:
+  // the terminal rendered "no matching start", the start rendered a fabricated
+  // "still running — no finish in the ring yet", and durations/longest were
+  // never computed (probe evidence: fixes/288_b1_components.md §F1). Feed the
+  // window oldest-first — the rows below, their `L{n}` chips and the raw-NDJSON
+  // disclosure then share one chronological order (matching what the CLI
+  // appends on disk). The raw ring list ABOVE stays newest-first, unchanged.
+  const lines = useMemo(() => [...snap.tail].reverse().map((row) => JSON.stringify(row)), [snap.tail]);
   const rows = useMemo(() => parseTimeline(lines), [lines]);
   const summary = useMemo(() => summarizeTimeline(rows), [rows]);
 

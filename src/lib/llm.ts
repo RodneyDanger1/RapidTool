@@ -39,6 +39,9 @@ export type LlmResult =
       ok: false;
       reason: "not-configured" | "error";
       error?: string;
+      // Y1's I2 contract (codegen FM-03): a REFUSAL may still report usage at runtime; the type now
+      // carries it so accountSynthUsage can meter it without narrowing gymnastics.
+      usage?: { promptTokens: number; completionTokens: number };
       /** Machine-readable class of the failure (errors.ts); always present on
        *  provider-side failures so callers never parse prose. */
       code?: ErrorCode;

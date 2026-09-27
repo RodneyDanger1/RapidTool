@@ -34,6 +34,21 @@
  * exactly ONE terminal row (`complete` | `block`); a task refused before claim
  * gets its terminal row WITHOUT a claim row — the ledger never shows a claim
  * for work that never started.
+ *
+ * W31 · T3 (R13-f14) — STATUS: DE-SCOPED FOR THIS WAVE, explicitly (the
+ * register's "wire-or-de-scope"). The fan-out wiring is sequenced AFTER
+ * R13-f01 (the unattended keyed journey) and R13-f11 (run-budget invest
+ * semantics) because orchestration is a consumer of plan + memory (`90 §6`
+ * P2-2) — fanning out before the budget/invest seam exists would mint
+ * unattributed parallel spend. WIRE PLAN when the sequence opens: call
+ * `createSubagentContract` from the read-only parallel stages — research
+ * phases {0,7,11} and the verification legs — with ledgered dispatch
+ * (per-task rows), per-task budgets (`perAgentBudgetTokens`), and a
+ * deterministic merge (id-ordered `results()`, never arrival-ordered).
+ *
+ * TODO(R13-f14): add that call site (research {0,7,11} / verification legs)
+ * once R13-f01 + R13-f11 land — this contract already satisfies what they
+ * will consume; nothing here is fake, it is simply not yet wired.
  */
 
 import { estimateTokens } from "./algorithms.ts";

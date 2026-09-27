@@ -19,3 +19,14 @@ Each lane file is ordered for speed and contains:
 Rules: parent owns these files and refreshes them each wave. Lanes must NOT edit them —
 report corrections in the final message instead. Files stay in the repo so the next session
 (and the user) can see exactly what each lane was told.
+
+---
+
+## Current-wave index (appended 2026-09-26 by the W32 organizer — append-only; log: `fixes/275_organizer.md`)
+
+Wave dirs on disk beyond the convention above (newest first): **W32** `organizer.md` (the organizer +
+its watchdog) · **W31** `gap-finshers.md` · **W30** `shell-sprint.md` (its master table lives in
+`finalsprint.md`, repo root) · **W29** `coders.md` · **W28** `extension.md` · **W27**
+`mass-investigation.md`. (W25 has no directory — its findings live in
+`research/multiagent/thoroughanalysis.md`.) A full, machine-generated link index of every `fixes/` and
+`wave_plans/` file: **`fixes/263_index.md`** (refreshed 2026-09-26).

@@ -119,11 +119,20 @@ function floorNonNeg(n: unknown): number {
 }
 
 /**
+ * The env record for THIS host — `process.env` on Node, `{}` where `process`
+ * is absent (browser bundles; R4-f03's non-Node hardening ⇒ unmetered, never
+ * a ReferenceError escape).
+ */
+function defaultEnv(): Record<string, string | undefined> {
+  return typeof process === "undefined" || !process.env ? {} : process.env;
+}
+
+/**
  * Parse RAPIDTOOL_TOKEN_CAP. Unset / blank / 0 / NaN / negative → undefined
  * (unmetered). Positive finite numbers floor to an int cap.
  */
 export function tokenCapFromEnv(
-  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = defaultEnv(),
 ): number | undefined {
   const raw = env?.RAPIDTOOL_TOKEN_CAP;
   if (typeof raw !== "string" || !raw.trim()) return undefined;
@@ -300,6 +309,44 @@ export function createTokenBudget(
   ledger: TokenLedger = emptyLedger(),
 ): TokenBudget {
   return { ledger, cap: budgetCap(cap) };
+}
+
+// ---------------------------------------------------------------------------
+// The PROCESS-scoped session budget (R4-f03 / A2-f07 / R12-f02 — W30 · LANE S3)
+// ---------------------------------------------------------------------------
+
+/**
+ * The ONE lazily-created process-scoped budget. Every production seam that
+ * used to mint a FRESH ledger per call (`codegen.server.ts`'s
+ * `synthWithBackoff` defaults, the headless verify threading) shares THIS
+ * ledger + cap, so `RAPIDTOOL_TOKEN_CAP` binds a whole PROCESS — one CLI run
+ * = one process; the dev server = one server session (R4-f03 §4.4). N
+ * sub-cap calls can no longer slip past a cap that only ever saw one call's
+ * own usage (the R12-f02 runaway).
+ *
+ * Lazily created on first use (importing this module never reads env); the
+ * cap is read ONCE at creation — set `RAPIDTOOL_TOKEN_CAP` per process
+ * invocation, not mid-run. Spend is kept, never clamped: the ledger is the
+ * caller-shared `TokenLedger` object mutated in place by
+ * `recordBudgetSpend`/`recordSpend`.
+ */
+let sessionBudget: TokenBudget | null = null;
+
+/** Get (or lazily create) the process session budget. ONE object per process. */
+export function sessionTokenBudget(): TokenBudget {
+  if (sessionBudget === null) sessionBudget = createTokenBudget();
+  return sessionBudget;
+}
+
+/**
+ * Test / explicit-new-session boundary: drop the singleton so the next
+ * `sessionTokenBudget()` re-reads env and starts a fresh empty ledger.
+ * Returns the NEW budget (the old object, if any caller still holds it,
+ * keeps its own spend — never mutated by the reset).
+ */
+export function resetSessionBudget(): TokenBudget {
+  sessionBudget = null;
+  return sessionTokenBudget();
 }
 
 /**

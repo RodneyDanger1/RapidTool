@@ -16,7 +16,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import pg from "pg";
-import { pendingMigrations } from "./migration-plan.mjs";
+import { authSchemaRefusal, pendingMigrations } from "./migration-plan.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -28,6 +28,10 @@ if (!databaseUrl) {
 
 const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
+// R15-f02: sign-in is enabled unless the flag is explicitly "false" (parity
+// with src/lib/auth/server.ts's `authDisabled`).
+const authEnabled = (process.env.VITE_AUTH_ENABLED ?? "").trim() !== "false";
+
 async function main() {
   let entries;
   try {
@@ -35,6 +39,24 @@ async function main() {
   } catch {
     console.log("[migrate] no migrations/ directory — nothing to do.");
     return;
+  }
+  // R15-f02 (fixes/273_t2_r15.md): when sign-in is enabled, refuse BEFORE
+  // touching the database if no migration in migrations/ creates the Better
+  // Auth `user` table. The auth schema under migrations/auth/ is never applied
+  // (neither applier descends into it); a coded refusal + the copy-up
+  // instruction beats a deploy that signs users in against a schema-less DB.
+  // Pinned in scripts/migration-plan.test.mjs.
+  if (authEnabled) {
+    const sqlTexts = await Promise.all(
+      entries
+        .filter((entry) => entry.endsWith(".sql"))
+        .map((name) => readFile(join(migrationsDir, name), "utf8")),
+    );
+    const refusal = authSchemaRefusal({ authEnabled, names: entries, sql: sqlTexts });
+    if (refusal) {
+      console.error(`[migrate] ${refusal.code}: ${refusal.message}`);
+      process.exit(1);
+    }
   }
   // An app with no schema of its own must not pay for a database connection.
   if (pendingMigrations(entries, []).length === 0) {
@@ -67,6 +89,23 @@ async function main() {
           await client.query("ROLLBACK");
         } catch {
           // ROLLBACK fails when the connection died — keep the original error.
+        }
+        // B2 (W39): two migrators sharing one DATABASE_URL (a preview build and
+        // a production build overlapping) can both see a file as pending. The
+        // transaction above is rolled back WHOLE here, so the file is not
+        // half-applied by this process — the winner's commit stands. Report the
+        // honest skip instead of failing the deploy on a duplicate key. Narrow
+        // on purpose: only the `_migrations` ledger's own unique violation
+        // qualifies; a unique violation from the migration's SQL still throws.
+        const isLedgerRace =
+          err?.code === "23505" &&
+          (err?.table === "_migrations" ||
+            String(err?.constraint ?? "").includes("_migrations"));
+        if (isLedgerRace) {
+          console.warn(
+            `[migrate] ${name} was applied concurrently by another migrator — skipping (this transaction was rolled back whole).`,
+          );
+          continue;
         }
         throw err;
       }

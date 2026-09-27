@@ -13,6 +13,10 @@
 // ---------------------------------------------------------------------------
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, sep } from "node:path";
+// R11-f07: ONE shared physical-containment helper (scripts/path-safety.mjs —
+// same cross-boundary pattern as db.ts → migration-plan.mjs). Lexical checks
+// cannot see symlinks; this resolves both sides on the real filesystem.
+import { physicalInside } from "../../scripts/path-safety.mjs";
 
 /** Prior state of one relative path under the write-set root. */
 export type PathSnapshot = {
@@ -58,6 +62,14 @@ function absOf(root: string, rel: string): string {
   const rootPrefix = rootCmp.endsWith("/") ? rootCmp : rootCmp + "/";
   if (absCmp !== rootCmp.replace(/\/$/, "") && !absCmp.startsWith(rootPrefix)) {
     throw new Error(`write-set: path escaped root: ${rel}`);
+  }
+  // R11-f07 (S-05): the lexical checks above cannot see a symlinked parent or
+  // a junctioned subtree — a path that LOOKS inside can physically land
+  // outside. Verify with the shared physical helper: confirmed-outside throws;
+  // `null` (nothing along the prefix resolves — e.g. a root that does not
+  // exist yet) keeps the lexical verdict, which is the pre-R11-f07 law.
+  if (physicalInside(root, abs) === false) {
+    throw new Error(`write-set: path physically escaped root (symlink/junction): ${rel}`);
   }
   return abs;
 }

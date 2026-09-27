@@ -17,7 +17,9 @@ import { hydrateProject } from "./engine.ts";
 import type { Project } from "./types.ts";
 import { coerceAcceptanceFixtures } from "./brief-fixtures.ts";
 
-export type ImportResult = { ok: true; project: Project } | { ok: false; error: string };
+export type ImportResult =
+  | { ok: true; project: Project }
+  | { ok: false; error: string; code?: string };
 
 /** The pipeline always has exactly 13 phase records (P0..P12). */
 export const PHASE_COUNT = 13;
@@ -25,11 +27,20 @@ export const PHASE_COUNT = 13;
 /**
  * H4: hard cap on import payload size (chars). A hostile or corrupt import
  * string is refused BEFORE JSON.parse so a multi-hundred-MB paste can never
- * blow the tab's memory in one allocation. 10 MB is far beyond any real
- * project export (and beyond the localStorage quota the persist layer can
- * write, so anything larger could never survive a reload anyway).
+ * blow the tab's memory in one allocation.
+ *
+ * R12-f11 (P3): lowered 10 MB → 5 MB. The persist layer must survive a
+ * localStorage-class ~5 MB budget, so a payload that could never survive a
+ * reload is refused AT IMPORT with a human-readable reason the store can
+ * forward instead of reporting a persistence failure later.
+ *
+ * A1-25: this comment used to promise a machine-readable `tooLargeToPersist`
+ * code; no such code exists and the store forwards only `error`. TODO(A1-25):
+ * mint `RT_E_IMPORT_TOO_LARGE` (+ ERROR_CODE_DOC entry) and thread it through
+ * `ImportResult` when the errors-registry pass lands — until then the message
+ * is the contract.
  */
-export const IMPORT_MAX_CHARS = 10_000_000;
+export const IMPORT_MAX_CHARS = 5_000_000;
 
 /** Serialize a project to pretty-printed JSON (2-space indent, stable keys). */
 export function exportProjectJson(project: Project): string {
@@ -133,9 +144,10 @@ export function coerceArtifactProvenance(v: unknown): ArtifactProvenance | null 
 //     NOT at row level (chatLog / oracle / crew): junk rows (null, primitives)
 //     are dropped so the packet render / chat replay that reads row fields can
 //     never throw on them;
-//   - research, which NO hydrate pass normalizes (the engine half of H-03 lands
-//     in a later pass): a non-array container becomes [], and corpus entries
-//     must be {query, items[]} with plain-object items;
+//   - research, normalized engine-side since fixes/122 (hydrateProject filters
+//     the container AND its item rows — A1-23): this pass keeps its own defense
+//     for the import boundary AHEAD of hydration: a non-array container becomes
+//     [], and corpus entries must be {query, items[]} with plain-object items;
 //   - scorecard / specGraph / contracts, which pass hydrate's plain-object
 //     guards but crash compileAgentPacket when their inner collections are
 //     junk ({axes:5} → .map throws; specGraph {order:5} → .map throws;
@@ -393,14 +405,21 @@ function stampImportRepairLog(p: Record<string, unknown>, notes: string[]): void
     typeof currentPhase === "number" && Number.isInteger(currentPhase)
       ? currentPhase
       : 0;
+  // A1-26: the cap slice is a real mutation on repaired imports — when it
+  // drops older rows the repair note must SAY so (a >200-row payload used to
+  // lose its oldest rows with the note silent about it). The clamp keys off
+  // PHASE_COUNT (A1-44 spirit), not a bare 12.
+  const priorRows = Array.isArray(p.logs) ? p.logs.length : 0;
+  const dropped = Math.max(0, priorRows + 1 - 200);
+  const detail = dropped > 0 ? [...notes, `logs:-${dropped}`].join(" ") : notes.join(" ");
   p.logs = [
     ...(p.logs as unknown[]),
     {
       ts: Date.now(),
-      phase: Math.min(12, Math.max(0, phase)),
+      phase: Math.min(PHASE_COUNT - 1, Math.max(0, phase)),
       level: "warn",
       event: "import.repaired",
-      detail: notes.join(" "),
+      detail,
     },
   ].slice(-200);
 }
@@ -458,7 +477,9 @@ export function importProject(json: string, opts?: { preserveWildRun?: boolean }
     typeof p.currentPhase !== "number" ||
     !Number.isInteger(p.currentPhase) ||
     p.currentPhase < 0 ||
-    p.currentPhase > 12
+    // B2 (W39): the graph authority is PHASE_COUNT, not a bare 12 (the A1-15
+    // drift class — the sibling check at :473 already keys off PHASE_COUNT).
+    p.currentPhase > PHASE_COUNT - 1
   ) {
     return { ok: false, error: "Project currentPhase must be an integer between 0 and 12." };
   }

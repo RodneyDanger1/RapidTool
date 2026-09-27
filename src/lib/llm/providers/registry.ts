@@ -276,6 +276,63 @@ export function resolveEnvProvider(
   return { ok: true, provider, requested, source: "env" };
 }
 
+// ---------------------------------------------------------------------------
+// R13-f09 (W31 · T3) — `RAPIDTOOL_FALLBACK_PROVIDERS`: the failover chain,
+// RESOLVED but deliberately NOT ARMED
+// ---------------------------------------------------------------------------
+
+/** The ONE env var naming the failover chain: comma-separated provider ids,
+ *  tried in order after the primary. Today the chain is RESOLVED (pure,
+ *  testable, visible to `doctor`/tests) but NOT ARMED — routing across
+ *  families needs a second live-verified family plus the keyed evidence wave
+ *  (`221 §F2` step 2 defers routing; the register's R13-f09 done-when is
+ *  OWNER-ONLY on a funded key). A configured chain is refused LOUDLY at the
+ *  call site — never silently ignored, never a fake catch — so no caller can
+ *  believe failover is on when it isn't. Unset (the default) ⇒ the
+ *  single-provider path is byte-identical. */
+export const FALLBACK_PROVIDERS_ENV_VAR = "RAPIDTOOL_FALLBACK_PROVIDERS";
+
+/** Parse + validate `RAPIDTOOL_FALLBACK_PROVIDERS`. Pure: no I/O. Unset/blank
+ *  ⇒ the empty chain (`ok`). Unknown id or a duplicate entry ⇒ a coded
+ *  `RT_E_VALIDATION` refusal naming the registered ids — explicit, never
+ *  silently dropped. (`mock` stays absent from `PROVIDERS`, so it can never be
+ *  chained either — the explicit-only rule of T-107.10.) */
+export function resolveFallbackChain(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): { ok: true; ids: LlmProviderId[] } | { ok: false; code: ErrorCode; error: string } {
+  const raw = env?.[FALLBACK_PROVIDERS_ENV_VAR];
+  if (typeof raw !== "string" || !raw.trim()) return { ok: true, ids: [] };
+  const parts = raw
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  const known = PROVIDERS.map((p) => p.id);
+  const ids: LlmProviderId[] = [];
+  for (const id of parts) {
+    const provider = getProvider(id);
+    if (!provider) {
+      return {
+        ok: false,
+        code: "RT_E_VALIDATION",
+        error:
+          `${FALLBACK_PROVIDERS_ENV_VAR}: "${id}" is not a registered provider — known: ` +
+          `${known.join(", ")}. Refusing rather than silently skipping it.`,
+      };
+    }
+    if (ids.includes(provider.id)) {
+      return {
+        ok: false,
+        code: "RT_E_VALIDATION",
+        error:
+          `${FALLBACK_PROVIDERS_ENV_VAR}: provider "${provider.id}" appears twice — the chain ` +
+          `is an ordered list of DISTINCT candidates. Refusing rather than silently de-duping it.`,
+      };
+    }
+    ids.push(provider.id);
+  }
+  return { ok: true, ids };
+}
+
 /** Successful env-selected route: the provider descriptor + the model id the
  *  registry would SEND for the role, plus which rung selected the provider. */
 export type EnvSelectedRoute =
@@ -631,6 +688,32 @@ export async function callModel(
   const envSelection = resolveEnvProvider(process.env);
   if (!envSelection.ok) {
     return { ok: false, reason: "error", error: envSelection.error, code: envSelection.code };
+  }
+  // R13-f09 (W31 · T3): the failover chain is resolved BEFORE any dispatch and
+  // refused while it remains unarmed — a configured chain must never be a
+  // silent no-op (that lie would outlive this wave). Unset ⇒ empty chain ⇒
+  // everything below is exactly the pre-R13-f09 path.
+  const fallbackChain = resolveFallbackChain(process.env);
+  if (!fallbackChain.ok) {
+    return { ok: false, reason: "error", error: fallbackChain.error, code: fallbackChain.code };
+  }
+  if (fallbackChain.ids.length > 0) {
+    // TODO(R13-f09): ARM the chain here — on a transient-class primary failure
+    // (429 / ≥500 per 101 §4.5) attempt the next descriptor in chain order,
+    // stamp `failoverFrom` provenance on the served result (T5.4 pattern), and
+    // stop at the first success. Sequenced after a live-verified second family
+    // (221 §F2 step 2) + the owner's keyed evidence wave.
+    return {
+      ok: false,
+      reason: "error",
+      error:
+        `${FALLBACK_PROVIDERS_ENV_VAR}="${fallbackChain.ids.join(",")}": the failover chain is ` +
+        `specified but NOT ARMED — cross-family routing is sequenced after a live-verified second ` +
+        `family (R13-f09 / 221 §F2 step 2; TODO at registry.ts callModel). Unset ` +
+        `${FALLBACK_PROVIDERS_ENV_VAR} to use the single-provider path, or wait for the keyed ` +
+        `verification wave — this refusal exists so no caller can believe failover is on.`,
+      code: "RT_E_VALIDATION",
+    };
   }
   if (
     envSelection.source === "env" &&

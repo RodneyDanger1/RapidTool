@@ -1,29 +1,32 @@
 // ---------------------------------------------------------------------------
-// browser-guard.test.mjs — pins the four target-check cases for
-// scripts/browser-guard.mjs. W15-L1 port of W14-L3's scratch harness
-// (WD-α finding R2: the cases lived only in C:/Users/mnril/w14l3_scratch/).
+// browser-guard.test.mjs — pins the target-check cases for
+// scripts/browser-guard.mjs.
 //
 // checkedOutputPath's fail() calls process.exit(1) — an in-process refusal
 // would kill the test runner — so every case runs in a child of this same file
 // (`node <this file> --case <name>`); the child imports the REAL guard
 // (relative to this file), prints one JSON line and exits.
 //
-// Cases (allowedDirs is the literal ["/workspace"] the real callers pass —
-// scripts/browser-smoke.mjs:30-41 — so the accept case pins the Windows fix
-// that resolves BOTH sides before the prefix compare):
-//   1. accept  C:/workspace/screenshots/w15.png  → exit 0, resolved abs path
-//   2. refuse  C:/workspace/../secret/x.png      → exit 1 (`..`-escape)
-//   3. refuse  C:/Users/mnril/x.png              → exit 1 (outside every allowed dir)
-//   4. refuse  C:/workspace                      → exit 1 (the strict allowed dir itself)
-//
-// Windows-shaped by design (drive-letter paths, the C: drive, same literals as
-// the scratch harness): the guard's resolve-both-sides bug is a Windows path
-// semantics defect, so the cases skip on non-Windows hosts. Run:
-//   node --experimental-strip-types --test scripts/browser-guard.test.mjs
+// R11-f06 (S-04) rewrite of the W15 pins: the old "accept-windows-scratch"
+// case pinned the drive-root mapping (allowed dir "/workspace" → C:\workspace
+// accepted on win32) — the exact S-04 hole the audit row declares unsafe. The
+// guard now fails closed on win32 for POSIX-literal allow-dirs, and the
+// accept/refuse cases run against a REAL tmp dir (platform-neutral):
+//   1. accept  <tmp>/screenshots/w15.png under [<tmp>]   → exit 0, resolved
+//   2. refuse  <tmp>/../secret/x.png                      → exit 1 (`..` escape)
+//   3. refuse  <other-tmp>/x.png                          → exit 1 (outside every allowed dir)
+//   4. refuse  <tmp> (the allowed dir itself)             → exit 1 (strict containment)
+//   5. refuse  ["/workspace"] on win32                    → exit 1 (fail-closed, never C:\workspace)
+// Case 5 is win32-only by construction (on POSIX, "/workspace" may be a real
+// path and is judged physically).
+// Run:
+//   node --test scripts/browser-guard.test.mjs
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { checkedOutputPath } from "./browser-guard.mjs";
@@ -33,12 +36,28 @@ const CASE_FLAG = "--case";
 const caseIdx = process.argv.indexOf(CASE_FLAG);
 const caseArg = caseIdx === -1 ? null : process.argv[caseIdx + 1];
 
+const realDir = () => mkdtempSync(join(tmpdir(), "browser-guard-"));
+
 /** One entry per case; the child dispatches on `--case <name>`. */
 const CASES = {
-  "accept-windows-scratch": () => checkedOutputPath("C:/workspace/screenshots/w15.png", ["/workspace"]),
-  "reject-escape": () => checkedOutputPath("C:/workspace/../secret/x.png", ["/workspace"]),
-  "reject-outside": () => checkedOutputPath("C:/Users/mnril/x.png", ["/workspace"]),
-  "strict-dir-itself": () => checkedOutputPath("C:/workspace", ["/workspace"]),
+  "accept-real-dir": () => {
+    const dir = realDir();
+    return checkedOutputPath(join(dir, "screenshots", "w15.png"), [dir]);
+  },
+  "reject-escape": () => {
+    const dir = realDir();
+    return checkedOutputPath(join(dir, "..", "secret", "x.png"), [dir]);
+  },
+  "reject-outside": () => {
+    const dir = realDir();
+    const other = realDir();
+    return checkedOutputPath(join(other, "x.png"), [dir]);
+  },
+  "strict-dir-itself": () => {
+    const dir = realDir();
+    return checkedOutputPath(dir, [dir]);
+  },
+  "reject-posix-literal-win32": () => checkedOutputPath("C:/workspace/screenshots/w15.png", ["/workspace"]),
 };
 
 if (caseArg) {
@@ -46,32 +65,24 @@ if (caseArg) {
   const result = CASES[caseArg]();
   console.log(JSON.stringify({ case: caseArg, exit: 0, result }));
 } else {
-  // resolve("/workspace") is cwd-drive-relative on Windows: pin the child cwd
-  // to the C: root so the accept case is deterministic (the repo lives on C:).
-  const CHILD_CWD = resolve("C:/");
-  const SKIP = process.platform !== "win32" ? "Windows-shaped C:/ cases (see header)" : false;
+  const SKIP_WIN32 = process.platform !== "win32" ? "win32-only case (R11-f06 fail-closed branch)" : false;
 
   function runCase(name) {
     try {
-      const stdout = execFileSync(process.execPath, [self, CASE_FLAG, name], { cwd: CHILD_CWD, encoding: "utf8" });
+      const stdout = execFileSync(process.execPath, [self, CASE_FLAG, name], { encoding: "utf8" });
       return { exit: 0, stdout, stderr: "" };
     } catch (err) {
       return { exit: err.status, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
     }
   }
 
-  test("accepts a screenshot path under the POSIX-literal allowed dir (Windows resolve-both-sides)", { skip: SKIP }, () => {
-    const r = runCase("accept-windows-scratch");
+  test("accepts a screenshot path under a real allowed dir (physical + lexical containment)", () => {
+    const r = runCase("accept-real-dir");
     assert.equal(r.exit, 0, `accept case must exit 0; stderr: ${r.stderr}`);
     const parsed = JSON.parse(r.stdout);
     assert.equal(parsed.exit, 0);
     assert.equal(typeof parsed.result, "string", "checkedOutputPath returns the resolved absolute path");
     assert.match(parsed.result, /screenshots[\\/]w15\.png$/, "the accepted path is returned resolved");
-    assert.match(
-      parsed.result.toLowerCase(),
-      /^c:\\workspace\\screenshots\\/,
-      "resolved INSIDE the allowed dir — the fix resolves both sides before the prefix compare",
-    );
   });
 
   const REFUSALS = [
@@ -80,14 +91,29 @@ if (caseArg) {
     ["strict-dir-itself", "refuses the allowed dir itself (strict containment, never a bare prefix)"],
   ];
   for (const [name, description] of REFUSALS) {
-    test(description, { skip: SKIP }, () => {
+    test(description, () => {
       const r = runCase(name);
       assert.equal(r.exit, 1, `refusal "${name}" must exit 1 (fail-closed)`);
       assert.equal(r.stdout, "", "a refused path must never print the success JSON");
       const parsed = JSON.parse(r.stderr);
       assert.equal(parsed.ok, false);
-      assert.match(parsed.error, /must be under \/workspace/, "the refusal names the allowed dir");
+      assert.match(parsed.error, /must be under/, "the refusal names the containment rule");
       assert.match(parsed.error, /screenshot/, "the refusal labels the target kind");
     });
   }
+
+  test(
+    "R11-f06: fails closed on win32 instead of mapping a POSIX-literal allowed dir onto a drive root",
+    { skip: SKIP_WIN32 },
+    () => {
+      const r = runCase("reject-posix-literal-win32");
+      assert.equal(r.exit, 1, "the old C:\\workspace accept must now exit 1 (fail closed)");
+      assert.equal(r.stdout, "", "a refused path must never print the success JSON");
+      const parsed = JSON.parse(r.stderr);
+      assert.equal(parsed.ok, false);
+      assert.match(parsed.error, /failed closed on win32/, "the refusal names the fail-closed branch");
+      assert.match(parsed.error, /POSIX-style path/, "the refusal names WHY (POSIX literal on win32)");
+      assert.match(parsed.error, /screenshot/, "the refusal labels the target kind");
+    },
+  );
 }

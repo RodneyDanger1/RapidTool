@@ -1,4 +1,4 @@
-import type { PhaseDef, PhaseId } from "./types";
+import type { PhaseDef, PhaseId } from "./types.ts";
 
 export const PHASES: PhaseDef[] = [
   {
@@ -22,7 +22,7 @@ export const PHASES: PhaseDef[] = [
     code: "P2",
     title: "Memory & Context Consolidation",
     summary:
-      "Context & persistence plan — project memory rows, spec grounding, honest persistence model (no durable checkpoint layer).",
+      "Context & persistence plan — project memory rows, spec grounding, honest persistence model (T-107.7's checkpoint module ships in-tree but unwired — no wired durable checkpoint layer yet).",
     hitl: false,
   },
   {
@@ -159,6 +159,11 @@ export const STOCK_HITL = [4, 5, 8, 9] as const;
  */
 export const PHASE_TAIL_START: PhaseId = 7;
 
+/** A1-15: the graph's final phase id (12 today) — the ONE authority for the
+ *  store's loop bounds and "stops advancing" guards; comments that claim a
+ *  bound "derives from the graph" must not be backed by bare 12/13 literals. */
+export const PHASE_LAST: PhaseId = PHASES[PHASES.length - 1]!.id;
+
 /**
  * T-14: honest phase-coverage census — a pure function of the persisted graph
  * state (phase records + artifact rows), never a hard-coded "all 13 ran".
@@ -223,8 +228,15 @@ export function phaseCoverage(
  * census (never templated), so a full run honestly reports its own numbers.
  */
 export function phaseCoverageLine(coverage: PhaseCoverage): string {
-  const from = PHASES[coverage.tailStart]?.code ?? "P7";
-  const to = PHASES[PHASES.length - 1]?.code ?? "P12";
+  // F3-20 (A20): look ids up in PHASE_BY_ID — never index PHASES by position.
+  // The old `PHASES[coverage.tailStart]` silently renamed the window if the
+  // array were ever reordered; ids are the graph's key (same law as
+  // priorsSealed/phaseCoverage above).
+  const fromDef = PHASE_BY_ID.get(coverage.tailStart);
+  const lastDef = PHASES[PHASES.length - 1];
+  const toDef = lastDef ? PHASE_BY_ID.get(lastDef.id) : undefined;
+  const from = fromDef?.code ?? "P7";
+  const to = toDef?.code ?? "P12";
   const noun = coverage.tailArtifacts === 1 ? "artifact" : "artifacts";
   return `${coverage.executed} of ${coverage.total} phases executed / ${coverage.tailArtifacts} ${noun} from ${from}–${to}`;
 }

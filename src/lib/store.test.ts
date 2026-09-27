@@ -969,7 +969,11 @@ test("S2: startWildRun drives deterministically and parks honestly when the clas
     const res = await useRapid.getState().startWildRun(p.id);
     assert.equal(res.ok, true);
     assert.equal(res.stoppedReason, "paused", "first stock gate (P4) parks the run");
-    assert.equal(res.code, "RT_E_LLM_NOT_CONFIGURED", "honest pause class surfaces");
+    // 185-H1/F3-06 (store.ts:72-77): ok:true NEVER carries `code` — the pause
+    // class rides as `note` (the ok-pause return at store.ts:1186 spreads
+    // `...(res.code ? { note: res.code } : {})`). Pin the doctrine's field:
+    assert.equal((res as { note?: string }).note, "RT_E_LLM_NOT_CONFIGURED", "honest pause class surfaces");
+    assert.equal((res as { code?: string }).code, undefined, "ok:true never dual-channels a code (185-H1/F3-06)");
     const after = current(p.id);
     assert.equal(after.wildRun?.active, true, "paused runs stay active (resumable)");
     assert.equal(after.wildRun?.pause, true);
@@ -1106,6 +1110,37 @@ test("S2: remove archives a project and clears a stale activeId", () => {
   useRapid.getState().select(b);
   useRapid.getState().remove(b);
   assert.equal(useRapid.getState().activeId, null, "removing the active project clears the pointer");
+});
+
+test("W-18 (fixes/274 · WDX-3 · §W27-B · A1-f09/R8-f04): a keyed status probe threads enforceDod into create", () => {
+  // The console's honest view of the SERVER's key is llmStatus.configured; on a
+  // keyed server the keyed default (hard-DoD ON) must reach console-created
+  // projects. Not-configured (or probe not run) leaves the engine default in
+  // place — the keyless path stays advisory, byte-for-byte.
+  const prev = useRapid.getState().llmStatus;
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  try {
+    delete process.env.DEEPSEEK_API_KEY;
+    useRapid.setState({ llmStatus: { configured: true, label: "deepseek · configured" } });
+    const keyedId = useRapid.getState().create("A brief for the keyed wire.", "KeyedWire");
+    assert.equal(
+      current(keyedId).enforceDod,
+      true,
+      "keyed probe ⇒ console-created project joins the keyed default",
+    );
+
+    useRapid.setState({ llmStatus: { configured: false, label: "deterministic engine" } });
+    const keylessId = useRapid.getState().create("A brief for the keyless wire.", "KeylessWire");
+    assert.equal(
+      current(keylessId).enforceDod,
+      false,
+      "no configured probe ⇒ the engine's keyless default stands",
+    );
+  } finally {
+    if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = savedKey;
+    useRapid.setState({ llmStatus: prev });
+  }
 });
 
 test("S2: ingestReport surfaces applied/reason/gate_unmet (E-09 envelope honesty)", () => {

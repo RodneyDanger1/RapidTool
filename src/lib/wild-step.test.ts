@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, wildStep, type WildReviewer } from "./engine.ts";
+import { emptyProject, applyPhaseResult, wildStep, type WildReviewer } from "./engine.ts";
 import type { Project } from "./types.ts";
 
 /** An ACTIVE wild-run project pinned to one phase status (no gate open). */
@@ -198,5 +198,116 @@ describe("wildStep onEvent telemetry (109 CAP-5)", () => {
     assert.equal(withSink.outcome, without.outcome);
     assert.equal(withSink.code, without.code);
     assert.equal(withSink.ran, without.ran);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W-01 (fixes/271 · §R1-f01): the wild P6 keyed edge seam. Keyed hosts execute
+// phase 6 through headless.runP6Edge; keyless (or browser) keeps the EXACT
+// pre-seam deterministic floor; an injected `p6Edge` test seam proves the call
+// site without a key. (R9-f03 asked for these two pins after the seam landed.)
+// ---------------------------------------------------------------------------
+
+/** A P6-ready wild fixture: priors 0-5 sealed, cursor on a ready phase 6. */
+function p6WildFixture(): Project {
+  const p = emptyProject({ name: "WildP6", brief: "A wild brief for the autonomous loop." });
+  p.wildMode = true;
+  p.wildRun = {
+    active: true,
+    phase: 6,
+    startedAt: Date.now(),
+    lastAutoLog: "Wild run at P6",
+    lastAutoAt: Date.now(),
+    stoppedAt: null,
+    pause: false,
+  };
+  p.currentPhase = 6;
+  p.status = "running";
+  p.phases = p.phases.map((r) =>
+    r.id < 6 ? { ...r, status: "complete" as const } : r.id === 6 ? { ...r, status: "ready" as const } : r,
+  );
+  return p;
+}
+
+describe("W-01 (fixes/271 · §R1-f01) — the wild P6 keyed edge seam", () => {
+  it("phase-6 execute runs an injected p6Edge seam exactly once and names the edge in wild.exec", async () => {
+    const seen: Project[] = [];
+    const fakeEdge = async (q: Project): Promise<Project> => {
+      seen.push(q);
+      return { ...q, lastTest: { ok: true, detail: "edge ran" } };
+    };
+    const res = await wildStep(p6WildFixture(), { reviewer: notConfiguredReviewer, p6Edge: fakeEdge });
+    assert.equal(seen.length, 1, "the injected seam is called exactly once");
+    assert.equal(seen[0]!.currentPhase, 6, "the seam receives the P6-running project");
+    assert.equal(
+      seen[0]!.phases.find((r) => r.id === 6)?.status,
+      "running",
+      "phase 6 is marked running before the edge executes",
+    );
+    const exec = (res.project.logs ?? []).filter((l) => l.event === "wild.exec");
+    assert.equal(exec.length, 1, "one wild.exec row for the step");
+    assert.ok(exec[0]!.detail.includes("edge"), `wild.exec names the edge used: ${exec[0]!.detail}`);
+    assert.ok(
+      !exec[0]!.detail.includes("deterministic floor"),
+      "never logs the floor detail while the edge ran (fixes/154 D7 honesty rule)",
+    );
+  });
+
+  it("keyless without a seam keeps the deterministic floor path byte-for-byte (parity pin)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const seamless = await wildStep(p6WildFixture(), { reviewer: notConfiguredReviewer });
+      // Control: the same fixture driven through the same tail with the floor
+      // injected AS the edge — the ONLY intended difference is the wild.exec
+      // detail string (the seam-naming rule, pinned in the test above).
+      const control = await wildStep(p6WildFixture(), {
+        reviewer: notConfiguredReviewer,
+        p6Edge: async (q) => applyPhaseResult(q, 6),
+      });
+      // WDX-3 (fixes/274 · W31): two independently-executed pipelines always
+      // differ on per-run volatile bytes. The first normalize (W-01, E1b) missed
+      // two of that class — the phase record's completedAt and the embedded
+      // packet text inside artifact bodies — so the pin read RED on volatile
+      // bytes only (byte-classifier run at W31: 26 diffs = 25 volatile + the
+      // seam-naming detail this pin intentionally masks). Same class as the
+      // fields already masked below; never a behavior comparison.
+      const stripVolatiles = (s: string) =>
+        s
+          .replace(/compiled_at: [^\n]+/g, "compiled_at: FIXED")
+          .replace(/project_id: [^\n]+/g, "project_id: FIXED")
+          .replace(/"compiled_at": "[^"]+"/g, '"compiled_at": "FIXED"')
+          .replace(/"project_id": "[^"]+"/g, '"project_id": "FIXED"');
+      const normalize = (p: Project) => ({
+        ...p,
+        id: "fixture",
+        createdAt: 0,
+        artifacts: (p.artifacts ?? []).map((a) => ({ ...a, body: stripVolatiles(a.body) })),
+        logs: (p.logs ?? []).map((l) =>
+          l.event === "wild.exec" ? { ...l, ts: 0, detail: "FIXED" } : { ...l, ts: 0 },
+        ),
+        packet: stripVolatiles(p.packet),
+        traces: (p.traces ?? []).map((a) => ({ ...a, ranAt: 0 })),
+        wildRun: p.wildRun ? { ...p.wildRun, startedAt: 0, lastAutoAt: 0 } : p.wildRun,
+        phases: (p.phases ?? []).map((r) => ({
+          ...r,
+          startedAt: r.startedAt === null ? null : 0,
+          completedAt: typeof r.completedAt === "number" ? 0 : r.completedAt,
+          gate: r.gate && typeof r.gate === "object" ? { ...(r.gate as object), checkedAt: 0 } : r.gate,
+        })),
+      });
+      assert.deepEqual(
+        normalize(seamless.project),
+        normalize(control.project),
+        "keyless no-seam == floor pipeline (modulo the seam-naming detail)",
+      );
+      assert.equal(seamless.outcome, control.outcome);
+      assert.equal(seamless.code, control.code);
+      const exec = (seamless.project.logs ?? []).find((l) => l.event === "wild.exec");
+      assert.equal(exec?.detail, "P6 executed (deterministic floor)", "the exact pre-seam floor detail bytes");
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
   });
 });
