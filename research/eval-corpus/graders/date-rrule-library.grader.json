@@ -1,0 +1,77 @@
+{
+  "graderVersion": 2,
+  "slug": "date-rrule-library",
+  "caseName": "RRULE Kit",
+  "authority": "RUN-SIDE GRADER (W41 · P3, fixes/295_p3_eval.md; §R7-f04 — the missing-kind fixtures) — the acceptance bar for this eval case. Declared before the run; read ONLY by scripts/run-eval.mjs; never copied into research/eval-out; the emitted project tree must neither contain nor reference it (graderLeakScan) and the agent-facing brief must not carry it (briefLeakScan).",
+  "movedFrom": "none — authored 2026-09-27 by W41 · P3 from K9's verified runnable-kind probe (probe-k9-kinds.mjs), not transcribed. The corpus frontmatter keeps acceptance / expectedNouns / expectedCapabilities as documentation for corpus readers; this file is the grading source of truth and no grading input is read from the frontmatter.",
+  "acceptanceBar": "One importable package: build an RFC 5545 RRULE string, read it back into a rule, compute the next and previous occurrences, expand a series, and export the whole surface from the package entry — with no I/O at import time.",
+  "requiredIdentifiers": [
+    "rrule",
+    "recurrenceRule",
+    "occurrence",
+    "series",
+    "byDay",
+    "interval"
+  ],
+  "requiredCapabilities": [
+    "Build RFC 5545 RRULE strings",
+    "Read/parse RRULE strings back into a rule",
+    "Compute the next occurrence",
+    "Compute the previous occurrence",
+    "Expand a recurrence series",
+    "Pure functions with no I/O"
+  ],
+  "expectedKind": "library",
+  "expectedFiles": [
+    "package.json",
+    "README.md",
+    "tests/oracle.spec.ts"
+  ],
+  "expectedContent": [
+    {
+      "file": "package.json",
+      "contains": "\"type\": \"module\""
+    },
+    {
+      "file": "package.json",
+      "contains": "\"test\": \"node --experimental-strip-types --test tests/oracle.spec.ts\""
+    },
+    {
+      "file": "package.json",
+      "contains": "\"exports\": {"
+    },
+    {
+      "file": "package.json",
+      "contains": "\"files\": ["
+    }
+  ],
+  "expectedBehavior": [
+    {
+      "id": "library-entry",
+      "check": "file-exists",
+      "path": "src/main.ts"
+    },
+    {
+      "id": "library-package-main",
+      "check": "package-target-exists",
+      "target": "main"
+    },
+    {
+      "id": "library-package-exports",
+      "check": "package-target-exists",
+      "target": "exports"
+    },
+    {
+      "id": "library-import-runs",
+      "check": "entry-runs",
+      "note": "probe-verified (library 8/8): the emitted entry imports under node --experimental-strip-types, exposes its surface, and runs no I/O at import — PENDING until runtime evidence is wired (TODO(A3-f05))"
+    }
+  ],
+  "passWhen": {
+    "meanAtLeast": 1,
+    "requireExpectedFiles": true,
+    "requireExpectedContent": true,
+    "requireExpectedBehavior": true,
+    "requireExpectedKind": true
+  }
+}

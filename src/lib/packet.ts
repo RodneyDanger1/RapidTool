@@ -128,6 +128,11 @@ function systemJson(
       // E-11: the exact machine report shape the ingest seam validates.
       report_schema: REPORT_SCHEMA,
       research_hash: researchHash(project),
+      // F2-03 (W41 · P1): the deterministic input fingerprint — folds the
+      // content-only inputs (notes/artifacts/memory) the ISO stamp cannot see.
+      // Additive key (T-14 `phase_coverage` / OV-41 `spend` precedent);
+      // PACKET_VERSION stays 3. See packetInputHash.
+      input_hash: packetInputHash(project),
       sandbox: {
         claim: sandboxClaim(project.sandbox),
         ram_mb: project.sandbox.ramMb,
@@ -232,6 +237,49 @@ function compiledAtFor(project: Project): string {
   }
   // W29 · R2-f01: one total render for BOTH bounds — see isoFromMs.
   return isoFromMs(latest);
+}
+
+/**
+ * F2-03 (W41 · P1): the packet's deterministic input fingerprint. The ISO
+ * `compiled_at` stamp can only move with TIME-bearing inputs (createdAt,
+ * logs[].ts, decisions[].decidedAt — H-05: never a wall clock), so content-only
+ * inputs (operator notes, artifacts, memory rows) change the packet bytes
+ * without moving the stamp. This FNV-1a fold covers the SAME inputs the
+ * compile reads, PLUS those content-only inputs, in the project's own stored
+ * order (the same order the packet renders them — deterministic; never
+ * sorted and never re-derived from a clock): createdAt, logs[].ts,
+ * decisions[].decidedAt, notes, artifacts (id/phase/kind/title/body), memory
+ * (id/kind/phase/score/text — the fields the Ranked-memory section renders;
+ * the documented-telemetry counters `counterEvidence`/`reproducedCount` are
+ * excluded, mirroring types.ts's "never part of any content fingerprint").
+ * The `kind:"packet"` artifact is EXCLUDED — it is the compile's own output
+ * (sealPacketArtifact rewrites its body to the freshly compiled packet on
+ * every stamp), so folding it would churn the hash on re-stamp and break the
+ * H-05/D2 byte-idempotence pin; same exclusion the ## Artifacts section
+ * renderer applies. Two packets with the same `input_hash` finger the same
+ * inputs; a notes/artifact/memory edit moves it even when `compiled_at`
+ * cannot. Pure; never throws; corrupt rows degrade to the epoch/empty forms,
+ * exactly like compiledAtFor.
+ */
+export function packetInputHash(project: Project): string {
+  const ms = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const rows: string[] = [`created:${ms(project.createdAt)}`];
+  for (const row of project.logs ?? []) rows.push(`log:${ms(row?.ts)}`);
+  for (const d of project.decisions ?? []) rows.push(`decision:${ms(d?.decidedAt)}`);
+  rows.push(`notes:${project.notes ?? ""}`);
+  for (const a of project.artifacts ?? []) {
+    // The sealed packet artifact is the compile's output, not an input (see above).
+    if (a?.kind === "packet") continue;
+    rows.push(
+      `artifact:${a?.id ?? ""}\u0001${a?.phase ?? ""}\u0001${a?.kind ?? ""}\u0001${a?.title ?? ""}\u0001${a?.body ?? ""}`,
+    );
+  }
+  for (const m of project.memory ?? []) {
+    rows.push(
+      `memory:${m?.id ?? ""}\u0001${m?.kind ?? ""}\u0001${m?.phase ?? ""}\u0001${m?.score ?? ""}\u0001${m?.text ?? ""}`,
+    );
+  }
+  return String(fnv1a(rows.join("\u0002")));
 }
 
 // ---------------------------------------------------------------------------

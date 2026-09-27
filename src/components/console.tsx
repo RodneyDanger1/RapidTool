@@ -1445,7 +1445,12 @@ const GUIDE_SECTIONS: { title: string; body: string }[] = [
   },
   {
     title: "Feed results back",
-    body: "Paste Copy-phase-handoff into the agent; paste the agent's output back into the phase's Notes so it flows into the next packet compile. Export the project JSON to move a build between machines or archive it — it round-trips through Import with validation + repair.",
+    // R6-f06 (L2 step 4, in-app half — fixes/292/294/295): name the ingest
+    // seam that ships (the console Ingest report control → store.ingestReport,
+    // same seam as the CLI `ingest` verb). The guide's own limitation line
+    // ("browser-local only", What-it-is-not below) is kept — ingest is a
+    // paste-in seam, not a live channel.
+    body: "Paste Copy-phase-handoff into the agent; paste the agent's output back into the phase's Notes so it flows into the next packet compile. A structured JSON agent report can instead be ingested verbatim via this console's Ingest report control (the same seam as the CLI `ingest` verb) — its artifacts land marked “[agent report]”. Export the project JSON to move a build between machines or archive it — it round-trips through Import with validation + repair.",
   },
   {
     title: "What it is not",
@@ -2224,10 +2229,23 @@ export function RunScreen({ id }: { id: string }) {
       setError("Rejection note must be at least 12 characters before rejecting.");
       return;
     }
-    void rejectAsync(projectId, note).then((res) => {
-      if (!res.ok) setError(res.error);
-      else setNote("");
-    });
+    // K5-2 (fixes/294/295): the configured path awaits an LLM feedback
+    // interpretation, so a rejection is not instant — latch the dock while it
+    // is in flight (busyAction already carried the "reject" member, unused)
+    // so the human sees pending instead of an idle-looking button, and a
+    // double-fire is dropped here before the store's serialized queue.
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusyAction("reject");
+    void rejectAsync(projectId, note)
+      .then((res) => {
+        if (!res.ok) setError(res.error);
+        else setNote("");
+      })
+      .finally(() => {
+        busyRef.current = false;
+        setBusyAction(null);
+      });
   }
 
   async function runUntil() {
@@ -3216,6 +3234,7 @@ export function RunScreen({ id }: { id: string }) {
               setNote={setNote}
               onApprove={onApprove}
               onReject={onReject}
+              rejectBusy={busyAction === "reject"}
               noteRef={noteRef}
               overrideRef={overrideRef}
             />
@@ -3837,6 +3856,7 @@ function HitlDock({
   setNote,
   onApprove,
   onReject,
+  rejectBusy,
   noteRef,
   overrideRef,
 }: {
@@ -3845,6 +3865,9 @@ function HitlDock({
   setNote: (v: string) => void;
   onApprove: (force?: boolean) => void;
   onReject: () => void;
+  /** K5-2 (fixes/294/295): a rejection is in flight (rejectAsync awaited) —
+   *  the button reports pending instead of looking idle. */
+  rejectBusy?: boolean;
   noteRef?: RefObject<HTMLTextAreaElement | null>;
   overrideRef?: RefObject<HTMLInputElement | null>;
 }) {
@@ -3949,21 +3972,29 @@ function HitlDock({
         <button
           type="button"
           onClick={onReject}
-          disabled={note.trim().length < 12}
+          disabled={note.trim().length < 12 || rejectBusy === true}
           aria-label={
-            note.trim().length < 12
-              ? "Reject disabled — the rejection note must be at least 12 characters"
-              : "Reject this phase with the note above"
+            rejectBusy === true
+              ? "Rejecting — the rejection is being recorded"
+              : note.trim().length < 12
+                ? "Reject disabled — the rejection note must be at least 12 characters"
+                : "Reject this phase with the note above"
           }
           className="inline-flex min-h-11 items-center gap-2 rounded-md border border-danger/40 px-4 text-sm text-danger disabled:opacity-40"
         >
-          <X className="h-4 w-4" />
-          Reject
+          {rejectBusy === true ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <X className="h-4 w-4" />
+          )}
+          {rejectBusy === true ? "Rejecting…" : "Reject"}
         </button>
         <span className="sr-only" aria-live="polite">
-          {note.trim().length < 12
-            ? "Reject disabled — note must be at least 12 characters"
-            : "Reject enabled"}
+          {rejectBusy === true
+            ? "Rejecting — waiting for the store to record the rejection"
+            : note.trim().length < 12
+              ? "Reject disabled — note must be at least 12 characters"
+              : "Reject enabled"}
         </span>
       </div>
       {allowListRefusal ? (
@@ -4424,6 +4455,9 @@ function VaultGroupHeader({ label, count }: { label: string; count: number }) {
  */
 /** Runtime Log pane — live ring-buffer view + AI-agent diagnosis (109 CAP-F). */
 function RuntimeLogPane({ project }: { project: Project }) {
+  // Store-wide project count for the diagnose growth surface (K7-6/G4).
+  // READ-ONLY here: the store array is sampled for its honest length only.
+  const { projects } = useRapid();
   const [snap, setSnap] = useState(() => rtSnapshot());
   const [diag, setDiag] = useState<string | null>(null);
 
@@ -4440,9 +4474,22 @@ function RuntimeLogPane({ project }: { project: Project }) {
       // sampling it at click time is honest: a quota/blocked failure that happened
       // earlier now surfaces in the diagnosis JSON instead of "ok: true".
       const persistHealth = persistStorageHealth();
+      // K7-6 (fixes/287_z3 + 290_k7 item 6): real growth counts. Without this
+      // producer the payload's growth.counts read `{}` while rt-client.ts's
+      // ClientDiagnosisInput doc promises "Growth counts from the store
+      // (artifacts/memory/decisions/projects)" — declare-or-strike: the claim
+      // is now true (this project's arrays + the store's project count).
+      // Defensive lengths: a legacy/hand-built payload reports 0, never throws.
+      const counts: Record<string, number> = {
+        artifacts: Array.isArray(project.artifacts) ? project.artifacts.length : 0,
+        memory: Array.isArray(project.memory) ? project.memory.length : 0,
+        decisions: Array.isArray(project.decisions) ? project.decisions.length : 0,
+        projects: Array.isArray(projects) ? projects.length : 0,
+      };
       const d = buildClientDiagnosis({
         project: project as unknown as never,
         persistHealth,
+        counts,
       });
       setDiag(JSON.stringify(d, null, 2));
     } catch (err) {
@@ -5865,7 +5912,13 @@ function ChatPane({ project }: { project: Project }) {
   );
   // Frozen at mount: the "Thread restored" caption shows only for a genuine
   // reload/remount, never for rows appended during this session (99 §3.3).
-  const [restoredRows] = useState<number>(() =>
+  // K5-1 (N3/K5, fixes/294): count the rows chatLogToViews actually RESTORED
+  // into the visible window (trimTurns keeps ≤12) — counting the raw persisted
+  // chatLog (≤40) made the caption claim rows that are not on screen.
+  const [restoredRows] = useState<number>(() => msgs.length);
+  // Raw persisted length (≤ the 40-row storage cap) — only used by the caption
+  // to EXPLAIN the window when it is shorter, never to overstate what is shown.
+  const [persistedRows] = useState<number>(() =>
     Array.isArray(project.chatLog) ? project.chatLog.length : 0,
   );
   const [draft, setDraft] = useState("");
@@ -6055,6 +6108,9 @@ function ChatPane({ project }: { project: Project }) {
         <p className="px-5 pt-1 font-mono text-[11px] text-faint">
           Thread restored from this build's log · {restoredRows} row
           {restoredRows === 1 ? "" : "s"}
+          {persistedRows > restoredRows
+            ? ` shown — the render window keeps the newest 12 of ${persistedRows} stored`
+            : ""}
         </p>
       ) : null}
       {staleNote ? (

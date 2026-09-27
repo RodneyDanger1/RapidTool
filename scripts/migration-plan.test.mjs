@@ -288,9 +288,33 @@ test("K2: the shipped tree's auth copy-up state matches the guard's verdict", ()
   const { auth, copied } = authSchemaCopies(projectRoot());
   const migrated = readdirSync(join(projectRoot(), "migrations"));
   const gaps = authCopyUpGaps({ authNames: auth, migratedNames: migrated });
+  // The guard flags PARTIAL copy-ups only: "nothing copied up" is the R15-f02
+  // refusal's case (no `user` table at all) and a complete copy-up has no
+  // gaps. The shipped tree copies nothing up (sign-in off by default), so []
+  // is its verdict — the full missing list is the refusal's business.
+  const expected = copied.length === 0 ? [] : auth.filter((name) => !copied.includes(name));
   assert.deepEqual(
     gaps,
-    auth.filter((name) => !copied.includes(name)),
+    expected,
     "the guard's gap list must agree with the on-disk copy-up state",
+  );
+});
+
+test("K2: same-basename entries resolve by the byte-order path tie-break, not input order", () => {
+  // The order is TOTAL — (name, then path) — so the same file globbed from two
+  // directories keeps the byte-order-first path. A name-only (stable) sort
+  // would keep whichever path the glob listed first, and with a reversed glob
+  // the dedupe survivor would differ between boxes.
+  assert.deepEqual(pendingMigrations(["/other/0002_x.sql", "/migrations/0002_x.sql"], []), [
+    { name: "0002_x.sql", path: "/migrations/0002_x.sql" },
+  ]);
+  // And the output is totally ordered even when the input is not.
+  assert.deepEqual(
+    pendingMigrations(["/m/0003_c.sql", "/other/0002_x.sql", "/m/0001_a.sql", "/m/0002_x.sql"], []),
+    [
+      { name: "0001_a.sql", path: "/m/0001_a.sql" },
+      { name: "0002_x.sql", path: "/m/0002_x.sql" },
+      { name: "0003_c.sql", path: "/m/0003_c.sql" },
+    ],
   );
 });

@@ -1,0 +1,95 @@
+{
+  "graderVersion": 2,
+  "slug": "arcade-breakout",
+  "caseName": "Arcade Breakout",
+  "authority": "RUN-SIDE GRADER (W41 · P3, fixes/295_p3_eval.md; §R7-f04 — the missing-kind fixtures) — the acceptance bar for this eval case. Declared before the run; read ONLY by scripts/run-eval.mjs; never copied into research/eval-out; the emitted project tree must neither contain nor reference it (graderLeakScan) and the agent-facing brief must not carry it (briefLeakScan).",
+  "movedFrom": "none — authored 2026-09-27 by W41 · P3 from K9's verified runnable-kind probe (probe-k9-kinds.mjs), not transcribed. The corpus frontmatter keeps acceptance / expectedNouns / expectedCapabilities as documentation for corpus readers; this file is the grading source of truth and no grading input is read from the frontmatter.",
+  "acceptanceBar": "One runnable game loop: keyboard-moved paddle, ball physics off walls, paddle and brick rows, three speed-increasing levels, live score plus a persisted high score, pause/resume, and win/lose end screens — all on a canvas.",
+  "requiredIdentifiers": [
+    "paddle",
+    "ball",
+    "brick",
+    "level",
+    "speed",
+    "score",
+    "highScore",
+    "pause",
+    "winScreen",
+    "loseScreen"
+  ],
+  "requiredCapabilities": [
+    "A paddle moved by keyboard controls",
+    "A ball that bounces off walls and the paddle",
+    "Brick rows broken per hit",
+    "Three levels of increasing ball speed",
+    "Score and high-score tracking",
+    "Pause and resume",
+    "Win and lose screens",
+    "Canvas-only rendering"
+  ],
+  "expectedKind": "game",
+  "expectedFiles": [
+    "package.json",
+    "index.html",
+    "README.md",
+    "vite.config.ts",
+    "assets/manifest.json"
+  ],
+  "expectedContent": [
+    {
+      "file": "package.json",
+      "contains": "\"type\": \"module\""
+    },
+    {
+      "file": "package.json",
+      "contains": "\"test\": \"node --experimental-strip-types --test tests/oracle.spec.ts\""
+    },
+    {
+      "file": "index.html",
+      "contains": "/src/main.ts"
+    },
+    {
+      "file": "assets/manifest.json",
+      "contains": "\"kind\": \"game\""
+    }
+  ],
+  "expectedBehavior": [
+    {
+      "id": "game-web-entry",
+      "check": "file-exists",
+      "path": "index.html"
+    },
+    {
+      "id": "game-module-entry",
+      "check": "file-exists",
+      "path": "src/main.ts"
+    },
+    {
+      "id": "game-vite-config",
+      "check": "file-exists",
+      "path": "vite.config.ts"
+    },
+    {
+      "id": "game-asset-manifest",
+      "check": "file-exists",
+      "path": "assets/manifest.json"
+    },
+    {
+      "id": "game-package-main",
+      "check": "package-target-exists",
+      "target": "main"
+    },
+    {
+      "id": "game-entry-runs",
+      "check": "entry-runs",
+      "note": "probe-verified (game 11/11): pkg.main resolves to the emitted src/main.ts, index.html references \"/src/main.ts\", and the README Kind line reads game; the vite dev/build leg needs a network install, so the runtime row stays PENDING until runtime evidence is wired into acceptance (TODO(A3-f05))"
+    }
+  ],
+  "passWhen": {
+    "meanAtLeast": 1,
+    "requireExpectedFiles": true,
+    "requireExpectedContent": true,
+    "requireExpectedBehavior": true,
+    "requireExpectedKind": true
+  }
+}

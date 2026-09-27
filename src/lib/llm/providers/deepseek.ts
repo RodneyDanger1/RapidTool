@@ -267,6 +267,26 @@ async function postWithRetry(
   throw err;
 }
 
+/**
+ * G3 residual (fixed W41 · Q7 — `fixes/285_g3_model_visibility.md`): the
+ * wallet-empty TEXT class, ONE regex shared by both provider families
+ * (openai-compatible.ts imports this). The old check required the exact
+ * two-word pair (`/insufficient balance/i`), so a bare vendor phrase that
+ * arrives in another shape classified as a generic refusal:
+ * live-seen shapes are the bare `Insufficient Balance` body,
+ * `insufficient_funds`, `insufficient-quota`, and OpenAI's
+ * `insufficient_quota` (out of credit). A 402 status alone is not the only
+ * door — a gateway can ride the phrase on any status — so this text class is
+ * checked alongside the status, and it lands in the same wallet class
+ * `RT_E_LLM_NO_BALANCE` documents (errors.ts: "a wallet class, not a generic
+ * refusal"; never retried, billing is not transient). Narrow by design:
+ * `insufficient` must be followed by nothing but separators and then a wallet
+ * noun, so "insufficient permissions/parameters" stays a generic refusal.
+ */
+export function isInsufficientFundsText(text: unknown): boolean {
+  return typeof text === "string" && /insufficient[\s"'_-]*(?:balance|funds|quota)/i.test(text);
+}
+
 async function describeError(res: Response): Promise<string> {
   // fixes/153 (P1): read the raw text ONCE so a proxy/gateway HTML page or a
   // plain-text refusal can fall back to a visible bounded excerpt. Previously
@@ -464,7 +484,10 @@ async function completeDeepSeekInner(
       // already carried, so the message stays byte-identical; only the code
       // changes for the 402 class.
       const refusalText = await describeError(res);
-      const noBalance = res.status === 402 || /insufficient balance/i.test(refusalText);
+      // W41·Q7 (G3 residual, fixes/285): the wallet-empty class is checked on
+      // the TEXT as well as the status — see isInsufficientFundsText above for
+      // the widened, still-narrow shapes.
+      const noBalance = res.status === 402 || isInsufficientFundsText(refusalText);
       return {
         ok: false,
         reason: "error",
@@ -620,6 +643,20 @@ export type LlmCallTapRecord = {
   code: string | null;
   promptTokens: number | null;
   completionTokens: number | null;
+  /**
+   * W41·Q7 (G3's "tap records — cache-field gap", fixes/285): the context-cache
+   * split of `promptTokens`, forwarded so a driver can price the cheaper
+   * cache-hit bucket (run-eval's estimate) and read the cache discipline of a
+   * run. ADDITIVE + CONDITIONAL, exactly like the LlmUsage fields it mirrors:
+   * a call whose response (or tape) reports no split keeps the byte-identical
+   * legacy record — no consumer that ignores them is affected, and no
+   * fabricated 0 is ever emitted for a response that did not report.
+   * `cachedPromptTokens` = hit tokens (DeepSeek `prompt_cache_hit_tokens` /
+   * OpenAI-style `prompt_tokens_details.cached_tokens`), `cacheMissTokens` =
+   * the vendor's explicit miss count (DeepSeek only).
+   */
+  cachedPromptTokens?: number | null;
+  cacheMissTokens?: number | null;
 };
 
 let llmCallTap: ((record: LlmCallTapRecord) => void) | null = null;

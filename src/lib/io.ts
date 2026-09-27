@@ -515,11 +515,25 @@ export function importProject(json: string, opts?: { preserveWildRun?: boolean }
   }
 }
 
-/** The paste-ready Agent Packet plus (when present) the operator notes block. */
+/**
+ * The paste-ready Agent Packet plus (when present) the operator notes block.
+ *
+ * G2 (fixes/285 edge 2; K7 item 4): the compiled packet ALREADY embeds the
+ * operator-notes block when notes existed at compile time (packet.ts
+ * `## Operator notes (human steering)`), so appending unconditionally rendered
+ * the same notes TWICE on the copy/download path. Append only when the stamped
+ * packet does not already carry the current notes (searched from the embedded
+ * block onward — the notes text alone may legitimately appear elsewhere, e.g.
+ * quoted into a mission line). Notes edited AFTER the last compile still
+ * append: the packet is the stale side there.
+ */
 export function exportPacketText(project: Project): string {
   const packet = project.packet ?? "";
   const notes = (project.notes ?? "").trim();
-  return notes ? `${packet}\n\n## Operator notes\n${notes}` : packet;
+  if (!notes) return packet;
+  const embeddedAt = packet.indexOf("## Operator notes (human steering)");
+  if (embeddedAt !== -1 && packet.indexOf(notes, embeddedAt) !== -1) return packet;
+  return `${packet}\n\n## Operator notes\n${notes}`;
 }
 
 /**

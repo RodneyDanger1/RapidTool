@@ -37,3 +37,14 @@
 | F12 | scripts/path-safety.mjs (new `relativeEscapes`) + scripts/write-atomic.mjs import | guard-script refactor | **VERIFIED CLEAN (pending write-atomic usage line).** `relativeEscapes(rel) = rel === ".." \|\| rel.startsWith(".."+sepOf(rel)) \|\| isAbsolute(rel)` — byte-equivalent to the old inline predicate in `physicalInside` (`rel !== ".." && !startsWith && !isAbsolute` negated). `..foo` stays INSIDE (correct); no loosening. |
 | F13 | src/lib/llm.ts:44-62 + :67/:77 (K6) | type widening | **VERIFIED CLEAN.** `LlmUsage` carries the two optional cache fields; both `LlmResult` arms now use `LlmUsage`; claim "old tapes keep the legacy 2-key object" verified against the deepEqual pin (deepseek.server.test.ts:381-389 fixture has no cache fields). NOTE: this type is what makes F6 (cassette strip) a live defect — see F6 handoff. |
 | F10 | src/lib/node-runner.server.ts:55-63 (L1, mtime 01:25:25 — MID-EDIT) | **phantom enforcement claim (PENDING re-check)** | New comment claims "enforcement is the streaming byte counter in the data handlers below: once the child has written this many bytes … the tree is killed and the run reports a coded failure". Grep at t3: `MAX_BUFFER` appears ONLY at :64 (definition) + :319 (inert spawn option); data handlers (:336-341) only TRUNCATE via `.slice(-MAX_OUTPUT)` — no counter, no kill, no coded failure. Same file :313-315 still says "maxBuffer is a real Node spawn option (output-bomb kill) … keeps the guard" → self-contradiction. Re-checking whether counter lands (lane actively editing); if not → handoff: either implement the counter or strike the claim (W-26 open item). |
+
+## Q3 close (folded in — see `fixes/296_q3_w3.md`)
+
+W3's owed items F14/F15/F16/F17 + the full F1–F17 disposition table are landed in `fixes/296_q3_w3.md` (Q3 lane; all owning lanes were closed at pickup, so fixes landed in place instead of handing off):
+
+- **F14** — pin landed: path tie-break + total-order test in `scripts/migration-plan.test.mjs` → `node --test` **20/20** (was 19-pass / 1-red; the red was an adjacent born-red shipped-tree test, also fixed — its expectation ignored the guard's documented "nothing copied up → []" shape).
+- **F15** — tmp hygiene: two inert `.hermes-tmp` files removed (one tracked since the initial commit, all-NUL bytes); post-sweep `find` empty. Intended deletions.
+- **F16** — `store.ts:924` stale parenthetical ("never overwritten on a version mismatch") reworded to match K2's own rescue bytes (:925-926 now).
+- **F17** — `boundedInt` dedupe confirmed landed (N4): single def at `bounded-int.ts:15`, both callers import; test 4/4.
+- F1/F6 re-verified (cassette pins **37/37**); F2–F13 re-verified byte-clean at HEAD `ac6b151`; F5 condition expired (file is tracked now) — its README naming row is scoped as 12f in `294_n5_cli.md` §8.
+

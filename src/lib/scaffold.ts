@@ -2660,6 +2660,15 @@ export function deplyNotes(project: Project): string {
 }
 
 // ---------------------------------------------------------------------------
+// deployNotes — correctly-spelled alias for `deplyNotes` (N6-W8 · P4 naming
+// pass; fixes/295_p4_sweeps.md). `deplyNotes` is the PINNED name (EXPORT
+// SURFACE header above; scaffold.test.ts imports it by exact name) — NEVER
+// rename it. New callers should use this alias; migrate the old spelling only
+// when the pin test is rewritten in the same change.
+// ---------------------------------------------------------------------------
+export const deployNotes = deplyNotes;
+
+// ---------------------------------------------------------------------------
 // scaffoldProject — assemble the deterministic file tree
 // ---------------------------------------------------------------------------
 

@@ -53,6 +53,9 @@ export const RT_SCOPES = [
   "diagnose",
 ] as const;
 
+// TODO(N6-W6 · fixes/295_p4_sweeps.md): RtScope has 0 external refs (P4
+// re-count) — used only by this module's own types. Delete at the next
+// EXPORT SURFACE pin rewrite, or keep as the documented scope type.
 export type RtScope = (typeof RT_SCOPES)[number];
 
 /** One runtime telemetry row (schema v1 — see fixes/109 §2.2). */
@@ -197,6 +200,28 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
   "diagnose.ran": "diagnose",
 };
 
+// ---------------------------------------------------------------------------
+// TODO(N6-W3 · fixes/294_n6_sweeps.md §W1-W3; re-censused by P4 —
+// fixes/295_p4_sweeps.md): as of HEAD ac6b151, 38 of the 55 registered names
+// above have NO emitter anywhere in src/ or scripts/ — no host passes them as
+// `event:` (grep-verified; read-side matches in diagnose.ts / rt-timeline.ts
+// / rapidtool-cli.mjs do NOT count), and none is emitted server- or CLI-side
+// under its exact name. Emit one, or trim it — a registered name nothing
+// emits is a guardrail only in prose.
+//   boot.start · boot.ready · sys.memory · boundary.crash · ui.action_error ·
+//     store.action_error · engine.phase_fallback · engine.phase_error ·
+//     wild.driver_cap · wild.driver_stall · wild.driver_start_refused ·
+//     wild.driver_paused_auto · wild.driver_resumed · wild.driver_error ·
+//     llm.ok · llm.not_configured · llm.timeout · llm.rejected ·
+//     llm.transport_error · llm.late_settle · chat.send_error · verify.error ·
+//     verify.ok · crew.turn_ok · crew.turn_error · runner.unavailable ·
+//     runner.failed · runner.ok · cli.error · hydrate.ok · hydrate.empty ·
+//     persist.salvaged · persist.ok · watcher.error · watcher.refused ·
+//     harvest.error · search.unavailable · diagnose.ran
+// (cli.invocation left this list in W40/N5 — OPS-4 landed its real emitter,
+// rapidtool-cli.mjs:163 — so the never-set is 38, not the 39 N6 counted.)
+// ---------------------------------------------------------------------------
+
 /** True when the event string is a catalogue member. */
 export function isKnownRtEvent(event: string): boolean {
   return Object.prototype.hasOwnProperty.call(RT_EVENT_NAMES, event);
@@ -216,12 +241,23 @@ export const P6_PHASE_MAX_MS = 240_000;
  *  set the 2× stall latch on resolve — auto-pausing a healthy run mid-
  *  synthesis. Derived from the phase max + a scheduling margin. */
 export const WILD_STEP_BUDGET_MS = P6_PHASE_MAX_MS + 15_000;
+// TODO(N6-W6 · fixes/295_p4_sweeps.md): WILD_STEP_AUTOPAUSE_MS has 0
+// external refs (P4 re-count) — watchdog.ts:138's message promises
+// "auto-pause on resolve", but no consumer reads this constant. Wire the
+// real consumer or delete it with the doctrine text; gated by the EXPORT
+// SURFACE pin.
 export const WILD_STEP_AUTOPAUSE_MS = P6_PHASE_MAX_MS + 60_000;
 export const CHAT_STEP_BUDGET_MS = 60_000;
 export const HEARTBEAT_MS = 1_000;
 export const HEARTBEAT_PERSIST_EVERY_MS = 5_000;
 export const HEARTBEAT_LAG_WARN_MS = 3_000;
 export const STALL_CRITICAL_MS = 10_000;
+// TODO(N6-W6 · fixes/295_p4_sweeps.md): both LONGTASK_* constants are DEAD —
+// 0 external refs (P4 re-count): rt-client.ts:463 hardcodes the 250 ms report
+// floor, :467 coalesces on RT_COALESCE_MS (5 000 ms) while its own :456
+// comment claims "10 s coalesce". Wire rt-client to THESE constants or delete
+// both — until then §5.6's "single source of truth" is prose only. Gated by
+// the EXPORT SURFACE pin.
 export const LONGTASK_REPORT_MS = 250;
 export const LONGTASK_COALESCE_MS = 10_000;
 export const RING_CAP = 200;

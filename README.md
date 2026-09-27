@@ -48,7 +48,7 @@ the newest byte-read and the finding register's corrections win.
 
 1. **`README.md`** (this file) — what RapidTool is, the honest state, and **the catalog of every
    tracked file** (§10). Start here so you know what exists before you touch anything.
-2. **`START-HERE.md`** (working tree, untracked as of 2026-09-26) — the cold-start map: the 10-line
+2. **`START-HERE.md`** (tracked; written as a working-tree file 2026-09-26) — the cold-start map: the 10-line
    tour, the read order, the run commands (each verified or explicitly marked why not), the
    never-do hard rules.
 3. **`AGENTS.md`** — the repo working contract: source layout, commands, the honesty contract
@@ -56,14 +56,14 @@ the newest byte-read and the finding register's corrections win.
 4. **`research/multiagent/thoroughanalysis.md`** — **the register**: the deep audit's mission
    preamble + every finding (`A*`/`C*`/`W-*`/`R*`/`T*`) with `file:line` evidence. Read its header
    PROTOCOL before appending anything — it is append-only via its end-marker.
-5. **`finalsprint.md`** (working tree, untracked) — the W30 shell-sprint master table: every
+5. **`finalsprint.md`** (tracked) — the W30 shell-sprint master table: every
    remaining capability, its shell status, and what it needs to become real. Its publisher-listed
    `§MASTER-CORRECTIONS` append is **owed, not yet landed** — until it lands, treat the master
    table plus the RS-01…RS-04 correction rows in `fixes/274_wdx2.md` as the audited record, and
    never trust a lane log's "landed" list over the bytes.
 6. **The current-wave dispatch** — `wave_plans/W37/master-pack.md` (the X1–X6 lane packs naming
    every remaining task) and `wave_plans/W38/NEW-SESSION-PROMPT.md` (the finish-RapidTool task
-   list; both working tree, untracked).
+   list; both tracked).
 7. **The live lane logs** — `fixes/` (newest number = current wave; `fixes/271–286` are the W29–W38
    era). Each log is a claim + evidence; verify before building on it (the audits found lanes that
    overstated — e.g. `finalsprint.md`'s CF-1/CF-2 rows).
@@ -275,7 +275,7 @@ win. The trail:
 - **`remainingwaves.md` — every remaining wave, task by task, with the files each touches,
   estimates, likely bugs, and the tests each needs.** ← start there for "what's left".
 - `finalsprint.md` + `wave_plans/W37/master-pack.md` + `wave_plans/W38/NEW-SESSION-PROMPT.md` —
-  the current finish-line set (working tree, untracked).
+  the current finish-line set (all tracked).
 
 ## Verification — how to check every claim above
 
@@ -299,44 +299,46 @@ logs, vault notes, eval trees, vault/E2E outputs) are described **by convention 
 membership derivable from one command** — stated inline — because each member's purpose is its
 category's purpose. Descriptions are evidence-based (file heads/comments read on 2026-09-26); a
 genuinely unclear file says so. Re-count any directory with
-`git ls-files <dir> | wc -l`; the working tree also carries untracked files (§10.13).
+`git ls-files <dir> | wc -l`; the working tree is clean at HEAD `ac6b151` — the formerly-untracked
+set is committed (§10.13).
 
-## 10.1 Census (tracked, 2026-09-26)
+## 10.1 Census (tracked, re-derived 2026-09-27 at `ac6b151`)
 
 | Area | Files | What it is |
 |---|---:|---|
 | `research/` | 468 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 15 · `eval-out/` 345 · 5 top-level research docs) |
-| `fixes/` | 321 | Append-only per-lane landing logs (§10.9) |
-| `src/` | 201 | The product: engine + UI (§10.6) |
-| `wave_plans/` | 93 | Per-lane dispatch plans, W4–W28 + the convention README (§10.10) |
+| `fixes/` | 419 | Append-only per-lane landing logs (§10.9) |
+| `src/` | 210 | The product: engine + UI (§10.6) |
+| `wave_plans/` | 105 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 + the convention README (§10.10) |
 | `.grok/` | 89 | Legacy platform chrome — **do not build on it** (§10.12) |
 | `builds/` | 50 | Legacy sample build outputs (vault export + sample project) (§10.11) |
 | `vault-e2e/` | 47 | Vault export of the HVAC Dispatch E2E project (§10.11) |
-| `scripts/` | 40 | CLI + gates + guards + tooling + their tests (§10.7) |
-| root | 35 | Every root file named in §10.2 |
+| `scripts/` | 45 | CLI + gates + guards + tooling + their tests (§10.7) |
+| root | 42 | Every root file named in §10.2 |
 | `screenshots/` | 16 | QA/app screenshots (§10.11) |
 | `public/` | 10 | Static assets served as-is (§10.4) |
 | `audit-bugs/` | 5 | Bug-audit reports (§10.12) |
 | `audit/` · `review/` · `proposals/` | 3 + 3 + 3 | Audits, deep reviews, enhancement proposals (§10.12) |
 | `server/` | 2 | Deployed-app PWA middleware + OG types (§10.4) |
-| `migrations/` | 1 | Deploy SQL (§10.3) |
+| `migrations/` | 2 | Deploy SQL (§10.3) |
 | `.github/` | 1 | CI workflow (§10.3) |
 | `attachments/` · `artifacts/` · `.audit-g2/` | 1 + 1 + 1 | Historical artifact + stored image + G2 probe (§10.12) |
-| **Total** | **1,391** | `git ls-files \| wc -l` |
+| `.t4scratch/` | 192 | Committed lane-scratch tree (was working-tree scratch; tracked at `ac6b151`) |
+| **Total** | **1,715** | `git ls-files \| wc -l` |
 
-## 10.2 Root files (all 35 tracked — named; plus 5 untracked working files, marked)
+## 10.2 Root files (all 42 tracked — named)
 
-| File | Purpose (evidence: head/comments read 2026-09-26) |
+| File | Purpose (evidence: head/comments read 2026-09-26/27) |
 |---|---|
 | `README.md` | This file — the catalog + honest state. |
 | `AGENTS.md` | Repo-level agent working contract: layout, commands, honesty contract, ownership rules. |
 | `AGENT_GUIDE.md` | Product-level guide: how an AI agent consumes a RapidTool project + the honesty contract in full. |
-| `START-HERE.md` | **Untracked.** The cold-start map (10-line tour, read order, verified commands, hard rules). |
+| `START-HERE.md` | The cold-start map (10-line tour, read order, verified commands, hard rules). |
 | `RESUME.md` | Session handoff: gate contract, hard rules, settled decisions (written 2026-09-16). |
 | `taskuniverselog.md` | Live task-status board: every dossier task, status, next wave. |
 | `remainingwaves.md` | The execution catalogue: every remaining wave with tasks/files/estimates/tests. |
-| `finalsprint.md` | **Untracked.** W30 shell-sprint master table + lane polls + §S5; §MASTER-CORRECTIONS owed. |
-| `docs-FOLDER-MAP.md` | **Untracked.** Depth-2 map, one line per node, generated from `git ls-files` (W32). |
+| `finalsprint.md` | W30 shell-sprint master table + lane polls + §S5; §MASTER-CORRECTIONS owed. |
+| `docs-FOLDER-MAP.md` | Depth-2 map, one line per node, generated from `git ls-files` (W32). |
 | `agentnotes.md` | Historical master working doc (pre-W5); banner says do not read as current. |
 | `AGENTS.project.md` | Stale scaffolding: a Grok-project mount note ("files at /workspace/artifacts"). Ignore. |
 | `LICENSE` | MIT (Copyright 2026 RapidTool contributors). |
@@ -345,11 +347,11 @@ genuinely unclear file says so. Re-count any directory with
 | `.env.example` | Env template: `DEEPSEEK_API_KEY`, `TAVILY_API_KEY` + every advanced knob (documented inline). |
 | `.gitignore` | Ignore rules: node_modules/dist, secrets (`.env*`), `*.log`, `.hermes/`, `**/.rapidtool/logs/`. |
 | `.prettierrc` | Prettier config (`semi: true`, `singleQuote: false`, …). |
-| `.prettierignore` | **Untracked.** Prettier ignores (R15-f05). |
+| `.prettierignore` | Prettier ignores (R15-f05). |
 | `.node_modules.lock` | An **empty** marker file (0 bytes) — platform tooling sentinel. |
 | `eslint.config.mjs` | ESLint flat config (js + prettier + react-hooks plugins). |
 | `tsconfig.json` | TS config: strict, ES2022, bundler resolution, `allowJs`/`checkJs` for the migration-plan import. |
-| `tsconfig.scripts.json` | **Untracked.** Scripts-program TS config (R15-f04 staged; its error census = 1030 pre-existing, see `finalsprint.md`). |
+| `tsconfig.scripts.json` | Scripts-program TS config (R15-f04 staged; its error census = 1030 pre-existing, see `finalsprint.md`). |
 | `vite.config.ts` | Vite + TanStack Start + Nitro + Tailwind config: port 8080 + `strictPort` fixed contract; dev bind loopback by default (R11-f01), `RAPIDTOOL_BIND_ALL=1` opts out; PGLite bootstrap; serverDir `./server`. |
 | `build.json` | Sample project file: "HVAC Dispatch" (the CLI quickstart's output, tracked as a fixture). |
 | `w1-source-project.json` | Sample project file: "W1 Boot Probe" (used by W1-era probes). |
@@ -368,6 +370,8 @@ genuinely unclear file says so. Re-count any directory with
 | `probe-r5-misc.ts` | Probe: tracing validation + render/vector fuzz. |
 | `probe-r5-vector.ts` | Probe: `vector.ts` sanitizeSvg fuzz hypotheses. |
 | `probe_h1_libcrash.ts` | W26 temp probe (hostile-input sweep); its own header says "deleted after the run" — it wasn't; kept for the record. |
+| `probe-k9-kinds.mjs` | W40 K9 probe: the 4 corpus kinds' runnable emission, empirically (game / cli-tool / library / service). |
+| `probe_n2_f316.mjs` | W41 N2 probe: the F3-16 evidence digest now distinguishes spec sets with equal counts. |
 
 ## 10.3 `.github/` · `migrations/`
 
@@ -377,7 +381,7 @@ genuinely unclear file says so. Re-count any directory with
   is deliberately not enabled.
 - `migrations/auth/0001_auth.sql` — Better Auth schema (identity + sessions), generated by the
   Better Auth CLI; applied by `scripts/migrate.mjs` in `npm run build`, or by PGLite in dev.
-  - **Untracked sibling:** `migrations/auth/0002_account_unique.sql` (working tree).
+  - `migrations/auth/0002_account_unique.sql` — the account-uniqueness migration (tracked).
 
 ## 10.4 `public/` · `server/`
 
@@ -403,9 +407,9 @@ genuinely unclear file says so. Re-count any directory with
 - `src/routes/` (3): `__root.tsx` (root layout + auth provider), `index.tsx` (HomeScreen from
   `console.tsx`), `run.$id.tsx` (RunScreen from `console.tsx`).
 
-## 10.6 `src/lib/` — the engine (191 files = 110 modules + 81 colocated tests)
+## 10.6 `src/lib/` — the engine (200 files = 114 modules + 85 colocated tests + 1 tracked stray temp)
 
-**78 direct modules** (one line each; the module's comments read 2026-09-26):
+**82 direct modules** (one line each; the module's comments read 2026-09-26/27):
 
 - **Core:** `engine.ts` (13-phase state machine: applies phase results, gates, repairs, sealing) ·
   `phases.ts` (phase graph defs + coverage/transition helpers) · `store.ts` (zustand store — the
@@ -423,10 +427,13 @@ genuinely unclear file says so. Re-count any directory with
   contract) · `write-set.ts` (SSSF-style write-set rollback) · `patch.ts` (`str_replace`
   primitive) · `verify.server.ts` (machine verify-fix loop) · `verify.ts` (its client-safe seam) ·
   `maker-score.ts` (pure M1..M9 rubric) · `token-ledger.ts` (spend vs hard cap) · `compaction.ts`
-  (compaction constants + summary template).
+  (compaction constants + summary template) · `checkpoint.server.ts` (versioned atomic run
+  checkpoint — resume after a crash/kill, T-107.7) · `quarantine.ts` (forced-emit quarantine move —
+  foreign files moved aside, R11-f08).
 - **LLM / providers / research:** `llm.ts` + `llm-tasks.ts` (client-facing LLM contract +
   helpers) · `deepseek.server.ts` (thin re-export of the provider) · `tavily.server.ts` (Tavily
-  search) · `websearch.server.ts` (keyless free web search) · `research.ts` (client web-research
+  search) · `websearch.server.ts` (keyless free web search) · `bounded-int.ts` (the one bounded-
+  integer knob sanitizer shared by both search providers, W40 N4) · `research.ts` (client web-research
   contract) · `harvest.ts` (bounded live-source harvester) · `cassette.ts` (deterministic LLM
   record/replay) · `chat.ts` + `chat.server.ts` (copilot chat contract + grounded server core) ·
   `prompt-engine.ts` (hyper-prompt expansion + policy constraints).
@@ -439,7 +446,8 @@ genuinely unclear file says so. Re-count any directory with
   (design tokens + preview HTML) · `diagram.ts` (standalone SVG diagrams) · `tracing.ts` (trace
   model) · `watchdog.ts` (wild-loop freeze decisions) · `diagnose.ts` (diagnosis builder) ·
   `doctor.ts` (environment/factory truth incl. `autonomousSoftwareFactory`) ·
-  `wild-mode.server.ts` (wild auto-review supervisor classifier).
+  `wild-mode.server.ts` (wild auto-review supervisor classifier) · `wild-review.ts` (node-side wild
+  supervisor completer seam, R14-f01).
 - **Telemetry:** `rt-events.ts` (types) → `rt-ring.ts` (bounded ring) → `rt-client.ts` (browser
   glue) → `rt-timeline.ts` (NDJSON→timerows) · `runtime-log.server.ts` (NDJSON disk appender) ·
   `error-scan.server.ts` (error scan).
@@ -452,7 +460,8 @@ genuinely unclear file says so. Re-count any directory with
   migrations) · `error-component.tsx` (route error UI) · `preview-embedder-origin.ts` +
   `preview-host-bridge.ts` (preview postMessage trust model + guest side).
 
-**32 subdirectory modules:** `app-data/` (6: `index.ts` barrel, `server-only.ts` guard,
+**32 subdirectory modules** (+1 tracked stray temp artifact — `auth/.hermes-tmp.*`, flagged in
+`fixes/295_p4_sweeps.md`, not a module): `app-data/` (6: `index.ts` barrel, `server-only.ts` guard,
 `client.server.ts` connector client, `errors.ts`, `login.ts`, `types.ts` — platform app-data
 bridge) · `auth/` (17: `client.ts`, `server.ts` (self-hosted Better Auth), `gates.tsx`,
 `middleware.ts`, `provider.tsx`, `providers.ts` (upstream IdPs), `email-password.ts`,
@@ -464,27 +473,29 @@ bridge) · `auth/` (17: `client.ts`, `server.ts` (self-hosted Better Auth), `gat
 WebRTC full-mesh room client; staged, no live coturn) · `og/site.json` (OG metadata) ·
 `testing/fixtures.ts` (shared deterministic engine fixtures for tests).
 
-**81 colocated test suites** (the "how it's verified" map — each test file pins its
-subject-named contract; count today: `git ls-files src/lib | grep -c '\.test\.'` = 81):
-`algo-tools` · `algorithms` · `arch-tools` · `ast-mine` · `bench` · `brief-fixtures` · `cassette`
-· `chat` · `codegen.server` · `compaction` · `compile-check.server` · `crew` · `deepseek.server` ·
+**85 colocated test suites** (the "how it's verified" map — each test file pins its
+subject-named contract; count today: `git ls-files src/lib | grep -c '\.test\.'` = 85):
+`algo-tools` · `algorithms` · `arch-tools` · `ast-mine` · `bench` · `bounded-int` · `brief-fixtures` ·
+`cassette` · `chat` · `checkpoint.server` · `codegen.server` · `compaction` · `compile-check.server` ·
+`crew` · `deepseek.server` ·
 `design` · `determinism-guard` · `diagnose` · `diagram` · `doctor` · `emitted-honesty` ·
 `error-scan.server` · `errors` · `exec` · `fixtures` · `gate-stats` · `gates` · `git.server` ·
 `handoff` · `harvest` · `headless` · `honesty-guards` · `io` · `judgment` · `knowledge` ·
 `lesson-writers` · `llm` · `llm-tasks` · `maker-score` · `node-runner.server` · `packet` · `patch`
 · `patch-preservation` · `phases` · `planning` · `plugin` · `policy` · `policy-overlay` ·
-`preview-host-bridge` · `prompt-engine` · `render` · `report-intake` · `research` · `rt-client` ·
+`preview-host-bridge` · `prompt-engine` · `quarantine` · `render` · `report-intake` · `research` · `rt-client` ·
 `rt-events` · `rt-ring` · `rt-timeline` · `runtime-log.server` · `sandbox` · `sandbox-policy` ·
 `scaffold` · `store` · `subagent` · `swarm` · `sweep73-fuzz` · `token-ledger` · `tracing` ·
 `typed-failures` · `vault` · `vector` · `verify` · `verify.server` · `watchdog` · `websearch` ·
 `wild-mode.server` · `wild-step` · `write-set` · `zero-byte-guard` (each `.test.ts`); subdir
 suites: `app-data/app-data.test.ts`, `auth/gate-identity.test.ts`, `auth/sign-in-gate.test.ts`,
-`llm/providers/mock.test.ts`, `llm/providers/registry.test.ts`. Note: a few modules are pinned
+`llm/providers/mock.test.ts`, `llm/providers/registry.test.ts`,
+`llm/providers/registry-failover.test.ts`. Note: a few modules are pinned
 from sibling suites rather than a same-named file (e.g. there is **no** `engine.test.ts` — the
 engine's contracts are pinned from `headless.test.ts`, `gates.test.ts`, `judgment.test.ts` and
 others).
 
-## 10.7 `scripts/` — CLI, gates, guards, tooling (40 tracked = 22 tools + 18 tests)
+## 10.7 `scripts/` — CLI, gates, guards, tooling (45 tracked = 24 tools + 21 tests)
 
 - **CLI:** `rapidtool-cli.mjs` — the headless driver, **39 verbs** (count source of truth:
   `grep -c 'case "'`), one JSON object per call, exit taxonomy 0/1/2/3/4.
@@ -501,8 +512,8 @@ others).
 - **Env/tooling:** `with-app-env.mjs` (merges `.grok/app-env.json` into npm script envs) ·
   `app-env-plugin.mjs` (dev-only `/__app-env` endpoint) · `write-atomic.mjs` (stage→rename file
   handover for agents) · `sign-out-plan.mjs` (pure sign-out sequence used by
-  `auth/client.ts`) · `path-safety.mjs` (**untracked**, physical-containment helper R11-f07) ·
-  `docs-module-parity.mjs` (**untracked**, advisory doc-vs-disk scanner — never a gate).
+  `auth/client.ts`) · `path-safety.mjs` (physical-containment helper R11-f07) ·
+  `docs-module-parity.mjs` (advisory doc-vs-disk scanner — never a gate).
 - **Preview/browser:** `preview.mjs` (owns :8081 built-output QA preview; restart/stop) ·
   `preview-thumbnail.mjs` (1280×800 preview PNG capture) · `browser-smoke.mjs` (Playwright smoke) ·
   `browser-smoke-verdict.mjs` (verdict normalization seam) · `browser-guard.mjs` (target checks
@@ -513,17 +524,16 @@ others).
   · `install-page.html` (the Home-Screen install tutorial page).
 - **Guards:** `check-assertion-gaps.mjs` (T-17 tautology/zero-assertion lint, wired into
   gate.sh) · `check-auth-invariant.mjs` (dev-vs-build `VITE_AUTH_ENABLED` agreement: fail loudly).
-- **Test suites (18):** `README-cli.test.mjs` (CLI doc-contract) · `rapidtool-cli-edit.test.mjs` +
-  `rapidtool-cli-lesson.test.mjs` (verb contracts) · `chat-stream.test.mjs` (chat streaming) ·
-  `next-action-arm-parity.test.mjs` (next-action ↔ dispatcher parity) ·
+- **Test suites (21):** `README-cli.test.mjs` (CLI doc-contract) · `rapidtool-cli-edit.test.mjs` +
+  `rapidtool-cli-lesson.test.mjs` (verb contracts) · `rapidtool-cli-fixtures.test.mjs` (fixtures
+  verb contract) · `cli-exit-taxonomy.test.mjs` (exit-code class guard, OPS-3) ·
+  `gate-verdict.test.mjs` (a red leg can never produce a green verdict) · `chat-stream.test.mjs`
+  (chat streaming) · `next-action-arm-parity.test.mjs` (next-action ↔ dispatcher parity) ·
   `test-name-pattern-guard.test.mjs` (the `--test-name-pattern` no-op trap) ·
   `run-eval.test.mjs` · `migration-plan.test.mjs` · `brand-check.test.mjs` ·
   `browser-guard.test.mjs` · `browser-smoke-verdict.test.mjs` · `check-assertion-gaps.test.mjs` ·
   `check-auth-invariant.test.mjs` · `grok-pwa-plugin.test.mjs` · `preview.test.mjs` ·
   `sign-out-plan.test.mjs` · `with-app-env.test.mjs` · `write-atomic.test.mjs`.
-- **Untracked siblings on disk:** `cli-exit-taxonomy.test.mjs` (exit-code class guard, OPS-3) ·
-  `gate-verdict.test.mjs` (a red leg can never produce a green verdict) ·
-  `rapidtool-cli-fixtures.test.mjs` (fixtures verb contract).
 
 ## 10.8 `research/` (468)
 
@@ -575,30 +585,32 @@ others).
   `03_tech_deep_dives_research.md` (the origin research set, 2026-09-04) · `deepseek-api.md`
   (live-verified API spec) · `runtime-integration.md` (runtime/hosting research).
 
-## 10.9 `fixes/` — the append-only landing-log ledger (321 tracked + 50 untracked)
+## 10.9 `fixes/` — the append-only landing-log ledger (419 tracked)
 
 **Convention:** one `fixes/NN_<lane>.md` per lane per wave; append-only; each log carries
 what/why + `file:line` evidence + before/after. The numbering is chronological: the newest number
 is the current wave. Tracked today: the `01`–`99` early series, the **`216a`–`216t` Wave-4/5 set**
 (incl. `216j_honesty_tooling.md`, `216n_wave_h_primitives.md`, `216s_cli_wave.md`), the
 `100`–`270` era (233 three-digit logs; **`218_*` §5 = the W12 boundary gate of record**), and
-`pro1`–`pro4_*.md`. Untracked working tree: the **W29–W38 set `271`–`286`** (`271_lane*`,
-`272_s1…s5` (shell lanes), `273_t1…t5`, `274_wdx1/wdx2/wdx3` (watchdogs), `275_organizer`,
-`276–282` (W36/W37 completion lanes; `281_n1…n6`, `282_y1…y3`), `284_wiring_guarantee`,
-`285_g2…g4`, and this catalog's log `286_readme_catalog.md`).
+`pro1`–`pro4_*.md`. The **W29–W41 set (`271`–`294`)** is tracked too: `271_lane*`, `272_s1…s5`
+shell lanes, `273_t1…t5`, `274_wdx1/wdx2/wdx3` watchdogs, `275_organizer`, `276`–`283` completion
+lanes + `283_final_ledger.md`, `284_wiring_guarantee`, `285_g2…g4`, `286_readme_catalog.md`,
+`287_z5_runtime_tail.md`, `288`–`289` pickups, `290`–`294` per-lane wave-41 logs (`295`–`296`
+arrive untracked from the live tail waves).
 **How to search them:** `git ls-files fixes | sort | tail -30` (newest); `grep -l "<term>"
 fixes/*.md`; or grep the register's fix references (`R*`/`A*` IDs cite their fix logs).
 
-## 10.10 `wave_plans/` — dispatch plans (93 tracked; W29–W38 untracked)
+## 10.10 `wave_plans/` — dispatch plans (105 tracked; W4–W24 · W26–W38 · W40)
 
 **Convention:** `wave_plans/README.md` owns it — every wave dispatch ships ONE notes file per lane
 (`wave_plans/W<N>/lane-<K>.md` or a named lane doc), ordered for speed: mission → owned files →
 numbered mini-task plan → parent findings/traps → verification commands → logging rules. Tracked
-waves: **W4–W28** (93 files incl. `README.md`; W4–W10 five lane files each, W11 7, W12 8,
-**W13 25** (its audit/design/eng/guard/improver/playbook/wd/x lanes), W14 3, W15 2, W16–W28 one
-file each). **Untracked working tree:** `W29/coders.md`, `W30/shell-sprint.md`, `W31/gap-finshers.md`,
-`W32/organizer.md`, `W33/unlanded-block.md`, `W34/{prep,code-notes}.md`, `W35/factory-notes.md`,
-`W36/completion.md`, `W37/master-pack.md`, `W38/NEW-SESSION-PROMPT.md`.
+waves: **W4–W24 + W26–W38 + W40** (105 files incl. `README.md`; W4–W10 five lane files each, W11 7,
+W12 8, **W13 25** (its audit/design/eng/guard/improver/playbook/wd/x lanes), W14 3, W15 2, W16–W28
+one file each; then the former working-tree set, now tracked): `W29/coders.md`,
+`W30/shell-sprint.md`, `W31/gap-finshers.md`, `W32/organizer.md`, `W33/unlanded-block.md`,
+`W34/{prep,code-notes}.md`, `W35/factory-notes.md`, `W36/completion.md`, `W37/master-pack.md`,
+`W38/NEW-SESSION-PROMPT.md`.
 
 ## 10.11 `builds/` · `vault-e2e/` · `screenshots/`
 
@@ -642,20 +654,17 @@ file each). **Untracked working tree:** `W29/coders.md`, `W30/shell-sprint.md`, 
   `generate2dmap`/`generate2dsprite`/`video2dsprite`)). Keep-or-descope is decided in
   `research/multiagent/94` §B1 / `96`; do not delete or extend until that lands.
 
-## 10.13 Working-tree files not yet tracked (2026-09-26)
+## 10.13 Working-tree state — the former "not yet tracked" set (superseded 2026-09-27)
 
-The W29–W37 era is uncommitted (HEAD `0f85c32`). Untracked files that agents should KNOW about
-(count as of today: 270 total; the large `.t4scratch/` = 192-file scratch copy, ignore):
-
-- Docs: `START-HERE.md`, `finalsprint.md`, `docs-FOLDER-MAP.md`, `tsconfig.scripts.json`,
-  `.prettierignore`.
-- `src/lib/`: `checkpoint.server.ts` (+ its test), `quarantine.ts` (+ test),
-  `wild-review.ts`, `llm/providers/registry-failover.test.ts`.
-- `scripts/`: `cli-exit-taxonomy.test.mjs`, `gate-verdict.test.mjs`, `rapidtool-cli-fixtures.test.mjs`,
-  `path-safety.mjs`, `docs-module-parity.mjs`.
-- `migrations/auth/0002_account_unique.sql`; `wave_plans/W29…W38/*`; `fixes/271…286` (50 logs).
-- Gitignored and never printed: `.env` (secrets), `.env.bak-*`, `_*.log` scratch captures,
-  `.hermes/`, `.t4scratch/` scratch.
+The W29–W41 era was committed at HEAD `ac6b151` and the formerly-untracked set is now **tracked**:
+the docs (`START-HERE.md`, `finalsprint.md`, `docs-FOLDER-MAP.md`, `tsconfig.scripts.json`,
+`.prettierignore`), the `src/lib/` set (`checkpoint.server.ts` + test, `quarantine.ts` + test,
+`wild-review.ts`, `llm/providers/registry-failover.test.ts`), the scripts guards
+(`cli-exit-taxonomy.test.mjs`, `gate-verdict.test.mjs`, `rapidtool-cli-fixtures.test.mjs`,
+`path-safety.mjs`, `docs-module-parity.mjs`), `migrations/auth/0002_account_unique.sql`,
+`wave_plans/W29…W38/*`, `fixes/271…286` (50 logs) and `.t4scratch/` (192 — it has its own §10.1 row
+now). Gitignored and never printed: `.env` (secrets), `.env.bak-*`, `_*.log` scratch captures
+(kept on purpose — `docs-FOLDER-MAP.md`), `.hermes/`.
 
 ---
 
@@ -664,14 +673,14 @@ The W29–W37 era is uncommitted (HEAD `0f85c32`). Untracked files that agents s
 | Doc | Purpose |
 |---|---|
 | `README.md` | This file — quickstart + honest state + **the full tracked-file catalog** (§10). |
-| `START-HERE.md` (wt) | Cold-start map + verified run commands + hard rules. |
+| `START-HERE.md` | Cold-start map + verified run commands + hard rules. |
 | `RESUME.md` | Session handoff: gates contract, hard rules, settled decisions. |
 | `AGENTS.md` | Agent contract: mandatory reads, working rules, honesty contract. |
 | `AGENT_GUIDE.md` | How an agent consumes a RapidTool project (product-level). |
 | `remainingwaves.md` | **Every remaining wave** with tasks/files/estimates/bugs/tests. |
 | `taskuniverselog.md` | Live task board (status of every task from every dossier). |
-| `finalsprint.md` (wt) | W30 shell-sprint master table (what's REAL vs shelled) + lane polls. |
-| `docs-FOLDER-MAP.md` (wt) | Depth-2 folder map, one line per node. |
+| `finalsprint.md` | W30 shell-sprint master table (what's REAL vs shelled) + lane polls. |
+| `docs-FOLDER-MAP.md` | Depth-2 folder map, one line per node. |
 | `research/multiagent/thoroughanalysis.md` | **The register** — mission preamble + all findings (read the protocol first). |
 | `research/multiagent/94_readiness_plan.md` · `93_design_flaws.md` · `90_LEAPFROG.md` · `96_engineering_completion.md` | The plan/defects/strategy/scorecard set `AGENTS.md` sends feature work through. |
 | `research/multiagent/104_factory_upgrade_plan.md` | The factory-upgrade master plan (`RESUME.md` indexes it). |
@@ -679,8 +688,6 @@ The W29–W37 era is uncommitted (HEAD `0f85c32`). Untracked files that agents s
 | `packet-e2e.md` · `design-e2e.html` · `*-e2e.svg` | Sample outputs (packet / design system / diagrams). |
 | `fixes/` | Append-only landing logs (newest number = current wave). |
 | `wave_plans/` | Per-lane dispatch plans (convention in `wave_plans/README.md`). |
-
-_(wt) = working tree (untracked as of 2026-09-26)._
 
 ## License
 

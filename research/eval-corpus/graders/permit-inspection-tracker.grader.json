@@ -1,5 +1,5 @@
 {
-  "graderVersion": 1,
+  "graderVersion": 2,
   "slug": "permit-inspection-tracker",
   "caseName": "Permit & Inspection Tracker",
   "authority": "RUN-SIDE GRADER (W5-L5 / T-107.5; fixture authored W19-L4 under OV-7) — the acceptance bar for this eval case. Read ONLY by scripts/run-eval.mjs; never copied into research/eval-out; the emitted project tree must neither contain nor reference it (graderLeakScan) and the agent-facing brief must not carry it (briefLeakScan, OV-7).",
@@ -26,20 +26,33 @@
     "Deficiency punch lists with re-inspection dates",
     "A per-project compliance summary"
   ],
+  "v2Upgrade": "W41 · P3 (fixes/295_p3_eval.md), §R7-f03: graderVersion 2 — kind-correct expectedFiles (+ vite.config.ts), kind-correct expectedContent (package.json `\"type\": \"module\"` + the oracle test script; index.html → /src/main.tsx) and the declared expectedKind. v1 graded files+content only and could not catch a mis-kinded or CJS-broken tree; every assertion here is verified against the emitted webapp scaffold (18/19 trees under research/eval-out/** carry all four facts; the one exception is the legacy pre-emitter-fix tree).",
+  "expectedKind": "webapp",
   "expectedFiles": [
     "package.json",
     "index.html",
-    "README.md"
+    "README.md",
+    "vite.config.ts"
   ],
   "expectedContent": [
     {
       "file": "package.json",
-      "contains": "\"test\""
+      "contains": "\"type\": \"module\""
+    },
+    {
+      "file": "package.json",
+      "contains": "\"test\": \"node --experimental-strip-types --test tests/oracle.spec.ts\""
+    },
+    {
+      "file": "index.html",
+      "contains": "/src/main.tsx"
     }
   ],
   "passWhen": {
     "meanAtLeast": 1,
     "requireExpectedFiles": true,
-    "requireExpectedContent": true
+    "requireExpectedContent": true,
+    "requireExpectedBehavior": true,
+    "requireExpectedKind": true
   }
 }

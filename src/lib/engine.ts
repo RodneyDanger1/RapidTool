@@ -1,4 +1,5 @@
 import { PHASES, PHASE_BY_ID, PHASE_LAST, canEnter, phaseDef, priorsSealed } from "./phases.ts";
+import { clientSafeServerSpecifier } from "./server-spec.ts";
 import type { ErrorCode } from "./errors.ts";
 import { classifyError, ERROR_CODES } from "./errors.ts";
 import { flattenStack } from "./rt-events.ts";
@@ -1661,10 +1662,12 @@ export function approveHitl(
     throw new Error("Autopilot may not approve a forceHuman gate (R3/B-03).");
   }
   const now = Date.now();
-  const next = Math.min(12, phase + 1) as PhaseId;
+  // A1-30 residue (fixes/296 Q1): the transition bound comes from the graph authority
+  // (phases.ts PHASE_LAST) — never a bare 12 (behavior-identical: PHASE_LAST = 12).
+  const next = Math.min(PHASE_LAST, phase + 1) as PhaseId;
   const phases = project.phases.map((p) => {
     if (p.id === phase) return { ...p, status: "complete" as const, completedAt: now };
-    if (p.id === next && phase < 12) return { ...p, status: "ready" as const };
+    if (p.id === next && phase < PHASE_LAST) return { ...p, status: "ready" as const };
     return p;
   });
   const forcedOverride =
@@ -2151,9 +2154,10 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
   // CORE-03: validate the scalar currentPhase exactly like repairPhases validates
   // the phases array. A corrupt / out-of-range value would otherwise brick the
   // next stamp/approve via `PHASES[currentPhase]` indexing (packet.ts:69,
-  // algorithms.ts:630). Repair to the highest complete phase + 1 (floor 0), capped 12.
+  // algorithms.ts:630). Repair to the highest complete phase + 1 (floor 0),
+  // capped at PHASE_LAST — the graph authority, never a bare 12 (A1-30 residue).
   const cp = raw.currentPhase as number;
-  const cpValid = Number.isInteger(cp) && cp >= 0 && cp <= 12;
+  const cpValid = Number.isInteger(cp) && cp >= 0 && cp <= PHASE_LAST;
   let currentPhase: PhaseId = cpValid ? (cp as PhaseId) : 0;
   const cpRepaired = !cpValid;
   if (!cpValid) {
@@ -2163,7 +2167,7 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
         highest = p.id;
       }
     }
-    currentPhase = Math.max(0, Math.min(12, highest + 1)) as PhaseId;
+    currentPhase = Math.max(0, Math.min(PHASE_LAST, highest + 1)) as PhaseId;
   }
   // SWEEP-2 (hyd-1): the current edge must never rest on a LOCKED phase record.
   // repairPhases re-inserts a phase whose persisted record was dropped (garbage
@@ -2184,12 +2188,12 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
     // fails forever. Clamp to the first unsealed slot after a prefix of
     // completes.
     let highest = -1;
-    for (let i = 0; i <= 12; i++) {
+    for (let i = 0; i <= PHASE_LAST; i++) {
       const rec = phaseRepair.phases.find((r) => r.id === i);
       if (rec?.status === "complete") highest = i;
       else break;
     }
-    currentPhase = Math.max(0, Math.min(12, highest + 1)) as PhaseId;
+    currentPhase = Math.max(0, Math.min(PHASE_LAST, highest + 1)) as PhaseId;
     // Promote the derived edge only when its priors are genuinely sealed —
     // otherwise leave the honest locked state (the graph cannot run and says
     // so) instead of fabricating a runnable edge over an unsealed history.
@@ -2207,7 +2211,7 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
   let holeRepaired = false;
   if (!priorsSealed(phaseRepair.phases, currentPhase)) {
     let highestContig = -1;
-    for (let i = 0; i <= 12; i++) {
+    for (let i = 0; i <= PHASE_LAST; i++) {
       const rec = phaseRepair.phases.find((r) => r.id === i);
       if (rec?.status === "complete") highestContig = i;
       else break;
@@ -2928,7 +2932,7 @@ export type LiveLayerDeps = {
  */
 async function upgradeP6Keyed(floor: Project, deps?: LiveLayerDeps): Promise<Project> {
   try {
-    const dsSpec = "./deepseek." + "server.ts";
+    const dsSpec = clientSafeServerSpecifier("deepseek");
     const ds = (await import(dsSpec)) as { isDeepSeekConfigured?: () => boolean };
     const configured = typeof ds.isDeepSeekConfigured === "function" ? ds.isDeepSeekConfigured() : false;
     if (!configured) return floor;
@@ -2945,7 +2949,7 @@ async function upgradeP6Keyed(floor: Project, deps?: LiveLayerDeps): Promise<Pro
       if (surfaceKind === "ui") p = { ...p, kind: "app" };
       else if (surfaceKind === "cli-tool") p = { ...p, kind: "tool" };
     }
-    const codegenSpec = "./codegen." + "server.ts";
+    const codegenSpec = clientSafeServerSpecifier("codegen");
     const codegen = (await import(codegenSpec)) as {
       liveP6Synthesis?: (p: Project, deps?: { treeFailure?: string }) => Promise<Project>;
     };
@@ -4044,7 +4048,7 @@ export async function wildStep(
     // denies direct `*.server.*` imports from the client bundle; a computed
     // specifier defers the load to runtime (bare-Node hosts resolve it
     // directly; the browser never triggers this path in deterministic mode).
-    const wildServerSpec = "./wild-mode." + "server.ts";
+    const wildServerSpec = clientSafeServerSpecifier("wild-mode");
     const reviewer =
       opts?.reviewer ?? (await import(wildServerSpec)).wildClassifierReview;
     const phase: PhaseId = project.currentPhase;

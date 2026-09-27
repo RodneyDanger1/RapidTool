@@ -69,7 +69,10 @@ export const STALE_TURN_PREFIX = (v: number): string =>
   `[earlier build state v${v} — may be stale] `;
 
 /** Parse the `v<N>` context version out of a provenance stamp; null when the
- *  stamp is missing or unparseable (unverifiable rows pass through untouched). */
+ *  stamp is missing or unparseable (unverifiable rows pass through untouched).
+ *  MIRROR: chat.ts `chatStampVersion` — the client-safe copy of this parser
+ *  (this module is server-only); the two must stay byte-identical and
+ *  chat.test.ts pins their parity. Edit BOTH when this parse ever changes. */
 export function provenanceVersion(provenance: string | undefined | null): number | null {
   if (typeof provenance !== "string") return null;
   const m = /v(\d+)/.exec(provenance);
@@ -276,12 +279,14 @@ export function buildChatContext(project: Project): string {
   if (hasTree || lastTest) {
     if (hasTree) {
       const labelBit = testLabel ? `; lastTest label=${testLabel}` : "";
+      // K5-6 (fixes/294/295): DEFAULT-DENY. Only the two machine-proof labels
+      // may skip the caveat; any other value (persisted drift, a future fourth
+      // label) is NOT tree-run proven and must say so — the old allow-list let
+      // an unknown label read as proven (over-claim).
       const proven =
         testLabel === "tested" || testLabel === "real-run"
           ? ""
-          : testLabel === "self-test" || !testLabel
-            ? " (tree present — not tree-run proven)"
-            : "";
+          : " (tree present — not tree-run proven)";
       synthesisLine = clip(`synthesis: tree ${treeCount} files${labelBit}${proven}`, 160);
     } else if (testLabel === "tested") {
       synthesisLine = "synthesis: tested-equivalent (no generatedTree on project)";
@@ -471,8 +476,15 @@ export function runChatTool(name: ChatToolName, project: Project, context: strin
     if (src.length <= CHAT_READ_MAX) return src;
     return `${src.slice(0, CHAT_READ_MAX)}\n… truncated (${src.length} bytes, cap ${CHAT_READ_MAX})`;
   }
-  const fx = context.split("\n").find((l) => l.startsWith("fixtures:"));
-  return fx ?? "fixtures: (none on this project — field absent, not empty)";
+  if (name === "fixtures") {
+    const fx = context.split("\n").find((l) => l.startsWith("fixtures:"));
+    return fx ?? "fixtures: (none on this project — field absent, not empty)";
+  }
+  // K5-3 (fixes/294/295): the fixtures body was the silent DEFAULT arm — a name
+  // drift at runtime would have been answered with fixture text. Unreachable
+  // for the ChatToolName union (parseChatTool allow-lists every verb, and it is
+  // the only producer), so this tail is a CODED refusal, never a fallback body.
+  return `RT_E_VALIDATION: unknown chat tool "${String(name)}" — no tool body ran.`;
 }
 
 // ---------------------------------------------------------------------------

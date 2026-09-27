@@ -19,6 +19,7 @@ import {
   deepenResearch as deepenResearchEngine,
 } from "./engine.ts";
 import { canEnter, PHASE_LAST, priorsSealed, phaseDef, STOCK_HITL } from "./phases.ts";
+import { clientSafeServerSpecifier } from "./server-spec.ts";
 import { gateArtifact, hardDodBlockInto, hardDodMessage, runGate } from "./dod.ts";
 import { exportProjectJson, importProject as parseProjectJson } from "./io.ts";
 import { validateReport, applyReportResult, reportGateDelta, type ReportApplyReason } from "./report-intake.ts";
@@ -921,7 +922,8 @@ const persistOptions: PersistOptions<RapidState, PersistedSlice> = {
   name: PERSIST_NAME,
   // T0.1 (fixes/162): version the blob BEFORE any schema add. zustand defaults
   // version:0 with no migrate — a later bump would wipe every user and re-wipe
-  // every reload (the blob is never overwritten on a version mismatch).
+  // every reload (the unmigratable blob is rescued to `<name>.rescue` before
+  // the re-seed write overwrites it — see the K2 note below).
   // v0 → v1 is an identity migrate (legacy blobs keep their projects).
   // A FUTURE blob (fromVersion > 1) throws so onRehydrateStorage recovers via
   // recoverFromCorruptPersistence (clean re-seed), never silent-drop.
@@ -1041,7 +1043,7 @@ export const useRapid = create<RapidState>()(
         // the bundle) and the catch below returns the honest refusal; node
         // (tests, CLI-hosted) resolves + runs the real driveP6Journey.
         try {
-          const headlessSpec = "./headless." + "ts";
+          const headlessSpec = clientSafeServerSpecifier("headless", "ts");
           const headless = (await import(headlessSpec)) as {
             driveP6Journey?: (
               project: Project,

@@ -30,7 +30,24 @@ Evidence per item = `file:line` → before → after + `grep -c` reference count
 ## Log (append-only)
 
 ### [t0] log opened — HEAD d98643f; both source logs are header-only (K12 logged only `[t0]`; K3's findings table had 1 row and no fixes landed)
-- Recon: `src/lib/rt-events.ts` = 395 L, 56 registered names in `RT_EVENT_NAMES`
+- Recon: `src/lib/rt-events.ts` = 395 L, 55 registered names in `RT_EVENT_NAMES` (**corrected by P4
+  — was 56; full re-census in `fixes/295_p4_sweeps.md`**)
   (`grep -c '": "' `, catalogue lines 124-198). `src/lib/errors.ts` = 538 L. `errors.test.ts` = 485 L,
   `rt-events.test.ts` = 197 L.
 - Q1 scratch dir `~/w39q1_scratch/` intact (6 scripts + 2 exports dumps) — will be re-run/verified, not trusted blind.
+
+### [P4] tail landed (`fixes/295_p4_sweeps.md`) — census re-run + TODOs written + naming/docs swept
+
+- **Census re-run on `ac6b151` bytes: 55 registered / 17 emitted / 38 never.** The count MOVED since
+  N6's read: N5's OPS-4 landed `event: "cli.invocation"` (`rapidtool-cli.mjs:163`, payload
+  `{cmd, exitCode}`), so the never-set is **38**, not 39. The rest of N6's verdict stands
+  (0 server/CLI-emitted under their exact names; the 38 read-side-only refs re-verified).
+- **W3 landed:** grouped `TODO(N6-W3)` block under the catalogue in `rt-events.ts` (38 names, census
+  + row id named). **W6 landed:** dead-export TODOs beside `RtScope` / `WILD_STEP_AUTOPAUSE_MS` /
+  `LONGTASK_*` (all P4-recounted at 0 external refs). **W8 landed:** `deployNotes` alias in
+  `scaffold.ts` (pin untouched — `deplyNotes` NOT renamed).
+- **W4/W5/W7 re-verified — no renames:** RT_E grammar clean; the 11 test-name outliers are
+  false positives (N6's byte verdict stands); `scripts/README-cli.test.mjs` rename **refused** —
+  referenced by **55** `.md` files (pure churn, zero functional gain).
+- K3/Q1 caveat N6 recorded stands: dead-code detection still owes the "refs outside
+  errors.ts + README" variant.

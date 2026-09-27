@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compileAgentPacket, exportProfiles, PACKET_VERSION } from "./packet.ts";
+import { compileAgentPacket, exportProfiles, packetInputHash, PACKET_VERSION } from "./packet.ts";
 import { PHASES } from "./phases.ts";
 import type { CrewSeat, HitlDecision, Project } from "./types.ts";
 
@@ -843,6 +843,54 @@ test("H-05/D3 (pin): compiled_at derives from the newest state stamp, never wall
   assert.equal(env.compiled_at, expect, "System JSON compiled_at matches the prose stamp");
   // And a recompile right after (wall clock advanced) is still byte-identical:
   assert.equal(compileAgentPacket(p), out, "same project + same decision → same bytes");
+});
+
+// ---------------------------------------------------------------------------
+// F2-03 (W41 P1) — the stale-packet class: content-only inputs (operator
+// notes, artifacts, memory) can never move the ISO `compiled_at` stamp (H-05
+// keeps it clock-free), so the System JSON envelope also carries `input_hash`
+// — an FNV-1a fold over the same inputs the compile reads, INCLUDING notes,
+// artifacts and memory rows. A consumer comparing two packets can detect a
+// content change the timestamp alone cannot show; the fold is deterministic
+// (same project ⇒ same hash) with no wall clock anywhere in it.
+// ---------------------------------------------------------------------------
+
+test("F2-03: input_hash is present + deterministic; a notes edit moves it while compiled_at stays put", () => {
+  const p = makeProject();
+  const out1 = compileAgentPacket(p);
+  const h1 = parseSystemJson(out1).input_hash;
+  assert.equal(typeof h1, "string", "envelope carries a string input_hash");
+  assert.ok((h1 as string).length > 0, "input_hash is non-empty");
+  assert.equal(
+    parseSystemJson(compileAgentPacket(p)).input_hash,
+    h1,
+    "same project compiles to the same hash (clock-free)",
+  );
+  const before = parseSystemJson(out1).compiled_at;
+  p.notes = "Ship the offline queue first, not auth.";
+  const out2 = compileAgentPacket(p);
+  assert.notEqual(parseSystemJson(out2).input_hash, h1, "a notes change moves input_hash");
+  assert.equal(
+    parseSystemJson(out2).compiled_at,
+    before,
+    "the content-only edit never fakes a newer timestamp (stamp stays the state stamp)",
+  );
+});
+
+test("F2-03: input_hash folds artifacts + memory content; telemetry counters are excluded", () => {
+  const p = makeProject();
+  const h1 = packetInputHash(p);
+  p.artifacts = [...p.artifacts, { id: "art-f2-03", phase: 0, kind: "docs", title: "Carrier", body: "body" }];
+  const h2 = packetInputHash(p);
+  assert.notEqual(h2, h1, "an artifact append moves input_hash");
+  const row = { id: "mem-f2-03", kind: "semantic" as const, phase: 0 as const, text: "row text", score: 0.5 };
+  p.memory = [...p.memory, row];
+  const h3 = packetInputHash(p);
+  assert.notEqual(h3, h2, "a memory append moves input_hash");
+  // Documented telemetry counters (types.ts MemoryEntry) are "never part of any
+  // content fingerprint" — accruing them alone must not churn the hash.
+  p.memory = [...p.memory.slice(0, -1), { ...row, counterEvidence: 3, reproducedCount: 2 }];
+  assert.equal(packetInputHash(p), h3, "telemetry-only mutation leaves input_hash stable");
 });
 
 // ---------------------------------------------------------------------------
