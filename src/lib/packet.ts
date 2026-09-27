@@ -143,6 +143,9 @@ function systemJson(
         phase: d.phase,
         decision: d.decision,
         decided_by: d.decidedBy,
+        // K7 payout (W40 solo): the machine block dropped the seat provenance the prose
+        // carries (F2-01) — additive key, null when absent (G2 item 1).
+        decided_via: d.decidedVia ?? null,
         note: d.note != null ? quoteNote(d.note, 200) : null,
         requested_at: d.requestedAt,
         decided_at: d.decidedAt,
@@ -639,7 +642,19 @@ export function compileAgentPacket(
     `Phase coverage: ${phaseCoverageLine(coverage)} — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).`,
     hitl,
     priorBlock,
-    project.lastTest ? `P6 template self-test (last run): ${project.lastTest.ok ? "pass" : "FAIL"} — ${project.lastTest.detail}` : "",
+    project.lastTest
+      ? `P6 ${
+          project.lastTest.label === "tested"
+            ? "self-test (machine-verified)"
+            : project.lastTest.label === "real-run"
+              ? "real run"
+              : "template self-test"
+        } (last run): ${project.lastTest.ok ? "pass" : "FAIL"} — ${project.lastTest.detail}${
+          (project.lastTest as { evidenceHash?: string }).evidenceHash
+            ? ` · evidence ${(project.lastTest as { evidenceHash?: string }).evidenceHash}`
+            : ""
+        }`
+      : "",
     project.scorecard ? `Verdict: ${project.scorecard.verdict}` : "",
     ...(ledgerRows.length
       ? [`## Decision ledger (HITL)`, ledgerRows.join("\n")]

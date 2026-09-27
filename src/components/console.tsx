@@ -1182,7 +1182,8 @@ function WildConsole({ project }: { project: Project }) {
       try {
         reportRt({
           level: "info",
-          scope: "wild-driver",
+          scope: "sys", // K7 payout (W40 solo): was "wild-driver" — scope+event is the coalesce key
+          // (rt-events.ts shouldCoalesce), so the old scope could never merge with rt-client's heartbeats.
           event: "sys.heartbeat",
           message: "Wild feed poll alive",
           capture: "src/components/console.tsx:WildFeed watchdog",

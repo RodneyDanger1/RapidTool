@@ -696,8 +696,10 @@ export function buildClientDiagnosis(input: ClientDiagnosisInput, now: number = 
         chatLog: input.project?.chatLog?.length ?? 0,
       },
       bytes: {
-        projectFile: 0,
-        logDirBytes: 0,
+        // K7 payout (W40 solo): a browser CANNOT measure these — honest null + "not measured"
+        // semantics (was a fake 0, the G4 item-5 class). Consumers render null as unknown.
+        projectFile: null,
+        logDirBytes: null,
         localStorageEstimate: storageBytes(),
       },
       counts,

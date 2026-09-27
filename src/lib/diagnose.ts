@@ -62,7 +62,9 @@ export type DiagnosisWatchdog = {
 
 export type DiagnosisGrowth = {
   rows: Record<string, number>;
-  bytes: Record<string, number>;
+  // W40 solo (K7/G4): values may be null where the surface genuinely cannot measure
+  // (the browser's projectFile/logDirBytes) — null = "not measured", never a fake 0.
+  bytes: Record<string, number | null>;
   counts: Record<string, number>;
 };
 

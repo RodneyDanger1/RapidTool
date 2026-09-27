@@ -32,7 +32,10 @@ export function parseWriteAtomicArgs(argv) {
 
 function isInside(dir, file) {
   const rel = relative(dir, file);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+  // K3 payout (W39): the segment-correct escape test (relativeEscapes from
+  // path-safety.mjs) replaces the old `!rel.startsWith("..")` overreach that
+  // mis-classified legitimate `..foo` names; isAbsolute stays for drive-mismatch.
+  return rel !== "" && !relativeEscapes(rel) && !isAbsolute(rel);
 }
 
 /**

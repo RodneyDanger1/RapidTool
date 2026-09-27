@@ -23,4 +23,10 @@ _(starting — verifying now)_
 
 ## LEDGER (final) + HANDOFFS `for <lane>`
 
-_(written at close)_
+**Parent-completed (W40 solo finish, 2026-09-27 ~02:0x; content verified from this lane's summary):**
+
+**Fixed by K10: 3** — A1-24 · A1-28-residual · A1-30-residual.
+**Verified already landed by Y2/N2 (byte-checked, no overstatement found): 29** — the 24 §A1 rows (A1-13…A1-33 spot-verified with file:line evidence; e.g. A1-13 store.ts:1217 one releaseWildStart + grep=2 · A1-15 PHASE_LAST phases.ts:165 + 6 store sites · A1-19 store.ts:625 llm.degrade + classifyError · A1-20 CHAT_LOG_MAX_ROWS=40 :742/:1811 · A1-21 anyRepaired :2500→:2581 · A1-27 engine.ts:362 immutable spread · A1-30 clamp engine.ts:2097 · A1-31/32 packet.ts:498-509) + the 5 §F3 rows confirmed true.
+**Deferred with TODO / still open: 5 in-box** — A1-45 · A1-07 · A1-12 · the checkpoint-module residuals A1-02/04/05/08/09 (N2 closed the 10 top cards; these are the residue) · remaining clamp sites.
+**Out-of-box: 3** — A1-38/41/42 (for K12/K13 boxes; K12's log records them).
+**Parent note:** the verification tables above ARE the evidence; the per-row file:line proofs live in the delegation summary (`subagent-summary-0-20260927_013043_530419.txt`). Post-boundary gate status: typecheck+lint green at `be12c59`.

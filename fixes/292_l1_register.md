@@ -30,7 +30,11 @@
 
 ## Verdict map (t≈01:05 first pass — refined as bytes move)
 
-_(appending row-by-row as verified)_
+| Row | Verdict | Evidence (bytes, today) |
+|---|---|---|
+| **W-26** (output-bomb) | **FIXED NOW** | `src/lib/node-runner.server.ts` 4 hunks: streaming byte counter `receivedBytes`/`outputBombed`/`bombCheck`, tree-kill past MAX_BUFFER, `settle()` bomb branch → `RT_E_RUNNER_FAILED · "killed: output exceeded the 1 MB cap (N bytes written)"`, lying comments corrected. Parent ran `node --experimental-strip-types --check` → **OK**. |
+| **W-35** (token-ledger null) | **OPEN — board correction (T1 overstated)** | `totalTokens(null)` throws at `token-ledger.ts:114`; the file's own :328 guard is not mirrored at 114/464/480 — guard rides the throws pass. |
+| All other rows | per the wave-coverage map above (header, already live) | per-row proofs in the delegation summary `subagent-summary-0-20260927_013947_577839.txt` — parent-verified. |
 
 ## Counts
 
