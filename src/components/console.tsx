@@ -79,6 +79,10 @@ import { WILD_STEP_BUDGET_MS } from "@/lib/rt-events";
 // for cross-component imports (routes import "@/components/console.tsx").
 import { CmdPalette, type CmdPaletteEntry } from "@/components/cmd-palette.tsx";
 import { RuntimeTimelinePane } from "@/components/runtime-timeline-pane.tsx";
+// W309 A6 (M4-01 · BUG-308-08): the pipeline-visibility rail built by W307 U2
+// (fixes/307_u2_pipeline.md) — 0 importers since 800a40d until this mount.
+// Additive sibling of PhaseProgressRail; nothing above is replaced.
+import { PipelineRail } from "@/components/pipeline-rail.tsx";
 
 /** One prior copilot turn — structural ChatTurn (chat.server.ts shape). */
 type ChatTurn = { role: "user" | "assistant"; text: string };
@@ -3207,6 +3211,11 @@ export function RunScreen({ id }: { id: string }) {
           <PendingFixturesBanner project={project} />
 
           <PhaseProgressRail project={project} />
+
+          {/* W309 A6 (M4-01): U2's pipeline rail — rail + now-line + click-for-
+              detail + the ring.stall latch's first continuous app reader.
+              Mounted after its sibling PhaseProgressRail; additive. */}
+          <PipelineRail project={project} />
 
           <WildConsole project={project} />
 

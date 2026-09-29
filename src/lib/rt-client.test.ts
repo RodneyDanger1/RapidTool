@@ -95,8 +95,13 @@ test("stall latch sidecar: set/peek/clear round-trip", () => {
   const stall = peekStall();
   assert.equal(stall?.class, "step-timeout");
   assert.equal(stall?.stepElapsedMs, 900);
+  // W309 A6 (M4-02): console's RunScreen mounts the pipeline rail, whose stall
+  // row renders `snap.ring.stall` — pin that the rtSnapshot really carries the
+  // seeded latch field-for-field (the rail's exact read path).
+  assert.deepEqual(rtSnapshot().ring.stall, stall);
   clearStall();
   assert.equal(peekStall(), null);
+  assert.equal(rtSnapshot().ring.stall, null, "clearStall empties the snapshot view too");
 });
 
 test("heartbeat rows divert to the sidecar, never the row list", () => {

@@ -28,6 +28,8 @@
 // app's hottest module, and console.tsx is U1's box this wave. Its real-field
 // reads are replicated 1:1 (ledger: fixes/307_u2_pipeline.md §2); this
 // component stays self-contained so U1's wiring is a 2-line import + mount.
+// W309 A6: that mount is DONE — console.tsx imports this and renders it in
+// RunScreen right after PhaseProgressRail (additive; nothing replaced).
 // ---------------------------------------------------------------------------
 
 import { useEffect, useState } from "react";
@@ -142,6 +144,10 @@ function pickNowLine(project: Project, tail: RtEvent[], ringRows: number): NowLi
       source: "wild",
       ts: wr.lastAutoAt,
       tone: "text-wild",
+      // Display-only provenance label, NOT a telemetry event: nothing passes
+      // "wild.auto" to reportRt and it is deliberately absent from
+      // RT_EVENT_NAMES (308_bugmap NOTE-308-03 / 309 A6; the N6 census
+      // conflated this display row with real emitters).
       event: "wild.auto",
       text: wr.lastAutoLog,
       code: null,
@@ -413,9 +419,16 @@ export function PipelineRail({ project }: { project: Project }) {
     attention.push({ code: cur?.code ?? `P${project.currentPhase}`, word: "Blocked — review the notes", tone: "text-danger" });
   }
   const park = project.wildRun?.park ?? null;
-  // §5.2/§5.3 stall latch (ring sidecar). W307 U2: until this component, NO app
-  // surface read it — the latch was writer-only (rt-client's heartbeat sets
-  // `mainthread-stall`; `peekStall` had zero app consumers). First real reader.
+  // §5.2/§5.3 stall latch (ring sidecar). W307 U2 delivered this component but
+  // it had ZERO importers until W309 A6 mounted it in console's RunScreen — so
+  // the old "First real reader" claim was false at delivery (zero readers) and
+  // holds only from the mount, precisely stated: this is the latch's first
+  // CONTINUOUS app-surface reader (the Diagnose pane's buildClientDiagnosis
+  // folds r.stall into its JSON on click only — rt-client.ts:663). It reads the
+  // latch through the rtSnapshot ring view (`snap.ring.stall`, raw RtRing), NOT
+  // `peekStall()` (test-only consumers). Writer: installRtClient's heartbeat
+  // ("mainthread-stall", critical lag while a busy run ticks — rt-client.ts:528).
+  // Read path pinned in rt-client.test.ts (M4-02, 309 A6).
   const stall = snap.ring.stall;
 
   return (
