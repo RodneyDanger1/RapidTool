@@ -136,12 +136,95 @@ export type JsonLog = {
 };
 
 /**
+ * 306 F5 (fixes/306_f5_pipeline.md) — coded unlock class for a parked wild run:
+ * WHAT lets the run continue. Mapped to print-ready copy in engine.ts's
+ * WILD_UNLOCK_TEXT (carried on every park as `unlockText`) so a UI/agent never
+ * invents its own mapping:
+ *  - "configure-key": configure the LLM key so Auto-Review can verdict, then resume.
+ *  - "human-gate":    a human must approve/reject the open gate, then resume.
+ *  - "human-retry":   a human decision is required (fix/regenerate/retry), then resume.
+ *  - "resume":        plain resume retries the step (no repair named).
+ *  - "operator":      the run state itself looks wrong — inspect, repair, resume.
+ */
+export type WildParkUnlock = "configure-key" | "human-gate" | "human-retry" | "resume" | "operator";
+
+/** What the NEXT wild step acts on (the re-entry edge). "park" = the next call
+ *  parks again (locked/rejected edges); "none" = terminal / nothing to do. */
+export type WildNextAction = "execute" | "gate" | "advance" | "finalize" | "park" | "none";
+
+/**
+ * 306 F5 — the machine-readable PARK RECORD of a wild run, present on
+ * `WildRunState.park` whenever `pause === true`. It answers the three
+ * questions a driver, a UI and an agent all ask of a parked run without
+ * reading prose:
+ *   WHY                  — `code` (the `WildStepResult.code` RT_E_* class;
+ *                          null for uncoded pauses: operator toggles and the
+ *                          store's defensive step cap), plus `reason`.
+ *   WHAT UNLOCKS         — `unlock` (coded class) + `unlockText` (same class,
+ *                          one ready-to-print sentence).
+ *   WHERE resume re-enters — `resumePhase` + `resumeAction`: the edge the next
+ *                          wild step acts on after a resume. For checkpointed
+ *                          runs this is the same edge the checkpoint records
+ *                          as `run.phase` (headless.loadResumableCheckpoint).
+ */
+export type WildParkInfo = {
+  /** Why (coded): the RT_E_* class of the pause; null when the pause carries no
+   *  code (operator pause, store step cap). */
+  code: import("./errors.ts").ErrorCode | null;
+  /** Ledger event that recorded the park; null for uncoded operator pauses. */
+  event: string | null;
+  /** One-line reason — bounded copy of the park's own ledger detail. */
+  reason: string;
+  unlock: WildParkUnlock;
+  /** Print-ready sentence for `unlock` (engine.ts WILD_UNLOCK_TEXT). */
+  unlockText: string;
+  /** Where a resume re-enters: the edge (phase id) the next wild step acts on. */
+  resumePhase: number;
+  resumeAction: WildNextAction;
+  /** When the park was stamped (epoch ms). */
+  at: number;
+};
+
+/**
+ * 306 F5 — the machine-readable summary of ONE executed wild step: what ran,
+ * what it produced, what's next. Stamped on `WildRunState.lastStep` by every
+ * executed step so the console/CLI/agents read the SAME truth from the
+ * persisted record; also carried on `WildStepResult.summary` and (flattened)
+ * in the `wild.step_*` telemetry payloads. Prose (`lastAutoLog`) is for humans;
+ * this is what drivers branch on.
+ */
+export type WildStepSummary = {
+  outcome: "advanced" | "completed" | "paused";
+  /** What the call did: executed a phase, resolved an open gate, left a
+   *  complete phase, finalized P12 — or parked. */
+  action: "execute" | "gate" | "advance" | "finalize" | "park";
+  /** The edge the step acted on (the project's current phase at call time). */
+  phase: number;
+  /** A phase this step sealed (gate approval / execution); null otherwise. */
+  completedPhase: number | null;
+  /** The cursor moved here; null when the edge held (execute/park paths). */
+  advancedTo: number | null;
+  /** Net artifacts this step appended (never negative). */
+  artifacts: number;
+  /** What's next: the edge the next call acts on. */
+  nextPhase: number;
+  nextAction: WildNextAction;
+  /** Present iff `action === "park"` — the same object as `WildRunState.park`. */
+  park?: WildParkInfo;
+};
+
+/**
  * Live Wild Mode autonomous-run surface (Pillar 13) — the exact field set the
  * console (B7) streams: active/paused lifecycle, the frontier `phase`, and the
  * latest auto decision (`lastAutoLog`/`lastAutoAt`) so every step is observable
  * without paging the ledger. `stoppedAt` is set on natural completion (P12)
  * and on operator stops; a PAUSED run keeps `active: true` + `pause: true`
  * until the operator resumes (toggleWildPause) or stops (stopWildRun).
+ *
+ * 306 F5 additions (additive; absent on legacy payloads): `lastStep` carries
+ * the last executed step's machine summary and `park` the coded why/unlock/
+ * re-entry record of the current pause. Both are optional — hydrate keeps them
+ * only when shaped right (engine.hydrateWildRun).
  */
 export type WildRunState = {
   active: boolean;
@@ -151,6 +234,10 @@ export type WildRunState = {
   lastAutoAt: number | null;
   stoppedAt: number | null;
   pause: boolean;
+  /** 306 F5: the last executed step's machine-readable summary. */
+  lastStep?: WildStepSummary | null;
+  /** 306 F5: why/unlock/re-entry of the current pause — present iff `pause`. */
+  park?: WildParkInfo | null;
 };
 
 /**

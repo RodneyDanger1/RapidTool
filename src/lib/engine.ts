@@ -60,7 +60,11 @@ import type {
   Project,
   ResearchCorpusEntry,
   SchedulerPlan,
+  WildNextAction,
+  WildParkInfo,
+  WildParkUnlock,
   WildPlan,
+  WildStepSummary,
 } from "./types";
 
 // knowledge.ts is disk-backed (statically imports node:fs) — a static import
@@ -3588,6 +3592,14 @@ export type WildStepResult = {
    * transition → RT_E_PHASE_ILLEGAL · unexpected engine throw → RT_E_INTERNAL.
    */
   code?: ErrorCode;
+  /**
+   * 306 F5 — what ran · what it produced · what's next, machine-readable.
+   * Present on every executed step (paused/advanced/completed); absent on
+   * noop. Also stamped on `project.wildRun.lastStep` and (flattened) into the
+   * `wild.step_*` telemetry payloads, so store, CLI, console and drivers read
+   * the same truth.
+   */
+  summary?: WildStepSummary;
 };
 
 /** Reviewer seam (defaults to the deepseek-v4-flash Auto-Review classifier). */
@@ -3656,15 +3668,92 @@ function wildPatch(p: Project, patch: Partial<NonNullable<Project["wildRun"]>>):
   return { ...p, wildRun: { ...cur, ...patch, phase: patch.phase ?? p.currentPhase } };
 }
 
-/** Pause the run (pause:true, active stays true) + ledger entry. */
+/**
+ * 306 F5 — coded unlock class → the ONE print-ready sentence carried by every
+ * park (`WildParkInfo.unlockText`), so the console/CLI/agents never need their
+ * own copy map (and cannot drift from each other).
+ */
+const WILD_UNLOCK_TEXT: Record<WildParkUnlock, string> = {
+  "configure-key": "Configure the LLM key (DEEPSEEK_API_KEY) so Auto-Review can verdict, then resume the run.",
+  "human-gate": "A human must approve or reject the open gate (console/CLI), then resume the run.",
+  "human-retry": "A human decision is required (fix, regenerate or retry), then resume the run.",
+  resume: "Resume the run to retry the step.",
+  operator: "Inspect the run state, repair it, then resume the run.",
+};
+
+/**
+ * 306 F5 — what the next wild step would do at `phase`, derived from the
+ * project's OWN status/records (never from a previous result). This is the ONE
+ * re-entry truth parks and summaries advertise: "park" = the next call pauses
+ * again (locked/rejected edges need a human/repair first); "none" = terminal.
+ */
+function wildNextActionAt(p: Project, phase: number): WildNextAction {
+  if (p.status === "complete") return "none";
+  const rec = (p.phases ?? []).find((r) => r.id === phase);
+  if (!rec) return "none";
+  if (rec.status === "awaiting_hitl" || p.hitl?.phase === phase) return "gate";
+  if (rec.status === "complete") return phase === PHASE_LAST ? "finalize" : "advance";
+  if (rec.status === "ready" || rec.status === "running") return "execute";
+  return "park";
+}
+
+/** 306 F5 — the re-entry edge of the run's current cursor (see wildNextActionAt). */
+export function wildNextEdgeOf(p: Project): { phase: number; action: WildNextAction } {
+  return { phase: p.currentPhase, action: wildNextActionAt(p, p.currentPhase) };
+}
+
+/** 306 F5 — build the park record stamped on `wildRun.park` (WHY coded · WHAT
+ *  UNLOCKS · WHERE a resume re-enters). `phase` is the paused edge. */
+function wildParkInfo(
+  p: Project,
+  phase: PhaseId,
+  event: string | null,
+  detail: string,
+  park: { code: ErrorCode | null; unlock: WildParkUnlock },
+): WildParkInfo {
+  return {
+    code: park.code,
+    event,
+    reason: detail.slice(0, 200),
+    unlock: park.unlock,
+    unlockText: WILD_UNLOCK_TEXT[park.unlock],
+    resumePhase: phase,
+    resumeAction: wildNextActionAt(p, phase),
+    at: Date.now(),
+  };
+}
+
+/** 306 F5 — the park record for an OPERATOR pause (console toggle / CLI pause):
+ *  uncoded (code/event null) but it still says what unlocks (resume) and where a
+ *  resume re-enters, so EVERY paused state answers why/what/where uniformly. */
+export function wildOperatorPark(p: Project, detail: string): WildParkInfo {
+  return wildParkInfo(p, p.currentPhase, null, detail, { code: null, unlock: "resume" });
+}
+
+/**
+ * Pause the run (pause:true, active stays true) + ledger entry.
+ *
+ * 306 F5: every pause stamps the machine-readable `park` record — WHY (coded) ·
+ * WHAT UNLOCKS · WHERE a resume re-enters — so a parked run is drivable from the
+ * persisted record instead of prose. Pass `park` on every coded pause (engine
+ * arms); omitted ⇒ an uncoded park cleared to null (the operator-pause paths
+ * stamp their own record via wildOperatorPark).
+ */
 export function wildPause(
   p: Project,
   phase: PhaseId,
   level: JsonLog["level"],
   event: string,
   detail: string,
+  park?: { code: ErrorCode | null; unlock: WildParkUnlock } | null,
 ): Project {
-  const stamped = wildPatch(p, { pause: true, lastAutoLog: detail.slice(0, 300), lastAutoAt: Date.now() });
+  const info = park ? wildParkInfo(p, phase, event, detail, park) : null;
+  const stamped = wildPatch(p, {
+    pause: true,
+    park: info,
+    lastAutoLog: detail.slice(0, 300),
+    lastAutoAt: Date.now(),
+  });
   return wildLog(stamped, phase, level, event, detail);
 }
 
@@ -3958,6 +4047,76 @@ async function wildP6Edge(project: Project): Promise<Project> {
 }
 
 /**
+ * 306 F5 — derive the machine-readable outcome summary of ONE executed step
+ * from (input project, result, action). Everything is READ from the two
+ * projects — never guessed: completedPhase/advancedTo/artifacts are the real
+ * deltas; `next` comes from the output's own records (wildNextEdgeOf).
+ */
+function wildStepSummaryOf(
+  before: Project,
+  result: WildStepResult,
+  action: WildStepSummary["action"],
+): WildStepSummary {
+  const after = result.project;
+  const edge = before.currentPhase;
+  const paused = result.outcome === "paused";
+  const beforeRec = (before.phases ?? []).find((r) => r.id === edge);
+  const afterRec = (after.phases ?? []).find((r) => r.id === edge);
+  const completedPhase =
+    beforeRec !== undefined &&
+    afterRec !== undefined &&
+    beforeRec.status !== "complete" &&
+    afterRec.status === "complete"
+      ? edge
+      : null;
+  const advancedTo = after.currentPhase !== before.currentPhase ? after.currentPhase : null;
+  const artifacts = Math.max(0, (after.artifacts?.length ?? 0) - (before.artifacts?.length ?? 0));
+  const next = wildNextEdgeOf(after);
+  const park = paused ? after.wildRun?.park ?? null : null;
+  return {
+    outcome: result.outcome === "advanced" || result.outcome === "completed" ? result.outcome : "paused",
+    action: paused ? "park" : action,
+    phase: edge,
+    completedPhase,
+    advancedTo,
+    artifacts,
+    nextPhase: next.phase,
+    nextAction: next.action,
+    ...(park ? { park } : {}),
+  };
+}
+
+/** 306 F5 — stamp the summary on the step's output project (no-op without a
+ *  wildRun surface — a noop/refusal result never reaches here). */
+function wildStampSummary(p: Project, summary: WildStepSummary): Project {
+  return p.wildRun ? { ...p, wildRun: { ...p.wildRun, lastStep: summary } } : p;
+}
+
+/** 306 F5 — flatten a summary into the RtEventSeed payload vocabulary (FLAT
+ *  scalars only; the events registry's payload is a flat record by contract). */
+function wildSummaryPayload(s: WildStepSummary): NonNullable<RtEventSeed["payload"]> {
+  return {
+    outcome: s.outcome,
+    action: s.action,
+    phase: s.phase,
+    completedPhase: s.completedPhase,
+    advancedTo: s.advancedTo,
+    artifacts: s.artifacts,
+    nextPhase: s.nextPhase,
+    nextAction: s.nextAction,
+    ...(s.park
+      ? {
+          parkCode: s.park.code,
+          parkEvent: s.park.event,
+          parkUnlock: s.park.unlock,
+          parkResumePhase: s.park.resumePhase,
+          parkResumeAction: s.park.resumeAction,
+        }
+      : {}),
+  };
+}
+
+/**
  * P13 bounded autonomous step — the headless Wild Mode primitive. See the
  * section header for semantics. Never mutates its input; `opts.reviewer`
  * injects the Auto-Review classifier (tests), defaulting to the real
@@ -3975,39 +4134,50 @@ export async function wildStep(
     project.wildRun?.startedAt !== null && project.wildRun?.startedAt !== undefined
       ? String(project.wildRun.startedAt)
       : null;
-  const emitPaused = (result: WildStepResult): WildStepResult => {
-    if (emit && result.outcome === "paused") {
+  /** 306 F5: attach the outcome summary to BOTH the result and its project
+   *  (`wildRun.lastStep`) — done with or without a telemetry sink, so the
+   *  persisted record is the same truth the events carry. */
+  const summarized = (result: WildStepResult, action: WildStepSummary["action"]): WildStepResult => {
+    const summary = wildStepSummaryOf(project, result, action);
+    return { ...result, summary, project: wildStampSummary(result.project, summary) };
+  };
+  /** 306 F5: the one finish path for every dispatched step — summarize, stamp,
+   *  then emit `wild.step_paused`/`wild.step_ok` with the summary flattened into
+   *  the payload (long-run feedback: every event carries what ran/produced/next). */
+  // W43 repair (F5 left the rewire mid-flight): the four legacy emitPaused call
+  // sites all map to the same action — one exact delegate keeps their semantics
+  // byte-identical while finishStep carries the new wild.step_* summary events.
+  const emitPaused = (result: WildStepResult): WildStepResult => finishStep(result, "park");
+  const finishStep = (result: WildStepResult, action: WildStepSummary["action"]): WildStepResult => {
+    const out = summarized(result, action);
+    if (!emit) return out;
+    if (out.outcome === "paused") {
       emit({
         level: "warn",
         scope: "wild-step",
         event: "wild.step_paused",
-        message: result.error ?? "Wild step paused",
+        message: out.error ?? "Wild step paused",
         capture: "src/lib/engine.ts:wildStep",
-        code: result.code ?? null,
+        code: out.code ?? null,
         phase: project.currentPhase,
         projectId: project.id,
         runRef,
+        payload: wildSummaryPayload(out.summary!),
       });
-    }
-    return result;
-  };
-  const emitResult = (result: WildStepResult): WildStepResult => {
-    if (!emit) return result;
-    if (result.outcome === "paused") return emitPaused(result);
-    if (result.outcome === "advanced" || result.outcome === "completed") {
+    } else if (out.outcome === "advanced" || out.outcome === "completed") {
       emit({
         level: "info",
         scope: "wild-step",
         event: "wild.step_ok",
-        message: `Wild step ${result.outcome}`,
+        message: `Wild step ${out.outcome}`,
         capture: "src/lib/engine.ts:wildStep",
         phase: project.currentPhase,
         projectId: project.id,
         runRef,
-        payload: { outcome: result.outcome },
+        payload: wildSummaryPayload(out.summary!),
       });
     }
-    return result;
+    return out;
   };
   const emitStart = (phase: PhaseId): void => {
     emit?.({
@@ -4019,7 +4189,7 @@ export async function wildStep(
       phase,
       projectId: project.id,
       runRef,
-      payload: { phase },
+      payload: { phase, action: wildNextActionAt(project, phase) },
     });
   };
   try {
@@ -4030,19 +4200,23 @@ export async function wildStep(
       return { project, outcome: "noop", ran: false, error: "Wild run is paused." };
     }
     if (project.status === "blocked") {
-      return emitPaused({
-        project: wildPause(
-          project,
-          project.currentPhase,
-          "warn",
-          "wild.paused",
-          "Project blocked (rejected phase) — wild run paused; retry is a human decision.",
-        ),
-        outcome: "paused",
-        ran: true,
-        error: "Project blocked.",
-        code: "RT_E_PHASE_ILLEGAL",
-      });
+      return finishStep(
+        {
+          project: wildPause(
+            project,
+            project.currentPhase,
+            "warn",
+            "wild.paused",
+            "Project blocked (rejected phase) — wild run paused; retry is a human decision.",
+            { code: "RT_E_PHASE_ILLEGAL", unlock: "human-retry" },
+          ),
+          outcome: "paused",
+          ran: true,
+          error: "Project blocked.",
+          code: "RT_E_PHASE_ILLEGAL",
+        },
+        "park",
+      );
     }
     if (project.status === "complete") {
       return { project, outcome: "noop", ran: false, error: "Project already complete." };
@@ -4068,12 +4242,12 @@ export async function wildStep(
     // Open gate on the current edge → classifier decision (approve or pause).
     if (rec.status === "awaiting_hitl" || project.hitl?.phase === phase) {
       emitStart(phase);
-      return emitResult(await wildApproveGate(project, phase, reviewer));
+      return finishStep(await wildApproveGate(project, phase, reviewer), "gate");
     }
     if (rec.status === "complete") {
       emitStart(phase);
-      if (phase === 12) return emitResult(wildFinalize(project, phase));
-      return emitResult(await wildLeavePhase(project, phase, reviewer));
+      if (phase === 12) return finishStep(wildFinalize(project, phase), "finalize");
+      return finishStep(await wildLeavePhase(project, phase, reviewer), "advance");
     }
     if (rec.status === "locked") {
       return emitPaused({
@@ -4147,19 +4321,19 @@ export async function wildStep(
         : `P6 executed (${opts?.p6Edge ? "injected edge seam" : "keyed synthesis edge"})`,
     );
     if (done.hitl?.phase === phase) {
-      return emitResult(await wildApproveGate(done, phase, reviewer));
+      return finishStep(await wildApproveGate(done, phase, reviewer), "gate");
     }
     if (phase === 12) {
       // P0-08 Hole B (fixes/97): the terminal packet was compiled inside
       // applyPhaseResult BEFORE the P12 gate was recorded — re-stamp so the
       // final packet's gate_passed for P12 is never null on wild runs.
-      return emitResult(wildFinalize(stampPacket(recordGateInto(done, phase)), phase));
+      return finishStep(wildFinalize(stampPacket(recordGateInto(done, phase)), phase), "finalize");
     }
     // Phase completed without a gate: record the DoD verdict AND re-stamp the
     // packet (store finishPhase parity — audit-31 convergence fix), then let
     // the reviewer decide whether the loop may LEAVE it.
     const gated = stampPacket(recordGateInto(done, phase));
-    return emitResult(await wildLeavePhase(gated, phase, reviewer));
+    return finishStep(await wildLeavePhase(gated, phase, reviewer), "advance");
   } catch (err) {
     // Any unexpected engine error pauses the run with an honest ledger entry —
     // never a silent swallow, never a fabricated verdict.

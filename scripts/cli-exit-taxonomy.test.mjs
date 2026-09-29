@@ -192,3 +192,47 @@ test("two-channel seat — the same-env-var-both-sides degeneracy stays statical
     `claim sites (${claimSites.length}) !== humanSeatClaim( calls (${seamCalls.length}) — a claim bypasses the ONE seat seam`,
   );
 });
+
+// ---------------------------------------------------------------------------
+// Leg 4 (G8/OPS-13, W42): envelope-code registry membership. The CLI's
+// `ensureErrorCodes` doc-guard only lets a classifier result ride an envelope
+// when it is shape-valid AND registered in `ERROR_CODE_DOC`; this leg pins the
+// STATIC side — every quoted `RT_E_*` literal in the CLI must be a registered
+// code, so a literal can never drift out of `src/lib/errors.ts` unnoticed.
+// ---------------------------------------------------------------------------
+const ERRORS_PATH = fileURLToPath(new URL("../src/lib/errors.ts", import.meta.url));
+
+test("envelope codes — every RT_E_* literal in the CLI is registered in ERROR_CODE_DOC", () => {
+  const errorsText = readFileSync(ERRORS_PATH, "utf8");
+  const docBlock = errorsText.match(/export const ERROR_CODE_DOC[^=]*=\s*\{([\s\S]*?)\n\};/);
+  assert.ok(
+    docBlock,
+    "ERROR_CODE_DOC block not found in src/lib/errors.ts — re-derive this guard against the new shape",
+  );
+  const docCodes = new Set(
+    [...docBlock[1].matchAll(/^\s*(RT_E_[A-Z0-9_]+):/gm)].map((m) => m[1]),
+  );
+  // Vacuity floor: 34 registered codes at the W42 write. A shrunken extraction
+  // means the block's shape moved — re-derive instead of reading a green.
+  assert.ok(
+    docCodes.size >= 30,
+    `ERROR_CODE_DOC extraction found only ${docCodes.size} codes — the scan has gone vacuous; re-derive this guard.`,
+  );
+  // Widened scan (A-66): every quoted RT_E_* literal — `code: "…"` fields AND
+  // `payload.code = "…"` assignments; no single-quoted/backticked forms exist
+  // today, both are scanned so a future one cannot dodge the guard.
+  const literals = [
+    ...new Set([...cliText.matchAll(/["'`](RT_E_[A-Z0-9_]*)["'`]/g)].map((m) => m[1])),
+  ];
+  // Vacuity floor: 14 distinct literals at the W42 write.
+  assert.ok(
+    literals.length >= 10,
+    `found only ${literals.length} RT_E_* literals in the CLI — the scan has gone vacuous (quoting changed?). Re-derive this guard.`,
+  );
+  const unregistered = literals.filter((c) => !docCodes.has(c));
+  assert.deepEqual(
+    unregistered,
+    [],
+    `CLI literals outside ERROR_CODE_DOC (${ERRORS_PATH}): ${unregistered.join(", ")} — register the code in src/lib/errors.ts's ERROR_CODES+ERROR_CODE_DOC or fix the literal; envelopes must never carry unregistered codes (OPS-13).`,
+  );
+});

@@ -212,8 +212,18 @@ async function ensureErrorCodes() {
     );
     if (typeof mod.classifyError === "function") {
       const fn = mod.classifyError;
+      // OPS-13 (W42 · L4/G8): when the errors module ships its own registry
+      // (ERROR_CODE_DOC), a shape-valid code that is NOT in the registry must
+      // not ride an envelope — `code in doc` is the contract. Doc-absent
+      // (module absent / older errors.ts) keeps the legacy shape-only rule.
+      const doc =
+        mod.ERROR_CODE_DOC && typeof mod.ERROR_CODE_DOC === "object" ? mod.ERROR_CODE_DOC : null;
       const safe = (code) =>
-        typeof code === "string" && /^RT_E_[A-Z0-9_]+$/.test(code) ? code : null;
+        typeof code === "string" &&
+        /^RT_E_[A-Z0-9_]+$/.test(code) &&
+        (doc === null || code in doc)
+          ? code
+          : null;
       classify = (text) => {
         try {
           return safe(fn(text));
@@ -1831,7 +1841,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: `${findArg.error} (the str_replace needle; the edit refuses an empty --find)`,
+              error: `${findArg.error} (the str_replace needle; the edit refuses an empty --find) — a needle beginning with -- needs the --find=<value> form (parseArgs reads a -- token as the next flag)`,
               code: "RT_E_VALIDATION",
             },
             1,
@@ -1843,7 +1853,7 @@ async function main() {
           return respond(
             {
               ok: false,
-              error: 'edit: missing required --replace (pass the replacement text; --replace="" deletes the matched block)',
+              error: 'edit: missing required --replace (pass the replacement text — a value beginning with -- needs the --replace=<value> form; --replace="" deletes the matched block)',
               code: "RT_E_VALIDATION",
             },
             1,
@@ -3811,7 +3821,7 @@ const USAGE = {
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",
     packet: "packet --project <file.json> [--out <file.md>] [--knowledge <store.json>]  # --knowledge seeds the Ranked-memory section with cross-project accepted lesson rows (tier-1, advisory)",
     export: "export --project <file.json> [--out <file.json>]",
-    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse)",
+    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse)",
     fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR approve selected/all ids — never auto-approves: --approve routes through the policy seam's human seat (--i-am-human + a TTY re-entry of RT_HUMAN_SEAT_TOKEN; a denied verdict writes nothing and stamps no decidedBy)",
     eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, nothing fabricated — the eval-out documents are never written (like every verb, the exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/); a missing history prints as 'no history', never a fake 0 delta",
     "tree-run": "tree-run --dir <dir> [--project <file.json>]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0; red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",

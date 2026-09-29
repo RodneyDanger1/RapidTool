@@ -80,6 +80,9 @@ import type {
   WildPlan,
 } from "./types.ts";
 
+import type { DoctorSpend } from "./doctor.ts";
+import type { TokenLedger, TokenSpend } from "./token-ledger.ts";
+
 // ---------------------------------------------------------------------------
 // File persistence (atomic write via write-then-rename).
 // ---------------------------------------------------------------------------
@@ -3478,6 +3481,9 @@ export type DoctorStatus = {
       real: number;
       files: Array<{ path: string; kind: "stub" | "reexport" | "real" }>;
     } | null;
+    /** OPS-8 (W42 · L4/G9): the caller's measured spend — the session
+     *  budget's ledger by default; honest `measured:false` nulls when unmetered. */
+    spend: DoctorSpend;
   };
 };
 
@@ -3554,6 +3560,23 @@ export function collectJobSources(treeDir: string): Array<{ path: string; source
   return out;
 }
 
+/** OPS-8 (W42 · L4/G9): the pre-import floor's honest spend — byte-mirror of
+ *  `doctorSpend(null)`'s `empty` envelope (doctor.ts) so the catch-fallback
+ *  factory never diverges from the real helper's unmetered shape. */
+const DOCTOR_SPEND_FLOOR: DoctorSpend = {
+  measured: false,
+  promptTokens: null,
+  completionTokens: null,
+  totalTokens: null,
+  calls: null,
+  cachedPromptTokens: null,
+  cacheWriteTokens: null,
+  reasoningTokens: null,
+  estimatedCostUsd: null,
+  pricesSupplied: false,
+  line: "spend: none measured (no token-ledger sample handed in — keyless/unmetered or pre-synthesis; never estimated)",
+};
+
 /**
  * E-25: capability pre-flight for agent drivers — what CAN this host do right
  * now? Reads process.env through the server modules (never the server-fn
@@ -3566,7 +3589,12 @@ export function collectJobSources(treeDir: string): Array<{ path: string; source
  * leftover-job census into factoryClaim. Absent tree → RAPIDTOOL_FACTORY_EVIDENCE
  * (inventory null). Never invents job bodies.
  */
-export async function doctorStatus(opts?: { treeDir?: string }): Promise<DoctorStatus> {
+export async function doctorStatus(opts?: {
+  treeDir?: string;
+  /** OPS-8 (W42 · L4/G9): caller-measured spend; defaults to the process
+   *  session budget's ledger (`sessionTokenBudget().ledger`). */
+  spend?: TokenSpend | TokenLedger | null;
+}): Promise<DoctorStatus> {
   const llm = { configured: false, label: "not configured (set DEEPSEEK_API_KEY)" };
   try {
     const { isDeepSeekConfigured, DEEPSEEK_MODEL_IDS } = await import("./deepseek.server.ts");
@@ -3633,11 +3661,15 @@ export async function doctorStatus(opts?: { treeDir?: string }): Promise<DoctorS
       "product-complete bar not met (skip≠green; stubs≠complete)",
     ],
     inventory: null,
+    spend: DOCTOR_SPEND_FLOOR,
   };
   try {
     const doctor = await import("./doctor.ts");
+    // OPS-8 (W42 · L4/G9): the session budget's ledger is the measured-spend
+    // source; an explicit `opts.spend` overrides it. Shape lives in doctorSpend.
+    const { sessionTokenBudget } = await import("./token-ledger.ts");
     const treeDir = typeof opts?.treeDir === "string" && opts.treeDir.trim() ? opts.treeDir.trim() : "";
-    let claim = doctor.doctorFactory(process.env);
+    let claim = doctor.doctorFactory(process.env, opts?.spend ?? sessionTokenBudget().ledger);
     if (treeDir) {
       const files = collectJobSources(treeDir);
       const inv = doctor.inventoryFromJobSources(files, resolve(treeDir));
@@ -3653,6 +3685,7 @@ export async function doctorStatus(opts?: { treeDir?: string }): Promise<DoctorS
       tokenCap: claim.tokenCap,
       gaps: claim.gaps,
       inventory: claim.inventory,
+      spend: claim.spend,
     };
   } catch {
     /* keep the inline honest floor (factory stays false) */
