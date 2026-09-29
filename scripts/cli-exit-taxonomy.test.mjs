@@ -81,9 +81,11 @@ function countCodeOccurrences(pattern) {
   return n;
 }
 
-/** `errCode(err, "CODE")` call sites with the nearest following `}, <N>)`. */
+/** `errCode(<ident>, "CODE")` call sites with the nearest following `}, <N>)`.
+ *  W40 (Q8/R1): widened from `errCode(err, …)` to ANY identifier — `saveErr`-style
+ *  sites (:993) were previously unscanned. Widening only; same 28+ sites, 0 offenders. */
 function errCodeSites(source) {
-  const re = /errCode\(err,\s*"([A-Z0-9_]+)"\)/g;
+  const re = /errCode\(\s*[A-Za-z_$][\w$.]*\s*,\s*"([A-Z0-9_]+)"\s*\)/g;
   const sites = [];
   let m;
   while ((m = re.exec(source)) !== null) {

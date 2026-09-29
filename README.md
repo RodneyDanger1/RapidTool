@@ -306,15 +306,15 @@ set is committed (§10.13).
 
 | Area | Files | What it is |
 |---|---:|---|
-| `research/` | 468 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 15 · `eval-out/` 345 · 5 top-level research docs) |
-| `fixes/` | 419 | Append-only per-lane landing logs (§10.9) |
+| `research/` | 476 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 15 · `eval-out/` 345 · 5 top-level research docs) |
+| `fixes/` | 429 | Append-only per-lane landing logs (§10.9) |
 | `src/` | 210 | The product: engine + UI (§10.6) |
 | `wave_plans/` | 105 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 + the convention README (§10.10) |
 | `.grok/` | 89 | Legacy platform chrome — **do not build on it** (§10.12) |
 | `builds/` | 50 | Legacy sample build outputs (vault export + sample project) (§10.11) |
 | `vault-e2e/` | 47 | Vault export of the HVAC Dispatch E2E project (§10.11) |
 | `scripts/` | 45 | CLI + gates + guards + tooling + their tests (§10.7) |
-| root | 42 | Every root file named in §10.2 |
+| root | 44 | Every root file named in §10.2 |
 | `screenshots/` | 16 | QA/app screenshots (§10.11) |
 | `public/` | 10 | Static assets served as-is (§10.4) |
 | `audit-bugs/` | 5 | Bug-audit reports (§10.12) |
@@ -407,9 +407,9 @@ set is committed (§10.13).
 - `src/routes/` (3): `__root.tsx` (root layout + auth provider), `index.tsx` (HomeScreen from
   `console.tsx`), `run.$id.tsx` (RunScreen from `console.tsx`).
 
-## 10.6 `src/lib/` — the engine (200 files = 114 modules + 85 colocated tests + 1 tracked stray temp)
+## 10.6 `src/lib/` — the engine (200 files = 111 modules + 89 colocated tests; the tracked stray temp was removed in the W40 era — re-derived live 2026-09-27)
 
-**82 direct modules** (one line each; the module's comments read 2026-09-26/27):
+**79 direct modules** (one line each; the module's comments read 2026-09-26/27):
 
 - **Core:** `engine.ts` (13-phase state machine: applies phase results, gates, repairs, sealing) ·
   `phases.ts` (phase graph defs + coverage/transition helpers) · `store.ts` (zustand store — the
@@ -535,7 +535,7 @@ others).
   `check-auth-invariant.test.mjs` · `grok-pwa-plugin.test.mjs` · `preview.test.mjs` ·
   `sign-out-plan.test.mjs` · `with-app-env.test.mjs` · `write-atomic.test.mjs`.
 
-## 10.8 `research/` (468)
+## 10.8 `research/` (476)
 
 - **`research/multiagent/` (103)** — the analysis program. The register/ledger trio:
   `thoroughanalysis.md` (**the finding register** — mission preamble + append-only protocol;
@@ -585,7 +585,7 @@ others).
   `03_tech_deep_dives_research.md` (the origin research set, 2026-09-04) · `deepseek-api.md`
   (live-verified API spec) · `runtime-integration.md` (runtime/hosting research).
 
-## 10.9 `fixes/` — the append-only landing-log ledger (419 tracked)
+## 10.9 `fixes/` — the append-only landing-log ledger (429 tracked)
 
 **Convention:** one `fixes/NN_<lane>.md` per lane per wave; append-only; each log carries
 what/why + `file:line` evidence + before/after. The numbering is chronological: the newest number
