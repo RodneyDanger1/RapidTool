@@ -1,7 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noUnusedParameters": true
-  },
-  "include": ["src/lib"]
-}
