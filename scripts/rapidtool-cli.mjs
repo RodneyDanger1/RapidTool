@@ -1566,8 +1566,14 @@ async function main() {
                 refused: imp.refused,
                 warnings: imp.warnings,
               };
-            } catch {
-              /* advisory only */
+            } catch (e) {
+              // W42 L4-G7 (OPS-12 / A-58): the divergence report stays
+              // advisory (verdict + exit are never changed by it), but a
+              // failed ledger read is no longer SILENT — the envelope names
+              // why the report is absent (message bounded to 200 chars).
+              payload.dirDirtyNote =
+                "ledger read failed — divergence report skipped: " +
+                (e instanceof Error ? e.message : String(e)).slice(0, 200);
             }
           }
           if (outcome.ok !== true) {

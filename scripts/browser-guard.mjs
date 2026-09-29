@@ -16,7 +16,11 @@
 import { resolve, sep } from "node:path";
 import { physicalInside } from "./path-safety.mjs";
 
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+// W42 L4-G4 (q2 A-101): bare "::1" was a DEAD entry — WHATWG `URL.hostname`
+// serializes the IPv6 loopback as "[::1]" (bracketed), so the bare spelling
+// could never match `checkedUrl`'s `parsed.hostname` lookup. Exported so the
+// pin can assert the reachable form directly.
+export const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 /** http/https loopback only, else exit 1. `BROWSER_ALLOW_EXTERNAL_HOST=1` opts out. */
 export function checkedUrl(url) {

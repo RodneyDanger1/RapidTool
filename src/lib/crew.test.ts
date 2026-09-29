@@ -18,6 +18,7 @@ import type { PhaseId, Project } from "./types.ts";
 import { seedProject } from "./testing/fixtures.ts";
 import type { LlmResult } from "./llm.ts";
 import { estimateTokens } from "./algorithms.ts";
+import { createTokenBudget, recordBudgetSpend, totalTokens } from "./token-ledger.ts";
 import {
   CREW_PROTOCOL_EMITS,
   SWARM_ROLES,
@@ -944,5 +945,112 @@ describe("216p T-107.2 — registry migration pin (crew seam)", () => {
       if (savedPin === undefined) delete process.env.DEEPSEEK_MODEL_REASONING;
       else process.env.DEEPSEEK_MODEL_REASONING = savedPin;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F2-10 (W42 · L2-P5) — crew budget seam: every wire call a run makes is
+// gated on the (session or explicit) token budget and its real usage recorded
+// into that budget's ledger; a budget stop is the coded
+// RT_E_BUDGET_EXHAUSTED refusal — never an escaping throw, never a
+// mislabeled RT_E_INTERNAL (SPEC §2 · L2-P5).
+// ---------------------------------------------------------------------------
+describe("F2-10 crew budget seam (W42 · L2-P5)", () => {
+  it("pre-dispatch gate: an exhausted budget refuses coded BEFORE any wire call", async () => {
+    let calls = 0;
+    const crew = createCrew(async () => {
+      calls++;
+      return okText("should never dispatch");
+    });
+    const budget = createTokenBudget(10);
+    recordBudgetSpend(budget, { promptTokens: 10, completionTokens: 0 });
+    const res = await crew.runCrew(seededProject(), { phase: 6, live: false, maxSteps: 1, budget });
+    assert.equal(calls, 0, "the gate refuses before the completer is reached");
+    assert.equal(res.ok, false);
+    if (!res.ok) {
+      assert.equal(res.reason, "error");
+      assert.equal(res.code, "RT_E_BUDGET_EXHAUSTED", "coded stop — not RT_E_INTERNAL, not thrown");
+      assert.match(res.error ?? "", /RT_E_BUDGET_EXHAUSTED/);
+    }
+  });
+
+  it("post-response crossing: usage past the cap refuses coded and the spend is KEPT on the ledger", async () => {
+    let calls = 0;
+    const crew = createCrew(async () => {
+      calls++;
+      return {
+        ok: true,
+        text: "turn output",
+        model: "deepseek-v4-flash",
+        usage: { promptTokens: 20, completionTokens: 0 },
+      };
+    });
+    const budget = createTokenBudget(10);
+    const res = await crew.runCrew(seededProject(), { phase: 6, live: false, maxSteps: 1, budget });
+    assert.equal(calls, 1, "the crossing is detected on the response, not before it");
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.equal(res.code, "RT_E_BUDGET_EXHAUSTED");
+    assert.equal(totalTokens(budget.ledger), 20, "spend kept, never clamped (the metering half of F2-10)");
+  });
+
+  it("unmetered budget: exactly one call, result unchanged, usage still recorded once", async () => {
+    let calls = 0;
+    const crew = createCrew(async () => {
+      calls++;
+      return {
+        ok: true,
+        text: "plain turn",
+        model: "deepseek-v4-flash",
+        usage: { promptTokens: 7, completionTokens: 3 },
+      };
+    });
+    const budget = createTokenBudget(null);
+    const res = await crew.runCrew(seededProject(), { phase: 6, live: false, maxSteps: 1, budget });
+    assert.equal(calls, 1, "unmetered → no gate, no retry");
+    assert.equal(res.ok, true, "the result is unchanged");
+    if (res.ok) assert.equal(res.messages.length, 1);
+    assert.equal(budget.ledger.calls, 1, "the wire call is metered into the budget ledger exactly once");
+    assert.equal(totalTokens(budget.ledger), 10);
+  });
+
+  it("plan-call budget stop: planRes.code rides through as RT_E_BUDGET_EXHAUSTED, never relabeled", async () => {
+    let calls = 0;
+    const crew = createCrew(async () => {
+      calls++;
+      return okText("should never dispatch");
+    });
+    const budget = createTokenBudget(10);
+    recordBudgetSpend(budget, { promptTokens: 10, completionTokens: 0 });
+    const res = await crew.runCrew(seededProject(), { mode: "plan-act", phase: 6, budget });
+    assert.equal(calls, 0, "refused before the plan call dispatches");
+    assert.equal(res.ok, false);
+    if (!res.ok) {
+      assert.equal(res.reason, "error");
+      assert.equal(res.code, "RT_E_BUDGET_EXHAUSTED", "the planner's coded class survives the crew mapping");
+    }
+  });
+
+  it("plan-act step-turn crossing: the step seam also reports the coded stop", async () => {
+    let calls = 0;
+    const crew = createCrew(async (_prompt, cOpts) => {
+      calls++;
+      const system = cOpts?.system ?? "";
+      if (system.includes("planning layer of a governed multi-agent crew")) {
+        return { ok: true, text: PLAN_JSON, model: "deepseek-v4-flash", usage: { promptTokens: 5, completionTokens: 0 } };
+      }
+      return { ok: true, text: "step out", model: "deepseek-v4-flash", usage: { promptTokens: 20, completionTokens: 0 } };
+    });
+    const budget = createTokenBudget(10);
+    const res = await crew.runCrew(seededProject(), {
+      mode: "plan-act",
+      phase: 6,
+      budget,
+      maxSteps: 2,
+      live: false,
+    });
+    assert.equal(calls, 2, "plan call + first step turn only");
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.equal(res.code, "RT_E_BUDGET_EXHAUSTED");
+    assert.equal(totalTokens(budget.ledger), 25, "both responses' usage stays on the ledger");
   });
 });

@@ -29,8 +29,11 @@
  */
 import { existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { OG_SITE_REL_PATH, readOgSite, siteHasCustomCard } from "./grok-pwa-shared.mjs";
+// W42 L4-G5 (q2 A-99): shared realpath-based main-module check (see
+// with-app-env.mjs:97-105) — never the naive pathToFileURL compare.
+import { isMainModule } from "./with-app-env.mjs";
 
 // Over this, link scrapers (X card previews included) time out or skip the
 // image, so the card silently fails to unfurl. The og skill's JPEG contract
@@ -193,7 +196,7 @@ function isBrandWarning(message) {
   return message.startsWith("BRAND WARNING:");
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const args = parseBrandCheckArgs(process.argv.slice(2));
   if (args.error) {
     console.error(JSON.stringify({ ok: false, error: args.error }, null, 2));

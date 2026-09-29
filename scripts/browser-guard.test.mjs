@@ -29,7 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { checkedOutputPath } from "./browser-guard.mjs";
+import { checkedOutputPath, LOOPBACK_HOSTNAMES } from "./browser-guard.mjs";
 
 const self = fileURLToPath(import.meta.url);
 const CASE_FLAG = "--case";
@@ -116,4 +116,18 @@ if (caseArg) {
       assert.match(parsed.error, /screenshot/, "the refusal labels the target kind");
     },
   );
+
+  test("W42 L4-G4: IPv6 loopback matches via the WHATWG hostname form ([::1])", () => {
+    // `new URL(...).hostname` yields "[::1]" — the bare "::1" spelling never
+    // matched and was dropped as a dead entry; the reachable form must stay.
+    assert.equal(new URL("http://[::1]:8080/").hostname, "[::1]");
+    assert.ok(
+      LOOPBACK_HOSTNAMES.has(new URL("http://[::1]:8080/").hostname),
+      "[::1] (the URL.hostname form) must be an accepted loopback host",
+    );
+    assert.ok(
+      !LOOPBACK_HOSTNAMES.has("::1"),
+      'bare "::1" is unreachable via URL.hostname — keep the dead entry dropped',
+    );
+  });
 }

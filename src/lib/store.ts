@@ -1589,6 +1589,11 @@ export const useRapid = create<RapidState>()(
             };
             updated = { ...updated, logs: [...updated.logs, warnEntry].slice(-200) };
           }
+          // F2-03b (W42 · L2-P8): the ingested "[agent report]" artifacts (and
+          // the no-evidence warn row) must ride the COMPILED packet too — a
+          // downstream agent reading project.packet would otherwise see the
+          // pre-intake snapshot.
+          updated = stampPacket(updated);
           return { projects: s.projects.map((p) => (p.id === id ? updated : p)) };
         });
         return {
@@ -1846,9 +1851,15 @@ export const useRapid = create<RapidState>()(
           projects: s.projects.map((p) => (p.id === id ? { ...p, name: trimmed } : p)),
         }));
       },
+      // F2-03b (W42 · L2-P8): the compiled packet embeds the operator-notes
+      // block ("## Operator notes (human steering)"), so the notes write
+      // re-stamps the packet — the persisted packet (packet pane, export,
+      // tree consumers) never serves pre-edit notes. `stampPacket` replaces
+      // the packet artifact and rebuilds the A4 trace, so repeated writes
+      // cannot accumulate rows.
       setNotes: (id, notes) =>
         set((s) => ({
-          projects: s.projects.map((p) => (p.id === id ? { ...p, notes } : p)),
+          projects: s.projects.map((p) => (p.id === id ? stampPacket({ ...p, notes }) : p)),
         })),
       // P0-2: append chat rows to one project's persisted thread. Additive only —
       // never replaces the log, never touches other projects. The cap trims on

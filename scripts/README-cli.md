@@ -928,16 +928,19 @@ it: the same exit code can carry different codes, and agents should branch on
 for JSON consumers (they already branch on `ok`/`error`), so `schema_version`
 stays `1` — schema-version bumps are reserved for breaking envelope changes.
 
-The classifier matches a deliberately small set of signals (ENOENT, abort /
-timeout prose, report rejection by error name), so today a subset of codes can
-appear on CLI envelopes: project-file load failures → `RT_E_PROJECT_MISSING`;
-rejected reports → `RT_E_REPORT_INVALID` / `RT_E_REPORT_PHASE_MISMATCH`;
-exit-3 (backend not configured, crew/verify/prompt) → `RT_E_LLM_NOT_CONFIGURED`;
-every other failure prose falls back to `RT_E_UNKNOWN`. The remaining codes are
-engine/UI-domain (chat copilot, live research, bounded runner, phase guards)
-and surface in `src/lib` results instead. The canonical registry is
-`ERROR_CODE_DOC` in `src/lib/errors.ts`; this table mirrors it (one row per
-code, `typical exit_code` from the taxonomy above):
+The classifier matches a small set of signals — a thrown `RT_E_*` code passes
+through; `ENOENT`; abort/timeout prose; report rejection by error name; the
+OS/network errno families (`EACCES`/`EPERM`, `ENOSPC`, `EADDRINUSE`, connect/DNS,
+a bare `fetch failed`); a failed `JSON.parse` → `RT_E_VALIDATION` — so a subset
+of codes appears on CLI envelopes today: project-file load failures →
+`RT_E_PROJECT_MISSING`; rejected reports → `RT_E_REPORT_INVALID` /
+`RT_E_REPORT_PHASE_MISMATCH`; `emit`/`check` failures → `RT_E_FOREIGN_FILES` /
+`RT_E_CHECK_FAILED`; exit-3 (backend not configured, crew/verify/prompt) →
+`RT_E_LLM_NOT_CONFIGURED`; unmatched prose falls back to the caller's domain
+code, else `RT_E_UNKNOWN`. The remaining codes are engine/UI-domain and
+surface in `src/lib` results or the console instead. The canonical registry is
+`ERROR_CODE_DOC` in `src/lib/errors.ts`; this table mirrors it — the full
+registry, one row per code, `typical exit_code` from the taxonomy above:
 
 **The lesson/wild pillar subcommands add NO new codes** — they reuse the existing
 registry: `harvest` never fails for missing keys (keyless; honest-empty rows +
@@ -958,9 +961,11 @@ The emit→edit→re-emit verbs (`tree-run`/`repair`, fixes/150 wave G1) set the
 | `RT_E_REPORT_PHASE_MISMATCH` | A report targeted a phase other than the live current phase. | Re-emit the report for project.currentPhase, or advance the project to the phase the report covers first. | 1 |
 | `RT_E_RUNNER_UNAVAILABLE` | The bounded code runner is not configured in this environment. | Fall back to the deterministic self-test path and label lastTest as self-test — never present a fallback as a real run. | 3 (verify/exec domain) |
 | `RT_E_RUNNER_FAILED` | The runner executed but failed (refused, timed out, non-zero exit, or spawn failure). | Read the runner's stdout/stderr evidence, fix the generated module, and re-run before claiming any test verdict. | 4 (verify/exec domain) |
+| `RT_E_CHECK_FAILED` | The compile-check pass found emitted files that do not parse (per-file verdicts carried on the result). | Read the per-file verdicts, fix the offending emitted modules at the generator, and re-emit before building further. | 1 (emit --check / `check`) |
 | `RT_E_LLM_NOT_CONFIGURED` | No DeepSeek API key is present, so no LLM call can run. | Return the honest not-configured fallback (deterministic path), never fabricate model text, and tell the user to set DEEPSEEK_API_KEY. | 3 |
 | `RT_E_LLM_TIMEOUT` | The LLM call exceeded its deadline. | Retry once if the task is idempotent, otherwise fall back to the deterministic path and report the timeout honestly. | 4 (crew/verify backend) |
 | `RT_E_LLM_REJECTED` | The LLM provider refused the request (401 auth, 402 billing, 429 rate limit, invalid params, or empty content). | Do not retry blindly; check key/balance/parameters, and surface the provider's own message to the user. | 4 (crew/verify backend) |
+| `RT_E_LLM_NO_BALANCE` | The LLM provider refused the call because the account balance is exhausted (the provider's HTTP 402 / "Insufficient Balance" — a wallet class, not a generic refusal). | Stop consuming this account: do not retry (billing is not transient) and read NO keyed score from a run in this state — top up the account or switch keys, re-pass the fundedness probe, then re-run. | 4 (crew/verify backend) |
 | `RT_E_RESEARCH_UNAVAILABLE` | The live web-research backend is not configured or unreachable. | Proceed with the deterministic corpus, set liveUnavailable so the documented gate waiver applies, and never present fabricated findings as real research. | 3 (engine live-overlay domain) |
 | `RT_E_VALIDATION` | Input or model output failed validation and cannot be used. | Reject the payload, state the concrete validation rule that failed, and ask for corrected input instead of guessing. | 1 |
 | `RT_E_INTERNAL` | Unexpected internal failure (transport, serialization, server). | Log the full error, retry once if it may be transient, and escalate with the raw message rather than paraphrasing. | 4 |
@@ -968,6 +973,20 @@ The emit→edit→re-emit verbs (`tree-run`/`repair`, fixes/150 wave G1) set the
 | `RT_E_TREE_RUN_FAILED` | `tree-run --dir` (or `emit --run`) executed the tree and it is RED — not all parse/spec/entry verdicts are ok. | Read the envelope's first not-ok tail, fix the emitted file(s) in the dir, re-run — never treat a red tree as clean. | 1 (tree-run / emit --run red tree) |
 | `RT_E_REPAIR_FAILED` | `repair --dir` exhausted its cycle budget without a green tree-run — the deterministic floor stands, no fake repair was applied. | Read the failure tail/refusal in the envelope, hand-edit the dir or tighten the brief, re-run repair. | 1 (repair budget exhausted) |
 | `RT_E_VERIFY_KIND_FAILED` | `emit --verify-kind` ran the bounded scratch-copy install + the declared build/test leg and it ended red (fixes/216z · T4.1). | Read the honest install/build `detail` and fix the emitted scaffold or the emitted package. | 1 (emit --verify-kind) |
+| `RT_E_BUDGET_EXHAUSTED` | A journey or wild run hit its hard cycle/token budget and stopped without converging. | Read the last tree-failure tail, raise the budget only with a human decision, or repair the generator — never mint converged after exhaustion. | 4 (crew/engine budget stop) |
+| `RT_E_ABORTED` | The process received SIGTERM/SIGINT and stamped acceptance:aborted before exit. | Resume from the persisted cursor if one exists; do not treat the run as accepted or failed. | 1 (chat abort; signal stamps exit 130/143) |
+| `RT_E_BUSY` | Another writer holds the project file lock (saveProject O_EXCL). | Wait and retry the save; do not overwrite or delete the .lock file while a writer is live. | 1 (emit/save lock refusal) |
+| `RT_E_FOREIGN_FILES` | emit refused because the target dir contains foreign files that are not leftover tests/. | Pass --force only if you intend to overwrite, or emit into a clean directory. | 1 (emit --force refusal) |
+| `RT_E_PERMISSION_DENIED` | The OS denied access to a file or directory (EACCES/EPERM). | Fix the path's permissions or run from a location the process may write to; do not retry the same path unchanged. | 1–4 (classified in place) |
+| `RT_E_DISK_FULL` | A write failed because the filesystem has no space left (ENOSPC). | Free space or point the output at another volume before retrying; never report the write as done. | 1–4 (classified in place) |
+| `RT_E_PORT_IN_USE` | A server could not bind because the address/port is already in use (EADDRINUSE). | Stop the process holding the port or bind a different port; do not kill processes blindly. | 1–4 (classified in place) |
+| `RT_E_NETWORK_UNREACHABLE` | A network call never reached its target — DNS miss, refused or reset connection, unreachable host (includes undici's bare "fetch failed"). | Check the target host/port and connectivity; retry once if the failure may be transient, then report the unreachable endpoint honestly instead of fabricating the remote result. | 1–4 (classified in place) |
+| `RT_E_GIT_UNAVAILABLE` | The git binary is not available in this environment, so the git landing tail cannot run. | Report the absence honestly and leave the tree uninitialized — install git, or run where git exists; never fake a landing or hand-roll repository metadata. | — (no live emitter today; landing tail unwired) |
+| `RT_E_UNATTENDED_UNSUPPORTED` | W-47: an unattended end-to-end run was requested before its host and blockers exist — there is no scheduler/daemon/queue in this product and the W-01 (keyed wild P6 seam) / W-02 (mint reachability) blockers are not landed keyed. | Do not fake an unattended run: read the `blockers` list, land W-01+W-02 keyed, then arm the external hook (the refusal payload carries the exact scheduler line) and re-run; manual wild/gate runs remain available. | — (no live emitter today; console surface) |
+| `RT_E_CHECKPOINT_MISSING` | T-107.7: `resume`/`unattended` found no checkpoint at <projectDir>/.rapidtool/checkpoint.json — the run never committed a phase with a known project dir, or a COMPLETE seal cleared it (there is no successor state to re-enter). | Continue with the normal run verbs — `gate`/`run --project` writes a fresh checkpoint on every committed phase (`unattended` starts from the project file when no checkpoint exists); re-run `resume` only after a run has committed a phase beside that dir. Never invent a resumption. | 1 (resume/unattended re-entry) |
+| `RT_E_NOT_IMPLEMENTED` | The requested capability is a coded SHELL: its seam exists (types/parsing/refusal paths in place) but the full logic is not wired yet — the message names the owning TODO row. | Treat the refusal as the honest state of the build: read the named TODO(<row-id>) / lane log, implement that row, and re-run; never work around it by fabricating the missing behavior. | — (no live emitter today) |
+| `RT_E_AUTH_SCHEMA_MISSING` | Sign-in is enabled (VITE_AUTH_ENABLED is not "false") but no migration creates the Better Auth "user" table — migrations/auth/*.sql is never applied (neither the deploy migrator nor the PGLite fallback descends into it). | Copy the auth schema into the migrated directory (`cp migrations/auth/0001_auth.sql migrations/0001_auth.sql`, plus any later migrations/auth/*.sql in name order), restart, and re-run; or set VITE_AUTH_ENABLED=false to run without sign-in. Never let the app serve sign-in against a schema-less database. | 1 (migrate/build preflight) |
+| `RT_E_MCP_DISABLED` | F1 (R8-f11 / R13-f06): the MCP runtime client is owner-gated and DISABLED by default — no child process was spawned and zero network I/O was performed (the shell is discovery-first and inert until the owner's trust decision). | Do not simulate MCP discovery or fabricate tool lists: wait for the owner's trust decision, then set RAPIDTOOL_MCP_ENABLED=1 (once the JSON-RPC 2.0 stdio transport lands, TODO(R8-f11)) and re-run the read-only tools/list discovery. | — (owner-gated; no live emitter until the transport lands) |
 
 ## Full agent loop (Hermes-style)
 

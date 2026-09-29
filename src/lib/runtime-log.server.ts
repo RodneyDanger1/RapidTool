@@ -21,9 +21,11 @@
 
 import {
   appendFileSync,
+  closeSync,
   existsSync,
   mkdirSync,
-  readFileSync,
+  openSync,
+  readSync,
   readdirSync,
   renameSync,
   statSync,
@@ -137,13 +139,34 @@ export function readRtTail(logDir: string, n: number): RtEvent[] {
     // Read at most the last 256 KB — n rows are ≤ ~2 KB each by construction.
     const stats = statSync(file);
     const start = Math.max(0, stats.size - 256 * 1024);
-    // B2 (W39): `start` is a BYTE offset — slice the Buffer, not a UTF-8-decoded
-    // string's code units (a multibyte character straddling the boundary shifted
-    // the window and left the first line a mojibake fragment; the "last 256 KB"
-    // claim only held for ASCII input).
-    const buf = readFileSync(file).subarray(start).toString("utf8");
+    // B2 (W39): `start` is a BYTE offset — the window is read as raw bytes and
+    // decoded whole, never sliced out of a UTF-8-decoded string (a multibyte
+    // character straddling the boundary shifted the window and left the first
+    // line a mojibake fragment; the "last 256 KB" claim only held for ASCII).
+    // W42 L4-G6 (OPS-11 / A-57): open + readSync EXACTLY the window — the
+    // claim is the read itself, not a whole-file read with the window sliced
+    // off after the fact. The loop tolerates a short read (file rotated or
+    // shrunk between stat and open).
+    const windowBytes = stats.size - start;
+    let buf: Buffer = Buffer.alloc(0);
+    if (windowBytes > 0) {
+      const fd = openSync(file, "r");
+      try {
+        buf = Buffer.alloc(windowBytes);
+        let filled = 0;
+        while (filled < windowBytes) {
+          const got = readSync(fd, buf, filled, windowBytes - filled, start + filled);
+          if (got <= 0) break; // EOF — the file shrank under us
+          filled += got;
+        }
+        if (filled < windowBytes) buf = buf.subarray(0, filled);
+      } finally {
+        closeSync(fd);
+      }
+    }
+    const content = buf.toString("utf8");
     const rows: RtEvent[] = [];
-    for (const line of buf.split("\n")) {
+    for (const line of content.split("\n")) {
       const trimmed = line.trim();
       if (trimmed.length === 0) continue;
       try {

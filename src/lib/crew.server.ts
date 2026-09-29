@@ -36,6 +36,12 @@ import { compileAgentPacket } from "./packet.ts";
 import { PHASES, phaseDef } from "./phases.ts";
 import { createPlanning } from "./planning.ts";
 import { classifyError, dualChannelFailDetail } from "./errors.ts";
+import {
+  runBudgetedCall,
+  sessionTokenBudget,
+  isBudgetStopRefusal,
+  type TokenBudget,
+} from "./token-ledger.ts";
 import type { ErrorCode } from "./errors.ts";
 import type { PlanCritique, PlanStep } from "./planning.ts";
 import type { LlmModel, LlmResult } from "./llm.ts";
@@ -827,6 +833,13 @@ export type CrewRunOptions = {
   maxPlanSteps?: number;
   /** Override the per-role model tier. */
   model?: CrewModel;
+  /** F2-10 (W42 · L2-P5): the token budget every wire call this run makes is
+   *  gated on and metered into (`runBudgetedCall`). Defaults to the process
+   *  session budget (`sessionTokenBudget()`); unmetered when
+   *  `RAPIDTOOL_TOKEN_CAP` is unset, so the helpers are no-ops. A budget stop
+   *  returns the coded `RT_E_BUDGET_EXHAUSTED` refusal — never a throw, never
+   *  an `RT_E_INTERNAL` mislabel. */
+  budget?: TokenBudget | null;
   /** Progress hook (headless/UI streaming). */
   onTurn?: (turn: CrewTurn) => void;
 };
@@ -934,6 +947,15 @@ export function createCrewRuntime(deps: {
     if (deps.configured && !deps.configured()) {
       return { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" };
     }
+    // F2-10 (W42 · L2-P5): wrap the run's completer ONCE — every wire call
+    // this run makes (default-mode role turns, the plan-act plan/step calls)
+    // is gated on the budget and its real usage recorded by `runBudgetedCall`
+    // (recorded exactly once, never double-counted). A budget stop comes back
+    // as the coded RT_E_BUDGET_EXHAUSTED refusal below — never an escaping
+    // throw, never mislabeled RT_E_INTERNAL.
+    const budget = opts.budget ?? sessionTokenBudget();
+    const budgetedComplete: CrewCompleter = (prompt, o) =>
+      runBudgetedCall(budget, () => deps.complete(prompt, o));
     const phase = normalizePhase(opts.phase ?? project.currentPhase);
     // Roles override is validated up front — an unknown role is an honest
     // error before any dispatch, garbage non-arrays fall back to the table.
@@ -965,14 +987,20 @@ export function createCrewRuntime(deps: {
     const live = opts.live ?? true;
 
     if (opts.mode === "plan-act") {
-      return runPlanAct(project, opts, session, {
-        phase,
-        maxSteps,
-        maxTotalTokens,
-        maxPromptTokens,
-        maxArtifacts,
-        live,
-      });
+      return runPlanAct(
+        project,
+        opts,
+        session,
+        {
+          phase,
+          maxSteps,
+          maxTotalTokens,
+          maxPromptTokens,
+          maxArtifacts,
+          live,
+        },
+        budgetedComplete,
+      );
     }
 
     let stopped: CrewStopReason = "done";
@@ -1039,7 +1067,7 @@ export function createCrewRuntime(deps: {
       // 3) ONE DeepSeek call for this turn (90s budget + one bounded timeout
       // retry — fixes/129, research/99 §2: the 20s flash abort killed crews 2/2).
       const model: CrewModel = opts.model ?? spec.model;
-      const res = await completeCrewTurn(deps.complete, prompt, {
+      const res = await completeCrewTurn(budgetedComplete, prompt, {
         model: DEEPSEEK_MODELS[model],
         system: spec.system,
         maxTokens: spec.budgetTokens,
@@ -1048,6 +1076,17 @@ export function createCrewRuntime(deps: {
       if (!res.ok) {
         session.status = res.reason === "not-configured" ? "stopped-no-key" : "error";
         session.endedAt = Date.now();
+        if (isBudgetStopRefusal(res)) {
+          // F2-10 (W42 · L2-P5): a controlled budget stop is its coded outcome
+          // — the ledger keeps the spend, the run reports it verbatim (never
+          // RT_E_INTERNAL, never a throw into the caller).
+          return {
+            ok: false,
+            reason: "error",
+            error: res.error,
+            code: "RT_E_BUDGET_EXHAUSTED",
+          };
+        }
         return res.reason === "not-configured"
           ? { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" }
           : {
@@ -1133,10 +1172,13 @@ export function createCrewRuntime(deps: {
       maxArtifacts: number;
       live: boolean;
     },
+    complete: CrewCompleter,
   ): Promise<CrewRunResult> {
     const { phase, maxSteps, maxTotalTokens, maxPromptTokens, maxArtifacts, live } = cfg;
     const def = phaseDef(phase);
-    const planning = createPlanning(deps.complete);
+    // F2-10 (W42 · L2-P5): the plan-act wire calls run through the run's ONE
+    // budgeted completer (gated + metered) — never the raw deps.complete.
+    const planning = createPlanning(complete);
     const goal = planActGoalFor(project, def);
     const context = planActContextFor(project, phase);
     const maxPlanSteps = Math.max(1, Math.min(opts.maxPlanSteps ?? 8, 8));
@@ -1152,7 +1194,10 @@ export function createCrewRuntime(deps: {
             ok: false,
             reason: "error",
             error: planRes.error ?? "plan steps call failed",
-            code: "RT_E_INTERNAL",
+            // F2-10 (W42 · L2-P5): the planner's coded class rides through —
+            // a budget-stop plan call reports RT_E_BUDGET_EXHAUSTED, not a
+            // mislabeled RT_E_INTERNAL.
+            code: planRes.code ?? "RT_E_INTERNAL",
           };
     }
     const planned = planRes.steps; // full machine plan (≤ maxPlanSteps, ≤ 8)
@@ -1235,7 +1280,7 @@ export function createCrewRuntime(deps: {
 
       // ONE DeepSeek call for this step's turn.
       const model: CrewModel = opts.model ?? spec.model;
-      const res = await deps.complete(prompt, {
+      const res = await complete(prompt, {
         model: DEEPSEEK_MODELS[model],
         system: spec.system,
         maxTokens: spec.budgetTokens,
@@ -1244,6 +1289,15 @@ export function createCrewRuntime(deps: {
       if (!res.ok) {
         session.status = res.reason === "not-configured" ? "stopped-no-key" : "error";
         session.endedAt = Date.now();
+        if (isBudgetStopRefusal(res)) {
+          // F2-10 (W42 · L2-P5): coded budget stop, same contract as default mode.
+          return {
+            ok: false,
+            reason: "error",
+            error: res.error,
+            code: "RT_E_BUDGET_EXHAUSTED",
+          };
+        }
         return res.reason === "not-configured"
           ? { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" }
           : {
@@ -1253,7 +1307,8 @@ export function createCrewRuntime(deps: {
               code: res.code ?? "RT_E_INTERNAL",
             };
       }
-      // 185-H1: plan-act path uses deps.complete directly — dual-channel fail-close.
+      // 185-H1: plan-act path step turns go through the run's budgeted
+      // completer directly — dual-channel fail-close.
       const dual = dualChannelFailDetail(res);
       if (dual) {
         session.status = "error";

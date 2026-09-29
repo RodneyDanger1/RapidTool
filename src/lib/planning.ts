@@ -253,9 +253,16 @@ function makePlanSteps(completer: PlannerCompleter) {
         json: true,
       });
       if (!res.ok) {
-        return res.reason === "not-configured"
-          ? { ok: false, reason: "not-configured" }
-          : { ok: false, reason: "error", error: res.error ?? "plan steps call failed" };
+        if (res.reason === "not-configured") return { ok: false, reason: "not-configured" };
+        return {
+          ok: false,
+          reason: "error",
+          error: res.error ?? "plan steps call failed",
+          // F2-10 (W42 · L2-P5): the completer's coded failure class rides
+          // through — a budget stop must surface as RT_E_BUDGET_EXHAUSTED on
+          // the crew result, never be relabeled RT_E_INTERNAL downstream.
+          ...(res.code ? { code: res.code } : {}),
+        };
       }
       const steps = tryParseSteps(res.text, capped);
       if (steps) return { ok: true, steps, plan: { goal: trimmedGoal, steps } };

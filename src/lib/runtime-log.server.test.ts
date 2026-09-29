@@ -83,6 +83,36 @@ test("readRtTail returns newest-first, capped, and skips torn/junk lines", () =>
   }
 });
 
+test("readRtTail reads a bounded window of a >256 KB file (W42 L4-G6)", () => {
+  const dir = tmpDir();
+  try {
+    const file = join(dir, RUNTIME_LOG_FILE);
+    // ~1400 rows ≈ 350 KB — comfortably past the 256 KB window, so the
+    // earliest rows lie wholly outside it and must not come back.
+    const lines: string[] = [];
+    for (let i = 1; i <= 1400; i++) lines.push(JSON.stringify(row(i)));
+    writeFileSync(file, `${lines.join("\n")}\n`, "utf8");
+    assert.ok(statSync(file).size > 256 * 1024, "fixture must exceed the 256 KB window");
+
+    const tail = readRtTail(dir, 100_000);
+    assert.equal(tail[0].payload?.i, 1400, "newest row first");
+    assert.equal(tail[1].payload?.i, 1399, "newest-first order preserved");
+    assert.ok(
+      !tail.some((r) => r.payload?.i === 1),
+      "rows outside the byte window are not read back",
+    );
+    // The window holds every whole row after the boundary; the first line in
+    // it is a torn fragment (skipped). Deterministic lower bound from the
+    // largest row's byte size — no magic row counts.
+    const maxRowBytes = Buffer.byteLength(lines[1399], "utf8") + 1;
+    const minRows = Math.floor((256 * 1024) / maxRowBytes) - 1;
+    assert.ok(tail.length >= minRows, `window tail holds >= ${minRows} rows, got ${tail.length}`);
+    assert.ok(tail.length < 1400, "the full history is NOT returned — the read stayed window-bounded");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("readRtTail on a missing dir returns [] (never throws)", () => {
   assert.deepEqual(readRtTail(join(tmpDir(), "does-not-exist"), 5), []);
 });

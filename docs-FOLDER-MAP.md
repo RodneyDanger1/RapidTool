@@ -8,8 +8,8 @@
 ```
 RapidTool Main/
 │
-├─ src/ (210) ................ the product: pure engine + UI surfaces
-│  ├─ lib/ (200) ............. engine & logic; tests colocated (*.test.ts). Key files:
+├─ src/ (211) ................ the product: pure engine + UI surfaces
+│  ├─ lib/ (201) ............. engine & logic; tests colocated (*.test.ts). Key files:
 │  │  │                        engine.ts (13-phase state machine) · headless.ts (journey driver/CLI backend)
 │  │  │                        codegen.server.ts (P6 synthesis) · store.ts (zustand state) · phases.ts
 │  │  │                        packet.ts · dod.ts · io.ts · errors.ts (RT_E registry) · verify.server.ts
@@ -38,9 +38,9 @@ RapidTool Main/
 │  ├─ eval-out/ (345) ........ TRACKED trial outputs: results.json, history.json, per-slug emitted trees/trials
 │  └─ 01…03_*research.md · deepseek-api.md · runtime-integration.md .... early deep-dive dossiers
 │
-├─ fixes/ (450) ............. append-only landing logs, one per lane per wave (NN_ = wave number);
+├─ fixes/ (456) ............. append-only landing logs, one per lane per wave (NN_ = wave number);
 │                             263_index.md = the generated link index of fixes/ + wave_plans/
-├─ wave_plans/ (105) ......... per-lane dispatch plans W4→W40 (35 dirs; no W25) + README.md (convention)
+├─ wave_plans/ (106) ......... per-lane dispatch plans W4→W42 (36 dirs; no W25) + README.md (convention)
 │
 ├─ public/ (10) .............. static assets (favicon.svg, og.jpg) + legacy public/__grok/ install assets
 ├─ .github/ (1) .............. CI: workflows/gate.yml

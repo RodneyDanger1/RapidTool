@@ -14,10 +14,14 @@
  */
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 // R11-f07: the shared physical-containment helper (one implementation, three
 // call sites — see scripts/path-safety.mjs).
 import { physicalInside, relativeEscapes } from "./path-safety.mjs";
+// W42 L4-G5 (q2 A-99): the shared main-module check (realpath-based — a
+// symlinked or case-differing launch path still runs the CLI; the naive
+// `pathToFileURL` compare silently no-opped it). See with-app-env.mjs:97-105.
+import { isMainModule } from "./with-app-env.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -64,8 +68,12 @@ export function handOver(staged, target, { rename = renameSync } = {}) {
   if (!existsSync(staged)) {
     throw Object.assign(new Error(`staged file is missing: ${staged}`), { code: "ENOENT" });
   }
-  mkdirSync(dirname(target), { recursive: true });
+  // W42 L4-G3 (q2 A-100): the mkdir sits INSIDE the try with the rename — it
+  // is part of the hand-over's single mutation step, so a rename failure
+  // re-throws through the one catch below (raw error, or the EXDEV advice)
+  // instead of failing across two independent failure paths.
   try {
+    mkdirSync(dirname(target), { recursive: true });
     rename(staged, target);
   } catch (err) {
     if (err?.code === "EXDEV") {
@@ -78,7 +86,7 @@ export function handOver(staged, target, { rename = renameSync } = {}) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const args = parseWriteAtomicArgs(process.argv.slice(2));
   if (args.error) {
     console.error(`[write-atomic] ${args.error}`);

@@ -124,6 +124,30 @@ test("a staged file on another filesystem is refused, not copied", () => {
   assert.equal(readFileSync(target, "utf8"), "old card");
 });
 
+test("an injected rename failure re-throws the raw error and leaves the target absent (W42 L4-G3)", () => {
+  const root = makeWorkspace();
+  const staged = join(root, ".grok/og.jpg.tmp");
+  // Target parent dir is deliberately missing: the moved mkdir (now inside the
+  // same try as the rename) runs first, then the injected rename fails — the
+  // catch must re-throw the RAW error (only EXDEV is translated) and no target
+  // may appear, with the staged file unconsumed.
+  const target = join(root, "src/lib/og/site.json");
+  writeFileSync(staged, "new card");
+  const denied = Object.assign(new Error("EACCES: rename denied"), { code: "EACCES" });
+
+  assert.throws(
+    () =>
+      handOver(staged, target, {
+        rename: () => {
+          throw denied;
+        },
+      }),
+    (err) => err === denied, // re-thrown as-is, never wrapped
+  );
+  assert.equal(existsSync(target), false, "the target was never written");
+  assert.equal(readFileSync(staged, "utf8"), "new card", "the staged file was not consumed");
+});
+
 test("cli: hands the file over, and refuses a temp staged in public/", () => {
   const root = makeWorkspace();
   writeFileSync(join(root, ".grok/og.jpg.tmp"), "new card");
