@@ -174,7 +174,7 @@ export function RuntimeTimelinePane() {
         >
           {open ? "Hide typed timeline" : "Typed timeline — pair starts with finishes"}
         </button>
-        <p className="font-mono text-[11px] text-faint">
+        <p className="font-mono text-xs text-faint">
           {summary.rows} row{summary.rows === 1 ? "" : "s"} · {paired} pair{paired === 1 ? "" : "s"} ·{" "}
           {summary.openSpans} still running · {summary.raw} unparsed
         </p>
@@ -191,13 +191,13 @@ export function RuntimeTimelinePane() {
         hidden={!open}
         className="mt-3 rounded-md border border-line bg-overlay/40 p-3"
       >
-        <p className="font-mono text-[11px] text-muted">
+        <p className="font-mono text-xs text-muted">
           rows {summary.rows} · completed {summary.ok} · failed {summary.failed} · paused{" "}
           {summary.paused} · events {summary.instant} · unparsed {summary.raw} · still running{" "}
           {summary.openSpans}
           {summary.longestMs !== null ? ` · longest span ${durationLabel(summary.longestMs)}` : ""}
         </p>
-        <p className="mt-1 text-[11px] leading-relaxed text-faint">
+        <p className="mt-1 text-xs leading-relaxed text-faint">
           Derived from the ring rows above by <span className="font-mono">rt-timeline.ts</span> —
           the same NDJSON the CLI writes under{" "}
           <span className="font-mono">&lt;dir&gt;/.rapidtool/logs/</span>. The raw ring list stays
@@ -229,7 +229,7 @@ export function RuntimeTimelinePane() {
                   key={`${r.line}-${r.event ?? "raw"}`}
                   className="rounded-md border border-line bg-overlay/40 px-3 py-2"
                 >
-                  <span className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+                  <span className="flex flex-wrap items-center gap-2 font-mono text-xs">
                     <span className="text-faint tabular-nums">L{r.line}</span>
                     <span className="text-faint tabular-nums">{clockLabel(r.ts)}</span>
                     <span className={meta.tone}>{meta.word}</span>
@@ -241,7 +241,7 @@ export function RuntimeTimelinePane() {
                     {pair !== null ? <span className="ml-auto text-faint">{pair}</span> : null}
                   </span>
                   {r.status === "raw" ? (
-                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] text-faint">
+                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-faint">
                       {r.raw}
                     </pre>
                   ) : r.message.length > 0 ? (
@@ -254,10 +254,10 @@ export function RuntimeTimelinePane() {
         )}
 
         <details className="mt-3">
-          <summary className="cursor-pointer font-mono text-[11px] text-muted">
+          <summary className="cursor-pointer font-mono text-xs text-muted">
             Raw NDJSON — the exact {lines.length} line{lines.length === 1 ? "" : "s"} parsed
           </summary>
-          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-overlay/40 p-2 font-mono text-[10px] leading-relaxed text-muted">
+          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-overlay/40 p-2 font-mono text-xs leading-relaxed text-muted">
             {lines.join("\n")}
           </pre>
         </details>

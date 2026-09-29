@@ -50,6 +50,7 @@ import {
   scoringCorpusFor,
   trialEmitDir,
   treeTextFiles,
+  treeRunToEvidence,
   trialsSummary,
   verifyGraderFreeze,
   writeJsonAtomic,
@@ -163,6 +164,28 @@ test("(a) graderLeakScan flags planted grader content and clears a clean tree", 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("F4 (314): treeRunToEvidence carries the verdict hash — and never invents one", () => {
+  const hashed = treeRunToEvidence({
+    ok: true,
+    dir: "/tmp/x",
+    compile: { ok: true },
+    tests: [
+      { file: "tests/oracle.spec.ts", run: "pass", tests: { pass: 3, fail: 0 } },
+      { file: "tests/other.spec.ts", run: "pass", tests: { pass: 1, fail: 0 } },
+    ],
+    verdictHash: "deadbeefcafef00d",
+  });
+  assert.equal(hashed.ok, true);
+  assert.equal(hashed.testsPass, 4);
+  assert.equal(hashed.verdictHash, "deadbeefcafef00d");
+  // Legacy/no-hash evidence stays legacy-shaped — the key is omitted, never guessed.
+  const legacy = treeRunToEvidence({ ok: true, dir: "d", tests: [] });
+  assert.equal(legacy.verdictHash, undefined);
+  // Empty-string hash is not a hash.
+  assert.equal(treeRunToEvidence({ ok: true, tests: [], verdictHash: "" }).verdictHash, undefined);
+  assert.equal(treeRunToEvidence(null), null);
 });
 
 test("(a) emitted trees on disk carry no grader content (leak scan over the real artifacts)", (t) => {

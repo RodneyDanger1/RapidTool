@@ -36,5 +36,21 @@ Replace every PENDING-AUDIT marker in `wave_plans/W43/COMPLETION-TASKS.md` with 
 ## Planned task inventory (before write — recount at close-out)
 F1 ×6 · F2 ×3 · F3 ×4 · F4 ×5 · F5 ×5 · F6 ×4 · F7 ×1 · F8 ×7 · F9 ×6 · F10 ×2 = **43 tasks**.
 
-## Close-out (filled after the merge write)
-*(appending now)*
+## Close-out (2026-09-29, at compile)
+
+**Deliverable SAVED:** `wave_plans/W43/COMPLETION-TASKS.md` — 137 lines / 30,203 bytes; every PENDING-AUDIT marker resolved (the only remaining "PENDING-AUDIT" string is the header's descriptive sentence). **43 tasks = 6 LANDED · 15 LANDING · 22 OWED** (per factor: F1 6 · F2 3 · F3 4 · F4 5 · F5 5 · F6 4 · F7 1 · F8 7 · F9 6 · F10 2).
+
+**Structure shipped:** the keyed-run critical-path top-block (5 conditions: seal complete → waves land on a green boundary → keyless probes answered → wallet funded → the user's word) · F1–F7 verdicts + tasks (every former PENDING-AUDIT → verdict with source file:line) · NEW F8 (SD kink list; executor F5) · F9 (MA outshine-moves; big ranked moves hand off to `wave_plans/W43/F4_outshine_moves.md`) · F10 (10 modernizations: 10/10 landed + the out-of-lane remainder named) · merge rule + the checklist count.
+
+**Mid-merge lane landings observed & folded in (statuses kept honest):** `314_f1_iterate.md` (F1: iterate design record; T2.2/T2.3 sharpened to its real scope — pure module, OFF-default gate, owner-gated live arm) · `314_f2_selfimprove.md` (F2: guardrails-first; `selfmod.ts` on disk, server+pins in flight; T3.2 updated) · `314_f4_outshine.md` (F4: handoff file noted under F9) · `314_f5_kinks.md` (F5: K2/K5/K6/friction #5/metering slice landing; T8.2/T8.4/T8.6/T8.7 updated) · `314_g1_tail.md` + `314_f6_residue.md` (in flight; no list change needed) · `314_wd2_guard.md` (fleet guard; recovery ref noted).
+
+**Verification (commands + observed):**
+- `grep -c "^- \*\*T" wave_plans/W43/COMPLETION-TASKS.md` → **43** (matches the count line exactly).
+- `grep -c "PENDING-AUDIT" wave_plans/W43/COMPLETION-TASKS.md` → **1**, and that hit is the header's descriptive sentence — no unresolved marker.
+- `wc -l -c` → 137 lines / 30,203 bytes (post-patch).
+- Scope: `git status --short` shows this lane's writes = `wave_plans/W43/COMPLETION-TASKS.md` (M) + `fixes/314_f3_merge.md` (new) **only**; every other dirty path is a live sibling lane's (E1–E4 / F1 / F2 / F4 / F5 / F6 / G1), byte-untouched by F3.
+- The byte-check table above stands (K1 engine-vs-CLI split; `settle.ts`; mobile fix; U1/U2/U3; E2 helpers; `wildLiveEdge` pending; probe_c1_arith present).
+
+**Honest caveats:** (a) statuses are as of this write — the E/F lanes are live and several LANDING rows will flip to LANDED at the next commit/boundary; each row names its pending artifact. (b) NO keyed calls made (rule honored). (c) The critical path's step 5 (the user's word) is owner-gated by the merge rule — T1.2 must not fire before it.
+
+**Writes:** `wave_plans/W43/COMPLETION-TASKS.md` (compiled) · this log. No product edits. No keyed calls.

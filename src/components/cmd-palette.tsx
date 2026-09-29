@@ -106,7 +106,7 @@ export function CmdPalette({
           <Command.Group
             key={group}
             heading={group}
-            className="px-1 py-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-mono [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:tracking-widest [&_[cmdk-group-heading]]:text-faint [&_[cmdk-group-heading]]:uppercase"
+            className="px-1 py-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-mono [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:tracking-widest [&_[cmdk-group-heading]]:text-faint [&_[cmdk-group-heading]]:uppercase"
           >
             {items.map((e) => (
               <Command.Item
@@ -125,18 +125,18 @@ export function CmdPalette({
                   <span className="text-xs text-muted">{e.description}</span>
                 </span>
                 {e.verb !== null ? (
-                  <code className="mt-0.5 shrink-0 rounded-sm border border-border bg-raised px-1.5 py-0.5 font-mono text-[10px] text-accent">
+                  <code className="mt-0.5 shrink-0 rounded-sm border border-border bg-raised px-1.5 py-0.5 font-mono text-xs text-accent">
                     rapidtool {e.verb}
                   </code>
                 ) : (
-                  <span className="mt-0.5 shrink-0 font-mono text-[10px] text-faint">console only</span>
+                  <span className="mt-0.5 shrink-0 font-mono text-xs text-faint">console only</span>
                 )}
               </Command.Item>
             ))}
           </Command.Group>
         ))}
       </Command.List>
-      <p className="border-t border-line px-4 py-2 font-mono text-[10px] text-faint">
+      <p className="border-t border-line px-4 py-2 font-mono text-xs text-faint">
         Esc closes · single-key shortcuts are paused while this is open
       </p>
     </Command.Dialog>

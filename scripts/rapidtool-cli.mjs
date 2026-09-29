@@ -16,7 +16,7 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs gate    --project build.json [--autopilot] [--live]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs resume    --project build.json [--autopilot] [--live]   # T-107.7: re-enter from the per-phase checkpoint (prints the snapshot age; never a silent resume)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs unattended --project build.json                         # W-47: scheduler-facing drive — resumes from a checkpoint when present, else starts from the file; autopilot + live until parked (stock HITL gates still park; exit 2)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs approve --project build.json [--force]
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs approve --project build.json (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed (314 F5 / K2)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs reject  --project build.json --note "..."
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs retry   --project build.json                  # unlock a rejected/blocked phase
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs ingest  --project build.json --report '@report.json' | '-'
@@ -881,14 +881,64 @@ async function main() {
         // silently minted decidedBy:"human" — no TTY, no note, no seat
         // evidence (the reproduced forged-advance path). The human seat is now
         // required for EVERY non-TTY approval. An unattended process must use
-        // the autopilot gate; it may not impersonate the human seat by default.
-        if (process.stdin.isTTY !== true && !flag(args, "i-am-human")) {
+        // the autopilot seat; it may not impersonate the human seat by default.
+        //
+        // 314 F5 (K2/K5 · fixes/311_sd_product §1): the seat is never GUESSED.
+        // The 216 guard left two kinks: (K2) a bare `approve` on a TTY passed
+        // through to the ternary below, silently attributing a HUMAN's
+        // decision to the machine seat (decidedBy:"autopilot") — an integrity
+        // bug on high-stakes gates; (K5) its non-TTY arm pointed at "the
+        // autopilot gate" with no exact next step, while --i-am-human is
+        // itself refused off-TTY — a dead end. Now the seat must be NAMED,
+        // exactly one of: `--i-am-human` (human ceremony, TTY only — the 216
+        // contract) or `--seat autopilot` (EXPLICIT machine attribution, the
+        // documented agent door — 311 audit rec. #1 alt / #2). A bare call is
+        // refused WITH its exact recovery. headless.approve's own default
+        // (HARNESS_APPROVE_ACTOR) is untouched — this discipline is the CLI
+        // verb's.
+        const humanClaim = flag(args, "i-am-human");
+        const seatArg = args.seat;
+        const machineSeat = seatArg === "autopilot";
+        if (seatArg !== undefined && !machineSeat) {
+          const shown = seatArg === true ? "(no value)" : JSON.stringify(seatArg);
+          return respond(
+            {
+              ok: false,
+              error: `approve: --seat ${shown} is not a seat — name 'autopilot' for an explicit machine decision, or drop --seat and pass --i-am-human for the human seat.`,
+              code: "RT_E_VALIDATION",
+              remedy:
+                "Re-run with exactly one seat: `approve --project <p> --seat autopilot` (explicit machine attribution) or `approve --project <p> --i-am-human` from an interactive terminal (human seat).",
+            },
+            1,
+          );
+        }
+        if (humanClaim && machineSeat) {
           return respond(
             {
               ok: false,
               error:
-                "approve from a non-TTY requires --i-am-human (never mint decidedBy:human from an agent; use the autopilot gate for machine approval)",
+                "approve: --i-am-human and --seat autopilot are mutually exclusive — a decision is either a person's or the machine's; name exactly one seat.",
               code: "RT_E_VALIDATION",
+              remedy:
+                "Drop one flag: keep `--i-am-human` for the human seat (TTY-only) or `--seat autopilot` for explicit machine attribution.",
+            },
+            1,
+          );
+        }
+        if (!humanClaim && !machineSeat) {
+          const forceClause = flag(args, "force")
+            ? " (--force additionally requires the verified human seat — a machine may never force past a gate)"
+            : "";
+          return respond(
+            {
+              ok: false,
+              error:
+                process.stdin.isTTY === true
+                  ? `approve: no seat named — a bare approval would be attributed to the MACHINE (decidedBy:"autopilot") and the seat is never guessed.${forceClause} Name the seat: \`--i-am-human\` for a human decision (typed RT_HUMAN_SEAT_TOKEN re-entry at the prompt) or \`--seat autopilot\` for an explicit machine decision.`
+                  : `approve from a non-TTY names no claimable seat — the human seat needs an interactive terminal (--i-am-human + typed RT_HUMAN_SEAT_TOKEN re-entry; refused off-TTY) and a machine decision must be explicit.${forceClause} Next step: \`approve --project <p> --seat autopilot\` for an explicit machine approval, or run the verb from a terminal where a person can confirm.`,
+              code: "RT_E_VALIDATION",
+              remedy:
+                "Name exactly one seat: `--seat autopilot` (explicit machine attribution, works non-TTY) or `--i-am-human` from an interactive terminal (human seat, typed token re-entry).",
             },
             1,
           );
@@ -918,6 +968,9 @@ async function main() {
         // provenance is exactly this verb's enforced verdict. No response-shape
         // change: the approve JSON contract + exit codes stay byte-identical.
         const { evaluatePolicy } = await import("../src/lib/policy.ts");
+        // 314 F5: re-read via flag() on purpose — the W29 static pin
+        // (cli-exit-taxonomy.test.mjs) counts `flag(args,"i-am-human") ? await
+        // humanSeatClaim(` claim sites; `humanClaim` above is the same value.
         const humanSeat = flag(args, "i-am-human") ? await humanSeatClaim("approve") : null;
         if (humanSeat && humanSeat.error) {
           return respond({ ok: false, error: humanSeat.error, code: "RT_E_VALIDATION" }, 1);
@@ -3435,8 +3488,14 @@ async function main() {
         // honest sink is cliLogEvent (NDJSON under logs/ via resolveLogDir —
         // seed shape matches wildStep's emits 1:1). Telemetry-side only: the
         // envelope and project bytes are untouched (no-op while rtServer null).
+        // 313/T4.4 — THE AGENT SEAL: `--agent-seal` opts the run into the
+        // classifier-as-approver path (coded [seat agent-seal] rows; never a
+        // 'human' seat). The engine arms read opts.agentSeal; this is the
+        // switch's last hop from the CLI.
+        const agentSeal = flag(args, "agent-seal");
         const opts = {
           ...(steps ? { maxSteps: steps } : {}),
+          ...(agentSeal ? { agentSeal: true } : {}),
           onEvent: (seed) => cliLogEvent(seed),
         };
         try {
@@ -3865,12 +3924,23 @@ async function promptHumanSeatToken() {
  */
 async function humanSeatClaim(cmd) {
   if (process.stdin.isTTY !== true) {
+    // 314 F5 (K5): the machine pointer is CMD-AWARE. `approve` now has the
+    // explicit `--seat autopilot` door (a non-TTY claim may take it); for
+    // `fixtures` the action is human-only by policy (the autopilot seat is
+    // denied) so no machine promise may be made; `edit` keeps the historical
+    // autopilot fallback. The old shared "(omit --i-am-human)" clause named a
+    // recovery that only held for one of the three verbs.
+    const machineLine =
+      cmd === "approve"
+        ? "For an explicit MACHINE decision use `approve --project <p> --seat autopilot` — a bare call is never guessed a seat."
+        : cmd === "fixtures"
+          ? "Approving fixtures is a human-only decision (the autopilot seat can never approve them) — run the verb from a terminal where a person can confirm."
+          : "Use the autopilot seat instead (omit --i-am-human) or run the verb from a terminal where a person can confirm.";
     return {
       error:
         `${cmd}: --i-am-human refused — the human seat needs an interactive confirmation ` +
         `(re-enter RT_HUMAN_SEAT_TOKEN at the TTY prompt) and this stdin is not a TTY, so the ` +
-        `environment alone cannot furnish a second channel. Use the autopilot seat instead ` +
-        `(omit --i-am-human) or run the verb from a terminal where a person can confirm.`,
+        `environment alone cannot furnish a second channel. ${machineLine}`,
     };
   }
   return {
@@ -3888,7 +3958,7 @@ const USAGE = {
     gate: "gate --project <file.json> [--autopilot] [--live] [--unattended]  # advance until parked; --unattended forces autopilot+live",
     resume: "resume --project <file.json|dir> [--autopilot] [--live]  # T-107.7: read the per-phase checkpoint written beside the project dir by run/gate, admit it (identity + mode + integer phase sanity), hydrate it, and re-enter the drive at the recorded phase; prints the snapshot age — exit taxonomy identical to gate (2 = parked). Never a silent resume",
     unattended: "unattended --project <file.json|dir>  # W-47: scheduler-facing drive — re-enter from a checkpoint when one exists (crash recovery), else start from the named project file; autopilot + live until parked; NOT a daemon (a host hook — Windows Task Scheduler / cron — invokes it on a cadence); stock HITL gates still park for a human by design (exit 2)",
-    approve: "approve --project <file.json> [--force] [--i-am-human]   # --i-am-human: human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY; use `gate --autopilot` for machine approval)",
+    approve: "approve --project <file.json> (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed, name exactly one: --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY); --seat autopilot = explicit MACHINE attribution (`decidedBy:\"autopilot\"`, seat harness; works non-TTY — the documented agent door for a parked gate)",
     reject: "reject --project <file.json> --note <text>",
     retry: "retry --project <file.json>                  # unlock a rejected/blocked phase",
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",

@@ -65,6 +65,12 @@ export type MakerTreeRunEvidence = {
   skipped?: boolean;
   /** Kind-entry smoke verdict when the driver lifted a TreeRunOutcome. */
   entryRun?: string;
+  /** F4 (fixes/314_f4_outshine · MA §5 move 3 — the hashed verdict): the
+   *  tree-run verdict's own FNV-1a hash (`treeVerdictHash`, set on every
+   *  runnable verdict). Carried through so M2's green evidence can cite it
+   *  and a reader can prove "same hash, same verdict" from the published
+   *  scorecard. Integrity, not cryptography; absent on legacy evidence. */
+  verdictHash?: string;
 } | null;
 
 /** M2 scores 1 only when assertions actually ran and passed — skip is not green. */
@@ -100,6 +106,9 @@ export function treeRunToMakerEvidence(tr: TreeRunOutcome): MakerTreeRunEvidence
     testsFail,
     skipped,
     entryRun,
+    // F4 (fixes/314_f4_outshine · MA §5 move 3): carry the tree-run verdict's
+    // own hash through the lift — the eval's persisted M2 evidence reads it.
+    verdictHash: typeof tr.verdictHash === "string" && tr.verdictHash.length > 0 ? tr.verdictHash : undefined,
     detail: spec && spec.run !== "pass" ? spec.detail : undefined,
   };
 }
@@ -406,6 +415,14 @@ export function m1Substance(input: MakerScoreInput): MakerCriterion {
 export function m2Runs(input: MakerScoreInput): MakerCriterion {
   const tr = input.treeRun;
   if (!tr) return { score: 0, evidence: "no treeRun verdict supplied" };
+  // F4 (fixes/314_f4_outshine · MA §5 move 3 — hashed-verdict surfacing): when
+  // the evidence carries the tree-run verdict's own hash, cite it on the green
+  // line — the persisted scorecard can then prove "same hash, same verdict"
+  // without re-running the tree. Absent hash ⇒ byte-identical legacy line.
+  const hashBit =
+    typeof tr.verdictHash === "string" && tr.verdictHash.length > 0
+      ? ` · verdict ${tr.verdictHash.slice(0, 8)}`
+      : "";
   if (input.behavioral) {
     const b = input.behavioral;
     if (b.fail > 0 || tr.ok !== true) {
@@ -415,7 +432,7 @@ export function m2Runs(input: MakerScoreInput): MakerCriterion {
       };
     }
     if (b.pass > 0) {
-      return { score: 1, evidence: `treeRun ok; behavioral ${b.pass} pass / 0 fail` };
+      return { score: 1, evidence: `treeRun ok${hashBit}; behavioral ${b.pass} pass / 0 fail` };
     }
     return { score: 0, evidence: "no behavioral assertion ran" };
   }
@@ -435,8 +452,8 @@ export function m2Runs(input: MakerScoreInput): MakerCriterion {
     return {
       score: 1,
       evidence: journeyFailed
-        ? `${base} | journey: failed — treeRun green is the deterministic floor, not LLM code`
-        : base,
+        ? `${base}${hashBit} | journey: failed — treeRun green is the deterministic floor, not LLM code`
+        : `${base}${hashBit}`,
     };
   }
   return {

@@ -4168,7 +4168,7 @@ async function attachWildPlan(project: Project): Promise<Project> {
  */
 export async function wildStartHeadless(
   project: Project,
-  opts: { maxSteps?: number; onEvent?: (seed: RtEventSeed) => void } = {},
+  opts: { maxSteps?: number; onEvent?: (seed: RtEventSeed) => void; agentSeal?: boolean } = {},
 ): Promise<WildStartShape> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 24, 1), 48);
   if (project.wildMode !== true) {
@@ -4196,6 +4196,7 @@ export async function wildStartHeadless(
     // emission-side only, the project bytes are unchanged (DG-8).
     const res = await wildStep(current, {
       ...(reviewer ? { reviewer } : {}),
+      ...(opts.agentSeal ? { agentSeal: true } : {}),
       onEvent: opts.onEvent ?? (() => undefined),
     });
     steps += 1;
@@ -4334,7 +4335,7 @@ export type WildLifecycleShape =
  *  (185-H1 — never dual-channel ok:true + error). */
 export async function wildStartRun(
   project: Project,
-  opts: { maxSteps?: number; onEvent?: (seed: RtEventSeed) => void } = {},
+  opts: { maxSteps?: number; onEvent?: (seed: RtEventSeed) => void; agentSeal?: boolean } = {},
 ): Promise<WildLifecycleShape> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 24, 1), 48);
   if (project.wildRun?.active === true) {
@@ -4388,6 +4389,7 @@ export async function wildStartRun(
     // caller's opts.onEvent is the honest seam; absent ⇒ no-op default.
     const res = await wildStep(current, {
       ...(reviewer ? { reviewer } : {}),
+      ...(opts.agentSeal ? { agentSeal: true } : {}),
       onEvent: opts.onEvent ?? (() => undefined),
     });
     steps += 1;

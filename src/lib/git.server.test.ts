@@ -565,6 +565,13 @@ describe("gitLandReadBack", () => {
 // ---------------------------------------------------------------------------
 
 describe("runBoundedChild — the bounds are real", () => {
+  // M6-07 (known-class pin — fixes/308_map6_time.md): timeout/settlement pins
+  // are load-sensitive: the full suite's parallelism starves child spawns, so
+  // the wall-clock bounds below are deliberately generous (a 500 ms floor and a
+  // 6 s ceiling around the 900 ms timer). Standalone under 6-child load this
+  // pin passed 3/3 on 308; a red under full-suite load is the KNOWN class, not
+  // a regression — re-run standalone before hunting. Same class as
+  // exec.test.ts's CLOSE_GRACE comment (that file documents the mechanism).
   it("kills a real hanging child at the wall-clock deadline", async () => {
     const dir = scratch("bound-timeout-");
     const started = Date.now();

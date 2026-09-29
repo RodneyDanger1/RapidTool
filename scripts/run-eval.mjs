@@ -94,8 +94,13 @@ import { treeRun } from "../src/lib/compile-check.server.ts";
 import { scoreMaker, capabilityCoverage, treeFilesOf } from "../src/lib/maker-score.ts";
 import { fnv1a } from "../src/lib/algorithms.ts";
 // W23-L1 (fixes/262): the trial rows' usage/cost evidence consumes the
-// T-107.6 ledger helpers directly — consume, never recompute.
-import { emptyLedger, recordSpend, totalTokens, estimateCostUsd } from "../src/lib/token-ledger.ts";
+// T-107.6 ledger helpers directly — consume, never recompute. F1 (314) adds
+// the session-budget READ (isBudgetExhausted) the iterate decision consults.
+import { emptyLedger, recordSpend, totalTokens, estimateCostUsd, sessionTokenBudget, isBudgetExhausted } from "../src/lib/token-ledger.ts";
+// F1 (314) — the iterate driver's config gate + PURE decision (src/lib/iterate.ts).
+// The eval side RECORDS the per-trial decision (additive `iterate` row block);
+// the live keyed firing is owner-gated and never engages in this leg.
+import { readIterateConfig, decideIterate, ITERATE_THRESHOLD_ENV } from "../src/lib/iterate.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -573,7 +578,13 @@ function domainMatch(entry, project) {
   return tokens.every((t) => hay.includes(t)) ? 1 : 0;
 }
 
-function treeRunToEvidence(outcome) {
+/** F4 (fixes/314_f4_outshine · MA §5 move 3 — the hashed verdict): lift the
+ *  tree-run verdict into the driver's M2 evidence. `verdictHash` (compile-
+ *  check's FNV-1a `treeVerdictHash`, set on every runnable verdict) is carried
+ *  through so the persisted scorecard can cite it; absent ⇒ omitted, never
+ *  invented. Exported for the test suite (the driver self-executes only as the
+ *  CLI entry). */
+export function treeRunToEvidence(outcome) {
   if (!outcome || typeof outcome !== "object") return null;
   const specPass = Array.isArray(outcome.tests)
     ? outcome.tests.reduce((a, v) => a + (v && v.tests && typeof v.tests.pass === "number" ? v.tests.pass : 0), 0)
@@ -599,6 +610,11 @@ function treeRunToEvidence(outcome) {
     compileOk: outcome.compile ? outcome.compile.ok === true : outcome.ok === true,
     testsPass: specPass,
     testsFail: specFail,
+    // F4 (fixes/314_f4_outshine · MA §5 move 3): the verdict's own hash, when
+    // the outcome carries one (compile-check sets it on every runnable
+    // verdict); absent ⇒ omitted, never invented.
+    verdictHash:
+      typeof outcome.verdictHash === "string" && outcome.verdictHash.length > 0 ? outcome.verdictHash : undefined,
     detail,
   };
 }
@@ -2461,6 +2477,12 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     synthesisSucceeded,
   });
 
+  // F1 (314): the iterate driver's DECISION rides the row (additive `iterate`
+  // block; see iterateFactsFor — OFF by default, live firing owner-gated, this
+  // leg never regenerates). Recorded from the trial's own card mean + the
+  // process session token budget.
+  const iterateFacts = iterateFactsFor(card);
+
   // 5) M1 capability-coverage report (fixes/147 E3 — the divergence-1 signal).
   //    maker-score stays pure: the coverage MAP is computed here in the driver
   //    (which holds corpus + tree) via maker-score's exported pure probes, so
@@ -2578,6 +2600,10 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       // W23-L1: what the per-trial clean emit target did before this emit.
       emitDirClean: cleanReport,
     },
+    // --- F1 (314) additive key: the iterate driver's decision (never engaged
+    // here — the live keyed firing is owner-gated; see iterateFactsFor). ---
+    iterate: iterateFacts,
+    // --- end F1 additive key ---
   };
   // W42·L1-E1 (Q4-c/X2 tail): every entries row carries the funded | unfunded |
   // unmeasured end class — the SAME classifier history.json's rows use
@@ -2656,6 +2682,44 @@ export function acceptanceFailReason(row, acceptance, grader) {
     return `expected kind mismatch: ${(acceptance.kind && acceptance.kind.reason) || "emitted kind does not match expectedKind"}`;
   }
   return null;
+}
+
+/**
+ * F1 (314) — the per-trial ITERATE facts (SE2 §4a; additive row key). The
+ * bounded iterate-until-satisfaction driver's decision is computed — by the
+ * PURE `decideIterate` — against this trial's OWN card mean (the 0..1 rubric
+ * scale) plus the process token budget, and recorded on every row. Two
+ * honest invariants:
+ *   · `wouldFire` is the decision IF a regeneration seam were attached;
+ *     `seamAttached:false` and `engaged:false` are recorded explicitly — the
+ *     live keyed firing is the owner-gated step (F1 PROVE's run) and this leg
+ *     NEVER regenerates anything.
+ *   · OFF by default: `RAPIDTOOL_ITERATE_THRESHOLD` unset ⇒ armed:false,
+ *     code `iterate.disabled` — the parked owner decision, named per row.
+ */
+export function iterateFactsFor(card, { env = process.env, budgetExhausted = null } = {}) {
+  const config = readIterateConfig(env);
+  const score = card && typeof card.mean === "number" && Number.isFinite(card.mean) ? card.mean : null;
+  const exhausted =
+    typeof budgetExhausted === "boolean" ? budgetExhausted : isBudgetExhausted(sessionTokenBudget());
+  const decision = decideIterate({ config, score, cycle: 0, budgetExhausted: exhausted, seamAttached: true });
+  return {
+    armed: config.enabled,
+    threshold: config.threshold,
+    maxCycles: config.maxCycles,
+    score: score === null ? null : Number(score.toFixed(4)),
+    wouldFire: decision.fire,
+    code: decision.code,
+    budgetExhausted: exhausted,
+    seamAttached: false,
+    engaged: false,
+    configNotes: config.notes,
+    note: config.enabled
+      ? `iterate ARMED (threshold ${config.threshold}, max ${config.maxCycles} cycle(s)) — decision ${
+          decision.fire ? "below-threshold → WOULD fire" : `no-fire (${decision.code})`
+        }; live regeneration is owner-gated (F1 PROVE keyed run) — engaged=false, nothing fired by this leg`
+      : `${ITERATE_THRESHOLD_ENV} unset — iterate driver OFF (parked owner decision); decision recorded, nothing fired`,
+  };
 }
 
 /** W5-L5 T-107.5 — run TRIALS fresh trials of one case (fresh project + fresh

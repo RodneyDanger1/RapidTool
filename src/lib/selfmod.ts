@@ -78,6 +78,7 @@ export const SELFMOD_PROTECTED_PATHS: readonly SelfmodProtectedEntry[] = [
   { path: "src/lib/policy.ts", class: "seal", why: "the seat policy — the seal's no-self-approval story rides PolicySeat/evaluatePolicy" },
   // — ledger class —
   { path: "src/lib/token-ledger.ts", class: "ledger", why: "design ⑤'s budget machinery — the cap this run refuses to run without" },
+  { path: "fixes/", class: "ledger", why: "the append-only landing-log paper trail — a run must not rewrite its own record" },
   // — pins class: the tests that judge the harness must not be editable by it —
   { path: "src/lib/honesty-guards.test.ts", class: "pins", why: "the W11 falsification pins" },
   { path: "src/lib/token-ledger.test.ts", class: "pins", why: "pins the cap parse the selfmod guard trusts" },
@@ -183,14 +184,15 @@ export function normalizeRelPathRaw(raw: unknown): string | null {
 
 export type SelfmodProtectedMatch = SelfmodProtectedEntry;
 
-/** The protected-path match: exact file, or under a protected directory entry.
+/** The protected-path match: exact file, or under a protected directory entry
+ *  (a trailing `/` on the entry marks a directory and is normalized away here).
  *  Case- and separator-insensitive (git prints `/`; Windows folds case). */
 export function matchProtectedPath(relPath: unknown): SelfmodProtectedMatch | null {
   const rel = normalizeRelPathRaw(relPath);
   if (rel === null) return null;
   const lower = rel.toLowerCase();
   for (const entry of SELFMOD_PROTECTED_PATHS) {
-    const p = entry.path.toLowerCase();
+    const p = entry.path.toLowerCase().replace(/\/+$/, "");
     if (lower === p || lower.startsWith(p + "/")) return entry;
   }
   return null;
@@ -316,7 +318,7 @@ export function allowListRefusals(allow: unknown): { refusals: SelfmodRefusal[];
     }
     const lower = rel.toLowerCase() + "/";
     for (const entry of SELFMOD_PROTECTED_PATHS) {
-      if (entry.path.toLowerCase().startsWith(lower)) {
+      if (entry.path.toLowerCase().replace(/\/+$/, "").startsWith(lower) || entry.path.toLowerCase().startsWith(lower)) {
         push({ code: SELFMOD_CODES.PROTECTED, detail: `allow entry ${rel}/ would cover protected path ${entry.path} (${entry.class})` });
       }
     }
@@ -332,6 +334,13 @@ export function evaluateSelfmodPreflight(
   req: SelfmodPreflightRequest,
   env: Record<string, string | undefined>,
 ): SelfmodPreflightVerdict {
+  if (req === null || typeof req !== "object") {
+    return {
+      ok: false,
+      refusals: [{ code: "RT_E_VALIDATION", detail: "preflight request must be an object" }],
+      honestLimits: SELFMOD_HONEST_LIMITS,
+    };
+  }
   const refusals: SelfmodRefusal[] = [];
   const checks: string[] = [];
 
@@ -411,11 +420,9 @@ export function evaluateSelfmodPreflight(
   if (wt.sameRepo !== true) {
     refusals.push({ code: SELFMOD_CODES.UNGOVERNED, detail: "worktreeDir is not a worktree of repoDir (git-common-dir mismatch — executor check missing or failed)" });
   }
-  if (!isMainBranch(wt.branch)) {
-    if (typeof wt.branch !== "string" || wt.branch.trim() === "") {
-      refusals.push({ code: SELFMOD_CODES.UNGOVERNED, detail: "worktree branch unknown — a self-mod run must state its non-main branch" });
-    }
-  } else {
+  if (typeof wt.branch !== "string" || wt.branch.trim() === "") {
+    refusals.push({ code: SELFMOD_CODES.UNGOVERNED, detail: "worktree branch unknown — a self-mod run must state its non-main branch" });
+  } else if (isMainBranch(wt.branch)) {
     refusals.push({
       code: SELFMOD_CODES.UNGOVERNED,
       detail: `worktree branch ${JSON.stringify(wt.branch)} derives from main/master — design ②: never main`,
@@ -464,8 +471,9 @@ export function diffWithinCaps(
   caps: SelfmodCaps,
   allow: readonly unknown[],
 ): SelfmodDiffVerdict {
+  const list: readonly SelfmodDiffEntry[] = Array.isArray(entries) ? entries : [];
   const allowNorm: string[] = [];
-  for (const raw of allow) {
+  for (const raw of Array.isArray(allow) ? allow : []) {
     const rel = normalizeRelPathRaw(raw);
     if (rel !== null) allowNorm.push(rel);
   }
@@ -477,9 +485,16 @@ export function diffWithinCaps(
       refusals.push(r);
     }
   };
+  if (!Array.isArray(entries)) {
+    push({ code: "RT_E_VALIDATION", detail: "diff entries must be an array (the executor's numstat parse)" });
+  }
   let files = 0;
   let lines = 0;
-  for (const entry of entries) {
+  for (const entry of list) {
+    if (entry === null || typeof entry !== "object") {
+      push({ code: "RT_E_VALIDATION", detail: `diff entry ${JSON.stringify(entry)} is not an object` });
+      continue;
+    }
     files += 1;
     const added = Number.isFinite(entry.added) && entry.added > 0 ? Math.floor(entry.added) : 0;
     const deleted = Number.isFinite(entry.deleted) && entry.deleted > 0 ? Math.floor(entry.deleted) : 0;
@@ -542,6 +557,14 @@ export function selfmodLandingDecision(input: {
   branch: unknown;
   capsVerdict?: { ok: boolean; refusals?: readonly SelfmodRefusal[] } | null;
 }): SelfmodLandingDecision {
+  if (input === null || typeof input !== "object") {
+    return {
+      mayLand: false,
+      refusals: [{ code: "RT_E_VALIDATION", detail: "landing decision input must be an object" }],
+      rollbackRequired: true,
+      honestLimits: SELFMOD_HONEST_LIMITS,
+    };
+  }
   const refusals: SelfmodRefusal[] = [];
   if (isMainBranch(input.branch)) {
     refusals.push({ code: SELFMOD_CODES.UNGOVERNED, detail: `refusing to land on main-derivation branch ${JSON.stringify(input.branch)} — design ②: never main` });
