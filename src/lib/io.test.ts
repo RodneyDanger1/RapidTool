@@ -633,6 +633,24 @@ describe("exportPacketText", () => {
     assert.ok(text.includes("## Operator notes"));
     assert.ok(text.includes("Ship the audit trail first."));
   });
+
+  it("de-dupe pin (K7-4 / G2 edge 2): a compiled packet already embedding the notes renders ONCE", () => {
+    const p = { ...fullRun(), notes: "Ship the audit trail first." };
+    const compiled = compileAgentPacket(p);
+    assert.ok(compiled.includes("## Operator notes (human steering)"), "compile embeds the notes block");
+    const text = exportPacketText({ ...p, packet: compiled });
+    assert.equal(text, compiled, "stamped packet passes through unmodified — no second notes block");
+    assert.equal(text.split("## Operator notes").length - 1, 1, "exactly ONE notes block renders");
+  });
+
+  it("de-dupe pin: notes edited AFTER the last compile still append (the packet is the stale side)", () => {
+    const p = { ...fullRun(), notes: "first note" };
+    const compiled = compileAgentPacket(p);
+    const text = exportPacketText({ ...p, notes: "new note after compile", packet: compiled });
+    assert.ok(text.startsWith(compiled), "compiled packet stays the prefix");
+    assert.equal(text.split("## Operator notes").length - 1, 2, "embedded + appended block both render");
+    assert.ok(text.includes("new note after compile"));
+  });
 });
 
 describe("slugName + downloadFilename", () => {

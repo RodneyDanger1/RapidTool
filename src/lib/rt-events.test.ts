@@ -79,6 +79,7 @@ test("catalogue: every event name maps to a legal scope (sync pin, mirrors error
       "sys.uncaught_error",
       "sys.unhandled_rejection",
       "ui.action_error",
+      "ui.boundary_crash",
       "ui.pane_crash",
       "verify.error",
       "verify.ok",

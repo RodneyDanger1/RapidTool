@@ -66,11 +66,15 @@ A project (13 phases, P0–P12) with a governed edge. For each project you can g
 
 ## 4. How to feed results back (the honest loop)
 
-RapidTool has no live LLM/research/sandbox feedback channel (client-side, localStorage-only).
-To close the loop today:
+RapidTool has no live intake for your agent's output: results come back manually — paste them
+into the phase's Notes / operator notes (or round-trip the whole project JSON) — and they reach
+the packet at its NEXT stamp (phase advance / decision), not the instant you save. The live
+LLM/research/runner channels of §5 run inside RapidTool's own phases; they do not process text
+you paste back. To close the loop today:
 
 1. **Per phase:** paste `Copy phase handoff` into the agent; paste the agent's output back into
-   the phase's Notes / operator notes so it flows into the next packet compile.
+   the phase's Notes / operator notes. Re-read the packet after the next advance — that is when
+   the paste-back compiles into it.
 2. **Whole project:** export the project JSON (`Export`) — it round-trips through `Import`
    with shape validation + repair, so a build can move between machines or be archived.
 3. **Cross-tool:** the packet `.md` is the interchange format; the JSON sidecar is the durable

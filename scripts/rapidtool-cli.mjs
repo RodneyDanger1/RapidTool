@@ -55,7 +55,7 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs packet  --project build.json [--knowledge lessons.json]        # tier-1: seed Ranked memory with accepted cross-project lessons
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs eval    [--dir research/eval-out] [--slug <slug>]              # T5.3 (262 LANE 5): read-only M1-M9 eval scorecard + history deltas from the eval-out documents — no keyed calls, no writes
 // ---------------------------------------------------------------------------
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import readline from "node:readline";
@@ -172,7 +172,21 @@ function respond(result, exitCode) {
   } catch {
     /* never break the exit path */
   }
-  process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+  // fixes/297 R1 (Q2 row-4 of the §A2 walk): piped stdout on Windows is an
+  // ASYNC libuv write (Node docs — "Pipes: asynchronous on Windows"), and the
+  // in-tick process.exit() below can cut a large envelope before the pipe
+  // consumed it. Drain synchronously to fd 1 FIRST so nothing is left buffered
+  // when the exit runs; the exit itself stays in-tick (fixes/217e G1 — the
+  // guard-position call sites depend on respond ENDING the verb, so deferring
+  // the exit through the event loop would re-open that fall-through).
+  const payload = JSON.stringify(out, null, 2) + "\n";
+  try {
+    writeSync(1, payload);
+  } catch {
+    // fd 1 unusable (closed/EBADF/EAGAIN): keep the async write as last
+    // resort — identical to the pre-fix path, worst case unchanged.
+    process.stdout.write(payload);
+  }
   process.exit(exitCode);
 }
 

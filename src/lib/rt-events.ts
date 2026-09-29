@@ -141,6 +141,7 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
   // boundary
   "boundary.crash": "boundary",
   // ui-render
+  "ui.boundary_crash": "ui-render", // K7 12a (landed R1/297): the name error-component.tsx:60 actually emits (twin boundary.crash stays for its own emit-or-trim pass)
   "ui.pane_crash": "ui-render",
   "ui.action_error": "ui-render",
   // store-action
@@ -202,12 +203,12 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 
 // ---------------------------------------------------------------------------
 // TODO(N6-W3 · fixes/294_n6_sweeps.md §W1-W3; re-censused by P4 —
-// fixes/295_p4_sweeps.md): as of HEAD ac6b151, 38 of the 55 registered names
-// above have NO emitter anywhere in src/ or scripts/ — no host passes them as
-// `event:` (grep-verified; read-side matches in diagnose.ts / rt-timeline.ts
-// / rapidtool-cli.mjs do NOT count), and none is emitted server- or CLI-side
-// under its exact name. Emit one, or trim it — a registered name nothing
-// emits is a guardrail only in prose.
+// fixes/295_p4_sweeps.md; +1 name / R1 fixes/297): as of HEAD 60c92a2, 38 of
+// the 56 registered names above have NO emitter anywhere in src/ or scripts/ —
+// no host passes them as `event:` (grep-verified; read-side matches in
+// diagnose.ts / rt-timeline.ts / rapidtool-cli.mjs do NOT count), and none is
+// emitted server- or CLI-side under its exact name. Emit one, or trim it — a
+// registered name nothing emits is a guardrail only in prose.
 //   boot.start · boot.ready · sys.memory · boundary.crash · ui.action_error ·
 //     store.action_error · engine.phase_fallback · engine.phase_error ·
 //     wild.driver_cap · wild.driver_stall · wild.driver_start_refused ·
