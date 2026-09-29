@@ -25,6 +25,8 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, sta
 import { tmpdir } from "node:os";
 import { extname, join, relative, resolve, sep } from "node:path";
 import ts from "typescript";
+import { fnv1a } from "./algorithms.ts";
+import { inventoryFromJobSources } from "./doctor.ts";
 import { runNodeBounded } from "./node-runner.server.ts";
 import { maskLiteralsAndComments } from "./sandbox.ts";
 
@@ -385,6 +387,59 @@ export type TreeRunOutcome = {
    *  isolation, NOT a security sandbox. Optional so fixture objects in other
    *  lanes stay assignable; treeRun() always sets it. */
   sandbox?: false;
+  /** W43 · C6 (fixes/312_c6_ux · 311_sd_product K3/K4): the product-substance
+   *  census over the tree's own job modules (`src/jobs/*` + `jobs/*`) — the
+   *  SAME classifier `doctor --tree` counts with, so `stubs:N real:M` can
+   *  never disagree between the two surfaces. Set by `treeRun()` on every
+   *  runnable subject; absent only on the copy-failure early return. */
+  substance?: TreeSubstance;
+  /** W43 · C6 (311_ma_competitive §5 move 3 — the keyless slice): a stable
+   *  FNV-1a hash (same algorithm + decimal-string shape as dod.ts's
+   *  `evidenceHash`) over the DECISIVE verdict fields — `ok`, the compile
+   *  census, every spec's run label, the entry run, the declared-script
+   *  verdicts and the substance census. A downstream consumer can re-run the
+   *  tree and re-derive `treeVerdictHash(outcome)`: the same hash means the
+   *  machine verdict is unchanged; a different hash means it is not.
+   *  Integrity, not cryptography (the repo's standing hash contract). */
+  verdictHash?: string;
+};
+
+/** W43 · C6 (fixes/312_c6_ux · 311_sd_product K3/K4) — the product-substance
+ *  census a tree-run verdict carries. Green ≠ works: on the keyless floor
+ *  every job module is a 12-line `throw … TODO(E-15) stub`, and the emitted
+ *  oracle spec asserts those stubs REJECT — so a green tree-run with
+ *  `stubs:N real:0` reads as "success" unless the verdict says otherwise.
+ *  This object is that "otherwise": counts in the doctor's own classifier
+ *  vocabulary, a verdict label, and (when not clean AND job modules exist) a
+ *  loud `note` marking the trap and the way out. */
+export type TreeSubstanceVerdict = "real" | "mixed" | "stub-skeleton" | "empty";
+
+export type TreeSubstance = {
+  /** TODO(E-15)/empty-job-body/throw-TODO modules (doctor.classifyJobSource). */
+  stubs: number;
+  /** reexport-only bridge modules — bridges, not job implementations. */
+  reexports: number;
+  /** genuinely implemented job modules. */
+  real: number;
+  /** Capped sample (doctor's 32-row shape): path (POSIX rel) + class. */
+  files: Array<{ path: string; kind: "stub" | "reexport" | "real" }>;
+  /** `real` (≥1 real, zero stubs/reexports) · `mixed` (real + leftovers) ·
+   *  `stub-skeleton` (job modules exist, none real) · `empty` (no job
+   *  modules under `src/jobs/` or `jobs/` — nothing to census). */
+  verdict: TreeSubstanceVerdict;
+  /** True when THIS verdict is green while the tree still ships stub or
+   *  reexport-only job modules (or none real at all): exit 0 must never be
+   *  read as product quality (K3). False on a red verdict and on clean/
+   *  empty censuses. */
+  greenWhileStubbed: boolean;
+  /** K4 oracle trap: `tests/oracle.spec.ts` asserts the stub-refusal form
+   *  (`assert.rejects(… TODO(E-15) stub)`), so implementing a stubbed seam
+   *  turns its oracle row RED until the row's real assertion replaces it. */
+  oracleStubTrap: boolean;
+  /** The loud marking — present only when the census is NOT clean and job
+   *  modules exist (so it can ride `TreeRunOutcome.note` without touching
+   *  trees that carry no job-file signal at all). */
+  note?: string;
 };
 
 const DEFAULT_RUN_TIMEOUT_MS = 30_000;
@@ -430,6 +485,142 @@ function walkSpecFiles(root: string): string[] {
   };
   walk(root);
   return out.sort();
+}
+
+/**
+ * W43 · C6 (fixes/312_c6_ux · 311_sd_product K3): job modules under
+ * `src/jobs/` + `jobs/` — the exact file-selection rule
+ * `headless.collectJobSources` uses, so the census here agrees with
+ * `doctor --tree` row for row (extensions .ts/.js/.mjs at those dirs' top
+ * level, POSIX rel paths). Mirrored instead of imported: headless.ts imports
+ * THIS module (the repair seam), so importing back would be a cycle — a
+ * parity test pins the two implementations to the same file set.
+ */
+function collectTreeJobSources(root: string): Array<{ path: string; source: string }> {
+  const out: Array<{ path: string; source: string }> = [];
+  const candidates = [join(root, "src", "jobs"), join(root, "jobs")];
+  for (const dir of candidates) {
+    if (!existsSync(dir)) continue;
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.endsWith(".ts") && !name.endsWith(".js") && !name.endsWith(".mjs")) continue;
+      const full = join(dir, name);
+      try {
+        if (!statSync(full).isFile()) continue;
+        out.push({
+          path: relative(root, full).replace(/\\/g, "/"),
+          source: readFileSync(full, "utf8"),
+        });
+      } catch {
+        /* skip unreadable — same best-effort rule as the doctor's census */
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * W43 · C6 (K4): does the tree's own oracle spec assert the stub-refusal form?
+ * Bounded read of the scaffold-reserved `tests/oracle.spec.ts`; true when an
+ * `assert.rejects` sits within 400 chars of a `TODO(E-15)` literal — the trap
+ * that reddens the moment a stubbed seam is implemented.
+ */
+function detectOracleStubTrap(root: string): boolean {
+  const spec = join(root, "tests", "oracle.spec.ts");
+  if (!existsSync(spec)) return false;
+  try {
+    const source = readFileSync(spec, "utf8").slice(0, 200_000);
+    return /assert\.rejects[\s\S]{0,400}?TODO\\?\(E-15\\?\)/.test(source);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * W43 · C6 (fixes/312_c6_ux · 311_sd_product K3/K4) — the ONE derivation of a
+ * tree-run's product-substance census. Reads only (never writes; never walks
+ * node_modules) and never invents a job body. Exported so tests and other
+ * consumers derive the same object `treeRun()` attaches to its verdict.
+ *
+ * `note` is set only when job modules EXIST and the census is not clean — the
+ * loud marking for K3 (a green exit 0 on a stub tree) and K4 (the emitted
+ * oracle asserts those stubs reject). Trees with no job-file signal at all
+ * stay silent: no job modules is not this trap.
+ */
+export function treeSubstanceOf(dir: string, opts: { green?: boolean } = {}): TreeSubstance {
+  const subject = resolve(dir);
+  const sources = collectTreeJobSources(subject);
+  const inv = inventoryFromJobSources(sources, subject);
+  const { stubs, reexports, real } = inv;
+  const files = inv.files;
+  const verdict: TreeSubstanceVerdict =
+    files.length === 0
+      ? "empty"
+      : real === 0
+        ? "stub-skeleton"
+        : stubs + reexports === 0
+          ? "real"
+          : "mixed";
+  const green = opts.green === true;
+  const greenWhileStubbed = green && files.length > 0 && (stubs > 0 || reexports > 0);
+  const oracleStubTrap = files.length > 0 ? detectOracleStubTrap(subject) : false;
+
+  let note: string | undefined;
+  if (files.length > 0 && verdict !== "real") {
+    const counts = `stubs:${stubs} reexports:${reexports} real:${real}`;
+    const what =
+      stubs > 0 && real === 0
+        ? `every one of the ${files.length} job module(s) is a TODO(E-15) stub or a reexport-only bridge`
+        : stubs > 0
+          ? `${stubs} of ${files.length} job module(s) are TODO(E-15) stubs`
+          : `${reexports} job module(s) are reexport-only bridges`;
+    const reading = green
+      ? " green here means the emitted files parse and the emitted tests as emitted pass — never that the brief's jobs work"
+      : "";
+    const trap = oracleStubTrap
+      ? " tests/oracle.spec.ts asserts those stub seams REJECT, so implementing them turns those rows RED — replace each stub assertion with the row's real acceptance assertion as you implement (the K4 oracle trap)."
+      : "";
+    note =
+      `SUBSTANCE MARKING (${counts}): ${what} — this tree is NOT product-complete ` +
+      `(\`doctor --tree\` shows the same census; K3: exit 0 must never be read as product quality).${reading}${trap}`;
+  }
+
+  return { stubs, reexports, real, files, verdict, greenWhileStubbed, oracleStubTrap, ...(note ? { note } : {}) };
+}
+
+/**
+ * W43 · C6 (311_ma_competitive §5 move 3 — the keyless slice): the stable
+ * FNV-1a hash of a tree-run's DECISIVE verdict fields (same hash contract as
+ * dod.ts's `evidenceHash` — integrity, not cryptography). Re-run the tree and
+ * call this again: the same hash means the machine verdict is unchanged.
+ */
+export function treeVerdictHash(outcome: TreeRunOutcome): string {
+  const scripts = (["typecheck", "test", "build"] as const).map((key) => {
+    const v = outcome.project?.[key];
+    return [key, v ? v.run : "absent"];
+  });
+  const canonical = JSON.stringify({
+    ok: outcome.ok === true,
+    compile: [
+      outcome.compile?.ok === true,
+      outcome.compile?.checked ?? 0,
+      outcome.compile?.passed ?? 0,
+      outcome.compile?.failed ?? 0,
+      outcome.compile?.skipped ?? 0,
+    ],
+    tests: (outcome.tests ?? []).map((t) => [t.file, t.run]),
+    run: outcome.run ? [outcome.run.kind ?? null, outcome.run.run, outcome.run.entry ?? null] : null,
+    project: outcome.project ? [outcome.project.ok === true, scripts] : null,
+    substance: outcome.substance
+      ? [outcome.substance.stubs, outcome.substance.reexports, outcome.substance.real, outcome.substance.verdict]
+      : null,
+  });
+  return String(fnv1a(canonical));
 }
 
 /** The runner wrapper that executes one emitted spec as the REAL node:test
@@ -1204,6 +1395,16 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
       (outcome.run.run === "pass" ||
         (outcome.run.run === "skip" && outcome.run.kind === "ui-shell"));
     outcome.ok = compile.ok && specsGreen && entryGreen && projectLeg.verdict.ok;
+    // W43 · C6 (fixes/312_c6_ux · 311_sd_product K3/K4): the substance census
+    // rides every runnable verdict, and a non-clean census over an EXISTING
+    // job-file set joins the top-level note — so a green tree-run whose job
+    // modules are TODO(E-15) stubs can never read as "the product works".
+    // Trees without a job-file signal get the census but stay note-silent.
+    outcome.substance = treeSubstanceOf(subject, { green: outcome.ok });
+    if (outcome.substance.note) {
+      outcome.note = outcome.note ? `${outcome.note} · ${outcome.substance.note}` : outcome.substance.note;
+    }
+    outcome.verdictHash = treeVerdictHash(outcome);
     return finish(outcome);
   } finally {
     // Safety net for a throw out of the work block — finish() already cleaned

@@ -1,10 +1,18 @@
 import { PHASES, PHASE_BY_ID, PHASE_LAST, canEnter, phaseDef, priorsSealed } from "./phases.ts";
 import { clientSafeServerSpecifier } from "./server-spec.ts";
+// 312 C3 (CF-SE2-1): bounded settlement + trust gates for the wild-review /
+// P6-synthesis awaits. See settle.ts for the measured mock-starvation proof.
+import { isBareNodeHost, isTrustedCallable, settleWithin } from "./settle.ts";
 import type { ErrorCode } from "./errors.ts";
 import { classifyError, ERROR_CODES } from "./errors.ts";
 import { flattenStack } from "./rt-events.ts";
 import type { RtEventSeed } from "./rt-events.ts";
 import { compileAgentPacket } from "./packet.ts";
+// C1 (312): the seat-label vocabulary for the agent-seal provenance rows —
+// policy.ts is a pure leaf (no engine import), so this pulls no cycle in.
+// C1's seatLabel import was staged but never wired (the agent-seal path landed
+// only as an optional `decidedVia?` pass-through) — removed to keep the tree
+// typecheck-clean; the seal work resumes in the next round.
 import {
   bootstrapMemory,
   feasibilityScorecard,
@@ -1652,6 +1660,16 @@ export function approveHitl(
     /** Explicit override of a forceHuman gate (failed P6 sandbox) — R3/B-03. */
     force?: boolean;
     requestedAt?: number;
+    /**
+     * C1 (312) — optional ledger PROVENANCE for the minted row (types.ts
+     * `HitlDecision.decidedVia`). The wild agent-seal path stamps the allowing
+     * decision here (action/resource/reason + seat label + token path) so the
+     * row names the approver machine-readably: `decidedBy` stays the truthful
+     * machine actor ("autopilot"), `decidedVia.label` names the seal seat
+     * (autopilot/agent-seal), and `dod.ts` cross-checks the pair when tagged.
+     * Absent ⇒ the row is byte-identical to the pre-312 shape.
+     */
+    decidedVia?: HitlDecision["decidedVia"];
   },
 ): Project {
   const phase = project.currentPhase;
@@ -3009,6 +3027,16 @@ export type LiveLayerDeps = {
 };
 
 /**
+ * 312 C3: the hang bound for ONE keyed P6 synthesis call (ms). NOT a
+ * performance budget — it sits an order above the worst plausible keyed P6
+ * (the provider's own per-call ceilings are 20 s flash / 60 s pro, and the
+ * seam's retries + repairs are bounded), so it can only ever trip on a call
+ * that has STOPPED making progress; the deterministic floor is then the
+ * outcome exactly as for any other synthesis failure.
+ */
+export const P6_SYNTH_HANG_BOUND_MS = 900_000;
+
+/**
  * fixes/150 (G4): the keyed P6 upgrade core shared by liveLayer AND the wild
  * P6 step — ONE seam for both faces of the product (149_a5 F1 / 149_a4 #2:
  * the 'leave it alone' face must produce the same artifact a keyed store run
@@ -3027,6 +3055,14 @@ export type LiveLayerDeps = {
  */
 async function upgradeP6Keyed(floor: Project, deps?: LiveLayerDeps): Promise<Project> {
   try {
+    // 312 C3 (CF-SE2-1) — HOST GATE. On a non-Node host the runtime-assembled
+    // `.server.` specifiers below are rewritten by the TanStack
+    // import-protection plugin to a mock module whose every export is a
+    // callable proxy; awaiting a call on it never settles (it spins the
+    // microtask queue forever — measured, see settle.ts / fixes/312 §1), and
+    // no in-process timeout can fire. Refuse by host check BEFORE any import;
+    // the honest floor then stands exactly as it does keyless.
+    if (!isBareNodeHost()) return floor;
     const dsSpec = clientSafeServerSpecifier("deepseek");
     const ds = (await import(dsSpec)) as { isDeepSeekConfigured?: () => boolean };
     const configured = typeof ds.isDeepSeekConfigured === "function" ? ds.isDeepSeekConfigured() : false;
@@ -3048,12 +3084,17 @@ async function upgradeP6Keyed(floor: Project, deps?: LiveLayerDeps): Promise<Pro
     const codegen = (await import(codegenSpec)) as {
       liveP6Synthesis?: (p: Project, deps?: { treeFailure?: string }) => Promise<Project>;
     };
-    if (typeof codegen.liveP6Synthesis === "function") {
+    if (typeof codegen.liveP6Synthesis === "function" && isTrustedCallable(codegen.liveP6Synthesis)) {
       // fixes/147 (E2): the journey driver's tree-failure tail rides the
       // additive `deps` param into codegen (deps.treeFailure is codegen's
       // ONLY failure-context reader); absent ⇒ liveP6Synthesis(done) —
       // byte-identical legacy call.
-      const upgraded = await codegen.liveP6Synthesis(p, deps);
+      // 312 C3: the await is BOUNDED — a synthesis promise that never settles
+      // (dropped wire call) resolves as !ok at the hang bound and the floor
+      // stands, exactly like every other synthesis failure below.
+      const settled = await settleWithin(codegen.liveP6Synthesis(p, deps), P6_SYNTH_HANG_BOUND_MS);
+      if (!settled.ok) return floor;
+      const upgraded = settled.value;
       if (upgraded && typeof upgraded === "object" && upgraded !== p) return upgraded;
     }
     return p;
@@ -3674,7 +3715,9 @@ export type WildStepResult = {
   /**
    * Machine-readable pause/failure class (errors.ts, B5). Absent on noop —
    * a driver loop branches on `code`, never on prose. Mapping: classifier
-   * error/short feedback → RT_E_LLM_REJECTED · classifier not configured →
+   * error/short feedback → RT_E_LLM_REJECTED · classifier call that never
+   * settles inside the review bound (312 C3) → RT_E_LLM_TIMEOUT · classifier
+   * not configured →
    * RT_E_LLM_NOT_CONFIGURED · human-only gate / hard-DoD block / review
    * reject → RT_E_GATE_PENDING · locked/rejected/missing-record/illegal
    * transition → RT_E_PHASE_ILLEGAL · unexpected engine throw → RT_E_INTERNAL.
@@ -3731,6 +3774,13 @@ export type WildStepOptions = {
    *  production guard (keyed ⇒ headless.runP6Edge, keyless ⇒ the deterministic
    *  floor, byte-identical to the pre-seam engine). */
   p6Edge?: (p: Project) => Promise<Project>;
+  /** 312 C3: bound on ONE Auto-Review classifier decision (ms). A reviewer
+   *  call that never settles resolves as a coded RT_E_LLM_TIMEOUT pause
+   *  within this window instead of hanging the driver. Default
+   *  `WILD_REVIEW_TIMEOUT_MS` (≥ the provider's own per-call ceilings);
+   *  test/dev seam — pass a small value to pin the bound. Non-finite/non-
+   *  positive values fall back to the default (settle.ts normalizeMs). */
+  reviewTimeoutMs?: number;
 };
 
 export function wildLog(p: Project, phase: PhaseId, level: JsonLog["level"], event: string, detail: string): Project {
@@ -3868,29 +3918,90 @@ function wildReviewCtx(
 }
 
 /**
+ * 312 C3: the default bound on ONE Auto-Review classifier decision (ms). The
+ * reviewer can only legitimately take about one provider call (20 s flash /
+ * 60 s pro per-call ceilings); this window sits above that with slack and
+ * exists to convert a reviewer promise that NEVER settles into a coded
+ * RT_E_LLM_TIMEOUT pause instead of a hung driver. Override per step with
+ * `WildStepOptions.reviewTimeoutMs` (test/dev seam).
+ */
+export const WILD_REVIEW_TIMEOUT_MS = 120_000;
+
+/**
+ * The honest reviewer for hosts that cannot load the Node-side classifier
+ * (browser / worker without Node): not-configured maps to the engine's
+ * existing deterministic paths — advance decisions use the DoD floor, an OPEN
+ * GATE pauses with RT_E_LLM_NOT_CONFIGURED. Never fabricates a verdict.
+ */
+const unavailableWildReviewer: WildReviewer = async () => ({ ok: false, reason: "not-configured" });
+
+/**
+ * 312 C3 (CF-SE2-1) — resolve the reviewer for one step WITHOUT ever trusting
+ * a denied specifier:
+ *   - a caller-provided reviewer is used only when it passes
+ *     `isTrustedCallable` (the import-protection mock's callable proxies —
+ *     whose `.name` is not a string — are REFUSED, never called or awaited);
+ *   - otherwise the default `wild-mode.server.ts` reviewer is imported ONLY on
+ *     a bare-Node host. Elsewhere the specifier IS the import-protection mock,
+ *     and an await on it starves the event loop forever (measured) — so the
+ *     honest unavailable reviewer is used instead;
+ *   - the resolved module export is trust-checked the same way before use.
+ * Every branch returns a REAL callable; the caller can never receive a proxy.
+ */
+async function resolveWildReviewer(provided?: WildReviewer): Promise<WildReviewer> {
+  if (provided !== undefined && isTrustedCallable(provided)) return provided;
+  if (!isBareNodeHost()) return unavailableWildReviewer;
+  try {
+    const spec = clientSafeServerSpecifier("wild-mode");
+    const mod = (await import(spec)) as { wildClassifierReview?: unknown };
+    const candidate = mod?.wildClassifierReview;
+    return isTrustedCallable(candidate) ? (candidate as WildReviewer) : unavailableWildReviewer;
+  } catch {
+    // Missing provider module / load failure — the honest unavailable reviewer
+    // (not-configured), never a fabricated or proxy verdict.
+    return unavailableWildReviewer;
+  }
+}
+
+/**
  * Resolve the reviewer for one decision. Classifier ok → its verdict verbatim.
  * Classifier not-configured → deterministic DoD floor verdict for advance
  * decisions (approve iff runGate passes); for an OPEN GATE the loop must not
  * fabricate a judgment, so the caller pauses instead (returns null).
  * Classifier error / too-short feedback → honest error, never a guessed verdict.
+ * Classifier call that never settles → coded `RT_E_LLM_TIMEOUT` error at the
+ * bound (312 C3) — a hang is a classified failure, never an infinite await.
  */
 async function resolveWildReview(
   reviewer: WildReviewer,
   project: Project,
   phase: PhaseId,
   reason: "advance" | "gate",
+  timeoutMs: number = WILD_REVIEW_TIMEOUT_MS,
 ): Promise<
   | { kind: "verdict"; verdict: "approve" | "reject"; feedback: string; source: "classifier" | "dod" }
   | { kind: "unconfigured-gate" }
-  | { kind: "error"; error: string }
+  | { kind: "error"; error: string; code?: "RT_E_LLM_TIMEOUT" }
 > {
   const ctx = wildReviewCtx(project, phase, reason);
-  let res: WildClassifierResult;
+  let called: PromiseLike<WildClassifierResult> | WildClassifierResult;
   try {
-    res = await reviewer(ctx);
+    called = reviewer(ctx);
   } catch (err) {
+    // Synchronous reviewer throw — preserved exactly as before (an honest
+    // error verdict, never a lost step).
     return { kind: "error", error: err instanceof Error ? err.message : String(err) };
   }
+  const settled = await settleWithin(called, timeoutMs);
+  if (!settled.ok) {
+    const why = settled.timedOut
+      ? `Auto-Review timed out after ${settled.ms}ms — the classifier call never settled`
+      : settled.error instanceof Error
+        ? settled.error.message
+        : String(settled.error);
+    return { kind: "error", error: why, ...(settled.timedOut ? { code: "RT_E_LLM_TIMEOUT" as const } : {}) };
+  }
+  const res: WildClassifierResult = settled.value;
   if (res.ok) {
     // Engine-side honesty floor (defense in depth): never log a "review" that
     // cannot meet the 12-char feedback contract the ledger promises.
@@ -3935,6 +4046,7 @@ async function wildApproveGate(
   p: Project,
   phase: PhaseId,
   reviewer: WildReviewer,
+  opts?: WildStepOptions,
 ): Promise<WildStepResult> {
   const gate = p.hitl;
   if (!gate || gate.phase !== phase) {
@@ -3953,7 +4065,7 @@ async function wildApproveGate(
     );
     return { project: paused, outcome: "paused", ran: true, error: `P${phase} is a human-only gate.`, code: "RT_E_GATE_PENDING" };
   }
-  const decision = await resolveWildReview(reviewer, p, phase, "gate");
+  const decision = await resolveWildReview(reviewer, p, phase, "gate", opts?.reviewTimeoutMs);
   if (decision.kind === "unconfigured-gate") {
     const paused = wildPause(
       p,
@@ -3966,7 +4078,7 @@ async function wildApproveGate(
   }
   if (decision.kind === "error") {
     const paused = wildPause(p, phase, "error", "wild.error", `P${phase} Auto-Review failed: ${decision.error}`);
-    return { project: paused, outcome: "paused", ran: true, error: decision.error, code: "RT_E_LLM_REJECTED" };
+    return { project: paused, outcome: "paused", ran: true, error: decision.error, code: decision.code ?? "RT_E_LLM_REJECTED" };
   }
   const next = wildReviewLog(p, phase, decision.source, decision.feedback);
   if (decision.verdict === "reject") {
@@ -4026,8 +4138,9 @@ async function wildLeavePhase(
   p: Project,
   phase: PhaseId,
   reviewer: WildReviewer,
+  opts?: WildStepOptions,
 ): Promise<WildStepResult> {
-  const decision = await resolveWildReview(reviewer, p, phase, "advance");
+  const decision = await resolveWildReview(reviewer, p, phase, "advance", opts?.reviewTimeoutMs);
   if (decision.kind === "unconfigured-gate") {
     // Unreachable for advance reviews (only gate reviews return this), but
     // keep it honest anyway.
@@ -4036,7 +4149,7 @@ async function wildLeavePhase(
   }
   if (decision.kind === "error") {
     const paused = wildPause(p, phase, "error", "wild.error", `P${phase} Auto-Review failed: ${decision.error}`);
-    return { project: paused, outcome: "paused", ran: true, error: decision.error, code: "RT_E_LLM_REJECTED" };
+    return { project: paused, outcome: "paused", ran: true, error: decision.error, code: decision.code ?? "RT_E_LLM_REJECTED" };
   }
   const next = wildReviewLog(p, phase, decision.source, decision.feedback);
   if (decision.verdict === "reject") {
@@ -4325,13 +4438,12 @@ export async function wildStep(
     if (project.status === "complete") {
       return { project, outcome: "noop", ran: false, error: "Project already complete." };
     }
-    // Concatenated specifier: the TanStack import-protection plugin statically
-    // denies direct `*.server.*` imports from the client bundle; a computed
-    // specifier defers the load to runtime (bare-Node hosts resolve it
-    // directly; the browser never triggers this path in deterministic mode).
-    const wildServerSpec = clientSafeServerSpecifier("wild-mode");
-    const reviewer =
-      opts?.reviewer ?? (await import(wildServerSpec)).wildClassifierReview;
+    // 312 C3 (CF-SE2-1): reviewer resolution goes through the trust-gated
+    // helper — on a non-Node host the runtime-assembled specifier below IS the
+    // import-protection mock (awaiting it starves the event loop forever,
+    // measured in fixes/312 §1), so the specifier is only imported on a
+    // bare-Node host and every resolved callable is trust-checked first.
+    const reviewer = await resolveWildReviewer(opts?.reviewer);
     const phase: PhaseId = project.currentPhase;
     const rec = project.phases.find((r) => r.id === phase);
     if (!rec) {
@@ -4346,12 +4458,12 @@ export async function wildStep(
     // Open gate on the current edge → classifier decision (approve or pause).
     if (rec.status === "awaiting_hitl" || project.hitl?.phase === phase) {
       emitStart(phase);
-      return finishStep(await wildApproveGate(project, phase, reviewer), "gate");
+      return finishStep(await wildApproveGate(project, phase, reviewer, opts), "gate");
     }
     if (rec.status === "complete") {
       emitStart(phase);
       if (phase === 12) return finishStep(wildFinalize(project, phase), "finalize");
-      return finishStep(await wildLeavePhase(project, phase, reviewer), "advance");
+      return finishStep(await wildLeavePhase(project, phase, reviewer, opts), "advance");
     }
     if (rec.status === "locked") {
       return emitPaused({
@@ -4425,7 +4537,7 @@ export async function wildStep(
         : `P6 executed (${opts?.p6Edge ? "injected edge seam" : "keyed synthesis edge"})`,
     );
     if (done.hitl?.phase === phase) {
-      return finishStep(await wildApproveGate(done, phase, reviewer), "gate");
+      return finishStep(await wildApproveGate(done, phase, reviewer, opts), "gate");
     }
     if (phase === 12) {
       // P0-08 Hole B (fixes/97): the terminal packet was compiled inside
@@ -4437,7 +4549,7 @@ export async function wildStep(
     // packet (store finishPhase parity — audit-31 convergence fix), then let
     // the reviewer decide whether the loop may LEAVE it.
     const gated = stampPacket(recordGateInto(done, phase));
-    return finishStep(await wildLeavePhase(gated, phase, reviewer), "advance");
+    return finishStep(await wildLeavePhase(gated, phase, reviewer, opts), "advance");
   } catch (err) {
     // Any unexpected engine error pauses the run with an honest ledger entry —
     // never a silent swallow, never a fabricated verdict.

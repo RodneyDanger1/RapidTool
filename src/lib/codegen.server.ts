@@ -2460,8 +2460,14 @@ export async function expandBriefWithBackoff(
  * Synthesis retry-with-backoff (make-5 blocker — fixes/121). The main
  * synthesis call was a single non-retrying 90s-capped attempt; when it timed
  * out that WAS the delivery outcome. Give it the same bounded-backoff
- * treatment expandBrief already has: 2 attempts with exponential backoff, and
- * an honest RT_E_LLM_TIMEOUT only after BOTH fail. Non-transient failures
+ * treatment expandBrief already has: a bounded attempt count with exponential
+ * backoff (expandBrief: P6_EXPAND_MAX_ATTEMPTS = 3; this synthesis seam:
+ * P6_SYNTH_MAX_ATTEMPTS = 2), and an honest RT_E_LLM_TIMEOUT only after BOTH
+ * synthesis attempts fail. 312 C5: this sentence used to read "expandBrief
+ * already has: 2 attempts" — DA1 falsified the count and the 311 guard
+ * re-verified it (fixes/311_da1_claims.md:16, fixes/311_wd_guard.md:39): the 2
+ * belongs to synthesis, expandBrief is 3 (backoff 500/1000ms, see :2429/:2449).
+ * Non-transient failures
  * (not-configured, provider rejection, unparseable) return immediately —
  * never a blind re-run. The `sleep` seam is injectable for deterministic tests.
  */

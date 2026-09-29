@@ -27,6 +27,16 @@
 //                  record is the CURRENT pause's), and the rail-level "Parked"
 //                  row carries the same why/unlock/re-entry lines as the detail.
 //
+// W312 C4 (311 §6 #4 — "break the two-rail duplicate"): the P0–P12 strip this
+// component used to render was byte-near-identical to the console's
+// `PhaseProgressRail` right above it, so the strip is GONE from here: the
+// merged rail is `PhaseProgressRail` (console.tsx), which is now the clickable
+// one (`openPhase` is owned by the console and passed down). What remains here
+// is the now-line (keyed, live region) + attention/park/stall rows + the detail
+// panel that the merged rail opens. `openPhase`/`onCloseDetail` are props now;
+// the local state and the duplicate `done/total · pct%` counter are removed —
+// one strip, one counter, one source of truth.
+//
 // Provenance note: console.tsx's module-private `PhaseRecordView` is NOT
 // imported here — that would create a console↔pipeline-rail import cycle in the
 // app's hottest module, and console.tsx is U1's box this wave. Its real-field
@@ -171,28 +181,6 @@ function pickNowLine(project: Project, tail: RtEvent[], ringRows: number): NowLi
     count: null,
     note: "honest idle — the ring and the ledger are both empty",
   };
-}
-
-/** Rail-segment presentation for one phase record (colors mirror PhaseProgressRail). */
-function segmentMeta(
-  status: PhaseStatus,
-  isCurrent: boolean,
-  blocked: boolean,
-  wildActive: boolean,
-): { tone: string; word: string; lblCls: string } {
-  if (status === "complete") return { tone: "bg-ok", word: "Complete", lblCls: "rail-lbl-done" };
-  if (status === "rejected") return { tone: "bg-danger", word: "Rejected", lblCls: "rail-lbl-bad" };
-  if (status === "awaiting_hitl") return { tone: "bg-warn", word: "Awaiting approval", lblCls: "rail-lbl-warn" };
-  if (status === "running") {
-    return { tone: "bg-accent", word: wildActive ? "Wild mode running" : "Running", lblCls: "rail-lbl-now" };
-  }
-  if (isCurrent) {
-    return blocked
-      ? { tone: "bg-danger", word: "Blocked", lblCls: "rail-lbl-bad" }
-      : { tone: "bg-accent", word: "Current", lblCls: "rail-lbl-now" };
-  }
-  if (status === "ready") return { tone: "bg-fg/50", word: "Ready", lblCls: "" };
-  return { tone: "bg-faint", word: "Locked", lblCls: "" };
 }
 
 /**
@@ -394,9 +382,20 @@ function PhaseRecordDetail({
  * `PhaseProgressRail` (mounted after it by the console). Read-only — nothing
  * here mutates the store.
  */
-export function PipelineRail({ project }: { project: Project }) {
+export function PipelineRail({
+  project,
+  openPhase,
+  onCloseDetail,
+}: {
+  project: Project;
+  /** The phase whose detail panel is open. W312 C4 (311 §6 #4): ownership moved
+   *  up to the console — the merged `PhaseProgressRail` is now the one clickable
+   *  strip, and both components need the same open state, so it can no longer
+   *  live in here. */
+  openPhase: PhaseId | null;
+  onCloseDetail: () => void;
+}) {
   const [snap, setSnap] = useState(() => rtSnapshot());
-  const [openPhase, setOpenPhase] = useState<PhaseId | null>(null);
 
   // Same bounded poll as the runtime panes; the ring is per page-load and tiny.
   useEffect(() => {
@@ -404,10 +403,6 @@ export function PipelineRail({ project }: { project: Project }) {
     return () => clearInterval(id);
   }, []);
 
-  const done = project.phases.filter((r) => r.status === "complete").length;
-  const total = PHASES.length;
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  const wildActive = project.wildRun !== null && project.wildRun !== undefined && project.wildRun.active === true;
   const now = pickNowLine(project, snap.tail, snap.stats.rows);
 
   // Per-phase attention rows — all real fields (mirrors + extends PhaseProgressRail).
@@ -445,60 +440,43 @@ export function PipelineRail({ project }: { project: Project }) {
   const stall = snap.ring.stall;
 
   return (
-    <section className="border-b border-line px-5 py-3" aria-label="Pipeline rail and telemetry">
+    <section className="border-b border-line px-5 py-3" aria-label="Pipeline telemetry">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-mono text-[10px] font-medium tracking-widest text-faint uppercase">Pipeline</p>
-        <p className="font-mono text-[10px] text-faint tabular-nums">
-          {done}/{total} sealed · {pct}% · project {PROJECT_STATUS_WORD[project.status]}
+        <p className="font-mono text-xs font-medium tracking-widest text-faint uppercase">Pipeline</p>
+        {/* W312 C4: the `done/total sealed · pct%` counter that used to repeat
+            here is GONE — the merged PhaseProgressRail above owns it (one
+            counter, one source). What stays is the project-level status word,
+            which was unique to this header. */}
+        <p className="font-mono text-xs text-faint tabular-nums">
+          project {PROJECT_STATUS_WORD[project.status]}
         </p>
       </div>
 
-      <ol className="mt-2 flex gap-1" aria-label="Phase rail P0 to P12 — activate a phase for detail">
-        {PHASES.map((p) => {
-          const rec = project.phases.find((r) => r.id === p.id);
-          const status: PhaseStatus = rec?.status ?? "locked";
-          const isCurrent = project.currentPhase === p.id;
-          const meta = segmentMeta(status, isCurrent, project.status === "blocked", wildActive);
-          const open = openPhase === p.id;
-          return (
-            <li key={p.id} className="min-w-0 flex-1">
-              <button
-                type="button"
-                onClick={() => setOpenPhase((prev) => (prev === p.id ? null : p.id))}
-                aria-expanded={open}
-                aria-controls={open ? "pipeline-rail-detail" : undefined}
-                aria-label={`${p.code} · ${p.title} · ${meta.word} — ${open ? "hide" : "show"} detail`}
-                title={`${p.code} · ${p.title} · ${meta.word}`}
-                className="block w-full rounded-sm focus-visible:ring-2 focus-visible:ring-accent/40"
-              >
-                <span
-                  aria-hidden="true"
-                  className={`rail-seg block h-2 w-full rounded-full ${meta.tone} ${isCurrent ? "rail-current" : ""}`}
-                />
-                <span
-                  className={`rail-lbl ${meta.lblCls} mt-1 block truncate text-center font-mono text-[11px] leading-none text-faint`}
-                >
-                  {p.code}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-
-      <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono text-xs">
-        <span className="text-faint">{now.source === "idle" ? "IDLE" : now.source.toUpperCase()}</span>
-        {now.ts !== null ? <span className="text-faint tabular-nums">{clockLabel(now.ts)}</span> : null}
-        {now.event !== null ? <span className="text-fg">{now.event}</span> : null}
-        {now.code !== null ? <span className="text-accent">{now.code}</span> : null}
-        {now.phase !== null ? <span className="text-faint">P{now.phase}</span> : null}
-        {now.count !== null ? <span className="text-faint">×{now.count} repeats</span> : null}
-        <span className={`${now.tone} [overflow-wrap:anywhere]`}>{now.text}</span>
+      {/* W312 C4 · 311 §2 (top a11y violation) + §6 #7: the now-line is now a
+          polite live region — a screen reader hears the build narrate itself —
+          and its inner row is keyed on the newest event's ts, so each new ring
+          row remounts it and `.nowline-fresh` replays the arrival wash (the
+          existing 2s `rtSnapshot()` poll drives both; no new timer). The live
+          region stays a STABLE node and only its text changes — remounting the
+          region itself would suppress announcements. */}
+      <div role="log" aria-live="polite" aria-atomic="true" aria-label="Newest pipeline event">
+        <div
+          key={now.ts === null ? "idle" : String(now.ts)}
+          className="nowline-fresh mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono text-xs"
+        >
+          <span className="text-faint">{now.source === "idle" ? "IDLE" : now.source.toUpperCase()}</span>
+          {now.ts !== null ? <span className="text-faint tabular-nums">{clockLabel(now.ts)}</span> : null}
+          {now.event !== null ? <span className="text-fg">{now.event}</span> : null}
+          {now.code !== null ? <span className="text-accent">{now.code}</span> : null}
+          {now.phase !== null ? <span className="text-faint">P{now.phase}</span> : null}
+          {now.count !== null ? <span className="text-faint">×{now.count} repeats</span> : null}
+          <span className={`${now.tone} [overflow-wrap:anywhere]`}>{now.text}</span>
+        </div>
       </div>
-      <p className="mt-0.5 font-mono text-[10px] text-faint">{now.note}</p>
+      <p className="mt-0.5 font-mono text-xs text-faint">{now.note}</p>
 
       {attention.length > 0 || park !== null || stall !== null ? (
-        <div className="mt-1.5 space-y-0.5 font-mono text-[11px] leading-relaxed">
+        <div className="mt-1.5 space-y-0.5 font-mono text-xs leading-relaxed">
           {stall !== null ? (
             <p className={stall.class === "step-overdue" ? "text-warn" : "text-danger"}>
               Stalled · {stall.class} · step {stall.stepElapsedMs}ms · since {agoLabel(stall.since)} ago
@@ -525,7 +503,7 @@ export function PipelineRail({ project }: { project: Project }) {
       ) : null}
 
       {openPhase !== null ? (
-        <PhaseRecordDetail project={project} phase={openPhase} onClose={() => setOpenPhase(null)} />
+        <PhaseRecordDetail project={project} phase={openPhase} onClose={onCloseDetail} />
       ) : null}
     </section>
   );

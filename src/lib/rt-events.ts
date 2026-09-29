@@ -226,7 +226,11 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 // every non-test `event:` emit re-scanned — STILL 38 of 56; ui.boundary_crash
 // (the R1/297 +1 name, :144) is emitted at error-component.tsx:60 and is
 // correctly absent above — the arithmetic is re-derived, not inherited, and
-// the list is byte-identical to the scan.)
+// the list is byte-identical to the scan.
+// 312 C5 re-count 2026-09-29 (fixes/312_c5_trust.md; same script): catalogue 56 ·
+// emitted 18 · dead 38 — still 38 of 56; the dead list matched name-for-name on
+// the live mid-wave tree (wild.step_* emitter lines shifted with the 312 lanes;
+// names unchanged).)
 // ---------------------------------------------------------------------------
 
 /** True when the event string is a catalogue member. */

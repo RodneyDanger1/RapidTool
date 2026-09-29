@@ -4434,7 +4434,16 @@ export async function wildStopRun(project: Project): Promise<WildLifecycleShape>
   const { wildLog } = await import("./engine.ts");
   const stopped: Project = {
     ...project,
-    wildRun: { ...run, active: false, stoppedAt: Date.now(), pause: false },
+    wildRun: {
+      ...run,
+      active: false,
+      stoppedAt: Date.now(),
+      pause: false,
+      // 308 B-01 (B2, C2 completion): park is present iff pause — stop must
+      // CLEAR a preserved park, not let it ride the spread onto a stopped run
+      // (the resume/stop family rule; store.stopWildRun parity).
+      park: null,
+    },
   };
   return {
     ok: true,

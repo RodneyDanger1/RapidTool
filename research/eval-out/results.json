@@ -1,6 +1,9 @@
 {
   "generatedAt": "2026-09-25T00:03:43.504Z",
   "mode": "keyed",
+  "stale": true,
+  "staleStampedAt": "2026-09-29T21:45:54Z",
+  "staleNote": "312 C5 (fixes/312_c5_trust.md): predates the endClass entry key (added 8418b04, 2026-09-28), so its entry row carries NO endClass and read-side censuses report 'absent 1' by design (run-eval.mjs:2589-2590 — readers tolerate the absence, never invent a class). Stamped stale in place rather than refreshed: scripts/run-eval.mjs offers no read-only re-render mode (flags: --keyed/--all/--limit=/--trials=/--k=/--preflight), and a fresh full run would overwrite this newest keyed run's record. The next harness run rewrites this file WITH endClass and clears this note.",
   "corpusDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus",
   "graderDir": "C:\\Users\\mnril\\Desktop\\RapidTool Main\\research\\eval-corpus\\graders",
   "graderFreeze": {

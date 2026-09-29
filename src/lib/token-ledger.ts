@@ -18,8 +18,15 @@
  * assertWithinBudget is the pre-call gate: spent already `>=` cap means the
  * next call would start past budget.
  *
- * Parent wires recordSpend + assertWithinBudget / recordSpendWithinCap at
- * codegen synth paths. Do not add Project.tokenCap here (types.ts is parent).
+ * Parent wiring (312 C5, corrected for accuracy): the codegen synth paths
+ * meter through `accountSynthUsage` → recordSpend + the session-budget
+ * cross-check. The ledger-object helpers here (wouldExceed / assertWithinBudget
+ * / recordSpendWithinCap — all REAL exports, test-pinned) and the budget-object
+ * seam (assertBudgetHeadroom / recordBudgetSpend, the runBudgetedCall family)
+ * are the seam-callable API; the three ledger-object helpers have no production
+ * call site today. CF-SE2-4's "non-existent recordSpendWithinCap" premise was
+ * disproven on bytes (the function is exported below). Do not add
+ * Project.tokenCap here (types.ts is parent).
  *
  * T-107.6 (dossier 107 §6 "Budgets that bind"): the ledger went cache-aware and
  * budget-threadable. `TokenSpend` / `TokenLedger` carry OPTIONAL cache fields

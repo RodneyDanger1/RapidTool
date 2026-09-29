@@ -3334,6 +3334,12 @@ async function main() {
       }
 
       case "wild": {
+        // 308 B-02 (B2, C2 completion): the verb drives wildStep through
+        // headless, so its wild.step_* telemetry rides the CALLER's onEvent
+        // seam. Make the NDJSON appender explicitly available at this verb's
+        // entry (no-op when main() already loaded it — cliLogEvent itself
+        // no-ops while rtServer is null, so the hop can never throw).
+        await ensureRtAppender();
         // Bounded headless wild-mode macro-run (engine.wildStep loop, default
         // 24 steps) + the full lifecycle the UI toggle offers: --start enables
         // Wild Mode AND begins a run (store startWildRun parity), --pause /
@@ -3382,7 +3388,15 @@ async function main() {
           typeof args.steps === "string" && /^\d+$/.test(args.steps)
             ? parseInt(args.steps, 10)
             : undefined;
-        const opts = steps ? { maxSteps: steps } : {};
+        // 308 B-02 (B2, C2 completion): the headless wild legs emit their
+        // wild.step_* telemetry through the caller's onEvent seam; the CLI's
+        // honest sink is cliLogEvent (NDJSON under logs/ via resolveLogDir —
+        // seed shape matches wildStep's emits 1:1). Telemetry-side only: the
+        // envelope and project bytes are untouched (no-op while rtServer null).
+        const opts = {
+          ...(steps ? { maxSteps: steps } : {}),
+          onEvent: (seed) => cliLogEvent(seed),
+        };
         try {
           const res =
             action === "start"

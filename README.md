@@ -290,25 +290,26 @@ re-run. Where reality is behind, the docs say so, the packets say so, and `docto
 
 ---
 
-# THE CATALOG — every tracked file (1,792 today)
+# THE CATALOG — every tracked file (1,834 today)
 
 **What this is:** the literal catalog of the repository's tracked universe. Counts re-derived
-2026-09-29: `git ls-files | wc -l` = **1,792**. Every **root file, every script, every route,
+2026-09-29: `git ls-files | wc -l` = **1,834**. Every **root file, every script, every route,
 every migration, every config** is named below; mass-produced classes (tests, wave plans, fix
 logs, vault notes, eval trees, vault/E2E outputs) are described **by convention with their full
 membership derivable from one command** — stated inline — because each member's purpose is its
 category's purpose. Descriptions are evidence-based (file heads/comments read on 2026-09-26); a
 genuinely unclear file says so. Re-count any directory with
-`git ls-files <dir> | wc -l`; counts read the tracked index at HEAD `4309f58` (re-derived
-2026-09-29; the wave-309 lane logs move `fixes/` + total as they commit — re-count for the
-live truth) — the formerly-untracked set is committed (§10.13).
+`git ls-files <dir> | wc -l`; counts read the tracked index at HEAD `59dc573` (re-derived
+2026-09-29 by the 312 C5 lane; the 312 wave's lane logs — 6 untracked at derivation — move
+`fixes/` + total as they commit; re-count for the live truth) — the formerly-untracked set
+is committed (§10.13).
 
-## 10.1 Census (tracked, re-derived 2026-09-29 at `4309f58`)
+## 10.1 Census (tracked, re-derived 2026-09-29 at `59dc573`)
 
 | Area | Files | What it is |
 |---|---:|---|
 | `research/` | 476 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 23 · `eval-out/` 345 · 5 top-level research docs) |
-| `fixes/` | 484 | Append-only per-lane landing logs (§10.9) |
+| `fixes/` | 526 | Append-only per-lane landing logs (§10.9) |
 | `src/` | 212 | The product: engine + UI (§10.6) |
 | `wave_plans/` | 106 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 · W42 + the convention README (§10.10) |
 | `.grok/` | 89 | Legacy platform chrome — **do not build on it** (§10.12) |
@@ -325,7 +326,7 @@ live truth) — the formerly-untracked set is committed (§10.13).
 | `.github/` | 1 | CI workflow (§10.3) |
 | `attachments/` · `artifacts/` · `.audit-g2/` | 1 + 1 + 1 | Historical artifact + stored image + G2 probe (§10.12) |
 | `.t4scratch/` | 192 | Committed lane-scratch tree (was working-tree scratch; tracked at `ac6b151`) |
-| **Total** | **1,792** | `git ls-files \| wc -l` |
+| **Total** | **1,834** | `git ls-files \| wc -l` |
 
 ## 10.2 Root files (all 43 tracked — named)
 
@@ -592,7 +593,7 @@ others).
   `03_tech_deep_dives_research.md` (the origin research set, 2026-09-04) · `deepseek-api.md`
   (live-verified API spec) · `runtime-integration.md` (runtime/hosting research).
 
-## 10.9 `fixes/` — the append-only landing-log ledger (484 tracked)
+## 10.9 `fixes/` — the append-only landing-log ledger (526 tracked)
 
 **Convention:** one `fixes/NN_<lane>.md` per lane per wave; append-only; each log carries
 what/why + `file:line` evidence + before/after. The numbering is chronological: the newest number

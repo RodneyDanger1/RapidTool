@@ -2,6 +2,7 @@ import { Component, Fragment, useEffect, useMemo, useRef, useState, type ChangeE
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
+import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Tabs from "@radix-ui/react-tabs";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -20,6 +21,7 @@ import {
   Loader2,
   Lock,
   Moon,
+  PanelRight,
   Pause,
   Play,
   RotateCcw,
@@ -1384,11 +1386,19 @@ function WildConsole({ project }: { project: Project }) {
       ) : null}
 
       {feed.length > 0 ? (
-        <ul className="scroll-thin mt-2 max-h-[240px] space-y-1 overflow-y-auto pr-1">
+        /* 311 §2 (W312 C4): the wild feed updates silently for SR users — it is
+           now a polite live region. Each row already carries a real text kind
+           (`auto`/`gate`/`log`), so the tone dot is decoration, not the encoding. */
+        <ul
+          role="log"
+          aria-live="polite"
+          aria-label="Wild-mode activity rows"
+          className="scroll-thin mt-2 max-h-[240px] space-y-1 overflow-y-auto pr-1"
+        >
           {feed.slice(0, 30).map((r) => (
             <li
               key={r.id}
-              className={`wild-row wild-row--${r.tone} flex items-baseline gap-2 rounded-sm px-1.5 py-1 font-mono text-[11px] leading-relaxed ${
+              className={`wild-row wild-row--${r.tone} flex items-baseline gap-2 rounded-sm px-1.5 py-1 font-mono text-xs leading-relaxed ${
                 r.kind === "auto" ? "wild-row-auto text-fg/90" : "text-fg/75"
               }`}
             >
@@ -1952,6 +1962,17 @@ export function RunScreen({ id }: { id: string }) {
   const [query, setQuery] = useState("");
   const [phaseFilter, setPhaseFilter] = useState<PhaseId | "all">("all");
   const [viewPhase, setViewPhase] = useState<PhaseId | null>(null);
+  /**
+   * W312 C4 · 311 §6 #4: the phase whose pipeline detail panel is open. Owned
+   * HERE because the merged `PhaseProgressRail` (the single clickable strip)
+   * and `PipelineRail` (now-line + detail panel) both need it.
+   */
+  const [railDetail, setRailDetail] = useState<PhaseId | null>(null);
+  /** W312 C4 · 311 §6 #1: the mobile sidebar drawer. Below `lg` the right
+   *  sidebar is a slide-over instead of a ~3 000px stacked column. */
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  /** W312 C4 · 311 §6 #8: the A1–A8 algorithm cards collapse to one line. */
+  const [algoOpen, setAlgoOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportDraft, setReportDraft] = useState("");
@@ -1988,6 +2009,18 @@ export function RunScreen({ id }: { id: string }) {
       if (undoNameTimer.current !== null) window.clearTimeout(undoNameTimer.current);
     };
   }, []);
+
+  // W312 C4 · 311 §6 #1: Escape closes the mobile sidebar drawer. The drawer is
+  // not a modal (no focus trap — it holds ordinary page content), so this is the
+  // only key affordance it needs; desktop (`lg`) never opens it.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setSidebarOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sidebarOpen]);
 
   // 216m · 111 TASK-10: mirror the palette's open state into a ref. The global
   // key handler below deliberately depends only on `id`, so it must read the
@@ -2710,13 +2743,21 @@ export function RunScreen({ id }: { id: string }) {
               saved {fmtClock(lastSaved)}
             </span>
           ) : null}
+          {/* 311 §2 (unnamed control #1): the input was only implicitly associated
+              (wrapped label) and the probe measured no accessible name, so the
+              span now carries an id and the input points at it explicitly. */}
           <label className="inline-flex min-h-9 items-center gap-2 rounded-sm border border-border px-2">
             <input
+              id="autopilot-toggle"
               type="checkbox"
               checked={autopilot}
               onChange={(e) => setAutopilot(e.target.checked)}
+              aria-labelledby="autopilot-toggle-label"
             />
-            <span title="Auto-approves eligible gates only: non-stock gates whose DoD check passed. Stock P4/P5/P8/P9 gates and human-only gates still stop for you.">
+            <span
+              id="autopilot-toggle-label"
+              title="Auto-approves eligible gates only: non-stock gates whose DoD check passed. Stock P4/P5/P8/P9 gates and human-only gates still stop for you."
+            >
               Autopilot · auto-approve eligible gates
             </span>
           </label>
@@ -3009,14 +3050,17 @@ export function RunScreen({ id }: { id: string }) {
               >
                 Ingest report
               </button>
+              {/* 311 §2 (unnamed control #3): the visually-hidden file input was
+                  label-less by design; it now carries an explicit name. */}
               <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-3 text-sm text-muted hover:text-fg">
-                <Upload className="h-4 w-4" />
+                <Upload className="h-4 w-4" aria-hidden="true" />
                 Import
                 <input
                   type="file"
                   accept="application/json,.json"
                   className="hidden"
                   onChange={onImportFile}
+                  aria-label="Import a build file (.json)"
                 />
               </label>
               <button
@@ -3025,6 +3069,23 @@ export function RunScreen({ id }: { id: string }) {
                 className="min-h-11 rounded-md px-3 text-sm text-muted hover:text-danger"
               >
                 Archive
+              </button>
+              {/* W312 C4 · 311 §6 #1 + §3 (mobile/390px was the biggest
+                  ease-of-access failure — the right sidebar stacked inline and
+                  the page ran ~7 300px tall). Below `lg` the sidebar becomes a
+                  slide-over drawer; this toggle is the mobile-only affordance
+                  (desktop keeps the static column, so the button hides there).
+                  Everything in the sidebar stays reachable — nothing removed. */}
+              <button
+                type="button"
+                onClick={() => setSidebarOpen((v) => !v)}
+                aria-expanded={sidebarOpen}
+                aria-controls="run-sidebar"
+                title="Notes, memory, gate log and diagnostics"
+                className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-4 text-sm text-fg focus-visible:ring-2 focus-visible:ring-accent/40 lg:hidden"
+              >
+                <PanelRight className="h-4 w-4" aria-hidden="true" />
+                {sidebarOpen ? "Hide sidebar" : "Sidebar"}
               </button>
             </div>
             {project.status === "complete" ? <ExportSoftwareBlock project={project} /> : null}
@@ -3096,22 +3157,15 @@ export function RunScreen({ id }: { id: string }) {
               </div>
             ) : null}
 
-            <p className="mt-3 font-mono text-[11px] text-faint">
+            <p className="mt-3 font-mono text-xs text-faint">
               Saved to this browser only · Export for backup
             </p>
-            {/* UI-11: the legend is DERIVED from the SHORTCUTS table (single
-                source) — it can no longer drift from the Shortcuts dialog,
-                which stays the canonical list and also carries the Ctrl chords.
-                Only the single-key rows fit a footer; keycap and wording both
-                come from the table, exactly as announced to a screen reader. */}
-            <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-faint">
-              <span className="sr-only">Keyboard shortcuts:</span>
-              {SHORTCUTS.filter((s) => s.keys.length === 1).map((s) => (
-                <span key={s.keys[0]} className="inline-flex items-center gap-1">
-                  <Kbd>{s.keys[0]}</Kbd> {s.label}
-                </span>
-              ))}
-            </p>
+            {/* 311 §6 #9 (W312 C4): the visible `e / g / a / r` legend that sat
+                here is retired — it ate prime vertical space under the action
+                bar while the authoritative list (single-key rows AND the Ctrl
+                chords) already lives in the Shortcuts dialog, reachable from
+                the header button, Ctrl+/ and `?`→Guide. Shortcuts themselves
+                are unchanged; only the duplicate legend text is gone. */}
 
             <AlertDialog.Root open={archiveOpen} onOpenChange={setArchiveOpen}>
               <AlertDialog.Portal>
@@ -3210,27 +3264,62 @@ export function RunScreen({ id }: { id: string }) {
 
           <PendingFixturesBanner project={project} />
 
-          <PhaseProgressRail project={project} />
+          <PhaseProgressRail
+            project={project}
+            openPhase={railDetail}
+            onTogglePhase={(p) => setRailDetail((prev) => (prev === p ? null : p))}
+          />
 
-          {/* W309 A6 (M4-01): U2's pipeline rail — rail + now-line + click-for-
-              detail + the ring.stall latch's first continuous app reader.
-              Mounted after its sibling PhaseProgressRail; additive. */}
-          <PipelineRail project={project} />
+          {/* W309 A6 (M4-01): U2's pipeline rail — now-line + click-for-detail +
+              the ring.stall latch's first continuous app reader. W312 C4
+              (311 §6 #4): its duplicate P0–P12 strip is retired — the merged
+              clickable strip above owns the rail, and this mount renders the
+              now-line (live region) + the detail panel the strip opens. */}
+          <PipelineRail
+            project={project}
+            openPhase={railDetail}
+            onCloseDetail={() => setRailDetail(null)}
+          />
 
           <WildConsole project={project} />
 
+          {/* W312 C4 · 311 §6 #8: the A1–A8 cards are REAL state but were competing
+              with the phase story at equal weight; the same progressive-disclosure
+              pattern as "More panels" collapses them to one line (their ids — real
+              fields) with an explicit "Show all N" toggle. Nothing is deleted. */}
           {project.traces.length ? (
             <div className="border-b border-line px-5 py-4">
-              <p className="font-mono text-xs text-muted">Onboard algorithms</p>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {project.traces.map((t) => (
-                  <div key={t.id} className="rounded-md border border-border bg-raised px-3 py-3">
-                    <p className="font-mono text-[11px] text-accent">{t.id}</p>
-                    <p className="mt-1 text-sm font-medium">{t.name}</p>
-                    <p className="mt-1 text-[11px] leading-snug text-muted">{t.summary}</p>
-                  </div>
-                ))}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-mono text-xs text-muted">
+                  Onboard algorithms · {project.traces.length} in play
+                  {!algoOpen ? (
+                    <span className="text-faint"> — {project.traces.map((t) => t.id).join(" · ")}</span>
+                  ) : null}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setAlgoOpen((v) => !v)}
+                  aria-expanded={algoOpen}
+                  className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-muted hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  {algoOpen ? "Hide the cards" : `Show all ${project.traces.length}`}
+                  <ChevronRight
+                    aria-hidden="true"
+                    className={`h-3.5 w-3.5 transition-transform ${algoOpen ? "rotate-90" : ""}`}
+                  />
+                </button>
               </div>
+              {algoOpen ? (
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {project.traces.map((t) => (
+                    <div key={t.id} className="rounded-md border border-border bg-raised px-3 py-3">
+                      <p className="font-mono text-xs text-accent">{t.id}</p>
+                      <p className="mt-1 text-sm font-medium">{t.name}</p>
+                      <p className="mt-1 text-xs leading-snug text-muted">{t.summary}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -3524,7 +3613,39 @@ export function RunScreen({ id }: { id: string }) {
         </section>
         </PaneBoundary>
 
-        <aside className="bg-surface px-4 py-4">
+        {/* W312 C4 · 311 §6 #1 + §3: the right sidebar. On `lg`+ this is the
+            static third column (same content, byte-identical controls). Below
+            `lg` it is a slide-over drawer, CLOSED by default — the old
+            always-inline stack was the measured ~7 300px-tall phone page. The
+            mobile-only "Sidebar" button in the action bar opens it; Escape, the
+            backdrop, or the in-drawer Close button dismiss it. Nothing in the
+            sidebar was removed or moved out of reach. */}
+        {sidebarOpen ? (
+          <button
+            type="button"
+            aria-label="Close the sidebar"
+            className="fixed inset-0 z-40 bg-bg/70 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        ) : null}
+        <aside
+          id="run-sidebar"
+          className={
+            sidebarOpen
+              ? "fixed inset-y-0 right-0 z-40 w-[300px] max-w-[86vw] overflow-y-auto border-l border-line bg-surface px-4 py-4 lg:static lg:z-auto lg:w-auto lg:max-w-none lg:overflow-visible lg:border-l-0"
+              : "hidden bg-surface px-4 py-4 lg:block"
+          }
+        >
+          {sidebarOpen ? (
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(false)}
+              className="mb-3 inline-flex min-h-9 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-muted hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40 lg:hidden"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+              Close
+            </button>
+          ) : null}
           <EnforceDodToggle project={project} llmConfigured={llmStatus.configured} />
           <h2 className="mt-8 text-xs font-medium tracking-wide text-muted uppercase">
             <label htmlFor="notes">Notes</label>
@@ -3622,8 +3743,27 @@ export function RunScreen({ id }: { id: string }) {
   );
 }
 
-/** Compact 13-segment progress rail (P0–P12): done / current / upcoming from project.phases. */
-function PhaseProgressRail({ project }: { project: Project }) {
+/** Compact 13-segment progress rail (P0–P12): done / current / upcoming from project.phases.
+ *
+ *  W312 C4 (311 §6 #4): this rail is now the ONE clickable strip — the P0–P12
+ *  copy that `PipelineRail` duplicated right below it is gone (its counter too),
+ *  and each segment here opens the shared `pipeline-rail-detail` panel (`openPhase`
+ *  is owned by RunScreen so both mounts read the same state).
+ *
+ *  311 §2 ("color-only status encodings get a text/icon twin"): each segment's
+ *  status was previously carried by the fill color + the `rail-lbl-*` tint
+ *  alone for sighted users. Exceptional states now also render a visible glyph
+ *  (✓ complete · ✕ rejected/blocked · ! awaiting approval) and the full status
+ *  word stays in the button's aria-label + title. */
+function PhaseProgressRail({
+  project,
+  openPhase,
+  onTogglePhase,
+}: {
+  project: Project;
+  openPhase: PhaseId | null;
+  onTogglePhase: (phase: PhaseId) => void;
+}) {
   const done = project.phases.filter((r) => r.status === "complete").length;
   const total = PHASES.length;
   const pct = Math.round((done / total) * 100);
@@ -3658,10 +3798,10 @@ function PhaseProgressRail({ project }: { project: Project }) {
   return (
     <div className="border-b border-line px-5 py-3" aria-label="Phase progress">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-mono text-[10px] font-medium tracking-widest text-faint uppercase">
+        <p className="font-mono text-xs font-medium tracking-widest text-faint uppercase">
           Phase graph
         </p>
-        <p className="font-mono text-[10px] text-faint tabular-nums">
+        <p className="font-mono text-xs text-faint tabular-nums">
           {done}/{total} sealed · {pct}%
         </p>
       </div>
@@ -3672,11 +3812,11 @@ function PhaseProgressRail({ project }: { project: Project }) {
         </span>
       </p>
       {attention.length ? (
-        <p className="mt-1 font-mono text-[11px] leading-relaxed text-warn">
+        <p className="mt-1 font-mono text-xs leading-relaxed text-warn">
           Needs you: {attention.map((a) => `${a.code} ${a.word}`).join(" · ")}
         </p>
       ) : null}
-      <ol className="mt-2 flex gap-1">
+      <ol className="mt-2 flex gap-1" aria-label="Phase rail P0 to P12 — activate a phase for detail">
         {PHASES.map((p) => {
           const rec = project.phases.find((r) => r.id === p.id);
           const status = rec?.status ?? "locked";
@@ -3705,22 +3845,44 @@ function PhaseProgressRail({ project }: { project: Project }) {
             label = project.status === "blocked" ? "Blocked" : "Current";
             lblTone = project.status === "blocked" ? "rail-lbl-bad" : "rail-lbl-now";
           }
+          // Text/icon twin for the color fill (311 §2). Only the exceptional
+          // states mark up — complete ✓, rejected ✕, awaiting !, blocked ✕ —
+          // so the strip stays calm; the full word is in aria-label/title.
+          const marker =
+            status === "complete"
+              ? "✓"
+              : status === "rejected" || (isCurrent && project.status === "blocked")
+                ? "✕"
+                : status === "awaiting_hitl"
+                  ? "!"
+                  : null;
+          const open = openPhase === p.id;
           return (
-            <li
-              key={p.id}
-              className="min-w-0 flex-1"
-              title={`${p.code} · ${p.title} · ${label}`}
-              aria-label={`${p.code} · ${label}`}
-            >
-              <span
-                aria-hidden="true"
-                className={`rail-seg block h-2 w-full rounded-full ${tone} ${isCurrent ? "rail-current" : ""}`}
-              />
-              <span
-                className={`rail-lbl ${lblTone} mt-1 block truncate text-center font-mono text-[11px] leading-none text-faint`}
+            <li key={p.id} className="min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={() => onTogglePhase(p.id)}
+                aria-expanded={open}
+                aria-controls={open ? "pipeline-rail-detail" : undefined}
+                aria-label={`${p.code} · ${p.title} · ${label} — ${open ? "hide" : "show"} detail`}
+                title={`${p.code} · ${p.title} · ${label}`}
+                className="block w-full rounded-sm focus-visible:ring-2 focus-visible:ring-accent/40"
               >
-                {p.code}
-              </span>
+                <span
+                  aria-hidden="true"
+                  className={`rail-seg block h-2 w-full rounded-full ${tone} ${isCurrent ? "rail-current" : ""}`}
+                />
+                <span
+                  className={`rail-lbl ${lblTone} mt-1 block truncate text-center font-mono text-xs leading-none text-faint`}
+                >
+                  {p.code}
+                  {marker !== null ? (
+                    <span aria-hidden="true" className="ml-0.5">
+                      {marker}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
             </li>
           );
         })}
@@ -3953,14 +4115,20 @@ function HitlDock({
       </p>
       {needsOverride && (
         <label className="mt-3 flex items-start gap-2 text-sm text-danger">
+          {/* 311 §2 (unnamed control #2): explicit accessible name — the probe
+              measured none for the wrapped-label form. */}
           <input
             ref={overrideRef}
+            id="hitl-override"
             type="checkbox"
             checked={forceOverride}
             onChange={(e) => setForceOverride(e.target.checked)}
+            aria-labelledby="hitl-override-label"
             className="mt-0.5 h-4 w-4"
           />
-          <span>I reviewed the failing bounded-runner output and approve anyway.</span>
+          <span id="hitl-override-label">
+            I reviewed the failing bounded-runner output and approve anyway.
+          </span>
         </label>
       )}
       <div className="mt-3 flex flex-wrap gap-2">
@@ -4533,7 +4701,9 @@ function RuntimeLogPane({ project }: { project: Project }) {
             <span className="font-mono">diagnose</span> verb prints). Nothing is uploaded — this
             panel reads only what is already in this browser.
           </p>
-          <pre className="max-h-96 overflow-auto rounded-md border border-line bg-black/20 p-3 font-mono text-xs text-fg">
+          {/* 311 §6 #6 (W312 C4): `bg-black/20` wells render as grey patches on
+              white in light theme; `bg-overlay/40` resolves through the token. */}
+          <pre className="max-h-96 overflow-auto rounded-md border border-line bg-overlay/40 p-3 font-mono text-xs text-fg">
           {diag}
           </pre>
         </>
@@ -4545,11 +4715,20 @@ function RuntimeLogPane({ project }: { project: Project }) {
           fails, or a wild step stalls. Honest silence, not a broken tab.
         </p>
       ) : (
-        <ul className="flex flex-col gap-1.5">
+        /* 311 §2 (W312 C4 · top a11y violation): the ring feed is the console's
+           live wire — it was silent for screen readers (probe: ariaLiveCount 0
+           on the run screen). It is now a polite live region; `aria-relevant`
+           defaults to additions/text, so new rows narrate as they land. */
+        <ul
+          role="log"
+          aria-live="polite"
+          aria-label="Runtime telemetry ring rows"
+          className="flex flex-col gap-1.5"
+        >
           {snap.tail.map((row, i) => (
             <li
               key={`${row.ts}-${i}`}
-              className="flex flex-col gap-0.5 rounded-md border border-line bg-black/20 px-3 py-2"
+              className="flex flex-col gap-0.5 rounded-md border border-line bg-overlay/40 px-3 py-2"
             >
               <span className="flex flex-wrap items-center gap-2 font-mono text-xs">
                 <span className={row.level === "critical" ? "text-danger" : row.level === "error" ? "text-warn" : "text-muted"}>
@@ -6626,53 +6805,59 @@ function GateHealthCard({ project }: { project: Project }) {
   );
 }
 
-/** Minimal modal shell (overlay + title + Escape/click-outside close). */
+/** Radix-backed modal shell (overlay + title + Escape/click-outside close).
+ *
+ *  W312 C4 · 311 §2 (measured violation #3): the hand-rolled shell had no focus
+ *  trap, no initial focus and no focus restore, and its full-screen overlay was
+ *  a focusable `<button>` — so the first Tab stop was an invisible "Close".
+ *  Radix Dialog (already a dependency, already used by the command palette)
+ *  supplies the trap, initial focus (the visible Close button), focus restore,
+ *  scroll lock and Escape handling, while this shell keeps the exact same
+ *  visuals: same panel classes, same `[role="dialog"]` elevation from
+ *  styles.css, same close control. The global shortcut guard's
+ *  `[role="dialog"][aria-modal="true"]` DOM check keeps working — Radix renders
+ *  exactly those attributes. `description` is announced via Dialog.Description
+ *  (kept sr-only; the panels' bodies stay byte-identical). */
 function Modal({
   open,
   onClose,
   title,
+  description,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
+  description: string;
   children: ReactNode;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    // Lock body scroll while the modal is open (one scroll context at a time —
-    // nested regions inside the dialog keep their own thin scrollbars).
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open, onClose]);
-
-  if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
-      <button type="button" aria-label="Close" className="absolute inset-0 bg-bg/80" onClick={onClose} />
-      <div className="relative z-10 max-h-[80vh] w-full max-w-lg overflow-auto rounded-xl border border-border bg-surface p-5">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-base font-medium tracking-tight">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex min-h-9 items-center gap-1 rounded-md border border-border px-2 text-sm text-muted hover:text-fg"
-          >
-            <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
-          </button>
-        </div>
-        <div className="mt-4">{children}</div>
-      </div>
-    </div>
+    <Dialog.Root
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-bg/80" />
+        <Dialog.Content className="fixed top-1/2 left-1/2 z-50 max-h-[80vh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-xl border border-border bg-surface p-5 focus:outline-none">
+          <div className="flex items-center justify-between gap-3">
+            <Dialog.Title className="text-base font-medium tracking-tight">{title}</Dialog.Title>
+            <Dialog.Close asChild>
+              <button
+                type="button"
+                className="inline-flex min-h-9 items-center gap-1 rounded-md border border-border px-2 text-sm text-muted hover:text-fg"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+                <span className="sr-only">Close</span>
+              </button>
+            </Dialog.Close>
+          </div>
+          <Dialog.Description className="sr-only">{description}</Dialog.Description>
+          <div className="mt-4">{children}</div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -6693,7 +6878,7 @@ function SettingsDialog({
   researchConfigured: boolean;
 }) {
   return (
-    <Modal open={open} onClose={onClose} title="Settings">
+    <Modal open={open} onClose={onClose} title="Settings" description="Where keys live — server-side .env, never the browser.">
       <p className="text-sm leading-relaxed text-muted">
         RapidTool keys live server-side in{" "}
         <code className="rounded-sm bg-raised px-1 font-mono text-xs text-fg">.env</code> — never in the
@@ -6721,7 +6906,7 @@ function SettingsDialog({
 /** Condensed AGENT_GUIDE.md content. */
 function GuideDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
-    <Modal open={open} onClose={onClose} title="Agent guide">
+    <Modal open={open} onClose={onClose} title="Agent guide" description="Condensed AGENT_GUIDE.md content.">
       <div className="space-y-4">
         {GUIDE_SECTIONS.map((s) => (
           <div key={s.title}>
@@ -6738,7 +6923,7 @@ function GuideDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
 /** Keyboard-shortcut reference (single-key + existing Ctrl chords). */
 function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
-    <Modal open={open} onClose={onClose} title="Keyboard shortcuts">
+    <Modal open={open} onClose={onClose} title="Keyboard shortcuts" description="Every single-key and Ctrl chord this screen listens for.">
       <ul className="space-y-1">
         {SHORTCUTS.map((s) => (
           <li
