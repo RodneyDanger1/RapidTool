@@ -198,7 +198,7 @@ export function matchProtectedPath(relPath: unknown): SelfmodProtectedMatch | nu
   return null;
 }
 
-export type SelfmodRefusalCode = SelfmodCode | "RT_E_VALIDATION";
+export type SelfmodRefusalCode = SelfmodCode | "RT_E_VALIDATION" | "RT_E_GIT_UNAVAILABLE";
 
 export type SelfmodRefusal = { code: SelfmodRefusalCode; detail: string };
 

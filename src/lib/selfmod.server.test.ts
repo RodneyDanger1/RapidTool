@@ -263,7 +263,7 @@ describe("selfmod.server · §collect — the real change set", () => {
     appendFileSync(join(wt.dir, "lib.js"), "export const b = 2;\nexport const c = 3;\n", "utf8");
     writeFileSync(join(wt.dir, "notes.txt"), "one\ntwo\nthree\nfour\nfive\n", "utf8");
     const c = await collectSelfmodDiff(wt.dir);
-    assert.ok(c.ok, JSON.stringify(c.refusals));
+    assert.ok(c.ok, "collectSelfmodDiff must see the tracked edit + untracked file (the union-narrowing fix: the message no longer serializes an out-of-shape field)");
     const lib = c.entries.find((e) => e.path === "lib.js");
     assert.ok(lib, "lib.js must appear");
     assert.equal(lib.added, 2);
