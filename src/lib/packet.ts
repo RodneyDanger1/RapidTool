@@ -5,9 +5,17 @@ import { sandboxClaim } from "./sandbox.ts";
 import type { MemoryEntry, PhaseDef, Project } from "./types.ts";
 // OV-41 (W23 · L4, fixes/262): the T-107.6 token ledger — client-safe (its
 // graph is pure arithmetic; no node:fs). Consumed for measured spend ONLY:
-// fields + the ledger's own helpers, never a recomputed number.
-import { estimateCostUsd, totalTokens } from "./token-ledger.ts";
-import type { TokenLedger, TokenPrices, TokenSpend } from "./token-ledger.ts";
+// fields + the ledger's own helpers, never a recomputed number. F2-04 (W41 X1)
+// adds the session-budget boundary helpers (budgetCap / isBudgetExhausted /
+// sessionTokenBudget) — same client-safe module.
+import {
+  budgetCap,
+  estimateCostUsd,
+  isBudgetExhausted,
+  sessionTokenBudget,
+  totalTokens,
+} from "./token-ledger.ts";
+import type { TokenBudget, TokenLedger, TokenPrices, TokenSpend } from "./token-ledger.ts";
 
 /**
  * Packet format version (T7/Q-303). v2 = version-stamped, ledger-aware, honest
@@ -21,6 +29,10 @@ import type { TokenLedger, TokenPrices, TokenSpend } from "./token-ledger.ts";
  * so every no-spend packet stays byte-identical. The version stays 3:
  * additive envelope keys follow T-14's `phase_coverage` precedent, and
  * `packet.test.ts` pins 3 (not this lane's file to change).
+ * F2-04 (W41 · X1): the envelope ALSO gains an ADDITIVE `budget` block — the
+ * honest session-budget boundary (`{spent, cap, stop_reason}`), null unless a
+ * budget has spend, a cap, or a recorded stop to report (see
+ * packetBudgetBoundary). Same precedent; PACKET_VERSION stays 3.
  */
 export const PACKET_VERSION = 3;
 

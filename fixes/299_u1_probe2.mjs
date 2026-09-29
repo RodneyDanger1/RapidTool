@@ -1,6 +1,10 @@
 // U1 scratch probe 2: import-mode loader with the path EMBEDDED in the eval
 // text (process.argv[1] must stay empty — the emitted direct-run guard fires
 // when argv[1] names the entry).
+// HEADER NOTE fixes/301 · X4 (2026-09-28): was repo root `u1_probe2.mjs`,
+// accidentally committed at 4af061a; kept under fixes/ as U1's entry-runs
+// evidence. Run from the repo root:
+//   node --experimental-strip-types fixes/299_u1_probe2.mjs
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";

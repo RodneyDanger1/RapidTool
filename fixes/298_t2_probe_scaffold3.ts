@@ -1,7 +1,11 @@
 // T2 probe #3c: byte-exact truth for the scaffold regexes.
+// MOVED fixes/301 · X4 (2026-09-28): was repo root `probe-t2-scaffold3.ts`,
+// accidentally committed at 4af061a; kept under fixes/ as T2's scaffold-red
+// diagnosis evidence. Run from the repo root (its readFileSync path is
+// cwd-relative):  node --experimental-strip-types fixes/298_t2_probe_scaffold3.ts
 import { readFileSync } from "node:fs";
-import { ALL_PHASES, runHeadless, seedProject } from "./src/lib/testing/fixtures.ts";
-import { scaffoldProject } from "./src/lib/scaffold.ts";
+import { ALL_PHASES, runHeadless, seedProject } from "../src/lib/testing/fixtures.ts";
+import { scaffoldProject } from "../src/lib/scaffold.ts";
 
 // 1. raw source lines of the two failing assertions
 const testSrc = readFileSync("./src/lib/scaffold.test.ts", "utf8").split("\n");

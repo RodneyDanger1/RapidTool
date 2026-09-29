@@ -2613,7 +2613,16 @@ export function acceptanceFailReason(row, acceptance, grader) {
     const failed = rows.filter((r) => r.status === "fail");
     const named = failed
       .slice(0, 3)
-      .map((r) => `${r.id}${r.path ? ` (${r.path})` : r.target ? ` (${r.target})` : r.entry ? ` (${r.entry})` : ""}`)
+      .map((r) => {
+        const loc = r.path ? ` (${r.path})` : r.target ? ` (${r.target})` : r.entry ? ` (${r.entry})` : "";
+        // fixes/301 (X2 — Q4-b tail): the failed row's OWN coded detail (exit
+        // code / missing pin / spawn error — what evaluateEntryRunsRow saw)
+        // must ride the reason; an id alone cannot be acted on. Bounded so a
+        // noisy child cannot bloat the record.
+        const detail =
+          typeof r.detail === "string" && r.detail.trim() !== "" ? `: ${r.detail.trim().slice(0, 120)}` : "";
+        return `${r.id}${loc}${detail}`;
+      })
       .join("; ");
     return `expected behavior failed: ${named || "declared row(s) failed"}`;
   }

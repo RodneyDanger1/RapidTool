@@ -1,12 +1,16 @@
 // T2 probe #2: the lesson-writers P6 red-seal digest failure — print the seal
 // detail + segment lengths.
-import { applyPhaseResult } from "./src/lib/engine.ts";
-import { runGate } from "./src/lib/dod.ts";
-import { runToGate, seedProject } from "./src/lib/testing/fixtures.ts";
-import { lessonEvidenceDetail } from "./src/lib/knowledge.ts";
-import type { PhaseId, Project } from "./src/lib/types.ts";
+// MOVED fixes/301 · X4 (2026-09-28): was repo root `probe-t2-lesson.ts`,
+// accidentally committed at 4af061a; kept under fixes/ as T2's red-seal
+// diagnosis evidence. Run from the repo root:
+//   node --experimental-strip-types fixes/298_t2_probe_lesson.ts
+import { applyPhaseResult } from "../src/lib/engine.ts";
+import { runGate } from "../src/lib/dod.ts";
+import { runToGate, seedProject } from "../src/lib/testing/fixtures.ts";
+import { lessonEvidenceDetail } from "../src/lib/knowledge.ts";
+import type { PhaseId, Project } from "../src/lib/types.ts";
 
-await import("./src/lib/knowledge.ts");
+await import("../src/lib/knowledge.ts");
 
 const parked = runToGate(seedProject(), 6);
 const withRefusal: Project = {

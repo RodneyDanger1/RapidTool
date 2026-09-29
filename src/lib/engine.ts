@@ -1315,14 +1315,17 @@ function fitLessonEvidence(digest: string, budget = 240): string {
       continue;
     }
     const room = budget - out.length - 3;
-    if (room <= 0) break;
     if (seg.startsWith("tail:")) {
-      out = `${out} · ${seg.slice(0, room)}`;
+      if (room > 0) {
+        out = `${out} · ${seg.slice(0, room)}`;
+      }
     } else if (out.startsWith("unmet: ")) {
-      // Atomic clause (e.g. class): reclaim room by trimming the unmet list.
-      const head = out.slice("unmet: ".length);
-      out = `unmet: ${head.slice(0, Math.max(0, head.length - (seg.length - room)))} · ${seg}`;
-    } else {
+      // Atomic clause (e.g. class): fit it exactly by trimming the unmet list's
+      // tail — the verbatim head alone may already overflow the budget, and a
+      // recorded refusal code is never silently mangled (fixes/300).
+      const keep = Math.max("unmet: ".length, budget - 3 - seg.length);
+      out = `${out.slice(0, keep)} · ${seg}`;
+    } else if (room > 0) {
       out = `${out} · ${seg.slice(0, room)}`;
     }
     break;

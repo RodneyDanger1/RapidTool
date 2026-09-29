@@ -1,6 +1,10 @@
 // T2 probe #3b: exact chars + which candidate regex matches.
-import { ALL_PHASES, runHeadless, seedProject } from "./src/lib/testing/fixtures.ts";
-import { scaffoldProject } from "./src/lib/scaffold.ts";
+// MOVED fixes/301 · X4 (2026-09-28): was repo root `probe-t2-scaffold2.ts`,
+// accidentally committed at 4af061a; kept under fixes/ as T2's scaffold-red
+// diagnosis evidence. Run from the repo root:
+//   node --experimental-strip-types fixes/298_t2_probe_scaffold2.ts
+import { ALL_PHASES, runHeadless, seedProject } from "../src/lib/testing/fixtures.ts";
+import { scaffoldProject } from "../src/lib/scaffold.ts";
 
 const p = runHeadless(seedProject(), ALL_PHASES);
 if (!p) throw new Error("no project");

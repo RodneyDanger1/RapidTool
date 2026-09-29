@@ -1,10 +1,14 @@
 // U1 scratch probe 4 (NOT committed): full acceptance evaluation of the 4
 // re-pointed kind graders against the REAL emitted trees + whole-corpus
 // loadGrader sweep + verification labels.
-import { readFileSync, readdirSync } from "node:fs";
+// HEADER NOTE fixes/301 · X4 (2026-09-28): was repo root `u1_probe4.mjs`,
+// accidentally committed at 4af061a; kept under fixes/ as U1's entry-runs
+// evidence. Run from the repo root:
+//   node --experimental-strip-types fixes/299_u1_probe4.mjs
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { checkAcceptance, loadGrader, parseGrader } from "./scripts/run-eval.mjs";
+import { checkAcceptance, loadGrader } from "../scripts/run-eval.mjs";
 
 const ROOT = process.cwd();
 const GRADER_DIR = join(ROOT, "research", "eval-corpus", "graders");

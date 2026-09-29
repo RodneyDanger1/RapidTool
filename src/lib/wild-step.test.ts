@@ -179,7 +179,8 @@ describe("wildStep onEvent telemetry (109 CAP-5)", () => {
     });
     // Wall-clock stamps (createdAt, ledger ts, wildRun stamps), the per-run
     // project id, and the packet's compiled_at/project_id differ between the
-    // two separately-built fixtures — normalize them; everything else must be
+    // two separately-built fixtures — as does fixes/295's wall-clock-folded
+    // envelope input_hash — normalize them; everything else must be
     // identical (the sink may not alter engine behavior).
     const normalize = (p: Project) => ({
       ...p,
@@ -190,7 +191,8 @@ describe("wildStep onEvent telemetry (109 CAP-5)", () => {
         .replace(/compiled_at: [^\n]+/g, "compiled_at: FIXED")
         .replace(/project_id: [^\n]+/g, "project_id: FIXED")
         .replace(/"compiled_at": "[^"]+"/g, '"compiled_at": "FIXED"')
-        .replace(/"project_id": "[^"]+"/g, '"project_id": "FIXED"'),
+        .replace(/"project_id": "[^"]+"/g, '"project_id": "FIXED"')
+        .replace(/"input_hash": "[^"]+"/g, '"input_hash": "FIXED"'),
       traces: (p.traces ?? []).map((a) => ({ ...a, ranAt: 0 })),
       wildRun: p.wildRun ? { ...p.wildRun, startedAt: 0, lastAutoAt: 0 } : p.wildRun,
     });
@@ -271,13 +273,16 @@ describe("W-01 (fixes/271 · §R1-f01) — the wild P6 keyed edge seam", () => {
       // packet text inside artifact bodies — so the pin read RED on volatile
       // bytes only (byte-classifier run at W31: 26 diffs = 25 volatile + the
       // seam-naming detail this pin intentionally masks). Same class as the
-      // fields already masked below; never a behavior comparison.
+      // fields already masked below (incl. fixes/295 F2-03's envelope
+      // input_hash, folded from the same wall-clocks); never a behavior
+      // comparison.
       const stripVolatiles = (s: string) =>
         s
           .replace(/compiled_at: [^\n]+/g, "compiled_at: FIXED")
           .replace(/project_id: [^\n]+/g, "project_id: FIXED")
           .replace(/"compiled_at": "[^"]+"/g, '"compiled_at": "FIXED"')
-          .replace(/"project_id": "[^"]+"/g, '"project_id": "FIXED"');
+          .replace(/"project_id": "[^"]+"/g, '"project_id": "FIXED"')
+          .replace(/"input_hash": "[^"]+"/g, '"input_hash": "FIXED"');
       const normalize = (p: Project) => ({
         ...p,
         id: "fixture",

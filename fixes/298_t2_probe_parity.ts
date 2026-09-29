@@ -1,10 +1,14 @@
 // T2 probe: enumerate exact byte diffs for the three parity pins (headless W-02,
 // wild #5 sink, wild W-01 seam) after their existing normalizers.
-import { createProject, runPhase, runP6Edge, runUntilGate, approve } from "./src/lib/headless.ts";
-import { emptyProject, applyPhaseResult, wildStep, type WildReviewer } from "./src/lib/engine.ts";
-import type { Project } from "./src/lib/types.ts";
-import { FIXTURE_BRIEF } from "./src/lib/testing/fixtures.ts";
-import { packetInputHash } from "./src/lib/packet.ts";
+// MOVED fixes/301 · X4 (2026-09-28): was repo root `probe-t2-parity.ts`,
+// accidentally committed at 4af061a; kept under fixes/ as T2's parity-pin
+// diagnosis evidence. Run from the repo root:
+//   node --experimental-strip-types fixes/298_t2_probe_parity.ts
+import { createProject, runPhase, runP6Edge, runUntilGate, approve } from "../src/lib/headless.ts";
+import { emptyProject, applyPhaseResult, wildStep, type WildReviewer } from "../src/lib/engine.ts";
+import type { Project } from "../src/lib/types.ts";
+import { FIXTURE_BRIEF } from "../src/lib/testing/fixtures.ts";
+import { packetInputHash } from "../src/lib/packet.ts";
 
 async function drainToComplete(project: Project): Promise<Project> {
   let p = project;

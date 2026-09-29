@@ -421,8 +421,8 @@ export function applyReportResult(project: Project, report: AgentReport): ApplyR
   // F2-21 (W37 Y3): the recorded note carries REPORT_BLOCK_MARKER — an agent's
   // self-reported block is labeled as such on every surface that renders it
   // (packet rejection-loop/prior-rejection lines, steering, console), never
-  // presented as a human rejection. Pin re-point owed: report-intake.test.ts
-  // :205/:209 assert the pre-marker bytes (for the test owner).
+  // presented as a human rejection. Pin re-point landed: report-intake.test.ts
+  // asserts the marked bytes (fixes/300).
   const blockedNote = `${REPORT_BLOCK_MARKER}${report.summary}`;
   const phases: PhaseRecord[] = project.phases.map((p) =>
     p.id === phase && report.status === "blocked"

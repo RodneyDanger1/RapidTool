@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // probe_p3_graders.mjs — W41 · P3 · the grader-v2 assertions vs REAL emitted trees.
 //
-// Run:  node --experimental-strip-types probe_p3_graders.mjs
+// Run:  node --experimental-strip-types fixes/295_p3_probe_graders.mjs  (from the repo root)
 //
 // For every grader in research/eval-corpus/graders/*.grader.json:
 //   1. loadGrader() must accept it (a grader that cannot be trusted never grades)
@@ -13,15 +13,18 @@
 //   3. print per-row behavior verdicts + the verification label + the expectedKind
 //      assertion. A failing row is a FAIL line (exit 1); all-pass prints the marker.
 // Throwaway probe — evidence for fixes/295_p3_eval.md.
+// MOVED fixes/301 · X4 (2026-09-28): was repo root `probe_p3_graders.mjs`
+// (committed at 60c92a2); kept under fixes/ as P3's grader-v2 evidence (the
+// 292_w3 F5 note asked for exactly this relocation).
 // ---------------------------------------------------------------------------
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { readdirSync, existsSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { loadGrader, checkAcceptance, trialEmitDir, listCorpusEntries } from "./scripts/run-eval.mjs";
-import { ALL_PHASES, runHeadless, seedProject } from "./src/lib/testing/fixtures.ts";
-import { emitProject } from "./src/lib/headless.ts";
+import { loadGrader, checkAcceptance, trialEmitDir, listCorpusEntries } from "../scripts/run-eval.mjs";
+import { ALL_PHASES, runHeadless, seedProject } from "../src/lib/testing/fixtures.ts";
+import { emitProject } from "../src/lib/headless.ts";
 
 // --fresh [slug,slug]: ignore the on-disk trees and EMIT a fresh keyless tree per
 // case from the fixture's own brief/name/kind (the CURRENT emitter's output),
@@ -34,7 +37,7 @@ const only = (() => {
   return i >= 0 && process.argv[i + 1] ? new Set(process.argv[i + 1].split(",").map((s) => s.trim())) : null;
 })();
 
-const ROOT = fileURLToPath(new URL(".", import.meta.url));
+const ROOT = fileURLToPath(new URL("..", import.meta.url)); // fixes/301 · X4: lives in fixes/ — parent = repo root
 const GRADER_DIR = join(ROOT, "research", "eval-corpus", "graders");
 const OUT_DIR = join(ROOT, "research", "eval-out");
 

@@ -1,11 +1,15 @@
 // U1 scratch probe (NOT committed; deleted before the lane closes): emit the
 // four kind trees via the pure scaffold emitter and probe the exact spawn
 // shapes the entry-runs evaluation will use.
+// HEADER NOTE fixes/301 · X4 (2026-09-28): the "deleted before the lane closes"
+// intent missed — it was committed accidentally at 4af061a. Kept under fixes/ as
+// U1's entry-runs evidence. Run from the repo root:
+//   node --experimental-strip-types fixes/299_u1_probe.mjs
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import * as scaffold from "./src/lib/scaffold.ts";
+import * as scaffold from "../src/lib/scaffold.ts";
 
 const base = join(tmpdir(), "u1-probe");
 rmSync(base, { recursive: true, force: true });

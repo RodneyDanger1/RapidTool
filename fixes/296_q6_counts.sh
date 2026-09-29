@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -e
+# Q6 (W41) evidence: per-directory tracked-file census behind the README §10.1 rows.
+# MOVED fixes/301 · X4 (2026-09-28): was repo root `q6counts.sh` (committed at
+# 60c92a2); kept under fixes/ as Q6's census evidence. Run from the repo root.
 git ls-files > /tmp/q6_all.txt
 git ls-files src > /tmp/q6_src.txt
 git ls-files src/lib > /tmp/q6_lib.txt

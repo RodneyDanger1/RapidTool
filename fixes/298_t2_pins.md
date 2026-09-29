@@ -13,5 +13,21 @@ Scope (tap-verbatim failing names):
 5. `wildStep onEvent telemetry (109 CAP-5)` — src/lib/wild-step.test.ts
 6. `W-01 (fixes/271 · §R1-f01) — the wild P6 keyed edge seam` — src/lib/wild-step.test.ts
 
-Status: OPEN.
+Status: CLOSED — all six reds landed by V1 (fixes/300, HEAD `4af061a` + working tree); every
+implicated file re-run foreground green. T2's line anchors held within ±2.
+
+## Final table (V1 landing)
+
+| # | red | file | diagnosis | landed fix | re-run |
+|---|-----|------|-----------|------------|--------|
+| 1 | W-02 keyless floor | src/lib/headless.test.ts | STALE PIN — fixes/295 F2-03 envelope `input_hash` (wall-clock fold; zero behavior change) | mask `"input_hash"` in `stripVolatiles` (:639) | 96/96 ✓ |
+| 2 | red-seal evidence digest | src/lib/lesson-writers.test.ts | REAL BUG — `fitLessonEvidence` discarded the atomic `class:` clause behind a 249-char head, then `.slice(0,240)` trampled | engine.ts:1318-1331 — room guard into branches; exact-fit `keep = max("unmet: ".length, budget - 3 - seg.length)` trim | 25/25 ✓ |
+| 3 | blocked-report note | src/lib/report-intake.test.ts | SANCTIONED STALE PIN — F2-21 stamps `REPORT_BLOCK_MARKER` | re-point :208/:212 to the marked bytes (asserting MORE) | 23/23 ✓ |
+| 4 | leftover job-* oracle rows | src/lib/scaffold.test.ts | STALE PIN — W16+W17 coded-refusal (`RT_E_VALIDATION`) superseded the bare `TODO+(E-15+)` form (probe: `matches: false`) | re-point :743/:761 — byte-verified escaped regex | 37/37 ✓ |
+| 5 | sink parity | src/lib/wild-step.test.ts | STALE PIN — fixes/295 F2-03 `input_hash` | mask in `normalize` (:195) | 14/14 ✓ |
+| 6 | W-01 seam parity | src/lib/wild-step.test.ts | STALE PIN — fixes/295 F2-03 `input_hash` | mask in `stripVolatiles` (:285) | 14/14 ✓ |
+
+Cross-checks: `src/lib/exec.test.ts` **19/19 ✓** (T1's file — stayed green);
+`src/lib/honesty-guards.test.ts` **13/13 ✓** (second `p6.seal.unmet` pin — no collateral from
+the engine fix). Full per-red evidence: `fixes/300_v1_sixpins.md`.
 

@@ -737,8 +737,10 @@ describe("scaffoldProject — leftover job-* nodes (fixes/196)", () => {
         `oracle must not assert TODO throw for bridged job ${label}`,
       );
     }
-    // host job / API route may still assert the TODO throw (do not delete globally)
-    assert.match(spec, /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/TODO\\+\(E-15\\+\) stub\/\)/);
+    // host job / API route may still assert the TODO throw (do not delete globally).
+    // W16+W17 coded-refusal contract: the emitted row names RT_E_VALIDATION
+    // before the canonical escaped-paren TODO marker.
+    assert.match(spec, /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/RT_E_VALIDATION · TODO\\\(E-15\\\) stub\/\)/);
   });
 
   it("keeps leftover jobs as emitJobStub when there is no generatedSource", () => {
@@ -756,7 +758,7 @@ describe("scaffoldProject — leftover job-* nodes (fixes/196)", () => {
     const spec = bodyOf(result, "tests/oracle.spec.ts");
     assert.match(
       spec,
-      /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/TODO\\+\(E-15\\+\) stub\/\)/,
+      /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/RT_E_VALIDATION · TODO\\\(E-15\\\) stub\/\)/,
       "stub jobs MAY still assert the TODO throw",
     );
   });

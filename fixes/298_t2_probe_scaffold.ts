@@ -1,7 +1,11 @@
 // T2 probe #3: the exact assert.rejects bytes the oracle spec emits for the
 // scaffold leftover-job fixtures (both branches).
-import { ALL_PHASES, runHeadless, seedProject } from "./src/lib/testing/fixtures.ts";
-import { scaffoldProject } from "./src/lib/scaffold.ts";
+// MOVED fixes/301 · X4 (2026-09-28): was repo root `probe-t2-scaffold.ts`,
+// accidentally committed at 4af061a; kept under fixes/ as T2's scaffold-red
+// diagnosis evidence. Run from the repo root:
+//   node --experimental-strip-types fixes/298_t2_probe_scaffold.ts
+import { ALL_PHASES, runHeadless, seedProject } from "../src/lib/testing/fixtures.ts";
+import { scaffoldProject } from "../src/lib/scaffold.ts";
 
 const bodyOf = (p: ReturnType<typeof scaffoldProject>, path: string): string => {
   if (!p.ok) throw new Error(p.error);

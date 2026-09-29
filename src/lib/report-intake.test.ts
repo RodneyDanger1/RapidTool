@@ -202,11 +202,14 @@ describe("applyReport", () => {
     const out = applyReport(project, blocked);
     const rec = out.phases.find((p) => p.id === 5);
     assert.ok(rec);
-    assert.equal(rec?.rejectionNote, "stalled on validation fixture");
+    // F2-21 (W37 Y3): the recorded note carries REPORT_BLOCK_MARKER so an agent
+    // self-report is labeled as such (never a human rejection) — the pin
+    // asserts the marked bytes.
+    assert.equal(rec?.rejectionNote, "[agent report] stalled on validation fixture");
     assert.notEqual(rec?.status, "rejected");
     // M-05: attempt counting stays truthful — a blocked report IS a rejection.
     assert.equal(rec?.rejectionHistory?.length, 1);
-    assert.equal(rec?.rejectionHistory?.[0].note, "stalled on validation fixture");
+    assert.equal(rec?.rejectionHistory?.[0].note, "[agent report] stalled on validation fixture");
     assert.equal(out.status, project.status); // project status untouched
     const log = out.logs[out.logs.length - 1];
     assert.equal(log.level, "warn");

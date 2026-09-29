@@ -628,12 +628,15 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
       // wall-clocks — the byte diff is EXACTLY the volatile class (packet
       // `compiled_at` text+embed inside artifact bodies, phase record
       // startedAt/completedAt + gate.checkedAt, trace ranAt; logs ts was
-      // already masked). Strip those; every behavior byte stays compared.
+      // already masked; fixes/295 F2-03's envelope `input_hash` folds those
+      // same wall-clocks, so it masks with them). Strip those; every behavior
+      // byte stays compared.
       const floor = await runPhase(rewound, 6);
       const stripVolatiles = (s: string) =>
         s
           .replace(/compiled_at: [^\n]+/g, "compiled_at: FIXED")
-          .replace(/"compiled_at": "[^"]+"/g, '"compiled_at": "FIXED"');
+          .replace(/"compiled_at": "[^"]+"/g, '"compiled_at": "FIXED"')
+          .replace(/"input_hash": "[^"]+"/g, '"input_hash": "FIXED"');
       const strip = (p: Project) => ({
         ...p,
         logs: (p.logs ?? []).map((l) => ({ ...l, ts: 0 })),

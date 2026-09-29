@@ -17,11 +17,11 @@
 //      (the evidence the run-eval `entry-runs` row can cite).
 // One JSON line per case + a final ALL-PASS/FAIL marker. Throwaway probe.
 // ---------------------------------------------------------------------------
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { ALL_PHASES, runHeadless, seedProject } from "./src/lib/testing/fixtures.ts";
 import { emitProject } from "./src/lib/headless.ts";
 import { projectKindOf } from "./src/lib/scaffold.ts";

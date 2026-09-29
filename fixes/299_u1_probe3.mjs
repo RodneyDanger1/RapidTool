@@ -1,10 +1,14 @@
 // U1 scratch probe 3 (NOT committed): functional check of the new
 // checkExpectedBehavior entry-runs evaluation against the real emitted trees
 // from probe 1/2 + synthetic broken/HANGING trees.
+// HEADER NOTE fixes/301 · X4 (2026-09-28): was repo root `u1_probe3.mjs`,
+// accidentally committed at 4af061a; kept under fixes/ as U1's entry-runs
+// evidence. Run from the repo root:
+//   node --experimental-strip-types fixes/299_u1_probe3.mjs
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { checkExpectedBehavior, parseGrader } from "./scripts/run-eval.mjs";
+import { checkExpectedBehavior, parseGrader } from "../scripts/run-eval.mjs";
 
 const base = join(tmpdir(), "u1-probe");
 const show = (label, grader, dir, files) => {
@@ -50,7 +54,7 @@ console.log("parse: bad expectExit →", pg({ id: "x", check: "entry-runs", entr
 console.log("parse: valid roundtrip →", JSON.stringify(pg({ id: "x", check: "entry-runs", entry: "./bin/a.mjs", args: ["--help"], expectExit: 0, expectStdout: "u", timeoutMs: 5000 }).grader.expectedBehavior));
 
 // real graders: loadGrader through the module + label
-import { loadGrader, checkAcceptance } from "./scripts/run-eval.mjs";
+import { loadGrader } from "../scripts/run-eval.mjs";
 for (const slug of ["invoice-csv-cli", "date-rrule-library", "order-webhook-service", "arcade-breakout"]) {
   const g = loadGrader(slug);
   console.log(`grader ${slug}: ok=${g.ok}${g.ok ? "" : " ERR=" + g.error}`);
