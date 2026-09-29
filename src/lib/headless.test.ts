@@ -6,7 +6,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -47,6 +47,17 @@ import type { PhaseId, Project } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), "rapidtool-headless-"));
+
+/** 310 (B1 · M6-01/M6-02): a pid that is provably DEAD on this host — a real
+ *  child spawned and fully reaped. The OS cannot recycle a pid inside the
+ *  pin's window, so the liveness check sees it as an orphan (the SIGKILL
+ *  residue class the reclaim pins reproduce). */
+function deadPid(): number {
+  const res = spawnSync(process.execPath, ["-e", ""], { encoding: "utf8" });
+  assert.equal(res.status, 0, `dead-pid probe child must exit cleanly (${res.stderr ?? ""})`);
+  assert.ok(typeof res.pid === "number" && res.pid > 0, "spawnSync must report the child pid");
+  return res.pid;
+}
 
 /** Drive a project to completion through the headless loop (deterministic). */
 async function drainToComplete(project: Project): Promise<Project> {
@@ -172,6 +183,59 @@ describe("file persistence (atomic)", () => {
         assert.equal((err as Error & { code?: string }).code, "RT_E_BUSY");
       }
       assert.ok(!existsSync(path), "must not write the project while locked");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("310 (B1 · M6-02): reclaims a stale .lock whose holder pid is dead (SIGKILL residue)", () => {
+    const dir = tempDir();
+    try {
+      const path = join(dir, "build.json");
+      writeFileSync(`${path}.lock`, JSON.stringify({ pid: deadPid(), ts: Date.now() }));
+      saveProject(path, createProject({ brief: FIXTURE_BRIEF }));
+      assert.ok(existsSync(path), "a stale (dead-pid) lock must not block the save");
+      assert.ok(!existsSync(`${path}.lock`), "the reclaimed lock is released after the save");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("310 (B1 · M6-02): a LIVE .lock still refuses RT_E_BUSY — liveness, not age, decides", () => {
+    const dir = tempDir();
+    try {
+      const path = join(dir, "build.json");
+      // own pid = provably live; ts 0 = ancient, so only a real liveness check
+      // can refuse this — a blanket age/force bypass would reclaim it.
+      writeFileSync(`${path}.lock`, JSON.stringify({ pid: process.pid, ts: 0 }));
+      try {
+        saveProject(path, createProject({ brief: FIXTURE_BRIEF }));
+        assert.fail("expected lock refusal");
+      } catch (err) {
+        assert.equal((err as Error & { code?: string }).code, "RT_E_BUSY");
+      }
+      assert.ok(!existsSync(path), "must not write the project while locked");
+      assert.ok(existsSync(`${path}.lock`), "a live lock is never deleted by a refused writer");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("310 (B1 · M6-02): legacy identityless lock — fresh refuses, past the age bound reclaims", () => {
+    const dir = tempDir();
+    try {
+      const path = join(dir, "build.json");
+      writeFileSync(`${path}.lock`, "held");
+      try {
+        saveProject(path, createProject({ brief: FIXTURE_BRIEF }));
+        assert.fail("expected lock refusal on a fresh identityless lock");
+      } catch (err) {
+        assert.equal((err as Error & { code?: string }).code, "RT_E_BUSY");
+      }
+      const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      utimesSync(`${path}.lock`, old, old);
+      saveProject(path, createProject({ brief: FIXTURE_BRIEF }));
+      assert.ok(existsSync(path), "an identityless lock past the bound is orphaned residue — reclaim it");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1049,7 +1113,9 @@ describe("E-02 — DoD gate parity on headless paths (recordGateInto)", () => {
   it("records a gate for a human-approved HITL phase (approve parity)", async () => {
     let p = createProject({ brief: FIXTURE_BRIEF });
     p = (await runUntilGate(p)).project; // parked at P4, gate NOT yet recorded
-    assert.equal(p.phases.find((r) => r.id === 4)?.gate, undefined);
+    // M7-01 (fixes/310): unrecorded gate = birth-stamped `null` (was the
+    // pre-stamp `undefined` sentinel); still "not yet recorded".
+    assert.equal(p.phases.find((r) => r.id === 4)?.gate ?? null, null);
     const before = p.logs.length;
     p = approve(p);
     const rec = p.phases.find((r) => r.id === 4);

@@ -16,8 +16,8 @@
 //   - `installRtClient()` is idempotent and no-ops without a window.
 //
 // EXPORT SURFACE (compile against these — do not rename):
-//   installRtClient · reportRt · markBoundaryError · getRtRing · rtSnapshot
-//   setStallLatch · peekStall · clearStall · setBusyProbe
+//   installRtClient · disposeRtClient · reportRt · markBoundaryError · getRtRing
+//   rtSnapshot · setStallLatch · peekStall · clearStall · setBusyProbe
 //   tryStartWild · releaseWildStart · buildClientDiagnosis
 //   type RtBusyState · type ClientDiagnosisInput · __rtResetForTests
 // ---------------------------------------------------------------------------
@@ -74,6 +74,10 @@ let installed = false;
 let installedFailed = false;
 let navStart = 0;
 let heartbeatTimer: number | null = null;
+// M6-08 teardown state: the long-task observer handle + every listener
+// installRtClient registered, so disposeRtClient() can take them all down.
+let longTaskObserver: PerformanceObserver | null = null;
+let installedHandlers: { target: "window" | "document"; type: string; fn: unknown }[] = [];
 let lastTickAt = 0;
 let tickOrdinal = 0;
 let lastLongTaskAt = 0;
@@ -395,20 +399,30 @@ export function tryStartWild(projectId: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
+ * M6-08 — record a listener installRtClient registered, so
+ * `disposeRtClient()` can remove exactly the handlers this module owns.
+ */
+function trackInstalledListener(target: "window" | "document", type: string, fn: unknown): void {
+  installedHandlers.push({ target, type, fn });
+}
+
+/**
  * Install the CAP-1 global handlers, the long-task observer, the heartbeat
  * probe and the pagehide flush. Idempotent (double-import safe) and a strict
  * no-op without a window (SSR / node:test). Called from router.tsx module
  * scope and again from __root's layout effect (late-safe install).
+ * Teardown: `disposeRtClient()` — wired to a real pagehide below.
  */
 export function installRtClient(): void {
   if (typeof window === "undefined") return;
   if (installed || installedFailed) return;
   try {
     installed = true;
+    installedHandlers = [];
     navStart = performance.now();
     lastTickAt = Date.now();
 
-    window.addEventListener("error", (event: ErrorEvent) => {
+    const onWindowError = (event: ErrorEvent) => {
       try {
         const err: unknown = event.error ?? event.message;
         if (!markBoundaryError(err)) return; // boundary already reported it
@@ -428,9 +442,11 @@ export function installRtClient(): void {
       } catch {
         /* never throw from a capture handler */
       }
-    });
+    };
+    window.addEventListener("error", onWindowError);
+    trackInstalledListener("window", "error", onWindowError);
 
-    window.addEventListener("unhandledrejection", (event: PromiseRejectionEvent) => {
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
       try {
         reportRt({
           level: "critical",
@@ -451,7 +467,9 @@ export function installRtClient(): void {
       }
       // NOTE: preventDefault is intentionally NOT called — the browser keeps
       // its default console noise (honest per §3.1).
-    });
+    };
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    trackInstalledListener("window", "unhandledrejection", onUnhandledRejection);
 
     // §5.4 Long Tasks API (≥ 250 ms report floor, coalesced on RT_COALESCE_MS).
     try {
@@ -476,6 +494,8 @@ export function installRtClient(): void {
           }
         });
         observer.observe({ type: "longtask", buffered: true });
+        // M6-08: keep the handle — disposeRtClient() disconnects it.
+        longTaskObserver = observer;
       }
     } catch {
       /* Long Tasks API unavailable — the interval-lag probe is the fallback */
@@ -559,10 +579,21 @@ export function installRtClient(): void {
         /* best effort */
       }
     };
-    window.addEventListener("pagehide", flush);
-    document.addEventListener("visibilitychange", () => {
+    // M6-08: a REAL unload tears the probes down (long-task observer + heartbeat
+    // interval + these listeners). A bfcache pagehide (`persisted === true`)
+    // does NOT — the browser freezes this page and thaws it on restore, so
+    // disposing there would kill telemetry for a page that comes back.
+    const onPageHide = (event: PageTransitionEvent) => {
+      flush();
+      if (!event.persisted) disposeRtClient();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    trackInstalledListener("window", "pagehide", onPageHide);
+    const onVisibilityHidden = () => {
       if (document.visibilityState === "hidden") flush();
-    });
+    };
+    document.addEventListener("visibilitychange", onVisibilityHidden);
+    trackInstalledListener("document", "visibilitychange", onVisibilityHidden);
   } catch {
     installedFailed = true;
   }
@@ -712,11 +743,56 @@ export function buildClientDiagnosis(input: ClientDiagnosisInput, now: number = 
   });
 }
 
+/**
+ * M6-08 — the production TEARDOWN seam for installRtClient: disconnect the
+ * long-task PerformanceObserver, clear the heartbeat interval and remove every
+ * listener install registered. Wired to a REAL pagehide (`persisted === false`)
+ * and exported for hosts/tests that need it explicitly. Keeps the ring (the
+ * telemetry data survives teardown; only the probes stop) and re-arms the
+ * install latch, so a later `installRtClient()` boots a fresh host.
+ * Strictly never throws — teardown is itself never a crash source.
+ */
+export function disposeRtClient(): void {
+  try {
+    if (longTaskObserver !== null) {
+      longTaskObserver.disconnect();
+      longTaskObserver = null;
+    }
+    if (heartbeatTimer !== null) {
+      if (typeof window !== "undefined" && typeof window.clearInterval === "function") {
+        window.clearInterval(heartbeatTimer);
+      } else if (typeof clearInterval === "function") {
+        clearInterval(heartbeatTimer);
+      }
+      heartbeatTimer = null;
+    }
+    const w = typeof window !== "undefined" ? window : null;
+    const d = typeof document !== "undefined" ? document : null;
+    for (const h of installedHandlers) {
+      try {
+        const target = h.target === "window" ? w : d;
+        target?.removeEventListener(h.type, h.fn as EventListener);
+      } catch {
+        /* one bad removal never blocks the rest of the teardown */
+      }
+    }
+    installedHandlers = [];
+    installed = false;
+    installedFailed = false;
+  } catch {
+    /* teardown never throws into the host it observes */
+  }
+}
+
 /** Test-only: reset the module singleton state (deterministic node tests). */
 export function __rtResetForTests(): void {
-  ring = null;
+  // M6-08: the reset routes through the SAME teardown seam the page uses
+  // (observer disconnect + heartbeat clear + listener removal), then drops
+  // the singleton data on top of it.
+  disposeRtClient();
   installed = false;
   installedFailed = false;
+  ring = null;
   navStart = 0;
   tickOrdinal = 0;
   lastTickAt = 0;
@@ -727,8 +803,4 @@ export function __rtResetForTests(): void {
   crashSnapshot = null;
   persistedCrashImported = false;
   wildStartLatch = null;
-  if (heartbeatTimer !== null) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
-  }
 }

@@ -87,6 +87,16 @@ export const ERROR_CODES = [
   // Append-only; consumers match string literals, never array position.
   "RT_E_AUTH_SCHEMA_MISSING",
   "RT_E_MCP_DISABLED",
+  // 310 B3 (fixes/310_b3_boundary.md · 308 M7-05/M7-02/M7-06): the wrong-KIND
+  // path family — a directory where a file was required (EISDIR: a dir-as-file
+  // read) or a non-directory where a directory was required (ENOTDIR: a
+  // parent-is-a-FILE emit target, a file-shaped `.rapidtool/`). Previously
+  // unmatched, so these collapsed to caller fallbacks (RT_E_VALIDATION for a
+  // dir-as-file read, RT_E_INTERNAL for an emit, "missing" for a blocked
+  // checkpoint read) — a wrong-kind path is its own path-class refusal, not
+  // input validation. Append-only; consumers match string literals, never
+  // array position.
+  "RT_E_PATH_KIND_MISMATCH",
 ] as const;
 
 /**
@@ -154,9 +164,12 @@ export function dualChannelFailDetail(res: {
  *      `EADDRINUSE` → `RT_E_PORT_IN_USE`, and the connect/DNS errno family
  *      (`ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`, `ENETUNREACH`,
  *      `EHOSTUNREACH`, `ECONNRESET`) → `RT_E_NETWORK_UNREACHABLE` (W12 G3).
- *   5. `SyntaxError` carrying a JSON-specific message (a failed `JSON.parse`)
+ *   5. `EISDIR`/`ENOTDIR` (errno or message) → `RT_E_PATH_KIND_MISMATCH` — a
+ *      wrong-KIND path (dir-where-file / file-where-dir) is its own path-class
+ *      refusal, never the caller's validation fallback (310 B3 · M7-05).
+ *   6. `SyntaxError` carrying a JSON-specific message (a failed `JSON.parse`)
  *      → `RT_E_VALIDATION`.
- *   6. Nothing matched → the caller-supplied `fallback` (default `RT_E_UNKNOWN`).
+ *   7. Nothing matched → the caller-supplied `fallback` (default `RT_E_UNKNOWN`).
  *
  * Wrapper errors (e.g. fetch's "fetch failed" TypeError) carry the real
  * failure in `err.cause` — the chain (up to 4 levels) is walked and every
@@ -254,6 +267,18 @@ function matchErrorLink(link: unknown): ErrorCode | null {
     NETWORK_ERRNO_RE.test(message)
   ) {
     return "RT_E_NETWORK_UNREACHABLE";
+  }
+  // 310 B3 (fixes/310_b3_boundary.md · 308 M7-05): the wrong-KIND path family.
+  // A directory where a file was required (EISDIR — a dir-as-file read) or a
+  // non-directory where a directory was required (ENOTDIR — a parent-is-a-FILE
+  // emit target, a file-shaped `.rapidtool/`) previously matched nothing and
+  // collapsed to the caller's fallback (RT_E_VALIDATION for `run --project .`,
+  // RT_E_INTERNAL for an emit) — a wrong-kind path is a path-class refusal,
+  // not input validation. Deliberately AFTER every existing matcher: adding a
+  // family never re-classifies an error the older matchers already claim
+  // (the W12 append-only ordering rule).
+  if (errno === "EISDIR" || errno === "ENOTDIR" || /\b(EISDIR|ENOTDIR)\b/.test(message)) {
+    return "RT_E_PATH_KIND_MISMATCH";
   }
   // A failed JSON.parse is an input-validation failure and reuses the
   // existing RT_E_VALIDATION ("input or model output failed validation") —
@@ -534,5 +559,11 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
       "F1 (R8-f11 / R13-f06): the MCP runtime client is owner-gated and DISABLED by default — no child process was spawned and zero network I/O was performed (the shell is discovery-first and inert until the owner's trust decision).",
     agentAction:
       "Do not simulate MCP discovery or fabricate tool lists: wait for the owner's trust decision, then set RAPIDTOOL_MCP_ENABLED=1 (once the JSON-RPC 2.0 stdio transport lands, TODO(R8-f11)) and re-run the read-only tools/list discovery.",
+  },
+  RT_E_PATH_KIND_MISMATCH: {
+    meaning:
+      "The path is the wrong KIND of filesystem entry for the operation — a directory where a file was required (EISDIR) or a non-directory where a directory was required (ENOTDIR).",
+    agentAction:
+      "Point the operation at the right kind of path (a file for a file read, a directory for a dir-scoped write) or move the blocking entry aside; do not retry the same path unchanged and never report it as missing.",
   },
 };

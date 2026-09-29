@@ -307,6 +307,49 @@ describe("classifyError", () => {
     );
   });
 
+  // ---- 310 B3 (fixes/310_b3_boundary.md · 308 M7-05): the wrong-KIND path
+  // family. Real shapes (probe, windows node v22): "EISDIR: illegal operation
+  // on a directory, read" (readFileSync on a dir) and "ENOTDIR: not a
+  // directory, mkdir 'x'" / ", scandir 'x'" (parent-is-a-FILE). Both used to
+  // match nothing and collapse to the caller's fallback (RT_E_VALIDATION for
+  // `run --project .`) — a wrong-kind path is its own path-class refusal.
+
+  it("maps EISDIR/ENOTDIR to RT_E_PATH_KIND_MISMATCH", () => {
+    assert.equal(
+      classifyError(
+        Object.assign(new Error("EISDIR: illegal operation on a directory, read"), { code: "EISDIR" }),
+      ),
+      "RT_E_PATH_KIND_MISMATCH",
+    );
+    // Prose-only (a wrapper flattened the errno) still classifies.
+    assert.equal(
+      classifyError(new Error("EISDIR: illegal operation on a directory, read")),
+      "RT_E_PATH_KIND_MISMATCH",
+    );
+    assert.equal(
+      classifyError(
+        Object.assign(new Error("ENOTDIR: not a directory, mkdir 'afile/out'"), { code: "ENOTDIR" }),
+      ),
+      "RT_E_PATH_KIND_MISMATCH",
+    );
+    // A strong signal overrides a caller fallback — a wrong-kind path is NOT
+    // "validation" (the M7-05 misreport this pins against).
+    assert.equal(
+      classifyError(new Error("ENOTDIR: not a directory, scandir 'x'"), "RT_E_VALIDATION"),
+      "RT_E_PATH_KIND_MISMATCH",
+    );
+    // Widen only: the pre-existing families keep their codes (the new matcher
+    // sits after every older one).
+    assert.equal(
+      classifyError(Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" })),
+      "RT_E_PROJECT_MISSING",
+    );
+    assert.equal(
+      classifyError(new Error("EPERM: operation not permitted, open 'x'")),
+      "RT_E_PERMISSION_DENIED",
+    );
+  });
+
   it("maps the connect/DNS errno family to RT_E_NETWORK_UNREACHABLE", () => {
     for (const code of [
       "ECONNREFUSED",
@@ -439,6 +482,16 @@ describe("ERROR_CODE_DOC", () => {
       assert.ok(ERROR_CODE_DOC[code].meaning.trim().length > 0, `${code} meaning is empty`);
       assert.ok(ERROR_CODE_DOC[code].agentAction.trim().length > 0, `${code} agentAction is empty`);
     }
+  });
+
+  it("310 B3 addition stays registered with an honest doc (append-only)", () => {
+    assert.ok(
+      (ERROR_CODES as readonly string[]).includes("RT_E_PATH_KIND_MISMATCH"),
+      "RT_E_PATH_KIND_MISMATCH missing from ERROR_CODES",
+    );
+    assert.ok(ERROR_CODE_DOC.RT_E_PATH_KIND_MISMATCH.meaning.trim().length > 0);
+    assert.ok(ERROR_CODE_DOC.RT_E_PATH_KIND_MISMATCH.agentAction.trim().length > 0);
+    assert.match(ERROR_CODE_DOC.RT_E_PATH_KIND_MISMATCH.meaning, /EISDIR|ENOTDIR/);
   });
 });
 

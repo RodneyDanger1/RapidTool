@@ -12,6 +12,7 @@ import {
   stampPacket,
   unlockRetry,
   wildLog,
+  wildOperatorPark,
   wildPause,
   wildStep,
   // PB-03 (E-13 seam): deepenResearch is imported under an alias so the store's
@@ -1174,6 +1175,10 @@ export const useRapid = create<RapidState>()(
             lastAutoAt: Date.now(),
             stoppedAt: null,
             pause: false,
+            // 308 B-01 (B2): resume must not erase the last executed step's
+            // summary (same key-erasure class the hydrator used to inflict);
+            // park stays absent — it is present iff pause.
+            ...(resuming && p.wildRun!.lastStep ? { lastStep: p.wildRun!.lastStep } : {}),
           },
         };
         // Audit-31: every machine decision is ledgered, nothing is silent.
@@ -1255,7 +1260,20 @@ export const useRapid = create<RapidState>()(
               return { ok: true, ran, stoppedReason: "stopped" };
             }
           }
-          const capped = wildPause(cur, cur.currentPhase, "warn", "wild.cap", "Wild loop step cap (20) reached — run parked.");
+          // 308 M4-05 (B2): the cap stamps the uncoded park — code null (the
+          // WildParkInfo doc names operator toggles + this defensive cap as the
+          // uncoded sources) with unlock "operator" (the run state itself looks
+          // wrong — inspect, repair, resume; WILD_UNLOCK_TEXT). The old bare
+          // call left park:null, making the UI's "parked · uncoded" branch
+          // unreachable for this pause.
+          const capped = wildPause(
+            cur,
+            cur.currentPhase,
+            "warn",
+            "wild.cap",
+            "Wild loop step cap (20) reached — run parked.",
+            { code: null, unlock: "operator" },
+          );
           commitWild(capped, cur);
           return { ok: true, ran, stoppedReason: "cap" };
         } catch (e) {
@@ -1282,17 +1300,29 @@ export const useRapid = create<RapidState>()(
         set((s) => ({
           projects: s.projects.map((p) =>
             p.id === id && p.wildRun
-              ? { ...p, wildRun: { ...p.wildRun, active: false, stoppedAt: Date.now(), pause: false } }
+              ? { ...p, wildRun: { ...p.wildRun, active: false, stoppedAt: Date.now(), pause: false, park: null } }
               : p,
           ),
         })),
       toggleWildPause: (id) =>
         set((s) => ({
-          projects: s.projects.map((p) =>
-            p.id === id && p.wildRun && p.wildRun.active
-              ? { ...p, wildRun: { ...p.wildRun, pause: !p.wildRun.pause } }
-              : p,
-          ),
+          projects: s.projects.map((p) => {
+            if (!(p.id === id && p.wildRun && p.wildRun.active)) return p;
+            // 308 M4-06 (B2): the operator toggle stamps its park record on
+            // pause (wildOperatorPark: uncoded, unlock "resume") and clears it
+            // on resume — park is present iff pause (types.ts WildRunState.park;
+            // the toggle used to leave park:null on pause and a stale record on
+            // resume).
+            const paused = p.wildRun.pause !== true;
+            return {
+              ...p,
+              wildRun: {
+                ...p.wildRun,
+                pause: paused,
+                park: paused ? wildOperatorPark(p, "Wild run paused from the console.") : null,
+              },
+            };
+          }),
         })),
       create: (brief, name) => {
         const project = emptyProject({

@@ -2700,7 +2700,7 @@ export function RunScreen({ id }: { id: string }) {
             className="rounded-sm border border-border px-2 py-1 tabular-nums"
             title={`estimate · ±15% · ${project.modelRoute}`}
           >
-            ≈{tokenEst.tokensEst} tok
+            ≈{tokenEst.tokensEst} tok (est)
           </span>
           {lastSaved !== null ? (
             <span

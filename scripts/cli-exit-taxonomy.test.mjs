@@ -31,6 +31,15 @@
 //      read in the CLI (the expected side), the presented side typed at the
 //      TTY prompt, every `--i-am-human` claim routed through the ONE
 //      `humanSeatClaim` seam (with its non-TTY refusal).
+//   4. (G8/OPS-13) every quoted RT_E_* literal in the CLI is registered in
+//      ERROR_CODE_DOC.
+//   5. (309/A1, behavioral spawn) the wild fuzz shape refuses CODED.
+//   6-8. (310/B1 · M6-05/06, source + TWO behavioral spawns) the Node global
+//      nets: no bare `main();`, ONE `exitInternalError` seam (stack → stderr,
+//      respond() envelope at exit 4), and both process.on nets — proven with
+//      REAL injected faults (`--import` shim gated on the CLI's own listeners,
+//      no startup race; a deadline fallback still faults a REGRESSED CLI so
+//      the pin goes red loudly instead of hanging).
 //
 // House rules honored: cwd-independent (paths via import.meta.url — a
 // scripts-leg test must not depend on process cwd); failure messages name the
@@ -38,12 +47,12 @@
 // Run: node --test scripts/cli-exit-taxonomy.test.mjs
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const CLI_PATH = fileURLToPath(new URL("./rapidtool-cli.mjs", import.meta.url));
 const README_PATH = fileURLToPath(new URL("./README-cli.md", import.meta.url));
@@ -295,3 +304,164 @@ test("wild fuzz shape — `wild --project <missing>.json` refuses CODED (exit 1)
   );
   assert.equal(json.exit_code, res.status, "the envelope's exit_code must equal the process exit");
 });
+
+// ---------------------------------------------------------------------------
+// Legs 6-8 (M6-05/M6-06, fixes/310 · B1) — the Node-side global nets. Leg 6 is
+// source-text (the CLI's bytes are the artifact a reviewer diffs); legs 7/8
+// are BEHAVIORAL spawns with REAL injected faults. The 308 map6 defects: a
+// bare `main();` (a rejection from the awaits ABOVE main()'s internal
+// try/catch escaped with no envelope) and no process-level
+// unhandledRejection/uncaughtException handler on any Node path. The fix: ONE
+// `exitInternalError` seam (stack → stderr; the SAME respond() envelope the
+// internal catch emits: ok:false + RT_E_INTERNAL + exit 4) + main().catch +
+// both process nets.
+// ---------------------------------------------------------------------------
+test("M6-05/06 (310 · B1) — no bare `main();`; both Node nets route through ONE exitInternalError seam", () => {
+  const bare = cliText.match(/(^|\n)\s*main\(\);\s*(\n|$)/);
+  assert.equal(
+    bare,
+    null,
+    "a bare `main();` is back: a rejection from the awaits ABOVE main()'s internal try/catch " +
+      "would escape with no envelope (308 M6-05). Route it through main().catch(exitInternalError).",
+  );
+  assert.match(cliText, /main\(\)\.catch\(exitInternalError\)/, "main() must be .catch()ed through the ONE exitInternalError seam");
+  assert.equal(countCodeOccurrences(/process\.on\("unhandledRejection"/g), 1, "exactly ONE unhandledRejection net (M6-06)");
+  assert.equal(countCodeOccurrences(/process\.on\("uncaughtException"/g), 1, "exactly ONE uncaughtException net (M6-06)");
+  assert.match(
+    cliText,
+    /process\.on\("unhandledRejection",\s*\(reason\)\s*=>\s*exitInternalError\(reason\)\)/,
+    "the unhandledRejection net must route through exitInternalError (one shape, not a second ad-hoc envelope)",
+  );
+  assert.match(
+    cliText,
+    /process\.on\("uncaughtException",\s*\(err\)\s*=>\s*exitInternalError\(err\)\)/,
+    "the uncaughtException net must route through exitInternalError",
+  );
+  const seam = cliText.match(/function exitInternalError\(err\) \{[\s\S]*?\n\}/);
+  assert.ok(seam, "exitInternalError seam not found in rapidtool-cli.mjs — re-derive this guard");
+  assert.match(seam[0], /console\.error\(stack\)/, "the seam must print the stack to stderr (stdout stays exactly one JSON object)");
+  assert.match(
+    seam[0],
+    /respond\(\{ ok: false, error: message, \.\.\.errCode\(err, "RT_E_INTERNAL"\) \}, 4\)/,
+    "the seam must emit the SAME respond() envelope as main()'s internal catch (ok:false + RT_E_INTERNAL + exit 4)",
+  );
+});
+
+/**
+ * Legs 7/8 harness: spawn the real CLI with a fault-injecting `--import` shim.
+ * The shim polls for the CLI's OWN listeners before injecting (no startup
+ * race); a 20s deadline fallback still faults a REGRESSED CLI — it then dies
+ * bare and the assertions go red loudly instead of hanging. The child runs a
+ * real `ingest --report -` against a fixture project with stdin held open, so
+ * it parks (alive) while the shim injects.
+ */
+async function spawnWithInjectedFault({ name, ready, inject }) {
+  const cwd = mkdtempSync(join(tmpdir(), `rapidtool-cli-nets-${name}-`));
+  const env = { ...process.env }; // same scrub set as rapidtool-cli-edit.test.mjs
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  let child = null;
+  try {
+    const proj = join(cwd, "pin-project.json");
+    const created = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "create", "--brief", "B1 net pin fixture project", "--out", proj],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+    const shim = join(cwd, "b1-fault-inject.mjs");
+    writeFileSync(
+      shim,
+      [
+        "// B1 (310) fault shim — inject only once the CLI's own nets are live.",
+        "const deadline = Date.now() + 20_000;",
+        "const gate = setInterval(() => {",
+        `  const ready = ${ready} && process.listenerCount("SIGTERM") > 0;`,
+        "  if (ready || Date.now() > deadline) {",
+        "    clearInterval(gate);",
+        `    ${inject}`,
+        "  }",
+        "}, 5);",
+        "",
+      ].join("\n"),
+    );
+    child = spawn(
+      process.execPath,
+      ["--import", pathToFileURL(shim).href, "--experimental-strip-types", CLI_PATH, "ingest", "--project", proj, "--report", "-"],
+      { cwd, env, stdio: ["pipe", "pipe", "pipe"] },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => {
+      stdout += d;
+    });
+    child.stderr.on("data", (d) => {
+      stderr += d;
+    });
+    const exit = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+        reject(new Error(`timed out waiting for the CLI to exit (${name}).\nstdout: ${stdout}\nstderr: ${stderr}`));
+      }, 120_000);
+      child.on("close", (code, signal) => {
+        clearTimeout(timer);
+        resolve({ code, signal });
+      });
+    });
+    return { exit, stdout, stderr };
+  } finally {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* ignore */
+      }
+    }
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
+/** The M6-05/06 net contract: exit 4 + one JSON envelope + the fault on stderr. */
+function assertNetEnvelope({ exit, stdout, stderr }, marker) {
+  assert.equal(
+    exit.code,
+    4,
+    `an injected fault must exit 4 (RT_E_INTERNAL class), not crash bare — got code=${exit.code} signal=${exit.signal}.\n` +
+      `stdout: ${stdout}\nstderr: ${stderr}`,
+  );
+  let json = null;
+  try {
+    json = JSON.parse(stdout);
+  } catch {
+    /* surfaced below */
+  }
+  assert.ok(json, `the net must print exactly one JSON envelope.\nstdout: ${stdout}\nstderr: ${stderr}`);
+  assert.equal(json.ok, false, "the envelope is a refusal");
+  assert.equal(json.code, "RT_E_INTERNAL", "an escaped internal fault classifies as RT_E_INTERNAL");
+  assert.equal(json.exit_code, 4, "the envelope's exit_code mirrors the process exit");
+  assert.match(stderr, new RegExp(marker), "the fault's stack/message must land on stderr (stdout stays one JSON object)");
+}
+
+test("M6-05/06 (310 · B1) — an injected unhandled rejection exits CODED (exit 4, one JSON envelope)", async () => {
+  const out = await spawnWithInjectedFault({
+    name: "rejection",
+    ready: `process.listenerCount("unhandledRejection") > 0`,
+    inject: `Promise.reject(new Error("B1 pin: injected unhandled rejection"));`,
+  });
+  assertNetEnvelope(out, "B1 pin: injected unhandled rejection");
+});
+
+test("M6-05/06 (310 · B1) — an injected uncaught exception exits CODED (exit 4, one JSON envelope)", async () => {
+  const out = await spawnWithInjectedFault({
+    name: "exception",
+    ready: `process.listenerCount("uncaughtException") > 0`,
+    inject: `setImmediate(() => { throw new Error("B1 pin: injected uncaught exception"); });`,
+  });
+  assertNetEnvelope(out, "B1 pin: injected uncaught exception");
+});
+

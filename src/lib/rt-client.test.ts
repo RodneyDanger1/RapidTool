@@ -14,6 +14,7 @@ import {
   __rtResetForTests,
   buildClientDiagnosis,
   clearStall,
+  disposeRtClient,
   getRtRing,
   installRtClient,
   markBoundaryError,
@@ -296,22 +297,51 @@ test("buildClientDiagnosis: PB-02 persist-health failure passes through verbatim
 // AND the persisted crash snapshot. Node's own globals are saved/restored.
 // ---------------------------------------------------------------------------
 type FakeListener = (e: unknown) => void;
+/**
+ * M6-08: recording PerformanceObserver — real browsers construct one in
+ * installRtClient's Long Tasks path; the harness records construct/observe/
+ * disconnect so the teardown seam can be pinned field-for-field.
+ */
+class FakePerformanceObserver {
+  static instances: FakePerformanceObserver[] = [];
+  disconnected = false;
+  observed: unknown[] = [];
+  cb: (list: { getEntries: () => unknown[] }) => void;
+  constructor(cb: (list: { getEntries: () => unknown[] }) => void) {
+    this.cb = cb;
+    FakePerformanceObserver.instances.push(this);
+  }
+  observe(opts: unknown): void {
+    this.observed.push(opts);
+  }
+  disconnect(): void {
+    this.disconnected = true;
+  }
+}
 function fakeBrowserSurface() {
   const listeners = new Map<string, FakeListener[]>();
   const store = new Map<string, string>();
+  const clearedIntervals: number[] = [];
   const addListener = (type: string, fn: FakeListener) => {
     const arr = listeners.get(type) ?? [];
     arr.push(fn);
     listeners.set(type, arr);
   };
+  const removeListener = (type: string, fn: FakeListener) => {
+    const arr = listeners.get(type) ?? [];
+    const i = arr.indexOf(fn);
+    if (i >= 0) arr.splice(i, 1);
+  };
   const fire = (type: string, e: unknown) => {
     for (const fn of listeners.get(type) ?? []) fn(e);
   };
+  FakePerformanceObserver.instances.length = 0;
   const win = {
     addEventListener: addListener,
-    removeEventListener: () => {},
-    setInterval: () => 1, // never fires; cleared by __rtResetForTests
-    clearInterval: () => {},
+    removeEventListener: removeListener,
+    PerformanceObserver: FakePerformanceObserver,
+    setInterval: () => 1, // never fires; torn down by disposeRtClient
+    clearInterval: (id: number) => void clearedIntervals.push(id),
     setTimeout: () => 1,
     clearTimeout: () => {},
     location: { href: "https://rt.test/proj" },
@@ -329,6 +359,8 @@ function fakeBrowserSurface() {
     listeners,
     fire,
     store,
+    clearedIntervals,
+    observers: () => FakePerformanceObserver.instances,
     install() {
       const prev = {
         window: globalThis.window,
@@ -339,7 +371,7 @@ function fakeBrowserSurface() {
       (globalThis as Record<string, unknown>).window = win;
       (globalThis as Record<string, unknown>).document = {
         addEventListener: addListener,
-        removeEventListener: () => {},
+        removeEventListener: removeListener,
         visibilityState: "visible",
       };
       // The fake window above already carries navigator/performance — the
@@ -393,4 +425,67 @@ test("installRtClient boots the capture host once under a fake window (A3-01)", 
     (globalThis as Record<string, unknown>).performance = prev.performance;
     __rtResetForTests();
   }
+});
+
+// ---------------------------------------------------------------------------
+// M6-08 teardown pin (310 B6): installRtClient registers a long-task observer
+// + a heartbeat interval + four listeners, and pre-fix NOTHING ever took them
+// down outside __rtResetForTests. The seam under test: disposeRtClient() —
+// wired to a REAL pagehide (persisted === false) and exported for hosts —
+// disconnects the observer, clears the heartbeat, removes every listener, and
+// re-arms the install latch. A bfcache pagehide (persisted === true, the page
+// will be thawed) must NOT tear the probes down.
+// ---------------------------------------------------------------------------
+test("M6-08: disposeRtClient (and a real pagehide) tears down observer + heartbeat + listeners", () => {
+  __rtResetForTests();
+  const fb = fakeBrowserSurface();
+  const prev = fb.install();
+  try {
+    installRtClient();
+    const observer = fb.observers().at(-1);
+    assert.ok(observer, "Long Tasks observer constructed at install");
+    assert.equal(observer.observed.length, 1, "observer.observe called once");
+    assert.equal(observer.disconnected, false, "observer live right after install");
+
+    // bfcache pagehide: flush, but KEEP the probes (the page comes back).
+    fb.fire("pagehide", { persisted: true });
+    assert.equal(observer.disconnected, false, "bfcache pagehide keeps the observer");
+    assert.equal(fb.listeners.get("error")?.length, 1, "bfcache pagehide keeps listeners");
+
+    // Real unload: flush + dispose.
+    fb.fire("pagehide", { persisted: false });
+    assert.equal(observer.disconnected, true, "real pagehide disconnects the observer");
+    assert.ok(fb.clearedIntervals.includes(1), "heartbeat interval cleared (id 1)");
+    assert.equal(fb.listeners.get("error")?.length ?? 0, 0, "window error listener removed");
+    assert.equal(fb.listeners.get("unhandledrejection")?.length ?? 0, 0, "rejection listener removed");
+    assert.equal(fb.listeners.get("pagehide")?.length ?? 0, 0, "pagehide listener removed");
+    assert.equal(fb.listeners.get("visibilitychange")?.length ?? 0, 0, "visibility listener removed");
+
+    // The seam re-arms: a later install boots a FRESH host (new observer,
+    // one listener per type again — no duplicates).
+    installRtClient();
+    const observer2 = fb.observers().at(-1);
+    assert.ok(observer2 && observer2 !== observer, "reinstall constructs a fresh observer");
+    assert.equal(observer2.disconnected, false);
+    assert.equal(fb.listeners.get("error")?.length, 1, "reinstall re-registers exactly one");
+
+    // disposeRtClient() directly is idempotent + window-safe.
+    disposeRtClient();
+    disposeRtClient();
+    assert.equal(observer2.disconnected, true, "direct dispose disconnects too");
+    assert.equal(fb.observers().length, 2, "no observer churn on repeated dispose");
+  } finally {
+    (globalThis as Record<string, unknown>).window = prev.window;
+    (globalThis as Record<string, unknown>).document = prev.document;
+    (globalThis as Record<string, unknown>).performance = prev.performance;
+    __rtResetForTests();
+  }
+});
+
+test("M6-08: disposeRtClient is a strict no-op without a window (node-safe)", () => {
+  __rtResetForTests();
+  disposeRtClient(); // must not throw in Node
+  disposeRtClient(); // idempotent
+  installRtClient(); // and the latch still installs as before
+  assert.equal(getRtRing().rows.length, 0, "no rows from a Node install");
 });

@@ -11,9 +11,11 @@
  *    completed same-volume rename. (No fsync: a power-loss window can still lose the rename — stated
  *    instead of over-claimed; stale staging files are swept by the next clear.)
  *  - CORRUPT-SAFE: read NEVER throws on junk; it returns a coded refusal (`RT_E_VALIDATION` for
- *    junk/unknown shape) or `RT_E_CHECKPOINT_MISSING` when a REAL path has no checkpoint file.
- *    Callers branch on `ok`, never on exceptions. A junk/empty `projectDir` is an ARGUMENT error →
- *    `RT_E_VALIDATION` on every operation, refused BEFORE any `join()` (the order-of-operations law).
+ *    junk/unknown shape), `RT_E_PATH_KIND_MISMATCH` when a non-directory BLOCKS the path
+ *    (a FILE-shaped `.rapidtool/` — M7-06/fixes/310), or `RT_E_CHECKPOINT_MISSING` when a REAL
+ *    path has no checkpoint file. Callers branch on `ok`, never on exceptions. A junk/empty
+ *    `projectDir` is an ARGUMENT error → `RT_E_VALIDATION` on every operation, refused BEFORE
+ *    any `join()` (the order-of-operations law).
  *  - VERSIONED: `version` gates the shape; an unknown version is refused, never guessed.
  *  - BOUNDED: the heavy arrays (logs · decisions · memory · artifacts · research · chatLog) are
  *    trimmed on a COPY before write, so a checkpoint always persists within the storage budgets.
@@ -29,7 +31,7 @@
  * NO network. NO keyed calls. NO timestamps beyond the recorded `savedAt` (deterministic-replay friendly).
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { classifyError, type ErrorCode } from "./errors.ts";
@@ -118,9 +120,13 @@ export type CheckpointWriteResult =
  * `checkpoint` is returned as a RunCheckpoint for ergonomics, but the nested project's shape is
  * ASPIRATIONAL (logs/memory/decisions/currentPhase may be junk or absent) and MUST be run through
  * `hydrateProject` before use (see engine.hydrateProject; the resume seam does this). `code` is
- * `RT_E_CHECKPOINT_MISSING` ONLY for a real path with no file; every argument/shape/I-O refusal is
- * `RT_E_VALIDATION` or `classifyError`'s verdict (EACCES → RT_E_PERMISSION_DENIED, …). `path` is
- * `""` when the argument itself was refused (no fabricated partial path).
+ * `RT_E_CHECKPOINT_MISSING` ONLY for a real path with no file AND no non-directory blocking the
+ * chain; an existing non-directory on the way to the checkpoint (a FILE-shaped `.rapidtool/`, or
+ * a `projectDir` that is itself a file) is a wrong-KIND path → `RT_E_PATH_KIND_MISMATCH` (never
+ * "missing" — M7-06/fixes/310, aligning with clearCheckpoint's class on the same shape); every
+ * other argument/shape/I-O refusal is `RT_E_VALIDATION` or `classifyError`'s verdict
+ * (EACCES → RT_E_PERMISSION_DENIED, …). `path` is `""` when the argument itself was refused
+ * (no fabricated partial path).
  */
 export type CheckpointReadResult =
   | { ok: true; checkpoint: RunCheckpoint; path: string }
@@ -232,15 +238,61 @@ export function writeCheckpoint(projectDir: string, project: Project, run: Check
   }
 }
 
+/**
+ * B3 (M7-06 · fixes/310_b3_boundary.md): the first existing path component at-or-above `from`
+ * that is NOT a directory blocks every lookup beneath it — on POSIX the deep read/readdir lands
+ * on ENOTDIR; on Windows a read UNDER a file-parent even surfaces as ENOENT (probe:
+ * `readFileSync("<file>/.rapidtool/checkpoint.json")` → ENOENT while `readdirSync("<file>")` →
+ * ENOTDIR). Both are the same wrong-KIND path, never "missing": walk upward from `from`, stop at
+ * the first EXISTING component, and return it when it is not a directory. Returns null for a
+ * genuinely absent chain (the first existing ancestor is a directory) and never throws.
+ */
+function nonDirectoryBlocker(from: string): string | null {
+  let cur = from;
+  for (let i = 0; i < 64; i++) {
+    let exists = false;
+    try {
+      exists = existsSync(cur);
+    } catch {
+      return null; // un-probeable — not this refusal to make
+    }
+    if (exists) {
+      try {
+        return statSync(cur).isDirectory() ? null : cur;
+      } catch {
+        return null;
+      }
+    }
+    const parent = dirname(cur);
+    if (parent === cur) return null; // reached the root without an existing component
+    cur = parent;
+  }
+  return null;
+}
+
 /** Read the checkpoint. NEVER throws: absent → MISSING; junk/unknown shape → VALIDATION; a
  *  junk/empty `projectDir` → VALIDATION with `path: ""` (argument class — no fabricated relative
- *  path). The returned checkpoint carries the MINIMAL proven shape — hydrate before trusting
- *  fields (A1-09; see CheckpointReadResult). */
+ *  path); a non-directory BLOCKING the chain (a FILE-shaped `.rapidtool/`, a `projectDir` that is
+ *  itself a file) → RT_E_PATH_KIND_MISMATCH, never MISSING (M7-06 — clearCheckpoint refuses the
+ *  same shape in the same class). The returned checkpoint carries the MINIMAL proven shape —
+ *  hydrate before trusting fields (A1-09; see CheckpointReadResult). */
 export function readCheckpoint(projectDir: string): CheckpointReadResult {
   const refusedDir = refuseBadDir(projectDir);
   if (refusedDir) return { ...refusedDir, path: "" };
   const path = checkpointPath(projectDir);
   if (!existsSync(path)) {
+    // M7-06: distinguish "no checkpoint" from "the env blocks the path": a
+    // file-shaped `.rapidtool/` (or a projectDir that is itself a file) is a
+    // wrong-KIND path — the same class clearCheckpoint returns for the shape.
+    const blocker = nonDirectoryBlocker(dirname(path));
+    if (blocker !== null) {
+      return {
+        ok: false,
+        code: "RT_E_PATH_KIND_MISMATCH",
+        error: `checkpoint: ${blocker} exists but is not a directory — a file blocks the checkpoint path`,
+        path,
+      };
+    }
     return { ok: false, code: "RT_E_CHECKPOINT_MISSING", error: `checkpoint: none at ${path}`, path };
   }
   let text: string;

@@ -59,7 +59,7 @@ import { applyWrite, rollback, snapshotPaths } from "./write-set.ts";
 // top-level) and never enters the client graph (store.ts lazy-imports it).
 import { classifyError, type ErrorCode } from "./errors.ts";
 import { checkpointAdmits, clearCheckpoint, readCheckpoint, writeCheckpoint } from "./checkpoint.server.ts";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -79,6 +79,9 @@ import type {
   Project,
   WildPlan,
 } from "./types.ts";
+// 308 B-02 (B2): the Optional telemetry sink's seed shape — the same
+// RtEventSeed the engine emits and the CLI's cliLogEvent consumes.
+import type { RtEventSeed } from "./rt-events.ts";
 
 import type { DoctorSpend } from "./doctor.ts";
 import type { TokenLedger, TokenSpend } from "./token-ledger.ts";
@@ -95,6 +98,117 @@ export function loadProject(path: string, opts?: { preserveWildRun?: boolean }):
   return res.project;
 }
 
+// ---------------------------------------------------------------------------
+// fixes/310 (B1 · M6-01/M6-02): stale-lock reclamation for the two O_EXCL lock
+// sites (saveProject's `<project>.lock`, emit's `.rapidtool-emit.lock`). A
+// SIGKILLed writer cannot run its release; its lock file stranded the project
+// forever — every later writer refused RT_E_BUSY with no retry path short of a
+// manual unlink (308 map6 probes M6-01/02). The claim now writes the holder's
+// identity (pid + ts) INTO the fresh lock; on EEXIST the next claimant
+// consults the holder: a DEAD pid is an orphan and is reclaimed (rename-aside
+// claim + one "wx" re-attempt — the repo's own pid+ts discipline, cf.
+// checkpoint.server.ts A1-08), an identityless legacy lock falls back to a
+// bounded age (mtime), and a LIVE holder always refuses. Reclamation is never
+// a blanket bypass: the live-lock pin forbids it and `--force` (foreign-files)
+// semantics are untouched. Ceiling: pid liveness is same-machine semantics —
+// these locks are local-disk files by design.
+// ---------------------------------------------------------------------------
+const LOCK_STALE_MAX_AGE_MS = 10 * 60 * 1000;
+
+/** errno string of a thrown fs error, "" when the error carries none. */
+function errnoCode(err: unknown): string {
+  return err && typeof err === "object" && "code" in err ? String((err as { code?: unknown }).code) : "";
+}
+
+/** Parse a lock's holder identity (fixes/310). Absent/invalid → null — the
+ *  legacy/identityless class, decided by the bounded-age fallback. */
+function parseLockIdentity(content: string): { pid: number } | null {
+  try {
+    const parsed = JSON.parse(content) as { pid?: unknown } | null;
+    if (parsed && typeof parsed === "object" && typeof parsed.pid === "number" && Number.isInteger(parsed.pid) && parsed.pid > 0) {
+      return { pid: parsed.pid };
+    }
+  } catch {
+    /* legacy/foreign content — age decides */
+  }
+  return null;
+}
+
+/** Is `pid` a live process on this host? EPERM means "exists but not ours" →
+ *  alive (the safe direction: never reclaim a holder we merely cannot signal). */
+function pidIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return errnoCode(err) === "EPERM";
+  }
+}
+
+/** Reclaim an orphaned lock. true → the stale file is gone/moved aside and the
+ *  caller should re-attempt `wx` (exactly once); false → a live holder, or an
+ *  identityless lock inside its age bound — refuse RT_E_BUSY. The reclaim is
+ *  claimed ATOMICALLY via rename(): racing reclaimers cannot both win, and a
+ *  fresh lock created by another writer can never be unlinked out from under
+ *  it by a stale read (the open window a naive read→unlink order would have). */
+function reclaimStaleLock(lockPath: string): boolean {
+  let content: string | null = null;
+  try {
+    content = readFileSync(lockPath, "utf8");
+  } catch {
+    return true; // vanished (released/reclaimed) — let the caller re-attempt wx
+  }
+  const holder = parseLockIdentity(content);
+  if (holder !== null) {
+    if (pidIsAlive(holder.pid)) return false; // live holder — never a bypass
+  } else {
+    let ageMs: number;
+    try {
+      ageMs = Date.now() - statSync(lockPath).mtimeMs;
+    } catch {
+      return false; // cannot stat — leave it alone
+    }
+    if (ageMs < LOCK_STALE_MAX_AGE_MS) return false;
+  }
+  const aside = `${lockPath}.stale-${process.pid}-${Date.now()}`;
+  try {
+    renameSync(lockPath, aside);
+  } catch {
+    // Lost the reclaim race (ENOENT: already moved/released) or the file
+    // cannot move (EPERM/EBUSY): only a vanished lock may proceed.
+    return !existsSync(lockPath);
+  }
+  try {
+    unlinkSync(aside);
+  } catch {
+    /* best-effort sweep of the moved-aside stale lock */
+  }
+  return true;
+}
+
+/** fixes/310 (B1): exclusive claim of `lockPath` ("wx") with the holder
+ *  identity written in, reclaiming a provably-orphaned holder and retrying
+ *  exactly once. Returns the open fd, or null when a live/fresh writer holds
+ *  the lock (callers map that to RT_E_BUSY). Non-EEXIST fs errors throw. */
+function acquireExclusiveLock(lockPath: string): number | null {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync(lockPath, "wx");
+      try {
+        writeSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+      } catch {
+        /* identity is advisory — an identityless lock falls back to mtime age */
+      }
+      return fd;
+    } catch (err) {
+      if (errnoCode(err) !== "EEXIST") throw err;
+      if (attempt === 1) return null; // the re-attempt lost to a racing writer
+      if (!reclaimStaleLock(lockPath)) return null; // live/fresh holder
+    }
+  }
+  return null; // unreachable (every path above returns) — keeps the type honest
+}
+
 /** Persist a project to `path` atomically (write temp file, then rename over target).
  *  174-13: exclusive `.lock` (O_EXCL) so two writers cannot interleave. */
 export function saveProject(path: string, project: Project): string {
@@ -102,16 +216,13 @@ export function saveProject(path: string, project: Project): string {
   mkdirSync(dirname(target), { recursive: true });
   const lockPath = `${target}.lock`;
   let fd: number | null = null;
-  try {
-    fd = openSync(lockPath, "wx");
-  } catch (err) {
-    const code = err && typeof err === "object" && "code" in err ? String((err as { code?: unknown }).code) : "";
-    if (code === "EEXIST") {
-      const e = new Error("saveProject: another writer holds the lock");
-      (e as Error & { code?: string }).code = "RT_E_BUSY";
-      throw e;
-    }
-    throw err;
+  // fixes/310 (B1 · M6-02): stale-aware claim (acquireExclusiveLock) — an
+  // SIGKILLed writer's stranded lock is reclaimed; a live holder still refuses.
+  fd = acquireExclusiveLock(lockPath);
+  if (fd === null) {
+    const e = new Error("saveProject: another writer holds the lock");
+    (e as Error & { code?: string }).code = "RT_E_BUSY";
+    throw e;
   }
   const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
   try {
@@ -1815,17 +1926,39 @@ export async function emitProject(
       foreign,
     };
   }
-  mkdirSync(target, { recursive: true });
+  // 310 B3 (M7-02, fixes/310_b3_boundary.md): mkdir is a boundary the emit
+  // CONTRACT owns — a parent-is-a-FILE target (ENOTDIR) or an unwritable
+  // parent (EPERM/EACCES) used to THROW straight through `{ok:false}` and the
+  // CLI collapsed it to exit 4 `RT_E_INTERNAL` while every other emit failure
+  // is coded. Catch → the coded-refusal shape (classifyError: ENOTDIR →
+  // RT_E_PATH_KIND_MISMATCH, EPERM → RT_E_PERMISSION_DENIED — the CLI's own
+  // mapping).
+  try {
+    mkdirSync(target, { recursive: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `emit: cannot create ${target} (${msg})`, code: classifyError(err, "RT_E_INTERNAL") };
+  }
   const lockPath = join(target, ".rapidtool-emit.lock");
   let fd: number | null = null;
+  // fixes/310 (B1 · M6-01): stale-aware claim — an SIGKILLed emit's stranded
+  // lock is reclaimed; a live writer still refuses RT_E_BUSY, and `--force`
+  // (foreign-files) semantics are unchanged: it never bypasses the lock.
   try {
-    fd = openSync(lockPath, "wx");
+    fd = acquireExclusiveLock(lockPath);
   } catch (err) {
-    const code = err && typeof err === "object" && "code" in err ? String((err as { code?: unknown }).code) : "";
-    if (code === "EEXIST") {
-      return { ok: false, error: "emit: another writer holds the emit lock", code: "RT_E_BUSY" };
-    }
-    throw err;
+    // 310 B3 (M7-03): a non-EEXIST lock failure (EPERM on a read-only target
+    // dir, …) is the same coded refusal — the API-level throw bypassed the
+    // emit contract (the CLI already classified EPERM as RT_E_PERMISSION_DENIED).
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      error: `emit: cannot open the emit lock at ${lockPath} (${msg})`,
+      code: classifyError(err, "RT_E_INTERNAL"),
+    };
+  }
+  if (fd === null) {
+    return { ok: false, error: "emit: another writer holds the emit lock", code: "RT_E_BUSY" };
   }
   const snap = snapshotPaths(
     target,
@@ -3985,7 +4118,10 @@ async function attachWildPlan(project: Project): Promise<Project> {
  * and returns the final project; the CLI persists it. Honest refusal when the
  * project has wildMode off or no active wild run.
  */
-export async function wildStartHeadless(project: Project, opts: { maxSteps?: number } = {}): Promise<WildStartShape> {
+export async function wildStartHeadless(
+  project: Project,
+  opts: { maxSteps?: number; onEvent?: (seed: RtEventSeed) => void } = {},
+): Promise<WildStartShape> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 24, 1), 48);
   if (project.wildMode !== true) {
     return { ok: false, reason: "not-wild", error: "Wild mode is not enabled (project.wildMode !== true) — nothing to run." };
@@ -4005,7 +4141,15 @@ export async function wildStartHeadless(project: Project, opts: { maxSteps?: num
   let outcome = "advanced";
   let lastError: string | undefined;
   while (steps < maxSteps) {
-    const res = await wildStep(current, reviewer ? { reviewer } : undefined);
+    // 308 B-02 (B2): thread the host's telemetry sink into the step — every
+    // caller dropped it, so finishStep's wild.step_* emits never fired on this
+    // leg. headless has no in-file rt writer; the CALLER's opts.onEvent is the
+    // honest seam (CLI leg: cliLogEvent → NDJSON). Absent ⇒ a no-op default —
+    // emission-side only, the project bytes are unchanged (DG-8).
+    const res = await wildStep(current, {
+      ...(reviewer ? { reviewer } : {}),
+      onEvent: opts.onEvent ?? (() => undefined),
+    });
     steps += 1;
     current = res.project;
     outcome = res.outcome;
@@ -4142,7 +4286,7 @@ export type WildLifecycleShape =
  *  (185-H1 — never dual-channel ok:true + error). */
 export async function wildStartRun(
   project: Project,
-  opts: { maxSteps?: number } = {},
+  opts: { maxSteps?: number; onEvent?: (seed: RtEventSeed) => void } = {},
 ): Promise<WildLifecycleShape> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 24, 1), 48);
   if (project.wildRun?.active === true) {
@@ -4192,7 +4336,12 @@ export async function wildStartRun(
   let outcome = "advanced";
   let lastError: string | undefined;
   while (steps < maxSteps) {
-    const res = await wildStep(current, reviewer ? { reviewer } : undefined);
+    // 308 B-02 (B2): same sink threading as wildStartHeadless above — the
+    // caller's opts.onEvent is the honest seam; absent ⇒ no-op default.
+    const res = await wildStep(current, {
+      ...(reviewer ? { reviewer } : {}),
+      onEvent: opts.onEvent ?? (() => undefined),
+    });
     steps += 1;
     current = res.project;
     outcome = res.outcome;
@@ -4222,10 +4371,21 @@ export async function wildPauseRun(project: Project): Promise<WildLifecycleShape
   if (run.pause === true) {
     return { ok: true, project, changed: false, note: "Wild run is already paused." };
   }
-  const { wildPause } = await import("./engine.ts");
+  const { wildPause, wildOperatorPark } = await import("./engine.ts");
   return {
     ok: true,
-    project: wildPause(project, project.currentPhase, "warn", "wild.paused", "Wild run paused from the CLI."),
+    // 308 M4-06 (B2): the CLI operator pause stamps its own park record via
+    // wildOperatorPark (its FIRST repo-wide call site — the export was dead):
+    // uncoded ({code:null, unlock:"resume"}), so the pause answers
+    // why/what-unlocks/where-resume like every other pause.
+    project: wildPause(
+      project,
+      project.currentPhase,
+      "warn",
+      "wild.paused",
+      "Wild run paused from the CLI.",
+      wildOperatorPark(project, "Wild run paused from the CLI."),
+    ),
     changed: true,
   };
 }
@@ -4246,6 +4406,9 @@ export async function wildResumeRun(project: Project): Promise<WildLifecycleShap
     wildRun: {
       ...run,
       pause: false,
+      // 308 B-01 (B2): park is present iff pause — resume clears the record so
+      // a preserved park can never linger on a live run again.
+      park: null,
       lastAutoLog: "Wild run resumed from the CLI.",
       lastAutoAt: Date.now(),
     },

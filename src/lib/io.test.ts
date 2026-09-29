@@ -46,6 +46,52 @@ describe("exportProjectJson", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// M7-01 (fixes/310 B4): the round-trip is a BYTE no-op on the FIRST pass.
+//
+// The hydrate normalizers stamp defaults at IMPORT time — repairPhases
+// (`?? []` / `?? null` per phase row) + the research/implementationSpec
+// top-level defaults — so a project created without those keys drifted on its
+// first export→import→export hop (probe ~/rt6/probes/p3_roundtrip.mjs:
+// R2 equal:false, 24 structured diffs, ALL "key ADDED": rejectionHistory ×13,
+// gate ×9, research, implementationSpec). emptyProject (engine.ts) now stamps
+// the same defaults at the one place rows/projects are created, so persisted
+// bytes equal re-serialized bytes on the first pass (R2 equal:true) — a
+// reloaded clone emits identical project.json bytes.
+// ---------------------------------------------------------------------------
+describe("M7-01 (fixes/310): first-pass export→import→export byte parity", () => {
+  it("a full run round-trips byte-identically on the FIRST pass (no key drift)", () => {
+    const p = fullRun();
+    const s1 = exportProjectJson(p);
+    const res = importProject(s1);
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(
+      exportProjectJson(res.project),
+      s1,
+      "import must not add keys the first export omitted (rejectionHistory/gate/research/implementationSpec)",
+    );
+  });
+
+  it("a fresh project (pre-run) round-trips byte-identically too", () => {
+    const p = seedProject();
+    const s1 = exportProjectJson(p);
+    const res = importProject(s1);
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(exportProjectJson(res.project), s1);
+  });
+
+  it("hydrateProject alone is byte-stable on a healthy run (no repair drift)", () => {
+    const p = fullRun();
+    assert.equal(
+      exportProjectJson(hydrateProject(p)),
+      exportProjectJson(p),
+      "hydrate of a healthy payload must not mutate its serialized shape",
+    );
+  });
+});
+
 describe("importProject", () => {
   it("round-trips a full exported project back to an ok project", () => {
     const p = fullRun();

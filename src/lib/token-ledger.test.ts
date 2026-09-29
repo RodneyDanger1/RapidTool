@@ -65,8 +65,43 @@ describe("token-ledger", () => {
     assert.equal(tokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: "-5" }), undefined);
     assert.equal(tokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: "NaN" }), undefined);
     assert.equal(tokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: "abc" }), undefined);
-    assert.equal(tokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: "12.9" }), 12);
     assert.equal(tokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: "100" }), 100);
+    assert.equal(
+      tokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: " 4096 " }),
+      4096,
+      "surrounding whitespace still yields a plain decimal integer",
+    );
+  });
+
+  it("M7-08 (310 B3): only a plain decimal integer is a cap — JS-numeric spellings are unmetered", () => {
+    // Number() used to accept these: "0x10" → 16, "1e99" → a finite cap that
+    // can never trigger while the envelope reports a cap in force, "12.9" → 12.
+    // A permissive spelling must mean NO cap (the documented unmetered path),
+    // never a silently different cap.
+    for (const junk of [
+      "0x10",
+      "1e99",
+      "1e999999",
+      "12.9",
+      "+5",
+      "-0",
+      "Infinity",
+      "-Infinity",
+      "1_000",
+      "0b101",
+      "0o17",
+      ".5",
+      "5.",
+    ] as const) {
+      assert.equal(
+        tokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: junk }),
+        undefined,
+        `${junk} must be unmetered — never a silently different cap`,
+      );
+    }
+    // The still-valid decimal forms are unchanged.
+    assert.equal(tokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: "100" }), 100);
+    assert.equal(tokenCapFromEnv({ RAPIDTOOL_TOKEN_CAP: "0005" }), 5);
   });
 
   it("wouldExceed is true only after the next spend would pass the cap", () => {

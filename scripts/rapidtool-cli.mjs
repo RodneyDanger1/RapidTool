@@ -3869,4 +3869,40 @@ const USAGE = {
   },
 };
 
-main();
+// ---------------------------------------------------------------------------
+// M6-05/M6-06 (B1 · fixes/310): the Node-side global nets. The CLI contract is
+// ONE JSON object on stdout + the exit taxonomy (0/1/2/3/4), but `main()`'s
+// internal try/catch only wraps the dispatch below its first awaits — a
+// rejection from ensureErrorCodes()/ensureRtAppender() (or any uncaught throw
+// later in the process) used to exit with a bare Node stack and NO envelope
+// (308 map6 M6-05/06). The browser client carries its own nets
+// (rt-client.ts:411-454); Node gets the same shape here: ONE
+// `exitInternalError` seam — stack on stderr only, then the SAME respond()
+// envelope the internal catch emits (ok:false + RT_E_INTERNAL + exit 4).
+// Pinned by scripts/cli-exit-taxonomy.test.mjs (source-text legs + behavioral
+// spawns that inject a real unhandled rejection / uncaught throw).
+// ---------------------------------------------------------------------------
+function exitInternalError(err) {
+  try {
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error && err.stack ? err.stack : message;
+    console.error(stack);
+    respond({ ok: false, error: message, ...errCode(err, "RT_E_INTERNAL") }, 4);
+  } catch {
+    // respond() itself failed (fd 1 unusable and the async fallback too):
+    // last-resort exit — still non-zero, still one shape attempted.
+    try {
+      process.stderr.write(`cli: internal error: ${String(err)}\n`);
+    } catch {
+      /* ignore */
+    }
+    process.exit(4);
+  }
+}
+
+// The nets register BEFORE main() runs, so even a synchronous throw in its
+// prologue is covered. `uncaughtException` is safe to observe here — we always
+// exit immediately (a one-shot CLI has no state worth resuming).
+process.on("unhandledRejection", (reason) => exitInternalError(reason));
+process.on("uncaughtException", (err) => exitInternalError(err));
+main().catch(exitInternalError);

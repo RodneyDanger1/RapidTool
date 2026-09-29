@@ -22,6 +22,10 @@
 //                  `wildRun.lastStep: WildStepSummary` ·
 //                  `wildRun.park: WildParkInfo` — coded why/unlock/re-entry) and
 //                  the open HITL request (`project.hitl`).
+//                  W310 B6: the park payload (rail row + detail) renders ONLY
+//                  while `wildRun.pause === true` (B-08 stale-park gate — the
+//                  record is the CURRENT pause's), and the rail-level "Parked"
+//                  row carries the same why/unlock/re-entry lines as the detail.
 //
 // Provenance note: console.tsx's module-private `PhaseRecordView` is NOT
 // imported here — that would create a console↔pipeline-rail import cycle in the
@@ -214,6 +218,9 @@ function PhaseRecordDetail({
   const isCurrent = project.currentPhase === phase;
   const wr = project.wildRun ?? null;
   const hitl = project.hitl !== null && project.hitl.phase === phase ? project.hitl : null;
+  // B-08 gate: park is the CURRENT pause's record — render it only while the
+  // run is actually paused (stopWildRun/toggleWildPause leave it in place).
+  const park = wr && wr.pause === true ? wr.park ?? null : null;
 
   return (
     <div
@@ -353,12 +360,12 @@ function PhaseRecordDetail({
               {clip(wr.lastAutoLog, 200)}
             </p>
           ) : null}
-          {wr.park ? (
+          {park !== null ? (
             <p className="mt-1.5 font-mono text-[11px] leading-relaxed text-warn">
-              parked · {wr.park.code ?? "uncoded"} · {wr.park.reason}
-              <span className="block pl-3 text-faint [overflow-wrap:anywhere]">{wr.park.unlockText}</span>
+              parked · {park.code ?? "uncoded"} · {park.reason}
+              <span className="block pl-3 text-faint [overflow-wrap:anywhere]">{park.unlockText}</span>
               <span className="block pl-3 text-faint">
-                resume at P{wr.park.resumePhase} · {wr.park.resumeAction} · parked {agoLabel(wr.park.at)} ago
+                resume at P{park.resumePhase} · {park.resumeAction} · parked {agoLabel(park.at)} ago
               </span>
             </p>
           ) : null}
@@ -418,7 +425,13 @@ export function PipelineRail({ project }: { project: Project }) {
     const cur = PHASE_BY_ID.get(project.currentPhase);
     attention.push({ code: cur?.code ?? `P${project.currentPhase}`, word: "Blocked — review the notes", tone: "text-danger" });
   }
-  const park = project.wildRun?.park ?? null;
+  // B-08 gate (308_bugmap FIX-D · payload of 310 B6): render the park record
+  // only while the run is ACTUALLY paused. `stopWildRun` (store.ts:1281-1288)
+  // and `toggleWildPause` (:1289-1296) leave `park` in place ⇒ the ungated row
+  // kept claiming "Parked" for a stopped/resumed run (probe-proven stale render
+  // — 310 B6). The record is the CURRENT pause's why/unlock/re-entry
+  // (WildParkInfo, written by engine.wildPause/wildOperatorPark + parkIfNull).
+  const park = project.wildRun && project.wildRun.pause === true ? project.wildRun.park ?? null : null;
   // §5.2/§5.3 stall latch (ring sidecar). W307 U2 delivered this component but
   // it had ZERO importers until W309 A6 mounted it in console's RunScreen — so
   // the old "First real reader" claim was false at delivery (zero readers) and
@@ -501,6 +514,11 @@ export function PipelineRail({ project }: { project: Project }) {
             <p className="text-warn">
               Parked · {park.code ?? "uncoded"} · {park.reason}
               <span className="block pl-3 text-faint [overflow-wrap:anywhere]">{park.unlockText}</span>
+              {/* 310 B6: the rail-level row now answers WHERE a resume re-enters
+                  too (same re-entry line the detail block renders) — additive. */}
+              <span className="block pl-3 text-faint">
+                resume at P{park.resumePhase} · {park.resumeAction} · parked {agoLabel(park.at)} ago
+              </span>
             </p>
           ) : null}
         </div>

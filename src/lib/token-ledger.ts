@@ -6,7 +6,8 @@
  * NoMoneyException class: when a cap is set and spend exceeds it, throw
  * (never mint green after exhaustion).
  *
- * Unmetered path (no RAPIDTOOL_TOKEN_CAP / unset / 0 / NaN / non-positive):
+ * Unmetered path (no RAPIDTOOL_TOKEN_CAP / unset / blank / a non-integer or
+ * non-decimal spelling / 0 / NaN / non-positive):
  *   tokenCapFromEnv → undefined
  *   wouldExceed / assertWithinBudget / recordSpendWithinCap → no-op throws
  *   (byte-identical to pre-ledger call sites when the env var is absent).
@@ -133,15 +134,23 @@ function defaultEnv(): Record<string, string | undefined> {
 
 /**
  * Parse RAPIDTOOL_TOKEN_CAP. Unset / blank / 0 / NaN / negative → undefined
- * (unmetered). Positive finite numbers floor to an int cap.
+ * (unmetered). ONLY a plain decimal integer (surrounding whitespace ignored)
+ * is a cap — the extra JS-numeric spellings `Number()` also accepts are
+ * refused as unmetered: `0x10` (silently 16), `1e99` (a finite cap that can
+ * NEVER trigger while the envelope reports a cap in force), `12.9`, `+5`,
+ * `Infinity`, `1_000` (M7-08, fixes/310_b3_boundary.md). A junk spelling
+ * means NO cap is in force — the documented unmetered path, never a silently
+ * different cap.
  */
 export function tokenCapFromEnv(
   env: NodeJS.ProcessEnv | Record<string, string | undefined> = defaultEnv(),
 ): number | undefined {
   const raw = env?.RAPIDTOOL_TOKEN_CAP;
-  if (typeof raw !== "string" || !raw.trim()) return undefined;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+  if (typeof raw !== "string") return undefined;
+  const text = raw.trim();
+  if (!/^\d+$/.test(text)) return undefined;
+  const n = Number(text);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 /** True when no positive finite cap is in force (unmetered / no-op path). */

@@ -278,7 +278,11 @@ describe("recordGateInto (E-02 — store.recordGate parity, pure)", () => {
   it("records gate, artifact and verdict log for a completed phase", () => {
     const p = runHeadless(seedProject(), [0]); // P0 complete, gate not yet recorded
     assert.equal(p.phases.find((r) => r.id === 0)?.status, "complete");
-    assert.equal(p.phases.find((r) => r.id === 0)?.gate, undefined);
+    // M7-01 (fixes/310): an unrecorded gate is now the birth-stamped `null`
+    // (emptyProject stamps the hydrate defaults so the persisted shape is
+    // byte-stable on the first round trip) — assert not-recorded, not the
+    // old pre-stamp `undefined` sentinel.
+    assert.equal(p.phases.find((r) => r.id === 0)?.gate ?? null, null);
     const out = recordGateInto(p, 0);
     assert.notEqual(out, p, "returns a new project object");
     const gateRec = out.phases.find((r) => r.id === 0)?.gate;

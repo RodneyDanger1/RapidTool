@@ -1867,9 +1867,17 @@ export function emptyProject(input: {
     status: "intake",
     currentPhase: 0,
     ...(input.kind ? { kind: input.kind } : {}),
+    // M7-01 (fixes/310): stamp the hydrate defaults at the ONE place phase
+    // rows are created (repairPhases normalizes them at import with
+    // `?? []`/`?? null` — engine.ts:1979). Without birth stamps a project
+    // that never carried them drifted on its FIRST export→import→export hop
+    // (13× rejectionHistory + 9× gate keys ADDED). Persisted bytes now equal
+    // re-serialized bytes on the first pass.
     phases: PHASES.map((p) => ({
       id: p.id,
       status: p.id === 0 ? "ready" : "locked",
+      rejectionHistory: [],
+      gate: null,
     })),
     scorecard: null,
     competitors: [],
@@ -1926,6 +1934,12 @@ export function emptyProject(input: {
     // P0-2: persisted copilot thread starts empty (store appendChatRows caps it
     // at 40 rows; the ChatPane renders ≤12 and the model sees ≤6 turns).
     chatLog: [],
+    // M7-01 (fixes/310): same birth-stamp rule as the phase rows above — the
+    // hydrate normalizers (engine.ts research/implementationSpec) default these
+    // at import, so a project created without them drifted by two top-level
+    // keys on its first export→import→export hop. Stamp at creation.
+    research: [],
+    implementationSpec: null,
     _v: 2,
   };
   const ready = attachAlgorithms(base);
@@ -2085,6 +2099,62 @@ function usableSchedule(v: unknown): v is SchedulerPlan {
   );
 }
 
+// 308 B-01 (B2) — runtime accept-lists for the two records the hydrate rebuild
+// used to erase (`park` / `lastStep`). types.ts erases the unions, so the
+// structural guards below mirror them by value.
+const WILD_PARK_UNLOCKS: readonly string[] = ["configure-key", "human-gate", "human-retry", "resume", "operator"];
+const WILD_STEP_OUTCOMES: readonly string[] = ["advanced", "completed", "paused"];
+const WILD_STEP_ACTIONS: readonly string[] = ["execute", "gate", "advance", "finalize", "park"];
+const WILD_NEXT_ACTIONS: readonly string[] = ["execute", "gate", "advance", "finalize", "park", "none"];
+
+/** 308 B-01 (B2): structural guard for a persisted `WildParkInfo`. Carrying
+ *  the record back through hydrate must not let a hand-edited payload crash
+ *  the B7 stream, so it is accepted only when every render-bearing field is
+ *  the right primitive — and then kept VERBATIM (same object) so save→load
+ *  round-trips the identical record. */
+function usableWildPark(v: unknown): WildParkInfo | null {
+  if (!isPlainObject(v)) return null;
+  const p = v as Record<string, unknown>;
+  const unlock = p.unlock;
+  const resumeAction = p.resumeAction;
+  const ok =
+    (p.code === null || typeof p.code === "string") &&
+    (p.event === null || typeof p.event === "string") &&
+    typeof p.reason === "string" &&
+    typeof unlock === "string" &&
+    WILD_PARK_UNLOCKS.includes(unlock) &&
+    typeof p.unlockText === "string" &&
+    typeof p.resumePhase === "number" &&
+    typeof resumeAction === "string" &&
+    WILD_NEXT_ACTIONS.includes(resumeAction) &&
+    typeof p.at === "number";
+  return ok ? (v as WildParkInfo) : null;
+}
+
+/** 308 B-01 (B2): the same contract for `WildStepSummary` (the `lastStep`
+ *  mirror; its own optional `park` must itself be shaped right). */
+function usableWildStepSummary(v: unknown): WildStepSummary | null {
+  if (!isPlainObject(v)) return null;
+  const s = v as Record<string, unknown>;
+  const outcome = s.outcome;
+  const action = s.action;
+  const nextAction = s.nextAction;
+  const ok =
+    typeof outcome === "string" &&
+    WILD_STEP_OUTCOMES.includes(outcome) &&
+    typeof action === "string" &&
+    WILD_STEP_ACTIONS.includes(action) &&
+    typeof s.phase === "number" &&
+    (s.completedPhase === null || typeof s.completedPhase === "number") &&
+    (s.advancedTo === null || typeof s.advancedTo === "number") &&
+    typeof s.artifacts === "number" &&
+    typeof s.nextPhase === "number" &&
+    typeof nextAction === "string" &&
+    WILD_NEXT_ACTIONS.includes(nextAction) &&
+    (s.park === undefined || s.park === null || usableWildPark(s.park) !== null);
+  return ok ? (v as WildStepSummary) : null;
+}
+
 /**
  * P13 wildRun hydration. Legacy/absent → null. A persisted ACTIVE run is
  * stopped on hydrate: the driver loop is a session artifact and dies with the
@@ -2114,13 +2184,31 @@ function hydrateWildRun(
     stoppedAt: numOrNull(w.stoppedAt),
     pause: w.pause === true,
   };
+  // 308 B-01 (B2): the 306-F5 records are CARRIED through the rebuild instead
+  // of being dropped — the tracer: `wild --resume` ERASED `park` + `lastStep`.
+  // Both are kept only when shaped right (guards above) and `park` honours its
+  // "present iff pause" invariant: a stale park on a non-paused run is dropped,
+  // never resurrected. Valid records ride VERBATIM so save→load keeps them
+  // byte-identical.
+  const park = run.pause ? usableWildPark(w.park) : null;
+  if (park) run.park = park;
+  const lastStep = usableWildStepSummary(w.lastStep);
+  if (lastStep) run.lastStep = lastStep;
   if (!run.active) return { wildRun: run, stopped: false };
   // 174-3: CLI pause/resume/step must keep a persisted active run (the driver
   // is the CLI process). Browser hydrate still force-stops (session died).
   if (preserveActive) return { wildRun: run, stopped: false };
   // Session-break honesty: a live run cannot outlive the driver that drove it.
   return {
-    wildRun: { ...run, active: false, pause: false, stoppedAt: run.stoppedAt ?? Date.now() },
+    wildRun: {
+      ...run,
+      active: false,
+      pause: false,
+      // 308 B-01 (B2): park is present iff pause — the forced stop clears it
+      // explicitly instead of leaking a stale record into the stopped surface.
+      park: null,
+      stoppedAt: run.stoppedAt ?? Date.now(),
+    },
     stopped: true,
   };
 }
