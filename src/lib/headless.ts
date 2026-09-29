@@ -1565,7 +1565,10 @@ export type EmitProjectResult = {
   redTree?: RedTreeRef | null;
 };
 
-const EMIT_SKIP_DIRS = new Set(["node_modules", ".git", ".vercel"]);
+// R11-f08 (W42 · L4/E4): `.rapidtool-quarantine` joins the skip set — the CLI
+// emit wire moves forced-emit survivors there (src/lib/quarantine.ts), and a
+// repeat emit over the same dir must never re-judge them as foreign leftovers.
+const EMIT_SKIP_DIRS = new Set(["node_modules", ".git", ".vercel", ".rapidtool-quarantine"]);
 const GHOST_SPEC_RE = /(^|\/)[^/]+\.(spec|test)\.(ts|mts|cts|js|mjs|cjs)$/i;
 
 function walkEmitRel(root: string): string[] {

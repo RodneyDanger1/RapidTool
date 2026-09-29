@@ -192,7 +192,7 @@ size, where it lives, and what the next wave should pick up.
 | T-01 | `stripCjsExportAssignments` removes the whole CJS construct | S | ✅ | 216 wave (§9); empirical before/after 2-of-4 → 0-of-4 unparseable |
 | T-02 | Parse-gate every tree file before it is written | M | ✅ | §10; compile-check +5 tests; gate on the write path |
 | T-03 | Atomic tree write (tmp + rename) | S | ✅ | §10 |
-| T-04 | Declared tree entry `src/generated.ts` — allow or refuse LOUDLY (no silent drop) | S | ✅ W2 | entry written; refusals → README + `warnings[]`; 4 regression tests (scaffold 36/36) |
+| T-04 | Declared tree entry `src/generated.ts` (the *emitted* tree's entry path — `TREE_ENTRY_PATH`, `codegen.server.ts:1514`; **not a file in this repo**) — allow or refuse LOUDLY (no silent drop) | S | ✅ W2 | entry written; refusals → README + `warnings[]`; 4 regression tests (scaffold 36/36) |
 | T-05 | Emitted UI imports computed `treeEntryPath`, not the literal | S | ✅ W2 | computed entry pinned (3 shapes; tests) |
 | T-06 | Invalidate `lastTest`/`generatedSource` on tree change | S | ✅ | §10; `treeUpgraded` sets `lastTest: null`; one assertion updated old→new (recorded) |
 | T-07 | `emit` refuses/banners on an un-cleared red tree-run | M | ✅ W2 | wired: refuse-default / banner / probe; both branches + green control + no-partial-write pinned (4 tests); internal candidate emit = `probe` (parent audit) |

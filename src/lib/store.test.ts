@@ -1484,6 +1484,149 @@ test("H-06 C2: a concurrent human approve is not rolled back — its decision-jo
 });
 
 // ---------------------------------------------------------------------------
+// F3-10 W42 L2-P7 (A-5 residual) — the keepLiveWildRun + rebaseUserFields pin.
+// Every NON-driver whole-project commit wraps its result in
+// `keepLiveWildRun(rebaseUserFields(next.project, live), live)` (helpers
+// store.ts:268/:299; here the executeAsync success commit :1425-1429 and its
+// denial-log twin :1407-1413, F3-10 fixes/293 M2): operator-owned fields
+// (name/notes/createdAt/enforceDod/wildMode/chatLog/kind) rebase from the LIVE
+// record and an ACTIVE live wild run is re-attached — while the step's own
+// engine-owned progress still lands.
+// Adjacent finding (recorded, NOT fixed here — W43-ENGINE material): after the
+// rebase the notes FIELD is fresh but the compiled packet is NOT re-stamped, so
+// the persisted packet serves the snapshot's pre-edit notes until the next
+// stamp. Probe + smallest-fix sketch: fixes/305_e2_packet.md §Findings.
+// ---------------------------------------------------------------------------
+
+/** The live-run marker the guard must re-attach — distinct values so any
+ *  snapshot-clobber shows up as a mismatch (identity checked by value). */
+function liveWildRunMarker(): NonNullable<Project["wildRun"]> {
+  return {
+    active: true,
+    phase: 2,
+    startedAt: 424_242,
+    lastAutoLog: "",
+    lastAutoAt: 7,
+    stoppedAt: null,
+    pause: false,
+  };
+}
+
+test("F3-10 P-7a: a wild run started MID-FLIGHT + operator edits survive executeAsync's stale success commit (:1425-1429)", async () => {
+  const p = install(seedProject());
+  const marker = liveWildRunMarker();
+  const before = current(p.id);
+  const run = useRapid.getState().executeAsync(p.id);
+  // The commit is computed from executeAsync's ENTRY snapshot; this callback
+  // lands in the gap after that snapshot but before the whole-project commit
+  // (the same interleave H-01 R1 pins) — a run that starts + notes that are
+  // typed WHILE the snapshot is still in flight.
+  queueMicrotask(() => {
+    useRapid.getState().setNotes(p.id, "steer the crew mid-flight");
+    useRapid.getState().rename(p.id, "Renamed mid-flight");
+    useRapid.setState((s) => ({
+      projects: s.projects.map((x) => (x.id === p.id ? { ...x, wildRun: marker } : x)),
+    }));
+  });
+  const res = await run;
+  assert.equal(res.ok, true);
+  const after = current(p.id);
+  // The step's own (engine-owned) commit still landed — the guard merges; it
+  // never blocks the commit.
+  assert.ok(
+    after.currentPhase > before.currentPhase,
+    `the executeAsync step still progressed (P${before.currentPhase} -> P${after.currentPhase})`,
+  );
+  // ...but the ACTIVE live wild run was re-attached, not clobbered by the
+  // snapshot's null wildRun (the F3-10/174-1 guard, store.ts:299).
+  assert.deepEqual(
+    after.wildRun,
+    marker,
+    "a wild run started mid-flight survives the stale commit (keepLiveWildRun :299)",
+  );
+  // Operator-owned fields rebase from the LIVE record (store.ts:268).
+  assert.equal(after.notes, "steer the crew mid-flight", "notes typed mid-flight are operator-owned — live wins");
+  assert.equal(after.name, "Renamed mid-flight", "a rename mid-flight rides the same rebase");
+});
+
+test("F3-10 P-7b: the executeAsync DoD-denial commit (:1407-1413, fixes/293 M2) keeps the live wild run + operator edits", async () => {
+  const p = install(seedProject());
+  useRapid.getState().setEnforceDod(p.id, true);
+  assert.equal(useRapid.getState().execute(p.id).ok, true, "P0 passes its own gate and advances");
+  assert.equal(current(p.id).currentPhase, 1);
+  // Sabotage (the S2 recipe, store.test.ts:1061-1091): mark P1 complete
+  // WITHOUT its graph artifact, so leaving P1 fails the p1-graph probe and the
+  // DENIAL branch fires for real.
+  useRapid.setState((s) => ({
+    projects: s.projects.map((x) =>
+      x.id === p.id
+        ? {
+            ...x,
+            phases: x.phases.map((ph) =>
+              ph.id === 1 ? { ...ph, status: "complete" as const, startedAt: Date.now() } : ph,
+            ),
+          }
+        : x,
+    ),
+  }));
+  const marker = liveWildRunMarker();
+  const run = useRapid.getState().executeAsync(p.id);
+  queueMicrotask(() => {
+    useRapid.getState().setNotes(p.id, "operator steering while the denial commits");
+    useRapid.setState((s) => ({
+      projects: s.projects.map((x) => (x.id === p.id ? { ...x, wildRun: marker } : x)),
+    }));
+  });
+  const res = await run;
+  assert.equal(res.ok, false, "a hard-DoD block stays a 0-progress stop");
+  assert.ok(/DoD unmet/.test(res.error ?? ""), "honest error text names the block");
+  const after = current(p.id);
+  assert.equal(after.currentPhase, 1, "the cursor does not move");
+  // The denial commit itself DID run: its artifact + dod.blocked log landed.
+  assert.ok(
+    after.artifacts.some((a) => a.kind === "docs" && a.title.startsWith("Hard DoD block")),
+    "the denial-log commit's block artifact landed (the :1407-1413 branch executed)",
+  );
+  assert.ok(after.logs.some((l) => l.event === "dod.blocked"), "dod.blocked log landed");
+  // ...and it merged over the LIVE record instead of clobbering it (F3-10 fixes/293 M2).
+  assert.deepEqual(after.wildRun, marker, "keepLiveWildRun re-attaches the live run on the denial twin too");
+  assert.equal(after.notes, "operator steering while the denial commits", "notes rebase on the denial twin");
+});
+
+test("P8: setNotes/ingestReport re-stamp the persisted packet (F2-03b) — fresh content rides, repeats never accumulate", () => {
+  const p = install(seedProject());
+  assert.ok(!current(p.id).packet.includes("steer the crew mid-flight"), "baseline packet carries no notes text");
+  useRapid.getState().setNotes(p.id, "steer the crew mid-flight");
+  const a = current(p.id);
+  assert.equal(a.notes, "steer the crew mid-flight");
+  assert.ok(
+    a.packet.includes("steer the crew mid-flight"),
+    "setNotes re-stamps the packet — a notes write never leaves the persisted packet pre-edit (F2-03b)",
+  );
+  assert.ok(a.packet.includes("## Operator notes (human steering)"), "the compiled notes block rides the packet");
+  assert.equal(a.artifacts.filter((x) => x.kind === "packet").length, 1, "the stamp replaces the packet artifact");
+  useRapid.getState().setNotes(p.id, "steer the crew mid-flight, again");
+  assert.equal(
+    current(p.id).artifacts.filter((x) => x.kind === "packet").length,
+    1,
+    "repeated notes writes cannot accumulate packet artifacts (sealPacketArtifact replaces)",
+  );
+  const res = useRapid.getState().ingestReport(p.id, {
+    phase: 0,
+    status: "complete",
+    summary: "late intake report from an external agent",
+    artifacts: [{ title: "Late intake artifact", body: "external body" }],
+  });
+  assert.equal(res.ok, true);
+  const c = current(p.id);
+  assert.ok(c.artifacts.some((x) => x.id.startsWith("report-0-0-")), "the ingest artifact applied");
+  assert.ok(
+    c.packet.includes("Late intake artifact"),
+    "ingestReport re-stamps the packet — the report rides the compiled packet (F2-03b)",
+  );
+});
+
+// ---------------------------------------------------------------------------
 // fixes/144 M1 · lane L4 — store-side regression pins for the L3 console seams
 // (144_completion_plan.md M1 steps 4-5 + fixes/143_g3_continuation.md §2):
 //   (A) wild-resume = driver RE-ENTRY (PA-01), never a driverless flag flip —

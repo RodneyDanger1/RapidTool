@@ -236,7 +236,7 @@ completer (R14-f01) · unattended run (W-47) · plan-before-execute (R13-f02) ·
 recon-only; recovery owed) · cassette replay (T5.7) · streaming surface (T5.1) · MCP client (F1) ·
 second provider (F2 — registry entry already on disk per RS-02) · per-action allow-lists (F4) ·
 per-run token ledger · dev-server bind hardening (R11-f01 — loopback default now in
-`vite.config.ts`) · `--force` quarantine (R11-f08) · pane error boundary (R6-f12, partially
+`vite.config.ts`) · `--force` quarantine (R11-f08 — CLI wire landed W42; in-engine lift owed) · pane error boundary (R6-f12, partially
 landed) · human-seat console surface.
 
 **Blocked / known limits** (honest, not bugs to paper over): no isolation boundary — the bounded
@@ -290,24 +290,24 @@ re-run. Where reality is behind, the docs say so, the packets say so, and `docto
 
 ---
 
-# THE CATALOG — every tracked file (1,762 today)
+# THE CATALOG — every tracked file (1,766 today)
 
 **What this is:** the literal catalog of the repository's tracked universe. Counts re-derived
-2026-09-29: `git ls-files | wc -l` = **1,762**. Every **root file, every script, every route,
+2026-09-29: `git ls-files | wc -l` = **1,766**. Every **root file, every script, every route,
 every migration, every config** is named below; mass-produced classes (tests, wave plans, fix
 logs, vault notes, eval trees, vault/E2E outputs) are described **by convention with their full
 membership derivable from one command** — stated inline — because each member's purpose is its
 category's purpose. Descriptions are evidence-based (file heads/comments read on 2026-09-26); a
 genuinely unclear file says so. Re-count any directory with
-`git ls-files <dir> | wc -l`; counts read the tracked index at HEAD `8418b04` + the W42 lane
+`git ls-files <dir> | wc -l`; counts read the tracked index at HEAD `0deca1e` + the W42 lane
 work (re-derived 2026-09-29) — the formerly-untracked set is committed (§10.13).
 
-## 10.1 Census (tracked, re-derived 2026-09-29 at `8418b04`)
+## 10.1 Census (tracked, re-derived 2026-09-29 at `0deca1e`)
 
 | Area | Files | What it is |
 |---|---:|---|
 | `research/` | 476 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 23 · `eval-out/` 345 · 5 top-level research docs) |
-| `fixes/` | 456 | Append-only per-lane landing logs (§10.9) |
+| `fixes/` | 460 | Append-only per-lane landing logs (§10.9) |
 | `src/` | 211 | The product: engine + UI (§10.6) |
 | `wave_plans/` | 106 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 · W42 + the convention README (§10.10) |
 | `.grok/` | 89 | Legacy platform chrome — **do not build on it** (§10.12) |
@@ -324,7 +324,7 @@ work (re-derived 2026-09-29) — the formerly-untracked set is committed (§10.1
 | `.github/` | 1 | CI workflow (§10.3) |
 | `attachments/` · `artifacts/` · `.audit-g2/` | 1 + 1 + 1 | Historical artifact + stored image + G2 probe (§10.12) |
 | `.t4scratch/` | 192 | Committed lane-scratch tree (was working-tree scratch; tracked at `ac6b151`) |
-| **Total** | **1,762** | `git ls-files \| wc -l` |
+| **Total** | **1,766** | `git ls-files \| wc -l` |
 
 ## 10.2 Root files (all 42 tracked — named)
 
@@ -428,8 +428,9 @@ work (re-derived 2026-09-29) — the formerly-untracked set is committed (§10.1
   primitive) · `verify.server.ts` (machine verify-fix loop) · `verify.ts` (its client-safe seam) ·
   `maker-score.ts` (pure M1..M9 rubric) · `token-ledger.ts` (spend vs hard cap) · `compaction.ts`
   (compaction constants + summary template) · `checkpoint.server.ts` (versioned atomic run
-  checkpoint — resume after a crash/kill, T-107.7) · `quarantine.ts` (the forced-emit quarantine-move seam —
-  module + test landed; CLI/headless wiring owed, R11-f08).
+  checkpoint — resume after a crash/kill, T-107.7) · `quarantine.ts` (the forced-emit quarantine-move
+  seam — module + test landed; **CLI wire landed** (W42: `emit --force` moves survivors aside +
+  reports `quarantined`/`quarantineDir`); the in-engine lift for every forced caller owed, R11-f08).
 - **LLM / providers / research:** `llm.ts` + `llm-tasks.ts` (client-facing LLM contract +
   helpers) · `deepseek.server.ts` (thin re-export of the provider) · `tavily.server.ts` (Tavily
   search) · `websearch.server.ts` (keyless free web search) · `bounded-int.ts` (the one bounded-
@@ -587,7 +588,7 @@ others).
   `03_tech_deep_dives_research.md` (the origin research set, 2026-09-04) · `deepseek-api.md`
   (live-verified API spec) · `runtime-integration.md` (runtime/hosting research).
 
-## 10.9 `fixes/` — the append-only landing-log ledger (456 tracked)
+## 10.9 `fixes/` — the append-only landing-log ledger (460 tracked)
 
 **Convention:** one `fixes/NN_<lane>.md` per lane per wave; append-only; each log carries
 what/why + `file:line` evidence + before/after. The numbering is chronological: the newest number
@@ -597,9 +598,9 @@ is the current wave. Tracked today: the `01`–`99` early series, the **`216a`�
 `pro1`–`pro4_*.md`. The **W29–W41 set (`271`–`294`)** is tracked too: `271_lane*`, `272_s1…s5`
 shell lanes, `273_t1…t5`, `274_wdx1/wdx2/wdx3` watchdogs, `275_organizer`, `276`–`283` completion
 lanes + `283_final_ledger.md`, `284_wiring_guarantee`, `285_g2…g4`, `286_readme_catalog.md`,
-`287_z5_runtime_tail.md`, `288`–`289` pickups, `290`–`294` per-lane wave-41 logs; the `295`–`303`
-tail set (wave-41/42 logs + probes + the eng-review pair + the C-wave lane logs) is tracked too —
-`304_d1`–`304_d4` arrive untracked from the live W42 round-2 tail).
+`287_z5_runtime_tail.md`, `288`–`289` pickups, `290`–`294` per-lane wave-41 logs; the `295`–`304`
+tail set (wave-41/42 logs + probes + the eng-review pair + the C/D-wave lane logs) is tracked too —
+the `305_*` round-3 lane logs arrive untracked from the live W42 tail).
 **How to search them:** `git ls-files fixes | sort | tail -30` (newest); `grep -l "<term>"
 fixes/*.md`; or grep the register's fix references (`R*`/`A*` IDs cite their fix logs).
 

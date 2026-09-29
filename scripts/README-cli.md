@@ -387,7 +387,10 @@ the CLI.
 
 `--force` admits an emit into a folder that already holds foreign files — without it the
 emit is refused (`RT_E_FOREIGN_FILES`, exit 1, the `foreign` list on the envelope); with it
-the foreign files are KEPT in place (the refusal message's own "pass --force to keep").
+the foreign files are moved **aside** into `<dir>/.rapidtool-quarantine/<stamp>/` —
+recoverable, never deleted, and never judged by a later tree-run — and reported on the
+envelope (`quarantined` = the moved rel paths · `quarantineDir` = the stamp dir). A failed
+move is loud: `ok:false` + `RT_E_FOREIGN_FILES` with `quarantineFailed` (R11-f08 · W42).
 
 > **Shipped (fixes/216z · T4.1):** opt-in `--verify-kind` — a bounded scratch-copy
 > install (`npm ci` / `npm install`) + the tree's own declared `build` + `test`
@@ -976,7 +979,7 @@ The emit→edit→re-emit verbs (`tree-run`/`repair`, fixes/150 wave G1) set the
 | `RT_E_BUDGET_EXHAUSTED` | A journey or wild run hit its hard cycle/token budget and stopped without converging. | Read the last tree-failure tail, raise the budget only with a human decision, or repair the generator — never mint converged after exhaustion. | 4 (crew/engine budget stop) |
 | `RT_E_ABORTED` | The process received SIGTERM/SIGINT and stamped acceptance:aborted before exit. | Resume from the persisted cursor if one exists; do not treat the run as accepted or failed. | 1 (chat abort; signal stamps exit 130/143) |
 | `RT_E_BUSY` | Another writer holds the project file lock (saveProject O_EXCL). | Wait and retry the save; do not overwrite or delete the .lock file while a writer is live. | 1 (emit/save lock refusal) |
-| `RT_E_FOREIGN_FILES` | emit refused because the target dir contains foreign files that are not leftover tests/. | Pass --force only if you intend to overwrite, or emit into a clean directory. | 1 (emit --force refusal) |
+| `RT_E_FOREIGN_FILES` | emit refused because the target dir contains foreign files that are not leftover tests/ (also: a forced emit's quarantine move failed — `quarantineFailed`). | Pass --force only if you accept the foreign files moving aside into `<dir>/.rapidtool-quarantine/<stamp>/`, or emit into a clean directory. | 1 (emit --force refusal / quarantine move failure) |
 | `RT_E_PERMISSION_DENIED` | The OS denied access to a file or directory (EACCES/EPERM). | Fix the path's permissions or run from a location the process may write to; do not retry the same path unchanged. | 1–4 (classified in place) |
 | `RT_E_DISK_FULL` | A write failed because the filesystem has no space left (ENOSPC). | Free space or point the output at another volume before retrying; never report the write as done. | 1–4 (classified in place) |
 | `RT_E_PORT_IN_USE` | A server could not bind because the address/port is already in use (EADDRINUSE). | Stop the process holding the port or bind a different port; do not kill processes blindly. | 1–4 (classified in place) |

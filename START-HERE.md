@@ -27,7 +27,7 @@ W25–W28 deep audit, IDs `A*`/`C*`/`W-*`/`R*`/`T*`; append-only protocol in its
 | 2 | `src/components/` + `src/routes/` | The UI: `console.tsx` (main console) + TanStack routes. |
 | 3 | `scripts/rapidtool-cli.mjs` | The headless CLI — **39 verbs** (`grep -c 'case "'` is the count source of truth), single JSON object per call; contract = `scripts/README-cli.md`. |
 | 4 | `scripts/` (45) | `gate.sh` (the stability gate) · `run-eval.mjs` (eval harness) · guards/tooling + `*.test.mjs` suites. |
-| 5 | `fixes/` (456) | The **append-only landing logs** — one per lane per wave. The newest number = the current wave. Read the last few to know what just landed. |
+| 5 | `fixes/` (460) | The **append-only landing logs** — one per lane per wave. The newest number = the current wave. Read the last few to know what just landed. |
 | 6 | `wave_plans/` (106) | Per-lane dispatch plans (`W4`→`W42`, one file per lane) + the convention note in `wave_plans/README.md`. |
 | 7 | `research/multiagent/` (103) | The analysis program: dossiers, readiness plans (`94`, `104`), defect ledgers (`93`), and the register **`thoroughanalysis.md`**. |
 | 8 | `research/eval-corpus/` (23) | The acceptance corpus: 11 brief fixtures + `graders/`. `research/eval-out/` = **tracked** trial outputs (`results.json`, `history.json`, emitted trees). |
@@ -97,7 +97,7 @@ materialization W-03, landing) · wild supervisor completer (R14-f01) · unatten
 plan-before-execute (R13-f02) · checkpoint+`resume` (T-107.7) · 4 kind emitters + real graders + emitted
 UI seam (S2) · cassette replay (T5.7) · streaming surface (T5.1) · MCP client (F1) · second provider
 (F2) · per-action allow-lists (F4) · per-run token ledger · dev-server bind hardening (R11-f01) ·
-`--force` quarantine (R11-f08) · pane error boundary (R6-f12) · human-seat console surface.
+`--force` quarantine (R11-f08 — CLI wire landed W42; in-engine lift owed) · pane error boundary (R6-f12) · human-seat console surface.
 
 **Blocked / known limits** (honest, not bugs to paper over): no isolation boundary — the bounded
 node-runner is **NOT a sandbox** (R13-f04 = honest refusal; needs a host isolator) · keyed evidence runs

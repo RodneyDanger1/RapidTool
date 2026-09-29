@@ -272,6 +272,25 @@ async function checkDriver() {
 }
 
 // ---------------------------------------------------------------------------
+// R11-f08 (W42 · L4/E4): the forced-emit quarantine-move seam
+// (src/lib/quarantine.ts, same lazy .ts import mechanics as the driver). The
+// `emit` arm calls this AFTER an ok emit that returned `survivors` — the
+// foreign files are MOVED ASIDE (recoverable, never a delete) instead of
+// being left in place, so a later tree-run never judges bytes the factory
+// never authored. The full lift INTO emitProject stays deferred (headless.ts
+// is its own window); the CLI-side seam is the safe placement (fixes/272 §[2]).
+// ---------------------------------------------------------------------------
+const QUARANTINE_PATH = pathToFileURL(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "quarantine.ts"),
+).href;
+
+let quarantineModule = null;
+async function quarantineDriver() {
+  if (!quarantineModule) quarantineModule = await import(QUARANTINE_PATH);
+  return quarantineModule;
+}
+
+// ---------------------------------------------------------------------------
 // T-107.7 (W33 lane L2): the run-checkpoint seam (src/lib/checkpoint.server.ts)
 // — the read/admission side of the per-phase commit checkpoint that
 // `headless.runUntilGate` writes beside `.rapidtool/`.
@@ -1180,6 +1199,28 @@ async function main() {
             payload.overwritten = true;
             payload.warning =
               "Output folder already existed — its files were overwritten in place (writeFileSync replaces whole files; nothing was merged or appended).";
+          }
+          // R11-f08 (W42 · L4/E4): a forced emit no longer leaves the foreign
+          // survivors in place — move them ASIDE into
+          // `<dir>/.rapidtool-quarantine/<stamp>/` (recoverable, never a
+          // delete) and report it. Runs BEFORE --check/--run so those legs
+          // judge the intended tree only (A1-f07: the "tested" tree must not
+          // be a mixed tree). A failed move flips the envelope ok:false +
+          // RT_E_FOREIGN_FILES — the module never silently drops (R11-f08).
+          if (Array.isArray(res.survivors) && res.survivors.length > 0) {
+            const q = await quarantineDriver();
+            const moved = await q.quarantineFiles(target, res.survivors);
+            payload.quarantined = moved.moved;
+            payload.quarantineDir = moved.quarantineDir;
+            if (moved.missing.length > 0) payload.quarantineMissing = moved.missing;
+            if (!moved.ok) {
+              payload.ok = false;
+              payload.quarantineFailed = moved.failed;
+              payload.error =
+                "quarantine move failed: " +
+                moved.failed.map((f) => `${f.path} (${f.error})`).join(", ");
+              payload.code = "RT_E_FOREIGN_FILES";
+            }
           }
           if (flag(args, "verify-kind")) {
             const cc = await checkDriver();

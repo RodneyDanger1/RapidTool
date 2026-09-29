@@ -70,7 +70,8 @@ Wave-H integrations, and finish the honesty-doc bodies. 5 lanes, all files free 
   are named exports while the spec pins bare entry names; planned fix = typed cast
   `const <slug> = treeModule as unknown as Record<string, (...a: never[]) => unknown>;`
   (no assertion weakened). ⚠ `materializeImportableTree`'s ESM barrel must stay at
-  `src/generated.ts`; zero-job graphs must return the EXACT legacy mapping.
+  `src/generated.ts` — the *emitted* tree's barrel path (`TREE_ENTRY_PATH`, `codegen.server.ts:1514`;
+  not a file in this repo); zero-job graphs must return the EXACT legacy mapping.
 
 ### W5-L2 — Test-tails + log bodies + counts drift
 - **Files:** `src/lib/harvest.ts` + test, `src/lib/algorithms.test.ts` (T-15 guard new test),

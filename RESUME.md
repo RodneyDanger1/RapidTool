@@ -246,9 +246,11 @@ MANDATORY WORKING RULES — the parent will reject violations:
 - **Owned files (only these):** `src/lib/scaffold.ts`, `src/lib/scaffold.test.ts`
 - **Spec:** `research/multiagent/106_rapidtool_deep_analysis.md` §6, tasks **T-04** and **T-05**
   (also 106 §3 findings F-03 and F-07's scaffold half).
-- **T-04:** the declared tree entry `src/generated.ts` is **refused by the scaffold's own
-  `TREE_ALLOWED_ROOTS`** (`scaffold.ts:188-195`, `:227`) and **dropped in silence** (`:1975`). It must
-  either be allowed, or the refusal must be **loud and coded** — never a silent drop.
+- **T-04 (✅ landed W2 — `taskuniverselog.md` §2.1):** the declared tree entry `src/generated.ts`
+  (the *emitted* tree's entry path — `TREE_ENTRY_PATH`, `codegen.server.ts:1514`; not a file in this
+  repo) was refused by the scaffold's own `TREE_ALLOWED_ROOTS` (refs as issued: `scaffold.ts:188-195`,
+  `:227`; silent drop `:1975`). Landed: exact-match allow-list (`scaffold.ts:296`) + loud coded
+  refusals (`warnings[]`) — never a silent drop.
 - **T-05:** the emitted UI imports a **literal** path (`scaffold.ts:790-793`) that the tree pass never
   writes, instead of the computed `treeEntryPath` (`:1996-2005`).
 - **Owed from the previous lane:** write `fixes/216b_oracle_floor.md` (lane B's T-08 work) if §2.5

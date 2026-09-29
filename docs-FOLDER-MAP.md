@@ -38,7 +38,7 @@ RapidTool Main/
 │  ├─ eval-out/ (345) ........ TRACKED trial outputs: results.json, history.json, per-slug emitted trees/trials
 │  └─ 01…03_*research.md · deepseek-api.md · runtime-integration.md .... early deep-dive dossiers
 │
-├─ fixes/ (456) ............. append-only landing logs, one per lane per wave (NN_ = wave number);
+├─ fixes/ (460) ............. append-only landing logs, one per lane per wave (NN_ = wave number);
 │                             263_index.md = the generated link index of fixes/ + wave_plans/
 ├─ wave_plans/ (106) ......... per-lane dispatch plans W4→W42 (36 dirs; no W25) + README.md (convention)
 │
