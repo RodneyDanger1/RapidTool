@@ -250,6 +250,54 @@ export function saveProject(path: string, project: Project): string {
   return target;
 }
 
+/** M6-04 (312 · E2): the busy-aware save the CLI's run/gate arm uses instead
+ *  of a bare `saveProject` — bounded wait-and-retry per the `RT_E_BUSY`
+ *  agentAction remedy ("wait and retry the save"), then a CODED refusal
+ *  instead of a thrown `RT_E_BUSY` the top-level net would mislabel exit 4
+ *  (the README-documented busy exit is 1). Each attempt re-enters
+ *  `saveProject`, so the fixes/310 `reclaimStaleLock` discipline runs on
+ *  EVERY retry: an orphaned lock (dead holder, SIGKILL residue) is reclaimed
+ *  on the first attempt; a transiently-held live lock usually clears inside
+ *  the window; a still-live writer after the bound gets the coded refusal —
+ *  the caller then surfaces `preserved` (the run checkpoint) so the completed
+ *  phase work is never discarded. `sleep` is injectable for deterministic
+ *  tests; ONLY `RT_E_BUSY` is classified — every other failure propagates
+ *  unchanged (those are still the caller's own bugs). */
+export type SaveProjectBusyAwareResult =
+  | { ok: true; path: string; attempts: number }
+  | { ok: false; code: "RT_E_BUSY"; error: string; attempts: number; lockPath: string };
+
+export async function saveProjectBusyAware(
+  path: string,
+  project: Project,
+  opts: { attempts?: number; waitMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<SaveProjectBusyAwareResult> {
+  const attempts =
+    typeof opts.attempts === "number" && Number.isInteger(opts.attempts) && opts.attempts > 0
+      ? opts.attempts
+      : 3;
+  const waitMs =
+    typeof opts.waitMs === "number" && Number.isFinite(opts.waitMs) && opts.waitMs >= 0 ? opts.waitMs : 120;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let lastMessage = "";
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return { ok: true, path: saveProject(path, project), attempts: attempt };
+    } catch (err) {
+      if (errnoCode(err) !== "RT_E_BUSY") throw err;
+      lastMessage = err instanceof Error ? err.message : String(err);
+      if (attempt < attempts) await sleep(waitMs * attempt);
+    }
+  }
+  return {
+    ok: false,
+    code: "RT_E_BUSY",
+    error: `saveProject refused after ${attempts} attempt(s): ${lastMessage}`,
+    attempts,
+    lockPath: `${resolve(path)}.lock`,
+  };
+}
+
 /** B5: ONE writer for the terminal run stamp. Never infers accepted from a red gate. */
 export function runAcceptance(
   project: Project,

@@ -225,7 +225,7 @@ function RunTabTrigger({ tab }: { tab: (typeof RUN_TABS)[number] }) {
   return (
     <Tabs.Trigger value={tab.id} title={tab.purpose} className={TAB_TRIGGER_CLASS}>
       <span className="leading-tight whitespace-nowrap">{tab.label}</span>
-      <span className="mt-0.5 block max-w-[10.5rem] text-[10px] leading-tight whitespace-normal text-faint">
+      <span className="mt-0.5 block max-w-[10.5rem] text-xs leading-tight whitespace-normal text-faint">
         {tab.purpose}
       </span>
     </Tabs.Trigger>
@@ -514,10 +514,10 @@ function FixturesPanel() {
         </ul>
       ) : null}
       {data.corpusDir ? (
-        <p className="mt-2 font-mono text-[10px] break-all text-faint">corpus: {data.corpusDir}</p>
+        <p className="mt-2 font-mono text-xs break-all text-faint">corpus: {data.corpusDir}</p>
       ) : null}
       {data.ok ? (
-        <p className="mt-2 text-[11px] text-muted">
+        <p className="mt-2 text-xs text-muted">
           {data.rows.length} fixture(s) · {awaiting} awaiting a human decision · {barMissing} with no
           run-side bar
         </p>
@@ -532,12 +532,12 @@ function FixturesPanel() {
       <ol className="mt-3 space-y-2">
         {data.rows.map((r) => (
           <li key={r.slug} className="rounded-md border border-border bg-raised px-3 py-3">
-            <p className="font-mono text-[11px] text-accent">
+            <p className="font-mono text-xs text-accent">
               {r.slug} · {r.domain} · {r.kind}
             </p>
             <p className="mt-1 text-sm font-medium">{r.name}</p>
             <p className="mt-1 text-xs text-muted">{r.acceptanceBar}</p>
-            <p className="mt-1 text-[11px] text-muted">
+            <p className="mt-1 text-xs text-muted">
               {r.requiredIdentifiers.length} required identifier(s) ·{" "}
               <span className="font-mono" title={`fixtures.ts reviewState: ${r.reviewState}`}>
                 {FIXTURE_REVIEW_STATE_TEXT[r.reviewState]}
@@ -551,8 +551,8 @@ function FixturesPanel() {
                 dropped on the floor here. Additive disclosure, no new source. */}
             {r.expectedNouns.length || r.expectedCapabilities.length || r.baseline || r.provenanceHeadings.length ? (
               <details className="mt-2">
-                <summary className="cursor-pointer text-[11px] text-muted">fixture details</summary>
-                <div className="mt-1 space-y-0.5 text-[11px] text-muted">
+                <summary className="cursor-pointer text-xs text-muted">fixture details</summary>
+                <div className="mt-1 space-y-0.5 text-xs text-muted">
                   {r.baseline ? (
                     <p>
                       baseline: <span className="font-mono">{r.baseline}</span>
@@ -610,7 +610,7 @@ function PendingFixturesBanner({ project }: { project: Project }) {
       className="border-b border-line bg-warn/5 px-5 py-3"
       aria-label="Acceptance fixtures awaiting a human decision"
     >
-      <p className="font-mono text-[10px] font-medium tracking-widest text-warn uppercase">
+      <p className="font-mono text-2xs font-medium tracking-widest text-warn uppercase">
         Awaiting your decision · acceptance fixtures
       </p>
       <p className="mt-1.5 text-sm text-fg">
@@ -628,7 +628,7 @@ function PendingFixturesBanner({ project }: { project: Project }) {
       <p className="mt-1 text-xs leading-relaxed text-muted">
         Approving is a CLI action (the single flip path), run on this project&apos;s exported file
         from the RapidTool folder:{" "}
-        <code className="rounded-sm bg-raised px-1 font-mono text-[11px]">
+        <code className="rounded-sm bg-raised px-1 font-mono text-xs">
           {`node --experimental-strip-types scripts/rapidtool-cli.mjs fixtures --project "${slug}.json" --approve --ids ${shown.join(",")}`}
         </code>{" "}
         (or <span className="font-mono">--approve-all</span>). This console cannot flip the approval
@@ -663,7 +663,7 @@ function RunStatusPanel({
       className="border-b border-line bg-surface/60 px-5 py-4"
       aria-label="What's happening and what to do next"
     >
-      <p className="font-mono text-[10px] font-medium tracking-widest text-faint uppercase">
+      <p className="font-mono text-2xs font-medium tracking-widest text-faint uppercase">
         What&apos;s happening
       </p>
       <p className="mt-1.5 text-sm text-fg">
@@ -685,7 +685,7 @@ function RunStatusPanel({
             {buttonLabel}
           </button>
         ) : null}
-        <span className="font-mono text-[11px] text-faint" title="The CLI verb this action runs">
+        <span className="font-mono text-xs text-faint" title="The CLI verb this action runs">
           verb: {action.cmd}
         </span>
       </div>
@@ -921,7 +921,7 @@ function StatusBadge({
   if (rec.status === "locked" && !isCurrentBlocked) return null;
   return (
     <span
-      className={`rt-badge inline-flex max-w-full items-center gap-1 rounded-sm border px-1.5 py-px font-mono text-[9px] font-medium tracking-wider whitespace-nowrap ${BADGE_TONES[tone]} ${className}`}
+      className={`rt-badge inline-flex max-w-full items-center gap-1 rounded-sm border px-1.5 py-px font-mono text-2xs font-medium tracking-wider whitespace-nowrap ${BADGE_TONES[tone]} ${className}`}
       title={`${PHASES[phase].code} · ${label}`}
     >
       {live ? (
@@ -1295,7 +1295,7 @@ function WildConsole({ project }: { project: Project }) {
     <div role="region" aria-label="Wild mode activity" className="border-b border-line bg-surface/50 px-5 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <p
-          className={`inline-flex items-center gap-1.5 font-mono text-[11px] font-medium tracking-widest ${
+          className={`inline-flex items-center gap-1.5 font-mono text-xs font-medium tracking-widest ${
             running ? "text-wild" : wildPaused(wild.run) ? "text-warn" : "text-faint"
           }`}
         >
@@ -1303,7 +1303,7 @@ function WildConsole({ project }: { project: Project }) {
           WILD MODE
         </p>
         <span
-          className={`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 font-mono text-[10px] font-medium tracking-wider ${
+          className={`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 font-mono text-2xs font-medium tracking-wider ${
             running
               ? "border-wild/50 bg-wild/10 text-wild"
               : wildPaused(wild.run)
@@ -1327,7 +1327,7 @@ function WildConsole({ project }: { project: Project }) {
           )}
         </span>
         {startedAt != null ? (
-          <span className="font-mono text-[10px] text-faint tabular-nums">
+          <span className="font-mono text-xs text-faint tabular-nums">
             since {Math.max(0, Math.round((clock - startedAt) / 1000))}s
           </span>
         ) : null}
@@ -1342,7 +1342,7 @@ function WildConsole({ project }: { project: Project }) {
                 ? "Emergency pause — stop the unattended loop at the next phase boundary"
                 : "Resume the unattended run — re-enters the wild driver at the current phase"
             }
-            className={`inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium disabled:cursor-default disabled:opacity-40 ${
+            className={`inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2.5 text-2xs font-medium disabled:cursor-default disabled:opacity-40 ${
               running
                 ? "border-danger/50 bg-danger/10 text-danger hover:bg-danger/20"
                 : "border-border text-fg hover:border-accent/40"
@@ -1364,14 +1364,14 @@ function WildConsole({ project }: { project: Project }) {
             onClick={() => void onStop()}
             disabled={busy !== null}
             title="Emergency stop — end the unattended run entirely"
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-danger/50 bg-danger/10 px-2.5 text-[11px] font-medium text-danger hover:bg-danger/20 disabled:cursor-default disabled:opacity-40"
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-danger/50 bg-danger/10 px-2.5 text-2xs font-medium text-danger hover:bg-danger/20 disabled:cursor-default disabled:opacity-40"
           >
             <Square className="h-3 w-3" aria-hidden="true" />
             Stop
           </button>
         ) : null}
         {wild.run !== null && wild.run.active !== true && !wildPaused(wild.run) ? (
-          <p role="status" className="w-full font-mono text-[11px] leading-relaxed text-warn">
+          <p role="status" className="w-full font-mono text-xs leading-relaxed text-warn">
             Run stopped after reload — the wild driver is a session artifact and cannot resume
             across page loads (a paused-at-reload run is stopped, never left paused; a stopped run
             stays stopped). Start a new run from the current phase to continue.
@@ -1380,7 +1380,7 @@ function WildConsole({ project }: { project: Project }) {
       </div>
 
       {note ? (
-        <p role="alert" className="mt-2 font-mono text-[11px] leading-relaxed text-danger">
+        <p role="alert" className="mt-2 font-mono text-xs leading-relaxed text-danger">
           {note}
         </p>
       ) : null}
@@ -1425,7 +1425,7 @@ function WildConsole({ project }: { project: Project }) {
           ))}
         </ul>
       ) : (
-        <p className="mt-2 flex items-center gap-1.5 font-mono text-[11px] text-faint">
+        <p className="mt-2 flex items-center gap-1.5 font-mono text-xs text-faint">
           {running ? (
             <>
               <span aria-hidden="true" className="wild-live-dot h-1 w-1 rounded-full bg-current" />
@@ -1557,7 +1557,7 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="rounded-sm border border-border bg-raised px-1.5 py-0.5 font-mono text-[10px] text-fg">
+    <kbd className="rounded-sm border border-border bg-raised px-1.5 py-0.5 font-mono text-2xs text-fg">
       {children}
     </kbd>
   );
@@ -1700,7 +1700,7 @@ class PaneBoundary extends Component<
         <p className="font-medium text-danger">
           This area hit a render error — the rest of the console is still live.
         </p>
-        <p className="mt-1 font-mono text-[11px] leading-relaxed text-muted [overflow-wrap:anywhere]">
+        <p className="mt-1 font-mono text-xs leading-relaxed text-muted [overflow-wrap:anywhere]">
           {this.state.message ?? "unknown error"}
         </p>
         <button
@@ -1807,7 +1807,7 @@ export function HomeScreen() {
                 why, with the same live counter shape as the rejection note. */}
             <p
               aria-live="polite"
-              className={`w-full font-mono text-[11px] ${
+              className={`w-full font-mono text-xs ${
                 brief.trim().length > 0 && brief.trim().length < 12 ? "text-warn" : "text-faint"
               }`}
             >
@@ -1901,7 +1901,7 @@ function ExportMenuItem({
       <span className="mt-0.5 shrink-0 text-muted">{icon}</span>
       <span className="min-w-0">
         <span className="block text-sm text-fg">{label}</span>
-        <span className="mt-0.5 block text-[11px] leading-snug text-faint">{hint}</span>
+        <span className="mt-0.5 block text-xs leading-snug text-faint">{hint}</span>
       </span>
     </DropdownMenu.Item>
   );
@@ -2998,12 +2998,12 @@ export function RunScreen({ id }: { id: string }) {
                         body defeats the point" — so truncation also shows HERE, at
                         the copy/download affordance itself, before anything is taken. */}
                     {packetTruncated(current.packet) ? (
-                      <div className="mx-1 mb-1 rounded-sm border border-warn/30 px-2 py-1.5 font-mono text-[10px] leading-snug text-warn">
+                      <div className="mx-1 mb-1 rounded-sm border border-warn/30 px-2 py-1.5 font-mono text-xs leading-snug text-warn">
                         Packet truncated — hit the {PACKET_MAX_CHARS_MIRROR}-char budget; copy/download
                         carries the cut packet as-is.
                       </div>
                     ) : null}
-                    <DropdownMenu.Label className="px-2.5 pt-1.5 pb-1 font-mono text-[10px] tracking-widest text-faint uppercase">
+                    <DropdownMenu.Label className="px-2.5 pt-1.5 pb-1 font-mono text-2xs tracking-widest text-faint uppercase">
                       Copy
                     </DropdownMenu.Label>
                     <ExportMenuItem
@@ -3019,7 +3019,7 @@ export function RunScreen({ id }: { id: string }) {
                       onSelect={() => void copyHandoff()}
                     />
                     <DropdownMenu.Separator className="my-1 h-px bg-line" />
-                    <DropdownMenu.Label className="px-2.5 pt-1 pb-1 font-mono text-[10px] tracking-widest text-faint uppercase">
+                    <DropdownMenu.Label className="px-2.5 pt-1 pb-1 font-mono text-2xs tracking-widest text-faint uppercase">
                       Download
                     </DropdownMenu.Label>
                     <ExportMenuItem
@@ -3091,7 +3091,7 @@ export function RunScreen({ id }: { id: string }) {
             {project.status === "complete" ? <ExportSoftwareBlock project={project} /> : null}
             {crewRun && (crewRun.ok || crewRun.messages.length > 0) ? (
               <div className="mt-3 w-full rounded-md border border-border bg-raised px-4 py-3">
-                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-muted">
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-muted">
                   <Bot className="h-3.5 w-3.5" />
                   <span>
                     {crewRun.ok
@@ -3111,7 +3111,7 @@ export function RunScreen({ id }: { id: string }) {
                       key={`crew-msg-${m.seq}`}
                       className="rounded-md border border-border bg-bg px-3 py-2"
                     >
-                      <p className="font-mono text-[11px] text-accent">
+                      <p className="font-mono text-xs text-accent">
                         #{m.seq} · {m.role}
                         <span className="text-faint"> → </span>
                         {m.type}
@@ -3121,7 +3121,7 @@ export function RunScreen({ id }: { id: string }) {
                         {m.content}
                       </p>
                       {m.artifactTitles.length ? (
-                        <p className="mt-1 font-mono text-[11px] text-faint">
+                        <p className="mt-1 font-mono text-xs text-faint">
                           artifacts: {m.artifactTitles.join(" · ")}
                         </p>
                       ) : null}
@@ -3222,22 +3222,22 @@ export function RunScreen({ id }: { id: string }) {
             {project.lattice ? (
               <div className="mt-5 flex flex-wrap gap-1.5">
                 {project.lattice.jobs.slice(0, 6).map((j) => (
-                  <span key={`j-${j}`} className="rounded-sm border border-border px-2 py-1 font-mono text-[11px] text-accent">
+                  <span key={`j-${j}`} className="rounded-sm border border-border px-2 py-1 font-mono text-2xs text-accent">
                     job:{j}
                   </span>
                 ))}
                 {project.lattice.entities.slice(0, 5).map((e) => (
-                  <span key={`e-${e}`} className="rounded-sm border border-border px-2 py-1 font-mono text-[11px] text-muted">
+                  <span key={`e-${e}`} className="rounded-sm border border-border px-2 py-1 font-mono text-2xs text-muted">
                     {e}
                   </span>
                 ))}
                 {project.lattice.constraints.slice(0, 6).map((c) => (
-                  <span key={`c-${c}`} className="rounded-sm border border-warn/30 px-2 py-1 font-mono text-[11px] text-warn">
+                  <span key={`c-${c}`} className="rounded-sm border border-warn/30 px-2 py-1 font-mono text-2xs text-warn">
                     {c}
                   </span>
                 ))}
                 {project.lattice.constraints.length > 6 ? (
-                  <span className="rounded-sm border border-warn/30 px-2 py-1 font-mono text-[11px] text-warn">
+                  <span className="rounded-sm border border-warn/30 px-2 py-1 font-mono text-2xs text-warn">
                     +{project.lattice.constraints.length - 6} more
                   </span>
                 ) : null}
@@ -3383,7 +3383,7 @@ export function RunScreen({ id }: { id: string }) {
                   instead of leaving the human to guess (the toggle is kept, and
                   its click still pre-collapses the tier for when they leave). */}
               {activeIsAdvanced && !advancedOpen ? (
-                <p className="mt-1 text-[10px] leading-tight text-faint">
+                <p className="mt-1 text-xs leading-tight text-faint">
                   This panel lives in “More panels”, so its trigger stays visible while it is open —
                   the toggle collapses the section once you switch back to a primary panel.
                 </p>
@@ -3461,7 +3461,7 @@ export function RunScreen({ id }: { id: string }) {
                       shown. Detection reads the packet's OWN marker (packet.ts:17)
                       out of the assembled text — the cut is never recomputed here. */}
                   {packetTruncated(project.packet) ? (
-                    <div className="mb-3 rounded-md border border-warn/30 bg-raised px-3 py-2 font-mono text-[11px] leading-relaxed text-warn">
+                    <div className="mb-3 rounded-md border border-warn/30 bg-raised px-3 py-2 font-mono text-xs leading-relaxed text-warn">
                       This packet is truncated — it hit the packet budget ({PACKET_MAX_CHARS_MIRROR}{" "}
                       chars) and the tail was cut. The packet's own marker in the body reads:{" "}
                       {PACKET_TRUNC_MARKER}. Copy or download carries this packet as-is.
@@ -3500,7 +3500,7 @@ export function RunScreen({ id }: { id: string }) {
                   if (!n) return null;
                   return (
                     <li key={id} className="rounded-md border border-border bg-raised px-3 py-3">
-                      <p className="font-mono text-[11px] text-accent">
+                      <p className="font-mono text-xs text-accent">
                         {i + 1} · {n.owner}
                       </p>
                       <p className="mt-1 text-sm font-medium">{n.file}</p>
@@ -3528,13 +3528,13 @@ export function RunScreen({ id }: { id: string }) {
                 <div className="grid gap-3 px-5 py-4 sm:grid-cols-2">
                   {(project.crew ?? []).map((c) => (
                     <div key={c.role} className="rounded-md border border-border bg-raised px-3 py-3">
-                      <p className="font-mono text-[11px] text-accent">
+                      <p className="font-mono text-xs text-accent">
                         {c.role}
                         {c.active ? " · active" : ""} · {c.budgetTokens} tok
                       </p>
                       <p className="mt-2 text-sm">{c.mandate}</p>
                       <p className="mt-2 text-xs text-muted">{c.handoff}</p>
-                      <p className="mt-2 font-mono text-[11px] text-faint">{c.tools.join(" · ")}</p>
+                      <p className="mt-2 font-mono text-xs text-faint">{c.tools.join(" · ")}</p>
                     </div>
                   ))}
                 </div>
@@ -3543,13 +3543,13 @@ export function RunScreen({ id }: { id: string }) {
 
             <Tabs.Content value="oracle" forceMount className="data-[state=inactive]:hidden">
               <div className="px-5 py-4">
-                <p className="font-mono text-[11px] text-muted uppercase tracking-wide">
+                <p className="font-mono text-2xs text-muted uppercase tracking-wide">
                   Acceptance prose (A7 template)
                 </p>
                 <ul className="mt-2 space-y-2">
                   {(project.oracle ?? []).map((t) => (
                     <li key={t.id} className="rounded-md border border-border px-3 py-3">
-                      <p className="font-mono text-[11px] text-accent">{t.name}</p>
+                      <p className="font-mono text-xs text-accent">{t.name}</p>
                       <p className="mt-1 text-sm">{t.given}</p>
                       <p className="mt-1 text-xs text-muted">expect {t.expect}</p>
                     </li>
@@ -3565,7 +3565,7 @@ export function RunScreen({ id }: { id: string }) {
                   checks (99 §4).
                 </p>
 
-                <p className="mt-5 font-mono text-[11px] text-muted uppercase tracking-wide">
+                <p className="mt-5 font-mono text-2xs text-muted uppercase tracking-wide">
                   Machine verify (executable)
                 </p>
                 <OracleVerifyBlock project={project} />
@@ -3664,7 +3664,7 @@ export function RunScreen({ id }: { id: string }) {
           <ul className="scroll-thin mt-3 max-h-[46vh] space-y-3 overflow-y-auto pr-1">
             {project.memory.slice(0, 8).map((m) => (
               <li key={m.id} className="border-b border-line pb-3 last:border-0">
-                <p className="font-mono text-[11px] text-faint">
+                <p className="font-mono text-xs text-faint">
                   {m.kind} · P{m.phase} · {m.score.toFixed(2)}
                 </p>
                 <p className="mt-1 text-sm leading-snug text-fg">{m.text}</p>
@@ -3683,7 +3683,7 @@ export function RunScreen({ id }: { id: string }) {
               <ul className="mt-3 space-y-2">
                 {project.decisions.slice(-6).reverse().map((d) => (
                   <li key={d.id} className="border-b border-line pb-2 last:border-0">
-                    <p className="font-mono text-[11px] leading-relaxed">
+                    <p className="font-mono text-xs leading-relaxed">
                       <span className="text-fg/80">P{d.phase}</span>
                       <span className="text-faint"> · </span>
                       <span className={d.decision === "approve" ? "text-ok" : "text-danger"}>
@@ -3695,7 +3695,7 @@ export function RunScreen({ id }: { id: string }) {
                       </span>
                     </p>
                     {d.note ? (
-                      <p className="mt-0.5 font-mono text-[11px] text-faint">{clip60(d.note)}</p>
+                      <p className="mt-0.5 font-mono text-xs text-faint">{clip60(d.note)}</p>
                     ) : null}
                   </li>
                 ))}
@@ -3712,7 +3712,7 @@ export function RunScreen({ id }: { id: string }) {
           <ShellSurfacesCard project={project} />
 
           <h2 className="mt-8 text-xs font-medium tracking-wide text-muted uppercase">Diagnostics</h2>
-          <ol className="scroll-thin mt-3 max-h-[38vh] space-y-2 overflow-y-auto pr-1 font-mono text-[11px] leading-relaxed text-muted">
+          <ol className="scroll-thin mt-3 max-h-[38vh] space-y-2 overflow-y-auto pr-1 font-mono text-xs leading-relaxed text-muted">
             {project.logs.slice(-10).reverse().map((l, i) => (
               <li key={`${l.ts}-${i}`}>
                 <span className="text-faint">{l.event}</span>
@@ -3931,7 +3931,7 @@ function PhaseRail({
             >
               <PhaseGlyph status={rec.status} />
               <span className="min-w-0">
-                <span className={`block font-mono text-[11px] ${meta.tone}`}>
+                <span className={`block font-mono text-xs ${meta.tone}`}>
                   {p.code}
                   {p.hitl ? (
                     <>
@@ -3974,7 +3974,7 @@ function ScorecardBlock({ project }: { project: Project }) {
               packet.ts:498 — the UI had dropped it, so the headline number read
               as live research. Mirrored exact wording, never paraphrased softer
               ("template-derived, not live research" is the force of the line). */}
-          <p className="mt-1 font-mono text-[11px] leading-snug text-warn">
+          <p className="mt-1 font-mono text-xs leading-snug text-warn">
             (deterministic feasibility estimate — template-derived, not live research)
           </p>
         </div>
@@ -3984,7 +3984,7 @@ function ScorecardBlock({ project }: { project: Project }) {
           <div key={a.key} className="rounded-md border border-border bg-raised px-3 py-3">
             <p className="text-xs text-muted">{a.label}</p>
             <p className="mt-1 font-mono text-lg tabular-nums">{a.score}</p>
-            <p className="mt-1 text-[11px] leading-snug text-faint">{a.note}</p>
+            <p className="mt-1 text-xs leading-snug text-faint">{a.note}</p>
           </div>
         ))}
       </div>
@@ -4012,7 +4012,7 @@ function ScorecardBlock({ project }: { project: Project }) {
                           ? "Labelled “cited” by the engine — confirm the backing research artifact"
                           : "Deterministic template row — never present template prose as live research"
                       }
-                      className={`inline-flex items-center whitespace-nowrap rounded-sm border px-1.5 py-0.5 font-mono text-[10px] ${
+                      className={`inline-flex items-center whitespace-nowrap rounded-sm border px-1.5 py-0.5 font-mono text-2xs ${
                         c.source === "cited" ? "border-ok/40 text-ok" : "border-warn/30 text-warn"
                       }`}
                     >
@@ -4086,7 +4086,7 @@ function HitlDock({
             {evidence.map((r) => (
               <li
                 key={r.id}
-                className={`font-mono text-[11px] leading-relaxed ${
+                className={`font-mono text-xs leading-relaxed ${
                   r.tone === "ok" ? "text-ok" : r.tone === "danger" ? "text-danger" : "text-faint"
                 }`}
               >
@@ -4112,7 +4112,7 @@ function HitlDock({
       />
       <p
         aria-live="polite"
-        className={`mt-1 font-mono text-[11px] ${
+        className={`mt-1 font-mono text-xs ${
           note.trim().length > 0 && note.trim().length < 12 ? "text-warn" : "text-faint"
         }`}
       >
@@ -4185,7 +4185,7 @@ function HitlDock({
       {allowListRefusal ? (
         <p
           role="status"
-          className="mt-3 rounded-md border border-danger/40 bg-raised px-3 py-2 font-mono text-[11px] leading-relaxed text-danger"
+          className="mt-3 rounded-md border border-danger/40 bg-raised px-3 py-2 font-mono text-xs leading-relaxed text-danger"
         >
           {allowListRefusal.code}
           <span className="mt-0.5 block text-faint">
@@ -4201,7 +4201,7 @@ function HitlDock({
       {denial ? (
         <p
           role="status"
-          className="mt-3 rounded-md border border-warn/30 bg-raised px-3 py-2 font-mono text-[11px] leading-relaxed text-warn"
+          className="mt-3 rounded-md border border-warn/30 bg-raised px-3 py-2 font-mono text-xs leading-relaxed text-warn"
         >
           autopilot gate denied — {denial.detail}
           <span className="mt-0.5 block text-faint">
@@ -4246,7 +4246,7 @@ function BlockedGuidanceBlock({ project }: { project: Project }) {
   if (!g) return null;
   return (
     <div className="mt-2 w-full rounded-md border border-warn/30 bg-raised px-4 py-3">
-      <p className="font-mono text-[11px] text-warn">
+      <p className="font-mono text-xs text-warn">
         Rejection guidance (LLM) · advisory — deterministic deltas on regeneration may differ
       </p>
       <p className="mt-1.5 text-sm leading-relaxed whitespace-pre-wrap text-fg/90 [overflow-wrap:anywhere]">{g.body}</p>
@@ -4308,7 +4308,7 @@ function ArtifactPane({
                 active?.id === a.id ? "bg-raised text-fg" : "text-muted hover:text-fg"
               }`}
             >
-              <span className="block font-mono text-[11px] text-faint">
+              <span className="block font-mono text-xs text-faint">
                 P{a.phase} · {a.kind}
               </span>
               {a.title}
@@ -4318,7 +4318,7 @@ function ArtifactPane({
       </ul>
       <div className="min-w-0">
         <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-2">
-          <p className="truncate font-mono text-[11px] text-muted">
+          <p className="truncate font-mono text-xs text-muted">
             {active ? `P${active.phase} · ${active.kind} · ${active.title}` : "Select an artifact"}
           </p>
           {active ? (
@@ -4469,7 +4469,7 @@ function MarkdownBody({ text }: { text: string }) {
         nodes.push(
           <h4
             key={key++}
-            className="pt-1 font-mono text-[11px] font-medium text-fg/80 first:pt-0"
+            className="pt-1 font-mono text-xs font-medium text-fg/80 first:pt-0"
           >
             {b.text}
           </h4>,
@@ -4482,11 +4482,11 @@ function MarkdownBody({ text }: { text: string }) {
             className="overflow-hidden rounded-md border border-border bg-raised"
           >
             {b.lang ? (
-              <p className="border-b border-line px-2 py-1 font-mono text-[10px] tracking-wide text-faint uppercase">
+              <p className="border-b border-line px-2 py-1 font-mono text-2xs tracking-wide text-faint uppercase">
                 {b.lang}
               </p>
             ) : null}
-            <pre className="scroll-thin max-h-[420px] overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-fg/90">
+            <pre className="scroll-thin max-h-[420px] overflow-auto px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-fg/90">
               <code>{b.text}</code>
             </pre>
           </div>,
@@ -4615,7 +4615,7 @@ function VaultNoteRow({
         }`}
       >
         <span className="block min-w-0 truncate font-medium">{note.title}</span>
-        <span className="mt-0.5 block truncate font-mono text-[11px] text-faint">
+        <span className="mt-0.5 block truncate font-mono text-xs text-faint">
           {noteKindCaption(note)}
         </span>
       </button>
@@ -4626,7 +4626,7 @@ function VaultNoteRow({
 /** Group header <li> inside the navigator list (mono, muted — mirrors aside h2 styling). */
 function VaultGroupHeader({ label, count }: { label: string; count: number }) {
   return (
-    <li className="px-4 pt-3 pb-1 font-mono text-[11px] font-medium tracking-wide text-faint uppercase">
+    <li className="px-4 pt-3 pb-1 font-mono text-2xs font-medium tracking-wide text-faint uppercase">
       {label} · {count}
     </li>
   );
@@ -4750,7 +4750,7 @@ function RuntimeLogPane({ project }: { project: Project }) {
                 </span>
               </span>
               <span className="break-words text-fg/90">{row.message}</span>
-              <span className="font-mono text-[11px] text-muted">{row.capture}</span>
+              <span className="font-mono text-xs text-muted">{row.capture}</span>
             </li>
           ))}
         </ul>
@@ -4932,7 +4932,7 @@ function VaultPane({ project }: { project: Project }) {
               type="button"
               onClick={() => setTag(tag === t ? null : t)}
               aria-pressed={tag === t}
-              className={`rounded-sm border px-2 py-1 font-mono text-[11px] ${
+              className={`rounded-sm border px-2 py-1 font-mono text-2xs ${
                 tag === t ? "border-accent/60 text-accent" : "border-border text-muted hover:text-fg"
               }`}
             >
@@ -5005,7 +5005,7 @@ function VaultPane({ project }: { project: Project }) {
             {active ? (
               <>
                 <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-2">
-                  <p className="min-w-0 truncate font-mono text-[11px] text-muted">
+                  <p className="min-w-0 truncate font-mono text-xs text-muted">
                     {noteKindCaption(active)}
                     <span className="text-faint"> · </span>
                     <span className="text-fg/90">{active.title}</span>
@@ -5023,13 +5023,13 @@ function VaultPane({ project }: { project: Project }) {
                 </div>
                 {linksOut.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-4 py-2">
-                    <span className="font-mono text-[11px] text-faint">links:</span>
+                    <span className="font-mono text-xs text-faint">links:</span>
                     {linksOut.map((b) => (
                       <button
                         key={b.title}
                         type="button"
                         onClick={() => openNote(b.title)}
-                        className="rounded-sm border border-border px-2 py-1 font-mono text-[11px] text-accent hover:border-accent/40"
+                        className="rounded-sm border border-border px-2 py-1 font-mono text-2xs text-accent hover:border-accent/40"
                         title={`Open ${b.title}`}
                       >
                         {b.title}
@@ -5042,13 +5042,13 @@ function VaultPane({ project }: { project: Project }) {
                     {renderVaultBody(active.body, byTitle, openNote)}
                   </div>
                   {active.tags.length > 0 ? (
-                    <p className="font-mono text-[11px] text-faint">
+                    <p className="font-mono text-xs text-faint">
                       tags: {active.tags.join(" · ")}
                     </p>
                   ) : null}
                 </div>
                 <div className="border-t border-line px-4 py-3">
-                  <p className="font-mono text-[11px] font-medium tracking-wide text-muted uppercase">
+                  <p className="font-mono text-2xs font-medium tracking-wide text-muted uppercase">
                     Linked from
                   </p>
                   {backlinks.length === 0 ? (
@@ -5060,7 +5060,7 @@ function VaultPane({ project }: { project: Project }) {
                           <button
                             type="button"
                             onClick={() => openNote(b.title)}
-                            className="rounded-sm border border-border px-2 py-1 font-mono text-[11px] text-accent hover:border-accent/40"
+                            className="rounded-sm border border-border px-2 py-1 font-mono text-2xs text-accent hover:border-accent/40"
                             title={`Open ${b.title}`}
                           >
                             {noteKindCaption(b)} · {b.title}
@@ -5456,7 +5456,7 @@ function DesignPane({ project }: { project: Project }) {
           {copiedCss ? "Copied CSS" : "Copy CSS variables"}
         </button>
       </div>
-      <p className="px-5 pt-2 font-mono text-[11px] text-faint">
+      <p className="px-5 pt-2 font-mono text-xs text-faint">
         Deterministic design system for this build{view.meta ? ` · ${view.meta.name}` : ""} — generated
         by design.ts, previewed below.
       </p>
@@ -5475,7 +5475,7 @@ function DesignPane({ project }: { project: Project }) {
         <div className="pb-4">
           {view.colors.length > 0 ? (
             <section aria-label="Color tokens" className="px-5 pt-4">
-              <h3 className="font-mono text-[11px] font-medium tracking-widest text-muted uppercase">
+              <h3 className="font-mono text-2xs font-medium tracking-widest text-muted uppercase">
                 Color palette · {view.colors.length}
               </h3>
               <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(6rem,1fr))] gap-2">
@@ -5495,12 +5495,12 @@ function DesignPane({ project }: { project: Project }) {
                         className={`block h-10 w-full rounded-sm ${color ? "" : "bg-faint"}`}
                         style={color ? { background: color } : undefined}
                       />
-                      <span className="mt-1.5 block truncate font-mono text-[10px] text-fg/80">
+                      <span className="mt-1.5 block truncate font-mono text-xs text-fg/80">
                         {shortTokenName(s.name)}
                       </span>
-                      <span className="block truncate font-mono text-[10px] text-faint">{s.value}</span>
+                      <span className="block truncate font-mono text-xs text-faint">{s.value}</span>
                       {copiedToken === s.name ? (
-                        <span className="mt-1 flex items-center gap-1 font-mono text-[10px] text-ok">
+                        <span className="mt-1 flex items-center gap-1 font-mono text-xs text-ok">
                           <Check className="h-3 w-3" /> Copied
                         </span>
                       ) : null}
@@ -5513,7 +5513,7 @@ function DesignPane({ project }: { project: Project }) {
 
           {view.sizes.length > 0 ? (
             <section aria-label="Typography scale" className="px-5 pt-4">
-              <h3 className="font-mono text-[11px] font-medium tracking-widest text-muted uppercase">
+              <h3 className="font-mono text-2xs font-medium tracking-widest text-muted uppercase">
                 Type scale · {view.sizes.length}
               </h3>
               <div className="mt-2">
@@ -5521,7 +5521,7 @@ function DesignPane({ project }: { project: Project }) {
                   const size = cssLengthOf(s.value);
                   return (
                     <div key={`${s.name}-${s.value}`} className="border-b border-line py-2 last:border-0">
-                      <p className="font-mono text-[11px] text-faint">
+                      <p className="font-mono text-xs text-faint">
                         {shortTokenName(s.name)} · {s.value}
                       </p>
                       <p
@@ -5539,7 +5539,7 @@ function DesignPane({ project }: { project: Project }) {
 
           {view.fonts.length > 0 ? (
             <section aria-label="Font families" className="px-5 pt-4">
-              <h3 className="font-mono text-[11px] font-medium tracking-widest text-muted uppercase">
+              <h3 className="font-mono text-2xs font-medium tracking-widest text-muted uppercase">
                 Fonts · {view.fonts.length}
               </h3>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -5547,7 +5547,7 @@ function DesignPane({ project }: { project: Project }) {
                   const stack = safeCssValue(s.value);
                   return (
                     <div key={`${s.name}-${s.value}`} className="rounded-md border border-border bg-raised px-3 py-2">
-                      <p className="font-mono text-[11px] text-faint">
+                      <p className="font-mono text-xs text-faint">
                         {shortTokenName(s.name)} · {s.value}
                       </p>
                       <p className="mt-1 truncate text-xl text-fg" style={stack ? { fontFamily: stack } : undefined}>
@@ -5562,7 +5562,7 @@ function DesignPane({ project }: { project: Project }) {
 
           {view.spacing.length > 0 ? (
             <section aria-label="Spacing scale" className="px-5 pt-4">
-              <h3 className="font-mono text-[11px] font-medium tracking-widest text-muted uppercase">
+              <h3 className="font-mono text-2xs font-medium tracking-widest text-muted uppercase">
                 Spacing · {view.spacing.length}
               </h3>
               <div className="mt-3 flex flex-wrap items-end gap-x-6 gap-y-3">
@@ -5570,7 +5570,7 @@ function DesignPane({ project }: { project: Project }) {
                   const w = pxOf(s.value);
                   return (
                     <div key={`${s.name}-${s.value}`} className="min-w-0">
-                      <p className="font-mono text-[10px] text-faint">
+                      <p className="font-mono text-xs text-faint">
                         {shortTokenName(s.name)} · {s.value}
                       </p>
                       <span
@@ -5587,7 +5587,7 @@ function DesignPane({ project }: { project: Project }) {
 
           {view.radius.length > 0 ? (
             <section aria-label="Border radius tokens" className="px-5 pt-4">
-              <h3 className="font-mono text-[11px] font-medium tracking-widest text-muted uppercase">
+              <h3 className="font-mono text-2xs font-medium tracking-widest text-muted uppercase">
                 Radius · {view.radius.length}
               </h3>
               <div className="mt-2 flex flex-wrap items-end gap-4">
@@ -5595,7 +5595,7 @@ function DesignPane({ project }: { project: Project }) {
                   const rx = cssLengthOf(s.value);
                   return (
                     <div key={`${s.name}-${s.value}`} className="min-w-0">
-                      <p className="font-mono text-[10px] text-faint">
+                      <p className="font-mono text-xs text-faint">
                         {shortTokenName(s.name)} · {s.value}
                       </p>
                       <span
@@ -5612,7 +5612,7 @@ function DesignPane({ project }: { project: Project }) {
 
           {view.shadows.length > 0 ? (
             <section aria-label="Shadow tokens" className="px-5 pt-4">
-              <h3 className="font-mono text-[11px] font-medium tracking-widest text-muted uppercase">
+              <h3 className="font-mono text-2xs font-medium tracking-widest text-muted uppercase">
                 Shadows · {view.shadows.length}
               </h3>
               <div className="mt-2 flex flex-wrap items-end gap-4">
@@ -5620,7 +5620,7 @@ function DesignPane({ project }: { project: Project }) {
                   const shadow = safeCssValue(s.value);
                   return (
                     <div key={`${s.name}-${s.value}`} className="min-w-0">
-                      <p className="font-mono text-[10px] text-faint">
+                      <p className="font-mono text-xs text-faint">
                         {shortTokenName(s.name)} · {s.value}
                       </p>
                       <span
@@ -5728,7 +5728,7 @@ function DiagramPane({ project }: { project: Project }) {
           {copied ? "Copied SVG" : "Copy SVG"}
         </button>
       </div>
-      <p className="px-5 pt-2 font-mono text-[11px] text-faint">
+      <p className="px-5 pt-2 font-mono text-xs text-faint">
         Rendered from diagram.ts · {active.label.toLowerCase()} view of this build.
       </p>
 
@@ -5749,7 +5749,7 @@ function DiagramPane({ project }: { project: Project }) {
           </button>
         ))}
       </div>
-      <p className="px-5 pt-2 font-mono text-[11px] text-faint">{active.hint}</p>
+      <p className="px-5 pt-2 font-mono text-xs text-faint">{active.hint}</p>
 
       {error ? (
         <p role="alert" className="px-5 pt-2 text-sm text-danger">
@@ -5905,12 +5905,12 @@ function ChatMsgRow({ msg, onRetry }: { msg: ChatMsgView; onRetry?: () => void }
                       ? `Error ${msg.code}: ${doc.meaning}. ${doc.agentAction}`
                       : `Error ${msg.code}: uncatalogued`
                   }
-                  className={`rt-badge inline-block rounded-sm border px-1.5 py-0.5 font-mono text-[11px] ${badgeClass}`}
+                  className={`rt-badge inline-block rounded-sm border px-1.5 py-0.5 font-mono text-2xs ${badgeClass}`}
                 >
                   {msg.code}
                 </span>
                 {doc ? (
-                  <span className="font-mono text-[11px] text-faint">{doc.meaning}</span>
+                  <span className="font-mono text-xs text-faint">{doc.meaning}</span>
                 ) : null}
               </span>
             ) : null}
@@ -5921,7 +5921,7 @@ function ChatMsgRow({ msg, onRetry }: { msg: ChatMsgView; onRetry?: () => void }
               <button
                 type="button"
                 onClick={onRetry}
-                className="mt-2 rounded-sm border border-border px-2 py-1 font-mono text-[11px] text-muted hover:text-fg"
+                className="mt-2 rounded-sm border border-border px-2 py-1 font-mono text-2xs text-muted hover:text-fg"
               >
                 Retry — copy into draft
               </button>
@@ -6044,7 +6044,7 @@ function OracleVerifyBlock({ project }: { project: Project }) {
     <div className="mt-2 space-y-2">
       {lt ? (
         <div className="rounded-md border border-border px-3 py-3">
-          <p className="font-mono text-[11px] text-accent">
+          <p className="font-mono text-xs text-accent">
             lastTest · {ltLabel ? (LAST_TEST_LABEL_TEXT[ltLabel] ?? `test (${ltLabel})`) : "untagged"} ·{" "}
             {lt.ok ? "passed" : "failed"}
             {hash ? ` · hash ${hash}` : ""}
@@ -6054,7 +6054,7 @@ function OracleVerifyBlock({ project }: { project: Project }) {
       ) : null}
       {verifyArtifacts.map((a) => (
         <div key={a.id} className="rounded-md border border-border px-3 py-3">
-          <p className="font-mono text-[11px] text-accent">{a.title}</p>
+          <p className="font-mono text-xs text-accent">{a.title}</p>
           <p className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">
             {a.body.replace(/^#.*\n/, "").slice(0, 160)}
             {a.body.length > 160 ? "…" : ""}
@@ -6293,7 +6293,7 @@ function ChatPane({ project }: { project: Project }) {
           )}
         </p>
         {noBackend ? (
-          <p role="status" className="font-mono text-[11px] text-warn">
+          <p role="status" className="font-mono text-xs text-warn">
             No LLM backend — chat is read-only: DEEPSEEK_API_KEY is not set in the
             server .env, so sending is disabled (a send could only fail with
             RT_E_LLM_NOT_CONFIGURED). Set the key and reload to chat against this build.
@@ -6301,7 +6301,7 @@ function ChatPane({ project }: { project: Project }) {
         ) : null}
       </div>
       {restoredRows > 0 ? (
-        <p className="px-5 pt-1 font-mono text-[11px] text-faint">
+        <p className="px-5 pt-1 font-mono text-xs text-faint">
           Thread restored from this build's log · {restoredRows} row
           {restoredRows === 1 ? "" : "s"}
           {persistedRows > restoredRows
@@ -6310,7 +6310,7 @@ function ChatPane({ project }: { project: Project }) {
         </p>
       ) : null}
       {staleNote ? (
-        <p role="status" className="px-5 pt-1 font-mono text-[11px] text-warn">
+        <p role="status" className="px-5 pt-1 font-mono text-xs text-warn">
           {staleNote}
         </p>
       ) : null}
@@ -6327,7 +6327,7 @@ function ChatPane({ project }: { project: Project }) {
               Grounded copilot — advice only: it answers from this build's live
               state and never changes the build.
             </p>
-            <p className="mt-2 font-mono text-[11px] text-faint">
+            <p className="mt-2 font-mono text-xs text-faint">
               To act (run · approve · reject), use the console controls or the
               rapidtool CLI. Try: explain current gate · next legal action ·
               summarize packet
@@ -6359,7 +6359,7 @@ function ChatPane({ project }: { project: Project }) {
                 />
                 thinking… {elapsedSec}s
               </span>
-              <span className="mt-1 block font-mono text-[11px] text-faint">
+              <span className="mt-1 block font-mono text-xs text-faint">
                 one-shot reply — flash answers usually land &lt;20s; timeouts
                 surface as RT_E_LLM_TIMEOUT (no stream/stop yet)
               </span>
@@ -6377,7 +6377,7 @@ function ChatPane({ project }: { project: Project }) {
               onClick={() => void send(c.prompt())}
               disabled={busy || noBackend}
               title={noBackend ? "No LLM backend — sending is disabled" : c.label}
-              className="rounded-sm border border-border px-2 py-1 font-mono text-[11px] text-muted hover:text-fg disabled:cursor-default disabled:opacity-40"
+              className="rounded-sm border border-border px-2 py-1 font-mono text-2xs text-muted hover:text-fg disabled:cursor-default disabled:opacity-40"
             >
               {c.label}
             </button>
@@ -6478,7 +6478,7 @@ function DeepenResearchButton({ project, phase }: { project: Project; phase: Pha
         type="button"
         onClick={() => void runDeepen()}
         disabled={busy}
-        className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border px-2 text-[11px] text-fg hover:border-accent/40 disabled:opacity-40"
+        className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border px-2 text-2xs text-fg hover:border-accent/40 disabled:opacity-40"
       >
         <RotateCcw className="h-3 w-3" />
         {busy ? "Running live research…" : "Run live research (P7)"}
@@ -6512,7 +6512,7 @@ function GateVerdictDetail({
     <div
       role="group"
       aria-label="Recorded gate verdict"
-      className="mt-2 space-y-1.5 rounded-md border border-border bg-bg px-3 py-2 font-mono text-[11px] leading-relaxed"
+      className="mt-2 space-y-1.5 rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs leading-relaxed"
     >
       {gate.passed && unmet.length === 0 ? (
         <p className="text-ok">all recorded criteria met at completion</p>
@@ -6615,7 +6615,7 @@ function PhaseRecordView({
             open={!rec.gate.passed}
             className="mt-3 rounded-md border border-border bg-raised px-3 py-2"
           >
-            <summary className="cursor-pointer font-mono text-[11px] leading-relaxed select-none">
+            <summary className="cursor-pointer font-mono text-xs leading-relaxed select-none">
               <Term k="dod">DoD</Term>{" "}
               {rec.gate.passed ? (
                 <span className="text-ok">PASS</span>
@@ -6646,7 +6646,7 @@ function PhaseRecordView({
           <p className="font-mono text-xs text-muted">Gate decisions · {def.code}</p>
           <ul className="mt-3 space-y-2">
             {gateDecisions.map((d) => (
-              <li key={d.id} className="font-mono text-[11px] leading-relaxed">
+              <li key={d.id} className="font-mono text-xs leading-relaxed">
                 <span className={d.decision === "approve" ? "text-ok" : "text-danger"}>
                   {d.decision}
                 </span>
@@ -6660,7 +6660,7 @@ function PhaseRecordView({
               </li>
             ))}
             {(rec.rejectionHistory ?? []).map((r, i) => (
-              <li key={`${r.at}-${i}`} className="font-mono text-[11px] leading-relaxed text-faint">
+              <li key={`${r.at}-${i}`} className="font-mono text-xs leading-relaxed text-faint">
                 rejection · {agoLabel(r.at)}
                 <span className="block pl-3">{clip60(r.note)}</span>
               </li>
@@ -6724,7 +6724,7 @@ function EnforceDodToggle({
           </span>
         </span>
       </label>
-      <p className="mt-2 font-mono text-[11px] leading-relaxed text-faint">
+      <p className="mt-2 font-mono text-xs leading-relaxed text-faint">
         {on
           ? "Enforced — a failing gate parks the run (wild mode: a “Hard DoD block”)."
           : llmConfigured
@@ -6774,14 +6774,14 @@ function ExportSoftwareBlock({ project }: { project: Project }) {
             </li>
             <li>
               From the RapidTool folder, emit the scaffold:
-              <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-bg px-3 py-2 font-mono text-[11px] leading-relaxed text-fg/90">
+              <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs leading-relaxed text-fg/90">
                 {`node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project "${slug}.json" --check`}
               </pre>
             </li>
             <li>
               The scaffold lands in the default output folder{" "}
               <code className="rounded-sm bg-raised px-1 font-mono text-xs">{dir}</code> —{" "}
-              <span className="font-mono text-[11px]">~</span> is your home folder (here:{" "}
+              <span className="font-mono text-xs">~</span> is your home folder (here:{" "}
               <code className="rounded-sm bg-raised px-1 font-mono text-xs">C:\Users\&lt;you&gt;</code>);
               pass <code className="rounded-sm bg-raised px-1 font-mono text-xs">--out &lt;dir&gt;</code> to
               override. Then <code className="rounded-sm bg-raised px-1 font-mono text-xs">npm install &amp;&amp; npm test</code>{" "}
@@ -6805,7 +6805,7 @@ function GateHealthCard({ project }: { project: Project }) {
   return (
     <div className="mt-8">
       <h3 className="text-xs font-medium tracking-wide text-muted uppercase">Approval health</h3>
-      <p className={`mt-2 font-mono text-[11px] leading-relaxed ${tone}`}>
+      <p className={`mt-2 font-mono text-xs leading-relaxed ${tone}`}>
         {label} · {h.n} decisions · {Math.round(h.meanLatencyMs / 1000)}s mean ·{" "}
         {Math.round(h.rejectRate * 100)}% rejects
       </p>
@@ -7007,18 +7007,18 @@ function ShellSurfacesCard({ project }: { project: Project }) {
       <h2 className="mt-8 text-xs font-medium tracking-wide text-muted uppercase">Shell surfaces</h2>
       <ul className="mt-3 space-y-3">
         <li>
-          <p className="text-[11px] font-medium text-fg">
+          <p className="text-xs font-medium text-fg">
             Wild plan <span className="text-faint">· R13-f02</span>
           </p>
           {plan ? (
             <>
-              <p className="mt-0.5 font-mono text-[11px] text-muted">
+              <p className="mt-0.5 font-mono text-xs text-muted">
                 source: {plan.source} · {stepCount} step(s)
                 {typeof plan.plannedAt === "number" ? ` · planned ${agoLabel(plan.plannedAt)}` : ""}
               </p>
               {plan.goal ? <p className="mt-0.5 text-xs text-muted">{clip60(plan.goal)}</p> : null}
               {plan.note ? (
-                <p className="mt-0.5 font-mono text-[11px] text-faint">{clip60(plan.note)}</p>
+                <p className="mt-0.5 font-mono text-xs text-faint">{clip60(plan.note)}</p>
               ) : null}
             </>
           ) : (
@@ -7033,12 +7033,12 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           )}
         </li>
         <li>
-          <p className="text-[11px] font-medium text-fg">
+          <p className="text-xs font-medium text-fg">
             Checkpoint · resume <span className="text-faint">· T-107.7</span>
           </p>
           <p className="mt-0.5 text-xs text-muted">{resumeLine}</p>
           <p
-            className="mt-0.5 font-mono text-[11px] text-faint"
+            className="mt-0.5 font-mono text-xs text-faint"
             title="N2/T-107.7: readCheckpoint / checkpointAdmits live in checkpoint.server.ts (.rapidtool/checkpoint.json) — server-only, so the console has no read seam yet (TODO(N2)); cross-session resume stays a CLI verb until one lands."
           >
             cross-session resume: checkpoint reads are server-side — no console read seam yet
@@ -7046,7 +7046,7 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           </p>
         </li>
         <li>
-          <p className="text-[11px] font-medium text-fg">
+          <p className="text-xs font-medium text-fg">
             Unattended runs <span className="text-faint">· W-47</span>
           </p>
           <p
@@ -7058,7 +7058,7 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           </p>
         </li>
         <li>
-          <p className="text-[11px] font-medium text-fg">
+          <p className="text-xs font-medium text-fg">
             Token streaming <span className="text-faint">· T5.1</span>
           </p>
           <p
@@ -7069,7 +7069,7 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           </p>
         </li>
         <li>
-          <p className="text-[11px] font-medium text-fg">
+          <p className="text-xs font-medium text-fg">
             Cassette record/replay <span className="text-faint">· T5.7</span>
           </p>
           <p
@@ -7080,7 +7080,7 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           </p>
         </li>
         <li>
-          <p className="text-[11px] font-medium text-fg">
+          <p className="text-xs font-medium text-fg">
             Human seat <span className="text-faint">· R8-f09</span>
           </p>
           <p
@@ -7091,7 +7091,7 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           </p>
         </li>
         <li>
-          <p className="text-[11px] font-medium text-fg">
+          <p className="text-xs font-medium text-fg">
             Isolation boundary <span className="text-faint">· R13-f04</span>
           </p>
           <p

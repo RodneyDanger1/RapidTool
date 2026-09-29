@@ -409,8 +409,16 @@ export function convergeRealRun(base: Project, artifact: Artifact, log: JsonLog)
   if (!base || typeof base !== "object") return base;
   const baseArtifacts = Array.isArray(base.artifacts) ? base.artifacts : [];
   const baseLogs = Array.isArray(base.logs) ? base.logs : [];
+  // F6 (314 residue — the LAST M3 throw survivor, hostile probe case
+  // `store.converge-junk-all` = convergeRealRun({},{},{})): `phases` gets the
+  // same [] floor. recordGate reads `project.phases.find` FIRST, so a junk base
+  // with no phases key threw past the artifacts/logs bounds above; with phases
+  // bounded, recordGate's own not-complete guard (`!rec → return project`)
+  // no-ops honestly instead of a TypeError.
+  const basePhases = Array.isArray(base.phases) ? base.phases : [];
   const updated: Project = {
     ...base,
+    phases: basePhases,
     artifacts: [...baseArtifacts, artifact],
     logs: [...baseLogs, log].slice(-200),
   };

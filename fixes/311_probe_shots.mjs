@@ -1,4 +1,9 @@
-// 311 UI-DESIGN scratch probe v5 — light-theme runtime pane (bg-black well check). Delete after use.
+// fixes/311_probe_shots.mjs — MOVED (E3 hygiene, W312 close): the 311 UI-DESIGN audit's shot
+// generator v5 (light-theme runtime pane, bg-black well check), rescued from the repo root
+// (committed there in 54c6649; scratch probes leave root — hygiene precedent
+// fixes/290_k1_timeline_probe.mjs). Regenerates fixes/311_ui_shots/17-runtime-light.png +
+// 18-runtime-pane-light.png. Run from the repo root (needs the live dev server on :8080):
+//   node fixes/311_probe_shots.mjs
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 

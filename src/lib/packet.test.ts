@@ -984,22 +984,28 @@ test("W16 L4 OV-14: the packet carries the p6-arch reqTrace verdict for tree pro
 
 // ---------------------------------------------------------------------------
 // F2-04 (W41 · X1 tail · fixes/303 lane L2) — the packet budget boundary: an
-// always-present ADDITIVE envelope key `budget` ({spent, cap, stop_reason}) —
-// null unless the session budget has spend, a cap, or a crossed cap to report.
-// `stop_reason` fires ONLY via isBudgetExhausted (strict `>` — landing exactly
-// on the cap is still ok); unmetered (RAPIDTOOL_TOKEN_CAP unset) ⇒ cap null.
+// always-present ADDITIVE envelope key `budget` ({spent, cap, stop_reason}).
+// CF-SE2-3a (312 · E2): a PRESENT budget is stated EXPLICITLY — null ONLY when
+// no budget object exists at all; unmetered (RAPIDTOOL_TOKEN_CAP unset, the
+// default posture) reports `cap: null` instead of collapsing into the absent
+// case. `stop_reason` fires ONLY via isBudgetExhausted (strict `>` — landing
+// exactly on the cap is still ok).
 // ---------------------------------------------------------------------------
 
-test("F2-04: an empty unmetered budget ⇒ envelope budget: null (key always present)", () => {
+test("F2-04: an empty unmetered budget ⇒ explicit {spent:0, cap:null, stop_reason:null} (key always present)", () => {
   const p = makeProject();
   const env = parseSystemJson(compileAgentPacket(p, { budget: createTokenBudget(null) }));
-  assert.ok("budget" in env, "the key is present even when null (always-present, additive)");
-  assert.equal(env.budget, null);
+  assert.ok("budget" in env, "the key is present even for the unmetered default (always-present, additive)");
+  assert.deepEqual(
+    env.budget,
+    { spent: 0, cap: null, stop_reason: null },
+    "CF-SE2-3a: unmetered-by-default is STATED (cap:null), never collapsed into the null that means 'no budget at all'",
+  );
   assert.ok("spend" in env, "the OV-41 spend key is untouched (precedent intact)");
   // Default path (no opts) reads the process singleton — equally empty under
-  // the default keyless test env, so the same null holds.
+  // the default keyless test env, so the same explicit block holds.
   if (!process.env.RAPIDTOOL_TOKEN_CAP) {
-    assert.equal(parseSystemJson(compileAgentPacket(p)).budget, null);
+    assert.deepEqual(parseSystemJson(compileAgentPacket(p)).budget, { spent: 0, cap: null, stop_reason: null });
   }
 });
 
@@ -1025,14 +1031,18 @@ test("F2-04: spend crossing the cap ⇒ budget_exhausted; landing ON the cap sta
   );
 });
 
-test("F2-04: packetBudgetBoundary tolerates absent/hostile budgets — never throws", () => {
-  assert.equal(packetBudgetBoundary(null), null);
-  assert.equal(packetBudgetBoundary(undefined), null);
-  assert.equal(packetBudgetBoundary({} as never), null, "no ledger ⇒ reads as empty, not a throw");
-  assert.equal(
+test("F2-04: packetBudgetBoundary tolerates absent/hostile budgets — never throws; only ABSENT reads null", () => {
+  assert.equal(packetBudgetBoundary(null), null, "no budget object at all ⇒ null (the one absent case)");
+  assert.equal(packetBudgetBoundary(undefined), null, "undefined ⇒ null");
+  assert.deepEqual(
+    packetBudgetBoundary({} as never),
+    { spent: 0, cap: null, stop_reason: null },
+    "a present (even malformed) budget object reads as empty-but-stated, not a throw and not absent",
+  );
+  assert.deepEqual(
     packetBudgetBoundary({ ledger: {} as never, cap: Number.NaN } as never),
-    null,
-    "NaN cap ⇒ unmetered + unspent ⇒ null",
+    { spent: 0, cap: null, stop_reason: null },
+    "NaN cap ⇒ unmetered, still explicit",
   );
   const b = createTokenBudget(null, recordSpend(emptyLedger(), { promptTokens: 5, completionTokens: 0 }));
   assert.deepEqual(packetBudgetBoundary(b), { spent: 5, cap: null, stop_reason: null });

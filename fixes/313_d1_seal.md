@@ -30,4 +30,43 @@
 - for C2: CLI `opts` construction — D1 adds `--agent-seal` flag handling near your `wild` opts block; additive only.
 
 ## Seam table (site → before → after → pin)
-(filled at the end)
+(filled at the end — E1, below)
+
+---
+
+# E1 — THE SEAL FINISHER (D1's tail) · appended by lane E1
+
+**Lane:** E1 (D1's tail finisher). **HEAD at start:** 54c6649 (tree clean). **Baseline:** typecheck 0 / lint 0 / suite 2669/2668/0 (scripts 348 + src 2321 legs — D-wave boundary).
+**Scope:** (1) `--agent-seal` CLI wiring + threading → `wildStep` opts; (2) the keyless-safest seal pins (provenance: classifier/`agent-seal` seat, never `human`; `gate.forceHuman` refusal without/under the seal; bounded retry N=2 on a classifier-source reject); (3) D1's S1–S8 walked with evidence (below); (4) S6 step-arithmetic pin (13 steps / store cap 20 / margin 7 — pin only).
+**Files owned (D1's claims inherited):** `scripts/rapidtool-cli.mjs`, `src/lib/headless.ts` (wild opts threading), `src/lib/engine.ts` (C1/D1 regions: `wildLiveEdge`/`wildExecEdgeFor` new + `wildDodRepairOnce` completion + `wildStep` execute-edge), `src/lib/wild-seal.test.ts` (NEW), `scripts/README-cli.md`, `scripts/cli-exit-taxonomy.test.mjs` (Leg 10 additive), `fixes/313_d1_seal.md`, `probe_c1_arith.mjs` (delete at end).
+
+## E1 plan of record (locked before implementation)
+- **CLI semantics resolution (recorded because D1's claim line reads `wild`/`approve`/`gate --agent-seal wiring`):** the seal is a WILD-MODE policy (it lives in `WildStepOptions.agentSeal` and can only take effect on the `wildStep` carrier) — so:
+  - `wild --agent-seal` = THE wiring: threads `agentSeal: true` into headless (`wildStartRun`/`wildStartHeadless`) → `wildStep` opts. Valid on `--start` and bare step/`--resume`.
+  - `approve --agent-seal` / `gate --agent-seal` = **coded pointer refusals**: both verbs drive drivers that can never carry the seal (`approve` = the human seat door; `gate` = `runUntilGate` autopilot, which never self-approves stock HITL gates by design R3/B-03). A silent ignore of a governance flag would let a caller believe the seal applied when it did not — the refusal names the correct door (`wild --resume --agent-seal`). `approve`'s non-TTY hint (C1's noted item) also names the seal.
+  - README-cli.md §27 + USAGE + top comment updated; `wild` remains the only verb that can carry the flag into effect.
+- **Engine completion (D1 docstrings honored — declare-or-strike):** `opts.liveEdge` / `opts.dodRepair` were declared in `WildStepOptions` but not consumed (false claims): E1 wires `wildLiveEdge` (P7 live layer — the same `headless.runPhase(…, {live:true})` the sequential driver runs; keyless floor) + consumes `dodRepair` in `wildDodRepairOnce` + routes the execute-edge through one `wildExecEdgeFor` picker (P6 bytes identical — pinned by wild-step.test.ts).
+- **Pins (all keyless, injected reviewer):** `src/lib/wild-seal.test.ts` — provenance rows (never `human`), forceHuman refusal both modes, N=2 bounded retry + non-retry classes, repair seam, P7 live seam, full-run step arithmetic.
+- **Evidence log:** each block below lands with its command + observed output.
+
+## Seam table (site → before → after → pin) — filled
+| Site | Before | After | Pin |
+|---|---|---|---|
+| `policy.ts` `PolicySeat` | `autopilot: harness\|autopilot` | `+ agent-seal` (D-wave) | `policy.test.ts` (D) + E1 provenance pins |
+| `dod.ts` `classifyRowSeat` | harness/autopilot tags | `+ [seat agent-seal]` arm (D-wave) | E1 full-run: `runGate(…, gate).pass` post-seal |
+| `engine.ts` `wildApproveGate` | plain `decidedBy:"autopilot"` row | sealed row: `[seat agent-seal]` + `decidedVia` (D-wave) | `wild-seal.test.ts` §S1 |
+| `engine.ts` `resolveWildReviewBounded` | n/a | N=2 classifier-reject retry + `wild.review_retry` rows (D-wave) | `wild-seal.test.ts` §S3 |
+| `engine.ts` `wildExecEdgeFor` + `wildLiveEdge` | P6 inline pick; P7 floor-only | one picker (P6 bytes identical) + P7 live seam wired | `wild-step.test.ts` P6 pins (unchanged) + `wild-seal.test.ts` §S5 |
+| `engine.ts` `wildDodRepairOnce` | p6Edge-only consumed (D-wave) | `dodRepair` seam first, then `wildExecEdgeFor(phase)` (production non-floor edge) | `wild-seal.test.ts` §S4 |
+| `headless.ts` wild loops | no seal knob | `opts.agentSeal` threaded to `wildStep` | E1 CLI Leg 10 + `headless.test.ts` |
+| `rapidtool-cli.mjs` `wild` | no flag | `--agent-seal` → `opts.agentSeal:true`; usage | E1 CLI Leg 10 (behavioral spawn) |
+| `rapidtool-cli.mjs` `approve`/`gate` | flag silently ignored | coded pointer refusal + hint; usage | E1 CLI Leg 10 + README-cli docs |
+
+## E1 evidence (filled as it lands)
+- (E1a) probe_c1_arith.mjs re-run @54c6649 (pre-edit): **13 steps, 1/phase** — transcript tail: step 13 `in=P12(ready) out=completed`, `gate.verdict,wild.review,wild.advance` … `wild.complete`; FINAL `complete`. [S6 evidence]
+- (E1b) — engine completion edits + diff summary.
+- (E1c) — CLI wiring + usage diffs.
+- (E1d) — wild-seal.test.ts pins green (foreground run).
+- (E1e) — CLI legs (cli-exit-taxonomy incl. Leg 10, README-cli, scripts suite) foreground.
+- (E1f) — headless/wild-step regression legs foreground.
+- (E1g) — S1–S8 walk verdicts + gates (typecheck/lint) + probe deletion.

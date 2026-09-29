@@ -1,0 +1,51 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "phase": "after",
+  "out": "fixes/313_ui_shots",
+  "shots": [
+    "after-01-run-top.png",
+    "after-02-rail-detail.png",
+    "after-03-runtime-timeline-dark.png",
+    "after-04-runtime-timeline-light.png",
+    "after-05-mobile-closed.png",
+    "after-06-mobile-drawer.png"
+  ],
+  "errors": [],
+  "probes": {
+    "projectId": "95a2bdaa-31b4-4c62-b2d0-77e53edee700",
+    "chromeBadgePx": "11px",
+    "eyebrowPx": "12px",
+    "railMetaPx": "12px",
+    "sub12pxLeafCount": 201,
+    "sectionLabels": [
+      "What's happening and what to do next",
+      "Pipeline telemetry and phase detail",
+      "Typed timeline",
+      "Color tokens",
+      "Typography scale",
+      "Font families",
+      "Spacing scale",
+      "Border radius tokens",
+      "Shadow tokens",
+      "Shell capability state (read-only)"
+    ],
+    "nowline": {
+      "role": "log",
+      "ariaLive": "polite",
+      "ariaAtomic": "true"
+    },
+    "a11y": {
+      "ariaLiveCount": 2,
+      "roleLogCount": 2
+    },
+    "timelineWells": {
+      "body": "oklab(0.946733 -0.00721863 0.00197345 / 0.4)",
+      "row": "oklab(0.946733 -0.00721863 0.00197345 / 0.4)"
+    },
+    "mobileRailStrip": {
+      "docScrollW": 390,
+      "innerWidth": 390,
+      "navW": 390
+    }
+  }
+}

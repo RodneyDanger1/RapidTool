@@ -41,10 +41,13 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   /* Type ramp (311 §6 #5): the micro tier is NAMED, not ad-hoc. `--text-2xs`
-     is the floor for legibility-critical chrome (uppercase eyebrow labels and
-     badge chips — the only call sites below 12px); every reading-meta call
-     site moved up to `text-xs` (12px) in the same sweep. Tailwind's default
-     `--text-xs` (12px) stay the next step up; there is no tier below 2xs. */
+     is the floor for legibility-critical chrome (uppercase eyebrow labels,
+     badge chips, kbd, compact controls — the only call sites below 12px in
+     console.tsx + pipeline-rail.tsx after the W312 C4/D4/E3 sweep); every
+     reading-meta call site sits on `text-xs` (12px). Tailwind's default
+     `--text-xs` (12px) stays the next step up; there is no tier below 2xs.
+     Remainder (files outside the E3 lane claim): runtime-timeline-pane.tsx +
+     cmd-palette.tsx — recorded in fixes/312_c4_ui.md §E3. */
   --text-2xs: 11px;
 }
 

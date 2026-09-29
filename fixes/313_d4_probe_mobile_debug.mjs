@@ -1,4 +1,8 @@
-// D4 scratch: debug the mobile-viewport run page (delete after use).
+// fixes/313_d4_probe_mobile_debug.mjs — MOVED (E3 hygiene, W312 close): D4's mobile-viewport run
+// page debug probe (console/pageerror capture + home/run readiness), rescued from the repo root
+// (committed there in 54c6649; scratch probes leave root — precedent fixes/290_k1_timeline_probe.mjs).
+// Writes ~/d4_probe/debug-mobile.png. Run from the repo root (needs the live dev server on :8080):
+//   node fixes/313_d4_probe_mobile_debug.mjs
 import { chromium } from "playwright";
 import { homedir } from "node:os";
 

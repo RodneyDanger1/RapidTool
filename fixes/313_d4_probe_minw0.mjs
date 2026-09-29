@@ -1,4 +1,8 @@
-// D4 scratch: confirm the min-w-0 hypothesis for the mobile grid blowout (delete after use).
+// fixes/313_d4_probe_minw0.mjs — MOVED (E3 hygiene, W312 close): D4's min-w-0 grid-blowout
+// hypothesis probe, rescued from the repo root (committed there in 54c6649; scratch probes leave
+// root — precedent fixes/290_k1_timeline_probe.mjs). Kept as durable evidence for the D4 mobile
+// overflow fix (2955px → 390px real bug). Run from the repo root (needs the live dev server
+// on :8080):  node fixes/313_d4_probe_minw0.mjs
 import { chromium } from "playwright";
 
 const BASE = "http://127.0.0.1:8080";
@@ -23,7 +27,7 @@ const before = await page.evaluate(() => ({
 
 // hypothesis: nav's automatic minimum size keeps the grid track at the strip's
 // min-content width; min-width:0 should let the overflow-x-auto scroller work.
-const after = await page.evaluate(() => {
+await page.evaluate(() => {
   const nav = document.querySelector('nav[aria-label="Phases"]');
   nav.style.minWidth = "0";
   return null;

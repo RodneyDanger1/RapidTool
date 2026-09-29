@@ -145,6 +145,13 @@ function respond(result, exitCode) {
       if (code) out.code = code; // else omit (errors.ts absent — resilience)
     }
   }
+  // fixes/312_c6_ux (U3 · K5/K6): a coded refusal self-explains — attach the
+  // registry's own agentAction as `remedy` (a call site's own remedy passes
+  // through untouched). Omitted exactly when `code` is (doc absent / unknown).
+  if (out.ok === false && typeof out.remedy === "undefined") {
+    const remedy = remedyFor(out.code);
+    if (remedy) out.remedy = remedy;
+  }
   out.exit_code = exitCode;
   // G/E: stamp every CLI exit into the headless NDJSON event log (best-effort
   // — the appender itself must never break the exit path). NOT awaited
@@ -200,6 +207,11 @@ function respond(result, exitCode) {
 // ---------------------------------------------------------------------------
 let classify = () => null; // prose classifier — omit `code` when module absent
 let classifyErr = () => null; // object classifier (same module)
+// fixes/312_c6_ux (U3 · K5/K6): ERROR_CODE_DOC once errors.ts loads — the
+// module-level handle respond() (SYNC by construction, fixes/217e G1) reads
+// its coded remedies from. Null until ensureErrorCodes() resolves; a remedy
+// simply omits then, mirroring `code`'s best-effort contract.
+let errorDoc = null;
 let errorCodesLoaded = false;
 async function ensureErrorCodes() {
   if (errorCodesLoaded) return;
@@ -218,6 +230,7 @@ async function ensureErrorCodes() {
       // (module absent / older errors.ts) keeps the legacy shape-only rule.
       const doc =
         mod.ERROR_CODE_DOC && typeof mod.ERROR_CODE_DOC === "object" ? mod.ERROR_CODE_DOC : null;
+      errorDoc = doc; // U3 (fixes/312_c6_ux): respond() ships coded remedies from this registry
       const safe = (code) =>
         typeof code === "string" &&
         /^RT_E_[A-Z0-9_]+$/.test(code) &&
@@ -250,6 +263,19 @@ async function ensureErrorCodes() {
 function errCode(err, fallback) {
   const c = classifyErr(err, fallback);
   return c ? { code: c } : {};
+}
+
+// U3 (fixes/312_c6_ux · 311_sd_product K5/K6): the coded remedy seam — the
+// registry's OWN `agentAction` line, shipped as `remedy` on coded refusals so
+// an agent's next step is IN the envelope instead of behind a docs hop
+// (`diagnose` already surfaces these; the CLI never shipped them). Same
+// best-effort contract as `code`: doc absent / unknown code / empty text →
+// the key is omitted and the envelope stays byte-identical to before.
+function remedyFor(code) {
+  if (typeof code !== "string" || code.length === 0 || errorDoc === null) return null;
+  const entry = errorDoc[code];
+  const text = entry && typeof entry.agentAction === "string" ? entry.agentAction.trim() : "";
+  return text.length > 0 ? text : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1267,6 +1293,22 @@ async function main() {
             const cc = await checkDriver();
             const outcome = await cc.treeRun(res.dir);
             payload.treeRun = outcome;
+            // W43 · C6/E4 (fixes/312_c6_ux · 311_sd_product K3): self-qualification —
+            // a green --run must never read as "the product works" while the census
+            // shows stubs/reexports. The envelope carries the census in the doctor's
+            // own vocabulary (`stubs:N reexports:N real:N`) plus the verdict's loud
+            // marking, so the agent sees the same words `tree-run` would print and
+            // the emitted README's own claims stay checkable from the envelope.
+            if (outcome.substance) {
+              payload.substance = {
+                stubs: outcome.substance.stubs,
+                reexports: outcome.substance.reexports,
+                real: outcome.substance.real,
+                verdict: outcome.substance.verdict,
+                greenWhileStubbed: outcome.substance.greenWhileStubbed,
+              };
+              if (outcome.substance.note) payload.note = outcome.substance.note;
+            }
             if (!outcome.ok) {
               payload.ok = false;
               const bits = [];

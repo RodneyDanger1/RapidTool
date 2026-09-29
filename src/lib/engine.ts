@@ -50,6 +50,9 @@ import type { WildClassifierResult, WildReviewContext } from "./wild-mode.server
 // its deterministic path (honesty contract — never fabricate live output).
 import { complete, llmStatus } from "./llm.ts";
 import { research } from "./research.ts";
+// CF-SE2-3b (312 · E2): process-ledger completeness for the research narrative
+// (recordSessionSpend; client-safe pure module — no node:fs).
+import { recordSessionSpend } from "./token-ledger.ts";
 import { runCode } from "./exec.ts";
 import type { ExecResult } from "./exec.ts";
 import { extractConstraints, phaseNarrative } from "./llm-tasks.ts";
@@ -2984,6 +2987,10 @@ async function fetchResearch(
       const comp = await complete(
         `Write a concise one-paragraph phase narrative for ${project.name} (${phaseDef(phase).code} ${phaseDef(phase).title}). ${ground}\n\nBrief: ${project.brief.slice(0, 400)}`,
       );
+      // CF-SE2-3b (312 · E2): the narrative call is metered into the process
+      // session ledger — I2: EVERY response that reports usage, success or
+      // refusal (a refusal that burned tokens still counts against the cap).
+      if (comp && comp.usage) recordSessionSpend(comp.usage);
       if (comp && comp.ok === true && typeof comp.text === "string" && comp.text.trim()) {
         narrative = comp.text.trim();
       }

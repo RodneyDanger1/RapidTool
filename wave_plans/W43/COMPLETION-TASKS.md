@@ -1,50 +1,137 @@
 # wave_plans/W43/COMPLETION-TASKS.md — THE FACTORIAL COMPLETION TASK LIST
 
-**Created by:** the parent (commander lane) · **Status:** SKELETON — verdict columns fill when the 4 auditors land (`fixes/311_da1_claims.md` · `311_da2_data.md` · `311_se1_pipeline.md` · `311_se2_surfaces.md`).
-**Law:** every task = real code, a file/box, a done-when command, and a dependency. No task exists without a byte-traceable reason.
+**Created by:** the parent (commander lane) · **COMPILED by F3 (merge executor), 2026-09-29.**
+**Status:** COMPLETE — every PENDING-AUDIT marker replaced with its verdict + task. Verdicts compiled from `fixes/311_{da1_claims,da2_data,se1_pipeline,se2_surfaces,ma_competitive,sd_product,ui_design,wd_guard}.md` · `fixes/312_{c1..c6}*.md` · `fixes/313_d1_seal.md`; statuses byte-checked against today's tree at HEAD `54c6649` + the live E/F lane edits (uncommitted).
+**Law:** every task = real code/action, a file/box, a done-when command, and a source finding. No task exists without a byte-traceable reason.
+**Status vocabulary:** **LANDED** = in committed bytes ≤ `54c6649` (evidence cited) · **LANDING** = in a live lane's tree bytes / log, not yet committed · **OWED** = not landed anywhere; assigned.
 
 ---
 
-## THE SEVEN FACTORS (every dimension completion must cover)
+## ⛔ TOP-BLOCK · THE CRITICAL PATH TO THE KEYED RUN
+
+The keyed run (T1.2) happens ONLY when ALL FIVE are true, in this order:
+
+1. **THE SEAL IS COMPLETE (E1).** `--agent-seal` wired in the CLI + engine completion (`wildLiveEdge`/`wildExecEdgeFor`/`dodRepair` consumed) + `wild-seal.test.ts` pins green + `probe_c1_arith.mjs` deleted + E1 evidence (E1b–E1g) filled. *Why: the unattended completion path is `wild --agent-seal`; without the flag on disk there is no driveable command (K1; `311_sd_product.md` §1, `313_d1_seal.md` E1 plan).* **Today: engine core LANDED (D-wave), CLI+pins LANDING → not yet done.**
+2. **THE WAVES LAND + A GREEN BOUNDARY EXISTS.** E2/E3/E4 + F-lane landings committed; `bash scripts/gate.sh` green (typecheck 0 / lint 0 / both suite legs / build 0) at the boundary. *Why: the tree is mid-edit today (uncommitted E/F bytes); a keyed run must start from a boundary-green tree (repo rule; `312_c2_state.md` leg notes).*
+3. **THE KEYLESS PROBES HAVE ANSWERED.** (a) P7 full-run pin — does a seeded `enforceDod:true` project park at P7? (T1.4; `311_se1_pipeline.md` §5 — the cheapest falsification test; E1 S5 wires the live edge). (b) Step arithmetic — 13 steps / cap 20 / margin 7, probe-verified (`312_c1_ignition.md` §S6) — pin owed. (c) No-mint path — a no-spec/UI-shell tree never mints → `p6-verified` red → P6 hard-stop must be honest-coded, not silent (T6.2c; SE1 §3). *Why: these decide whether a keyed run reaches P12 or parks — better known keyless, before spending on the run.*
+4. **THE WALLET IS FUNDED (T1.5).** DeepSeek account topped up; `--preflight` no longer reports `balance-exhausted`. *Why: the last keyed attempt (2026-09-25T00:03:43Z) returned 402, 3/9 with every synthesis call refused (`311_da2_data.md` §NEWEST-RUN; `311_ma_competitive.md` §3).* For the run itself: arm `RAPIDTOOL_TOKEN_CAP` — unmetered-by-default stays legal (T5.1), but an uncapped keyed run has no coded stop.
+5. **THE USER'S WORD (merge rule).** The owner reviews this completed list and approves the run + the exact command (T1.1). *The run then proceeds: preflight → T1.2 the run, byte-logged → T1.3 post-mortem.*
+
+---
+
+## THE TEN FACTORS (every dimension completion must cover)
 
 ### F1 · PROVE — the keyed end-to-end demonstration
 *The single unproven link: key → synthesis → app → tree-green → acceptance → mint.*
-- [ ] T1.1 — Pre-flight: the funded key present + balance-checked; the exact command chosen (`run-eval --keyed` vs a wild-run vs both) · done-when: the command + env recorded.
-- [ ] T1.2 — THE RUN, logged byte-for-byte (envelope per phase, tree-run verdict, acceptance rows, mint state) · done-when: a run transcript exists with a real score.
-- [ ] T1.3 — The post-mortem: every zero/refusal read at its line — WAS it a code gap or model quality? · done-when: fixes/312 keyed-postmortem.md.
-(PENDING-AUDIT: DA1 #8, DA2's run-table + SE1's chain verdicts.)
+**VERDICT: BLOCKED** — no keyed run since 2026-09-25T00:03:43Z; that run = **3/9, `preflightClass:"balance-exhausted"`, every synthesis call refused** ("no LLM-produced software exists" — `311_da2_data.md` §NEWEST-RUN / results.json M1–M4). History: 40 rows = 10 keyed / 30 keyless; keyed trajectory 5/9 → 6/9 → 3/9-refused; the only two 9/9s are discredited artifacts (`fixes/154_f1.md:62-79`). Additionally the completion path itself was gated: reframe briefs mint `forceHuman` (P0 park) and stock gates refused machine approval (`311_da1_claims.md` #7; `311_se1_pipeline.md` §1) — addressed by the seal (T4.4, LANDING). Run only after the TOP-BLOCK conditions.
+
+- **T1.1** · Pre-flight: funded key present + balance-checked; the exact command chosen (`run-eval --keyed` vs `wild --start --agent-seal` vs both) + env recorded · box: `scripts/run-eval.mjs --preflight` + the run log · done-when: preflight output recorded with `preflightClass ≠ "balance-exhausted"` and the command+env written into the run log header · **OWED** — sources: skeleton T1.1; `311_da2_data.md` §caveats; MA §5 move 1 (`_keyed-run.log:2` command precedent).
+- **T1.2** · THE RUN, logged byte-for-byte (envelope per phase, tree-run verdict, acceptance rows, mint state) · box: `run-eval.mjs --keyed` (or `wild --agent-seal`) → `research/eval-out/_keyed-run.log` · done-when: a run transcript exists with a real score and a real mint-state row · **OWED** (blocked on TOP-BLOCK 1–5) — sources: skeleton T1.2; `311_da1_claims.md` #8.
+- **T1.3** · The post-mortem: every zero/refusal read at its line — code gap or model quality? · box: a `keyed-postmortem.md` log · done-when: every zero in the T1.2 transcript has a verdict with file:line · **OWED** — sources: skeleton T1.3; `311_se1_pipeline.md` §3 (early-return classes to check).
+- **T1.4** · P7 probe (keyless-safe): drive a seeded `enforceDod:true` project through an injected-reviewer `wildStep`; assert whether it pauses at P7; the wild path must carry the live layer · box: `src/lib/wild-seal.test.ts` (E1) + engine `wildLiveEdge` · done-when: `node --experimental-strip-types --test src/lib/wild-seal.test.ts` green incl. the P7 full-run arm · **LANDING** (E1 S5; engine completion bytes pending — `wildLiveEdge` docstring only at today's HEAD+tree) — sources: `311_se1_pipeline.md` §5 probe-priority + §3; `313_d1_seal.md` S5/E1.
+- **T1.5** · Wallet top-up + balance check (USER action) · box: DeepSeek account; `--preflight` · done-when: `node scripts/run-eval.mjs --preflight` no longer reports `balance-exhausted` · **OWED (user)** — sources: `311_da2_data.md` (402 balance-exhausted); MA §3.
+- **T1.6** · Run framing recorded: `acceptance.pass` is **structurally unreachable** (first-run M7 floor + keyless M1/M3/M4 floors; record-don't-fix pinned `wave_plans/W42/SPEC.md:83`) → the run's target = **mean ≥ 7/9 + mint evidence**, per `keyedRunDecision()` ("retrace-first ≤4/9") · box: this file + `research/eval-out` · done-when: recorded — **LANDED (decision)** — sources: `311_da2_data.md` §meanAtLeast verdict; MA §5 move 1.
 
 ### F2 · COMPLETE THE LOOP — iterate-until-satisfaction driver
-*Does not exist today. Buildable at eval/scorecard ↔ wild-step (SE2's design lands here).*
-- [ ] T2.1 — design frozen (SE2's concrete design → cards)
-- [ ] T2.2 — the driver: score < threshold → bounded critique+regenerate (with the budget caps respected)
-- [ ] T2.3 — pins + a keyless dry of the driver's decision logic
-(PENDING-AUDIT: SE2 #4a + DA1 #9.)
+*Does not exist today (no score<threshold regen path; nearest = bounded tree-run repair `headless.ts:2576-2587`, budget 3 — keyed on tree-run failure, not score). Buildable at the phase-edge.*
+**VERDICT: CONDITIONAL** — design **PASS** (SE2 §4a: driver = `dod.runGate` predicate + existing cycle machinery + `deps.treeFailure` as residual-work carrier; 1 new module + 3 patches, effort M); implementation in flight (F1 lane).
+
+- **T2.1** · Design frozen (SE2 §4a → cards) · box: `311_se2_surfaces.md` §4a → this list · done-when: recorded — **LANDED (design)** — sources: `311_se2_surfaces.md` §4a.
+- **T2.2** · The driver: `iteratePhaseToSatisfaction(project, phase, {maxCycles=3..5})` — run phase → `runGate` → pass⇒return / fail⇒rebuild `treeFailure` from `unmet`+artifact tail → re-run keyed → stamp `iterate.cycle` + terminal `iterate.stopped` (coded `RT_E_GATE_PENDING` / `RT_E_BUDGET_EXHAUSTED`) · box: NEW `src/lib/iterate.ts` · done-when: `node --experimental-strip-types --test src/lib/iterate.test.ts` green (keyless dry of pass/fail/stopped) · **LANDING** (F1 lane `fixes/314_f1_iterate.md` — file not yet on disk at merge write) — source: `311_se2_surfaces.md` §4a; `311_da1_claims.md` #9.
+- **T2.3** · Pins + keyless dry of the driver's decision logic (budget caps respected; no new provider surface; store mirror + 1 CLI verb or fold into `repair`) · box: `iterate.test.ts` + store/CLI surface · done-when: pins green incl. both coded stops · **LANDING** (F1 lane) — sources: `311_se2_surfaces.md` §4a; `312_c6_ux.md` E4 note.
 
 ### F3 · SELF — RapidTool improving its own repo
-*Not an architecture today (DA1 #10). Outside-the-box: the honest minimum = the pipeline as a bounded delegate + guard rails; scope TBD from SE2 #4b.*
-- [ ] T3.1 — scope decision: what self-edits are allowed, what's guard-railed (the AGENTS.md consent class)
+*Not an architecture today (DA1 #10: writes restricted to emitted dirs — `REPAIR_TREE_ALLOWED_ROOTS`, `emit` → `<home>/RapidTool Software/<slug>/`; exhaustive write-path grep not done). SE2 §4b gives the honest minimum.*
+**VERDICT: CONDITIONAL** — design **PASS** (SE2 §4b: the pipeline is already a delegate; 7 guards named); build in flight (F2 lane).
+
+- **T3.1** · Scope decision: what self-edits are allowed, what is guard-railed (the AGENTS.md consent class) · box: SE2 §4b's 7-guard set → scope record · done-when: recorded (allowed/forbidden/consent list) — **LANDED (design)** — sources: `311_se2_surfaces.md` §4b; `311_da1_claims.md` #10.
+- **T3.2** · Implementation (guardrails-first): NEW `src/lib/selfmod.ts` + `selfmod.server.ts` — protected-path manifest (6 classes), worktree/branch validator (never main), `gate.sh` self-DoD before/after (red ⇒ no commit), human-seat refusal, mandatory cap+enforceDod, diff caps, rollback, honest-limits · box: NEW modules + (mount) CLI · done-when: `node --experimental-strip-types --test src/lib/selfmod.test.ts src/lib/selfmod.server.test.ts` green (real temp-repo guards; pins per `fixes/314_f2_selfimprove.md` §guardrails) — **CLI mount OWED** behind E1's CLI ownership (F2's mount spec blocked this wave) · **LANDING** (F2 lane `fixes/314_f2_selfimprove.md` — landed mid-merge) — sources: `311_se2_surfaces.md` §4b; `311_da1_claims.md` #10.
+- **T3.3** · RS-03: `wild.paused_policy` unregistered — register + the F4 overlay consult in `wildApproveGate` (`engine.ts:3668`) · box: `engine.ts`/`policy.ts` · done-when: `grep -n "wild.paused_policy" src/lib/engine.ts src/lib/policy.ts` shows registration + consult; pin green · **OWED** — source: `311_se2_surfaces.md` §4b ①.
+- **T3.4** · Exhaustive write-path grep (DA1's unfinished #10 check): disposition every `writeFile`/`writeFileSync`/edit seam into (harness-safe | emitted-dir | self-mod candidate) · box: `src/lib/*.ts` + CLI · done-when: the grep's rows each carry a disposition; no harness-repo write path outside the allow-list · **OWED** — source: `311_da1_claims.md` #10 gap.
 
 ### F4 · SURFACES — UI-keyed parity + unattended
-*Whether the console can drive a keyed build, and the zero-touch path's remaining human touchpoints (SE2 #1/#2).*
-- [ ] T4.1 — the capability-diff fixes (whatever the audit names)
-- [ ] T4.2 — unattended zero-touch: close every human-touchpoint SE2 finds
+**VERDICT: CONDITIONAL** (UI-keyed) + **BLOCKED-by-design** (zero-touch unattended; the seal path is the answer — LANDING).
+- UI-keyed drive: per-phase keyed synthesis/research/P2 through server fns works (`llm.ts:83/:106/:141`; `store.ts:1440/:1483`); **browser wild loop was BLOCKED — it STALLED (never-settling mock-proxy await; latch held until reload)** — now fixed by host-gate refusal + bounded settle (LANDED C-wave) ⇒ honest coded degradation, not hang; console still lacks keyed P6→mint / wild / emit / checkpoint (CLI-only) — `311_se2_surfaces.md` §1 + capability diff.
+- Unattended zero-touch: fresh brief parks at P4 exit 2 (`canAutopilot` refuses `STOCK_HITL=[4,5,8,9]` by design; `311_se2_surfaces.md` §2 — 10 human touchpoints listed).
+
+- **T4.1** · Capability-diff fix CF-SE2-1: browser wild-arm never-settling mock → host-gate refusal + bounded settle + latch release · box: `src/lib/settle.ts` + `engine.ts` (`isBareNodeHost`/`isTrustedCallable`/`settleWithin`) · done-when: `node --experimental-strip-types --test src/lib/deny-path.test.ts` 2/2 green · **LANDED** (`de7deae`; pins re-run by D5 §1; verified on today's disk) — sources: `311_se2_surfaces.md` CF-SE2-1; `312_c3_lifecycle.md` §1; `312_c5_trust.md` §1.
+- **T4.2** · Capability-diff fix CF-SE2-2: `finalsprint:576` "console P6 Execute already reaches the E1b edge" — FALSE on the browser host; correction filed above the end marker · box: `finalsprint.md:594-601` · done-when: correction present (grep) · **LANDED** (C5 §4) — sources: `311_se2_surfaces.md` CF-SE2-2; `312_c5_trust.md` §4.
+- **T4.3** · Console parity gaps (keyed P6→mint, wild loop, emit/tree-run/repair, checkpoint-resume — CLI-only today; `store.runP6Journey` a mirror face) — decide: build parity or keep CLI-only + keep README's capability matrix truthful · box: `store.ts`/console + README · done-when: the decision recorded and README claims match reality (declare-or-strike) · **OWED** — source: `311_se2_surfaces.md` §1 capability diff.
+- **T4.4** · **Agent-completion path via the seal (the K1 remedy):** `wild --agent-seal` = classifier-as-approver for stock gates, coded audit rows `[seat agent-seal]`, bounded classifier-reject retry (N=2), DoD-red repair pass, P7 live edge, step arithmetic pinned; `approve --agent-seal`/`gate --agent-seal` = coded pointer refusals · box: CLI + `engine.ts` + `wild-seal.test.ts` · done-when: `wild --start --agent-seal` seeded keyless run completes to `wild.complete` (13 steps ≤ cap 20) + E1 Leg 10 green · **LANDING** (E1 — engine core LANDED D-wave; CLI flag/pins/evidence pending; engine `wildLiveEdge` not yet defined) — sources: `311_sd_product.md` K1; `311_se1_pipeline.md` §1/§5; `313_d1_seal.md` E1 plan; `312_c1_ignition.md`.
+- **T4.5** · Remaining unattended touchpoints (SE2 §2's ⑤⑧⑨⑩): blocked→human retry (keep human by design, documented), cron/Task-Scheduler arming (→ T5.2), key provisioning (→ T1.5), deploy handoff (post-keyed-run backlog) · box: README/docs + ops · done-when: each touchpoint closed or declared-by-design in one list · **OWED** — source: `311_se2_surfaces.md` §2.
 
 ### F5 · OPS — budget, telemetry, cron
-- [ ] T5.1 — the budget ceiling verdict (SE2 #3) + any unmetered path wired
-- [ ] T5.2 — the cron `last_status:error` diagnosis (2 fires errored — root cause + fix)
-- [ ] T5.3 — the spend ledger completeness (crew/websearch/synthesis — M4-10-class check)
+**VERDICT: CONDITIONAL** — real process-scoped budget (strict `^\d+$` parse; coded stop; overshoot ≤ one paid call) but **(a) unmetered by default stays by contract, now explicit in the envelope; (b) three unproven seams (narrative/research/classifier) — closing in E2; (c) spend-envelope surfacing owed; (d) eval runs write no telemetry at all (diagnose blind); (e) cron fires undiagnosed** (`311_se2_surfaces.md` §3 a/b/c; `311_da2_data.md` §newest-run; `311_wd_guard.md` §4).
+
+- **T5.1** · Budget verdict + wiring: keep unmetered-by-default (no silent arming); state a present-but-unmetered budget explicitly as `{spent, cap: null, stop_reason: null}` (null ONLY when no budget object); record spend at the three unproven sites via `recordSessionSpend`; CF-SE2-4 doc premise falsified + corrected (`recordSpendWithinCap` IS real at `token-ledger.ts:540`) · box: `packet.ts` + `token-ledger.ts` + 3 sites · done-when: `node --experimental-strip-types --test src/lib/budget-coverage.test.ts src/lib/packet.test.ts` green; `grep -rn "recordSessionSpend" src/lib` = the 3 sites · **LANDING** (E2 — envelope+`saveProjectBusyAware` bytes in tree; pins pending; doc part LANDED C5 §2) — sources: `311_se2_surfaces.md` §3a/b; `312_c3_lifecycle.md` §E2; `312_c5_trust.md` §2.
+- **T5.2** · Cron `last_status:error` diagnosis (2 fires errored): root-cause + fix · box: host scheduler (no scheduler file in-repo — `grep cron` = comments/docs only) · done-when: both fires root-caused with the scheduler config named, or an honest external-scheduler verdict recorded · **OWED** — sources: skeleton T5.2; `311_wd_guard.md` §4 (NO coverage); `311_se2_surfaces.md` §2 ⑧.
+- **T5.3** · Spend-ledger completeness (crew/websearch/synthesis — M4-10 class): crew/verify/packet/headless/doctor already wired (`311_se2_surfaces.md` §3); the three unproven sites land in E2 (T5.1) · box: `token-ledger.ts` + sites · done-when: `budget-coverage.test.ts` green + a behavioral classifier leg · **LANDING** (E2) — sources: `311_se2_surfaces.md` §3b; WD §2 #17.
+- **T5.4** · Eval-run telemetry blind spot: `run-eval.mjs` imports no `rt-events` (grep 0) ⇒ eval runs write NO run telemetry; `diagnose` can never audit an eval run · box: `scripts/run-eval.mjs` · done-when: `grep -c "rt-events" scripts/run-eval.mjs` > 0, OR the accepted-blindness decision is recorded (with reader tolerance) · **OWED** — source: `311_da2_data.md` §newest-run (CLI diagnose sees nothing).
+- **T5.5** · Headless spend-envelope surfacing (OV-41 PARTIAL): the summary envelope's spend half owed · box: `headless.ts` envelope · done-when: a headless summary carries spend (`{spent, cap, stop_reason}`) + pin · **OWED** — source: `311_se2_surfaces.md` §3c.
 
 ### F6 · QUALITY — the generated app must actually run green
-*The acceptance gate now fails a dead entry — but "the emitted tree's own tests pass" is the mint's precondition and was last known red pre-overhaul.*
-- [ ] T6.1 — the tree-test baseline: what the emitted tree's tests check; the acceptance/`meanAtLeast` reachability on a FIRST run (DA2 #3 + SE1 #3)
-- [ ] T6.2 — close every structural gap between tree-run-red and mint-blocked (SE1 #3's list)
+*The acceptance gate now fails a dead entry — but "the emitted tree's own tests pass" is the mint's precondition.*
+**VERDICT: CONDITIONAL** — tree-green achievable (treeRun = compile + specs + entry + project leg, fail-closed `compile-check.server.ts:1206`); **`acceptance.pass` (meanAtLeast:1) CONFIRMED STRUCTURAL-UNREACHABLE** — two independent arithmetic floors: (1) first run of any slug → M7=0 ⇒ ceiling 8/9 (one-time, funded included); (2) any keyless run → M1/M3/M4=0 ⇒ ceiling 6/9. No honest pass on record; **not a loosening candidate** (pinned record-don't-fix) (`311_da2_data.md` §meanAtLeast; `311_se1_pipeline.md` §3: mint narrow — no-spec/UI-shell never mints ⇒ P6 hard-stop; P7 hard-DoD risk on wild).
+
+- **T6.1** · Tree-test baseline + acceptance reachability: answered — the tree's own `npm run typecheck`+`npm test` gate `ok:true`; acceptance = 4 clauses (`run-eval.mjs:2596-2630`); the two floors above · box: this file · done-when: analysis recorded — **LANDED (analysis)** — sources: `311_da2_data.md` §meanAtLeast; `311_se1_pipeline.md` §5; `311_sd_product.md` §4 (treeRun verdict).
+- **T6.2** · Close the structural gaps tree-run-red → mint-blocked: (a) P7 live edge wired into the wild path (E1 S5, LANDING); (b) DoD-red parks: one repair pass (`wildDodRepairOnce`) LANDED (D-wave `54c6649`, "parent-cured engine red"); (c) no-mint⇒P6-red path walked + honest-coded (E1 S7, LANDING — a UI-shell tree emits `p6.tree.tested.skipped`, never mints ⇒ `p6-verified` red ⇒ enforceDod blocks leaving P6); (d) classifier-reject bounded retry N=2 LANDED (`resolveWildReviewBounded`, D-wave) · box: `engine.ts` + `wild-seal.test.ts` · done-when: `node --experimental-strip-types --test src/lib/wild-seal.test.ts` green proving P6/P7 clear with honest repair + coded stops · **LANDING** (E1; D-wave parts LANDED) — sources: `311_se1_pipeline.md` §3/§5; `313_d1_seal.md` S5/S7.
+- **T6.3** · Wire the ONE behavioral primitive into the product path: `entry-runs`-class assertion (`run-eval.mjs:780-864` — expectExit/Stdout/Stderr; the only true behavioral oracle) is **eval-side only; never fires on emit/run/repair** — so green ≠ works (K3/K4) · box: `headless.ts`/`compile-check.server.ts` seam reusing the run-eval primitive · done-when: a green tree whose entry throws can no longer exit 0 (reproduce K3 → fix → keyless leg green) · **OWED** — source: `311_sd_product.md` §4 + §5 #3 ("wiring gap, not a vision gap").
+- **T6.4** · Per-kind `expectedFiles` or M7 semantics (the two named remedies for the reachability floors) — **deferred by pin** (record-don't-fix, `wave_plans/W42/SPEC.md:83`; remedies listed out of scope in `311_da2_data.md`) · box: evaluators · done-when: re-open only by owner decision · **OWED (deferred)** — sources: `311_da2_data.md` §meanAtLeast; W42 SPEC:83/196/227/403.
 
 ### F7 · LEARNING — lessons improve the NEXT synthesis
-*The green-seal mints lessons — verify the consumer: does the next run's packet/synthesis actually CONSUME minted lessons? (Nobody has audited this end.)*
-- [ ] T7.1 — the lesson-consumption trace: mint site → packet → synthesis prompt · done-when: a grep-proven chain or the named missing hop.
+*The green-seal mints lessons (`engine.ts:1474` — RED seal never mints a row) — verify the consumer: does the next run's packet/synthesis actually CONSUME minted lessons?*
+**VERDICT: NO COVERAGE — OWED** (nobody audited this end; `311_wd_guard.md` §4 F7 ❌; `311_da1_claims.md` #2 proves the mint side only).
+
+- **T7.1** · The lesson-consumption trace: mint site → packet → synthesis prompt · box: `engine.ts`/`packet.ts`/`codegen.server.ts`/`knowledge.ts` · done-when: a grep-proven chain (e.g., `grep -n "lesson" src/lib/packet.ts src/lib/codegen.server.ts` shows minted rows reaching the next synthesis input) OR the named missing hop logged · **OWED** — sources: skeleton T7.1; `311_wd_guard.md` §4; `311_da1_claims.md` #2.
+
+### F8 · PRODUCT/UX — the SD kink list *(NEW factor — surfaced by the 311 SD audit)*
+**VERDICT: CONDITIONAL** — `311_sd_product.md` §1 ranked the kinks; the critical ones are being closed by C/D/E waves; the residue below is what remains. Pay-worthiness: **not sellable yet** (governed pre-flight = the sellable artifact today).
+
+- **T8.1** · K1 approval deadlock (both approval doors mutually exclusive ⇒ no agent-completable path) — remediation = the seal path · → executed as **T4.4** · **LANDING** — source: `311_sd_product.md` §1 K1.
+- **T8.2** · K2: bare `approve` on a TTY silently mints machine attribution (`{decidedBy:"autopilot", seat:"harness"}` fall-through — bytes still at `rapidtool-cli.mjs:934`) — require explicit seat intent; never guess the seat · box: CLI approve block · done-when: on a TTY without explicit seat, `approve` refuses OR stamps a decisively-labeled seat (pin: `scripts/cli-exit-taxonomy.test.mjs` leg) · **OWED** — source: `311_sd_product.md` §1 K2 + §5 #2.
+- **T8.3** · K3/K4 stub-green + oracle trap: U1 LANDED (`de7deae` — `TreeSubstanceVerdict` + `detectOracleStubTrap` + `treeVerdictHash`, `compile-check.server.ts:390-624`); U2 emit self-qualification LANDING (E4 — `emit --run` envelope carries `substance:{stubs,reexports,real}` + note; tree bytes present, pins pending) · box: `compile-check.server.ts` + CLI emit · done-when: `emit --run` on the stub tree reports the census and cannot read as clean success; `node --experimental-strip-types --test src/lib/compile-check.server.test.ts` green · **U1 LANDED / U2 LANDING** — sources: `311_sd_product.md` K3/K4 + §5 #4/#5; `312_c6_ux.md` U1/U2.
+- **T8.4** · K5/K6 coded remedies on refusals: the single `respond()` remedy seam sources `ERROR_CODE_DOC.agentAction` (bytes in tree) · box: `scripts/rapidtool-cli.mjs` + `errors.ts` · done-when: a coded refusal envelope carries `remedy`; spawn leg green · **LANDING** (E4) — sources: `311_sd_product.md` K5/K6; `312_c6_ux.md` U3.
+- **T8.5** · U4 home first-run/empty state (0-char disabled-reason hint + Builds empty box) · box: `src/routes/index.tsx` · done-when: the home renders the first-run hints (test/screenshot) · **OWED** (open in C6's board; not in E4's brief) — source: `312_c6_ux.md` U4.
+- **T8.6** · Key-setup parity: browser reads `.env`; the CLI requires a shell export (SD friction #5) · box: CLI/env loading · done-when: one documented step makes the key visible to both surfaces (or README repeats the split honestly) · **OWED** — source: `311_sd_product.md` §2 friction #5.
+- **T8.7** · Business rails (SD §3 gap list): multi-project/portfolio, auth/multi-tenant, hosting/deploy inputs, billing/metering (prices ship `null`), reliability guarantee — **post-completion backlog** (not keyed-run blockers) · box: product surface · done-when: each rail scoped or struck from claims — **OWED** — source: `311_sd_product.md` §3.
+
+### F9 · MARKET — the MA outshine-moves *(NEW factor — surfaced by the 311 MA audit)*
+**VERDICT: CONDITIONAL** — "Today: **no** — RapidTool does not outshine them" (governance/honesty/evidence: yes, architecturally; proven product: no — last three keyed runs 5/9, 6/9, 3/9-refused). After the gaps: the outshine axis = *provable, auditable, refuse-to-lie software production* — Factory.ai already markets "governed self-improvement" (`311_ma_competitive.md` §THE COMPETITIVE VERDICT). Big ranked moves hand off to **`wave_plans/W43/F4_outshine_moves.md`** (F4 lane `fixes/314_f4_outshine.md` — code-shaped slices only; F3 owns this list).
+
+- **T9.1** · Fund the key + run keyed e2e to ≥7/9 + publish (converts every claim hypothesis→fact; the one thing no competitor's marketing can match) · → executed as **T1.5 + T1.2**; publish = T9.6 · **OWED (blocked on F1)** — source: MA §5 move 1.
+- **T9.2** · Multi-module emitted tree (TA-15 — "one module wearing filenames" is the skeptic's counter) · box: emitted trees + `doctor --tree` · done-when: `node --experimental-strip-types scripts/rapidtool-cli.mjs doctor --tree <emitted>` → `real ≥ 3`, reexports ≤ 1 · **OWED** — source: MA §5 move 2; README.md:185-192.
+- **T9.3** · Promote machine verification into a hashed verdict (M3/M4 flagship: `lastTest.label==="tested"` + `evidenceHash`): keyless slice LANDED (`treeVerdictHash` FNV-1a over decisive fields, `de7deae`); promotion onto the emitted artifact on a real green run OWED (mint is self-guarded `codegen.server.ts:3766`) · box: `codegen.server.ts`/`compile-check.server.ts` · done-when: an emitted `project.json` from a green run carries `label:"tested"` + hash · **LANDING (slice) / OWED (promotion)** — source: MA §5 move 3; `311_da2_data.md` §mint ground truth.
+- **T9.4** · MCP client "through the phase machine" (phase-gated MCP — no competitor has it) · box: W15-L5 interop spike · done-when: interop spike lands or is SPEC'd · **OWED** — source: MA §5 move 4; 219e row 10.
+- **T9.5** · Second provider + cross-family judge (RS-02) — ends model monoculture; unblocks durable P0-03 fix · box: `llm/providers/registry.ts` · done-when: two provider entries + doctor surfacing · **OWED** — source: MA §5 move 5; registry.ts header.
+- **T9.6** · Publish the keyed scorecard (`eval` verb) + one real browser pass (W14-L1/L4) so the paper trail can be *seen* · box: eval-out + console · done-when: a published scorecard image/artifact + a recorded browser pass · **OWED** — source: MA §5 move 6; `311_da2_data.md` (eval verb read-only).
+
+### F10 · DESIGN — the 10 modernizations' status *(NEW factor — surfaced by the 311 UI audit)*
+**VERDICT: PASS — all 10 landed** (round 1 `de7deae` + D4 + E3), remainder named.
+
+| # | Modernization | Status | Evidence |
+|---|---|---|---|
+| 1 | Mobile run shell (drawer + scroll-strip below `lg`) | **LANDED** | `de7deae` (console.tsx:3083-3085/3616-3648) + D4 real-bug fix (2955→390px) + E3 probe `docScrollW 390` |
+| 2 | Announce the live feed (`role=log aria-live=polite` on now-line/ring/wild feed) | **LANDED** | `de7deae` (pipeline-rail.tsx:462; console.tsx:4718-4748/:1392-1396) |
+| 3 | Unnamed checkboxes (aria-labelledby/id) | **LANDED** | `de7deae` |
+| 4 | Two-rail duplicate merged (one clickable strip + one counter) | **LANDED** | `de7deae` (pipeline-rail.tsx:446-449) |
+| 5 | Type ramp tokens + sub-12px sweep | **LANDED + remainder** | `de7deae` + E3 132 sites swept (sub-12px leaf nodes 653→201); out-of-lane remainder → T10.1 |
+| 6 | `bg-black/*` wells → token surfaces | **LANDED** | `de7deae` (console) + D4 (runtime-timeline-pane.tsx:189/227/257) |
+| 7 | Now-line pulse on fresh rows | **LANDED** | `de7deae` (styles.css:674-693) |
+| 8 | Algorithm cards collapse (one line + "Show all N") | **LANDED** | `de7deae` |
+| 9 | Shortcut legend demoted to the dialog | **LANDED** | `de7deae` |
+| 10 | Dead UI deps removed (−6 deps) | **LANDED** | `54c6649`; E3 grep-proof 0 imports + `npm run build` exit 0 |
+| + | A11y extras (stale rail label; aria-atomic decision documented) | **LANDED** | D4 | 
+
+- **T10.1** · The out-of-lane type-ramp remainder: `runtime-timeline-pane.tsx` (6×`[11px]` + 1×`[10px]`) + `cmd-palette.tsx` (4×`[10px]`) — same sweep/policy as E3 · box: those two files · done-when: `grep -c "text-\[11px\]\|text-\[10px\]" src/components/runtime-timeline-pane.tsx src/components/cmd-palette.tsx` = 0 (QA: computed-style probe) · **OWED** — source: `312_c4_ui.md` §E3 lane notes.
+- **T10.2** · Probe-file hygiene completion: `probe_c1_arith.mjs` deleted (D1's "delete at the end" — E1); E3 already moved `probe_311_shots.mjs`→`fixes/311_probe_shots.mjs` + pruned the 2 junk captures (verified) · box: repo root · done-when: `test ! -f probe_c1_arith.mjs` · **LANDING** (E1) — sources: `313_d1_seal.md` (D1 claims); `312_c4_ui.md` §E3 item 1.
 
 ---
 
-## MERGE RULE
-When the 4 auditors land: each factor's PENDING-AUDIT becomes a verdict (PASS/CONDITIONAL/BLOCKED + evidence), each CONDITIONAL/BLOCKED spawns a numbered task with file/box/done-when, and this file becomes the coder-wave brief. The keyed run (F1) happens ONLY after the user reviews this completed list.
+## MERGE RULE (unchanged, now operative)
+This file IS the coder-wave brief. The keyed run (F1/T1.2) happens ONLY after ALL of: (1) the seal's completion (T4.4/E1), (2) the E/F waves' landing on a boundary-green tree, (3) the keyless probes answered (T1.4), (4) the wallet funded (T1.5), and (5) the user reviews this completed list and gives the word. Anything landing after this compile attaches its evidence to the named task; nothing here is re-opened silently.
+
+## CHECKLIST COUNT (tasks total · landed · owed)
+**43 tasks** = **6 LANDED** (T1.6, T2.1, T3.1, T4.1, T4.2, T6.1) · **13 LANDING** (T1.4, T2.2, T2.3, T3.2, T4.4, T5.1, T5.3, T6.2, T8.1, T8.3, T8.4, T9.3, T10.2) · **24 OWED** (T1.1–T1.3, T1.5, T3.3, T3.4, T4.3, T4.5, T5.2, T5.4, T5.5, T6.3, T6.4, T7.1, T8.2, T8.5–T8.7, T9.1, T9.2, T9.4–T9.6, T10.1).
+Per factor: F1 6 · F2 3 · F3 4 · F4 5 · F5 5 · F6 4 · F7 1 · F8 7 · F9 6 · F10 2.
+
+*Compiled by F3 (merge executor) 2026-09-29 · HEAD `54c6649` + live E/F tree bytes · log: `fixes/314_f3_merge.md`. Every status above was byte-checked where cheap; where a lane is mid-flight (E1/E2/E4, F1/F2 lanes) the status is LANDING with the pending artifact named.*

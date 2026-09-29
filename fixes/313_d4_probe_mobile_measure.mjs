@@ -1,4 +1,8 @@
-// D4 scratch: precise mobile layout measurements at 390px (delete after use).
+// fixes/313_d4_probe_mobile_measure.mjs — MOVED (E3 hygiene, W312 close): D4's precise mobile
+// layout measurements at 390px (overflow offenders + nav strip metrics), rescued from the repo
+// root (committed there in 54c6649; scratch probes leave root — precedent
+// fixes/290_k1_timeline_probe.mjs). Writes ~/d4_probe/mobile-top.png. Run from the repo root
+// (needs the live dev server on :8080):  node fixes/313_d4_probe_mobile_measure.mjs
 import { chromium } from "playwright";
 import { homedir } from "node:os";
 
@@ -30,7 +34,6 @@ const m = await page.evaluate(() => {
   }
   const nav = document.querySelector('nav[aria-label="Phases"]');
   const navInner = nav ? nav.firstElementChild : null;
-  const bar = document.querySelector('nav[aria-label="Phases"]');
   return {
     innerWidth: iw,
     docScrollW: de.scrollWidth,

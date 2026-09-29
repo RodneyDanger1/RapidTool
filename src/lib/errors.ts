@@ -474,7 +474,7 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
   RT_E_TREE_RUN_FAILED: {
     meaning: "The emitted tree's run verdict is red — compile-check, spec probes, or entry run failed under tree-run.",
     agentAction:
-      "Read the tree-run outcome (compile verdicts, per-spec tests, entry run), fix the generator or re-emit, then re-run the tree before treating P6 as verified.",
+      "Read the tree-run outcome (compile verdicts, per-spec tests, entry run), fix the generator or re-emit, then re-run the tree before treating P6 as verified. A GREEN run is still not product-complete when the verdict's `substance` census shows stubs/reexports, so read `substance` (stubs:N reexports:N real:N) and its SUBSTANCE MARKING note (K3: exit 0 is never product quality).",
   },
   RT_E_REPAIR_FAILED: {
     meaning: "The repair cycle exhausted its budget or refused to converge — the tree is still red after repair.",

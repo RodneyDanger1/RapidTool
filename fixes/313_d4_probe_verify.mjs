@@ -1,8 +1,10 @@
-// D4 verification probe (W312) — before/after for: rail section label, now-line
-// live-region attrs, a11y counts, sub-12px recount, runtime-timeline well colors
-// (light theme), mobile sidebar drawer. Method = fixes/311 audit's probe
-// (playwright vs the already-running dev server :8080); report → ~/d4_probe/.
-// Delete after use (repo rule).
+// fixes/313_d4_probe_verify.mjs — MOVED (E3 hygiene, W312 close): D4's verification probe,
+// rescued from the repo root (committed there in 54c6649; scratch probes leave root — hygiene
+// precedent fixes/290_k1_timeline_probe.mjs / fixes/299_u1_probe.mjs). Kept as durable evidence
+// for the D4/E3 before/after records. Probes: rail section label, now-line live-region attrs,
+// a11y counts, sub-12px recount, runtime-timeline well colors (light theme), mobile sidebar
+// drawer — playwright vs the already-running dev server :8080; report + shots → ~/d4_probe/.
+// Run from the repo root:  node fixes/313_d4_probe_verify.mjs before|after
 import { chromium } from "playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";

@@ -105,6 +105,31 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.j
 node --experimental-strip-types scripts/rapidtool-cli.mjs doctor --tree emitted/     # job-file census for an emitted tree
 ```
 
+### The truthful smoke — reading the verdict, not trusting it
+
+The quickstart above is the whole keyless path; what makes it a *smoke* rather than a demo is that every
+step prints one machine-checkable JSON envelope, and the emitted tree can be re-verified at any time
+without re-emitting:
+
+```bash
+# Re-run the emitted tree AS-IS (read-only oracle — never re-emits, never clobbers edits):
+node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir emitted/
+```
+
+Read what comes back truthfully:
+
+- **Green (exit 0) `emit --run` / `tree-run`** means the emitted **files parse, the emitted tests
+  pass as emitted, and the entry loads** — never that the brief's jobs work.
+- Every runnable verdict carries a **`substance` census** (`stubs:N reexports:N real:N`). When the
+  tree ships stub or reexport-only job modules, a loud **`SUBSTANCE MARKING`** note rides the
+  envelope and `greenWhileStubbed: true` says it plainly: **exit 0 here is not product quality**
+  (K3). `doctor --tree` shows the same census in the same classifier vocabulary.
+- **Implementing a stubbed seam reddens the emitted `tests/oracle.spec.ts`** until its assertion is
+  replaced — the K4 oracle trap; the same note says so, never silently.
+- **Red is never a fake 0:** a red `--run` exits 1 with `RT_E_TREE_RUN_FAILED` plus the first not-ok
+  tail on the envelope, and `treeRun.verdictHash` (FNV-1a over the decisive verdict fields —
+  integrity, not cryptography) lets a re-run prove whether the machine verdict changed: same hash,
+  same verdict.
 The CLI's full verb reference — all **39 verbs**, the exit-code taxonomy (0/1/2/3/4), the `RT_E_*`
 registry, and the Hermes-style agent loop — lives in **`scripts/README-cli.md`** (doc-contract
 tested by `scripts/README-cli.test.mjs`: the count, the verb list, and the `edit`/`emit` sections

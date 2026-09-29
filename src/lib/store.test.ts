@@ -1982,3 +1982,15 @@ test("A3/M3-18: convergeRealRun junk input — same-reference no-op; junk collec
   assert.deepEqual(out.artifacts, [artifact], "junk artifacts bound to [] before the append");
   assert.deepEqual(out.logs, [log], "junk logs bound to [] before the append");
 });
+
+test("F6/M3-18 tail (314 residue): convergeRealRun junk base with NO phases key — no throw", () => {
+  // The 308 hostile probe's LAST survivor (`store.converge-junk-all` =
+  // convergeRealRun({}, {}, {})): recordGate reads `project.phases.find` FIRST,
+  // so the pre-F6 artifacts/logs bounds did not cover this path — the call threw
+  // a TypeError (store.ts:352). phases now takes the same [] floor; recordGate's
+  // own not-complete guard no-ops honestly instead.
+  const out = convergeRealRun({} as unknown as Project, {} as unknown as Artifact, {} as unknown as JsonLog);
+  assert.deepEqual(out.phases, [], "junk phases bound to [] (was: TypeError at recordGate find)");
+  assert.equal(out.logs.length, 1, "foreign log row still lands (bounded collections append, not drop)");
+  assert.equal(out.artifacts.length, 1, "foreign artifact row still lands");
+});

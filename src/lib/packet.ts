@@ -201,8 +201,10 @@ function systemJson(
       spend: spendBlock(spend),
       // F2-04 (W41 · X1 tail): the honest session-budget boundary — `{spent,
       // cap, stop_reason}` read from the SAME T-107.6 ledger as `spend`; null
-      // unless the budget has spend, a cap, or a crossed cap to report. Key
-      // rides LAST, right after `spend:` (additive; PACKET_VERSION stays 3).
+      // ONLY when no budget object exists at all. CF-SE2-3a (312 · E2): a
+      // present-but-unmetered budget is stated EXPLICITLY as `cap: null` —
+      // never collapsed into the absent case. Key rides LAST, right after
+      // `spend:` (additive; PACKET_VERSION stays 3).
       budget: packetBudgetBoundary(budget),
     },
     null,
@@ -428,8 +430,11 @@ export function packetSpendSummary(
 
 /**
  * Read a session budget into the packet's boundary block (F2-04). Pure; never
- * throws. Returns null when there is nothing honest to report: no budget
- * object at all, or an unmetered budget with zero spend (the process default).
+ * throws. `null` ONLY when there is no budget object at all (absent/foreign
+ * input) — a PRESENT budget is always stated explicitly: `{spent, cap: null,
+ * stop_reason: null}` is the honest unmetered default (CF-SE2-3a, 312 · E2:
+ * `RAPIDTOOL_TOKEN_CAP` unset ⇒ unmetered BY DESIGN, and the envelope says so
+ * instead of collapsing it into the same `null` that means "no budget").
  * `totalTokens`/`isBudgetExhausted` are the ledger's own tolerant guards, so a
  * hostile budget reads as empty rather than escaping.
  */
@@ -440,9 +445,6 @@ export function packetBudgetBoundary(
   const spent = totalTokens(budget.ledger);
   const cap = budgetCap(budget);
   const exhausted = isBudgetExhausted(budget);
-  // Nothing honest to report: unmetered AND unspent ⇒ null (absent-is-honest,
-  // mirroring the spend block's rule).
-  if (spent <= 0 && cap === undefined && !exhausted) return null;
   return {
     spent,
     cap: cap ?? null,

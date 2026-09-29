@@ -234,14 +234,14 @@ function PhaseRecordDetail({
 
       {rec ? (
         <>
-          <p className="mt-2 font-mono text-[11px] text-fg">
+          <p className="mt-2 font-mono text-xs text-fg">
             {PHASE_STATUS_WORD[rec.status]}
             {rec.startedAt !== undefined ? ` · started ${agoLabel(rec.startedAt)} ago` : " · never started"}
             {rec.completedAt !== undefined ? ` · completed ${agoLabel(rec.completedAt)} ago` : ""}
           </p>
 
           {rec.gate ? (
-            <p className="mt-1.5 font-mono text-[11px]">
+            <p className="mt-1.5 font-mono text-xs">
               <span className="text-muted">DoD </span>
               {rec.gate.passed ? (
                 <span className="text-ok">PASS</span>
@@ -255,10 +255,10 @@ function PhaseRecordDetail({
               {rec.gate.unmet.length ? <span className="text-warn"> · {rec.gate.unmet.length} unmet</span> : null}
             </p>
           ) : (
-            <p className="mt-1.5 font-mono text-[11px] text-faint">No DoD gate verdict recorded yet.</p>
+            <p className="mt-1.5 font-mono text-xs text-faint">No DoD gate verdict recorded yet.</p>
           )}
           {rec.gate && rec.gate.unmet.length > 0 ? (
-            <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-warn">
+            <ul className="mt-1 space-y-0.5 font-mono text-xs text-warn">
               {rec.gate.unmet.map((u) => (
                 <li key={u}>unmet: {u}</li>
               ))}
@@ -271,7 +271,7 @@ function PhaseRecordDetail({
             </p>
           ) : null}
           {(rec.rejectionHistory ?? []).length > 0 ? (
-            <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-faint">
+            <ul className="mt-1 space-y-0.5 font-mono text-xs text-faint">
               {(rec.rejectionHistory ?? []).map((r, i) => (
                 <li key={`${r.at}-${i}`}>
                   rejection · {agoLabel(r.at)} ago · <span className="[overflow-wrap:anywhere]">{clip(r.note, 120)}</span>
@@ -288,10 +288,10 @@ function PhaseRecordDetail({
 
       {decisions.length > 0 ? (
         <div className="mt-2">
-          <p className="font-mono text-[11px] text-muted">Gate decisions</p>
+          <p className="font-mono text-xs text-muted">Gate decisions</p>
           <ul className="mt-1 space-y-1">
             {decisions.map((d) => (
-              <li key={d.id} className="font-mono text-[11px] leading-relaxed">
+              <li key={d.id} className="font-mono text-xs leading-relaxed">
                 <span className={d.decision === "approve" ? "text-ok" : "text-danger"}>{d.decision}</span>
                 <span className="text-faint">
                   {" "}
@@ -307,12 +307,12 @@ function PhaseRecordDetail({
         </div>
       ) : null}
 
-      <p className="mt-2 font-mono text-[11px] text-muted">
+      <p className="mt-2 font-mono text-xs text-muted">
         Artifacts · {arts.length} row{arts.length === 1 ? "" : "s"}
       </p>
       {arts.length > 0 ? (
         <>
-          <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-faint">
+          <ul className="mt-1 space-y-0.5 font-mono text-xs text-faint">
             {arts.slice(-6).map((a) => (
               <li key={a.id} className="truncate">
                 {a.kind} · {a.title}
@@ -320,7 +320,7 @@ function PhaseRecordDetail({
             ))}
           </ul>
           {arts.length > 6 ? (
-            <p className="mt-0.5 font-mono text-[11px] text-faint">
+            <p className="mt-0.5 font-mono text-xs text-faint">
               +{arts.length - 6} more — the Artifacts pane in the Run console holds the full browser.
             </p>
           ) : null}
@@ -329,14 +329,14 @@ function PhaseRecordDetail({
 
       {isCurrent && wr ? (
         <div className="mt-3 border-t border-line pt-2">
-          <p className="font-mono text-[11px] text-wild">
+          <p className="font-mono text-xs text-wild">
             Wild run — {wr.active ? (wr.pause ? "paused" : "active") : "stopped"} · frontier P{wr.phase}
             {wr.lastAutoAt !== null ? ` · last auto ${agoLabel(wr.lastAutoAt)} ago` : ""}
             {wr.startedAt !== null ? ` · started ${agoLabel(wr.startedAt)} ago` : ""}
             {wr.stoppedAt !== null ? ` · stopped ${agoLabel(wr.stoppedAt)} ago` : ""}
           </p>
           {wr.lastStep ? (
-            <p className="mt-1 font-mono text-[11px] text-muted">
+            <p className="mt-1 font-mono text-xs text-muted">
               last step · {wr.lastStep.outcome} · {wr.lastStep.action} · P{wr.lastStep.phase}
               {wr.lastStep.completedPhase !== null ? ` · sealed P${wr.lastStep.completedPhase}` : ""}
               {wr.lastStep.advancedTo !== null ? ` · advanced to P${wr.lastStep.advancedTo}` : ""}
@@ -349,7 +349,7 @@ function PhaseRecordDetail({
             </p>
           ) : null}
           {park !== null ? (
-            <p className="mt-1.5 font-mono text-[11px] leading-relaxed text-warn">
+            <p className="mt-1.5 font-mono text-xs leading-relaxed text-warn">
               parked · {park.code ?? "uncoded"} · {park.reason}
               <span className="block pl-3 text-faint [overflow-wrap:anywhere]">{park.unlockText}</span>
               <span className="block pl-3 text-faint">
@@ -362,12 +362,12 @@ function PhaseRecordDetail({
 
       {hitl ? (
         <div className="mt-3 border-t border-line pt-2">
-          <p className="font-mono text-[11px] text-warn">
+          <p className="font-mono text-xs text-warn">
             Human approval requested — {hitl.title}
             {hitl.forceHuman ? " · human-only (autopilot may not approve)" : ""}
           </p>
           <p className="mt-1 text-xs leading-relaxed text-fg/90 [overflow-wrap:anywhere]">{hitl.prompt}</p>
-          <p className="mt-0.5 font-mono text-[11px] text-faint">
+          <p className="mt-0.5 font-mono text-xs text-faint">
             stakes: <span className="[overflow-wrap:anywhere]">{hitl.stakes}</span>
             {hitl.requestedAt !== undefined ? ` · requested ${agoLabel(hitl.requestedAt)} ago` : ""}
           </p>

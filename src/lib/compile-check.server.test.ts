@@ -11,7 +11,9 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { SUPPLY_CHAIN_AUDIT_COMMAND, compileCheckDir, installToolFor, parseVerdictForSource, supplyChainFloorFor, treeRun, verifyKindDir } from "./compile-check.server.ts";
+import { SUPPLY_CHAIN_AUDIT_COMMAND, compileCheckDir, installToolFor, parseVerdictForSource, supplyChainFloorFor, treeRun, treeSubstanceOf, treeVerdictHash, verifyKindDir } from "./compile-check.server.ts";
+import { inventoryFromJobSources } from "./doctor.ts";
+import { collectJobSources } from "./headless.ts";
 import { scrubbedEnv } from "./node-runner.server.ts";
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), "rapidtool-cc-"));
@@ -1117,6 +1119,243 @@ describe("OV-43 — report-only supply-chain floor (never a gate)", () => {
       assert.equal(sc.noAuditFlag, false, "the seam command carries no --no-audit flag");
       assert.match(sc.auditNote, /test seam/);
       assert.match(sc.auditNote, /no npm ran/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W43 · C6/E4 (fixes/312_c6_ux · 311_sd_product K3/K4) — the product-substance
+// census + verdict-hash pins the C6 landing owed. Real dirs on disk; no mocks.
+// The census must agree with the doctor's own derivation over the file set
+// `headless.collectJobSources` selects (the mirror promise at
+// compile-check.server.ts:496-497), and the note must stay NARROW: job-less
+// fixture trees stay note-silent (the existing :569/:631-664 r.note
+// assertions depend on exactly that trigger).
+// ---------------------------------------------------------------------------
+
+const REAL_JOB = "export const route = (n: number): number => n + 1;\n";
+const STUB_JOB = 'export const route = (): never => {\n  throw new Error("RT_E_VALIDATION · TODO(E-15) stub");\n};\n';
+const BRIDGE_JOB = 'export { route } from "./impl.ts";\n';
+/** K4 oracle shape: `assert.rejects` within 400 chars of a `TODO(E-15)` literal. */
+const TRAP_SPEC = [
+  `import { test } from "node:test";`,
+  `import assert from "node:assert/strict";`,
+  `test("orc-1 route refuses until implemented (TODO(E-15) stub)", async () => {`,
+  `  await assert.rejects(async () => { throw new Error("RT_E_VALIDATION · TODO(E-15) stub"); }, /TODO\\(E-15\\) stub/);`,
+  `});`,
+  ``,
+].join("\n");
+
+/** Write job modules under src/jobs/ (key = rel path from there). */
+function writeJobs(dir: string, jobs: Record<string, string>): void {
+  for (const [rel, body] of Object.entries(jobs)) write(dir, `src/jobs/${rel}`, body);
+}
+
+describe("treeSubstanceOf — the product-substance census (fixes/312_c6_ux · K3/K4)", () => {
+  it("no job modules → verdict empty, census zeros, NO note (job-less trees stay silent)", () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      const s = treeSubstanceOf(dir, { green: true });
+      assert.equal(s.verdict, "empty");
+      assert.equal(s.files.length, 0);
+      assert.deepEqual([s.stubs, s.reexports, s.real], [0, 0, 0]);
+      assert.equal(s.greenWhileStubbed, false, "nothing to census is never green-while-stubbed");
+      assert.equal(s.oracleStubTrap, false, "no job modules → no trap to detect");
+      assert.equal(s.note, undefined, "the note trigger is narrow — no job-file signal, no marking");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("all-stub jobs → stub-skeleton + the loud note names the counts, the K3 reading and the K4 trap", () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, TRAP_SPEC);
+      writeJobs(dir, { "route.ts": STUB_JOB });
+      const s = treeSubstanceOf(dir, { green: true });
+      assert.equal(s.verdict, "stub-skeleton");
+      assert.deepEqual([s.stubs, s.reexports, s.real], [1, 0, 0]);
+      assert.equal(s.greenWhileStubbed, true, "green + stub jobs = the K3 misread this marking exists for");
+      assert.equal(s.oracleStubTrap, true, "the oracle asserts the stub refusal — implementing reddens it (K4)");
+      assert.ok(s.note, "a non-clean census over an EXISTING job-file set must carry the note");
+      assert.match(s.note!, /SUBSTANCE MARKING \(stubs:1 reexports:0 real:0\)/);
+      assert.match(s.note!, /every one of the 1 job module\(s\) is a TODO\(E-15\) stub or a reexport-only bridge/);
+      assert.match(s.note!, /NOT product-complete/);
+      assert.match(s.note!, /K3: exit 0 must never be read as product quality/);
+      assert.match(s.note!, /green here means the emitted files parse/);
+      assert.match(s.note!, /K4 oracle trap/);
+      // The trigger is about the census, not the run colour: red runs get the
+      // same marking, they just must not claim green-while-stubbed.
+      assert.equal(treeSubstanceOf(dir, {}).greenWhileStubbed, false);
+      assert.equal(treeSubstanceOf(dir, { green: false }).greenWhileStubbed, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the K4 clause drops when the oracle carries no stub-refusal assertion", () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC); // no assert.rejects + TODO(E-15) pair
+      writeJobs(dir, { "route.ts": STUB_JOB });
+      const s = treeSubstanceOf(dir, { green: true });
+      assert.equal(s.oracleStubTrap, false);
+      assert.ok(s.note, "the K3 marking still fires — the trap clause is what drops");
+      assert.doesNotMatch(s.note!, /oracle trap/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("mixed (real + stub) → verdict mixed; the note names the stub share", () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      writeJobs(dir, { "a.ts": REAL_JOB, "b.ts": STUB_JOB });
+      const s = treeSubstanceOf(dir);
+      assert.equal(s.verdict, "mixed");
+      assert.deepEqual([s.stubs, s.reexports, s.real], [1, 0, 1]);
+      assert.match(s.note!, /1 of 2 job module\(s\) are TODO\(E-15\) stubs/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("all real → verdict real + NO note (a clean tree stays silent)", () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      writeJobs(dir, { "a.ts": REAL_JOB });
+      const s = treeSubstanceOf(dir, { green: true });
+      assert.equal(s.verdict, "real");
+      assert.deepEqual([s.stubs, s.reexports, s.real], [0, 0, 1]);
+      assert.equal(s.greenWhileStubbed, false, "a clean census is never green-while-stubbed");
+      assert.equal(s.note, undefined, "a real census must not manufacture a marking");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reexport-only bridges count as bridges, never as real (and still mark green runs)", () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      writeJobs(dir, { "bridge.ts": BRIDGE_JOB });
+      const s = treeSubstanceOf(dir, { green: true });
+      assert.equal(s.verdict, "stub-skeleton", "no real module → not clean, whatever the leftover kind");
+      assert.deepEqual([s.stubs, s.reexports, s.real], [0, 1, 0]);
+      assert.equal(s.greenWhileStubbed, true, "reexport-only leftovers count as green-while-stubbed");
+      assert.match(s.note!, /1 job module\(s\) are reexport-only bridges/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("PARITY: the mirror selects the same file rows as headless.collectJobSources — and the doctor's own derivation agrees row for row", () => {
+    const dir = tempDir();
+    try {
+      write(dir, "src/jobs/route.ts", STUB_JOB);
+      write(dir, "src/jobs/bridge.ts", BRIDGE_JOB);
+      write(dir, "jobs/legacy.mjs", "export const legacy = () => 1;\n");
+      write(dir, "src/jobs/notes.md", "not a job module — extension filter");
+      mkdirSync(join(dir, "src", "jobs", "loose.ts"), { recursive: true }); // a DIR ending .ts — isFile filter
+      const census = treeSubstanceOf(dir);
+      const headlessFiles = collectJobSources(dir);
+      assert.deepEqual(
+        census.files.map((f) => f.path),
+        headlessFiles.map((f) => f.path),
+        "the mirror (src/jobs + jobs, top-level .ts/.js/.mjs) must select exactly headless.collectJobSources' rows",
+      );
+      assert.equal(census.files.length, 3, "notes.md (extension) and loose.ts (directory) are never rows");
+      const inv = inventoryFromJobSources(headlessFiles, dir);
+      assert.deepEqual(
+        [census.stubs, census.reexports, census.real],
+        [inv.stubs, inv.reexports, inv.real],
+        "the census counts must be the doctor's own classifier over those rows",
+      );
+      assert.equal(census.verdict, "mixed", "stub + reexport + real together = mixed");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("treeVerdictHash — the re-derivable machine-verdict hash (MA §5 move 3, keyless slice)", () => {
+  it("treeRun carries it; a downstream re-derivation matches; the same tree re-run re-derives the same hash", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      const r1 = await treeRunAsConsumer(dir);
+      assert.equal(typeof r1.verdictHash, "string", "treeRun always sets the hash on a runnable verdict");
+      assert.match(r1.verdictHash!, /^\d+$/, "FNV-1a decimal string (same contract as dod.ts evidenceHash)");
+      assert.equal(r1.verdictHash, treeVerdictHash(r1), "the documented consumer re-derivation matches the carried hash");
+      const r2 = await treeRunAsConsumer(dir);
+      assert.equal(r2.verdictHash, r1.verdictHash, "the same tree re-run re-derives the same machine verdict");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("decisive fields move the hash; cosmetic fields do not", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      const r = await treeRunAsConsumer(dir);
+      const base = treeVerdictHash(r);
+      assert.equal(
+        treeVerdictHash({ ...r, note: "cosmetic prose — not a machine verdict" }),
+        base,
+        "the note is not decisive: the hash covers the verdict, not the prose",
+      );
+      assert.notEqual(treeVerdictHash({ ...r, ok: !r.ok }), base, "ok is decisive");
+      assert.notEqual(
+        treeVerdictHash({ ...r, substance: { ...r.substance!, stubs: r.substance!.stubs + 1 } }),
+        base,
+        "the substance census is decisive — a changed census must move the hash",
+      );
+      assert.notEqual(
+        treeVerdictHash({ ...r, tests: r.tests.map((t) => ({ ...t, file: `${t.file}.renamed` })) }),
+        base,
+        "a spec's file identity is decisive",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("treeRun — the K3 substance marking rides the verdict (fixes/312_c6_ux)", () => {
+  it("a job-bearing stubbed tree: ok:true stays (the tree truly ran green) BUT the note fires with the census", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, TRAP_SPEC);
+      writeJobs(dir, { "route.ts": STUB_JOB });
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true, "the tree executes green — the marking qualifies it, it never fakes a red");
+      assert.ok(r.substance, "every runnable verdict carries the census");
+      assert.equal(r.substance!.verdict, "stub-skeleton");
+      assert.equal(r.substance!.greenWhileStubbed, true);
+      assert.match(r.note ?? "", /SUBSTANCE MARKING/, `the loud note rides the top-level note: ${r.note}`);
+      assert.match(r.note ?? "", /stubs:1 reexports:0 real:0/);
+      assert.equal(r.verdictHash, treeVerdictHash(r));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a clean tree carrying real jobs stays note-silent (nothing to mark)", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      writeJobs(dir, { "route.ts": REAL_JOB });
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true);
+      assert.equal(r.substance!.verdict, "real");
+      assert.equal(r.substance!.note, undefined);
+      assert.equal(r.note, undefined, "a real census must not manufacture a note");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -370,6 +370,36 @@ export function resetSessionBudget(): TokenBudget {
 }
 
 /**
+ * CF-SE2-3b (312 · E2): meter ONE completed provider call into the PROCESS
+ * session budget's ledger — IN PLACE and NEVER throwing. The three call sites
+ * this closes (`engine.ts` fetchResearch narrative, `headless.ts`
+ * bareNodeLiveOverlay narrative, `wild-mode.server.ts` wildClassifierReview)
+ * are post-call RECORDERS, not dispatch gates: `recordBudgetSpend`'s
+ * record-then-signal throw would turn a delivered narrative into an
+ * exception (their catches would degrade it to the silent floor), so the
+ * crossing is deliberately NOT signalled here — the gate seams
+ * (`assertBudgetHeadroom` / `runBudgetedCall`) read the same enriched ledger
+ * and own the enforcement. I2 contract: record every response that reports
+ * usage, success or refusal (a refusal that burned tokens still counts).
+ * Missing usage → no-op; a malformed singleton ledger is repaired, not
+ * thrown over.
+ */
+export function recordSessionSpend(spend: TokenSpend | null | undefined): TokenLedger {
+  const budget = sessionTokenBudget();
+  if (!budget.ledger || typeof budget.ledger !== "object") budget.ledger = emptyLedger();
+  const next = recordSpend(budget.ledger, spend);
+  budget.ledger.promptTokens = next.promptTokens;
+  budget.ledger.completionTokens = next.completionTokens;
+  budget.ledger.calls = next.calls;
+  for (const field of CACHE_LEDGER_FIELDS) {
+    const v = next[field];
+    if (v === undefined) delete budget.ledger[field];
+    else budget.ledger[field] = v;
+  }
+  return budget.ledger;
+}
+
+/**
  * True when a positive cap is set and the ledger has spent PAST it (`>` — 199:
  * landing exactly on the cap is still ok). Unmetered (or a malformed budget)
  * → false. Pure.
