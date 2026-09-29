@@ -615,3 +615,72 @@ describe("the call tap's promise channel (R4-f02 · W26 H3 containment)", () => 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// W42 · B2 (fixes/307_b2_backends — completes the k6 #4 cache chain): the tap
+// record must carry the vendor's context-cache split WHEN (and only when) the
+// response reports it. The record TYPE has declared the fields since W41·Q7
+// (G3, fixes/285); the emit dropped them until this pin, so every downstream
+// fold (run-eval's `llmEvidenceFromCallRecords`) saw 2 keys and cache spend
+// could never be priced. Two halves: forwarded-when-reported, and the
+// byte-identical legacy record when not (no fabricated 0).
+// ---------------------------------------------------------------------------
+
+describe("the call tap's cache split (W42 B2 · k6 #4 completion)", () => {
+  it("forwards cachedPromptTokens/cacheMissTokens when the vendor reports them", async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const cacheFetch = (async () =>
+      new Response(
+        JSON.stringify({
+          model: "deepseek-v4-flash",
+          choices: [{ message: { content: "ok" } }],
+          usage: {
+            prompt_tokens: 1200,
+            completion_tokens: 3,
+            // the vendor's context-cache split (DeepSeek kv_cache guide)
+            prompt_cache_hit_tokens: 1100,
+            prompt_cache_miss_tokens: 100,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+    withKey(KEY);
+    try {
+      setLlmCallTap((record) => {
+        records.push(record as unknown as Record<string, unknown>);
+      });
+      const r = await completeDeepSeek("hi", { fetch: cacheFetch });
+      assert.equal(r.ok, true);
+      assert.equal(records.length, 1, "one observation per call");
+      assert.equal(records[0]?.cachedPromptTokens, 1100, "hit tokens ride the record");
+      assert.equal(records[0]?.cacheMissTokens, 100, "miss tokens ride the record");
+    } finally {
+      clearLlmCallTap();
+      withKey(SAVE_KEY);
+    }
+  });
+
+  it("keeps the byte-identical legacy record when no split is reported (no fabricated 0)", async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const m = fakeFetch([200]); // legacy usage: prompt_tokens/completion_tokens only
+    withKey(KEY);
+    try {
+      setLlmCallTap((record) => {
+        records.push(record as unknown as Record<string, unknown>);
+      });
+      const r = await completeDeepSeek("hi", { fetch: m.fetch });
+      assert.equal(r.ok, true);
+      assert.equal(records.length, 1);
+      assert.equal("cachedPromptTokens" in (records[0] ?? {}), false);
+      assert.equal("cacheMissTokens" in (records[0] ?? {}), false);
+      assert.deepEqual(
+        Object.keys(records[0] ?? {}).sort(),
+        ["at", "code", "completionTokens", "ok", "promptTokens", "requestedModel", "servedModel"].sort(),
+        "the legacy 7-key record survives byte-for-byte (k6 #4 additive discipline)",
+      );
+    } finally {
+      clearLlmCallTap();
+      withKey(SAVE_KEY);
+    }
+  });
+});

@@ -714,6 +714,20 @@ export async function completeDeepSeek(
     code: res.ok === true ? null : res.code ?? null,
     promptTokens: res.ok === true && res.usage ? res.usage.promptTokens : null,
     completionTokens: res.ok === true && res.usage ? res.usage.completionTokens : null,
+    // W42·B2 (fixes/307_b2_backends — completes the k6 #4 cache chain): the
+    // vendor's context-cache split ride-along. The record TYPE has carried
+    // these since W41·Q7 (G3, fixes/285) but this emit dropped them, so every
+    // downstream fold (run-eval's `llmEvidenceFromCallRecords`) saw 2 keys and
+    // cache spend could never be priced. Additive + conditional, exactly like
+    // the parse site (:577-582): a response (or tape) that reports no split
+    // keeps the byte-identical legacy record — no fabricated 0, no consumer
+    // that ignores the fields is affected.
+    ...(res.ok === true && res.usage && typeof res.usage.cachedPromptTokens === "number"
+      ? { cachedPromptTokens: res.usage.cachedPromptTokens }
+      : {}),
+    ...(res.ok === true && res.usage && typeof res.usage.cacheMissTokens === "number"
+      ? { cacheMissTokens: res.usage.cacheMissTokens }
+      : {}),
   });
   return res;
 }
