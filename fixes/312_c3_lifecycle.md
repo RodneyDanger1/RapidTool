@@ -39,3 +39,29 @@ C3 claims these surfaces:
 ### 2. M6-03 descendant reap
 ### 3. M6-04 lost update
 ### 4. CF-SE2-3 budget
+
+---
+
+# D3 — THE LIFECYCLE COMPLETER (C3's items 2–4) — IN PROGRESS
+
+**Lane:** D3 (finishing C3's owed items). **HEAD at start:** `de7deae` (tree clean; C-wave committed §1). **Read first:** §1 above + the C3 rescue summary (items 2–4's exact anchors).
+**Rules honored:** NO keyed calls. Legs FOREGROUND. One writer per file — every file below re-read immediately before patching (siblings C1/C2/C6/D1 are live on `engine.ts`, `rapidtool-cli.mjs`, `headless.ts`).
+
+## D3 scope (C3's items 2–4, anchors verbatim)
+
+- **(2) M6-03** — `scripts/with-app-env.mjs:120-124`: a wrapper kill must reap DESCENDANTS (map6 probe: child 10696 + grandchild 15468 survived; heartbeats 14→27). Fix: win32 signal path shells to `taskkill /pid <child> /T /F` (the `node-runner.server.ts:164-171` pattern); POSIX keeps `child.kill(signal)`. Pins in `scripts/with-app-env.test.mjs`.
+- **(3) M6-04** — `ingest ∥ run` lost update: run's save of completed phase work was refused `RT_E_BUSY` by the live lock and the process exited 4 with the work discarded. Fix: the run/gate arm's save goes through ONE busy-aware helper — bounded wait-and-retry (the errors.ts `RT_E_BUSY` agentAction remedy), then a coded refusal at the README-documented busy exit (**1**) carrying the `preserved` per-phase checkpoint (where the completed work lives; `resume` re-enters). Pin: NEW `scripts/cli-run-busy.test.mjs`.
+- **(4) CF-SE2-3a** — budget default: unmetered-by-default STAYS (no silent arming of a ceiling; the ledger contract is caller-supplied). The ENVELOPE now says so EXPLICITLY: `packet.ts` `packetBudgetBoundary` reports a present-but-unmetered budget as `{spent, cap: null, stop_reason: null}` instead of `null` (`null` only when there is no budget object at all). Pins updated/appended in `src/lib/packet.test.ts`.
+- **(4) CF-SE2-3b** — ledger completeness, wired where usage is in hand: engine narrative (`engine.ts` `fetchResearch`), bare-Node research overlay narrative (`headless.ts` `bareNodeLiveOverlay`), auto-review classifier (`wild-mode.server.ts` `wildClassifierReview`) → `recordSpend(sessionTokenBudget().ledger, usage)`. Pins: NEW `src/lib/budget-coverage.test.ts` (+ a behavioral classifier leg).
+- **CF-SE2-4** — verified resolved on bytes at HEAD (`recordSpendWithinCap` IS exported at `token-ledger.ts:540`; the §12 doc already carries the "disproven on bytes" correction) — no edit.
+- **§1 re-verification** — grep the `engine.ts` hang-fix markers + run `settle.test.ts` + `wild-step.test.ts` foreground.
+
+## D3 file claims (additive to C3's list; coordination note)
+
+- `src/lib/packet.ts` + `src/lib/packet.test.ts` — CF-SE2-3a envelope explicitness (unclaimed by any 312/313 lane).
+- `src/lib/wild-mode.server.ts` — reviewer spend wiring only (unclaimed).
+- `scripts/cli-run-busy.test.mjs` — **NEW**: M6-04 pins.
+- `src/lib/budget-coverage.test.ts` — **NEW**: CF-SE2-3b pins.
+- (No change planned to `cli-exit-taxonomy.test.mjs`: the run-verb refusal sets its code literally in the case arm, the emit/repair precedent — keeps C2's scripts-suite region untouched.)
+
+## Evidence ledger (appended as items land)

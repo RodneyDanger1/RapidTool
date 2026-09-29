@@ -40,6 +40,10 @@
 //      REAL injected faults (`--import` shim gated on the CLI's own listeners,
 //      no startup race; a deadline fallback still faults a REGRESSED CLI so
 //      the pin goes red loudly instead of hanging).
+//   9. (312 · C2/D2, behavioral spawn) the `wild` verb's onEvent hop: a real
+//      keyless `wild --start` must land wild.step_* rows in the NDJSON log
+//      while the success envelope stays the plain shape (the hop is
+//      emission-side only — it must never alter envelope or project bytes).
 //
 // House rules honored: cwd-independent (paths via import.meta.url — a
 // scripts-leg test must not depend on process cwd); failure messages name the
@@ -48,7 +52,7 @@
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -463,5 +467,93 @@ test("M6-05/06 (310 · B1) — an injected uncaught exception exits CODED (exit 
     inject: `setImmediate(() => { throw new Error("B1 pin: injected uncaught exception"); });`,
   });
   assertNetEnvelope(out, "B1 pin: injected uncaught exception");
+});
+
+// ---------------------------------------------------------------------------
+// Leg 9 (312 · C2/D2 — the B-02 CLI hop, BEHAVIORAL spawn). The `wild` verb's
+// `opts.onEvent → cliLogEvent` hop is the only production path carrying the
+// headless wild.step_* telemetry into the NDJSON log — before 312 the seam
+// existed but no caller passed a sink, so the rows never landed. This leg
+// spawns a REAL keyless `wild --start` (deterministic floor: no key ⇒ no
+// network, the loop runs a few real steps) and reads the rows back from
+// resolveLogDir(project) = <project dir>/.rapidtool/logs. The envelope must
+// stay the plain success shape — the hop is emission-side only.
+// ---------------------------------------------------------------------------
+test("312 B-02 — the wild verb's onEvent hop lands wild.step_* rows in the NDJSON log; envelope unchanged", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-wildhop-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  try {
+    const proj = join(cwd, "wildhop.json");
+    const created = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        CLI_PATH,
+        "create",
+        "--brief",
+        "Build a field-service dispatch board for HVAC: jobs, techs, parts, same-day reroutes.",
+        "--name",
+        "WildHop",
+        "--out",
+        proj,
+      ],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `create must exit 0.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+
+    // Keyless --start: the classifier cannot self-approve, so the bounded loop
+    // runs REAL steps (deterministic floor — no key ⇒ no network).
+    const res = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "wild", "--project", proj, "--start", "--steps", "2"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(res.error, undefined, `spawn failed: ${String(res.error)}`);
+    assert.equal(res.status, 0, `wild --start must exit 0.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+    const json = JSON.parse(res.stdout);
+    assert.equal(json.ok, true);
+    assert.equal(json.action, "start");
+    assert.equal(json.exit_code, res.status, "the envelope's exit_code must equal the process exit");
+    assert.ok(typeof json.steps === "number" && json.steps >= 1, "the envelope still reports the executed step count");
+    assert.ok(!("error" in json), "a success envelope never carries `error` (185-H1) — telemetry must not alter the envelope");
+
+    // The hop's rows: resolveLogDir(project) = <project dir>/.rapidtool/logs.
+    const logDir = join(cwd, ".rapidtool", "logs");
+    assert.ok(
+      existsSync(logDir),
+      `the NDJSON log dir must exist at ${logDir} — did the wild verb lose its ensureRtAppender()/cliLogEvent hop?`,
+    );
+    const logText = readdirSync(logDir)
+      .filter((f) => f.endsWith(".ndjson"))
+      .map((f) => readFileSync(join(logDir, f), "utf8"))
+      .join("\n");
+    const rows = logText
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+    const stepRows = rows.filter((r) => typeof r.event === "string" && r.event.startsWith("wild.step"));
+    assert.ok(
+      stepRows.length >= 2,
+      `expected wild.step_* telemetry rows in the NDJSON log, got ${stepRows.length} ` +
+        `(events: ${rows.map((r) => r.event).join(", ")})`,
+    );
+    assert.ok(
+      stepRows.some((r) => r.event === "wild.step_start"),
+      "wild.step_start must reach the NDJSON log via the onEvent hop",
+    );
+    assert.ok(
+      stepRows.some((r) => r.event === "wild.step_ok" || r.event === "wild.step_paused" || r.event === "wild.step_error"),
+      "the step's terminal row must reach the NDJSON log (the hop must not drop terminal emits)",
+    );
+    assert.ok(
+      stepRows.every((r) => r.host === "cli" && r.scope === "wild-step"),
+      "every wild.step_* row must be a CLI-stamped wild-step row (makeCliRow)",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 

@@ -440,7 +440,10 @@ export function PipelineRail({
   const stall = snap.ring.stall;
 
   return (
-    <section className="border-b border-line px-5 py-3" aria-label="Pipeline telemetry">
+    <section className="border-b border-line px-5 py-3" aria-label="Pipeline telemetry and phase detail">
+      {/* W312 D4 · a11y extra: round 1's interim label ("Pipeline telemetry")
+          named only the telemetry rows; this section also hosts the interactive
+          PhaseRecordDetail the merged strip opens — the label now names both. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-mono text-xs font-medium tracking-widest text-faint uppercase">Pipeline</p>
         {/* W312 C4: the `done/total sealed · pct%` counter that used to repeat
@@ -458,7 +461,15 @@ export function PipelineRail({
           row remounts it and `.nowline-fresh` replays the arrival wash (the
           existing 2s `rtSnapshot()` poll drives both; no new timer). The live
           region stays a STABLE node and only its text changes — remounting the
-          region itself would suppress announcements. */}
+          region itself would suppress announcements.
+          W312 D4 · aria-atomic DECISION (C4's note): kept "true" deliberately.
+          The region holds exactly one keyed row and the key changes ONLY when a
+          new event's ts lands — so "the whole region" IS "the one new event":
+          announcements stay incremental (one landing → one announcement; the
+          poll's no-op re-renders mutate nothing). Atomicity also keeps the row
+          one coherent sentence instead of AT-dependent fragments — both
+          settings are announcement-equivalent for a single-row region; "true"
+          was chosen for cross-AT determinism. */}
       <div role="log" aria-live="polite" aria-atomic="true" aria-label="Newest pipeline event">
         <div
           key={now.ts === null ? "idle" : String(now.ts)}

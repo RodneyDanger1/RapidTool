@@ -104,6 +104,42 @@ export function isMainModule(moduleUrl) {
   }
 }
 
+/**
+ * Reap the spawned command's WHOLE tree in response to a signal this wrapper
+ * caught. M6-03 (312 · D3): on win32 `child.kill(signal)` terminates only the
+ * DIRECT child — the cmd.exe shim layer (`shell: true` spawns) and every
+ * process it started (vite, its workers) survive as orphans (308 map6 probe:
+ * child 10696 + grandchild 15468 still alive after the wrapper kill;
+ * heartbeats 14→27). `taskkill /pid <pid> /T /F` takes the whole tree — the
+ * same pattern node-runner.server.ts:164-171 documents. POSIX keeps
+ * `child.kill(signal)`: a real signal to a directly-spawned child is the
+ * correct, graceful path there. Best-effort: never throws; when taskkill
+ * itself cannot launch, the direct kill still fires.
+ */
+export function reapChildTree(child, signal, spawnFn = spawn) {
+  if (process.platform === "win32" && child && Number.isInteger(child.pid) && child.pid > 0) {
+    try {
+      const killer = spawnFn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      if (killer && typeof killer.on === "function") {
+        killer.on("error", () => {
+          try {
+            child.kill(signal);
+          } catch {
+            /* already gone — nothing to kill */
+          }
+        });
+      }
+      return;
+    } catch {
+      /* taskkill not launchable — fall through to the direct kill */
+    }
+  }
+  child.kill(signal);
+}
+
 function main(argv) {
   const [command, ...args] = argv;
   if (!command) {
@@ -119,8 +155,11 @@ function main(argv) {
   const useShell = process.platform === "win32" && /^[A-Za-z0-9_-]+$/.test(command);
   const child = spawn(command, args, { stdio: "inherit", env, shell: useShell });
   // The dev server is long-running and is stopped by signalling this wrapper.
+  // M6-03 (312 · D3): each caught signal reaps the child's WHOLE tree — a
+  // direct-child kill here used to strand the win32 descendants (see
+  // reapChildTree).
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-    process.on(signal, () => child.kill(signal));
+    process.on(signal, () => reapChildTree(child, signal));
   }
   child.on("error", (err) => {
     console.error(`[with-app-env] failed to run ${command}:`, err?.message || err);

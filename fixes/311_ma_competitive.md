@@ -1,4 +1,5 @@
 # fixes/311_ma_competitive.md — RESCUED from the auditor's final summary (file write hit the iteration cap; content verbatim)
+> **RESCUED-header correction (2026-09-29):** this file is on disk and complete — content verbatim from the auditor's final summary as pasted by the parent; the stale "file not written / not yet on disk" self-references below describe the original iteration-cap moment, not this file's state.
 # MA-COMPETITIVE — landscape, verdict, outshine-moves
 
 ## HONEST STATUS: deliverable file NOT written

@@ -20,7 +20,7 @@ import { compileAgentPacket } from "./packet.ts";
 import { hydrateProject, stampPacket } from "./engine.ts";
 import { phaseHandoff } from "./handoff.ts";
 import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
-import type { Project } from "./types.ts";
+import type { Project, WildParkInfo, WildStepSummary } from "./types.ts";
 
 const fullRun = () => runHeadless(seedProject(), ALL_PHASES);
 
@@ -758,6 +758,93 @@ describe("174-3 preserveWildRun hydrate", () => {
       assert.equal(keep.project.wildRun?.active, true);
       assert.equal(keep.project.wildRun?.startedAt, 1);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // 312 D2 (B-01): the 306-F5 records must ride save→load VERBATIM — the 308
+  // tracer found the hydrate rebuild ERASED `park` + `lastStep`, and the
+  // session-break force-stop could leak a stale park onto a stopped surface.
+  // The engine guards (usableWildPark / usableWildStepSummary) keep right-
+  // shaped records by value, so a JSON round-trip preserves them field-for-field.
+  // -------------------------------------------------------------------------
+  const PARK_RT: WildParkInfo = {
+    code: "RT_E_LLM_NOT_CONFIGURED",
+    event: "wild.paused",
+    reason: "Auto-Review classifier not configured.",
+    unlock: "configure-key",
+    unlockText:
+      "Configure the LLM key (DEEPSEEK_API_KEY) so Auto-Review can verdict, then resume the run.",
+    resumePhase: 4,
+    resumeAction: "gate",
+    at: 1_740_000_000_000,
+  };
+  const LAST_STEP_RT: WildStepSummary = {
+    outcome: "paused",
+    action: "park",
+    phase: 4,
+    completedPhase: null,
+    advancedTo: null,
+    artifacts: 0,
+    nextPhase: 4,
+    nextAction: "park",
+    park: PARK_RT,
+  };
+
+  it("312 D2 (B-01): park + lastStep ride save→load verbatim; the session-break stop clears the park", () => {
+    const parked: Project = {
+      ...seedProject(),
+      wildMode: true,
+      wildRun: {
+        active: true,
+        phase: 4,
+        startedAt: 17,
+        lastAutoLog: "paused at P4",
+        lastAutoAt: 18,
+        stoppedAt: null,
+        pause: true,
+        park: PARK_RT,
+        lastStep: LAST_STEP_RT,
+      },
+    };
+    const json = exportProjectJson(parked);
+
+    // preserveWildRun (the CLI pause/resume/step path): active stays true and
+    // both 306-F5 records survive field-for-field.
+    const keep = importProject(json, { preserveWildRun: true });
+    assert.equal(keep.ok, true);
+    if (!keep.ok) return;
+    assert.equal(keep.project.wildRun?.active, true, "a preserved active run stays active");
+    assert.equal(keep.project.wildRun?.pause, true);
+    assert.deepEqual(
+      keep.project.wildRun?.park,
+      PARK_RT,
+      "park must ride the round-trip verbatim (308 B-01: the rebuild used to erase it)",
+    );
+    assert.deepEqual(
+      keep.project.wildRun?.lastStep,
+      LAST_STEP_RT,
+      "lastStep must ride the round-trip verbatim (308 B-01 key-erasure class)",
+    );
+
+    // Session break (browser/default hydrate): the driver died with the session —
+    // the forced stop marks stopped AND clears the park ("present iff pause");
+    // the old rebuild leaked the stale record onto the stopped surface.
+    const def = importProject(json);
+    assert.equal(def.ok, true);
+    if (!def.ok) return;
+    assert.equal(def.project.wildRun?.active, false, "session-break hydrate still force-stops");
+    assert.equal(def.project.wildRun?.pause, false);
+    assert.equal(def.project.wildRun?.park ?? null, null, "the forced stop clears the park");
+    assert.equal(typeof def.project.wildRun?.stoppedAt, "number");
+    assert.ok(
+      (def.project.logs ?? []).some((l) => l.event === "wild.stop"),
+      "the forced stop must say so (wild.stop log row — session-break honesty)",
+    );
+    assert.deepEqual(
+      def.project.wildRun?.lastStep,
+      LAST_STEP_RT,
+      "lastStep is history — the stop keeps it; only the pause-bound park clears",
+    );
   });
 });
 

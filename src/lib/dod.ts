@@ -91,6 +91,14 @@ const classifyRowSeat = (row: HitlDecision): RowSeatClaim => {
   if ((tag === "harness" || tag === "autopilot") && row.decidedBy === "autopilot") {
     return { kind: "seat", seat: { decidedBy: "autopilot", seat: tag } };
   }
+  // 313 D1 (312 C1 design): the wild agent-seal seat — the keyed Auto-Review
+  // classifier is the approver of record for the sealed approvals, and its
+  // rows carry `[seat agent-seal]` with `decidedBy: "autopilot"`. Without this
+  // arm the tag would classify as `tagged-unknown` and the stock-gate
+  // *approved criteria (p4/p5/p8/p9) would fail closed on every sealed row.
+  if (tag === "agent-seal" && row.decidedBy === "autopilot") {
+    return { kind: "seat", seat: { decidedBy: "autopilot", seat: "agent-seal" } };
+  }
   return { kind: "tagged-unknown" };
 };
 

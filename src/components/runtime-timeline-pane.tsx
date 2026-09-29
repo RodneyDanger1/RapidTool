@@ -183,10 +183,13 @@ export function RuntimeTimelinePane() {
       {/* Disclosure body: kept mounted and `hidden` while collapsed (APG
           disclosure pattern) so `aria-controls` above always resolves to a
           real element instead of dangling on a conditional render. */}
+      {/* 311 §6 #6 (W312 D4): `bg-black/20|30` wells render as grey patches on
+          white in light theme; `bg-overlay/40` resolves through the theme token
+          (same fix de7deae landed for the console's wells). */}
       <div
         id="rt-timeline-body"
         hidden={!open}
-        className="mt-3 rounded-md border border-line bg-black/20 p-3"
+        className="mt-3 rounded-md border border-line bg-overlay/40 p-3"
       >
         <p className="font-mono text-[11px] text-muted">
           rows {summary.rows} · completed {summary.ok} · failed {summary.failed} · paused{" "}
@@ -224,7 +227,7 @@ export function RuntimeTimelinePane() {
               return (
                 <li
                   key={`${r.line}-${r.event ?? "raw"}`}
-                  className="rounded-md border border-line bg-black/20 px-3 py-2"
+                  className="rounded-md border border-line bg-overlay/40 px-3 py-2"
                 >
                   <span className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
                     <span className="text-faint tabular-nums">L{r.line}</span>
@@ -254,7 +257,7 @@ export function RuntimeTimelinePane() {
           <summary className="cursor-pointer font-mono text-[11px] text-muted">
             Raw NDJSON — the exact {lines.length} line{lines.length === 1 ? "" : "s"} parsed
           </summary>
-          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-black/30 p-2 font-mono text-[10px] leading-relaxed text-muted">
+          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-overlay/40 p-2 font-mono text-[10px] leading-relaxed text-muted">
             {lines.join("\n")}
           </pre>
         </details>

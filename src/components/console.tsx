@@ -3901,7 +3901,15 @@ function PhaseRail({
   onViewPhase: (phase: PhaseId) => void;
 }) {
   return (
-    <nav className="border-b border-line lg:border-r lg:border-b-0" aria-label="Phases">
+    <nav className="min-w-0 border-b border-line lg:border-r lg:border-b-0" aria-label="Phases">
+      {/* W312 D4 · 311 §6 #1 completion (measured): the strip below `lg` is a
+          horizontal scroller, but this nav is a GRID ITEM and kept its
+          automatic min-content minimum — 13 `min-w-[148px]` cards with
+          `truncate` titles — blowing the single mobile column out to ~2 955px
+          and cutting every center-column line off-screen at 390px (probe:
+          docScrollWidth 2955; instrumented `min-width: 0` on this nav → 390,
+          the scroller then scrolls its 2 044px of cards inside the viewport).
+          `min-w-0` lets the item shrink to the track; `lg` columns unchanged. */}
       <div className="flex gap-2 overflow-x-auto px-3 py-3 lg:block lg:space-y-0.5 lg:overflow-visible lg:px-3 lg:py-4">
         {PHASES.map((p) => {
           const rec = project.phases[p.id];

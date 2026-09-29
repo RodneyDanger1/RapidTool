@@ -44,6 +44,7 @@ import { evaluatePolicy } from "./policy.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
 import { fnv1a } from "./algorithms.ts";
 import type { PhaseId, Project } from "./types.ts";
+import type { RtEventSeed } from "./rt-events.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), "rapidtool-headless-"));
@@ -2375,6 +2376,91 @@ describe("185-H1 wild lifecycle — ok:true never carries error", () => {
     assert.equal(stopAgain.changed, false);
     assert.equal("error" in stopAgain, false);
     assert.equal(stopAgain.note, "Wild run is already stopped.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 312 D2 (B-01/M4-06 + the C2 stop completion): the park-record invariants at
+// the headless CLI read sites. Every pause stamps a machine-readable record
+// (wildOperatorPark — its first call site is wildPauseRun), resume CLEARS it
+// ("present iff pause"), and stop must never let a carried park ride the
+// rest-spread onto a stopped run (the one gap the b3161da batch missed).
+// ---------------------------------------------------------------------------
+describe("312 D2 — park present iff pause across the headless wild lifecycle", () => {
+  it("pause stamps the uncoded operator park; resume clears it; stop clears it and keeps it cleared", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "WildParkClear" });
+    const active: Project = {
+      ...base,
+      wildMode: true,
+      wildRun: {
+        active: true,
+        phase: 4,
+        startedAt: 1,
+        lastAutoLog: "",
+        lastAutoAt: 1,
+        stoppedAt: null,
+        pause: false,
+      },
+    };
+
+    const paused = await wildPauseRun(active);
+    assert.equal(paused.ok, true);
+    if (!paused.ok) return;
+    assert.equal(paused.project.wildRun?.pause, true, "pause keeps active, sets pause");
+    const park = paused.project.wildRun?.park;
+    assert.ok(park, "the CLI pause must stamp its park record (M4-06 — wildOperatorPark's first call site)");
+    assert.equal(park.code, null, "operator pauses are uncoded");
+    assert.equal(park.unlock, "resume", "what unlocks an operator pause is a plain resume");
+    assert.equal(typeof park.at, "number");
+
+    // B-01: resume clears the record — a preserved park must never linger on a live run.
+    const resumed = await wildResumeRun(paused.project);
+    assert.equal(resumed.ok, true);
+    if (!resumed.ok) return;
+    assert.equal(resumed.project.wildRun?.pause, false);
+    assert.equal(resumed.project.wildRun?.park ?? null, null, "resume clears the park");
+
+    // Re-pause, then STOP the park-carrying paused run: the stop must clear the
+    // park rather than let the spread leak it onto a stopped surface.
+    const repaused = await wildPauseRun(resumed.project);
+    assert.equal(repaused.ok, true);
+    if (!repaused.ok) return;
+    assert.ok(repaused.project.wildRun?.park, "re-pause stamps the park again");
+    const stopped = await wildStopRun(repaused.project);
+    assert.equal(stopped.ok, true);
+    if (!stopped.ok) return;
+    assert.equal(stopped.project.wildRun?.active, false);
+    assert.equal(stopped.project.wildRun?.pause, false);
+    assert.equal(
+      stopped.project.wildRun?.park ?? null,
+      null,
+      "stop clears the carried park (never rides the spread onto a stopped run)",
+    );
+    assert.equal(typeof stopped.project.wildRun?.stoppedAt, "number");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 312 D2 (B-02): the headless legs must THREAD the caller's onEvent sink —
+// every caller dropped it, so finishStep's wild.step_* telemetry never fired
+// on the CLI path. Emission-side only (project bytes unchanged); this pin
+// asserts the wildStartRun caller seam actually receives the step seeds.
+// ---------------------------------------------------------------------------
+describe("312 D2 — wildStartRun threads the caller's onEvent sink (B-02)", () => {
+  it("a keyless macro-run step emits its wild.step_* seeds through opts.onEvent", async () => {
+    const p = createProject({ brief: FIXTURE_BRIEF, name: "WildSink" });
+    const rows: RtEventSeed[] = [];
+    const res = await wildStartRun(p, { maxSteps: 1, onEvent: (seed) => rows.push(seed) });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.ok(
+      rows.some((r) => r.event === "wild.step_start"),
+      `wild.step_start must reach the caller's sink (got: ${rows.map((r) => r.event).join(", ") || "<none>"})`,
+    );
+    assert.ok(
+      rows.some((r) => r.event === "wild.step_ok" || r.event === "wild.step_paused" || r.event === "wild.step_error"),
+      `the step's terminal row must reach the caller's sink (got: ${rows.map((r) => r.event).join(", ") || "<none>"})`,
+    );
   });
 });
 

@@ -11,7 +11,7 @@ import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { dedupeMemoryIds, emptyProject, hydrateProject } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
-import type { Artifact, ChatLogRow, HitlRequest, JsonLog, PhaseId, Project } from "./types.ts";
+import type { Artifact, ChatLogRow, HitlRequest, JsonLog, PhaseId, Project, WildParkInfo } from "./types.ts";
 
 class MemoryStorage {
   private m = new Map<string, string>();
@@ -1055,6 +1055,66 @@ test("S2: toggleWildPause resumes and re-pauses an active run; stopWildRun deact
   const stopped = current(p.id).wildRun!;
   assert.equal(stopped.active, false);
   assert.equal(stopped.pause, false, "stop clears the pause flag too");
+  assert.equal(typeof stopped.stoppedAt, "number");
+});
+
+test("312 D2 (M4-06/B-01): operator toggle stamps an uncoded park on pause, clears it on resume; stop never leaks it", () => {
+  const p = install(seedProject());
+  useRapid.getState().setWildMode(p.id, true);
+  // A run paused the way the driver parks it — the operator park record riding
+  // the pause (uncoded {code:null, unlock:"resume"} — the wildOperatorPark shape).
+  const rider: WildParkInfo = {
+    code: null,
+    event: null,
+    reason: "Wild run paused from the console.",
+    unlock: "resume",
+    unlockText: "Resume the run to retry the step.",
+    resumePhase: 4,
+    resumeAction: "execute",
+    at: 1,
+  };
+  useRapid.setState((s) => ({
+    projects: s.projects.map((x) =>
+      x.id === p.id
+        ? {
+            ...x,
+            wildRun: {
+              active: true,
+              phase: 4,
+              startedAt: 1,
+              lastAutoLog: "",
+              lastAutoAt: 1,
+              stoppedAt: null,
+              pause: true,
+              park: rider,
+            },
+            status: "awaiting_hitl",
+          }
+        : x,
+    ),
+  }));
+
+  // Resume: park is present iff pause — the toggle must CLEAR the record.
+  useRapid.getState().toggleWildPause(p.id);
+  const resumed = current(p.id).wildRun!;
+  assert.equal(resumed.pause, false, "one toggle resumes a paused run");
+  assert.equal(resumed.park ?? null, null, "resume clears the park (present iff pause)");
+
+  // Re-pause: the operator toggle stamps its own uncoded record (M4-06).
+  useRapid.getState().toggleWildPause(p.id);
+  const repaused = current(p.id).wildRun!;
+  assert.equal(repaused.pause, true, "second toggle re-pauses");
+  assert.ok(repaused.park, "an operator pause stamps a park record");
+  assert.equal(repaused.park!.code, null, "operator pauses are uncoded");
+  assert.equal(repaused.park!.unlock, "resume", "what unlocks an operator pause is a plain resume");
+  assert.equal(typeof repaused.park!.at, "number");
+
+  // Stop: the park must not ride the spread onto a stopped run (the C2 gap class).
+  useRapid.getState().stopWildRun(p.id);
+  const stopped = current(p.id).wildRun!;
+  assert.equal(stopped.active, false);
+  assert.equal(stopped.pause, false, "stop clears the pause flag too");
+  assert.equal(stopped.park ?? null, null, "stop clears the park");
   assert.equal(typeof stopped.stoppedAt, "number");
 });
 

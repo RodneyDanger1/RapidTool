@@ -49,7 +49,7 @@
  */
 export type PolicySeat =
   | { decidedBy: "human"; seat: "human-cli-i-am-human" }
-  | { decidedBy: "autopilot"; seat: "harness" | "autopilot" };
+  | { decidedBy: "autopilot"; seat: "harness" | "autopilot" | "agent-seal" };
 
 /** The registered action ids. Anything else is default-DENY. */
 export type PolicyAction = "hitl.approve" | "hitl.force" | "tree.emit" | "repair.apply" | "fixtures.approve";
@@ -162,7 +162,13 @@ function classifySeat(actor: unknown): SeatClaim {
   if (decidedBy === "human" && seat === "human-cli-i-am-human") {
     return { kind: "seat", seat: { decidedBy: "human", seat: "human-cli-i-am-human" } };
   }
-  if (decidedBy === "autopilot" && (seat === "harness" || seat === "autopilot")) {
+  // 313 D1 (312 C1 design): `agent-seal` is the autopilot-class seat the wild
+  // agent-seal path mints — the keyed Auto-Review classifier is the approver of
+  // record for the stock HITL gates, and the row's `[seat agent-seal]` tag +
+  // `decidedVia.label` ("autopilot/agent-seal") name exactly that. It is a
+  // MACHINE seat: it runs the same Rule A as harness/autopilot (never the
+  // human-only Rule B), so it can never force past a forceHuman gate.
+  if (decidedBy === "autopilot" && (seat === "harness" || seat === "autopilot" || seat === "agent-seal")) {
     return { kind: "seat", seat: { decidedBy: "autopilot", seat } };
   }
   return { kind: "unknown", claim: `${clip(String(decidedBy))}/${clip(String(seat))}` };

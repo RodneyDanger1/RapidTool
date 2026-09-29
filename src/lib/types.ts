@@ -145,8 +145,11 @@ export type JsonLog = {
  *  - "human-retry":   a human decision is required (fix/regenerate/retry), then resume.
  *  - "resume":        plain resume retries the step (no repair named).
  *  - "operator":      the run state itself looks wrong — inspect, repair, resume.
+ *  - "agent-seal":    resume the sealed run with a working keyed classifier
+ *                     (313 D1) — the agent seal's Auto-Review classifier must
+ *                     consent before THIS gate can be approved unattended.
  */
-export type WildParkUnlock = "configure-key" | "human-gate" | "human-retry" | "resume" | "operator";
+export type WildParkUnlock = "configure-key" | "human-gate" | "human-retry" | "resume" | "operator" | "agent-seal";
 
 /** What the NEXT wild step acts on (the re-entry edge). "park" = the next call
  *  parks again (locked/rejected edges); "none" = terminal / nothing to do. */

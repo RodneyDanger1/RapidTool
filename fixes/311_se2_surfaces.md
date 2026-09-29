@@ -1,4 +1,5 @@
 # fixes/311_se2_surfaces.md — RESCUED from the auditor's final summary (file write hit the iteration cap; content verbatim)
+> **RESCUED-header correction (2026-09-29):** this file is on disk and complete — content verbatim from the auditor's final summary as pasted by the parent; the stale "file not written / not yet on disk" self-references below describe the original iteration-cap moment, not this file's state.
 # SE2 — surfaces/ops + the two vision-gap designs
 
 **CAP HIT — `fixes/311_se2_surfaces.md` was NOT written (no tool calls left). Zero product edits, zero keyed calls, tree clean at `b3161da` (verified).** Scribe the dossier below verbatim into `fixes/311_se2_surfaces.md`. Two side effects to clean: background dev server (session `proc_03d5bc8b2e80`, pid 12908, port 8080 never bound in my window) and temp probe `C:\Users\mnril\AppData\Local\Temp\se2_mock_probe.mjs` (outside repo).

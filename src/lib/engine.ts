@@ -8,11 +8,12 @@ import { classifyError, ERROR_CODES } from "./errors.ts";
 import { flattenStack } from "./rt-events.ts";
 import type { RtEventSeed } from "./rt-events.ts";
 import { compileAgentPacket } from "./packet.ts";
-// C1 (312): the seat-label vocabulary for the agent-seal provenance rows —
-// policy.ts is a pure leaf (no engine import), so this pulls no cycle in.
-// C1's seatLabel import was staged but never wired (the agent-seal path landed
-// only as an optional `decidedVia?` pass-through) — removed to keep the tree
-// typecheck-clean; the seal work resumes in the next round.
+// 313 D1 (312 C1 design): the seat-label vocabulary for the agent-seal
+// provenance rows — policy.ts is a pure leaf (no engine import), so this pulls
+// no cycle in. The seal's approval arms below mint `decidedVia.label` from
+// here ("autopilot/agent-seal"), the SAME vocabulary dod.ts cross-checks
+// against the row's `[seat agent-seal]` tag.
+import { seatLabel } from "./policy.ts";
 import {
   bootstrapMemory,
   feasibilityScorecard,
@@ -3781,6 +3782,41 @@ export type WildStepOptions = {
    *  test/dev seam — pass a small value to pin the bound. Non-finite/non-
    *  positive values fall back to the default (settle.ts normalizeMs). */
   reviewTimeoutMs?: number;
+  /**
+   * 313 D1 (312 C1 design) — the AGENT SEAL. `agentSeal: true` opts this run
+   * into the sealed unattended policy for closures that would otherwise wait
+   * on a human: gate approvals mint the coded classifier approver of record
+   * (`[seat agent-seal]` + `decidedVia` = seatLabel("autopilot/agent-seal"),
+   * NEVER a human seat), classifier REJECTS get the bounded retry below, and
+   * hard-DoD reds get ONE repair pass before parking. Absent (the default) ⇒
+   * every arm is byte-identical to the pre-seal engine — the seal is opt-in
+   * consent, never a silent widening.
+   */
+  agentSeal?: boolean;
+  /** 313 D1 — bounded classifier-REJECT retries under the seal (default
+   *  `WILD_REVIEW_MAX_RETRIES` = 2). Only REJECT verdicts from the CLASSIFIER
+   *  are re-asked (the deterministic DoD floor gives the same bytes, and a
+   *  provider error is not a verdict) — after the bound the run parks with the
+   *  last verdict as the recorded reason. Non-integer/negative values clamp
+   *  to 0 (= no retry) so a hostile option can never loop. */
+  maxReviewRetries?: number;
+  /** 313 D1 — base backoff between reject retries (ms), doubling per attempt
+   *  like `expandBriefWithBackoff` (500 ⇒ 500/1000/2000…). Default
+   *  `WILD_REVIEW_RETRY_BACKOFF_MS`; the test seam passes ~1 to keep pins fast. */
+  retryBackoffMs?: number;
+  /** 313 D1 — test seam for the P7 live-research edge (mirrors `p6Edge`).
+   *  Present ⇒ phase 7 executes through THIS function in ANY key state; absent
+   *  ⇒ the production guard (keyed ⇒ `wildLiveEdge` — the same live layer the
+   *  sequential driver runs, with the documented `meta.liveUnavailable`
+   *  waiver when live cannot run; keyless ⇒ the byte-identical floor). */
+  liveEdge?: (p: Project) => Promise<Project>;
+  /** 313 D1 — test seam for the ONE DoD-repair pass (also fired by the seal).
+   *  Present ⇒ a hard-DoD red calls THIS instead of re-running the phase's own
+   *  execution edge; return a repaired project whose exit gate is green, or
+   *  `null` to keep the honest park. Absent ⇒ the production repair (a
+   *  non-floor execution edge re-runs once; a pure-floor phase parks honestly —
+   *  a blind identical re-run is not a repair, B-07). */
+  dodRepair?: (p: Project, phase: PhaseId) => Promise<Project | null>;
 };
 
 export function wildLog(p: Project, phase: PhaseId, level: JsonLog["level"], event: string, detail: string): Project {
@@ -3817,6 +3853,12 @@ const WILD_UNLOCK_TEXT: Record<WildParkUnlock, string> = {
   "human-retry": "A human decision is required (fix, regenerate or retry), then resume the run.",
   resume: "Resume the run to retry the step.",
   operator: "Inspect the run state, repair it, then resume the run.",
+  // 313 D1: the sealed-run unlock — this park is a gate the AGENT SEAL could
+  // not consent to (classifier not configured / not reachable on this host).
+  // Unlike the plain keyless hint, the instruction names the seal: the run is
+  // committed to classifier-consented approvals, so a bare key is what unlocks.
+  "agent-seal":
+    "The agent seal could not consent (keyed classifier unavailable) — configure the classifier (DEEPSEEK_API_KEY), then resume the sealed run.",
 };
 
 /**
@@ -3895,6 +3937,36 @@ export function wildPause(
   return wildLog(stamped, phase, level, event, detail);
 }
 
+/** 313 D1: the seal's ONE DoD-repair pass (both call sites: wildApproveGate
+ *  post-approval / wildLeavePhase advance). Re-runs the phase's NON-FLOOR
+ *  execution edge exactly once (the keyed P6 synthesis edge today; the injected
+ *  seams) so a spurious red that a fresh attempt clears does not park an
+ *  unattended run. A pure-floor phase returns an honest null — a blind
+ *  identical re-run is not a repair (B-07). Never fabricates: the re-run's
+ *  REAL gate verdict decides. */
+async function wildDodRepairOnce(
+  project: Project,
+  phase: PhaseId,
+  opts: WildStepOptions | undefined,
+): Promise<{ repaired: Project | null; detail: string }> {
+  const edge = phase === 6 ? opts?.p6Edge : undefined;
+  if (typeof edge !== "function") {
+    return { repaired: null, detail: `no non-floor repair edge for P${phase} — honest park` };
+  }
+  try {
+    const after = await edge(project);
+    const g = runGate(after, phase);
+    return g.pass
+      ? { repaired: after, detail: "repair pass re-ran the edge; gate cleared" }
+      : { repaired: null, detail: "repair pass re-ran the edge; gate still red" };
+  } catch (err) {
+    return {
+      repaired: null,
+      detail: `repair pass failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 /** runGate output in the serializable shape the classifier consumes. */
 function wildGateInfo(
   project: Project,
@@ -3926,6 +3998,20 @@ function wildReviewCtx(
  * `WildStepOptions.reviewTimeoutMs` (test/dev seam).
  */
 export const WILD_REVIEW_TIMEOUT_MS = 120_000;
+
+/**
+ * 313 D1 (312 C1 design) — the bounded classifier-REJECT retry defaults. A
+ * single reject verdict from one classifier sample is the difference between a
+ * completed unattended run and a human wake-up, so under the agent seal the
+ * SAME classifier is re-asked on the same context up to N extra times with
+ * exponential backoff (expandBriefWithBackoff's shape: base 500 ms, doubling
+ * per attempt). N=2 retries ⇒ at most 3 classifier calls on a persistent
+ * reject, then the honest park — the bound makes "flaky verdict" survivable
+ * without turning "the phase is bad" into a loop. These are ALSO the values a
+ * caller may override per step (`maxReviewRetries` / `retryBackoffMs`).
+ */
+export const WILD_REVIEW_MAX_RETRIES = 2;
+export const WILD_REVIEW_RETRY_BACKOFF_MS = 500;
 
 /**
  * The honest reviewer for hosts that cannot load the Node-side classifier
@@ -3963,6 +4049,13 @@ async function resolveWildReviewer(provided?: WildReviewer): Promise<WildReviewe
   }
 }
 
+/** 313 D1: the resolved shape of ONE review decision (extracted so the
+ *  bounded-retry wrapper and the plain resolver share it verbatim). */
+type WildReviewDecision =
+  | { kind: "verdict"; verdict: "approve" | "reject"; feedback: string; source: "classifier" | "dod" }
+  | { kind: "unconfigured-gate" }
+  | { kind: "error"; error: string; code?: "RT_E_LLM_TIMEOUT" };
+
 /**
  * Resolve the reviewer for one decision. Classifier ok → its verdict verbatim.
  * Classifier not-configured → deterministic DoD floor verdict for advance
@@ -3978,11 +4071,7 @@ async function resolveWildReview(
   phase: PhaseId,
   reason: "advance" | "gate",
   timeoutMs: number = WILD_REVIEW_TIMEOUT_MS,
-): Promise<
-  | { kind: "verdict"; verdict: "approve" | "reject"; feedback: string; source: "classifier" | "dod" }
-  | { kind: "unconfigured-gate" }
-  | { kind: "error"; error: string; code?: "RT_E_LLM_TIMEOUT" }
-> {
+): Promise<WildReviewDecision> {
   const ctx = wildReviewCtx(project, phase, reason);
   let called: PromiseLike<WildClassifierResult> | WildClassifierResult;
   try {
@@ -4036,51 +4125,131 @@ async function resolveWildReview(
   return { kind: "error", error: res.error ?? "Auto-Review classifier failed" };
 }
 
+/** 313 D1 — clamp a caller-supplied retry bound: a real non-negative integer
+ *  wins (0 = no retry, exactly the plain resolver), anything else (negative,
+ *  fractional, NaN, hostile) clamps to 0, and absent uses the default. */
+function normalizeReviewRetries(v: unknown): number {
+  if (v === undefined) return WILD_REVIEW_MAX_RETRIES;
+  return typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
+}
+
+/** 313 D1 — clamp a caller-supplied backoff: finite positive ms are capped at
+ *  60 s per wait (a hostile value can delay, never wedge); anything else uses
+ *  the default base. */
+function normalizeReviewBackoff(v: unknown): number {
+  if (v === undefined) return WILD_REVIEW_RETRY_BACKOFF_MS;
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.min(v, 60_000) : WILD_REVIEW_RETRY_BACKOFF_MS;
+}
+
+/**
+ * 313 D1 (312 C1 design) — the bounded classifier-REJECT retry, used by the
+ * agent-seal arms of `wildApproveGate`/`wildLeavePhase` (expandBriefWithBackoff's
+ * shape, engine side). The SAME classifier is re-asked on the SAME context up
+ * to `maxReviewRetries` (default 2) extra times with exponential backoff —
+ * because one reject verdict from a single classifier sample is exactly the
+ * difference between a completed unattended run and a human wake-up.
+ *
+ * Retryable = a REJECT verdict whose source is the CLASSIFIER. Everything else
+ * returns immediately, honestly:
+ *   · approve / unconfigured-gate / error → not a reject, no blind re-run;
+ *   · a DoD-floor reject → deterministic (same bytes re-asked give the same
+ *     verdict) — re-running it would be theatre, never evidence.
+ * Every retry lands ONE `wild.review_retry` warn row on the returned project
+ * (the ledger shows the exact attempt count), and a persistent reject parks
+ * after the bound with the LAST verdict's feedback as the recorded reason.
+ * Returns the decision AND the (row-carrying) project so callers thread both.
+ */
+async function resolveWildReviewBounded(
+  reviewer: WildReviewer,
+  project: Project,
+  phase: PhaseId,
+  reason: "advance" | "gate",
+  opts?: WildStepOptions,
+): Promise<{ decision: WildReviewDecision; project: Project }> {
+  const retries = normalizeReviewRetries(opts?.maxReviewRetries);
+  const backoff = normalizeReviewBackoff(opts?.retryBackoffMs);
+  let p = project;
+  for (let attempt = 0; ; attempt += 1) {
+    const decision = await resolveWildReview(reviewer, p, phase, reason, opts?.reviewTimeoutMs);
+    const retryable =
+      decision.kind === "verdict" && decision.verdict === "reject" && decision.source === "classifier";
+    if (!retryable || attempt >= retries) return { decision, project: p };
+    const wait = backoff * 2 ** attempt;
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    p = wildLog(
+      p,
+      phase,
+      "warn",
+      "wild.review_retry",
+      `P${phase} review REJECTED (classifier) — retry ${attempt + 1}/${retries} after ${wait}ms backoff.`,
+    );
+  }
+}
+
 /** Record the review verdict on the ledger (feedback verbatim, >= 12 chars). */
 function wildReviewLog(p: Project, phase: PhaseId, source: string, feedback: string): Project {
   return wildLog(p, phase, "info", "wild.review", `P${phase} review (${source}): ${feedback}`);
 }
 
-/** Approve an open approval gate (classifier self-approval), with checks. */
+/** Approve an open approval gate (classifier self-approval), with checks.
+ *
+ *  313 D1 (312 C1 design) — the AGENT SEAL arms. `opts.agentSeal === true`
+ *  opts this step into the sealed unattended policy: the review resolves
+ *  through the bounded reject-retry, every approval mints the coded classifier
+ *  approver of record ([seat agent-seal] + decidedVia — never a human seat),
+ *  a classifier that cannot consent stamps the seal unlock class on its park,
+ *  and ONE DoD-repair pass runs before a hard-DoD park. Absent ⇒ every branch
+ *  below is byte-identical to the pre-seal engine.
+ */
 async function wildApproveGate(
   p: Project,
   phase: PhaseId,
   reviewer: WildReviewer,
   opts?: WildStepOptions,
 ): Promise<WildStepResult> {
+  const seal = opts?.agentSeal === true;
   const gate = p.hitl;
   if (!gate || gate.phase !== phase) {
     const paused = wildPause(p, phase, "error", "wild.error", `P${phase} approval gate mismatch — wild run paused.`);
     return { project: paused, outcome: "paused", ran: true, error: "Approval gate mismatch.", code: "RT_E_PHASE_ILLEGAL" };
   }
   // R3/B-03 parity: a human-only gate (failed P6 sandbox, P0 reframe) is never
-  // machine-approved — Wild Mode pauses and asks the human.
+  // machine-approved — Wild Mode pauses and asks the human. 313 D1: this stays
+  // true UNDER THE SEAL (C1's recorded reason, fixes/312 §S2): opening a
+  // forceHuman gate would need an `autopilot.force` policy rule, which would
+  // equally open the CLI `approve --force` door — the seal must not widen it.
+  // The sealed row below names that precise reason; the park stays human-gated.
   if (gate.forceHuman) {
-    const paused = wildPause(
-      p,
-      phase,
-      "warn",
-      "wild.paused_human",
-      `P${phase} gate is human-only (forceHuman) — Wild Mode cannot self-approve it.`,
-    );
+    const detail = seal
+      ? `P${phase} gate is human-only (forceHuman) — the agent seal refuses it (R3/B-03): opening it would need an autopilot.force policy rule that would also open the CLI 'approve --force' door. A human must decide.`
+      : `P${phase} gate is human-only (forceHuman) — Wild Mode cannot self-approve it.`;
+    const paused = wildPause(p, phase, "warn", "wild.paused_human", detail);
     return { project: paused, outcome: "paused", ran: true, error: `P${phase} is a human-only gate.`, code: "RT_E_GATE_PENDING" };
   }
-  const decision = await resolveWildReview(reviewer, p, phase, "gate", opts?.reviewTimeoutMs);
+  const resolved = seal
+    ? await resolveWildReviewBounded(reviewer, p, phase, "gate", opts)
+    : { decision: await resolveWildReview(reviewer, p, phase, "gate", opts?.reviewTimeoutMs), project: p };
+  const decision = resolved.decision;
+  const working = resolved.project;
   if (decision.kind === "unconfigured-gate") {
     const paused = wildPause(
-      p,
+      working,
       phase,
       "warn",
       "wild.paused_classifier",
       `Auto-Review classifier not configured — P${phase} approval gate cannot be self-approved.`,
+      // 313 D1: under the seal this pause carries its OWN unlock class — the
+      // run is committed to classifier-consented approvals, so the keyed
+      // classifier is what unlocks it (never a silent bare resume).
+      seal ? { code: "RT_E_LLM_NOT_CONFIGURED", unlock: "agent-seal" } : null,
     );
     return { project: paused, outcome: "paused", ran: true, error: "Classifier not configured.", code: "RT_E_LLM_NOT_CONFIGURED" };
   }
   if (decision.kind === "error") {
-    const paused = wildPause(p, phase, "error", "wild.error", `P${phase} Auto-Review failed: ${decision.error}`);
+    const paused = wildPause(working, phase, "error", "wild.error", `P${phase} Auto-Review failed: ${decision.error}`);
     return { project: paused, outcome: "paused", ran: true, error: decision.error, code: decision.code ?? "RT_E_LLM_REJECTED" };
   }
-  const next = wildReviewLog(p, phase, decision.source, decision.feedback);
+  const next = wildReviewLog(working, phase, decision.source, decision.feedback);
   if (decision.verdict === "reject") {
     const paused = wildPause(
       next,
@@ -4093,8 +4262,25 @@ async function wildApproveGate(
   }
   // Self-approval. approveHitl completes the phase and moves the cursor; the
   // ledger decision row records the machine actor + the classifier feedback as
-  // its note (T2 parity — nothing fabricated, nothing deleted).
-  const candidate = approveHitl(next, { decidedBy: "autopilot", note: decision.feedback.slice(0, 400) });
+  // its note (T2 parity — nothing fabricated, nothing deleted). 313 D1: under
+  // the seal the row additionally carries the CODED APPROVER OF RECORD — the
+  // `[seat agent-seal]` note tag + `decidedVia` (label from policy.seatLabel,
+  // the exact vocabulary dod.ts cross-checks: action/resource/reason/tokenPath).
+  // `decidedBy` stays the truthful machine actor ("autopilot"); the seal can
+  // never mint a human seat.
+  const candidate = seal
+    ? approveHitl(next, {
+        decidedBy: "autopilot",
+        note: `${decision.feedback.slice(0, 400)} [seat agent-seal]`,
+        decidedVia: {
+          action: "hitl.approve",
+          resource: `gate:P${phase}`,
+          reason: `agent-seal — the keyed Auto-Review classifier (${decision.source}) consented to P${phase}; unattended approval recorded under the seal.`,
+          label: seatLabel({ decidedBy: "autopilot", seat: "agent-seal" }),
+          tokenPath: false,
+        },
+      })
+    : approveHitl(next, { decidedBy: "autopilot", note: decision.feedback.slice(0, 400) });
   if (candidate === next) {
     const paused = wildPause(next, phase, "error", "wild.error", `P${phase} approval did not apply — wild run paused.`);
     return { project: paused, outcome: "paused", ran: true, error: "Approval did not apply.", code: "RT_E_INTERNAL" };
@@ -4104,24 +4290,34 @@ async function wildApproveGate(
   // so the enforcement check runs on the post-approval shape. A failing gate
   // is NOT committed: the candidate is discarded and the block is stamped on
   // the pre-approval project (no fabricated ledger row, no cursor move).
+  // 313 D1: under the seal, ONE repair pass runs before the park is stamped;
+  // a repair that cannot clear the gate still parks on the pre-approval
+  // project (the same discipline — nothing fabricated).
+  let approved = candidate;
   if (candidate.enforceDod === true) {
     const post = runGate(candidate, phase);
     if (!post.pass) {
-      const blocked = hardDodBlockInto(next, phase, post);
-      const paused = wildPause(
-        blocked,
-        phase,
-        "warn",
-        "wild.paused_dod",
-        `P${phase} DoD unmet after approval — hard gate holds: ${post.unmet.map((g) => g.id).join(", ") || "n/a"}`,
-      );
-      return { project: paused, outcome: "paused", ran: true, error: hardDodMessage(phase, post), code: "RT_E_GATE_PENDING" };
+      const repair = seal ? await wildDodRepairOnce(candidate, phase, opts) : null;
+      if (repair === null || repair.repaired === null) {
+        const blocked = hardDodBlockInto(next, phase, post);
+        const paused = wildPause(
+          blocked,
+          phase,
+          "warn",
+          "wild.paused_dod",
+          `P${phase} DoD unmet after approval — hard gate holds: ${post.unmet.map((g) => g.id).join(", ") || "n/a"}${
+            repair !== null ? ` (${repair.detail})` : ""
+          }`,
+        );
+        return { project: paused, outcome: "paused", ran: true, error: hardDodMessage(phase, post), code: "RT_E_GATE_PENDING" };
+      }
+      approved = repair.repaired;
     }
   }
   // P0-08 Hole A (fixes/97): the gate verdict is recorded AFTER approveHitl
   // compiled the packet — re-stamp so the packet's gate_passed + artifact
   // window reflect the recorded gate, never the pre-gate compile.
-  const gated = stampPacket(recordGateInto(candidate, phase));
+  const gated = stampPacket(recordGateInto(approved, phase));
   const stamped = wildPatch(gated, {
     lastAutoLog: `P${phase} gate self-approved (Auto-Review ${decision.source})`,
     lastAutoAt: Date.now(),
@@ -4133,6 +4329,10 @@ async function wildApproveGate(
 /**
  * Judge a just-executed complete phase and leave it (or pause). Callers pass a
  * project whose current edge is COMPLETE and < 12 (the phase being LEFT).
+ *
+ * 313 D1 — under the agent seal (`opts.agentSeal`), the verdict resolves
+ * through the bounded reject-retry and a hard-DoD red runs ONE repair pass
+ * before parking. Absent ⇒ the pre-seal bytes.
  */
 async function wildLeavePhase(
   p: Project,
@@ -4140,21 +4340,25 @@ async function wildLeavePhase(
   reviewer: WildReviewer,
   opts?: WildStepOptions,
 ): Promise<WildStepResult> {
-  const decision = await resolveWildReview(reviewer, p, phase, "advance", opts?.reviewTimeoutMs);
+  const seal = opts?.agentSeal === true;
+  const resolved = seal
+    ? await resolveWildReviewBounded(reviewer, p, phase, "advance", opts)
+    : { decision: await resolveWildReview(reviewer, p, phase, "advance", opts?.reviewTimeoutMs), project: p };
+  const decision = resolved.decision;
   if (decision.kind === "unconfigured-gate") {
     // Unreachable for advance reviews (only gate reviews return this), but
     // keep it honest anyway.
-    const paused = wildPause(p, phase, "warn", "wild.paused_classifier", `Auto-Review classifier not configured — P${phase} cannot be judged.`);
+    const paused = wildPause(resolved.project, phase, "warn", "wild.paused_classifier", `Auto-Review classifier not configured — P${phase} cannot be judged.`);
     return { project: paused, outcome: "paused", ran: true, error: "Classifier not configured.", code: "RT_E_LLM_NOT_CONFIGURED" };
   }
   if (decision.kind === "error") {
-    const paused = wildPause(p, phase, "error", "wild.error", `P${phase} Auto-Review failed: ${decision.error}`);
+    const paused = wildPause(resolved.project, phase, "error", "wild.error", `P${phase} Auto-Review failed: ${decision.error}`);
     return { project: paused, outcome: "paused", ran: true, error: decision.error, code: decision.code ?? "RT_E_LLM_REJECTED" };
   }
-  const next = wildReviewLog(p, phase, decision.source, decision.feedback);
+  let cur = wildReviewLog(resolved.project, phase, decision.source, decision.feedback);
   if (decision.verdict === "reject") {
     const paused = wildPause(
-      next,
+      cur,
       phase,
       "warn",
       "wild.reject",
@@ -4163,26 +4367,37 @@ async function wildLeavePhase(
     return { project: paused, outcome: "paused", ran: true, error: decision.feedback, code: "RT_E_GATE_PENDING" };
   }
   // P10 hard-DoD leave check: the phase being LEFT must pass its exit gate.
-  if (next.enforceDod === true) {
-    const g = runGate(next, phase);
+  // 313 D1: under the seal, ONE repair pass runs before the park is stamped —
+  // the phase's own non-floor execution edge re-runs once (keyed P6 synthesis /
+  // P7 live research / the injected seams) so a spurious red that a fresh
+  // attempt clears does not park an unattended run; a pure-floor phase parks
+  // honestly (a blind identical re-run is not a repair, B-07).
+  if (cur.enforceDod === true) {
+    const g = runGate(cur, phase);
     if (!g.pass) {
-      const blocked = hardDodBlockInto(next, phase, g);
-      const paused = wildPause(
-        blocked,
-        phase,
-        "warn",
-        "wild.paused_dod",
-        `P${phase} DoD unmet — hard gate blocks advance: ${g.unmet.map((x) => x.id).join(", ") || "n/a"}`,
-      );
-      return { project: paused, outcome: "paused", ran: true, error: hardDodMessage(phase, g), code: "RT_E_GATE_PENDING" };
+      const repair = seal ? await wildDodRepairOnce(cur, phase, opts) : null;
+      if (repair === null || repair.repaired === null) {
+        const blocked = hardDodBlockInto(cur, phase, g);
+        const paused = wildPause(
+          blocked,
+          phase,
+          "warn",
+          "wild.paused_dod",
+          `P${phase} DoD unmet — hard gate blocks advance: ${g.unmet.map((x) => x.id).join(", ") || "n/a"}${
+            repair !== null ? ` (${repair.detail})` : ""
+          }`,
+        );
+        return { project: paused, outcome: "paused", ran: true, error: hardDodMessage(phase, g), code: "RT_E_GATE_PENDING" };
+      }
+      cur = repair.repaired;
     }
   }
   const nextPhase = (phase + 1) as PhaseId;
   // Sync-store parity: a phase may only be LEFT when its priors are sealed and
   // the next phase is enterable (audit-31 P1 guard-skip fix).
-  if (!priorsSealed(next.phases, nextPhase) || !canEnter(phase, nextPhase)) {
+  if (!priorsSealed(cur.phases, nextPhase) || !canEnter(phase, nextPhase)) {
     const paused = wildPause(
-      next,
+      cur,
       phase,
       "warn",
       "wild.paused_guard",
@@ -4191,10 +4406,10 @@ async function wildLeavePhase(
     return { project: paused, outcome: "paused", ran: true, error: "Guard blocked illegal advance.", code: "RT_E_PHASE_ILLEGAL" };
   }
   const advanced: Project = {
-    ...next,
+    ...cur,
     currentPhase: nextPhase,
     status: "running",
-    phases: next.phases.map((r) => (r.id === nextPhase ? { ...r, status: "ready" as const } : r)),
+    phases: cur.phases.map((r) => (r.id === nextPhase ? { ...r, status: "ready" as const } : r)),
   };
   const stamped = wildPatch(advanced, { lastAutoLog: `P${phase} sealed → P${nextPhase}`, lastAutoAt: Date.now() });
   const done = wildLog(stamped, phase, "info", "wild.advance", `P${phase} sealed → P${nextPhase} (${decision.source})`);

@@ -1,4 +1,5 @@
 # fixes/311_da1_claims.md — RESCUED from the auditor's final summary (file write hit the iteration cap; content verbatim)
+> **RESCUED-header correction (2026-09-29):** this file is on disk and complete — content verbatim from the auditor's final summary as pasted by the parent; the stale "file not written / not yet on disk" self-references below describe the original iteration-cap moment, not this file's state.
 # DA1 — the claim-auditor truth-table
 
 ## DA1 status — ⚠️ FILE NOT WRITTEN (iteration cap)

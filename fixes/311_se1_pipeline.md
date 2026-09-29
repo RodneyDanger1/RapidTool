@@ -1,4 +1,5 @@
 # fixes/311_se1_pipeline.md — RESCUED from the auditor's final summary (file write hit the iteration cap; content verbatim)
+> **RESCUED-header correction (2026-09-29):** this file is on disk and complete — content verbatim from the auditor's final summary as pasted by the parent; the stale "file not written / not yet on disk" self-references below describe the original iteration-cap moment, not this file's state.
 # SE1 — the structural-blocker falsification
 
 **⚠️ Deliverable gap:** I did **not** write `fixes/311_se1_pipeline.md` — I hit the iteration cap while still reading the chain. All findings below are the material that file should contain (parent can paste, or re-dispatch me for the write). Audit-only honored: **zero edits, zero keyed calls** (all reads/greps).
