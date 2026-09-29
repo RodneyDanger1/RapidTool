@@ -1,0 +1,21 @@
+# fixes/308_map6_time.md — TRACER-5 · TIME/ORDER/RACES BUG MAP (RESCUED)
+
+**Rescued by:** the parent (commander lane) from TRACER-5's final summary — its file write never landed (iteration cap).
+**Method:** concurrency races (dual-CLI on one project), interleaving/timer leaks, flake forensics (3× under load), clock/order bytes, lifecycle teardowns. Probe scripts: `C:\Users\mnril\AppData\Local\Temp\m6\`.
+**Baseline:** HEAD `800a40d` + the uncommitted engine patch. Zero product edits.
+
+| ID | class | file:line | probe evidence | sev | box |
+|---|---|---|---|---|---|
+| **M6-01** | lifecycle / stale-lock (unrecoverable) | `src/lib/headless.ts:1819-1829` (emit `openSync(lockPath,"wx")`) | SIGKILL `emit` at 3000 ms → `emitted\.rapidtool-emit.lock` + a **partial tree (5 of 16 files)**. Re-emit → `{"ok":false,"error":"emit: another writer holds the emit lock","code":"RT_E_BUSY","exit_code":1}`; **`--force` does NOT bypass** (same refusal). Only a manual `unlinkSync` re-unlocked. | HIGH | B |
+| **M6-02** | lifecycle / stale-lock (unrecoverable) | `src/lib/headless.ts:103-137` (`saveProject` O_EXCL `*.lock`) | Same mechanism as M6-01: an SIGKILL mid-`saveProject` strands `<project>.lock`; no stale-lock reclamation exists → every later write refuses `RT_E_BUSY` forever. | HIGH | A |
+| **M6-03** | lifecycle / X3 class **CONFIRMED** | `scripts/with-app-env.mjs:120-124` | Wrapper SIGKILLed: child (10696) + grandchild (15468) **survived**; heartbeats grew 14→27 across the kill window. SIGKILL is uncatchable *and* `child.kill(signal)` doesn't reap grandchildren on win32 — the repo's own `node-runner.server.ts:164-171` documents taskkill `/T` is required. | HIGH | C |
+| **M6-04** | concurrency / lost update | `scripts/rapidtool-cli.mjs` run path + `headless.saveProject` | `ingest ∥ run` on one project: ingest = `exit 0 ok:true`; run = `RT_E_BUSY` **exit 4** — the run's completed phase work is **discarded** (`currentPhase` stayed 0). Contention surfaces as exit-4 (INTERNAL class), not a coded busy class on the run verb. (`run ∥ run` benign: both parked exit 2, JSON intact, no `.tmp` residue.) | MED | A/C |
+| **M6-05** | interleaving / unhandled rejection | `scripts/rapidtool-cli.mjs:3855` `main();` (awaits at `:556-557` sit **outside** the try/catch at `:588`) | `main()` never `.catch()`ed + no `process.on("unhandledRejection")` in the CLI → a rejection in `ensureErrorCodes`/`ensureRtAppender` exits without the single-JSON-object envelope (contract violation). | MED | C |
+| **M6-06** | interleaving / missing global handlers | repo-wide: `process.on(` only at `plugin.test.ts:370` + `with-app-env.mjs:123` | **No product-level `unhandledRejection`/`uncaughtException` handler on any Node/CLI/server path.** Browser side covered (`rt-client.ts:411-454`); Node is not. | MED | A/C |
+| **M6-07** | flake / timing-dependent (known) | `exec.test.ts:213,238,265`; `git.server.test.ts:582`; `compile-check.server.test.ts:285,681,899` | Standalone **3× under 6-child load → 19/19 pass 3/3** (22/30/27 s vs 6 s unloaded). NOT flaky in isolation today; the file itself documents the cause (`exec.test.ts:259-263`) — these pins will flake at full-suite parallelism. | MED (known) | A |
+| **M6-08** | lifecycle / teardown gap | `rt-client.ts:460-478` (PerformanceObserver), `:485-514` + `:730-733` (heartbeat) | Observer never `disconnect()`ed; `heartbeatTimer` has **no production teardown** (only `__rtResetForTests()`). Page-lifetime leak, not per-mount. | LOW | D |
+| **M6-09** | concurrency / staging-name class (K2/K3 residue) | `scripts/run-eval.mjs:2887` + `:2980` | `writeJsonAtomic`/`writeMarkerAtomic` stage as `${target}.${process.pid}.tmp` — **pid-only, no ts, no stale-`.tmp` sweep** (contrast `checkpoint.server.ts:215` + `knowledge.ts:533` + `git.server.ts:662` = pid+ts + sweep). A recycled pid can rename a stale staging over the target. | LOW | C |
+
+**Notes from T5:** the 3× full src-suite-under-load probe did NOT run (background legs die to the no-tty quirk; foreground exceeds 600s) — the standalone loaded probe is the substitute evidence. Fix pattern for M6-01/02: a stale-lock reclamation (pid-liveness check + bounded age, matching the repo's own atomic-write discipline) — not a blanket bypass.
+
+**END OF MAP6 (rescued verbatim from the summarizer's row set).**
