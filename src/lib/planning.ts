@@ -27,6 +27,10 @@
 
 import { completeDeepSeek, DEEPSEEK_MODELS } from "./deepseek.server.ts";
 import type { LlmModel, LlmResult } from "./llm.ts";
+// F2-10 (W41 · X1 tail · fixes/303 lane L2): the type-only error-code import —
+// PlanStepsResult carries the completer's coded failure class additively so a
+// budget stop surfaces as RT_E_BUDGET_EXHAUSTED, not a mislabeled RT_E_INTERNAL.
+import type { ErrorCode } from "./errors.ts";
 
 /** Hard cap on planned steps (register G-24 ledger "budget" default: 8). */
 export const MAX_PLAN_STEPS = 8;
@@ -78,7 +82,10 @@ export type PlanCritique = {
 
 export type PlanStepsResult =
   | { ok: true; steps: PlanStep[]; plan: Plan }
-  | { ok: false; reason: "not-configured" | "error"; error?: string };
+  // F2-10 (W41 · X1 tail): additive `code` — the completer's coded failure
+  // class rides through (e.g. RT_E_BUDGET_EXHAUSTED from a budgeted seam) so
+  // the crew maps it verbatim instead of relabeling RT_E_INTERNAL.
+  | { ok: false; reason: "not-configured" | "error"; error?: string; code?: ErrorCode };
 
 export type ReflectResult =
   | { ok: true; critique: PlanCritique }

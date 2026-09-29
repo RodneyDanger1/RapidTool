@@ -9,6 +9,7 @@ import {
   briefLeakScan,
   buildSummary,
   checkAcceptance,
+  checkExpectedBehavior,
   choose,
   classifyDrainEnding,
   classifyLlmPreflight,
@@ -22,6 +23,7 @@ import {
   graderFileFor,
   graderFreezeFingerprint,
   graderLeakScan,
+  historyEndClass,
   installLlmCallTap,
   isTerminalDrainOutcome,
   keyedRunDecision,
@@ -31,6 +33,7 @@ import {
   llmEvidenceFromCallRecords,
   loadGrader,
   markerPathFor,
+  MAX_HISTORY_ROWS,
   parseGrader,
   passAtK,
   passCaretK,
@@ -49,6 +52,7 @@ import {
   treeTextFiles,
   trialsSummary,
   verifyGraderFreeze,
+  writeJsonAtomic,
   writeRunStartMarker,
 } from "./run-eval.mjs";
 import { createProject, runUntilGate } from "../src/lib/headless.ts";
@@ -1188,5 +1192,177 @@ test("W24/B2 — WIRING GUARD: the tap install, the fold gate, the fundedness re
   ]);
   assert.equal(summary.skipped, 1);
   assert.equal(summary.skips[0].kind, "account-unfunded");
+});
+
+// ---------------------------------------------------------------------------
+// W42·L1-E3 — the missing pins (U1 + Q4-b/c): the run-side evaluators that
+// carried NO test coverage before this wave (`git show 4af061a --stat` has no
+// test-file pin; `grep -l "entry-runs|evaluateEntryRunsRow|checkExpectedBehavior"
+// scripts/run-eval.test.mjs` was 0 hits). All keyless, all bounded:
+//   (1) evaluateEntryRunsRow REAL evaluation, driven through the exported
+//       checkExpectedBehavior / checkAcceptance seams: temp JS entries are
+//       spawned for real — exit 0 within budget passes; exit 1 fails and the
+//       row's detail carries the exit code;
+//   (2) acceptanceFailReason rides the failed row's own coded detail
+//       (≤120 chars — a noisy child cannot bloat the record);
+//   (3) historyEndClass tri-state (funded / unfunded / unmeasured);
+//   (4) WIRING GUARD for E-1 (entries rows + crash row carry endClass).
+// ---------------------------------------------------------------------------
+
+/** Minimal grader for the behavior seams — only `expectedBehavior` matters. */
+function behaviorGrader(rows) {
+  return {
+    passWhen: {
+      requireExpectedFiles: false,
+      requireExpectedContent: false,
+      requireExpectedBehavior: true,
+      requireExpectedKind: false,
+    },
+    expectedFiles: [],
+    expectedContent: [],
+    expectedBehavior: rows,
+  };
+}
+
+test("L1-E3(1) — evaluateEntryRunsRow REALLY runs the emitted entry: exit-0 passes, exit-1 fails with the coded detail", () => {
+  const dir = mkdtempSync(join(tmpdir(), "run-eval-entryruns-"));
+  try {
+    writeFileSync(join(dir, "ok-entry.mjs"), "console.log('entry ran');\nprocess.exit(0);\n", "utf8");
+    writeFileSync(join(dir, "broken-entry.mjs"), "console.error('boom');\nprocess.exit(1);\n", "utf8");
+    const grader = behaviorGrader([
+      { id: "e-ok", check: "entry-runs", entry: "ok-entry.mjs" },
+      { id: "e-bad", check: "entry-runs", entry: "broken-entry.mjs" },
+    ]);
+    const files = ["ok-entry.mjs", "broken-entry.mjs"];
+
+    const behavior = checkExpectedBehavior(grader, dir, files);
+    assert.equal(behavior.declared, 2);
+    assert.equal(behavior.pending, 0, "the pre-U1 `pending` never-evaluated status must never come back");
+    const okRow = behavior.rows.find((r) => r.id === "e-ok");
+    const badRow = behavior.rows.find((r) => r.id === "e-bad");
+    assert.equal(okRow.status, "pass", "an exit-0 entry within budget passes — a REAL bounded spawn, not a structural skip");
+    assert.match(okRow.detail, /exit 0 in \d+ms/);
+    assert.equal(badRow.status, "fail", "a broken artifact FAILS the row — never a silent pass");
+    assert.match(badRow.detail, /exit 1 ≠ declared exit 0/);
+    assert.match(badRow.detail, /exec of broken-entry\.mjs/);
+    assert.equal(behavior.ok, false);
+
+    // The same verdict rides the acceptance record — `behaviorOk:false`, the
+    // clause passesAcceptance ANDs — and the coded reason names the row's own
+    // exit code (Q4-b tail).
+    const acceptance = checkAcceptance(grader, dir, files);
+    assert.equal(acceptance.behaviorOk, false);
+    assert.equal(acceptance.behavior.rows.length, 2);
+    const reason = acceptanceFailReason({ mean: 9 }, acceptance, grader);
+    assert.match(reason, /expected behavior failed: e-bad/);
+    assert.match(reason, /exit 1/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("L1-E3(2) — acceptanceFailReason carries the failed row's own coded detail, bounded at 120 chars", () => {
+  const grader = {
+    passWhen: {
+      meanAtLeast: 1,
+      requireExpectedFiles: false,
+      requireExpectedContent: false,
+      requireExpectedBehavior: true,
+      requireExpectedKind: false,
+    },
+  };
+  const acceptance = {
+    behaviorOk: false,
+    behavior: {
+      rows: [
+        { id: "r1", check: "entry-runs", entry: "cli.js", status: "fail", detail: "exit 7 ≠ declared exit 0 (exec of cli.js)" },
+      ],
+    },
+  };
+  const reason = acceptanceFailReason({ mean: 5 }, acceptance, grader);
+  assert.match(reason, /expected behavior failed: r1/);
+  assert.match(reason, /\(cli\.js\)/, "the row's location rides the reason");
+  assert.match(reason, /exit 7 ≠ declared exit 0/, "the row's OWN coded detail rides the reason (Q4-b tail)");
+
+  const huge = "X".repeat(500);
+  const noisy = acceptanceFailReason(
+    { mean: 5 },
+    { behaviorOk: false, behavior: { rows: [{ id: "r2", status: "fail", detail: huge }] } },
+    grader,
+  );
+  assert.ok(noisy.includes("X".repeat(120)), "the detail keeps its first 120 chars");
+  assert.ok(!noisy.includes("X".repeat(121)), "and is bounded at 120 — a noisy child cannot bloat the record");
+});
+
+test("L1-E3(3) — historyEndClass tri-state: unfunded wins, funded needs a scored keyed verdict, else unmeasured", () => {
+  assert.equal(historyEndClass({ notes: { noBalance: true } }, "keyed"), "unfunded", "a broke wallet is never a measurement");
+  assert.equal(historyEndClass({ notes: {}, acceptance: { pass: true } }, "keyed"), "funded");
+  assert.equal(historyEndClass({ notes: {}, acceptance: { pass: false } }, "keyed"), "funded", "a scored FAIL is still a paid measurement");
+  assert.equal(historyEndClass({ notes: {}, acceptance: { pass: true } }, "keyless"), "unmeasured", "keyless is the floor — no wallet was involved");
+  assert.equal(historyEndClass({ notes: {} }, "keyed"), "unmeasured", "no verdict → unmeasured");
+  assert.equal(historyEndClass({}, "keyed"), "unmeasured", "a row without acceptance/notes never throws");
+  assert.equal(historyEndClass(null, "keyed"), "unmeasured", "a missing row never throws");
+  // E-1's seam: the class is computed from `acceptance` + `notes.noBalance` —
+  // the two keys every entries row carries at classification time. A synthetic
+  // entries-shaped row classifies exactly like the trial rows persist() records.
+  const entryLike = { acceptance: { pass: false }, notes: { noBalance: false } };
+  assert.equal(historyEndClass(entryLike, "keyed"), "funded");
+  assert.equal(historyEndClass(entryLike, "keyless"), "unmeasured");
+});
+
+test("L1-E3(4) — WIRING GUARD: entries rows + the crash row carry endClass (E-1)", () => {
+  // The end-to-end value is covered by the keyless scratch smoke; this pins
+  // the two landing sites in the driver source so a future edit that drops
+  // either goes red without a full pipeline run.
+  const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
+  assert.match(src, /entryRow\.endClass = historyEndClass\(entryRow, mode\);/, "every entries row must carry the end class");
+  assert.match(src, /endClass: "unmeasured",/, "the crash-fallback row must class as unmeasured");
+});
+
+// ---------------------------------------------------------------------------
+// W42·L1-E6 — run-eval hygiene cluster pins (atomic writes, bounded history).
+// ---------------------------------------------------------------------------
+
+test("L1-E6(a) — writeJsonAtomic: atomic replacement, no tmp leftovers, and a failed rename never clobbers the old target", () => {
+  const dir = mkdtempSync(join(tmpdir(), "run-eval-atomic-"));
+  try {
+    const target = join(dir, "out", "results.json");
+    writeJsonAtomic(target, { a: 1, b: [true, null] });
+    assert.deepEqual(JSON.parse(readFileSync(target, "utf8")), { a: 1, b: [true, null] }, "the payload lands (mkdir + tmp + rename)");
+    assert.equal(
+      readdirSync(join(dir, "out")).filter((n) => n.endsWith(".tmp")).length,
+      0,
+      "no temp leftover after a successful rename",
+    );
+    writeJsonAtomic(target, { a: 2 });
+    assert.deepEqual(JSON.parse(readFileSync(target, "utf8")), { a: 2 }, "rename replaces the previous bytes");
+
+    // Failed-rename path (no injection seam needed): rename(2) onto an existing
+    // directory fails (EPERM on this host; EISDIR/ENOTDIR elsewhere) — the OLD
+    // target must survive untouched (never truncated, never half-written).
+    const blocked = join(dir, "blocked.json");
+    mkdirSync(blocked);
+    writeFileSync(join(blocked, "keep.txt"), "keep");
+    assert.throws(() => writeJsonAtomic(blocked, { nope: true }), "a failed rename must surface, not lie");
+    assert.equal(readFileSync(join(blocked, "keep.txt"), "utf8"), "keep", "the previous target bytes are intact");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("L1-E6(b) — MAX_HISTORY_ROWS pins the append bound + the persist slice wiring", () => {
+  assert.equal(MAX_HISTORY_ROWS, 200, "the bound is 200 rows");
+  // Slice semantics: the NEWEST rows survive (this run's included) and the
+  // kept count never exceeds the cap.
+  const rows = Array.from({ length: 260 }, (_, i) => i);
+  const kept = rows.slice(-MAX_HISTORY_ROWS);
+  assert.equal(kept.length, MAX_HISTORY_ROWS);
+  assert.equal(kept[kept.length - 1], 259, "the newest (this run's) row is kept");
+  assert.ok(!kept.includes(0), "the oldest rows are the ones dropped");
+  // Wiring guard: persist() slices before the atomic write — and both persists
+  // are atomic (no bare writeFileSync of results/history remains).
+  const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
+  assert.match(src, /writeJsonAtomic\(RESULTS_PATH, results\)/, "results.json persists atomically");
+  assert.match(src, /writeJsonAtomic\(HISTORY_PATH, history\.slice\(-MAX_HISTORY_ROWS\)\)/, "history.json is capped + atomic");
 });
 

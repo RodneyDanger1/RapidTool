@@ -290,31 +290,31 @@ re-run. Where reality is behind, the docs say so, the packets say so, and `docto
 
 ---
 
-# THE CATALOG — every tracked file (1,391 today)
+# THE CATALOG — every tracked file (1,754 today)
 
 **What this is:** the literal catalog of the repository's tracked universe. Counts re-derived
-2026-09-26: `git ls-files | wc -l` = **1,391**. Every **root file, every script, every route,
+2026-09-28: `git ls-files | wc -l` = **1,754**. Every **root file, every script, every route,
 every migration, every config** is named below; mass-produced classes (tests, wave plans, fix
 logs, vault notes, eval trees, vault/E2E outputs) are described **by convention with their full
 membership derivable from one command** — stated inline — because each member's purpose is its
 category's purpose. Descriptions are evidence-based (file heads/comments read on 2026-09-26); a
 genuinely unclear file says so. Re-count any directory with
-`git ls-files <dir> | wc -l`; the working tree is clean at HEAD `ac6b151` — the formerly-untracked
-set is committed (§10.13).
+`git ls-files <dir> | wc -l`; counts read the tracked index at HEAD `424f9e5` + the W42 lane
+work (re-derived 2026-09-28) — the formerly-untracked set is committed (§10.13).
 
-## 10.1 Census (tracked, re-derived 2026-09-27 at `ac6b151`)
+## 10.1 Census (tracked, re-derived 2026-09-28 at `424f9e5`)
 
 | Area | Files | What it is |
 |---|---:|---|
-| `research/` | 476 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 15 · `eval-out/` 345 · 5 top-level research docs) |
-| `fixes/` | 429 | Append-only per-lane landing logs (§10.9) |
+| `research/` | 476 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 23 · `eval-out/` 345 · 5 top-level research docs) |
+| `fixes/` | 450 | Append-only per-lane landing logs (§10.9) |
 | `src/` | 210 | The product: engine + UI (§10.6) |
 | `wave_plans/` | 105 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 + the convention README (§10.10) |
 | `.grok/` | 89 | Legacy platform chrome — **do not build on it** (§10.12) |
 | `builds/` | 50 | Legacy sample build outputs (vault export + sample project) (§10.11) |
 | `vault-e2e/` | 47 | Vault export of the HVAC Dispatch E2E project (§10.11) |
 | `scripts/` | 45 | CLI + gates + guards + tooling + their tests (§10.7) |
-| root | 44 | Every root file named in §10.2 |
+| root | 42 | Every root file named in §10.2 |
 | `screenshots/` | 16 | QA/app screenshots (§10.11) |
 | `public/` | 10 | Static assets served as-is (§10.4) |
 | `audit-bugs/` | 5 | Bug-audit reports (§10.12) |
@@ -324,7 +324,7 @@ set is committed (§10.13).
 | `.github/` | 1 | CI workflow (§10.3) |
 | `attachments/` · `artifacts/` · `.audit-g2/` | 1 + 1 + 1 | Historical artifact + stored image + G2 probe (§10.12) |
 | `.t4scratch/` | 192 | Committed lane-scratch tree (was working-tree scratch; tracked at `ac6b151`) |
-| **Total** | **1,715** | `git ls-files \| wc -l` |
+| **Total** | **1,754** | `git ls-files \| wc -l` |
 
 ## 10.2 Root files (all 42 tracked — named)
 
@@ -407,9 +407,9 @@ set is committed (§10.13).
 - `src/routes/` (3): `__root.tsx` (root layout + auth provider), `index.tsx` (HomeScreen from
   `console.tsx`), `run.$id.tsx` (RunScreen from `console.tsx`).
 
-## 10.6 `src/lib/` — the engine (200 files = 111 modules + 89 colocated tests; the tracked stray temp was removed in the W40 era — re-derived live 2026-09-27)
+## 10.6 `src/lib/` — the engine (200 files = 115 modules + 85 colocated tests; the tracked stray temp was removed in the W40 era — re-derived live 2026-09-28)
 
-**79 direct modules** (one line each; the module's comments read 2026-09-26/27):
+**83 direct modules** (one line each; the module's comments read 2026-09-26/27; re-counted 2026-09-28):
 
 - **Core:** `engine.ts` (13-phase state machine: applies phase results, gates, repairs, sealing) ·
   `phases.ts` (phase graph defs + coverage/transition helpers) · `store.ts` (zustand store — the
@@ -456,12 +456,13 @@ set is committed (§10.13).
   markdown blocks) · `templates.ts` (brief templates) · `brief-fixtures.ts` (fixture core) ·
   `fixtures.ts` + `fixtures.server.ts` + `fixtures.review.ts` (fixtures review data/server/client)
   · `git.server.ts` (git landing tail, W18) · `plugin.ts` (hook registry v1) ·
+  `server-spec.ts` (the ONE runtime-assembled `*.server.*` specifier helper, A1-12) ·
   `algorithms.ts` (fusionRank/stemming/tokenizer) · `db.ts` (PGLite/Postgres bridge; applies
   migrations) · `error-component.tsx` (route error UI) · `preview-embedder-origin.ts` +
   `preview-host-bridge.ts` (preview postMessage trust model + guest side).
 
-**32 subdirectory modules** (+1 tracked stray temp artifact — `auth/.hermes-tmp.*`, flagged in
-`fixes/295_p4_sweeps.md`, not a module): `app-data/` (6: `index.ts` barrel, `server-only.ts` guard,
+**32 subdirectory modules** (the flagged `auth/.hermes-tmp.*` stray temp is no longer tracked —
+`git ls-files src/lib | grep -i tmp` is empty): `app-data/` (6: `index.ts` barrel, `server-only.ts` guard,
 `client.server.ts` connector client, `errors.ts`, `login.ts`, `types.ts` — platform app-data
 bridge) · `auth/` (17: `client.ts`, `server.ts` (self-hosted Better Auth), `gates.tsx`,
 `middleware.ts`, `provider.tsx`, `providers.ts` (upstream IdPs), `email-password.ts`,
@@ -568,10 +569,11 @@ others).
   `18_chat_ux_research`, `19_chat_integration_plan`, `20_wave3_verification`,
   `21_plain_english_guide`, `23_debug_lead`…`34_cli_anchors` (the debug/hunt series),
   `37_production_proof`…`43_hunt_pipeline_memory`). Full list: `git ls-files research/multiagent | sort`.
-- **`research/eval-corpus/` (15)** — the acceptance corpus: `README.md` (contract) + **7 brief
-  fixtures** (`coffeehouse2home-property-ledger.md`, `field-ops-suite.md`, `house-flip-manager.md`,
+- **`research/eval-corpus/` (23)** — the acceptance corpus: `README.md` (contract) + **11 brief
+  fixtures** (`arcade-breakout.md`, `coffeehouse2home-property-ledger.md`, `date-rrule-library.md`,
+  `field-ops-suite.md`, `house-flip-manager.md`, `invoice-csv-cli.md`, `order-webhook-service.md`,
   `permit-inspection-tracker.md`, `real-estate-crm.md`, `rental-portfolio.md`,
-  `showing-booking.md`) + **7 frozen graders** (`graders/<slug>.grader.json`).
+  `showing-booking.md`) + **11 frozen graders** (`graders/<slug>.grader.json`).
 - **`research/eval-out/` (345)** — tracked trial outputs. Top level: `results.json` (the
   acceptance scorecard — last written 2026-09-25 in keyed mode), `history.json` (run history),
   `run-in-progress.json`, `_keyed-launcher.sh` (the keyed-run launcher). The other 341 files are
@@ -585,7 +587,7 @@ others).
   `03_tech_deep_dives_research.md` (the origin research set, 2026-09-04) · `deepseek-api.md`
   (live-verified API spec) · `runtime-integration.md` (runtime/hosting research).
 
-## 10.9 `fixes/` — the append-only landing-log ledger (429 tracked)
+## 10.9 `fixes/` — the append-only landing-log ledger (450 tracked)
 
 **Convention:** one `fixes/NN_<lane>.md` per lane per wave; append-only; each log carries
 what/why + `file:line` evidence + before/after. The numbering is chronological: the newest number
@@ -595,8 +597,9 @@ is the current wave. Tracked today: the `01`–`99` early series, the **`216a`�
 `pro1`–`pro4_*.md`. The **W29–W41 set (`271`–`294`)** is tracked too: `271_lane*`, `272_s1…s5`
 shell lanes, `273_t1…t5`, `274_wdx1/wdx2/wdx3` watchdogs, `275_organizer`, `276`–`283` completion
 lanes + `283_final_ledger.md`, `284_wiring_guarantee`, `285_g2…g4`, `286_readme_catalog.md`,
-`287_z5_runtime_tail.md`, `288`–`289` pickups, `290`–`294` per-lane wave-41 logs (`295`–`296`
-arrive untracked from the live tail waves).
+`287_z5_runtime_tail.md`, `288`–`289` pickups, `290`–`294` per-lane wave-41 logs; the `295`–`301`
+tail set (wave-41/42 logs + probes) is tracked too — `302`–`303` arrive untracked from the live
+W42 tail).
 **How to search them:** `git ls-files fixes | sort | tail -30` (newest); `grep -l "<term>"
 fixes/*.md`; or grep the register's fix references (`R*`/`A*` IDs cite their fix logs).
 

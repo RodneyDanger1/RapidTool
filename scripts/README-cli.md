@@ -24,15 +24,14 @@ pending until a human approves), the in-place edit verb (`edit` — dry-run by
 default, its own [Edit section](#edit-edit) below), and the emit→edit→re-emit
 continuation verbs `tree-run` + `repair` (rows #31–32 below).
 
-> **`tree-run` + `repair` + `edit` shipped (fixes/150 wave G1 + 216s); `emit --verify-kind` is in
-> flight.** The dir-based continuation verbs are callable today — rows #31–32
-> below and the [Tree-run and repair (landed); emit verify-kind (in flight)](#tree-run-and-repair-landed-emit-verify-kind-in-flight)
-> section describe their real envelopes (`edit`'s own section: [Edit (`edit`)](#edit-edit)). `emit --verify-kind` has **NOT landed as
-> a documented verb**: `grep -c 'case "'` reads 39 and none of the 39 case arms is
-> `verify-kind` — the flag rides inside `emit` (`rapidtool-cli.mjs:1149`, over
-> `verifyKindDir` at `compile-check.server.ts:770`) and the scratch-copy + install
-> leg is still open (TA-16) — treat its row as the
-> agreed contract, not proven behavior, and re-check before calling it.
+> **`tree-run` + `repair` + `edit` shipped (fixes/150 wave G1 + 216s); `emit --verify-kind` shipped
+> too (fixes/216z · T4.1).** The dir-based continuation verbs are callable today — rows #31–32
+> below and the [Tree-run and repair (landed); emit verify-kind (landed)](#tree-run-and-repair-landed-emit-verify-kind-landed)
+> section describe their real envelopes (`edit`'s own section: [Edit (`edit`)](#edit-edit)). `emit --verify-kind` is a **flag of
+> `emit`**, not its own case arm: `grep -c 'case "'` reads 39 and none of the 39 case arms is
+> `verify-kind` — the flag rides inside `emit` (`rapidtool-cli.mjs:1184`, calling
+> `verifyKindDir` at `compile-check.server.ts:1566`; a failed leg flips the envelope to
+> `ok:false` + `RT_E_VERIFY_KIND_FAILED`, exit 1).
 
 > **Ref note (W24-B4 · docs lane):** `fixes/150` is a **wave** reference — the per-lane logs
 > `fixes/150_g*.md` were **never filed** (`fixes/151_watchdog.md:19`: "No `fixes/150_g*.md` logs
@@ -76,7 +75,8 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs run --project build.js
 #    --autopilot auto-approves non-stock, non-forceHuman gates only
 node --experimental-strip-types scripts/rapidtool-cli.mjs gate --project build.json [--autopilot] [--live]
 
-# 4. Approve / reject the pending gate
+# 4. Approve / reject the pending gate (`reject` requires ≥12 characters of --note;
+#    a shorter note is refused — exit 1 RT_E_VALIDATION, nothing written)
 node --experimental-strip-types scripts/rapidtool-cli.mjs approve --project build.json [--force]
 node --experimental-strip-types scripts/rapidtool-cli.mjs reject  --project build.json --note "Must enumerate per-role OAuth scopes."
 
@@ -99,7 +99,7 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs export --project build
 #    tree in-loop (parse + every emitted tests/*.spec.ts + entry smoke; exit 1 on red);
 #    --red-tree banner admits an uncleared red tree-run WITH the unmissable banner
 #    on the emitted README (default refuse — see the Emit section)
-node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json [--out emitted/] [--check] [--run] [--red-tree refuse|banner]
+node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json [--out emitted/] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force]
 
 # 10. Compact JSON-safe snapshot (name, currentPhase, status, phaseCounts, lastGate,
 #     researchCount, memoryCount, vaultReady)
@@ -189,11 +189,12 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs lesson --refute --know
 #     RT_E_REPAIR_FAILED, pre-flight refusal → exit 1 RT_E_VALIDATION (ledger persisted
 #     after every completed run — converged or failed). Keyless: no repair loop runs —
 #     the deterministic floor stands and the budget exhausts honestly.
-# 33. emit --verify-kind (IN FLIGHT — NOT on disk): opt-in bounded install + vite build
-#     leg (webapp/game kinds) in a temp dir. No case arm yet — see the section below.
+# 33. emit --verify-kind (SHIPPED — fixes/216z · T4.1): opt-in bounded scratch-copy install +
+#     the tree's declared build/test leg (webapp/game kinds) in a temp dir. A FLAG of `emit`
+#     (no own case arm); a failed leg flips the envelope to ok:false + RT_E_VERIFY_KIND_FAILED.
 node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir emitted/          # standalone dir-based treeRun — no re-emit
 node --experimental-strip-types scripts/rapidtool-cli.mjs repair --dir emitted/ --project build.json   # re-import edited tree, re-run oracle, bounded repair cycles
-# node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json --out emitted/ --verify-kind   # NOT callable yet — no case arm exists
+node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json --out emitted/ --verify-kind   # flag of `emit` (no own case arm)
 # 34. eval (W23-L5 · T5.3 — SHIPPED, read-only): the M1–M9 rubric + per-case rows + history
 #     deltas/trend over the keyed-eval harness's own documents (research/eval-out/results.json
 #     + history.json + the run marker; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides
@@ -264,7 +265,9 @@ always produces byte-identical files.
 
 `count` = number of atomic note files written (`_index.md` not counted). If the
 vault module (`src/lib/vault.ts`) is not present yet, the command fails cleanly:
-`{ "ok": false, "error": "…" }`, exit 1. Note files carry YAML frontmatter
+`{ "ok": false, "error": "…" }`, exit **4** (`RT_E_INTERNAL` — a missing/broken
+module is a runtime failure in the arm's own catch, per the taxonomy below).
+Note files carry YAML frontmatter
 (`id/title/kind/phase/tags/score/source/url`) + the note body + a `## Links`
 section of resolved `[[wikilinks]]`; the MOC lists every note grouped by kind
 with wikilink rows, plus a tag index — Obsidian/Logseq-importable.
@@ -382,14 +385,20 @@ paths and is **not** exposed here; any other value is rejected with
 *emit with `redTree:"banner"` to ship the unmissable banner* — reachable from
 the CLI.
 
-> **In flight (fixes/149 P1-2):** opt-in `--verify-kind` — a bounded
-> `npm install` + `vite build` leg for webapp/game kinds in a temp dir (never
-> mutating the emitted dir), asserting the kind's declared build actually runs.
-> NOT proven at this write — none of the 39 case arms is `verify-kind`
-> (`grep -c 'case "' scripts/rapidtool-cli.mjs` reads 39); the flag rides inside
-> `emit` (`rapidtool-cli.mjs:1149` → `verifyKindDir`), whose scratch-copy + install
-> leg is still open (TA-16); see the
-> [Tree-run and repair (landed); emit verify-kind (in flight)](#tree-run-and-repair-landed-emit-verify-kind-in-flight)
+`--force` admits an emit into a folder that already holds foreign files — without it the
+emit is refused (`RT_E_FOREIGN_FILES`, exit 1, the `foreign` list on the envelope); with it
+the foreign files are KEPT in place (the refusal message's own "pass --force to keep").
+
+> **Shipped (fixes/216z · T4.1):** opt-in `--verify-kind` — a bounded scratch-copy
+> install (`npm ci` / `npm install`) + the tree's own declared `build` + `test`
+> scripts for webapp/game kinds in a temp dir (never mutating the emitted dir),
+> asserting the kind's declared build actually runs. It is a **flag of `emit`**,
+> not its own case arm (none of the 39 case arms is `verify-kind` —
+> `grep -c 'case "' scripts/rapidtool-cli.mjs` reads 39); the seam is
+> `verifyKindDir` (`compile-check.server.ts:1566`), called from
+> `rapidtool-cli.mjs:1184-1195`; a failed leg flips the envelope to `ok:false` +
+> `RT_E_VERIFY_KIND_FAILED`. See the
+> [Tree-run and repair (landed); emit verify-kind (landed)](#tree-run-and-repair-landed-emit-verify-kind-landed)
 > section before relying on it.
 
 ## Edit (`edit`)
@@ -451,14 +460,14 @@ never wired into `scripts/gate.sh`, is never called by `emit`, and blocks
 nothing** — the rules are heuristics, so every finding carries `advisory: true`
 (fixes/218 §3 item 4 / OV-21).
 
-## Tree-run and repair (landed); emit verify-kind (in flight)
+## Tree-run and repair (landed); emit verify-kind (landed)
 
-> **Status at this write: `tree-run --dir` and `repair --dir` SHIPPED (fixes/150 wave
-> G1, case arms present, `grep -c 'case "'` = 39). `emit --verify-kind` is IN
-> FLIGHT — the fixes/149 P1-2 contract below describes what will land, but none
-> of the 39 case arms is `verify-kind` (the flag rides inside `emit`) and the
-> scratch-copy + install leg is still open (TA-16).
-> Re-check before calling it.**
+> **Status: `tree-run --dir` and `repair --dir` SHIPPED (fixes/150 wave
+> G1, case arms present, `grep -c 'case "'` = 39). `emit --verify-kind` SHIPPED
+> too (fixes/216z · T4.1) — a flag of `emit`, not its own case arm: none of the
+> 39 case arms is `verify-kind` (the flag rides inside `emit`); the scratch-copy
+> install + declared build/test leg is on disk (`verifyKindDir`,
+> `compile-check.server.ts:1566`).**
 
 - **`tree-run --dir <dir>`** (keyless, read-only) — the dir-based oracle runner
   (`compile-check.server.ts: treeRun`: per-file parse + every emitted
@@ -488,11 +497,14 @@ nothing** — the rules are heuristics, so every finding carries `advisory: true
   `DEEPSEEK_API_KEY` the default synthesis seam is the deterministic floor, so a
   red dir exhausts the budget honestly (no fake repair, exit 1) — a green dir
   still converges at cycle 0 with the mint + honest gate record.
-- **`emit --verify-kind`** (planned: keyless, network — IN FLIGHT) — opt-in
-  bounded `npm install` + `vite build` for webapp/game kinds in a temp dir
-  (never mutating the emitted dir), asserting the kind's declared build actually
-  runs; exits 0 on a real green build or an honest failure envelope. Not
-  callable yet — no case arm and no `verifyKind` seam on disk.
+- **`emit --verify-kind`** (SHIPPED — fixes/216z · T4.1; keyless, network) — opt-in
+  bounded scratch-copy install (`npm ci` / `npm install`) + the tree's declared
+  build/test for webapp/game kinds in a temp dir (never mutating the emitted
+  dir), asserting the kind's declared build actually runs; exits 0 on a real
+  green build, or flips the emit envelope to `ok: false` +
+  `RT_E_VERIFY_KIND_FAILED` (exit 1) with the honest install/build `detail`. It
+  is a **flag of `emit`** — no own case arm; the seam is `verifyKindDir`
+  (`compile-check.server.ts:1566`).
 
 ## Design (`design`)
 
@@ -520,8 +532,8 @@ external assets).
 The token **schema is owned by `design.ts`** (its header freezes it) — treat
 `tokens` as opaque JSON; the CLI does not reshape it. `htmlWritten` is present
 only when `--html` was given. If the design module is not present yet, the
-command fails cleanly: `{ "ok": false, "error": "…" }`, exit 1 — same as the
-vault module contract.
+command fails cleanly: `{ "ok": false, "error": "…" }`, exit 4 (`RT_E_INTERNAL`)
+— same as the vault module contract.
 
 ## Diagram (`diagram`)
 
@@ -539,7 +551,7 @@ phase's gate-path flowchart). Anything else is a hard error, exit 1.
 SVG (then `svgWritten` carries the absolute path); without `--out` only the
 size is reported — stdout stays a single JSON object, so the SVG itself never
 leaks into the stream. Missing module → clean `{ "ok": false, "error": "…" }`,
-exit 1.
+exit 4 (`RT_E_INTERNAL` — the arm catch).
 
 ## Artifacts (`artifacts`)
 
@@ -836,9 +848,11 @@ offers. **Mutating:** a run-state change is persisted back to `--project`
 
 ```json
 { "ok": true, "path": "build.json", "action": "start", "outcome": "paused", "steps": 5,
-  "changed": true, "summary": { … }, "error": "…" }
+  "changed": true, "summary": { … }, "note": "…" }
 ```
 
+A success envelope never carries `error` — a run detail rides as `note`, never the
+dual `ok:true` + `error` shape (185-H1; failures use the coded `ok:false` shape below).
 The keyless macro-run loop parks honestly at the first stock gate with
 `outcome: "paused"` (the classifier cannot self-approve a human gate) — an
 agent then `approve`s/rejects the gate and `wild --resume` continues the run.
@@ -888,7 +902,7 @@ so the contract is strict and stable:
 - **Exit 0** = the command executed and produced its payload
   (`ok: true`, or `ok: false` only when the JSON *is* the honest outcome).
 - **Exit 1** = the command could not execute (bad/missing args, missing
-  project file, missing module) — stdout is `{ "ok": false, "error": "…" }`.
+  project file) — stdout is `{ "ok": false, "error": "…" }`.
   `run`/`gate` also exit 1 (code `RT_E_GATES_FAILED`, `sealedWithFailures:
   true`) when the run sealed COMPLETE with one or more recorded FAILED DoD
   gates — a red-gate completion is never a clean exit 0.
@@ -896,7 +910,8 @@ so the contract is strict and stable:
   (full state is on stdout — `approve`/`reject`/`retry` next).
 - **Exit 3** = a backend is not configured — no `DEEPSEEK_API_KEY` where one is
   required (`RT_E_LLM_NOT_CONFIGURED`).
-- **Exit 4** = backend or internal runtime failure (envelope carries the
+- **Exit 4** = backend or internal runtime failure — including a missing/broken
+  optional module in the vault/design/diagram arms (envelope carries the
   `RT_E_*` code).
 - `summary` carries agent hints: `researchCount` (cited findings across live
   corpus rounds; 0 on deterministic runs), `memoryCount` (atomic memory rows),
@@ -952,7 +967,7 @@ The emit→edit→re-emit verbs (`tree-run`/`repair`, fixes/150 wave G1) set the
 | `RT_E_GATES_FAILED` | The run sealed COMPLETE while one or more recorded DoD gates stand FAILED — a red-gate seal, never a clean one. | Read summary.failedGates (the census), repair the failing phase(s) and re-run — do not treat this exit as a successful completion or ship the artifact as-is. | 1 (run/gate red-gate complete) |
 | `RT_E_TREE_RUN_FAILED` | `tree-run --dir` (or `emit --run`) executed the tree and it is RED — not all parse/spec/entry verdicts are ok. | Read the envelope's first not-ok tail, fix the emitted file(s) in the dir, re-run — never treat a red tree as clean. | 1 (tree-run / emit --run red tree) |
 | `RT_E_REPAIR_FAILED` | `repair --dir` exhausted its cycle budget without a green tree-run — the deterministic floor stands, no fake repair was applied. | Read the failure tail/refusal in the envelope, hand-edit the dir or tighten the brief, re-run repair. | 1 (repair budget exhausted) |
-| `RT_E_VERIFY_KIND_FAILED` | Pre-registered for the in-flight `emit --verify-kind` install+build leg (fixes/149 P1-2) — currently UNUSED: no case arm sets it and the `verifyKind` seam is not on disk. | (Once it lands) read the honest install/build `detail` and fix the emitted scaffold. | 1 (emit --verify-kind, pre-registered) |
+| `RT_E_VERIFY_KIND_FAILED` | `emit --verify-kind` ran the bounded scratch-copy install + the declared build/test leg and it ended red (fixes/216z · T4.1). | Read the honest install/build `detail` and fix the emitted scaffold or the emitted package. | 1 (emit --verify-kind) |
 
 ## Full agent loop (Hermes-style)
 
@@ -1041,12 +1056,18 @@ cross-project STORE files only — the project file is never touched.
 
 ## Tests
 
-```
-node --experimental-strip-types --test src/lib/headless.test.ts
-node --experimental-strip-types --test src/lib/harvest.test.ts   # Pillar 1 + new-pillar bridge suite
+This file is pinned by **two legs** — the `npm test` pair (`ls scripts/*.test.mjs` + the
+`src/lib/**/*.test.ts` suite; both canonical commands are `package.json`'s `test` script):
+
+```bash
+npm test                                                 # both legs, in order
+# leg 1 — the scripts suite (21 contract suites), incl. THIS file's doc-contract pins:
+node --test "scripts/**/*.test.mjs"
+# leg 2 — the engine suite (`headless.test.ts` + `harvest.test.ts` are part of it):
+node --experimental-strip-types --test "src/lib/**/*.test.ts"
 ```
 
-## The `approve` seat — `--i-am-human` + the out-of-band `RT_HUMAN_SEAT_TOKEN` (216 · TA-2)
+## The `approve` seat — `--i-am-human` + the out-of-band `RT_HUMAN_SEAT_TOKEN` (216 · TA-2 · R5-f12 two-channel)
 
 Every HITL approval is recorded under an explicit **actor seat**, so a machine
 path can never mint `decidedBy: "human"` (the pre-216 behaviour: `approve()`
@@ -1057,27 +1078,40 @@ hardcoded a human actor for every caller, including the eval harness).
   what an unattended/agent process gets. Consequence: a plain approve can
   never override a `forceHuman` gate (e.g. a failed P6 sandbox) — such a gate
   needs the human seat below plus `--force`.
-- **Human seat** → `decidedBy: "human"`, seat `human-cli-i-am-human`. A
-  non-TTY call must present BOTH pieces of evidence:
+- **Human seat** → `decidedBy: "human"`, seat `human-cli-i-am-human`. The seat
+  needs TWO channels (R5-f12 — the two-channel claim, `humanSeatClaim`):
+  - **Channel A — possession/claim:** the person at the keyboard exports
+    `RT_HUMAN_SEAT_TOKEN` in their own shell; that environment value is the
+    EXPECTED side.
+  - **Channel B — presence/confirmation:** the CLI prompts on stderr and the
+    person RE-ENTERS the same token; the typed value is the PRESENTED side.
+
+  A TTY-typed `approve` thus presents BOTH pieces of evidence:
   1. `--i-am-human` on the command line (the T0.7 guard: a non-TTY `approve`
      without it exits 1 with `RT_E_VALIDATION` before anything is minted), and
-  2. the out-of-band token: the person at the keyboard exports
-     `RT_HUMAN_SEAT_TOKEN` in their own shell, e.g.
+  2. the two-channel token above, e.g.
      ```
      export RT_HUMAN_SEAT_TOKEN="$(head -c 24 /dev/urandom | base64)"
      node --experimental-strip-types scripts/rapidtool-cli.mjs approve \
        --project build.json --i-am-human
+     # → Confirm human seat — re-enter RT_HUMAN_SEAT_TOKEN:  (type it again)
      ```
-     The CLI presents that value to the harness; the row's note then reads
+     On a match the row's note reads
      `[seat human-cli-i-am-human] out-of-band RT_HUMAN_SEAT_TOKEN verified`.
 
-  With `--i-am-human` but **no matching token in the environment**, the call
-  REFUSES: exit 1, envelope `code: "RT_E_VALIDATION"`, the message naming
-  `RT_HUMAN_SEAT_TOKEN` — and **nothing is written** (the project stays parked
-  at the gate, no ledger row, no human actor). A seat claim without its
-  out-of-band evidence never lands.
+  A **non-TTY** `--i-am-human` is refused outright (exit 1, `RT_E_VALIDATION`):
+  there is no second channel to type into, so no human row may be minted — use
+  the autopilot seat (`gate --autopilot`) for machine approval. With a typo'd,
+  empty, or non-matching re-entry/env, the call REFUSES: exit 1, envelope
+  `code: "RT_E_VALIDATION"`, the message naming `RT_HUMAN_SEAT_TOKEN` — and
+  **nothing is written** (the project stays parked at the gate, no ledger row,
+  no human actor). A seat claim without its out-of-band evidence never lands.
+  Ceiling (honest): an accountability control under the ledger-trust assumption
+  (same-OS-user processes can read env/files), **not** a security boundary.
 
 The token is deliberately out-of-band: do not bake it into scripts, config
 files, `package.json`, or the project JSON — a process that merely inherited an
-agent's environment does not hold it. `approve` is the only verb with this
-requirement; the autopilot path (`gate --autopilot`, `wild`) never touches it.
+agent's environment does not hold it (and cannot type it). `approve` is the only
+verb that REQUIRES the human seat (non-TTY calls); the same two-channel claim
+backs `fixtures --approve` and `edit --write` when `--i-am-human` is passed; the
+autopilot path (`gate --autopilot`, `wild`) never touches it.

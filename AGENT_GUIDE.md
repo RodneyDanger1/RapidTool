@@ -67,10 +67,11 @@ A project (13 phases, P0–P12) with a governed edge. For each project you can g
 ## 4. How to feed results back (the honest loop)
 
 RapidTool has no live intake for your agent's output: results come back manually — paste them
-into the phase's Notes / operator notes (or round-trip the whole project JSON) — and they reach
-the packet at its NEXT stamp (phase advance / decision), not the instant you save. The live
-LLM/research/runner channels of §5 run inside RapidTool's own phases; they do not process text
-you paste back. To close the loop today:
+into the phase's Notes / operator notes (or round-trip the whole project JSON) — or through the
+structured `ingest` seam (the CLI's `ingest` verb; `report-intake.ts` validates + applies the
+report) — and they reach the packet at its NEXT stamp (phase advance / decision), not the
+instant you save. The live LLM/research/runner channels of §5 run inside RapidTool's own
+phases; they do not process text you paste back. To close the loop today:
 
 1. **Per phase:** paste `Copy phase handoff` into the agent; paste the agent's output back into
    the phase's Notes / operator notes. Re-read the packet after the next advance — that is when
@@ -79,6 +80,7 @@ you paste back. To close the loop today:
    with shape validation + repair, so a build can move between machines or be archived.
 3. **Cross-tool:** the packet `.md` is the interchange format; the JSON sidecar is the durable
    state. Keep both for a full handoff.
+4. **Structured ingest (CLI):** `node --experimental-strip-types scripts/rapidtool-cli.mjs ingest --project build.json --report '{"phase":4,"status":"complete","summary":"…","artifacts":[{"title":"…","body":"…"}]}'` — `report-intake.ts` validates the report shape first and applies it append-only (its artifacts are stamped `[agent report]` + an "unverified by engine" footer; a re-sent duplicate is a no-op, `applied:false`). A malformed or mis-phased report is refused with its `RT_E_REPORT_*` code, exit 1 (the refusal is recorded as a `report.rejected` trail row — never applied as state).
 
 ## 5. What RapidTool is *not* (don't ask it to)
 

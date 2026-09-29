@@ -19,6 +19,19 @@
 export const FIXTURE_REVIEW_LABEL =
   "read-only review — the grader is run-side authority; approval is a CLI action (fixtures --approve --ids …) and this view records no decision";
 
+/**
+ * @de-scoped (W42·L1-E5) — zero consumers; the human fixture decision CANNOT
+ * ride `project.decisions` as-is: a `HitlDecision` requires phase/title/
+ * requestedAt/decidedAt, and the engine's `wellFormedDecisionRow`
+ * (engine.ts:2037 — `typeof phase === "number"`, `typeof decidedAt ===
+ * "number"`, `decidedBy`/`decision` strings) would drop a mismatched row —
+ * a `FixtureDecisionEntry` carries none of those keys. Kept for the day the
+ * fixture-decision journal gets its own shape; do not wire it into
+ * `project.decisions` without that shape. Evidence: repo-wide grep 2026-09-28
+ * (`FixtureDecisionEntry|fixtureDecisionEntry|FixtureVerdict`) → definitions
+ * here + the console.tsx W24 note only (no reader); see fixes/295_p3_eval.md t0.
+ */
+
 /** Verdicts the human seat may record for one fixture. */
 export type FixtureVerdict = "approve" | "reject";
 
@@ -66,8 +79,14 @@ export interface FixtureReviewRow {
   expectedCapabilities: string[];
   baseline: string | null;
   graderOk: boolean;
-  /** Why the grader failed to parse (null when ok) — shown, never hidden. */
+  /** Why this row cannot be reviewed on the GRADER side (null when the grader
+   *  is ok): the grader's own parse failure — or, when the FIXTURE itself
+   *  never parsed, the fixture's parse failure (possibly joined with the
+   *  grader's). Shown, never hidden. */
   graderProblem: string | null;
+  /** W42·L1-E4 (W-29(g)): why the FIXTURE failed to parse (null when ok) —
+   *  the fixture axis, kept distinct from the grader axis. */
+  fixtureProblem: string | null;
   /** `##` headings found in the fixture body (provenance etc.), in file order. */
   provenanceHeadings: string[];
   reviewState: "awaiting-decision" | "bar-missing";
@@ -181,7 +200,11 @@ export function bodyHeadings(body: string): string[] {
 /**
  * Join fixtures with their graders by slug into display rows, in stable
  * slug order. A fixture without a parseable grader surfaces `reviewState:
- * "bar-missing"` with the reason — never silently.
+ * "bar-missing"` with the reason — never silently. W42·L1-E4: a fixture whose
+ * own frontmatter never parsed is never reviewable either — it can no longer
+ * mint `awaiting-decision` off the strength of its grader (W-29(g) fake row);
+ * its parse failure is named in `fixtureProblem` AND folded into
+ * `graderProblem` (the display slot the console reads), one problem per axis.
  */
 export function fixtureReviewRows(fixtures: FixtureParse[], graders: GraderParse[]): FixtureReviewRow[] {
   const graderBySlug = new Map<string, GraderParse>();
@@ -193,6 +216,12 @@ export function fixtureReviewRows(fixtures: FixtureParse[], graders: GraderParse
     const fields = f.ok ? f.fields : {};
     const asStr = (v: string | string[] | undefined): string => (Array.isArray(v) ? v.join(" · ") : (v ?? ""));
     const asArr = (v: string | string[] | undefined): string[] => (Array.isArray(v) ? v : v ? [v] : []);
+    // W42·L1-E4 (W-29(g); handoff p3): an unparseable fixture + a valid grader
+    // used to mint `awaiting-decision` — a fake review row. The fixture's own
+    // parse failure must be the problem named (never the misleading "no grader
+    // file for this slug" when that is not the actual fault).
+    const fixtureProblem = f.ok ? null : `fixture frontmatter unparseable — ${f.reason}`;
+    const graderProblem = g == null ? "no grader file for this slug" : g.ok ? null : g.reason;
     return {
       slug: f.slug,
       name: asStr(fields.name) || f.slug,
@@ -204,9 +233,10 @@ export function fixtureReviewRows(fixtures: FixtureParse[], graders: GraderParse
       expectedCapabilities: asArr(fields.expectedCapabilities),
       baseline: asStr(fields.baseline) || null,
       graderOk,
-      graderProblem: g == null ? "no grader file for this slug" : g.ok ? null : g.reason,
+      graderProblem: [fixtureProblem, graderProblem].filter((p): p is string => p !== null).join(" · ") || null,
+      fixtureProblem,
       provenanceHeadings: f.ok ? bodyHeadings(f.body) : [],
-      reviewState: graderOk ? "awaiting-decision" : "bar-missing",
+      reviewState: f.ok && graderOk ? "awaiting-decision" : "bar-missing",
       label: FIXTURE_REVIEW_LABEL,
     };
   });
@@ -218,6 +248,10 @@ export function fixtureReviewRows(fixtures: FixtureParse[], graders: GraderParse
  * appends it through the project's existing decision path with the acting
  * human's name and an optional note — same actor+ISO-timestamp discipline as
  * phase approvals (T2).
+ *
+ * @de-scoped (W42·L1-E5) — see the block above `FixtureVerdict`: no consumer
+ * today, and it cannot append to `project.decisions` without a journal shape
+ * (HitlDecision mismatch). Kept, documented, not wired.
  */
 export function fixtureDecisionEntry(
   slug: string,

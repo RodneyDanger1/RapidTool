@@ -2563,6 +2563,16 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       emitDirClean: cleanReport,
     },
   };
+  // W42·L1-E1 (Q4-c/X2 tail): every entries row carries the funded | unfunded |
+  // unmeasured end class — the SAME classifier history.json's rows use
+  // (`historyEndClass`, one definition — no drift). Both inputs are already on
+  // this object: `acceptance` (pass filled per-trial by evaluateEntry — the
+  // literal's placeholder `pass:false` classifies identically to either final
+  // boolean verdict: a scored keyed trial IS "funded") + `notes.noBalance` (checked
+  // first by the classifier) — so the class computed here cannot drift from
+  // the row persist() writes. A reader must still tolerate the key's absence
+  // on legacy artifacts (scorecard reader) — never invent a class.
+  entryRow.endClass = historyEndClass(entryRow, mode);
   return { entryRow, card, acceptance, noBalance };
 }
 
@@ -2853,6 +2863,32 @@ export function historyEndClass(row, mode) {
   return "unmeasured";
 }
 
+/** W42·L1-E6(b): the history.json trend is append-only, and the scorecard's M7
+ *  prior + trends read it WHOLE — unbounded growth makes every read O(all runs
+ *  ever). Keep the newest N rows (200 ≈ years of daily full-corpus runs); older
+ *  rows are dropped from the FILE only, never invented back. Exported so the
+ *  bound is pinnable (run-eval.test.mjs) without driving the slow pipeline. */
+export const MAX_HISTORY_ROWS = 200;
+
+/** W42·L1-E6(a): write `value` as pretty JSON onto `target` ATOMICALLY —
+ *  same-dir temp + rename, styled after writeMarkerAtomic below. A plain
+ *  writeFileSync truncates the target before it writes, so a kill mid-write
+ *  leaves a torn/0-byte results.json or history.json — and the stale-read
+ *  class this repo already bit on (W16-L1) reads such a tear as "the previous
+ *  run" or as garbage. rename(2) is atomic within one filesystem: a reader
+ *  sees the previous bytes or the new ones, never a tear. The serialized
+ *  bytes are byte-identical to the previous direct write (same
+ *  JSON.stringify(value, null, 2), no trailing newline — the scorecard and the
+ *  gate consume these files, formats must not move). Exported for the unit
+ *  seam: run-eval.test.mjs drives the failed-rename path (rename(2) onto an
+ *  existing directory → EPERM on this host) against a real target. */
+export function writeJsonAtomic(target, value) {
+  mkdirSync(dirname(target), { recursive: true });
+  const tmp = `${target}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value, null, 2), "utf8");
+  renameSync(tmp, target);
+}
+
 function persist(rows, mode, skips = [], extra = {}) {
   mkdirSync(OUT_DIR, { recursive: true });
   const results = {
@@ -2871,7 +2907,9 @@ function persist(rows, mode, skips = [], extra = {}) {
       ...buildSummary(rows, skips),
     },
   };
-  writeFileSync(RESULTS_PATH, JSON.stringify(results, null, 2), "utf8");
+  // W42·L1-E6(a): atomic (same-dir tmp + rename) — a kill mid-write can no
+  // longer tear results.json; the reader sees the previous run or this one.
+  writeJsonAtomic(RESULTS_PATH, results);
 
   const history = readJson(HISTORY_PATH, []);
   const at = new Date().toISOString();
@@ -2905,7 +2943,9 @@ function persist(rows, mode, skips = [], extra = {}) {
       });
     }
   }
-  writeFileSync(HISTORY_PATH, JSON.stringify(history, null, 2), "utf8");
+  // W42·L1-E6(b): bound the append-only trend — keep the newest
+  // MAX_HISTORY_ROWS rows (this run's included) before the atomic write.
+  writeJsonAtomic(HISTORY_PATH, history.slice(-MAX_HISTORY_ROWS));
   return results;
 }
 
@@ -3252,6 +3292,10 @@ async function main() {
           grader: { path: graderPath, hash: String(fnv1a(JSON.stringify(grader))) },
           perTrial: [],
           notes: { error: msg.slice(0, 300), trialsCrashed: true },
+          // W42·L1-E1: a crashed/skipped trial never reached a verdict — by
+          // the classifier's own doc (historyEndClass) it is "unmeasured",
+          // never fabricated into funded/unfunded.
+          endClass: "unmeasured",
         },
         card: null,
         trialRows: [],

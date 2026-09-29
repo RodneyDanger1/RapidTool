@@ -72,6 +72,10 @@ Status: CLOSED — all six landed; every implicated file re-run foreground green
   96 / 25 / 23 / 37 / 14 / 19, 0 fails.
 - `npm run typecheck`: exit 0 (full). `npm run lint`: exit 0 (0 errors; 4 transient warnings
   in `src/lib/packet.ts` from a sibling lane's in-flight edit — not V1's files).
+- Full `npm test` (canonical, both legs): **scripts 328/328 · src 2250 pass / 0 fail / 1 legit
+  skip** on retry. First attempt's only red was the documented `exec.test.ts` scratch-dir
+  timing flake under multi-lane machine load — standalone green ×3 (incl. immediately after),
+  and the retry was 82s vs 143s, confirming load sensitivity, not a leak or a V1 delta.
 
 ## Probes / artifacts
 - T2's five probes were preserved by the fixes/301 · X4 hygiene pass at

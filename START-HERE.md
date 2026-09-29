@@ -23,14 +23,14 @@ W25–W28 deep audit, IDs `A*`/`C*`/`W-*`/`R*`/`T*`; append-only protocol in its
 
 | # | Where | What lives there |
 |---|---|---|
-| 1 | `src/lib/` (191 files) | The pure engine + logic. Start with `engine.ts` (phase state machine), `headless.ts` (journey driver), `codegen.server.ts` (P6 synthesis), `store.ts`, then `phases.ts` · `packet.ts` · `dod.ts` · `io.ts` · `errors.ts` (the `RT_E_*` registry). Tests are colocated `*.test.ts`. |
+| 1 | `src/lib/` (200 files) | The pure engine + logic. Start with `engine.ts` (phase state machine), `headless.ts` (journey driver), `codegen.server.ts` (P6 synthesis), `store.ts`, then `phases.ts` · `packet.ts` · `dod.ts` · `io.ts` · `errors.ts` (the `RT_E_*` registry). Tests are colocated `*.test.ts`. |
 | 2 | `src/components/` + `src/routes/` | The UI: `console.tsx` (main console) + TanStack routes. |
-| 3 | `scripts/rapidtool-cli.mjs` | The headless CLI — **37 verbs** (`grep -c 'case "'` is the count source of truth), single JSON object per call; contract = `scripts/README-cli.md`. |
-| 4 | `scripts/` (40) | `gate.sh` (the stability gate) · `run-eval.mjs` (eval harness) · guards/tooling + `*.test.mjs` suites. |
-| 5 | `fixes/` (300+) | The **append-only landing logs** — one per lane per wave. The newest number = the current wave. Read the last few to know what just landed. |
-| 6 | `wave_plans/` (93) | Per-lane dispatch plans (`W4`→`W32`, one file per lane) + the convention note in `wave_plans/README.md`. |
+| 3 | `scripts/rapidtool-cli.mjs` | The headless CLI — **39 verbs** (`grep -c 'case "'` is the count source of truth), single JSON object per call; contract = `scripts/README-cli.md`. |
+| 4 | `scripts/` (45) | `gate.sh` (the stability gate) · `run-eval.mjs` (eval harness) · guards/tooling + `*.test.mjs` suites. |
+| 5 | `fixes/` (450) | The **append-only landing logs** — one per lane per wave. The newest number = the current wave. Read the last few to know what just landed. |
+| 6 | `wave_plans/` (105) | Per-lane dispatch plans (`W4`→`W40`, one file per lane) + the convention note in `wave_plans/README.md`. |
 | 7 | `research/multiagent/` (103) | The analysis program: dossiers, readiness plans (`94`, `104`), defect ledgers (`93`), and the register **`thoroughanalysis.md`**. |
-| 8 | `research/eval-corpus/` (15) | The acceptance corpus: 7 brief fixtures + `graders/`. `research/eval-out/` = **tracked** trial outputs (`results.json`, `history.json`, emitted trees). |
+| 8 | `research/eval-corpus/` (23) | The acceptance corpus: 11 brief fixtures + `graders/`. `research/eval-out/` = **tracked** trial outputs (`results.json`, `history.json`, emitted trees). |
 | 9 | Root docs | `README.md` (quickstart + honest limits) · `AGENTS.md` (working contract) · `RESUME.md` · `taskuniverselog.md` · `remainingwaves.md` · `finalsprint.md`. Full depth-2 map: **`docs-FOLDER-MAP.md`**. |
 | 10 | `migrations/` · `public/` · `.github/` | Deploy SQL · static assets · CI workflow. |
 
@@ -88,7 +88,7 @@ synthesis with gates + bounded repair (keyless = honest floors + `RT_E_LLM_NOT_C
 text) · banned-primitive refusals (prose-in-code / `Math.random`) · oracle rows + `tree-run` (the emitted
 product must pass its OWN `npm run typecheck`+`npm test`; a red tree can never be `ok:true`) · honest
 emission (redTree refuse/banner) · HITL two-channel seats (no machine path mints `decidedBy:"human"`) ·
-CLI 37 verbs incl. `doctor`/`diagnose`/read-only `eval` scorecard · the console UI (9+ tabs, ⌘K palette,
+CLI 39 verbs incl. `doctor`/`diagnose`/read-only `eval` scorecard · the console UI (9+ tabs, ⌘K palette,
 runtime log) · `gate.sh` with flake detection (first green run 2026-09-16).
 
 **Shelled / in progress** (per `finalsprint.md`; shells only — no fake behavior, each has

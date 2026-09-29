@@ -112,6 +112,7 @@ function systemJson(
   loop: { count: number; note: string | null },
   coverage: PhaseCoverage,
   spend: PacketSpend | null,
+  budget: TokenBudget | null,
 ): string {
   // SWEEP-2 (esc-1): escape raw backticks as \u0060 so the envelope stays a
   // single parseable ```json block. JSON.stringify does NOT escape backticks,
@@ -152,6 +153,12 @@ function systemJson(
         isolated: project.sandbox.isolated,
       },
       verdict: project.scorecard?.verdict ?? null,
+      // L2-P4 (W42 · G2 edge-1): the persisted acceptance verdict the
+      // SIGTERM-abort path writes (headless.ts runAcceptance) — previously
+      // invisible to downstream agents (packet.ts grep = 0). Additive key,
+      // null when absent (T-14 `phase_coverage` precedent); PACKET_VERSION
+      // stays 3.
+      acceptance: project.acceptance ?? null,
       rejection_loop:
         loop.count >= 1
           ? { phase: phase.id, attempts: loop.count, last_note: quoteNote(loop.note ?? undefined, 300) }
@@ -187,6 +194,11 @@ function systemJson(
       // measured sample (never a fabricated 0). Additive key (T-14
       // `phase_coverage` precedent); PACKET_VERSION stays 3.
       spend: spendBlock(spend),
+      // F2-04 (W41 · X1 tail): the honest session-budget boundary — `{spent,
+      // cap, stop_reason}` read from the SAME T-107.6 ledger as `spend`; null
+      // unless the budget has spend, a cap, or a crossed cap to report. Key
+      // rides LAST, right after `spend:` (additive; PACKET_VERSION stays 3).
+      budget: packetBudgetBoundary(budget),
     },
     null,
     2,
@@ -327,6 +339,23 @@ export type PacketSpend = {
   estimatedCostUsd: number | null;
 };
 
+/**
+ * F2-04 (W41 · X1 tail): the honest session-budget boundary carried in the
+ * envelope — `{spent, cap, stop_reason}`. `spent` is `totalTokens(ledger)`
+ * (the ledger's own sum — consumed, never recomputed); `cap` is null when
+ * unmetered (`RAPIDTOOL_TOKEN_CAP` unset); `stop_reason` fires ONLY via
+ * `isBudgetExhausted` (spend actually crossed the cap — strict `>`, landing
+ * exactly on the cap is still ok). Never an optimistic "ok", never fabricated.
+ */
+export type PacketBudget = {
+  /** `totalTokens(budget.ledger)` — the ledger's own sum. */
+  spent: number;
+  /** Effective cap in tokens; null = unmetered. */
+  cap: number | null;
+  /** Set only when spend has actually crossed the cap. */
+  stop_reason: "budget_exhausted" | null;
+};
+
 /** Positive-finite gate for caller prices (mirror of doctor.ts's gate): an
  *  estimate is emitted only when BOTH per-1M prices are usable — the ledger
  *  floors bad prices to 0, this surface refuses them instead of printing $0. */
@@ -384,6 +413,30 @@ export function packetSpendSummary(
     cacheWriteTokens: packetNum(ledger.cacheWriteTokens),
     reasoningTokens: packetNum(ledger.reasoningTokens),
     estimatedCostUsd: priced ? estimateCostUsd(source, prices) : null,
+  };
+}
+
+/**
+ * Read a session budget into the packet's boundary block (F2-04). Pure; never
+ * throws. Returns null when there is nothing honest to report: no budget
+ * object at all, or an unmetered budget with zero spend (the process default).
+ * `totalTokens`/`isBudgetExhausted` are the ledger's own tolerant guards, so a
+ * hostile budget reads as empty rather than escaping.
+ */
+export function packetBudgetBoundary(
+  budget: TokenBudget | null | undefined,
+): PacketBudget | null {
+  if (!budget || typeof budget !== "object") return null;
+  const spent = totalTokens(budget.ledger);
+  const cap = budgetCap(budget);
+  const exhausted = isBudgetExhausted(budget);
+  // Nothing honest to report: unmetered AND unspent ⇒ null (absent-is-honest,
+  // mirroring the spend block's rule).
+  if (spent <= 0 && cap === undefined && !exhausted) return null;
+  return {
+    spent,
+    cap: cap ?? null,
+    stop_reason: exhausted ? "budget_exhausted" : null,
   };
 }
 
@@ -449,6 +502,10 @@ export function compileAgentPacket(
     /** OV-41: CALLER-supplied per-1M prices for `estimateCostUsd` (the ledger
      *  ships no catalog — 107 §11). Absent ⇒ tokens only, no dollar figure. */
     spendPrices?: TokenPrices | null;
+    /** F2-04: the session budget whose boundary the envelope reports —
+     *  defaults to `sessionTokenBudget()` (the process singleton). Tests pass
+     *  an explicit budget (the singleton lazily reads env ONCE per process). */
+    budget?: TokenBudget | null;
   },
 ): string {
   // CORE-03 (defense-in-depth): never index PHASES[] with an unvalidated
@@ -467,6 +524,10 @@ export function compileAgentPacket(
   // number is a ledger field or a ledger-helper output. Absent ⇒ null ⇒ the
   // section and the envelope block stay empty (byte-identical, unmetered).
   const spend = packetSpendSummary(opts?.spend ?? project.tokenUsage, opts?.spendPrices);
+  // F2-04 (W41 · X1 tail): the session budget the envelope reports — the
+  // caller's explicit budget wins; else the process singleton (unmetered
+  // unless RAPIDTOOL_TOKEN_CAP is set). Never spent/recorded here — read-only.
+  const budget = opts?.budget ?? sessionTokenBudget();
   // Tier-1 (fixes/144 M5-3): cross-project proven rows join the pool as
   // research-sourced pseudo-memory rows (E-18 cited boost + "lesson" tag —
   // LESSON_TAG literal mirrors knowledge.ts; packet.ts cannot import it
@@ -615,6 +676,7 @@ export function compileAgentPacket(
     { count: loopCount, note: lastLoopNote },
     coverage,
     spend,
+    budget,
   );
 
   const notes = (project.notes ?? "").trim();
@@ -940,6 +1002,9 @@ function scopeSection(project: Project, lead: string): string {
   return [`## File scope`, `${lead}`, body].join("\n");
 }
 
+// TODO(F2-07): zero non-test consumers — KEEP; packet.test.ts pins the key set
+// (:676 deepEqual + 8 more). Wire the six coding tools or remove at the next
+// surface audit.
 export const exportProfiles: Record<ExportProfileId, ExportProfile> = {
   "claude-code": {
     name: "Claude Code",

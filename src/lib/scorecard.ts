@@ -110,6 +110,10 @@ export type EvalAcceptance = {
   missingFiles: string[];
   failedContent: string[];
   passReason: string | null;
+  /** W40·N4 verdict label, surfaced by W42·L1-E2 (`verificationLabel` in
+   *  run-eval.mjs): which run-side assertions graded the tree. Absent on
+   *  legacy rows predating the key — null, never invented. */
+  verification: string | null;
   checked: { expectedFiles: number | null; expectedContent: number | null } | null;
 };
 
@@ -138,6 +142,13 @@ export type EvalEntry = {
   mean: number | null;
   baseline: string | null;
   acceptance: EvalAcceptance | null;
+  /** W40·N4 verdicts surfaced per entry (W42·L1-E2) — read from the row's
+   *  `acceptance` block; null = the row predates the key (never invented). */
+  behaviorOk: boolean | null;
+  kindOk: boolean | null;
+  /** W42·L1-E2: funded | unfunded | unmeasured (run-eval.mjs's
+   *  `historyEndClass`). null = absent on the row (legacy artifact). */
+  endClass: string | null;
   grader: EvalGraderFacts | null;
   coverageMissing: string[];
   emitDir: string | null;
@@ -179,6 +190,7 @@ function readAcceptance(raw: unknown): EvalAcceptance | null {
     missingFiles: strList(raw.missingFiles),
     failedContent: strList(raw.failedContent),
     passReason: str(raw.passReason),
+    verification: str(raw.verification),
     checked,
   };
 }
@@ -217,6 +229,7 @@ function readEntry(raw: unknown): EvalEntry | null {
     }
   }
   const coverage = isRecord(raw.coverage) ? raw.coverage : null;
+  const rawAcceptance = isRecord(raw.acceptance) ? raw.acceptance : null;
   return {
     slug,
     name: str(raw.name),
@@ -231,6 +244,9 @@ function readEntry(raw: unknown): EvalEntry | null {
     mean: num(raw.mean),
     baseline: str(raw.baseline),
     acceptance: readAcceptance(raw.acceptance),
+    behaviorOk: rawAcceptance ? bool(rawAcceptance.behaviorOk) : null,
+    kindOk: rawAcceptance ? bool(rawAcceptance.kindOk) : null,
+    endClass: str(raw.endClass),
     grader: readGrader(raw.grader),
     coverageMissing: coverage ? strList(coverage.missing) : [],
     emitDir: str(raw.emitDir),
@@ -295,6 +311,9 @@ export type EvalHistoryRow = {
   trial: number | null;
   trials: number | null;
   pass: boolean | null;
+  /** W42·L1-E2: funded | unfunded | unmeasured (run-eval.mjs writes this
+   *  since W40·N4); null = absent on legacy rows — never invented. */
+  endClass: string | null;
   criteria: Partial<Record<EvalCriterionId, number>>;
   total: number | null;
   mean: number | null;
@@ -323,6 +342,7 @@ export function parseEvalHistory(text: string): JsonRead<EvalHistoryRow[]> {
       trial: num(raw.trial),
       trials: num(raw.trials),
       pass: bool(raw.pass),
+      endClass: str(raw.endClass),
       criteria,
       total: num(raw.total),
       mean: num(raw.mean),
@@ -450,6 +470,13 @@ export type EvalScorecard = {
     meanTotal: number | null;
     maxPerEntry: number;
     passCount: number;
+    /** W42·L1-E2 (X2 render tail): census of the funded | unfunded |
+     *  unmeasured end class over `entries`; `absent` = the row carried no
+     *  `endClass` (legacy artifacts predate the key — never guessed). */
+    endClass: { funded: number; unfunded: number; unmeasured: number; absent: number };
+    /** W42·L1-E2: three-way census of `acceptance.pass` over `entries`;
+     *  `unscored` = no boolean verdict was recorded for the row. */
+    acceptance: { pass: number; fail: number; unscored: number };
     /** per-slug pass@k block from `sourceSummary.passAtK`, verbatim (null when absent) */
     passAtK: Record<string, unknown> | null;
   };
@@ -651,6 +678,24 @@ export function buildScorecard(input: BuildScorecardInput): EvalScorecard {
     .filter((t): t is number => typeof t === "number");
   const means = entries.map((e) => e.mean).filter((m): m is number => typeof m === "number");
   const passCount = entryRows.filter((e) => e.acceptance?.pass === true).length;
+  // W42·L1-E2: the end-class + acceptance censuses over the (possibly
+  // slug-filtered) entries. A row outside the classifier's three classes —
+  // key absent, or a value never written by run-eval.mjs — is counted
+  // `absent`, NEVER silently landed in "unmeasured" (absence is not a class).
+  const endClassCensus = { funded: 0, unfunded: 0, unmeasured: 0, absent: 0 };
+  for (const e of entries) {
+    if (e.endClass === "funded") endClassCensus.funded += 1;
+    else if (e.endClass === "unfunded") endClassCensus.unfunded += 1;
+    else if (e.endClass === "unmeasured") endClassCensus.unmeasured += 1;
+    else endClassCensus.absent += 1;
+  }
+  const acceptanceCensus = { pass: 0, fail: 0, unscored: 0 };
+  for (const e of entries) {
+    const p = e.acceptance ? e.acceptance.pass : null;
+    if (p === true) acceptanceCensus.pass += 1;
+    else if (p === false) acceptanceCensus.fail += 1;
+    else acceptanceCensus.unscored += 1;
+  }
   const passAtK =
     results.sourceSummary && isRecord(results.sourceSummary.passAtK)
       ? results.sourceSummary.passAtK
@@ -668,6 +713,16 @@ export function buildScorecard(input: BuildScorecardInput): EvalScorecard {
       input.slug
         ? `no results entry matches slug ${JSON.stringify(input.slug)} in this results.json.`
         : "results.json carries no scored entries.",
+    );
+  }
+  // W42·L1-E2: the render tail (X2) — name both censuses as notes lines so the
+  // operator reads the class/acceptance mix without decoding `derived`.
+  if (entries.length > 0) {
+    notes.push(
+      `endClass census (${entries.length} entries): funded ${endClassCensus.funded} · unfunded ${endClassCensus.unfunded} · unmeasured ${endClassCensus.unmeasured} · absent ${endClassCensus.absent} — "absent" = the row carried no endClass (a legacy artifact predating the key); never guessed into a class.`,
+    );
+    notes.push(
+      `acceptance census: pass ${acceptanceCensus.pass} · fail ${acceptanceCensus.fail} · unscored ${acceptanceCensus.unscored} — "unscored" = no boolean verdict was recorded (no-balance trials and rows without an acceptance block).`,
     );
   }
   if (input.marker) {
@@ -699,6 +754,8 @@ export function buildScorecard(input: BuildScorecardInput): EvalScorecard {
       meanTotal: means.length > 0 ? round4(means.reduce((n, m) => n + m, 0) / means.length) : null,
       maxPerEntry: EVAL_MAX_PER_ENTRY,
       passCount,
+      endClass: endClassCensus,
+      acceptance: acceptanceCensus,
       passAtK,
     },
     sourceSummary: results.sourceSummary,

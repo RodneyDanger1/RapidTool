@@ -8,20 +8,20 @@
 ```
 RapidTool Main/
 │
-├─ src/ (201) ................ the product: pure engine + UI surfaces
-│  ├─ lib/ (191) ............. engine & logic; tests colocated (*.test.ts). Key files:
+├─ src/ (210) ................ the product: pure engine + UI surfaces
+│  ├─ lib/ (200) ............. engine & logic; tests colocated (*.test.ts). Key files:
 │  │  │                        engine.ts (13-phase state machine) · headless.ts (journey driver/CLI backend)
 │  │  │                        codegen.server.ts (P6 synthesis) · store.ts (zustand state) · phases.ts
 │  │  │                        packet.ts · dod.ts · io.ts · errors.ts (RT_E registry) · verify.server.ts
 │  │  │                        compile-check.server.ts + node-runner.server.ts (bounded runner, NOT a sandbox)
 │  │  │                        scaffold.ts (tree writer) · policy.ts · algorithms.ts · vault.ts · harvest.ts
-│  │  └─ auth/ (19) · app-data/ (7) · llm/ (7, provider seam) · multiplayer/ (2) · og/ (1) · testing/ (1)
+│  │  └─ auth/ (19) · app-data/ (7) · llm/ (8, provider seam) · multiplayer/ (2) · og/ (1) · testing/ (1)
 │  ├─ components/ (4) ........ UI components — console.tsx is the main console surface
 │  ├─ routes/ (3) ............ TanStack Start routes (__root, index, run.$id)
 │  └─ routeTree.gen.ts · router.tsx · styles.css
 │
-├─ scripts/ (40) ............. CLI + build tooling + tests
-│  ├─ rapidtool-cli.mjs ...... THE headless CLI (37 verbs; contract: README-cli.md)
+├─ scripts/ (45) ............. CLI + build tooling + tests
+│  ├─ rapidtool-cli.mjs ...... THE headless CLI (39 verbs; contract: README-cli.md)
 │  ├─ gate.sh ................ the stability gate (typecheck→lint→scripts→src→build, JSON verdict)
 │  ├─ run-eval.mjs ........... the eval harness (keyless floor / --keyed live)
 │  ├─ with-app-env.mjs ....... npm-script env loader (all npm scripts route through it)
@@ -29,18 +29,18 @@ RapidTool Main/
 │  ├─ browser-guard / browser-smoke / check-assertion-gaps / check-auth-invariant / brand-check / write-atomic / path-safety …
 │  └─ *.test.mjs ............. the scripts test leg (npm test leg 1)
 │
-├─ migrations/ (1) ........... deploy SQL: auth/0001_auth.sql
+├─ migrations/ (2) ........... deploy SQL: auth/0001_auth.sql · auth/0002_account_unique.sql
 │
-├─ research/ (468) ........... the research + evidence layer
+├─ research/ (476) ........... the research + evidence layer
 │  ├─ multiagent/ (103) ...... the analysis program: dossiers (01…112), plans (94/96/104), defect ledgers,
 │  │                            and THE REGISTER thoroughanalysis.md (append-only; read its header first)
-│  ├─ eval-corpus/ (15) ...... the acceptance corpus: 7 brief fixtures + graders/ + README
+│  ├─ eval-corpus/ (23) ...... the acceptance corpus: 11 brief fixtures + graders/ + README
 │  ├─ eval-out/ (345) ........ TRACKED trial outputs: results.json, history.json, per-slug emitted trees/trials
 │  └─ 01…03_*research.md · deepseek-api.md · runtime-integration.md .... early deep-dive dossiers
 │
-├─ fixes/ (~342) ............. append-only landing logs, one per lane per wave (NN_ = wave number);
+├─ fixes/ (450) ............. append-only landing logs, one per lane per wave (NN_ = wave number);
 │                             263_index.md = the generated link index of fixes/ + wave_plans/
-├─ wave_plans/ (93) .......... per-lane dispatch plans W4→W32 (28 dirs; no W25) + README.md (convention)
+├─ wave_plans/ (105) ......... per-lane dispatch plans W4→W40 (35 dirs; no W25) + README.md (convention)
 │
 ├─ public/ (10) .............. static assets (favicon.svg, og.jpg) + legacy public/__grok/ install assets
 ├─ .github/ (1) .............. CI: workflows/gate.yml

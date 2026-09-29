@@ -118,6 +118,50 @@ export function authCopyUpGaps({ authNames = [], migratedNames = [] } = {}) {
   return [...new Set(auth)].filter((name) => !migrated.has(name)).sort();
 }
 
+/**
+ * W42 L4-G2 (q2 rows A-87/A-88): per-file copy-up STATE for the auth schema —
+ * every `migrations/auth/*.sql`, plus its copy in the migrated directory when
+ * one exists. `copied` is the basename list that has a copy; a PARTIAL copy-up
+ * is `copied.length > 0 && copied.length < auth.length` (the quiet regression:
+ * 0001 makes sign-in work, a later file never applies). `pairs` carries the
+ * byte-pair per copy so a caller can prove copy === source.
+ *
+ * Moved here from `migration-plan.test.mjs`'s private copy so the workspace
+ * guard and its pin share ONE implementation (q2 A-87: the test had
+ * re-implemented it). Async with a LAZY `node:fs`/`node:path` import: this
+ * module is also imported by the client-capable `src/lib/db.ts`, and a
+ * top-level `node:fs` import is the H2 crash class — the house seam pattern
+ * is `src/lib/quarantine.ts`'s `await import("node:fs")`.
+ * @param {string} root
+ * @returns {Promise<{ auth: string[], copied: string[], pairs: Array<{ name: string, copy: string, source: string }> }>}
+ */
+export async function authSchemaCopyState(root) {
+  const fs = await import("node:fs");
+  const { join } = await import("node:path");
+  const authDir = join(root, "migrations", "auth");
+  if (!fs.existsSync(authDir)) return { auth: [], copied: [], pairs: [] };
+  const auth = fs
+    .readdirSync(authDir)
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
+  /** @type {string[]} */
+  const copied = [];
+  /** @type {Array<{ name: string, copy: string, source: string }>} */
+  const pairs = [];
+  for (const name of auth) {
+    const copy = join(root, "migrations", name);
+    if (fs.existsSync(copy)) {
+      copied.push(name);
+      pairs.push({
+        name,
+        copy: fs.readFileSync(copy, "utf8"),
+        source: fs.readFileSync(join(authDir, name), "utf8"),
+      });
+    }
+  }
+  return { auth, copied, pairs };
+}
+
 /** The canonical basename of the Better Auth schema migration (`migrations/auth/0001_auth.sql`). */
 export const AUTH_SCHEMA_MIGRATION = "0001_auth.sql";
 

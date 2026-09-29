@@ -1402,6 +1402,9 @@ export function createCrew(
   return createCrewRuntime({ complete: completer, search: extra?.search });
 }
 
+// TODO(F2-09): zero code consumers; cited only by the planned ingest path
+// (research/multiagent/03_crew_design.md:267-606, box unchecked :606) — wire or
+// de-scope at the next ingest pass; KEEP until then.
 /** Collapse a finished session into an AgentReport for report-intake. */
 export function crewToReport(session: CrewSession, project: Project): AgentReport {
   const last = session.messages[session.messages.length - 1];

@@ -33,6 +33,7 @@ const ROOT = cwdIdx >= 0 && args[cwdIdx + 1] ? resolve(args[cwdIdx + 1]) : proce
 export const DOCS = [
   "AGENTS.md",
   "README.md",
+  "START-HERE.md",
   "RESUME.md",
   "AGENT_GUIDE.md",
   "scripts/README-cli.md",
@@ -93,12 +94,16 @@ function main() {
     emptyCount: empty.length,
     missing,
     empty,
-    selfCheck: selfCheck ? "requested (see fixtures below)" : "not requested",
-    fixtures: {
-      // In-memory self-check: verify the audit logic on synthetic inputs (no repo dependence).
-      missingDetected: audit([{ doc: "<fixture>", paths: ["src/lib/__no_such_file__.ts"] }]).missing.length === 1,
-      existingNotFlagged: audit([{ doc: "<fixture>", paths: ["package.json"] }]).missing.length === 0,
-    },
+    selfCheck: selfCheck ? "requested — synthetic fixtures below" : "not requested (no fixtures computed)",
+    ...(selfCheck
+      ? {
+          fixtures: {
+            // In-memory self-check: verify the audit logic on synthetic inputs (no repo dependence).
+            missingDetected: audit([{ doc: "<fixture>", paths: ["src/lib/__no_such_file__.ts"] }]).missing.length === 1,
+            existingNotFlagged: audit([{ doc: "<fixture>", paths: ["package.json"] }]).missing.length === 0,
+          },
+        }
+      : {}),
   };
 }
 

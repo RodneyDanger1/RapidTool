@@ -9,6 +9,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ALL_PHASES, runHeadless, runToGate, seedProject } from "./testing/fixtures.ts";
+import { FIXTURE_REVIEW_LABEL, fixtureReviewRows, parseFixtureFrontmatter, parseGrader } from "./fixtures.ts";
 
 describe("runToGate determinism", () => {
   it("seals every phase below target 12 and parks exactly at its mouth", () => {
@@ -52,5 +53,72 @@ describe("runToGate determinism", () => {
       assert.equal(g.phases.find((r) => r.id === id)?.status, "complete", `phase ${id}`);
     }
     assert.ok(Array.isArray(g.research) && g.research.length > 0, "live-research corpus present");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W42·L1-E4 — fixtures REVIEW surface pins (src/lib/fixtures.ts): a fixture
+// whose frontmatter never parsed must NEVER mint `reviewState:
+// "awaiting-decision"` off the strength of its grader (W-29(g): the README
+// fake row still minted), and the row must name the parse failure — including
+// when no grader exists (the old "no grader file for this slug" text hid the
+// fixture-side fault).
+// ---------------------------------------------------------------------------
+describe("fixture review rows — parse-failure honesty (W42·L1-E4)", () => {
+  const validGrader = (slug: string) =>
+    parseGrader(
+      JSON.stringify({
+        graderVersion: 2,
+        slug,
+        caseName: "Case",
+        acceptanceBar: "the bar",
+        requiredIdentifiers: ["a"],
+        authority: "run-side",
+      }),
+      `${slug}.grader.json`,
+    );
+
+  it("unparseable fixture + valid grader → bar-missing + the parse failure is named (never awaiting-decision)", () => {
+    const badFixture = parseFixtureFrontmatter("plain text, no fence", "broken.md");
+    assert.equal(badFixture.ok, false);
+    const rows = fixtureReviewRows([badFixture], [validGrader("broken")]);
+    assert.equal(rows.length, 1);
+    const row = rows[0];
+    assert.notEqual(row.reviewState, "awaiting-decision", "an unparseable fixture is not reviewable");
+    assert.equal(row.reviewState, "bar-missing");
+    assert.ok(row.graderOk, "the grader itself parsed fine — the fixture is the fault");
+    assert.match(row.fixtureProblem ?? "", /frontmatter fence/);
+    assert.match(row.graderProblem ?? "", /frontmatter fence/, "the display slot names the parse failure too");
+  });
+
+  it("unparseable fixture + missing grader → both axes named, never only 'no grader file'", () => {
+    const badFixture = parseFixtureFrontmatter("still no fence", "lost.md");
+    const rows = fixtureReviewRows([badFixture], []);
+    const row = rows[0];
+    assert.equal(row.reviewState, "bar-missing");
+    assert.match(row.fixtureProblem ?? "", /unparseable/);
+    assert.match(row.graderProblem ?? "", /unparseable/, "the fixture fault is the FIRST problem named");
+    assert.ok((row.graderProblem ?? "").includes("no grader file for this slug"), "the grader-side fact is kept too");
+  });
+
+  it("parseable fixture + valid grader → awaiting-decision, no problems (no regression)", () => {
+    const good = parseFixtureFrontmatter("---\nname: Demo\nkind: cli-tool\n---\n## Provenance\nx", "demo.md");
+    assert.equal(good.ok, true);
+    const rows = fixtureReviewRows([good], [validGrader("demo")]);
+    const row = rows[0];
+    assert.equal(row.reviewState, "awaiting-decision");
+    assert.equal(row.fixtureProblem, null);
+    assert.equal(row.graderProblem, null);
+    assert.deepEqual(row.provenanceHeadings, ["Provenance"]);
+    assert.equal(row.label, FIXTURE_REVIEW_LABEL);
+  });
+
+  it("parseable fixture + missing grader → bar-missing with the grader text unchanged", () => {
+    const good = parseFixtureFrontmatter("---\nname: Demo\n---\n", "solo.md");
+    const rows = fixtureReviewRows([good], []);
+    const row = rows[0];
+    assert.equal(row.reviewState, "bar-missing");
+    assert.equal(row.fixtureProblem, null);
+    assert.equal(row.graderProblem, "no grader file for this slug");
   });
 });

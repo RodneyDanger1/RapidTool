@@ -13,6 +13,7 @@ import { test } from "node:test";
 import {
   AUTH_SCHEMA_MIGRATION,
   authCopyUpGaps,
+  authSchemaCopyState,
   authSchemaRefusal,
   createsAuthUserTable,
   isMigrationFile,
@@ -24,32 +25,11 @@ import { projectRoot } from "./with-app-env.mjs";
 
 const AUTH_MIGRATION = "0001_auth.sql";
 
-/**
- * K2 (W39): per-file copy-up state for the auth schema — every
- * `migrations/auth/*.sql`, plus its copy in the migrated directory when one
- * exists. `copied` is the basename list that has a copy; a PARTIAL copy-up is
- * `copied.length > 0 && copied.length < auth.length` (the quiet regression:
- * 0001 makes sign-in work, a later file never applies).
- */
-function authSchemaCopies(root) {
-  const authDir = join(root, "migrations", "auth");
-  if (!existsSync(authDir)) return { auth: [], copied: [], pairs: [] };
-  const auth = readdirSync(authDir).filter((name) => name.endsWith(".sql")).sort();
-  const copied = [];
-  const pairs = [];
-  for (const name of auth) {
-    const copy = join(root, "migrations", name);
-    if (existsSync(copy)) {
-      copied.push(name);
-      pairs.push({
-        name,
-        copy: readFileSync(copy, "utf8"),
-        source: readFileSync(join(authDir, name), "utf8"),
-      });
-    }
-  }
-  return { auth, copied, pairs };
-}
+// W42 L4-G2: the per-file copy-up state helper moved INTO migration-plan.mjs
+// (`authSchemaCopyState` — ONE implementation for the workspace guard and its
+// pins; the lazy node:fs seam keeps db.ts's client import H2-safe). q2 A-87
+// (test re-implemented the check) is closed here; every call site below awaits
+// the shared implementation.
 
 test("_migrations keys on basename, not path", () => {
   assert.equal(migrationName("/migrations/0002_todos.sql"), "0002_todos.sql");
@@ -87,15 +67,23 @@ test("the auth schema ships outside the globbed directory", () => {
   assert.ok(readdirSync(join(migrationsDir, "auth")).includes("0001_auth.sql"));
 });
 
-test("this workspace's auth schema copy-up is all-or-none and byte-identical", () => {
+test("this workspace's auth schema copy-up is all-or-none and byte-identical", async (t) => {
   // K2 (W39): every `migrations/auth/*.sql` that has a copy in `migrations/`
   // must be a verbatim copy of its source AND the copy-up must be COMPLETE. An
   // edited copy diverges silently (basename keying skips it on a database that
   // already ran the original, and applies a mutated file on a fresh PGLite
   // preview); a PARTIAL copy-up silently drops the later migrations — including
   // `0002_account_unique.sql`, the R15-f02 unique-index fix.
-  const { auth, copied, pairs } = authSchemaCopies(projectRoot());
-  if (copied.length === 0) return; // sign-in off — nothing has been copied up
+  const { auth, copied, pairs } = await authSchemaCopyState(projectRoot());
+  if (copied.length === 0) {
+    // W42 L4-G2 (q2 A-88): never a silent vacuous pass — say on the TAP stream
+    // that the workspace half had nothing to assert; the fixture cases below
+    // carry the real assertions.
+    t.diagnostic(
+      "no copy-ups exist in this workspace (sign-in off) — the fixture cases below carry the assertions",
+    );
+    return; // sign-in off — nothing has been copied up
+  }
   assert.deepEqual(
     copied,
     auth,
@@ -110,27 +98,27 @@ test("this workspace's auth schema copy-up is all-or-none and byte-identical", (
   }
 });
 
-test("the copy check reads every auth file and catches an edit", () => {
+test("the copy check reads every auth file and catches an edit", async () => {
   const root = mkdtempSync(join(tmpdir(), "auth-schema-"));
   mkdirSync(join(root, "migrations/auth"), { recursive: true });
   writeFileSync(join(root, "migrations/auth", AUTH_MIGRATION), "create table t ();\n");
   writeFileSync(join(root, "migrations/auth", "0002_second.sql"), "create index i on t ();\n");
-  assert.deepEqual(authSchemaCopies(root), { auth: [AUTH_MIGRATION, "0002_second.sql"], copied: [], pairs: [] });
+  assert.deepEqual(await authSchemaCopyState(root), { auth: [AUTH_MIGRATION, "0002_second.sql"], copied: [], pairs: [] });
 
   // PARTIAL copy-up: 0001 only — `copied` must not equal `auth`.
   writeFileSync(join(root, "migrations", AUTH_MIGRATION), "create table t ();\n");
-  const partial = authSchemaCopies(root);
+  const partial = await authSchemaCopyState(root);
   assert.deepEqual(partial.copied, [AUTH_MIGRATION]);
   assert.notDeepEqual(partial.copied, partial.auth, "a partial copy-up is visible to the guard");
 
   // Complete copy-up, then an edit to one copy — the pair check must see it.
   writeFileSync(join(root, "migrations", "0002_second.sql"), "create index i on t ();\n");
-  const complete = authSchemaCopies(root);
+  const complete = await authSchemaCopyState(root);
   assert.deepEqual(complete.copied, complete.auth);
   for (const pair of complete.pairs) assert.equal(pair.copy, pair.source);
 
   writeFileSync(join(root, "migrations", AUTH_MIGRATION), "create table t (x int);\n");
-  const drifted = authSchemaCopies(root).pairs.find((p) => p.name === AUTH_MIGRATION);
+  const drifted = (await authSchemaCopyState(root)).pairs.find((p) => p.name === AUTH_MIGRATION);
   assert.notEqual(drifted.copy, drifted.source);
 });
 
@@ -284,8 +272,8 @@ test("K2: the preflight refuses a partial copy-up with the exact copy command", 
   assert.match(legacy.message, /Copy it up: `cp migrations\/auth\/0001_auth\.sql migrations\/0001_auth\.sql`/);
 });
 
-test("K2: the shipped tree's auth copy-up state matches the guard's verdict", () => {
-  const { auth, copied } = authSchemaCopies(projectRoot());
+test("K2: the shipped tree's auth copy-up state matches the guard's verdict", async () => {
+  const { auth, copied } = await authSchemaCopyState(projectRoot());
   const migrated = readdirSync(join(projectRoot(), "migrations"));
   const gaps = authCopyUpGaps({ authNames: auth, migratedNames: migrated });
   // The guard flags PARTIAL copy-ups only: "nothing copied up" is the R15-f02

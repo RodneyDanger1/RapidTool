@@ -76,8 +76,11 @@ function runVerdict({ exits, double = false, logs = {} }) {
   };
   const typecheckLog = logPath("typecheck.log", "");
   const lintLog = logPath("lint.log", "");
-  const s1 = logPath("testsScripts.log", "");
-  const l1 = logPath("testsLib.log", "");
+  // Unspecified test legs default to a GREEN log: the exit-0 / zero-`# pass`
+  // guard (W42 L4-G1) lifts a fully silent clean-exit leg into hardFails, and
+  // a case only speaks about the legs it names — every other leg ran green.
+  const s1 = logPath("testsScripts.log", TAP_GREEN);
+  const l1 = logPath("testsLib.log", TAP_GREEN);
   const s2 = double ? logPath("testsScripts2.log", "") : "";
   const l2 = double ? logPath("testsLib2.log", "") : "";
   const buildLog = logPath("build.log", "");
@@ -197,4 +200,23 @@ test("E: --double, leg crashed in run 1 with no TAP names → exit 1 (never 3)",
   assert.equal(status, 1, "a crash with no test names must read as a hard fail, never a flake");
   assert.equal(verdict.ok, false);
   assert.equal(verdict.flakes.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// F · W42 L4-G1: a leg that EXITS 0 while reporting ZERO `# pass` lines ran
+// nothing (empty glob, early bail) — the verdict must not read green off an
+// empty leg. Named `F` because the letter `E` above already owns the
+// --double crash case (F-H11); the two guards are independent.
+// ---------------------------------------------------------------------------
+test("F: exit-0 leg with zero '# pass' lines → ok:false, exit 1 (no green off an empty leg)", () => {
+  const { status, verdict } = runVerdict({
+    exits: {},
+    logs: { "testsScripts.log": "", "testsLib.log": TAP_GREEN },
+  });
+  assert.equal(status, 1, "a clean-exit leg with zero '# pass' lines must read as a hard fail");
+  assert.equal(verdict.ok, false, "verdict.ok must be false");
+  assert.ok(
+    verdict.hardFails.some((n) => n.startsWith("testsScripts (exit 0 but zero '# pass' lines")),
+    `hardFails must name the silent leg; got ${JSON.stringify(verdict.hardFails)}`,
+  );
 });

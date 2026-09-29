@@ -161,6 +161,15 @@ for (const [id, log1, log2] of [["testsScripts", s1, s2], ["testsLib", l1, l2]])
     fail: run1.fail,
     skipped: run1.skipped,
   };
+  // W42 L4-G1 (A-89, q2 row 9): an exit-0 leg that reported ZERO `# pass`
+  // lines ran no tests at all (empty glob, early bail, wrong reporter) — a
+  // green verdict off a silent leg is a vacuous green. A skipped-only leg is
+  // activity (skipped > 0), so only the fully silent clean-exit leg is lifted.
+  // Deliberately a hardFail, not a flake: it is a runner-level fact about the
+  // leg, present in run 1 itself (fixes/173 §F-H11's rule).
+  if (exitOf(id) === 0 && run1.pass === 0 && run1.skipped === 0) {
+    hardFails.push(`${id} (exit 0 but zero '# pass' lines — no tests actually ran; read the gate log tail)`);
+  }
   // R5-f01 (W29 · A2-f02 · W-09): a leg can exit non-zero WITHOUT a TAP
   // `not ok` line (runner crash, unresolvable glob, missing file, OOM) — the
   // flake detector has no test name to key on, but the red must still be loud
@@ -218,9 +227,12 @@ NODE
 code=$?
 
 # Diagnosis on stderr for any red gate (stdout stays JSON-only).
-for id in typecheck lint assertionGaps testsScripts testsLib build; do
+# W42 L4-G1(b): the --double legs (testsScripts2/testsLib2) are tailed too, but
+# ONLY when their .exit key exists — a missing key means the leg never ran
+# (single mode), which has no log to read and is not a failure.
+for id in typecheck lint assertionGaps testsScripts testsLib testsScripts2 testsLib2 build; do
   ext="$(awk -F'\t' -v k="$id.exit" '$1 == k { print $2 }' "$RESULTS")"
-  if [ "$ext" != "0" ]; then tail_log "$id" "$TMP/$id.log"; fi
+  if [ -n "$ext" ] && [ "$ext" != "0" ]; then tail_log "$id" "$TMP/$id.log"; fi
 done
 if [ "$code" = 3 ]; then
   printf '\nFLAKES (run-1/run-2 disagreement, see verdict JSON):\n' >&2

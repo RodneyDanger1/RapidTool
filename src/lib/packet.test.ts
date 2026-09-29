@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compileAgentPacket, exportProfiles, packetInputHash, PACKET_VERSION } from "./packet.ts";
+import { compileAgentPacket, exportProfiles, packetBudgetBoundary, packetInputHash, PACKET_VERSION } from "./packet.ts";
 import { PHASES } from "./phases.ts";
+import { createTokenBudget, emptyLedger, recordSpend } from "./token-ledger.ts";
 import type { CrewSeat, HitlDecision, Project } from "./types.ts";
 
 /**
@@ -979,5 +980,76 @@ test("W16 L4 OV-14: the packet carries the p6-arch reqTrace verdict for tree pro
   assert.ok(skipPacket.includes("## Artifacts (trimmed)"), "the artifacts section itself renders (empty placeholder)");
   assert.ok(!skipPacket.includes("reqTrace"), "no reqTrace artifact for the skip — the fact surfaces as SILENCE");
   assert.ok(!skipPacket.includes("p6-arch"), "and no p6-arch verdict anywhere in the packet");
+});
+
+// ---------------------------------------------------------------------------
+// F2-04 (W41 · X1 tail · fixes/303 lane L2) — the packet budget boundary: an
+// always-present ADDITIVE envelope key `budget` ({spent, cap, stop_reason}) —
+// null unless the session budget has spend, a cap, or a crossed cap to report.
+// `stop_reason` fires ONLY via isBudgetExhausted (strict `>` — landing exactly
+// on the cap is still ok); unmetered (RAPIDTOOL_TOKEN_CAP unset) ⇒ cap null.
+// ---------------------------------------------------------------------------
+
+test("F2-04: an empty unmetered budget ⇒ envelope budget: null (key always present)", () => {
+  const p = makeProject();
+  const env = parseSystemJson(compileAgentPacket(p, { budget: createTokenBudget(null) }));
+  assert.ok("budget" in env, "the key is present even when null (always-present, additive)");
+  assert.equal(env.budget, null);
+  assert.ok("spend" in env, "the OV-41 spend key is untouched (precedent intact)");
+  // Default path (no opts) reads the process singleton — equally empty under
+  // the default keyless test env, so the same null holds.
+  if (!process.env.RAPIDTOOL_TOKEN_CAP) {
+    assert.equal(parseSystemJson(compileAgentPacket(p)).budget, null);
+  }
+});
+
+test("F2-04: spend recorded, no cap ⇒ {spent>0, cap:null, stop_reason:null}", () => {
+  const p = makeProject();
+  const ledger = recordSpend(emptyLedger(), { promptTokens: 120, completionTokens: 30 });
+  const env = parseSystemJson(compileAgentPacket(p, { budget: createTokenBudget(null, ledger) }));
+  assert.deepEqual(env.budget, { spent: 150, cap: null, stop_reason: null });
+});
+
+test("F2-04: spend crossing the cap ⇒ budget_exhausted; landing ON the cap stays ok", () => {
+  const p = makeProject();
+  const over = createTokenBudget(10, recordSpend(emptyLedger(), { promptTokens: 25, completionTokens: 0 }));
+  assert.deepEqual(
+    parseSystemJson(compileAgentPacket(p, { budget: over })).budget,
+    { spent: 25, cap: 10, stop_reason: "budget_exhausted" },
+  );
+  const onCap = createTokenBudget(10, recordSpend(emptyLedger(), { promptTokens: 10, completionTokens: 0 }));
+  assert.deepEqual(
+    parseSystemJson(compileAgentPacket(p, { budget: onCap })).budget,
+    { spent: 10, cap: 10, stop_reason: null },
+    "strict `>`: landing exactly on the cap is still ok",
+  );
+});
+
+test("F2-04: packetBudgetBoundary tolerates absent/hostile budgets — never throws", () => {
+  assert.equal(packetBudgetBoundary(null), null);
+  assert.equal(packetBudgetBoundary(undefined), null);
+  assert.equal(packetBudgetBoundary({} as never), null, "no ledger ⇒ reads as empty, not a throw");
+  assert.equal(
+    packetBudgetBoundary({ ledger: {} as never, cap: Number.NaN } as never),
+    null,
+    "NaN cap ⇒ unmetered + unspent ⇒ null",
+  );
+  const b = createTokenBudget(null, recordSpend(emptyLedger(), { promptTokens: 5, completionTokens: 0 }));
+  assert.deepEqual(packetBudgetBoundary(b), { spent: 5, cap: null, stop_reason: null });
+});
+
+// ---------------------------------------------------------------------------
+// L2-P4 (W42) — `project.acceptance` rides the envelope: null when absent, the
+// persisted verdict when present (previously invisible to downstream agents).
+// ---------------------------------------------------------------------------
+
+test("L2-P4: envelope acceptance key — null when absent, the verdict when present", () => {
+  const p = makeProject();
+  p.acceptance = undefined;
+  assert.equal(parseSystemJson(compileAgentPacket(p)).acceptance, null, "absent ⇒ null, never invented");
+  p.acceptance = "aborted";
+  assert.equal(parseSystemJson(compileAgentPacket(p)).acceptance, "aborted", "the persisted verdict rides");
+  p.acceptance = "failed";
+  assert.equal(parseSystemJson(compileAgentPacket(p)).acceptance, "failed");
 });
 
