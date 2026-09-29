@@ -1218,7 +1218,14 @@ export const useRapid = create<RapidState>()(
           let cur = withStartLog;
           for (let step = 0; step < 20; step++) {
             const prev = cur; // the generation this step is computed from
-            const res = await wildStep(cur, reviewer ? { reviewer } : undefined);
+            // 308 B-02: the wild-step telemetry was dead in production — every
+            // caller dropped opts.onEvent, so finishStep's wild.step_* emits
+            // never fired. The store's driver feeds them to the same ring the
+            // console reads (reportRt, the file's own rt seam).
+            const res = await wildStep(cur, {
+              ...(reviewer ? { reviewer } : {}),
+              onEvent: (seed) => reportRt(seed),
+            });
             const merged = commitWild(res.project, prev);
             // Continue from the MERGED generation, not the raw step output:
             // the next step's input then already carries the concurrent rows
