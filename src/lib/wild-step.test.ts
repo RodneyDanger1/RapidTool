@@ -194,7 +194,25 @@ describe("wildStep onEvent telemetry (109 CAP-5)", () => {
         .replace(/"project_id": "[^"]+"/g, '"project_id": "FIXED"')
         .replace(/"input_hash": "[^"]+"/g, '"input_hash": "FIXED"'),
       traces: (p.traces ?? []).map((a) => ({ ...a, ranAt: 0 })),
-      wildRun: p.wildRun ? { ...p.wildRun, startedAt: 0, lastAutoAt: 0 } : p.wildRun,
+      // 308 P-1/P-2: the park record (and its lastStep mirror) now rides every
+      // pause — park.at is the same per-run volatile class as lastAutoAt; the
+      // records themselves still compare in full.
+      wildRun: p.wildRun
+        ? {
+            ...p.wildRun,
+            startedAt: 0,
+            lastAutoAt: 0,
+            park: p.wildRun.park ? { ...p.wildRun.park, at: 0 } : p.wildRun.park,
+            lastStep: p.wildRun.lastStep
+              ? {
+                  ...p.wildRun.lastStep,
+                  park: p.wildRun.lastStep.park
+                    ? { ...p.wildRun.lastStep.park, at: 0 }
+                    : p.wildRun.lastStep.park,
+                }
+              : p.wildRun.lastStep,
+          }
+        : p.wildRun,
     });
     assert.deepEqual(normalize(withSink.project), normalize(without.project));
     assert.equal(withSink.outcome, without.outcome);
@@ -293,7 +311,27 @@ describe("W-01 (fixes/271 · §R1-f01) — the wild P6 keyed edge seam", () => {
         ),
         packet: stripVolatiles(p.packet),
         traces: (p.traces ?? []).map((a) => ({ ...a, ranAt: 0 })),
-        wildRun: p.wildRun ? { ...p.wildRun, startedAt: 0, lastAutoAt: 0 } : p.wildRun,
+        wildRun: p.wildRun
+          ? {
+              ...p.wildRun,
+              startedAt: 0,
+              lastAutoAt: 0,
+              // 308 P-1/P-2: the park record now rides every pause (parkIfNull at
+              // finishStep) — its `at` is the same per-run volatile class as
+              // lastAutoAt; masked here, the record itself still compares in full.
+              park: p.wildRun.park ? { ...p.wildRun.park, at: 0 } : p.wildRun.park,
+              // The summary's own park mirror (WildStepSummary.park) carries the
+              // same clock — same class, masked identically.
+              lastStep: p.wildRun.lastStep
+                ? {
+                    ...p.wildRun.lastStep,
+                    park: p.wildRun.lastStep.park
+                      ? { ...p.wildRun.lastStep.park, at: 0 }
+                      : p.wildRun.lastStep.park,
+                  }
+                : p.wildRun.lastStep,
+            }
+          : p.wildRun,
         phases: (p.phases ?? []).map((r) => ({
           ...r,
           startedAt: r.startedAt === null ? null : 0,
@@ -308,6 +346,10 @@ describe("W-01 (fixes/271 · §R1-f01) — the wild P6 keyed edge seam", () => {
       );
       assert.equal(seamless.outcome, control.outcome);
       assert.equal(seamless.code, control.code);
+      // 308 P-1/P-2: the park record must RIDE the pause on both sides (this was
+      // null before the fix — the parity normalizer above now masks only its clock).
+      assert.equal(seamless.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
+      assert.equal(seamless.project.wildRun?.park?.unlock, "human-gate");
       const exec = (seamless.project.logs ?? []).find((l) => l.event === "wild.exec");
       assert.equal(exec?.detail, "P6 executed (deterministic floor)", "the exact pre-seam floor detail bytes");
     } finally {
