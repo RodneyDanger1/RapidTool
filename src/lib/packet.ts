@@ -114,6 +114,11 @@ function systemJson(
   spend: PacketSpend | null,
   budget: TokenBudget | null,
 ): string {
+  // A3 (M3-14): the envelope reads three project collections directly — a
+  // foreign `{}` payload must render the empty forms, never throw.
+  const decisionRows = Array.isArray(project.decisions) ? project.decisions : [];
+  const phaseRows = Array.isArray(project.phases) ? project.phases : [];
+  const sandbox = project.sandbox ?? { runtime: "sync-template", ramMb: null, timeoutS: 0, isolated: false };
   // SWEEP-2 (esc-1): escape raw backticks as \u0060 so the envelope stays a
   // single parseable ```json block. JSON.stringify does NOT escape backticks,
   // and envelope strings are operator/agent-controlled (project name, decision
@@ -147,10 +152,10 @@ function systemJson(
       // PACKET_VERSION stays 3. See packetInputHash.
       input_hash: packetInputHash(project),
       sandbox: {
-        claim: sandboxClaim(project.sandbox),
-        ram_mb: project.sandbox.ramMb,
-        timeout_s: project.sandbox.timeoutS,
-        isolated: project.sandbox.isolated,
+        claim: sandboxClaim(sandbox),
+        ram_mb: sandbox.ramMb,
+        timeout_s: sandbox.timeoutS,
+        isolated: sandbox.isolated,
       },
       verdict: project.scorecard?.verdict ?? null,
       // L2-P4 (W42 · G2 edge-1): the persisted acceptance verdict the
@@ -163,7 +168,7 @@ function systemJson(
         loop.count >= 1
           ? { phase: phase.id, attempts: loop.count, last_note: quoteNote(loop.note ?? undefined, 300) }
           : null,
-      decisions: project.decisions.map((d) => ({
+      decisions: decisionRows.map((d) => ({
         phase: d.phase,
         decision: d.decision,
         decided_by: d.decidedBy,
@@ -174,7 +179,7 @@ function systemJson(
         requested_at: d.requestedAt,
         decided_at: d.decidedAt,
       })),
-      phases: project.phases.map((p) => ({
+      phases: phaseRows.map((p) => ({
         id: p.id,
         status: p.status,
         rejections: p.rejectionHistory?.length ?? 0,
@@ -287,18 +292,23 @@ function compiledAtFor(project: Project): string {
  */
 export function packetInputHash(project: Project): string {
   const ms = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-  const rows: string[] = [`created:${ms(project.createdAt)}`];
-  for (const row of project.logs ?? []) rows.push(`log:${ms(row?.ts)}`);
-  for (const d of project.decisions ?? []) rows.push(`decision:${ms(d?.decidedAt)}`);
-  rows.push(`notes:${project.notes ?? ""}`);
-  for (const a of project.artifacts ?? []) {
+  // A3 (M3-17 · 308 hostile probe): a null / non-object project (foreign
+  // payload) fingerprints as the empty project shape — every field read below
+  // already degrades (ms() → 0, `?? []`), so the only gap was the container
+  // itself. Same epoch/empty floor compiledAtFor documents.
+  const src = project && typeof project === "object" ? project : ({} as Project);
+  const rows: string[] = [`created:${ms(src.createdAt)}`];
+  for (const row of src.logs ?? []) rows.push(`log:${ms(row?.ts)}`);
+  for (const d of src.decisions ?? []) rows.push(`decision:${ms(d?.decidedAt)}`);
+  rows.push(`notes:${src.notes ?? ""}`);
+  for (const a of src.artifacts ?? []) {
     // The sealed packet artifact is the compile's output, not an input (see above).
     if (a?.kind === "packet") continue;
     rows.push(
       `artifact:${a?.id ?? ""}\u0001${a?.phase ?? ""}\u0001${a?.kind ?? ""}\u0001${a?.title ?? ""}\u0001${a?.body ?? ""}`,
     );
   }
-  for (const m of project.memory ?? []) {
+  for (const m of src.memory ?? []) {
     rows.push(
       `memory:${m?.id ?? ""}\u0001${m?.kind ?? ""}\u0001${m?.phase ?? ""}\u0001${m?.score ?? ""}\u0001${m?.text ?? ""}`,
     );
@@ -508,6 +518,24 @@ export function compileAgentPacket(
     budget?: TokenBudget | null;
   },
 ): string {
+  // A3 (M3-13 · 308 hostile probe): a null / non-object project (hand-edited
+  // import, console paste, foreign payload) has nothing to compile — return
+  // the honest no-record floor instead of a TypeError from the first field
+  // read. Mirrors handoff.phaseHandoff's W-16 no-project guard.
+  if (!project || typeof project !== "object") {
+    return [
+      `# RapidTool Agent Packet v${PACKET_VERSION} — (no project record)`,
+      ``,
+      `## Mission`,
+      `(refused — compileAgentPacket received a null/non-object project; nothing to compile)`,
+    ].join("\n");
+  }
+  // A3 (M3-15): a non-string brief (42/null — foreign payload) coerces ONCE
+  // with handoff.ts's text() precedent (strings pass through, null/undefined
+  // become "", anything else is String()-ed), so neither the rank key below
+  // nor brief.trim() can throw.
+  const briefRaw =
+    typeof project.brief === "string" ? project.brief : project.brief == null ? "" : String(project.brief);
   // CORE-03 (defense-in-depth): never index PHASES[] with an unvalidated
   // currentPhase — hydrateProject clamps it, but a hand-built Project with a
   // corrupt value must fall back to P0 rather than crash mid-compile.
@@ -518,6 +546,13 @@ export function compileAgentPacket(
   const coverage = phaseCoverage(project.phases, project.artifacts);
   const lattice = project.lattice;
   const schedule = project.schedule;
+  // A3 (M3-14): the compile reads these collections directly; engine hydration
+  // guarantees arrays, but a foreign `{}` payload must compile to an honest
+  // skeleton instead of throwing at `.filter()` — the Array.isArray fallback
+  // phaseCoverage/curHistory already use.
+  const decisionRows = Array.isArray(project.decisions) ? project.decisions : [];
+  const phaseRows = Array.isArray(project.phases) ? project.phases : [];
+  const artifactRows = Array.isArray(project.artifacts) ? project.artifacts : [];
   const memoryRows = project.memory ?? [];
   // OV-41 (W23-L4): measured spend from the T-107.6 ledger — a caller-threaded
   // ledger wins over the project's persisted slice (`types.ts:435`); every
@@ -555,7 +590,7 @@ export function compileAgentPacket(
     }));
   const rankPool = provenRows.length === 0 ? memoryRows : [...memoryRows, ...provenRows];
   const ranked = fusionRank(
-    `${phase.title} ${project.brief} ${lattice?.jobs?.join(" ") ?? ""}`,
+    `${phase.title} ${briefRaw} ${lattice?.jobs?.join(" ") ?? ""}`,
     rankPool,
     5,
   );
@@ -599,7 +634,7 @@ export function compileAgentPacket(
   for (const m of displayRanked) {
     if (provenIds.has(m.id)) displayedProven += 1;
   }
-  const artifacts = project.artifacts
+  const artifacts = artifactRows
     .filter((a) => a.kind !== "packet")
     .slice(-8)
     .map((a) => {
@@ -636,13 +671,13 @@ export function compileAgentPacket(
     ? `PENDING HITL: ${project.hitl.title}\n${project.hitl.prompt}\nStakes: ${project.hitl.stakes}`
     : "No pending HITL.";
   // T2/Q-303: append-only decision journal → one row per decision (rejects quote the note).
-  const ledgerRows = project.decisions.map((d) => {
+  const ledgerRows = decisionRows.map((d) => {
     const when = isoFromMs(d.decidedAt);
     const base = `- P${d.phase} · ${d.decision} · ${d.decidedBy} · ${when}`;
     return d.decision === "reject" ? `${base} — "${quoteNote(d.note, 200)}"` : base;
   });
   // T9/B-04: if the CURRENT phase is in a rejection loop, say so with attempt count + last note.
-  const curRecord = project.phases.find((p) => p.id === project.currentPhase);
+  const curRecord = phaseRows.find((p) => p.id === project.currentPhase);
   // A1-34: `?? []` is not a shape guard on persisted data — a corrupt
   // non-array rejectionHistory must read as "no rejections" (the old
   // non-null-assertion pair below it documented a guarantee that did not
@@ -653,10 +688,10 @@ export function compileAgentPacket(
   const lastLoopNote = loopCount > 0 ? (rejHistory[loopCount - 1]?.note ?? null) : null;
   // B-04/Q-303: the free-form prior-rejection dump becomes a compact pointer once the ledger
   // can back it; legacy payloads (rejectionNote without ledger rows) keep the detail lines.
-  const priorRejected = project.phases.filter(
+  const priorRejected = phaseRows.filter(
     (p) => Boolean(p.rejectionNote) || (p.rejectionHistory?.length ?? 0) > 0,
   );
-  const hasRejectDecisions = project.decisions.some((d) => d.decision === "reject");
+  const hasRejectDecisions = decisionRows.some((d) => d.decision === "reject");
   const priorBlock = priorRejected.length
     ? hasRejectDecisions
       ? `Prior rejections: see "## Decision ledger (HITL)" below.`
@@ -679,12 +714,22 @@ export function compileAgentPacket(
     budget,
   );
 
-  const notes = (project.notes ?? "").trim();
+  // A3 (M3-15 family): a non-string notes field (foreign payload) must render,
+  // never throw at `.trim()` — same coercion as the brief above.
+  const notes = String(project.notes ?? "").trim();
   // BUG WAVE 27: empty collections must render an explicit "(none)" placeholder —
   // a bare heading immediately followed by the next heading reads as an empty
   // section whose "content" is the next section's heading (crew/oracle/contracts
   // are all [] until algorithms run; brief can be empty on imported payloads).
-  const briefText = project.brief.trim();
+  const briefText = briefRaw.trim();
+  // A3 (M3-16): a junk `schedule` (foreign payload) degrades to "no notes /
+  // no extra HITL", never throws at `.length`/spread — the Array.isArray
+  // fallback, same as above.
+  const scheduleNotes = schedule && Array.isArray(schedule.notes) ? schedule.notes : [];
+  const scheduleHitl = schedule && Array.isArray(schedule.extraHitl) ? schedule.extraHitl : [];
+  // A3 (M3-14): the rail's Execution line reads the sandbox the same way the
+  // envelope does — a foreign `{}` payload degrades to the template claim.
+  const sandbox = project.sandbox ?? { runtime: "sync-template", ramMb: null, timeoutS: 0, isolated: false };
   const crewRows = (project.crew ?? []).map(
     (c) => `- ${c.role}${c.active ? " [ACTIVE]" : ""} (${c.budgetTokens} tok): ${c.mandate} → ${c.handoff}`,
   );
@@ -732,8 +777,8 @@ export function compileAgentPacket(
     ``,
     `## Scheduler (A3)`,
     `Tightness ${schedule?.tightness ?? "n/a"} · security Δ${schedule?.securityDelta ?? 0} · api Δ${schedule?.apiDelta ?? 0}`,
-    ...(schedule?.notes ?? []).map((n) => `- ${n}`),
-    `Extra HITL: ${schedule?.extraHitl.length ? schedule.extraHitl.map((p) => `P${p}`).join(", ") : "none"}`,
+    ...scheduleNotes.map((n) => `- ${n}`),
+    `Extra HITL: ${scheduleHitl.length ? scheduleHitl.map((p) => `P${p}`).join(", ") : "none"}`,
     ``,
     `## Crew (A8)`,
     ...(crewRows.length ? crewRows : ["(crew not yet assembled)"]),
@@ -756,7 +801,7 @@ export function compileAgentPacket(
     `${phase.code} — ${phase.title}`,
     phase.summary,
     `Status: ${project.status} · model: ${project.modelRoute}`,
-    `Execution: ${sandboxClaim(project.sandbox)}`,
+    `Execution: ${sandboxClaim(sandbox)}`,
     // T-14 (106 §6, finding F-11): honest phase coverage in the rail. The
     // shipped end-to-end run executed 7 of 13 phases and the strictly linear
     // graph left P7–P12 at 0 artifacts — this line reports the real census so
@@ -856,9 +901,9 @@ export function compileAgentPacket(
     `## Required output schema`,
     `Return your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.`,
     `The five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.`,
-    project.currentPhase >= 12
+    phase.id >= 12
       ? `Next legal edge: none — pipeline complete.`
-      : `Next legal edge — only P${project.currentPhase + 1} if this phase completes`,
+      : `Next legal edge — only P${phase.id + 1} if this phase completes`,
     ``,
     `Do not emit secrets. Do not widen OAuth scopes. Do not deploy without HITL on P9.`,
   ];

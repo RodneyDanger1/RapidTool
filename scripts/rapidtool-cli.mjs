@@ -3357,10 +3357,27 @@ async function main() {
         // 174-3: pause/resume/step/stop must NOT force-stop a persisted active
         // run (CLI is the driver). --start still hydrates-stop so a crash
         // cannot silently resume without --resume.
-        const project =
-          action === "start"
-            ? loadProjectFor("wild")
-            : h.loadProject(path, { preserveWildRun: true });
+        // 308 M3 (fuzz): this arm called h.loadProject RAW — the fuzz's 4
+        // STACK(exit4) crashes (ENOENT/EISDIR/missing-id) all landed here while
+        // the makeLoader guard (E-25) kept every other verb coded. Same classify
+        // contract: read ENOENT → RT_E_PROJECT_MISSING; malformed → RT_E_VALIDATION.
+        let project;
+        if (action === "start") {
+          project = loadProjectFor("wild");
+        } else {
+          try {
+            project = h.loadProject(path, { preserveWildRun: true });
+          } catch (err) {
+            return respond(
+              {
+                ok: false,
+                error: `wild: ${err instanceof Error ? err.message : String(err)}`,
+                ...errCode(err, "RT_E_VALIDATION"),
+              },
+              1,
+            );
+          }
+        }
         const steps =
           typeof args.steps === "string" && /^\d+$/.test(args.steps)
             ? parseInt(args.steps, 10)

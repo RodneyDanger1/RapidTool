@@ -453,7 +453,7 @@ export function installRtClient(): void {
       // its default console noise (honest per §3.1).
     });
 
-    // §5.4 Long Tasks API (≥ 250 ms report floor, 10 s coalesce).
+    // §5.4 Long Tasks API (≥ 250 ms report floor, coalesced on RT_COALESCE_MS).
     try {
       const PO = (window as unknown as { PerformanceObserver?: typeof PerformanceObserver }).PerformanceObserver;
       if (typeof PO === "function") {

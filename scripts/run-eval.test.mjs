@@ -1106,6 +1106,76 @@ test("W24/B2 — the provider call tap is WIRED: install → window → live rec
   }
 });
 
+test("W43/A5 — the cache fold (M4-09): split tap record → usage.cachedPromptTokens; legacy → key absent", async () => {
+  const ds = await import("../src/lib/deepseek.server.ts");
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = W24_B2_DUMMY_KEY;
+  try {
+    assert.equal(await installLlmCallTap(), true);
+    // (a) the vendor response carries DeepSeek's exact cache-split keys → the
+    // tap record AND the folded row usage both surface the measured read.
+    beginTrialCallTap();
+    const split = await ds.completeDeepSeek("w43/a5 cache split", {
+      maxTokens: 1,
+      timeoutMs: 5_000,
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-w43a5a",
+            model: "deepseek-flash",
+            choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+            usage: {
+              prompt_tokens: 11,
+              completion_tokens: 3,
+              prompt_cache_hit_tokens: 9,
+              prompt_cache_miss_tokens: 2,
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+    assert.equal(split.ok, true);
+    const splitRecords = endTrialCallTap();
+    assert.equal(splitRecords.length, 1);
+    assert.equal(splitRecords[0].cachedPromptTokens, 9, "the tap record carries the measured hit split");
+    assert.equal(splitRecords[0].cacheMissTokens, 2);
+    const splitEv = llmEvidenceFromCallRecords(splitRecords);
+    assert.equal(splitEv.usage.promptTokens, 11, "the fold still measures the prompt total");
+    assert.equal(splitEv.usage.totalTokens, 14);
+    assert.equal(splitEv.usage.cachedPromptTokens, 9, "the read-side fold surfaces cache reads to the row");
+    // (b) a legacy response with no cache keys → the key stays ABSENT
+    // end-to-end (no fabricated 0; record and folded usage keep the legacy shape).
+    beginTrialCallTap();
+    const legacy = await ds.completeDeepSeek("w43/a5 legacy", {
+      maxTokens: 1,
+      timeoutMs: 5_000,
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl-w43a5b",
+            model: "deepseek-flash",
+            choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 11, completion_tokens: 3 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+    assert.equal(legacy.ok, true);
+    const legacyRecords = endTrialCallTap();
+    assert.equal("cachedPromptTokens" in legacyRecords[0], false, "no measured split → no record key");
+    const legacyEv = llmEvidenceFromCallRecords(legacyRecords);
+    assert.equal("cachedPromptTokens" in legacyEv.usage, false, "absent stays absent — never a fabricated 0");
+    // (c) a non-number cache field is not a report (hostile-shape fold guard).
+    const hostileEv = llmEvidenceFromCallRecords([
+      { ok: true, promptTokens: 5, completionTokens: 2, cachedPromptTokens: "9" },
+    ]);
+    assert.equal("cachedPromptTokens" in hostileEv.usage, false, "a string is not a measurement");
+  } finally {
+    if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
 test("W24/B2 — probeFundedness: 402 ⇒ funded:false · answered 200 ⇒ funded:true · keyless ⇒ unaskable", async () => {
   const savedKey = process.env.DEEPSEEK_API_KEY;
   try {

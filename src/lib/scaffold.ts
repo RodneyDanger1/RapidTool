@@ -63,7 +63,8 @@
 //   export type ProjectKind            "webapp"|"cli-tool"|"library"|"game"|"service"
 //   export function projectKindOf(project: Project): ProjectKind
 //   export function scaffoldProject(project: Project, options?: ScaffoldOptions): ScaffoldResult
-//   export function deplyNotes(project: Project): string   (DEPLOY.md content)
+//   export function deployNotes(project: Project): string  (DEPLOY.md content;
+//     the legacy misspelling `deplyNotes` stays as a back-compat alias)
 //
 // Project.kind (types.ts) is a coarse optional 3-way union — "app"|"tool"|"game";
 // projectKindOf maps it onto this 5-way taxonomy (declared kind wins) and
@@ -2479,7 +2480,8 @@ function readmeBody(
 }
 
 // ---------------------------------------------------------------------------
-// DEPLOY.md (E-27 ship notes — deplyNotes is the canonical export name)
+// DEPLOY.md (E-27 ship notes — deployNotes is the canonical export name;
+// deplyNotes is the legacy-misspelling alias — fixes/309 A3 · M4-16)
 // ---------------------------------------------------------------------------
 
 /** Find a recorded engine artifact by kind + title predicate (stable titles). */
@@ -2516,7 +2518,7 @@ function recordedArtifacts(project: Project): string[] {
  * the pipeline never executed or validated those templates, credentials are
  * human-gated, and nothing in the scaffold deploys anywhere by itself.
  */
-export function deplyNotes(project: Project): string {
+export function deployNotes(project: Project): string {
   const kind = projectKindOf(project);
   const envNames = ENV_LINES[kind];
   const hasTemplates = project.artifacts.some(
@@ -2660,13 +2662,13 @@ export function deplyNotes(project: Project): string {
 }
 
 // ---------------------------------------------------------------------------
-// deployNotes — correctly-spelled alias for `deplyNotes` (N6-W8 · P4 naming
-// pass; fixes/295_p4_sweeps.md). `deplyNotes` is the PINNED name (EXPORT
-// SURFACE header above; scaffold.test.ts imports it by exact name) — NEVER
-// rename it. New callers should use this alias; migrate the old spelling only
-// when the pin test is rewritten in the same change.
+// deplyNotes — legacy-misspelling alias for `deployNotes` (N6-W8 · P4 naming
+// pass, fixes/295_p4_sweeps.md; alias direction flipped by fixes/309 A3 ·
+// M4-16, taking the 295 migration path: the call site + scaffold.test.ts moved
+// to the correct spelling in the SAME change). Back-compat only — every new
+// caller uses `deployNotes`.
 // ---------------------------------------------------------------------------
-export const deployNotes = deplyNotes;
+export const deplyNotes = deployNotes;
 
 // ---------------------------------------------------------------------------
 // scaffoldProject — assemble the deterministic file tree
@@ -2983,7 +2985,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   // (fixes/216k parent boundary repair: the README push moved BELOW the
   // spec-graph node loop — it renders the job-scope/bridge census arrays the
   // loop fills; emitting it here ran before the loop: TDZ + empty counts.)
-  push("DEPLOY.md", deplyNotes(proj));
+  push("DEPLOY.md", deployNotes(proj));
   push(".env.example", envExample(kind));
   push(".gitignore", gitignoreFile());
   push("package.json", packageJson(kind, proj, proj.oracle.length > 0));

@@ -11,7 +11,7 @@ import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { dedupeMemoryIds, emptyProject, hydrateProject } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
-import type { ChatLogRow, HitlRequest, PhaseId, Project } from "./types.ts";
+import type { Artifact, ChatLogRow, HitlRequest, JsonLog, PhaseId, Project } from "./types.ts";
 
 class MemoryStorage {
   private m = new Map<string, string>();
@@ -38,7 +38,7 @@ class MemoryStorage {
 (globalThis as unknown as { window: unknown }).window = globalThis;
 
 // Dynamic import: must run AFTER the polyfill so persist binds a real storage.
-const { useRapid, persistStorageHealth } = await import("./store.ts");
+const { convergeRealRun, useRapid, persistStorageHealth } = await import("./store.ts");
 // Let the initial rehydration (which seeds the demo project on empty storage) settle
 // before the first test; beforeEach wipes state for every test regardless.
 await new Promise((r) => setTimeout(r, 10));
@@ -1902,4 +1902,23 @@ test("K2: a FUTURE-version blob recovers loudly and is preserved under the .resc
   } finally {
     localStorage.removeItem("rapidtool.v4.rescue");
   }
+});
+
+// ---------------------------------------------------------------------------
+// A3 (fixes/309_a3_guardset.md) — M3-18: convergeRealRun hostile-shape guards
+// (the runModuleReal test seam must no-op on junk, never throw).
+// ---------------------------------------------------------------------------
+
+test("A3/M3-18: convergeRealRun junk input — same-reference no-op; junk collections bound to []", () => {
+  assert.equal(
+    convergeRealRun(null as unknown as Project, null as unknown as Artifact, null as unknown as JsonLog),
+    null,
+    "a null base has no recorded state to converge — returned unchanged, never a TypeError",
+  );
+  const base = { ...emptyProject({ name: "converge-junk", brief: "b" }), artifacts: 42, logs: "junk" };
+  const artifact = { id: "a1", phase: 6, kind: "code", title: "T", body: "B" } as Artifact;
+  const log = { ts: 1, phase: 6, level: "info", event: "runner.real", detail: "exit 0" } as JsonLog;
+  const out = convergeRealRun(base as unknown as Project, artifact, log);
+  assert.deepEqual(out.artifacts, [artifact], "junk artifacts bound to [] before the append");
+  assert.deepEqual(out.logs, [log], "junk logs bound to [] before the append");
 });

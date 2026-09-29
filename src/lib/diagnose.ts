@@ -22,6 +22,7 @@
 import { ERROR_CODE_DOC, type ErrorCode } from "./errors.ts";
 import { WILD_STEP_BUDGET_MS, CHAT_STEP_BUDGET_MS } from "./rt-events.ts";
 import type { RtEvent } from "./rt-events.ts";
+import { isRtEventLike } from "./rt-ring.ts";
 
 export type DiagnosisWildRun = {
   active: boolean;
@@ -141,26 +142,40 @@ function rowRefs(prefix: string, indices: number[]): string[] {
  * candidates (cap 3). Every claim carries evidence row indices.
  */
 export function buildDiagnosis(input: DiagnosisInput): DiagnosisJson {
-  const errors = Array.isArray(input.errors) ? input.errors : [];
-  const now = typeof input.now === "number" && Number.isFinite(input.now) ? input.now : 0;
-  const project = input.project ?? {
+  // M3-10 (fixes/309): a junk input (null/undefined) floors to the same empty
+  // shape this file already produces for `{}` — every field below keeps its
+  // `?? default` / Array.isArray guard. Never a throw: this runs live in the
+  // Runtime Log pane (the R4-f06 UI-crash class, rt-client.ts:268-276).
+  const src = (input ?? {}) as DiagnosisInput;
+  // M3-11 (fixes/309): junk rows in errors[] are dropped the same way the ring
+  // drops them at hydrate — real rows keep ranking and the evidence indices
+  // below stay aligned with the filtered output array.
+  const errors = (Array.isArray(src.errors) ? src.errors : []).filter(isRtEventLike);
+  const now = typeof src.now === "number" && Number.isFinite(src.now) ? src.now : 0;
+  const project = src.project ?? {
     ref: null,
     name: null,
     status: null,
     currentPhase: null,
     wildRun: null,
   };
-  const watchdog: DiagnosisWatchdog = input.watchdog ?? {
+  const watchdog: DiagnosisWatchdog = src.watchdog ?? {
     lastHeartbeatAt: null,
     heartbeatLagMs: null,
     stall: null,
     lastLongTaskMs: null,
     budgetsMs: { wildStep: WILD_STEP_BUDGET_MS, chat: CHAT_STEP_BUDGET_MS },
   };
-  const persistHealth = input.persistHealth ?? { ok: true, lastError: null };
-  const crashSnapshot = input.crashSnapshot ?? null;
-  const timeline = Array.isArray(input.timeline) ? input.timeline : [];
-  const growth = input.growth ?? { rows: {}, bytes: {}, counts: {} };
+  const persistHealth = src.persistHealth ?? { ok: true, lastError: null };
+  // M3-12 (fixes/309): only a snapshot-shaped object counts as a snapshot; a
+  // junk `at` never reaches `new Date(...).toISOString()` raw (the summary
+  // below refuses the unreadable timestamp instead of fabricating one).
+  const crashSnapshot =
+    src.crashSnapshot && typeof src.crashSnapshot === "object" && !Array.isArray(src.crashSnapshot)
+      ? src.crashSnapshot
+      : null;
+  const timeline = Array.isArray(src.timeline) ? src.timeline : [];
+  const growth = src.growth ?? { rows: {}, bytes: {}, counts: {} };
 
   const matches: RankedMatch[] = [];
 
@@ -278,9 +293,16 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisJson {
 
   // 8. freeze-pre-capture — a previous session crashed hard.
   if (crashSnapshot) {
+    // M3-12 (fixes/309): a junk `at`/`href` must not RangeError or smuggle a
+    // fabricated date into the summary — refuse the unreadable parts honestly.
+    const atText =
+      typeof crashSnapshot.at === "number" && Number.isFinite(crashSnapshot.at)
+        ? new Date(crashSnapshot.at).toISOString()
+        : "an unreadable timestamp";
+    const hrefText = typeof crashSnapshot.href === "string" ? crashSnapshot.href : "unknown href";
     matches.push({
       class: "freeze-pre-capture",
-      summary: `A crash snapshot from ${new Date(crashSnapshot.at).toISOString()} (${crashSnapshot.href}) was imported — the freeze tail predates this session.`,
+      summary: `A crash snapshot from ${atText} (${hrefText}) was imported — the freeze tail predates this session.`,
       evidence: ["crashSnapshot"],
     });
   }
@@ -360,8 +382,8 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisJson {
     ok: true,
     exit_code: 0,
     generatedAt: now,
-    source: input.source,
-    session: input.session,
+    source: src.source,
+    session: src.session,
     project,
     errors: errors.map((e) => ({
       ts: e.ts,
@@ -377,7 +399,7 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisJson {
     watchdog,
     growth,
     persistHealth,
-    ...(input.watcher ? { watcher: input.watcher } : {}),
+    ...(src.watcher ? { watcher: src.watcher } : {}),
     mostLikelyCause,
     candidates,
     actions,

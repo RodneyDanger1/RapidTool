@@ -203,8 +203,9 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 
 // ---------------------------------------------------------------------------
 // TODO(N6-W3 · fixes/294_n6_sweeps.md §W1-W3; re-censused by P4 —
-// fixes/295_p4_sweeps.md; +1 name / R1 fixes/297): as of HEAD 60c92a2, 38 of
-// the 56 registered names above have NO emitter anywhere in src/ or scripts/ —
+// fixes/295_p4_sweeps.md; +1 name / R1 fixes/297; re-counted by A5 —
+// fixes/309_a5_evdocs.md at HEAD 2d2c74a): 38 of the 56 registered names
+// above have NO emitter anywhere in src/ or scripts/ —
 // no host passes them as `event:` (grep-verified; read-side matches in
 // diagnose.ts / rt-timeline.ts / rapidtool-cli.mjs do NOT count), and none is
 // emitted server- or CLI-side under its exact name. Emit one, or trim it — a
@@ -220,7 +221,12 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 //     persist.salvaged · persist.ok · watcher.error · watcher.refused ·
 //     harvest.error · search.unavailable · diagnose.ran
 // (cli.invocation left this list in W40/N5 — OPS-4 landed its real emitter,
-// rapidtool-cli.mjs:163 — so the never-set is 38, not the 39 N6 counted.)
+// rapidtool-cli.mjs:163 — so the never-set is 38, not the 39 N6 counted.
+// A5 re-count at HEAD 2d2c74a (fixes/309_a5_evdocs.md; script ~/a5_census.py):
+// every non-test `event:` emit re-scanned — STILL 38 of 56; ui.boundary_crash
+// (the R1/297 +1 name, :144) is emitted at error-component.tsx:60 and is
+// correctly absent above — the arithmetic is re-derived, not inherited, and
+// the list is byte-identical to the scan.)
 // ---------------------------------------------------------------------------
 
 /** True when the event string is a catalogue member. */
@@ -253,11 +259,15 @@ export const HEARTBEAT_MS = 1_000;
 export const HEARTBEAT_PERSIST_EVERY_MS = 5_000;
 export const HEARTBEAT_LAG_WARN_MS = 3_000;
 export const STALL_CRITICAL_MS = 10_000;
-// TODO(N6-W6 · fixes/295_p4_sweeps.md): both LONGTASK_* constants are DEAD —
-// 0 external refs (P4 re-count): rt-client.ts:463 hardcodes the 250 ms report
-// floor, :467 coalesces on RT_COALESCE_MS (5 000 ms) while its own :456
-// comment claims "10 s coalesce". Wire rt-client to THESE constants or delete
-// both — until then §5.6's "single source of truth" is prose only. Gated by
+// TODO(N6-W6 · fixes/295_p4_sweeps.md; A5 strike — fixes/309_a5_evdocs.md):
+// both LONGTASK_* constants are DEAD — 0 external refs (P4 re-count; A5
+// re-verified at HEAD 2d2c74a): rt-client.ts:463 hardcodes the 250 ms report
+// floor, :465 coalesces on RT_COALESCE_MS (5 000 ms). The old "10 s coalesce"
+// claim at rt-client.ts:456 was STRUCK by A5 (the implemented §2.5 window is
+// the single coalescing constant for that path); wiring rt-client to THESE
+// constants (if the §5.4 draft's 1-row / 10 s cap is still wanted) or
+// deleting both remains an owner decision (fixes/307_b4_sweep.md §P3). Until
+// then §5.6's "single source of truth" is prose only for this pair. Gated by
 // the EXPORT SURFACE pin.
 export const LONGTASK_REPORT_MS = 250;
 export const LONGTASK_COALESCE_MS = 10_000;

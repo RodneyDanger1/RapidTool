@@ -1101,8 +1101,11 @@ export function trialEmitDir(outDir, slug, trial, trials) {
 //   servedModels     — every id the provider READ BACK (never the requested
 //                      constant; a refused call served nothing, so it adds none);
 //   usage            — measured {promptTokens, completionTokens, totalTokens}
-//                      folded via the T-107.6 ledger helpers (`recordSpend` /
-//                      `totalTokens` — consume, never recompute);
+//                      (+ `cachedPromptTokens` when the window reported the
+//                      vendor cache-read split — absent otherwise, never a
+//                      fabricated 0), folded via the T-107.6 ledger helpers
+//                      (`recordSpend` / `totalTokens` — consume, never
+//                      recompute);
 //   estimatedCostUsd — an ESTIMATE from caller-supplied per-1M prices
 //                      (`RAPIDTOOL_PRICE_INPUT_PER_M` / `RAPIDTOOL_PRICE_OUTPUT_PER_M`
 //                      env wins; else the repo's documented list-price row,
@@ -1181,6 +1184,13 @@ export function llmEvidenceFromCallRecords(records) {
       ledger = recordSpend(ledger, {
         promptTokens: typeof r.promptTokens === "number" ? r.promptTokens : 0,
         completionTokens: typeof r.completionTokens === "number" ? r.completionTokens : 0,
+        // W43/A5 (fixes/309_a5_evdocs.md — B2's "FOR B4" read-side fold): the
+        // vendor cache-read split is forwarded ONLY when the tap record
+        // measured it — absent stays absent, so a legacy record folds to the
+        // byte-identical 3-key ledger (`recordSpend` merges it sticky-
+        // additive). `cacheMissTokens` is deliberately NOT forwarded: it is
+        // not a `CACHE_LEDGER_FIELD` (a no-op there) — tap-record-only key.
+        ...(typeof r.cachedPromptTokens === "number" ? { cachedPromptTokens: r.cachedPromptTokens } : {}),
       });
     }
   }
@@ -1188,6 +1198,12 @@ export function llmEvidenceFromCallRecords(records) {
     promptTokens: ledger.promptTokens,
     completionTokens: ledger.completionTokens,
     totalTokens: totalTokens(ledger),
+    // W43/A5: measured cache reads are visible to the row when the window
+    // reported them — omitted entirely otherwise (null-when-absent, never a
+    // fabricated 0). `estimateCostUsd` prices the cached subset at the full
+    // input rate until a documented cached-input price exists (the table
+    // carries none — it over-bills, never under-bills).
+    ...(typeof ledger.cachedPromptTokens === "number" ? { cachedPromptTokens: ledger.cachedPromptTokens } : {}),
   };
   let estimatedCostUsd = null;
   let costBasis;

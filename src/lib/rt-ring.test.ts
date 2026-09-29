@@ -3,7 +3,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRtRing, rtHydrate, rtPush, rtRowBytes, rtSerialize, rtStats, rtTail } from "./rt-ring.ts";
+import { createRtRing, rtHydrate, rtPush, rtRowBytes, rtSerialize, rtStats, rtTail, type RtRing } from "./rt-ring.ts";
+import { RING_CAP } from "./rt-events.ts";
 import type { RtEvent } from "./rt-events.ts";
 
 let seq = 0;
@@ -173,4 +174,79 @@ test("hydrate clamps unknown stall.class to step-overdue (never trusts junk enum
   assert.ok(ring.stall);
   assert.equal(ring.stall!.class, "step-overdue");
   assert.equal(ring.stall!.projectId, "p");
+});
+
+// ---------------------------------------------------------------------------
+// fixes/309 A2 — M3-01…07 hostile-input throw guards. Repros from
+// ~/rt308_m3/hostile1.ts; each pin asserts the guarded (throw-free) outcome.
+// ---------------------------------------------------------------------------
+
+test("M3-01: a non-row (null/undefined/scalar/array) is a no-op — never a throw", () => {
+  const ring = createRtRing();
+  for (const junk of [null, undefined, 5, "x", ["rt"]] as unknown[]) {
+    const r = rtPush(ring, junk as RtEvent, { now: 1 });
+    assert.equal(r.ring, ring, `junk row ${String(junk)} leaves the ring untouched`);
+    assert.deepEqual(r.dropped, []);
+  }
+  assert.equal(ring.rows.length, 0);
+});
+
+test("M3-02: cap:-3 no longer spins (was a ~7.8 s busy loop then RangeError)", () => {
+  const ring = createRtRing();
+  const t0 = Date.now();
+  const r = rtPush(ring, row(), { cap: -3, now: 1 });
+  const elapsed = Date.now() - t0;
+  assert.ok(elapsed < 50, `cap:-3 must complete in <50 ms (took ${elapsed} ms)`);
+  assert.equal(r.ring.rows.length, 1, "junk cap falls back to the default bound — the row lands");
+  assert.deepEqual(r.dropped, []);
+});
+
+test("M3-03: a NaN cap is treated as absent — the ring stays bounded, not silently uncapped", () => {
+  let ring = createRtRing();
+  for (let i = 0; i < RING_CAP + 5; i++) {
+    ring = rtPush(ring, row({ message: `m${i}` }), { cap: Number.NaN, now: i + 1 }).ring;
+  }
+  assert.equal(ring.rows.length, RING_CAP, `NaN cap must not disable the cap (got ${ring.rows.length})`);
+});
+
+test("M3-04: a null/junk ring starts fresh — no throw, the row still lands", () => {
+  const r = rtPush(null as unknown as RtRing, row(), { now: 1 });
+  assert.equal(r.ring.rows.length, 1);
+  assert.ok(r.ring.sessionId.length > 0);
+  assert.deepEqual(r.dropped, []);
+  // A ring whose `rows` is not an array is junk too.
+  const r2 = rtPush({ ...createRtRing(), rows: 7 } as unknown as RtRing, row(), { now: 2 });
+  assert.equal(r2.ring.rows.length, 1);
+});
+
+test("M3-05: rtTail on a null ring returns [] (never throws)", () => {
+  assert.deepEqual(rtTail(null as unknown as RtRing, 3), []);
+});
+
+test("M3-06: rtStats floors junk rings/junk rows — counters and ts window never throw", () => {
+  const empty = rtStats(null as unknown as RtRing);
+  assert.equal(empty.rows, 0);
+  assert.equal(empty.errorCount + empty.criticalCount + empty.warnCount, 0);
+  assert.equal(empty.newestTs, null);
+  assert.equal(empty.oldestTs, null);
+  assert.equal(empty.sessionId, "");
+  const junk = rtStats({
+    ...createRtRing(),
+    rows: [null, { level: "error" }, 5, { level: 42, ts: "x" }],
+  } as unknown as RtRing);
+  assert.equal(junk.rows, 4, "rows counts the raw array");
+  assert.equal(junk.errorCount, 1, "only the well-shaped row counts");
+  assert.equal(junk.newestTs, null, "no finite ts among the junk rows");
+  assert.equal(junk.oldestTs, null);
+});
+
+test("M3-07: rtSerialize on a null ring emits the empty frame — hydrates clean", () => {
+  const raw = rtSerialize(null as unknown as RtRing);
+  const parsed = JSON.parse(raw) as { version: number; sessionId: string; rows: unknown[] };
+  assert.equal(parsed.version, 1);
+  assert.equal(parsed.sessionId, "");
+  assert.deepEqual(parsed.rows, []);
+  const back = rtHydrate(raw);
+  assert.equal(back.rows.length, 0);
+  assert.equal(back.recoveredCorrupt, false);
 });

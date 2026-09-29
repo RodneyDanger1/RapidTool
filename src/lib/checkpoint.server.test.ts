@@ -221,4 +221,28 @@ describe("checkpoint.server — the §A1 hardening pins (W36 N2)", () => {
     assert.equal((bounded.logs[bounded.logs.length - 1] as unknown as { n: number }).n, 299, "keeps the NEWEST rows");
     assert.equal((bounded.chatLog ?? []).length, CHECKPOINT_CAPS.chatLog);
   });
+
+  it("A3/M3-08: a null/non-object ask is a coded refusal — never a TypeError from ask.projectId", () => {
+    const base: RunCheckpoint = {
+      version: CHECKPOINT_VERSION,
+      savedAt: 7,
+      run: { phase: 1, step: 0, mode: "keyless" },
+      project: fixtureProject("p-ask"),
+    };
+    const refused = checkpointAdmits(base, null as unknown as { projectId: string; mode: "keyless" });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.ok === false && refused.code, "RT_E_VALIDATION");
+    assert.ok(refused.ok === false && /ask must be/.test(refused.error));
+    assert.equal(checkpointAdmits(base, undefined as unknown as { projectId: string; mode: "keyless" }).ok, false);
+    assert.equal(
+      checkpointAdmits(base, 42 as unknown as { projectId: string; mode: "keyless" }).ok,
+      false,
+      "a scalar ask is shape-refused too",
+    );
+  });
+
+  it("A3/M3-09: boundProjectForCheckpoint(null) yields the empty bounded copy — never a TypeError", () => {
+    const out = boundProjectForCheckpoint(null as unknown as Project);
+    assert.deepEqual(out, { logs: [], decisions: [], memory: [], artifacts: [], research: [], chatLog: [] });
+  });
 });

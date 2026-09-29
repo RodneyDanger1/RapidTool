@@ -17,8 +17,10 @@
 // this guard keeps the class from drifting back — it was RED before the fix,
 // it pins the fix now.
 //
-// Legs (all source-text only — the CLI is never imported, the bytes are the
-// artifact a reviewer diffs):
+// Legs 1–4 are source-text only — the CLI is never imported, the bytes are
+// the artifact a reviewer diffs. Leg 5 (309/A1) is BEHAVIORAL by design: it
+// spawns the CLI as a child process (still never imported) to pin the wild-arm
+// fuzz shape from 308 M3:
 //   1. exit taxonomy BY CODE CLASS: every `errCode(err, "<CODE>")` site must
 //      exit the class's documented `typical exit_code` from README-cli.md's
 //      error table — RT_E_INTERNAL → 4, usage-class codes → 1. An unmapped
@@ -36,7 +38,10 @@
 // Run: node --test scripts/cli-exit-taxonomy.test.mjs
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -235,4 +240,58 @@ test("envelope codes — every RT_E_* literal in the CLI is registered in ERROR_
     [],
     `CLI literals outside ERROR_CODE_DOC (${ERRORS_PATH}): ${unregistered.join(", ")} — register the code in src/lib/errors.ts's ERROR_CODES+ERROR_CODE_DOC or fix the literal; envelopes must never carry unregistered codes (OPS-13).`,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Leg 5 (309/A1, BEHAVIORAL — a spawned child; the CLI is still never
+// imported). The 308 M3 fuzz-lite found the ONE verb whose read-only controls
+// bypassed the E-25 makeLoader contract: the `wild` arm called
+// `h.loadProject(path, …)` RAW, so the fuzz's four shapes (missing file /
+// directory / wrong-shape JSON / missing file + `--out`) all crashed with a
+// Node STACK at exit 4 instead of a coded refusal. The guard
+// (rapidtool-cli.mjs ~:3360, same classify contract) is pinned at the
+// strongest level this file can offer: a real process, the exact fuzz shape
+// `wild --project nope.json` → exit 1 + `RT_E_PROJECT_MISSING`, no stack.
+// ---------------------------------------------------------------------------
+test("wild fuzz shape — `wild --project <missing>.json` refuses CODED (exit 1), never STACKs", () => {
+  // Throwaway temp cwd + keyless/seatless env (AGENTS.md scripts-leg cwd rule;
+  // same scrub set as rapidtool-cli-edit.test.mjs). The child resolves every
+  // path via import.meta.url — this test never depends on the repo cwd.
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-taxonomy-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  const missing = join(cwd, "nope.json"); // never created — the fuzz's `proj-nowhere`
+  const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "wild", "--project", missing], {
+    cwd,
+    env,
+    encoding: "utf8",
+    timeout: 120_000,
+  });
+  assert.equal(res.error, undefined, `spawn failed: ${String(res.error)}`);
+  const stderr = res.stderr ?? "";
+  assert.ok(
+    !/(^|\n)\s+at\s/.test(stderr),
+    `wild must never print a Node stack (the 308 M3 fuzz's STACK(exit4) class — the raw h.loadProject crash resurfaced):\n${stderr}`,
+  );
+  assert.equal(
+    res.status,
+    1,
+    `missing project → exit 1 (RT_E_PROJECT_MISSING is usage-class); exit 4 IS the regressed crash.\nstdout: ${res.stdout}\nstderr: ${stderr}`,
+  );
+  let json = null;
+  try {
+    json = JSON.parse(res.stdout);
+  } catch {
+    /* surfaced by the assert below */
+  }
+  assert.ok(json, `wild must print exactly one JSON envelope.\nstdout: ${res.stdout}\nstderr: ${stderr}`);
+  assert.equal(json.ok, false, "a missing project is a refusal envelope");
+  assert.equal(
+    json.code,
+    "RT_E_PROJECT_MISSING",
+    "a read ENOENT must classify as RT_E_PROJECT_MISSING (the makeLoader/errCode contract) — a generic code (or none) means the guard drifted",
+  );
+  assert.equal(json.exit_code, res.status, "the envelope's exit_code must equal the process exit");
 });

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { exportProjectJson, slugName } from "./io.ts";
 import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
 import type { Project, SpecGraph } from "./types.ts";
-import { DEPLOY_HONESTY_STAMP, deplyNotes, projectKindOf, scaffoldProject } from "./scaffold.ts";
+import { DEPLOY_HONESTY_STAMP, deployNotes, deplyNotes, projectKindOf, scaffoldProject } from "./scaffold.ts";
 import type { ScaffoldFile, ScaffoldResult } from "./scaffold.ts";
 
 /** A fully engine-run project (real lattice, spec graph, contracts, oracle, P6 module). */
@@ -524,7 +524,7 @@ describe("scaffoldProject — escaping (hostile inputs)", () => {
   });
 });
 
-describe("scaffoldProject + deplyNotes — no secrets, honest local-only framing", () => {
+describe("scaffoldProject + deployNotes — no secrets, honest local-only framing", () => {
   it("keeps .env.example to PLACEHOLDER values even when the project carries secrets", () => {
     const p = seedProject({
       kind: "app",
@@ -556,7 +556,7 @@ describe("scaffoldProject + deplyNotes — no secrets, honest local-only framing
       assert.ok(!env.includes(secret), `.env.example leaked ${secret}`);
     }
     // DEPLOY.md is composed from P9/P12 artifacts + kind defaults — never from memory/brief text.
-    const notes = deplyNotes(p);
+    const notes = deployNotes(p);
     for (const secret of ["sk-live-ABCDEF0123456789", "AKIAIOSFODNN7EXAMPLE", "hunter2"]) {
       assert.ok(!notes.includes(secret), `DEPLOY.md leaked ${secret}`);
     }
@@ -564,7 +564,7 @@ describe("scaffoldProject + deplyNotes — no secrets, honest local-only framing
 
   it("carries the E-27 honesty stamp and human-gated, local-only deploy framing", () => {
     const p = fullRun(); // P9/P12 recorded: GitHub Actions workflow + IaC sketch + ADR + OpenAPI
-    const notes = deplyNotes(p);
+    const notes = deployNotes(p);
     assert.ok(notes.includes(DEPLOY_HONESTY_STAMP), "mandatory stamp present verbatim");
     for (const section of [
       "## Run locally",
@@ -590,25 +590,25 @@ describe("scaffoldProject + deplyNotes — no secrets, honest local-only framing
   });
 
   it("adds game-specific asset wording and kind default destinations to DEPLOY.md", () => {
-    const game = deplyNotes(fullRun({ kind: "game" }));
+    const game = deployNotes(fullRun({ kind: "game" }));
     assert.ok(game.includes("assets/manifest.json"), "game notes name the manifest");
     assert.ok(game.includes("itch.io"), "game kind destination hint present");
-    const web = deplyNotes(fullRun({ kind: "app" }));
+    const web = deployNotes(fullRun({ kind: "app" }));
     assert.ok(web.includes("preview channels"), "webapp destination hint present");
     assert.ok(!web.includes("itch.io"));
   });
 
   it("notes honestly when no P9/P12 templates exist yet", () => {
-    const notes = deplyNotes(seedProject());
+    const notes = deployNotes(seedProject());
     assert.ok(notes.includes("_None yet"), "empty-template note");
     assert.ok(!notes.includes("GitHub Actions workflow"));
   });
 });
 
-describe("deplyNotes — run/test/env/deploy steps exist and are executable-sounding", () => {
+describe("deployNotes — run/test/env/deploy steps exist and are executable-sounding", () => {
   it("lists real commands matching the emitted skeleton", () => {
     const p = fullRun({ kind: "tool" });
-    const notes = deplyNotes(p);
+    const notes = deployNotes(p);
     assert.ok(notes.includes("npm install"));
     assert.ok(notes.includes("cp .env.example .env"));
     assert.ok(notes.includes("npm run typecheck"));
@@ -626,10 +626,10 @@ describe("deplyNotes — run/test/env/deploy steps exist and are executable-soun
     }
   });
 
-  it("scaffoldProject's DEPLOY.md file is exactly deplyNotes output", () => {
+  it("scaffoldProject's DEPLOY.md file is exactly deployNotes output", () => {
     const p = fullRun();
     const result = scaffoldProject(p);
-    assert.equal(bodyOf(result, "DEPLOY.md"), deplyNotes(p));
+    assert.equal(bodyOf(result, "DEPLOY.md"), deployNotes(p));
   });
 });
 
@@ -1018,5 +1018,17 @@ describe("fixes/216d — refused tree rows, declared entry, census bullet, compu
       okFiles(legacy).some((f) => f.path === legacyTarget),
       "the computed host is really emitted",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A3 (fixes/309_a3_guardset.md) — M4-16: the deplyNotes/deployNotes twin is
+// consolidated on the correct spelling; the legacy name survives as the alias.
+// ---------------------------------------------------------------------------
+
+describe("A3/M4-16 — deplyNotes/deployNotes twin", () => {
+  it("deplyNotes resolves to the canonical deployNotes (call site + exports agree)", () => {
+    assert.equal(deplyNotes, deployNotes, "one function, two names — the legacy spelling is alias-only");
+    assert.equal(typeof deployNotes(seedProject()), "string", "the wired name is callable");
   });
 });

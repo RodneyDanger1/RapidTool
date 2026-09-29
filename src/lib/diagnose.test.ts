@@ -300,3 +300,54 @@ test("honesty: hydrate.repaired (engine live event) is unclassified, not none-de
   assert.equal(diag.mostLikelyCause.class, "unclassified-errors");
   assert.ok(diag.mostLikelyCause.evidence.includes("errors[0]"));
 });
+
+// ---------------------------------------------------------------------------
+// fixes/309 A2 — M3-10/11/12 hostile-input throw guards. Repros from
+// ~/rt308_m3/hostile1.ts; each pin asserts the guarded (throw-free) outcome.
+// ---------------------------------------------------------------------------
+
+test("M3-10: a null input floors to the empty-shape diagnosis (never a throw)", () => {
+  const diag = buildDiagnosis(null as unknown as DiagnosisInput);
+  assert.equal(diag.ok, true);
+  assert.equal(diag.exit_code, 0);
+  assert.equal(diag.schema_version, 1);
+  assert.deepEqual(diag.errors, []);
+  assert.deepEqual(diag.timeline, []);
+  assert.equal(diag.mostLikelyCause.class, "none-detected");
+  assert.deepEqual(diag.candidates, []);
+});
+
+test("M3-11: junk error rows are dropped at entry — the real row still ranks, no throw", () => {
+  const diag = buildDiagnosis(
+    baseInput({
+      errors: [
+        null,
+        5,
+        { event: "wild.step_timeout" },
+        rtRow({
+          scope: "llm-call",
+          event: "llm.timeout",
+          ts: 950_000,
+          code: "RT_E_LLM_TIMEOUT",
+          message: "one timeout",
+        }),
+      ] as unknown as RtEvent[],
+    }),
+  );
+  assert.equal(diag.errors.length, 1, "junk rows filtered from the output array");
+  assert.equal(diag.errors[0].event, "llm.timeout");
+  assert.equal(diag.mostLikelyCause.class, "unclassified-errors", "the one real row still ranks — never none-detected");
+  assert.deepEqual(diag.mostLikelyCause.evidence, ["errors[0]"]);
+});
+
+test("M3-12: a junk crashSnapshot.at is refused honestly — no RangeError, no fabricated date", () => {
+  const diag = buildDiagnosis(
+    baseInput({ crashSnapshot: { at: "y", href: 3 } as unknown as { at: number; href: string } }),
+  );
+  assert.equal(diag.mostLikelyCause.class, "freeze-pre-capture", "the snapshot signal is kept");
+  assert.ok(/unreadable timestamp/.test(diag.mostLikelyCause.summary));
+  assert.equal(/1970|NaN|Invalid/.test(diag.mostLikelyCause.summary), false, "no fabricated date in the summary");
+  // A non-object snapshot is not a snapshot at all — honest floor, no match.
+  const diag2 = buildDiagnosis(baseInput({ crashSnapshot: 42 as unknown as null }));
+  assert.equal(diag2.mostLikelyCause.class, "none-detected");
+});

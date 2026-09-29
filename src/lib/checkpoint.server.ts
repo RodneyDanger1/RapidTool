@@ -132,7 +132,11 @@ export type CheckpointReadResult =
  *  be real arrays so a partial payload is refused, not silently hollowed out. */
 export function boundProjectForCheckpoint(project: Project): Project {
   const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
-  const fields = project as unknown as Record<string, unknown>;
+  // A3 (M3-09 · 308 hostile probe): a null/non-object project (foreign
+  // payload) has nothing to bound — the write gate refuses this shape
+  // upstream (writeCheckpoint's hasCheckpointProjectShape), so this export's
+  // floor is an empty bounded copy, never a TypeError from `fields.logs`.
+  const fields = (project && typeof project === "object" ? project : {}) as unknown as Record<string, unknown>;
   const bounded: Record<string, unknown> = { ...fields };
   bounded.logs = asArray(fields.logs).slice(-CHECKPOINT_CAPS.logs);
   bounded.decisions = asArray(fields.decisions).slice(-CHECKPOINT_CAPS.decisions);
@@ -303,6 +307,24 @@ export function checkpointAdmits(
   checkpoint: RunCheckpoint,
   ask: { projectId: string; mode: "keyless" | "keyed" },
 ): { ok: true; savedAt: number } | { ok: false; code: "RT_E_VALIDATION"; error: string } {
+  // A3 (M3-08 · 308 hostile probe): the guard below covers `checkpoint`, but
+  // the `ask` half arrives from foreign callers too — a null/non-object ask
+  // (or one missing projectId/mode) is an ARGUMENT error → coded refusal,
+  // never a TypeError from `ask.projectId` (order-of-operations law, same as
+  // refuseBadDir; field checks mirror writeCheckpoint's run validation).
+  const asked = ask as unknown as { projectId?: unknown; mode?: unknown } | null | undefined;
+  if (
+    !asked ||
+    typeof asked !== "object" ||
+    typeof asked.projectId !== "string" ||
+    (asked.mode !== "keyless" && asked.mode !== "keyed")
+  ) {
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error: 'checkpoint: ask must be { projectId: string, mode: "keyless" | "keyed" } — refusing this re-entry point',
+    };
+  }
   const run = (checkpoint as unknown as { run?: Partial<CheckpointRun> } | null | undefined)?.run;
   if (
     !run ||
@@ -321,14 +343,14 @@ export function checkpointAdmits(
     return { ok: false, code: "RT_E_VALIDATION", error: `checkpoint: run.step ${String(run.step)} is not an integer >= 0` };
   }
   const projectId = (checkpoint as unknown as { project?: { id?: unknown } } | null | undefined)?.project?.id;
-  if (typeof projectId !== "string" || projectId !== ask.projectId) {
+  if (typeof projectId !== "string" || projectId !== asked.projectId) {
     return { ok: false, code: "RT_E_VALIDATION", error: `checkpoint: project mismatch (${String(projectId)})` };
   }
-  if (checkpoint.run.mode !== ask.mode) {
+  if (checkpoint.run.mode !== asked.mode) {
     return {
       ok: false,
       code: "RT_E_VALIDATION",
-      error: `checkpoint: mode mismatch (saved ${checkpoint.run.mode}, asked ${ask.mode})`,
+      error: `checkpoint: mode mismatch (saved ${checkpoint.run.mode}, asked ${String(asked.mode)})`,
     };
   }
   return { ok: true, savedAt: checkpoint.savedAt };

@@ -401,10 +401,17 @@ function recordGate(project: Project, phase: PhaseId): Project {
  * (approval records it then — recordGate's own guard).
  */
 export function convergeRealRun(base: Project, artifact: Artifact, log: JsonLog): Project {
+  // A3 (M3-18 · 308 hostile probe): a null/non-object base has no recorded
+  // state to converge — return it unchanged (the same-reference no-op floor
+  // applyVerifyOutcome uses for junk input) instead of a TypeError; a foreign
+  // base with junk collections bounds them to [] instead of "not iterable".
+  if (!base || typeof base !== "object") return base;
+  const baseArtifacts = Array.isArray(base.artifacts) ? base.artifacts : [];
+  const baseLogs = Array.isArray(base.logs) ? base.logs : [];
   const updated: Project = {
     ...base,
-    artifacts: [...base.artifacts, artifact],
-    logs: [...base.logs, log].slice(-200),
+    artifacts: [...baseArtifacts, artifact],
+    logs: [...baseLogs, log].slice(-200),
   };
   return recordGate(updated, 6 as PhaseId);
 }

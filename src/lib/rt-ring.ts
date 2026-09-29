@@ -15,7 +15,9 @@
 //
 // EXPORT SURFACE (compile against these — do not rename):
 //   createRtRing · rtPush · rtSerialize · rtHydrate · rtTail · rtStats ·
-//   rtRowBytes · newSessionId · type RtRing · type StallLatch · RtRingStats
+//   rtRowBytes · newSessionId · isRtEventLike (additive, fixes/309 — shared
+//   row-shape predicate, diagnose.ts M3-11) ·
+//   type RtRing · type StallLatch · RtRingStats
 // ---------------------------------------------------------------------------
 
 import {
@@ -106,13 +108,28 @@ function serializedRowsBytes(rows: RtEvent[]): number {
  * Push one row through the ring: sanitize → heartbeat sidecar → coalesce →
  * row cap → byte cap. Returns the new ring and any rows dropped for capacity.
  * Pure with respect to its inputs (no module state, no clock reads).
+ *
+ * Hostile-input guards (M3-01/02/03/04, fixes/309): a junk ring starts fresh
+ * (rtHydrate's posture), a non-row is a no-op, and a junk `cap` (negative —
+ * the non-terminating trim loop — or NaN — cap silently off) falls back to
+ * the module default. Never throws into the code it observes (AGENTS.md §7).
  */
 export function rtPush(
   ring: RtRing,
   row: RtEvent,
   opts: { cap?: number; byteCap?: number; now?: number } = {},
 ): { ring: RtRing; dropped: RtEvent[] } {
-  const cap = opts.cap ?? RING_CAP;
+  // M3-04: no ring to land in (null/junk) — start a fresh one; the row still
+  // lands below. Same posture as rtHydrate's junk-block recovery.
+  const target = ring && typeof ring === "object" && Array.isArray(ring.rows) ? ring : createRtRing();
+  // M3-01: a non-row (null/undefined/scalar/array) is not pushable — no-op.
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    return { ring: target, dropped: [] };
+  }
+  // M3-02/03: junk cap ⇒ treated as absent (the `??` idiom): a negative cap
+  // made the trim loop non-terminating, NaN made the compare always false.
+  const rawCap = opts.cap ?? RING_CAP;
+  const cap = Number.isFinite(rawCap) && rawCap >= 1 ? Math.floor(rawCap) : RING_CAP;
   const byteCap = opts.byteCap ?? RING_BYTES;
   const now = opts.now ?? row.ts;
   const clean = sanitizeRtEvent(row);
@@ -120,15 +137,15 @@ export function rtPush(
   // §2.5: heartbeat rows are never persisted on their own — the ring keeps the
   // latest heartbeat only as a sidecar cursor (watchdog reads it for lag).
   if (clean.event === "sys.heartbeat") {
-    return { ring: { ...ring, lastHeartbeat: clean }, dropped: [] };
+    return { ring: { ...target, lastHeartbeat: clean }, dropped: [] };
   }
 
   // §2.5 coalescing: same fingerprint within the window → count-up.
-  const rows = ring.rows;
+  const rows = target.rows;
   const last = rows.length > 0 ? rows[rows.length - 1] : null;
   if (last && shouldCoalesce(last, clean, now)) {
     const bumped: RtEvent = { ...last, count: (last.count ?? 1) + 1 };
-    const next = { ...ring, rows: [...rows.slice(0, -1), bumped] };
+    const next = { ...target, rows: [...rows.slice(0, -1), bumped] };
     return { ring: next, dropped: [] };
   }
 
@@ -143,26 +160,34 @@ export function rtPush(
   while (nextRows.length > 1 && serializedRowsBytes(nextRows) > byteCap) {
     dropped.push(nextRows.shift() as RtEvent);
   }
-  return { ring: { ...ring, rows: nextRows }, dropped };
+  return { ring: { ...target, rows: nextRows }, dropped };
 }
 
 /**
  * Serialize the ring: {version, sessionId, rows[], lastHeartbeat, stall,
  * lastPersistFailure}. Deterministic; additive fields ignored on hydrate.
+ * M3-07 (fixes/309): a junk ring serializes the empty frame (sessionId "",
+ * rows []) — hydrates back to a clean empty ring; never throws (rtHydrate's
+ * contract partner).
  */
 export function rtSerialize(ring: RtRing): string {
+  const r = ring && typeof ring === "object" ? ring : null;
   return JSON.stringify({
     version: RT_SCHEMA_VERSION,
-    sessionId: ring.sessionId,
-    rows: ring.rows,
-    lastHeartbeat: ring.lastHeartbeat,
-    stall: ring.stall,
-    lastPersistFailure: ring.lastPersistFailure,
+    sessionId: typeof r?.sessionId === "string" ? r.sessionId : "",
+    rows: Array.isArray(r?.rows) ? r.rows : [],
+    lastHeartbeat: r?.lastHeartbeat ?? null,
+    stall: r?.stall ?? null,
+    lastPersistFailure: r?.lastPersistFailure ?? null,
   });
 }
 
-/** Duck-type check for a well-formed row (tolerates additive/legacy fields). */
-function isRtEventLike(v: unknown): v is RtEvent {
+/**
+ * Duck-type check for a well-formed row (tolerates additive/legacy fields).
+ * Exported (fixes/309) as the single source of truth for "junk row" — the
+ * ring's hydrate filter and diagnose.ts's errors[] filter (M3-11) share it.
+ */
+export function isRtEventLike(v: unknown): v is RtEvent {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
   const r = v as Record<string, unknown>;
   return (
@@ -235,30 +260,46 @@ export function rtHydrate(raw: unknown): RtRing {
   };
 }
 
-/** Newest-first tail of the ring (diagnose + crash snapshot). */
+/**
+ * Newest-first tail of the ring (diagnose + crash snapshot).
+ * M3-05 (fixes/309): a junk ring tails as [] — never throws.
+ */
 export function rtTail(ring: RtRing, n: number): RtEvent[] {
-  return ring.rows.slice(-n).reverse();
+  const rows = ring && typeof ring === "object" && Array.isArray(ring.rows) ? ring.rows : [];
+  return rows.slice(-n).reverse();
 }
 
-/** Growth/health stats for the diagnose verb (§6.2 G-12). */
+/**
+ * Growth/health stats for the diagnose verb (§6.2 G-12).
+ * M3-06 (fixes/309): a junk ring floors to the zero shape (sessionId "");
+ * junk rows are skipped by the counters/ts window instead of crashing.
+ */
 export function rtStats(ring: RtRing): RtRingStats {
-  const rows = ring.rows;
+  const rows: Array<RtEvent | null> =
+    ring && typeof ring === "object" && Array.isArray(ring.rows) ? ring.rows : [];
   let errorCount = 0;
   let criticalCount = 0;
   let warnCount = 0;
+  let oldestTs: number | null = null;
+  let newestTs: number | null = null;
   for (const r of rows) {
+    if (!r || typeof r !== "object") continue; // junk row: not countable
     if (r.level === "error") errorCount += 1;
     else if (r.level === "critical") criticalCount += 1;
     else if (r.level === "warn") warnCount += 1;
+    if (typeof r.ts === "number" && Number.isFinite(r.ts)) {
+      if (oldestTs === null) oldestTs = r.ts;
+      newestTs = r.ts;
+    }
   }
   return {
     rows: rows.length,
-    bytes: serializedRowsBytes(rows),
-    newestTs: rows.length > 0 ? rows[rows.length - 1].ts : null,
-    oldestTs: rows.length > 0 ? rows[0].ts : null,
+    bytes: serializedRowsBytes(rows.filter((r): r is RtEvent => isRtEventLike(r))),
+    newestTs,
+    oldestTs,
     errorCount,
     criticalCount,
     warnCount,
-    sessionId: ring.sessionId,
+    sessionId: ring && typeof ring === "object" && typeof ring.sessionId === "string" ? ring.sessionId : "",
   };
 }

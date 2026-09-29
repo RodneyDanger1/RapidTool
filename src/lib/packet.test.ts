@@ -1053,3 +1053,48 @@ test("L2-P4: envelope acceptance key — null when absent, the verdict when pres
   assert.equal(parseSystemJson(compileAgentPacket(p)).acceptance, "failed");
 });
 
+// ---------------------------------------------------------------------------
+// A3 (fixes/309_a3_guardset.md) — M3-13..17: the 308 hostile-probe guards.
+// Each pin is the probe's exact repro; asserts a safe/coerced OUTCOME, never a
+// throw (guards live in compileAgentPacket / packetInputHash).
+// ---------------------------------------------------------------------------
+
+test("A3/M3-13: compileAgentPacket(null) returns the no-project floor, never a TypeError", () => {
+  const out = compileAgentPacket(null as unknown as Project);
+  assert.equal(typeof out, "string");
+  assert.ok(out.includes("(no project record)"), "the floor names the missing record");
+  assert.ok(out.includes("nothing to compile"), "the refusal reason is stated, not silent");
+});
+
+test("A3/M3-14: compileAgentPacket({}) compiles the empty skeleton — no .filter/.map throw", () => {
+  const out = compileAgentPacket({} as unknown as Project);
+  assert.ok(out.includes("(no brief supplied"), "Mission falls back honestly");
+  assert.ok(out.includes("(none yet)"), "Artifacts section degrades to its placeholder");
+  assert.ok(out.includes("No pending HITL."), "the rail survives the empty payload");
+  assert.ok(!out.includes("Execution: undefined"), "the sandbox rail renders the template claim");
+});
+
+test("A3/M3-15: a non-string brief coerces (handoff.text precedent) — never brief.trim TypeError", () => {
+  const numeric = makeProject() as unknown as { brief: unknown };
+  numeric.brief = 42;
+  assert.ok(compileAgentPacket(numeric as unknown as Project).includes("42"), "String()-coerced into the Mission");
+  const nullish = makeProject() as unknown as { brief: unknown };
+  nullish.brief = null;
+  assert.ok(
+    compileAgentPacket(nullish as unknown as Project).includes("(no brief supplied"),
+    "null ⇒ the empty-brief floor",
+  );
+});
+
+test("A3/M3-16: a junk schedule degrades to no-notes / no-extra-HITL — never .length throw", () => {
+  const p = makeProject() as unknown as { schedule: unknown };
+  p.schedule = { tightness: "x" };
+  const out = compileAgentPacket(p as unknown as Project);
+  assert.ok(out.includes("Tightness x"), "the junk tightness still renders (never silently dropped)");
+  assert.ok(out.includes("Extra HITL: none"), "missing extraHitl reads as none, not a throw");
+});
+
+test("A3/M3-17: packetInputHash(null) fingerprints as the empty shape — never throws", () => {
+  assert.equal(packetInputHash(null as unknown as Project), packetInputHash({} as Project));
+});
+
