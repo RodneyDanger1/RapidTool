@@ -4144,12 +4144,28 @@ export async function wildStep(
   /** 306 F5: the one finish path for every dispatched step — summarize, stamp,
    *  then emit `wild.step_paused`/`wild.step_ok` with the summary flattened into
    *  the payload (long-run feedback: every event carries what ran/produced/next). */
-  // W43 repair (F5 left the rewire mid-flight): the four legacy emitPaused call
-  // sites all map to the same action — one exact delegate keeps their semantics
-  // byte-identical while finishStep carries the new wild.step_* summary events.
+  /** 308 P-1/P-2 (owner-ordered): every pause — the four legacy emitPaused
+   *  sites AND the wildApproveGate/wildLeavePhase internals — funnels through
+   *  finishStep, so the park record is stamped HERE, centrally, when a producer
+   *  left it null. The probe: `wild --start` parked P0 with `park: null` while
+   *  types.ts promised WildParkInfo (B1's class, wider than first mapped). */
+  const parkIfNull = (result: WildStepResult): WildStepResult => {
+    const wrp = result.outcome === "paused" ? result.project.wildRun : null;
+    if (result.outcome !== "paused" || !wrp || wrp.park) return result;
+    const code = result.code ?? null;
+    const unlock: WildParkUnlock = code === "RT_E_GATE_PENDING" ? "human-gate" : "human-retry";
+    const info = wildParkInfo(
+      result.project,
+      result.project.currentPhase,
+      "wild.paused",
+      (result.error ?? "Wild step paused").slice(0, 300),
+      { code, unlock },
+    );
+    return { ...result, project: wildPatch(result.project, { park: info }) };
+  };
   const emitPaused = (result: WildStepResult): WildStepResult => finishStep(result, "park");
   const finishStep = (result: WildStepResult, action: WildStepSummary["action"]): WildStepResult => {
-    const out = summarized(result, action);
+    const out = summarized(parkIfNull(result), action);
     if (!emit) return out;
     if (out.outcome === "paused") {
       emit({
