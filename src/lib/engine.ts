@@ -1724,6 +1724,10 @@ export function approveHitl(
     decidedBy,
     requestedAt: opts?.requestedAt ?? project.hitl.requestedAt ?? now,
     decidedAt: now,
+    // 315 V1 (C1's owed one-liner): the seal's provenance actually reaches the
+    // ledger row — `decidedVia` was accepted but never stored, so every sealed
+    // approval minted a row without its seat label. Absent ⇒ byte-identical.
+    ...(opts?.decidedVia ? { decidedVia: opts.decidedVia } : {}),
   };
   const decisions = [...project.decisions, decision].slice(-100);
   const overrideLogs: JsonLog[] = forcedOverride

@@ -1,18 +1,41 @@
 # 315 — V2 Deep/Logic Checker (adversarial audit of the seal + recent wave)
 
-Date: 2026-09-29 · HEAD: f270b38 · Lane: V2 (verifier-2, deep/logic)
-Scope: seal logic (engine.ts arms), recent-wave hunks, F2 tsc reds (if lane dead), independent legs.
-Do NOT touch: V1's files (`wild-seal.test.ts`), live lanes' files.
+Date: 2026-09-29 · Lane: V2 (verifier-2, deep/logic)
+Audit target HEAD: **f270b38** (per brief). Repo moved under me mid-audit: **6da9cc6** ("F-wave + verifier-cured", 18:38:43) — it touches only WD2/V1 logs + 2 selfmod lines, so every finding below persists at 6da9cc6 (re-verified: engine.ts / CLI / iterate / run-eval unchanged).
+Scope: seal logic (a–d), recent-wave hunks, F2 tsc reds, independent legs. Did NOT touch: V1's `wild-seal.test.ts`, live lanes' files. No keyed calls.
 
-## Log (append-only)
+## Log (append-only, timestamped)
 
-- [t0] Recon: HEAD=f270b38 confirmed; dirty = `fixes/314_wd2_guard.md` (WD2 live). Log opened.
-- [t0] Next: read seal arms (engine.ts 4203-4360), resolveWildReviewBounded, wildDodRepairOnce, policy/dod seat arms; grep decidedBy:"human" paths; wave-hunk audit; F2 liveness+tsc; independent legs.
+- [t0 18:30] Recon: HEAD=f270b38; dirty = WD2's log only. Log opened. Legs later: wild-step **14/14** (`WILDSTEP_EXIT=0`), cli-exit-taxonomy **9/9** (`TAX_EXIT=0`) — no reds.
+- [t1 ~18:33] Seal arms read (engine.ts:3954–3975 wildDodRepairOnce, 4075–4194 resolvers, 4211–4424 arms, 4553–4633 wildStep/parkIfNull). **Key hit:** `wildDodRepairOnce` line 3959 = `phase===6 ? opts?.p6Edge : undefined` — consumes ONLY the injected seam; `dodRepair` (declared :3826) and `liveEdge` (:3819) have **zero references repo-wide**; `wildExecEdgeFor`/`wildLiveEdge` (claimed "new" in `313_d1_seal.md` E1 seam table) **do not exist** (grep 0; `git log -S` shows only doc/plan mentions). P7 execute-edge is floor-only (:4749–4751). ⇒ R-E1 remainder is REAL and broader than its one-line note (see table #1–#4).
+- [t2 ~18:34] Mint-path audit: every seal mint = `approveHitl(decidedBy:"autopilot")` (:4279/:4290); the only literal `decidedBy:"human"` writes are `rejectHitl` (:1805, reachable only from headless reject :1233 + console store :1786 — never wild arms) and non-approval fixtures. forceHuman: refuse-both-modes (:4229–4235, seal-specific coded reason) + `approveHitl` guard (:1690) throws for autopilot+forceHuman without force; no `force:true` anywhere in the arms. Retry: classifier-source rejects ONLY (:4181–4183), N default 2, waits 500/1000 ms, one `wild.review_retry` row per retry. Seat chain verified end-to-end (policy.ts:171/:197 label "autopilot/agent-seal"; dod.ts:99–101 arm; dod.ts:116–124 provenance: resource/action/label/`" — "`/tokenPath=false all satisfied by :4282–4288; `evaluatePolicy` allows the autopilot seat). Verdicts: (a) human-mint impossible ✓; (b) no bypass ✓; (c) N=2 classifier-only ✓ (override caveat #7); (d) contract honored, one evidence gap #6.
+- [t3 ~18:35] Wave hunks: headless spreads complete (both sigs + call sites; no dropped keys). CLI: `parseArgs` absorbs ANY `--flag` (no unknown-key validation, :74–102) and the wild arm is the ONLY `agent-seal` reader (:3491–3511) → `approve --agent-seal` / `gate --agent-seal` are **silently ignored** (E1 plan of record required coded pointer refusals; USAGE :3953 + README-cli.md have no mention). iterate.ts consumed only by run-eval.mjs (decision record); driver/mappers/codes have zero non-test consumers (owner-gated, documented); run-eval.test.mjs has NO iterate pin (its +23 lines are F4's verdictHash test); scorecard.ts has no iterate census. selfmod.* unmounted by design (mount blocked; RT_E_SELFMOD not yet in errors.ts).
+- [t4 ~18:37] F2 liveness: selfmod.ts/.server.test.ts dirty + mtimes 18:22–18:32 + `ps -W` 11 node procs ⇒ **F2 LIVE**. `npx tsc --noEmit` = **TSC_EXIT=0** (in-flight tree already cured; F2's diff = exactly the cure: `SelfmodRefusalCode += "RT_E_GIT_UNAVAILABLE"` + one test line).
+- [t5 18:38:43] Parent landed **6da9cc6** ("Curred by parent: selfmod.ts union += RT_E_GIT_UNAVAILABLE (F2's TS2322 pair) + the test's .refusals message (TS2339) — typecheck 0"). F2's reds = **RESOLVED, no V2 action**. My log committed in it.
+- [t6 ~18:40] Re-verify at 6da9cc6: iterate.test.ts **32/32** (`ITERATE_EXIT=0`, independent); `npx tsc --noEmit` = **1 red, solely V1's brand-new untracked `src/lib/wild-seal.test.ts:126` TS2322** (`decidedVia.action` optionality in a fixture) — V1 mid-write, NOT a landing defect, NOT mine to fix. V1's A2 file did not exist 18:30–18:39, appeared by 18:39.
 
-## Adverse-findings table (filled at end)
+## Adversarial findings table
 
-| # | What looked done | What wasn't | Fix / verdict |
+| # | What looked done | What wasn't (evidence) | Fix / verdict |
 |---|---|---|---|
-| — | — | — | — |
+| 1 | "AGENT-SEAL SWITCH WIRED … engine arms" (f270b38 msg) + docstrings (:3937–3952, :4377–4381) claiming keyed P6 synthesis / P7 live re-runs | `wildDodRepairOnce` reads **only `opts.p6Edge`** (:3959). Production wild loop (headless) passes no `p6Edge` ⇒ **on a production sealed run the ONE repair pass can never fire — every hard-DoD red parks**. | R-E1 remainder (for R-E1/V1 finisher; engine.ts not mine to edit). Land `wildExecEdgeFor` per `313_d1_seal.md` seam table. |
+| 2 | `WildStepOptions.dodRepair` docstring "Present ⇒ a hard-DoD red calls THIS" | **Zero consumers** (grep = declaration only). Tests/passers would silently no-op. Same for `liveEdge` (:3819, P7). | declare-or-strike: wire or strike (same finisher). |
+| 3 | E1 seam table "After: one picker + P7 live seam wired" | `wildExecEdgeFor`/`wildLiveEdge` don't exist anywhere (grep 0; evidence e1b–e1g empty in the E1 log). | Known/in-progress; recorded so the table is not read as state. |
+| 4 | R-E1 note "no CLI `--agent-seal`" | **Stale**: wild verb flag landed (:3491–3511, verified threaded → both headless sigs → wildStep). Still missing: `approve`/`gate` **coded refusals** + USAGE/README lines. `approve --agent-seal` today = silent no-op (parseArgs absorbs it). | For finisher: land refusals; then update the note. |
+| 5 | Park unlock "agent-seal" text: "…then resume the sealed run" | Seal is **per-call** (`opts.agentSeal` only; no `sealed` field on WildRun). `wild --resume` (or any bare step) without the flag silently continues **unsealed** (no retry/seat/repair). Usage never says the flag is per-call. | For finisher: persist seal engagement OR state the per-call requirement in park/usage text. |
+| 6 | Repair "passing re-run clears" | Clears **silently**: no `wild.repair`/`dod.repair` row exists repo-wide; the success detail is dropped at both call sites (:4307–4321, :4385–4399) — asymmetric vs one `wild.review_retry` row per retry. No double-count/double-log found (single edge run; failure parks on the pre-repair project; pure-floor → honest null). | Low-medium; one `wildLog` row on success (finisher). |
+| 7 | `normalizeReviewRetries` docstring "hostile option can never loop" (:4135–4141) | Only negative/fractional/NaN clamp to 0 — a huge INTEGER is accepted (retries × ≤120 s timeout + ≤60 s backoff delays). CLI can't pass it (opts built at :3496–3500) ⇒ programmatic seam only. | Low; clamp an upper bound or amend the docstring. |
+| 8 | "F1: iterate driver + pins" (f270b38 / 6da9cc6) | iterate.test.ts 32/32 ✓, but `run-eval.test.mjs` has **no iterate pin** and `scorecard.ts` has **no census** (F1's S3/S4); the driver/mappers/codes remain unmounted by design. | F1 live → 'for F1' (its S3–S7 close-out). |
+| 9 | F4 "the persisted scorecard can cite it" (verdictHash) | Producer chain real (run-eval.mjs:2352 → m2Runs hashBit) + lift pinned; the **citation line itself** is unpinned (grep verdictHash in maker-score.test.ts = 0). | Minor; F4 follow-up or accept (cosmetic evidence line). |
+| 10 | "the 2 standing tsc reds are F2's" | **Cured** (6da9cc6; verified 0 at t4). | Resolved; no action. |
+| 11 | (new state) | `wild-seal.test.ts:126` TS2322 — V1's untracked in-flight file; the ONLY red at t6. | 'for V1' before its landing; re-run typecheck then. |
+| 12 | T10.1/T10.2 claims | Verified: `text-[10px]/[11px]` 0 hits in both files; `probe_c1_arith.mjs` absent. | Pass. |
 
-Counts: checks run = 0 · wrong found = 0 (in progress)
+## Verdicts (brief items)
+
+1. **Seal logic:** (a) human-mint impossible ✓ (b) no forceHuman bypass ✓ (c) N=2, classifier-only, backoff ✓ (override caveat #7) (d) contract honored; evidence gap #6; **the repair is production-dead until R-E1 lands (#1–#3)**.
+2. **Wave hunks:** no dropped spread keys; flag threaded for `wild`; two silent-gap classes surfaced (#4, #5); iterate/selfmod unmounting documented by their lanes (#8 + F2 mount-spec).
+3. **F2 reds:** lane ALIVE + reds cured by parent (6da9cc6) → no V2 fix needed.
+4. **Independent re-run:** wild-step **14/14** · cli-exit-taxonomy **9/9** · bonus iterate **32/32** · tsc 0 except V1's in-flight file. No unexplained reds; nothing to trace to a commit.
+
+Counts: **~50 discrete checks run · 12 findings (4 R-E1-known, 6 newly surfaced, 2 resolved/state) · 0 fixes by V2 (every finding owned by a live lane/V1; none silently editable)**.
