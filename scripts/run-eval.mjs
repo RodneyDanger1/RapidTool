@@ -80,6 +80,7 @@
  *      npm run eval -- --trials=3 [--all|--limit=N]   (trials + pass@k)
  */
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync, rmSync, renameSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join, dirname, basename, resolve, relative, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -356,17 +357,25 @@ export function parseGrader(raw, slug) {
     }
     expectedKind = doc.expectedKind.trim();
   }
-  // A3-f05/R11-f12 (W36 · N5 — landing the structure W30 §Graders spec'd):
-  // optional per-kind expectedBehavior rows over the EMITTED TREE (not text
-  // presence). Shape-checked here — a grader that cannot be trusted never
-  // grades; evaluated by checkExpectedBehavior. Checks:
+  // A3-f05/R11-f12 (W36 · N5 — landing the structure W30 §Graders spec'd;
+  // fixes/299 U1 completes it): optional per-kind expectedBehavior rows over
+  // the EMITTED TREE (not text presence). Shape-checked here — a grader that
+  // cannot be trusted never grades; evaluated by checkExpectedBehavior. Checks:
   //   file-exists           — `path` must exist in the emitted tree manifest
   //   package-target-exists — the emitted package.json's `bin`|`main`|`exports`
   //                           target(s) must resolve to emitted files
-  //   entry-runs            — RUNTIME row: stays `pending` until runtime
-  //                           evidence is wired into acceptance (TODO(A3-f05));
-  //                           visible in `behavior.rows` + the `verification`
-  //                           label, never silently skipped.
+  //   entry-runs            — RUNTIME row, evaluated by a bounded, env-minimal
+  //                           spawn of the emitted `entry` (fixes/299 U1):
+  //                           pass = the declared exit/output pins hold within
+  //                           budget; fail = timeout / exit mismatch / missing
+  //                           pin text / missing entry. A UI kind declares
+  //                           `uiShell: true` instead of an entry — that is a
+  //                           structural skip (verified against the tree's
+  //                           index.html, mirroring treeRun's resolveEntry),
+  //                           never a silent pass. Rows that name neither an
+  //                           `entry` nor `uiShell` are REJECTED here: they
+  //                           could only ever read `pending` (the pre-U1
+  //                           never-failing shape this lane closed).
   const BEHAVIOR_CHECKS = new Set(["file-exists", "package-target-exists", "entry-runs"]);
   const expectedBehavior = [];
   if (doc.expectedBehavior !== undefined) {
@@ -392,11 +401,57 @@ export function parseGrader(raw, slug) {
       if (check === "package-target-exists" && !(row.target === "bin" || row.target === "main" || row.target === "exports")) {
         return { ok: false, error: `expectedBehavior[${i}] (${id}): package-target-exists needs "target": "bin" | "main" | "exports"` };
       }
+      // fixes/299 (U1): the entry-runs runtime shape — validated here so a
+      // runtime row can never again grade nothing (the pre-U1 `pending` trap).
+      let entryRunFields = null;
+      if (check === "entry-runs") {
+        const uiShell = row.uiShell === true;
+        const entry = typeof row.entry === "string" ? row.entry.trim().replace(/\\/g, "/").replace(/^\.\//, "") : "";
+        if (uiShell && entry) {
+          return { ok: false, error: `expectedBehavior[${i}] (${id}): uiShell is a structural skip — it must not also declare an "entry"` };
+        }
+        if (!uiShell && !entry) {
+          return { ok: false, error: `expectedBehavior[${i}] (${id}): entry-runs needs a non-empty "entry" (the emitted-tree-relative file to run) or "uiShell": true for a UI kind` };
+        }
+        if (row.mode !== undefined && row.mode !== "exec" && row.mode !== "import") {
+          return { ok: false, error: `expectedBehavior[${i}] (${id}): entry-runs mode must be "exec" | "import" (got ${JSON.stringify(row.mode)})` };
+        }
+        if (row.args !== undefined) {
+          if (!Array.isArray(row.args) || row.args.some((a) => typeof a !== "string")) {
+            return { ok: false, error: `expectedBehavior[${i}] (${id}): entry-runs args must be an array of strings` };
+          }
+          if (row.mode === "import") {
+            return { ok: false, error: `expectedBehavior[${i}] (${id}): entry-runs args apply to mode "exec" only (an import takes no argv)` };
+          }
+        }
+        if (row.expectExit !== undefined && !(Number.isInteger(row.expectExit) && row.expectExit >= 0 && row.expectExit <= 255)) {
+          return { ok: false, error: `expectedBehavior[${i}] (${id}): expectExit must be an integer 0..255` };
+        }
+        if (row.expectStdout !== undefined && !(typeof row.expectStdout === "string" && row.expectStdout.length > 0)) {
+          return { ok: false, error: `expectedBehavior[${i}] (${id}): expectStdout must be a non-empty string` };
+        }
+        if (row.expectStderr !== undefined && !(typeof row.expectStderr === "string" && row.expectStderr.length > 0)) {
+          return { ok: false, error: `expectedBehavior[${i}] (${id}): expectStderr must be a non-empty string` };
+        }
+        if (row.timeoutMs !== undefined && !(Number.isFinite(row.timeoutMs) && row.timeoutMs > 0)) {
+          return { ok: false, error: `expectedBehavior[${i}] (${id}): timeoutMs must be a positive finite number` };
+        }
+        entryRunFields = {
+          ...(uiShell ? { uiShell: true } : { entry }),
+          ...(row.mode === "exec" || row.mode === "import" ? { mode: row.mode } : {}),
+          ...(Array.isArray(row.args) && row.args.length > 0 ? { args: [...row.args] } : {}),
+          ...(Number.isInteger(row.expectExit) ? { expectExit: row.expectExit } : {}),
+          ...(typeof row.expectStdout === "string" ? { expectStdout: row.expectStdout } : {}),
+          ...(typeof row.expectStderr === "string" ? { expectStderr: row.expectStderr } : {}),
+          ...(Number.isFinite(row.timeoutMs) ? { timeoutMs: row.timeoutMs } : {}),
+        };
+      }
       expectedBehavior.push({
         id,
         check,
         ...(typeof row.path === "string" ? { path: row.path.trim() } : {}),
         ...(typeof row.target === "string" ? { target: row.target } : {}),
+        ...(entryRunFields ?? {}),
         ...(typeof row.note === "string" && row.note.trim().length > 0 ? { note: row.note.trim() } : {}),
       });
     }
@@ -550,8 +605,10 @@ function treeRunToEvidence(outcome) {
 
 // ---------------------------------------------------------------------------
 // Trials, pass@k / pass^k / flakiness + the grader leak scan (W5-L5 T-107.5).
-// All pure except `checkAcceptance` / `treeTextFiles` / `graderLeakScan`,
-// which only read files. Nothing here writes into an emitted tree.
+// `checkAcceptance` reads files; since fixes/299 (U1) its `entry-runs` rows
+// also run the declared emitted entry through a bounded, env-minimal
+// spawnSync (the only spawn in this section) — nothing here writes into an
+// emitted tree.
 // ---------------------------------------------------------------------------
 
 const round4 = (x) => Math.round(x * 10_000) / 10_000;
@@ -658,21 +715,172 @@ function packageTargetPaths(value) {
   return out;
 }
 
-/** W40·N4 (§R7-f03/f04): evaluate the grader's declared `expectedBehavior`
- *  rows against the EMITTED TREE (the manifest + package.json), never against
- *  text presence in the brief. Row statuses:
+// ---------------------------------------------------------------------------
+// fixes/299 (U1 — closes the A3-f05 TODO; Q4 item a): `entry-runs` is a REAL,
+// bounded, honest runtime evaluation. Before this lane the row pushed
+// `pending` and never failed — the acceptance gate's one never-failing clause.
+// ---------------------------------------------------------------------------
+
+/** Default per-row budget. Long enough for a cold node + strip-types start on
+ *  this box (~1-2s observed), short enough that a hung entry cannot stall the
+ *  eval; a row may override within [min, max]. */
+const ENTRY_RUN_TIMEOUT_MS = 15_000;
+const ENTRY_RUN_TIMEOUT_MIN_MS = 500;
+const ENTRY_RUN_TIMEOUT_MAX_MS = 60_000;
+const ENTRY_RUN_STDOUT_TAIL = 160;
+const ENTRY_RUN_STDERR_TAIL = 240;
+
+/** One-line, whitespace-collapsed, bounded tail of a child's stream — evidence
+ *  a human can read inside results.json. */
+function entryRunTail(text, max) {
+  const t = String(text ?? "").replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+/** The bounded budget for one runtime row (row override clamped; default 15s). */
+function entryRunBudget(row) {
+  const v =
+    typeof row.timeoutMs === "number" && Number.isFinite(row.timeoutMs)
+      ? Math.floor(row.timeoutMs)
+      : ENTRY_RUN_TIMEOUT_MS;
+  return Math.min(Math.max(v, ENTRY_RUN_TIMEOUT_MIN_MS), ENTRY_RUN_TIMEOUT_MAX_MS);
+}
+
+/** fixes/299 (U1): the child environment for a runtime row — an ALLOWLIST of
+ *  the vars a node process needs to start (Windows: SystemRoot / PATH / TEMP…).
+ *  Nothing else passes through: no DEEPSEEK_* / provider config, no parent
+ *  NODE_OPTIONS — the emitted entry cannot read the driver's credentials.
+ *  Minimal ≠ an OS sandbox (the same bounded-runner caveat the repo states for
+ *  node-runner.server.ts). */
+const ENTRY_RUN_ENV_ALLOW = Object.freeze([
+  "PATH",
+  "PATHEXT",
+  "SYSTEMROOT",
+  "SYSTEMDRIVE",
+  "COMSPEC",
+  "WINDIR",
+  "TEMP",
+  "TMP",
+  "USERPROFILE",
+  "HOME",
+  "NUMBER_OF_PROCESSORS",
+  "OS",
+]);
+function entryRunEnv() {
+  const env = {};
+  for (const key of ENTRY_RUN_ENV_ALLOW) {
+    const v = process.env[key];
+    if (typeof v === "string") env[key] = v;
+  }
+  return env;
+}
+
+/** fixes/299 (U1): one `entry-runs` row, evaluated for real. Returns
+ *  `{ status, detail }` — status ∈ { "pass", "fail", "ui-shell" }:
+ *    ui-shell — the row declared it (a UI kind). The structural premise is
+ *               VERIFIED (index.html emitted — the exact signal treeRun's
+ *               resolveEntry uses); a declared ui-shell whose tree carries no
+ *               index.html FAILS, so the skip is true, never a free pass.
+ *    exec     — spawnSync(node, [--experimental-strip-types?, <entry>, …args])
+ *               bounded by the row budget, cwd = the emitted dir, env-minimal.
+ *               pass = declared exit (default 0) within budget AND every
+ *               declared stdout/stderr substring present; fail = timeout /
+ *               spawn error / exit mismatch / missing pin.
+ *    import   — node -e loads the entry as a module. The emitted entries carry
+ *               a direct-run guard (argv[1] vs import.meta.url), so argv[1]
+ *               must stay EMPTY: the path is embedded in the loader text, not
+ *               passed as argv. pass = the import resolves and the process
+ *               exits 0; a module that throws on import fails.
+ *  Reads + spawns only; never writes. */
+function evaluateEntryRunsRow(row, emittedDir, has) {
+  if (row.uiShell === true) {
+    return has("index.html")
+      ? {
+          status: "ui-shell",
+          detail:
+            "structural UI-shell skip — index.html emitted, so this kind has no headless entry (a dev/build leg needs a network install); the same skip treeRun's own resolveEntry makes",
+        }
+      : {
+          status: "fail",
+          detail:
+            "declared uiShell, but the tree carries no index.html — the structural premise is false, so this is not a UI shell (never a silent pass)",
+        };
+  }
+  if (!has(row.entry)) {
+    return { status: "fail", detail: `entry not emitted: ${row.entry} — nothing to run` };
+  }
+  const abs = join(emittedDir, row.entry);
+  const isTs = /\.(ts|mts|cts)$/i.test(row.entry);
+  const mode = row.mode === "import" ? "import" : "exec";
+  const budget = entryRunBudget(row);
+  let argv;
+  if (mode === "import") {
+    const loader =
+      `const entry = ${JSON.stringify(abs)};` +
+      'const { pathToFileURL } = await import("node:url");' +
+      "const m = await import(pathToFileURL(entry).href);" +
+      'console.log("import ok: " + Object.keys(m).sort().join(","));';
+    argv = [...(isTs ? ["--experimental-strip-types"] : []), "--input-type=module", "-e", loader];
+  } else {
+    argv = [...(isTs ? ["--experimental-strip-types"] : []), abs, ...(Array.isArray(row.args) ? row.args : [])];
+  }
+  const t0 = Date.now();
+  const run = spawnSync(process.execPath, argv, {
+    cwd: emittedDir,
+    encoding: "utf8",
+    timeout: budget,
+    env: entryRunEnv(),
+    windowsHide: true,
+  });
+  const ms = Date.now() - t0;
+  const stdoutTail = entryRunTail(run.stdout, ENTRY_RUN_STDOUT_TAIL);
+  const stderrTail = entryRunTail(run.stderr, ENTRY_RUN_STDERR_TAIL);
+  const tails = `${stdoutTail ? ` · stdout: "${stdoutTail}"` : ""}${stderrTail ? ` · stderr: "${stderrTail}"` : ""}`;
+  const timedOut = Boolean(run.error && run.error.code === "ETIMEDOUT");
+  if (run.error && !timedOut) {
+    return {
+      status: "fail",
+      detail: `spawn failed (${run.error.code || run.error.message}) — ${mode} of ${row.entry} could not start`,
+    };
+  }
+  if (timedOut) {
+    return { status: "fail", detail: `timed out after ${budget}ms (budget, killed) — ${mode} of ${row.entry} did not finish${tails}` };
+  }
+  const exitDesc = run.status === null ? (run.signal ? `signal ${run.signal}` : "no exit status") : `exit ${run.status}`;
+  const expected = Number.isInteger(row.expectExit) ? row.expectExit : 0;
+  if (run.status !== expected) {
+    return { status: "fail", detail: `${exitDesc} ≠ declared exit ${expected} (${mode} of ${row.entry})${tails}` };
+  }
+  if (row.expectStdout !== undefined && !String(run.stdout ?? "").includes(row.expectStdout)) {
+    return { status: "fail", detail: `${exitDesc} in ${ms}ms, but stdout lacks ${JSON.stringify(row.expectStdout)}${tails}` };
+  }
+  if (row.expectStderr !== undefined && !String(run.stderr ?? "").includes(row.expectStderr)) {
+    return { status: "fail", detail: `${exitDesc} in ${ms}ms, but stderr lacks ${JSON.stringify(row.expectStderr)}${tails}` };
+  }
+  return {
+    status: "pass",
+    detail: `${exitDesc} in ${ms}ms (bounded ${budget}ms, env-minimal spawn, cwd = emitted dir)${tails}`,
+  };
+}
+
+/** W40·N4 (§R7-f03/f04) + fixes/299 (U1): evaluate the grader's declared
+ *  `expectedBehavior` rows against the EMITTED TREE (the manifest +
+ *  package.json) — never against text presence in the brief. Row statuses:
  *    file-exists           — pass/fail: the declared path resolves in the manifest;
  *    package-target-exists — pass/fail: every path the package.json target
  *                            declares resolves to an emitted file (a declared-
  *                            but-dangling target, or an undeclared target,
  *                            FAILS);
- *    entry-runs            — `pending`: the runtime row stays pending until
- *                            runtime evidence is wired into acceptance
- *                            (TODO(A3-f05)); it is visible in `behavior.rows`
- *                            + the verification label, never silently skipped
- *                            and never counted as a pass.
- *  `ok` = no row FAILED (pending rows do not fail a tree); `complete` records
- *  whether any runtime row is still pending. Reads files only; never writes. */
+ *    entry-runs            — pass/fail/ui-shell: a bounded, env-minimal spawn
+ *                            (exec or import) of the declared emitted entry —
+ *                            the TODO(A3-f05) `pending` push is GONE; a broken
+ *                            artifact now FAILS the row. A UI-kind row reads
+ *                            the verified `ui-shell` structural skip instead of
+ *                            an entry (never a silent pass).
+ *  `ok` = no row FAILED (a ui-shell skip does not fail a tree, exactly as
+ *  treeRun's entryGreen reads it); `complete` = no runtime row still awaits
+ *  evidence — `ui-shell` is TERMINAL, so it never keeps `complete` false for a
+ *  webapp/game tree. Reads files + runs the declared entry; never writes. */
 export function checkExpectedBehavior(grader, emittedDir, emittedFiles) {
   const files = normalizeEmittedFiles(emittedFiles);
   const declaredRows = Array.isArray(grader.expectedBehavior) ? grader.expectedBehavior : [];
@@ -719,12 +927,15 @@ export function checkExpectedBehavior(grader, emittedDir, emittedFiles) {
       continue;
     }
     if (row.check === "entry-runs") {
+      const verdict = evaluateEntryRunsRow(row, emittedDir, has);
       rows.push({
         id: row.id,
         check: row.check,
-        status: "pending",
-        detail:
-          "runtime row — pending until runtime evidence is wired into acceptance (TODO(A3-f05)); visible here + in the verification label, never silently skipped",
+        ...(row.uiShell === true ? { uiShell: true } : { entry: row.entry }),
+        ...(row.mode === "import" ? { mode: "import" } : {}),
+        ...(Array.isArray(row.args) && row.args.length > 0 ? { args: row.args } : {}),
+        status: verdict.status,
+        detail: verdict.detail,
       });
       continue;
     }
@@ -743,8 +954,17 @@ export function checkExpectedBehavior(grader, emittedDir, emittedFiles) {
     rows,
     passed: rows.filter((r) => r.status === "pass").length,
     failed: rows.filter((r) => r.status === "fail").length,
+    // `pending` was the pre-U1 never-evaluated status; no row produces it now
+    // (parseGrader rejects a runtime row that names nothing to evaluate). The
+    // counter stays so the record shape and `complete` cannot silently rot.
     pending: rows.filter((r) => r.status === "pending").length,
+    uiShell: rows.filter((r) => r.status === "ui-shell").length,
+    // ok = no row FAILED — a ui-shell structural skip is not a failure (the
+    // same reading treeRun's entryGreen applies to a ui-shell entry).
     ok: rows.every((r) => r.status !== "fail"),
+    // complete = no runtime row still awaits evidence. A ui-shell row is
+    // TERMINAL (a verified structural skip), so it never keeps `complete`
+    // false for a webapp/game tree.
     complete: rows.every((r) => r.status !== "pending"),
     note: rows.length === 0 ? 'no expectedBehavior rows declared (v1 grader — the verification label reads "files+content only")' : null,
   };
@@ -797,11 +1017,14 @@ export function checkExpectedKind(grader, emittedDir, emittedFiles) {
 
 /** W40·N4: the honest one-line verification label the acceptance record and
  *  the CLI carry: what was actually verified for this trial. Legacy graders
- *  read "files+content only"; a declared behavior block names its row math. */
+ *  read "files+content only"; a declared behavior block names its row math.
+ *  fixes/299 (U1): a ui-shell structural skip is named (it is neither a pass
+ *  nor a failure — the reader must be able to see it). */
 function verificationLabel(behavior) {
   if (!behavior || behavior.declared === 0) return "files+content only";
   const bits = [`${behavior.passed}/${behavior.declared} rows pass`];
   if (behavior.failed > 0) bits.push(`${behavior.failed} FAILED`);
+  if (behavior.uiShell > 0) bits.push(`${behavior.uiShell} ui-shell skip${behavior.uiShell === 1 ? "" : "s"}`);
   if (behavior.pending > 0) bits.push(`${behavior.pending} pending runtime evidence`);
   return `files+content+behavior (${bits.join(", ")})`;
 }
@@ -2347,9 +2570,11 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
  *  the grader's threshold AND every declared run-side assertion held (files /
  *  content / the declared behavior rows / the declared kind). A crash/missing
  *  mean is a FAIL, never a default pass. W40·N4: the behavior and kind clauses
- *  only bite on an EXPLICIT failed verdict (`=== false`): a `pending` runtime
- *  row and a v1 grader's acceptance object (neither key present) never invent
- *  a failure. */
+ *  only bite on an EXPLICIT failed verdict (`=== false`). fixes/299 (U1):
+ *  `entry-runs` rows now really fail (bounded spawn — a broken artifact is
+ *  `behaviorOk:false`), while a `ui-shell` structural skip is NOT a failure
+ *  (and a v1 grader's acceptance object, neither key present, still invents
+ *  nothing). */
 export function passesAcceptance(row, acceptance, grader) {
   if (!row || typeof row.mean !== "number" || !Number.isFinite(row.mean)) return false;
   if (row.mean < grader.passWhen.meanAtLeast) return false;
@@ -2386,7 +2611,10 @@ export function acceptanceFailReason(row, acceptance, grader) {
   if (grader.passWhen.requireExpectedBehavior && acceptance.behaviorOk === false) {
     const rows = acceptance.behavior && Array.isArray(acceptance.behavior.rows) ? acceptance.behavior.rows : [];
     const failed = rows.filter((r) => r.status === "fail");
-    const named = failed.slice(0, 3).map((r) => `${r.id}${r.path ? ` (${r.path})` : r.target ? ` (${r.target})` : ""}`).join("; ");
+    const named = failed
+      .slice(0, 3)
+      .map((r) => `${r.id}${r.path ? ` (${r.path})` : r.target ? ` (${r.target})` : r.entry ? ` (${r.entry})` : ""}`)
+      .join("; ");
     return `expected behavior failed: ${named || "declared row(s) failed"}`;
   }
   if (grader.passWhen.requireExpectedKind && acceptance.kindOk === false) {

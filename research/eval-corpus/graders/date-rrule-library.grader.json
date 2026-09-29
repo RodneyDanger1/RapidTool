@@ -64,7 +64,10 @@
     {
       "id": "library-import-runs",
       "check": "entry-runs",
-      "note": "probe-verified (library 8/8): the emitted entry imports under node --experimental-strip-types, exposes its surface, and runs no I/O at import — PENDING until runtime evidence is wired (TODO(A3-f05))"
+      "entry": "src/main.ts",
+      "mode": "import",
+      "expectExit": 0,
+      "note": "probe-verified (library 8/8): the emitted entry imports under node --experimental-strip-types, exposes its surface (entry, main), and runs no I/O at import — now EVALUATED by the driver as a bounded import spawn (fixes/299 U1 closed TODO(A3-f05))"
     }
   ],
   "passWhen": {

@@ -3645,7 +3645,9 @@ async function main() {
             persistHealth,
             crashSnapshot: null,
           });
-          respond({ ok: true, ...diagnosis }, 0);
+          // K7 item 9 (W40 N5 + rendezvous fix): the computed checkpoint snapshot now
+          // actually RIDES the envelope — it was computed and dropped (assigned-unused).
+          respond({ ok: true, ...diagnosis, checkpoint }, 0);
         } catch (err) {
           respond(
             {

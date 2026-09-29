@@ -82,7 +82,8 @@
     {
       "id": "game-entry-runs",
       "check": "entry-runs",
-      "note": "probe-verified (game 11/11): pkg.main resolves to the emitted src/main.ts, index.html references \"/src/main.ts\", and the README Kind line reads game; the vite dev/build leg needs a network install, so the runtime row stays PENDING until runtime evidence is wired into acceptance (TODO(A3-f05))"
+      "uiShell": true,
+      "note": "probe-verified (game 11/11): pkg.main resolves to the emitted src/main.ts, index.html references \"/src/main.ts\", and the README Kind line reads game; the vite dev/build leg needs a network install, so this UI kind reads an honest ui-shell skip — EVALUATED by the driver against the tree's own structure (index.html emitted, treeRun's resolveEntry signal), never a silent pass (fixes/299 U1 closed TODO(A3-f05))"
     }
   ],
   "passWhen": {

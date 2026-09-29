@@ -61,7 +61,11 @@
     {
       "id": "cli-help-runs",
       "check": "entry-runs",
-      "note": "probe-verified (cli-tool 10/10): `node bin/invoice-csv-cli.mjs --help` exits 0 with a usage line and the bare entry exits 1 RT_E_VALIDATION — PENDING until runtime evidence is wired (TODO(A3-f05))"
+      "entry": "bin/invoice-csv-cli.mjs",
+      "args": ["--help"],
+      "expectExit": 0,
+      "expectStdout": "usage:",
+      "note": "probe-verified (cli-tool 10/10): `node bin/invoice-csv-cli.mjs --help` exits 0 with a usage line and the bare entry exits 1 RT_E_VALIDATION — the --help leg is now EVALUATED by the driver (bounded env-minimal spawn, fixes/299 U1 closed TODO(A3-f05))"
     }
   ],
   "passWhen": {

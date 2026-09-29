@@ -277,15 +277,28 @@ describe("runNodeBounded (harmless local fixture)", () => {
     }
   });
 
-  it("caps runaway stdout to the last 1 MB slice (no unbounded memory)", { skip: !available }, async () => {
+  // W-26 (fixes/292 §W-26): `maxBuffer` is inert on spawn() — the LIVE bound is
+  // the streaming byte counter, which tree-kills the run the moment stdout+stderr
+  // cross 1 MB and reports the coded bomb failure. A runaway writer must FAIL
+  // with that kill + byte count, never "pass" with a trimmed last-1 MB slice.
+  it("kills a runaway stdout bomb past the 1 MB cap with the coded failure (no unbounded memory)", { skip: !available }, async () => {
     const res = await runNodeBounded('process.stdout.write("y".repeat(1500000))');
-    assert.equal(res.ok, true);
-    if (res.ok) {
+    assert.equal(res.ok, false, "a 1.5 MB writer must be killed, not pass with a slice");
+    if (!res.ok) {
+      assert.equal(res.reason, "error", "the bomb kill is its own class — never a fake timeout");
+      assert.equal(res.code, "RT_E_RUNNER_FAILED");
+      const m = /^killed: output exceeded the 1 MB cap \((\d+) bytes written\)$/.exec(res.error ?? "");
+      assert.ok(m, `bomb envelope must carry the coded message with its byte count, got: ${res.error}`);
+      const written = Number(m[1]);
       assert.ok(
-        res.stdout.length <= 1_000_000,
-        `stdout slice must stay ≤ 1 MB, got ${res.stdout.length}`,
+        written > 1_000_000,
+        `byte count must report the kill past the 1 MB cap, got ${written}`,
       );
-      assert.ok(/y{5}$/.test(res.stdout), "kept slice must end at the true stream tail");
+      assert.ok(
+        written <= 1_500_000,
+        `byte count can never exceed what the child wrote (1.5 MB), got ${written}`,
+      );
+      assert.ok(!("stdout" in res), "the bomb envelope must not expose captured output");
     }
   });
 

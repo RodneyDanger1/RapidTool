@@ -60,7 +60,10 @@
     {
       "id": "service-port-wiring",
       "check": "entry-runs",
-      "note": "probe-verified (service 9/9): scripts.start runs the emitted entry, .env.example carries PORT and resolvePort reads it (8080 default, invalid → 8080, env → parsed) — PENDING until runtime evidence is wired (TODO(A3-f05))"
+      "entry": "src/main.ts",
+      "expectExit": 1,
+      "expectStderr": "RT_E_VALIDATION",
+      "note": "probe-verified (service 9/9): scripts.start runs the emitted entry (`node --experimental-strip-types src/main.ts`) to its structured refusal — exit 1, RT_E_VALIDATION on stderr; .env.example carries PORT and resolvePort reads it — the runtime leg is now EVALUATED by the driver (bounded env-minimal spawn, fixes/299 U1 closed TODO(A3-f05))"
     }
   ],
   "passWhen": {
