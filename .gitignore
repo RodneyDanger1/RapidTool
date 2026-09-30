@@ -10,6 +10,10 @@ dist/
 .env.local
 .env.*.local
 .env.bak-*
+# 318_a4 (W44 hygiene): cover every .env.<mode> variant too (.env.production,
+# .env.staging, …); .env.example stays addable (tracked convention).
+.env.*
+!.env.example
 
 # Logs / OS / probes
 *.log

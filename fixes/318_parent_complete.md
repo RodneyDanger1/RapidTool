@@ -1,0 +1,25 @@
+# fixes/318_parent_complete.md — W44 parent completion from capped-lane summaries
+
+**Lane:** parent (direct completion). **Repo:** `C:\Users\mnril\Desktop\RapidTool Main`.
+**Created:** 2026-09-30 ~10:35 local, BEFORE any edit. **HEAD:** `091b389` + six-lane wave `deleg_4ddea074` landed (uncommitted).
+
+## Why this file exists
+Four of six lanes capped mid-item (log-first preserved everything; the summaries carry the residue). Per the wave discipline ("capped lanes → parent completes from summaries"), the parent finishes:
+1. **A1 item 3 (T5.4)** — catalogue landed; emission bodies + rt-events test pin + run-eval.test pin MISSING (rt-events.test.ts currently RED against the new catalogue).
+2. **A3 item 5** — README/START-HERE count edits (numbers re-derived by A3; edits unwritten).
+3. **A5 tickets #1/#2** — W43 T4.4 cell cites (wild-seal line drift) + `fixes/316_h2_policy.md` §4.1a run-eval cites (post-dedup line drift).
+4. **Log closes** — 318_a1_oracle.md (skeleton), 318_a3_standard.md (item-5 + END), 318_a5_verify.md (A3/A4 verdicts + gate JSON), 318_a6_watch.md (RESCUE + END).
+Then: boundary gates → commit (#38) → conditions 1–3 re-verify.
+
+## Evidence ledger (appended as items land)
+
+- [t0] Log opened. State read: A1(1)+(2) proven; A1(3) partial (rt-events.ts +9: scope `eval-run` + `eval.run_start/run_end/run_error`; run-eval.mjs emission bodies absent; pins absent). A2 COMPLETE. A3 5/6. A4 COMPLETE. A5 partial (A2+A4 verified; A3 partial; A1 unverified; gate.sh not run). A6 partial.
+- [t1] **T5.4 FINISHED (parent)**: emitter + 4 bounded call sites in `scripts/run-eval.mjs` (V4A 5 hunks — all landed, markers grepped; capture fields verified 2950/3001/3186/3225); `rt-events.test.ts` sorted pin fixed (was RED); census re-count appended (60/22/38); +2 pins in `run-eval.test.mjs`. Scoped: rt-events **7/7** · run-eval.test **45/45** · eslint **0**.
+- [t1-evidence] Real keyless empty-corpus run → ndjson row: `{"host":"cli","sessionId":"ev-muo9jai8","scope":"eval-run","event":"eval.run_end","message":"eval run end (empty corpus) · mode=keyless · 0 entries","capture":"run-eval.mjs:2950",...,"payload":{"mode":"keyless","entries":0,"empty":true},...}` — the emitter works end-to-end (A6's "do not run the gate yet" precondition now cleared: census pin no longer stale).
+- [t2] NEXT: A3 item 5 (README/START-HERE counts), A5 tickets (W43 T4.4 cell; `fixes/316_h2_policy.md` §4.1a cites), log closes (A3/A5/A6), then boundary.
+- [t3] **A5 tickets FIXED**: (1) W43 T4.4 cell + the condition-3b cell — stale `wild-seal.test.ts` cites refreshed to live bytes (`:270-308`; `:298` steps=13 · `:300` wild.complete · `:308` margin 7; condition-3b `:298/:308`) — verified against the file read at fix time; (2) `fixes/316_h2_policy.md` §4.1a — both run-eval rows re-grepped post-A1/post-T5.4: clean guard now `:1046` (`prepareCleanEmitDir`, guard `:1035-1040`), write sites `:2689,:2716,:2752,:2781,:2802,:2821`. W43 sha `4dfd561b…` recorded.
+- [t4] **A3 item 5 LANDED** (README + START-HERE counts; re-derived against the staged post-wave index): total **1,908** = 476+587+224+108+89+50+47+46+41+16+10+5+3+3+3+2+2+1+1+1+1+192 (sum-verified); fixes 587 · src 224 · src/lib 213 · wave_plans 108 · scripts 46 · root 41 · verbs 39. §10.2 = exactly 41 named (4 probe rows removed programmatically-verified). §10.7 gained `cli-run-busy.test.mjs`; test-count line command-true at 93 (87 top-level + 6 subdir). Stale-scan clean.
+- [t4b] **Log closes**: 318_a3_standard (item 5 + END) · 318_a6_watch (RESCUE + NO-LOSS, final loss count 0 + END) · 318_a1_oracle (S1–S4 + END, earlier). A5's log gets the boundary gate JSON after the gate run.
+- [t5] NEXT: the boundary — typecheck · lint · npm test (full suite) · `bash scripts/gate.sh` — on the quiet tree; any red → fix; then commit (#38) + attach gate JSON to 318_a5_verify.md; then conditions 1–3 re-verify; then Phase 2 key prep.
+- [t6] **BOUNDARY GREEN**: typecheck exit 0 (0 errors) · lint exit 0 — **first fully-warning-free lint on record** (0 output, 0 problems; all 10 pre-wave warnings cleared) · `npm test` exit 0 → scripts **357/357** + src **2466/2465/0 fail/1 skip** = **2823 tests** · `bash scripts/gate.sh` → **`{"ok":true,...,"wallMs":248064,"gates":{...all six ok:true}}`** (typecheck 21067ms · lint 25815ms · gaps 845ms · scripts 357 · lib 2465 · build 56897ms). Gate JSON appended verbatim to `318_a5_verify.md`. A5's log closed COMPLETE.
+- [t7] NEXT: commit (#38) + conditions 1–3 re-verify at the new HEAD + Phase 2 key prep.

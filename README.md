@@ -315,34 +315,33 @@ re-run. Where reality is behind, the docs say so, the packets say so, and `docto
 
 ---
 
-# THE CATALOG — every tracked file (1,846 today)
+# THE CATALOG — every tracked file (1,908 today)
 
 **What this is:** the literal catalog of the repository's tracked universe. Counts re-derived
-2026-09-29: `git ls-files | wc -l` = **1,846**. Every **root file, every script, every route,
+2026-09-30: `git ls-files | wc -l` = **1,908**. Every **root file, every script, every route,
 every migration, every config** is named below; mass-produced classes (tests, wave plans, fix
 logs, vault notes, eval trees, vault/E2E outputs) are described **by convention with their full
 membership derivable from one command** — stated inline — because each member's purpose is its
 category's purpose. Descriptions are evidence-based (file heads/comments read on 2026-09-26); a
 genuinely unclear file says so. Re-count any directory with
-`git ls-files <dir> | wc -l`; counts read the tracked index at HEAD `de7deae` (re-derived
-2026-09-29 by the 312 D5 finisher; the C-wave commit moved `fixes/`, `src/`, `wave_plans/`,
-root and Total together — 6 lane logs, 2 probe files, 3 `src/lib` files, the W43 plan — and
-the live D-wave's not-yet-tracked files will move them again at commit; re-count for the live
-truth) — the formerly-untracked set is committed (§10.13).
+`git ls-files <dir> | wc -l`; counts read the tracked index at HEAD `091b389` + the W44 wave's
+staged changes (re-derived 2026-09-30 by the W44 wave — the W44 commit moved `fixes/`, `src/`,
+`wave_plans/`, `scripts/` and root + Total together: 7 lane logs, 5 probe relocations, and the
+eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth).
 
-## 10.1 Census (tracked, re-derived 2026-09-29 at `de7deae`)
+## 10.1 Census (tracked, re-derived 2026-09-30 at `091b389` + the W44 wave)
 
 | Area | Files | What it is |
 |---|---:|---|
 | `research/` | 476 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 23 · `eval-out/` 345 · 5 top-level research docs) |
-| `fixes/` | 532 | Append-only per-lane landing logs (§10.9) |
-| `src/` | 215 | The product: engine + UI (§10.6) |
-| `wave_plans/` | 107 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 · W42 · W43 + the convention README (§10.10) |
+| `fixes/` | 587 | Append-only per-lane landing logs (§10.9) |
+| `src/` | 224 | The product: engine + UI (§10.6) |
+| `wave_plans/` | 108 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 · W42 · W43 + the convention README (§10.10) |
 | `.grok/` | 89 | Legacy platform chrome — **do not build on it** (§10.12) |
 | `builds/` | 50 | Legacy sample build outputs (vault export + sample project) (§10.11) |
 | `vault-e2e/` | 47 | Vault export of the HVAC Dispatch E2E project (§10.11) |
-| `scripts/` | 45 | CLI + gates + guards + tooling + their tests (§10.7) |
-| root | 45 | Every root file named in §10.2 |
+| `scripts/` | 46 | CLI + gates + guards + tooling + their tests (§10.7) |
+| root | 41 | Every root file named in §10.2 |
 | `screenshots/` | 16 | QA/app screenshots (§10.11) |
 | `public/` | 10 | Static assets served as-is (§10.4) |
 | `audit-bugs/` | 5 | Bug-audit reports (§10.12) |
@@ -352,9 +351,9 @@ truth) — the formerly-untracked set is committed (§10.13).
 | `.github/` | 1 | CI workflow (§10.3) |
 | `attachments/` · `artifacts/` · `.audit-g2/` | 1 + 1 + 1 | Historical artifact + stored image + G2 probe (§10.12) |
 | `.t4scratch/` | 192 | Committed lane-scratch tree (was working-tree scratch; tracked at `ac6b151`) |
-| **Total** | **1,846** | `git ls-files \| wc -l` |
+| **Total** | **1,908** | `git ls-files \| wc -l` |
 
-## 10.2 Root files (all 45 tracked — named)
+## 10.2 Root files (all 41 tracked — named)
 
 | File | Purpose (evidence: head/comments read 2026-09-26/27) |
 |---|---|
@@ -398,11 +397,8 @@ truth) — the formerly-untracked set is committed (§10.13).
 | `probe-r5-misc.ts` | Probe: tracing validation + render/vector fuzz. |
 | `probe-r5-vector.ts` | Probe: `vector.ts` sanitizeSvg fuzz hypotheses. |
 | `probe_h1_libcrash.ts` | W26 temp probe (hostile-input sweep); its own header says "deleted after the run" — it wasn't; kept for the record. |
-| `probe-k9-kinds.mjs` | W40 K9 probe: the 4 corpus kinds' runnable emission, empirically (game / cli-tool / library / service). |
-| `probe_n2_f316.mjs` | W41 N2 probe: the F3-16 evidence digest now distinguishes spec sets with equal counts. |
-| `probe_311_shots.mjs` | 311 UI-Design scratch probe v5: light-theme runtime pane capture into `fixes/311_ui_shots/`; its header says "delete after use" — kept for the record. |
-| `probe_c1_arith.mjs` | 312 C1 scratch probe: step arithmetic + stock-gate behavior via `wildStep` (read-only; no keyed calls). |
 | `err2.txt` | **Empty** (0-byte) stray — named like an stderr capture, never written to; tracked since `70108c6`; nothing references it (kept for the record). |
+(2026-09-30: the W41/W44 `probe*.mjs` scratch probes now live under `fixes/` — `318_probe_*` from the W44 relocation; removed rows: `probe-k9-kinds.mjs` · `probe_n2_f316.mjs` · `probe_311_shots.mjs` · `probe_c1_arith.mjs` — see `fixes/318_a4_hygiene.md`)
 
 ## 10.3 `.github/` · `migrations/`
 
@@ -440,9 +436,9 @@ truth) — the formerly-untracked set is committed (§10.13).
 - `src/routes/` (3): `__root.tsx` (root layout + auth provider), `index.tsx` (HomeScreen from
   `console.tsx`), `run.$id.tsx` (RunScreen from `console.tsx`).
 
-## 10.6 `src/lib/` — the engine (204 files = 116 modules + 88 colocated tests; the tracked stray temp was removed in the W40 era — re-derived live 2026-09-29)
+## 10.6 `src/lib/` — the engine (213 files = 120 modules + 93 colocated tests; the tracked stray temp was removed in the W40 era — re-derived live 2026-09-30)
 
-**83 direct modules** (one line each; the module's comments read 2026-09-26/27; re-counted 2026-09-29):
+**88 direct modules** (one line each; the module's comments read 2026-09-26/27; re-counted 2026-09-30):
 
 - **Core:** `engine.ts` (13-phase state machine: applies phase results, gates, repairs, sealing) ·
   `phases.ts` (phase graph defs + coverage/transition helpers) · `store.ts` (zustand store — the
@@ -508,8 +504,8 @@ bridge) · `auth/` (17: `client.ts`, `server.ts` (self-hosted Better Auth), `gat
 WebRTC full-mesh room client; staged, no live coturn) · `og/site.json` (OG metadata) ·
 `testing/fixtures.ts` (shared deterministic engine fixtures for tests).
 
-**86 colocated test suites** (the "how it's verified" map — each test file pins its
-subject-named contract; count today: `git ls-files src/lib | grep -c '\.test\.'` = 86):
+**93 colocated test suites** (the "how it's verified" map — each test file pins its
+subject-named contract; count today: `git ls-files src/lib | grep -c '\.test\.'` = 93 — 87 top-level + 6 subdir):
 `algo-tools` · `algorithms` · `arch-tools` · `ast-mine` · `bench` · `bounded-int` · `brief-fixtures` ·
 `cassette` · `chat` · `checkpoint.server` · `codegen.server` · `compaction` · `compile-check.server` ·
 `crew` · `deepseek.server` ·
@@ -530,7 +526,7 @@ from sibling suites rather than a same-named file (e.g. there is **no** `engine.
 engine's contracts are pinned from `headless.test.ts`, `gates.test.ts`, `judgment.test.ts` and
 others).
 
-## 10.7 `scripts/` — CLI, gates, guards, tooling (45 tracked = 24 tools + 21 tests)
+## 10.7 `scripts/` — CLI, gates, guards, tooling (46 tracked = 24 tools + 22 tests)
 
 - **CLI:** `rapidtool-cli.mjs` — the headless driver, **39 verbs** (count source of truth:
   `grep -c 'case "'`), one JSON object per call, exit taxonomy 0/1/2/3/4.
@@ -559,9 +555,10 @@ others).
   · `install-page.html` (the Home-Screen install tutorial page).
 - **Guards:** `check-assertion-gaps.mjs` (T-17 tautology/zero-assertion lint, wired into
   gate.sh) · `check-auth-invariant.mjs` (dev-vs-build `VITE_AUTH_ENABLED` agreement: fail loudly).
-- **Test suites (21):** `README-cli.test.mjs` (CLI doc-contract) · `rapidtool-cli-edit.test.mjs` +
+- **Test suites (22):** `README-cli.test.mjs` (CLI doc-contract) · `rapidtool-cli-edit.test.mjs` +
   `rapidtool-cli-lesson.test.mjs` (verb contracts) · `rapidtool-cli-fixtures.test.mjs` (fixtures
   verb contract) · `cli-exit-taxonomy.test.mjs` (exit-code class guard, OPS-3) ·
+  `cli-run-busy.test.mjs` (busy-flag exits + the crew `--max-steps` key leg, H7/317) ·
   `gate-verdict.test.mjs` (a red leg can never produce a green verdict) · `chat-stream.test.mjs`
   (chat streaming) · `next-action-arm-parity.test.mjs` (next-action ↔ dispatcher parity) ·
   `test-name-pattern-guard.test.mjs` (the `--test-name-pattern` no-op trap) ·
@@ -621,7 +618,7 @@ others).
   `03_tech_deep_dives_research.md` (the origin research set, 2026-09-04) · `deepseek-api.md`
   (live-verified API spec) · `runtime-integration.md` (runtime/hosting research).
 
-## 10.9 `fixes/` — the append-only landing-log ledger (532 tracked)
+## 10.9 `fixes/` — the append-only landing-log ledger (587 tracked)
 
 **Convention:** one `fixes/NN_<lane>.md` per lane per wave; append-only; each log carries
 what/why + `file:line` evidence + before/after. The numbering is chronological: the newest number
@@ -637,12 +634,12 @@ the `305_*` round-3 lane logs arrive untracked from the live W42 tail).
 **How to search them:** `git ls-files fixes | sort | tail -30` (newest); `grep -l "<term>"
 fixes/*.md`; or grep the register's fix references (`R*`/`A*` IDs cite their fix logs).
 
-## 10.10 `wave_plans/` — dispatch plans (107 tracked; W4–W24 · W26–W38 · W40 · W42 · W43)
+## 10.10 `wave_plans/` — dispatch plans (108 tracked; W4–W24 · W26–W38 · W40 · W42 · W43)
 
 **Convention:** `wave_plans/README.md` owns it — every wave dispatch ships ONE notes file per lane
 (`wave_plans/W<N>/lane-<K>.md` or a named lane doc), ordered for speed: mission → owned files →
 numbered mini-task plan → parent findings/traps → verification commands → logging rules. Tracked
-waves: **W4–W24 + W26–W38 + W40 + W42 + W43** (107 files incl. `README.md`; W4–W10 five lane files each, W11 7,
+waves: **W4–W24 + W26–W38 + W40 + W42 + W43** (108 files incl. `README.md`; W4–W10 five lane files each, W11 7,
 W12 8, **W13 25** (its audit/design/eng/guard/improver/playbook/wd/x lanes), W14 3, W15 2, W16–W28
 one file each; then the former working-tree set, now tracked): `W29/coders.md`,
 `W30/shell-sprint.md`, `W31/gap-finshers.md`, `W32/organizer.md`, `W33/unlanded-block.md`,

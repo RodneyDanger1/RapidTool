@@ -1,7 +1,10 @@
+// MOVED (W44 · 318_a4): was repo-root probe-k9-kinds.mjs — runnable as before.
+// Run from the repo root: node --experimental-strip-types fixes/318_probe_k9_kinds.mjs
+// Path fix on move: ./src/ → ../src/ import specifiers (same targets; no logic change).
 // ---------------------------------------------------------------------------
 // probe-k9-kinds.mjs — W40 · K9 · the 4 kinds' RUNNABLE emission, empirically.
 //
-// Run:  node --experimental-strip-types probe-k9-kinds.mjs
+// Run:  node --experimental-strip-types fixes/318_probe_k9_kinds.mjs   (from the repo root)
 //
 // For each corpus-facing kind (game / cli-tool / library / service):
 //   1. a FULL keyless headless run of a kind-typical brief (no keys, no network)
@@ -22,10 +25,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { ALL_PHASES, runHeadless, seedProject } from "./src/lib/testing/fixtures.ts";
-import { emitProject } from "./src/lib/headless.ts";
-import { projectKindOf } from "./src/lib/scaffold.ts";
-import { treeRun } from "./src/lib/compile-check.server.ts";
+import { ALL_PHASES, runHeadless, seedProject } from "../src/lib/testing/fixtures.ts";
+import { emitProject } from "../src/lib/headless.ts";
+import { projectKindOf } from "../src/lib/scaffold.ts";
+import { treeRun } from "../src/lib/compile-check.server.ts";
 
 const NODE = process.execPath;
 const CASES = [

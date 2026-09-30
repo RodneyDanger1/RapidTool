@@ -1,3 +1,7 @@
+// MOVED (W44 · 318_a4): was repo-root probe-i4-busy.mjs — runnable as before.
+// Run from the repo root: node --experimental-strip-types fixes/318_probe_i4_busy.mjs
+// Path fix on move: ROOT now resolves the parent dir (file lives in fixes/) so the
+// CLI path still targets <repo>/scripts/rapidtool-cli.mjs (same target; no logic change).
 // probe-i4-busy.mjs — M6-04 (316 · I4) evidence probe: `ingest ∥ run` lost update.
 //
 // Scenarios (all keyless, temp-dir cwd, real CLI child processes):
@@ -10,14 +14,14 @@
 //      (fixes/310 reclaimStaleLock discipline, reached via saveProjectBusyAware)
 //      and proceeds — an orphaned lock can never wedge the run verb.
 //
-// Run: node --experimental-strip-types probe-i4-busy.mjs
+// Run: node --experimental-strip-types fixes/318_probe_i4_busy.mjs   (from the repo root)
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), ".."); // 318_a4: file lives in fixes/ — parent = repo root
 const CLI = join(ROOT, "scripts", "rapidtool-cli.mjs");
 const env = { ...process.env };
 for (const k of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[k];

@@ -1,17 +1,20 @@
+// MOVED (W44 · 318_a4): was repo-root probe-h6-lessonchain.mjs — runnable as before.
+// Run from the repo root: node --experimental-strip-types fixes/318_probe_h6_lessonchain.mjs
+// Path fix on move: ./src/ → ../src/ import specifiers (same targets; no logic change).
 // probe-h6-lessonchain.mjs — H6 / T7.1: the lesson-consumption trace, EXECUTED
 // (keyless, deterministic, no network). One REAL lesson row minted through
 // knowledge.lessonRow (the same builder the L1/L2/L5 mint sites use) is placed
 // into project.memory and traced to (a) the compiled agent packet's
 // ranked-memory section and (b) the P6 synthesis prompt's PRIOR LESSONS block.
-import { createProject } from "./src/lib/headless.ts";
-import { compileAgentPacket } from "./src/lib/packet.ts";
+import { createProject } from "../src/lib/headless.ts";
+import { compileAgentPacket } from "../src/lib/packet.ts";
 import {
   EXPAND_LESSON_RANK_LIMIT,
   lessonLinesForBrief,
   lessonRow,
   selectLessons,
-} from "./src/lib/knowledge.ts";
-import { p6SynthesisUserPrompt } from "./src/lib/codegen.server.ts";
+} from "../src/lib/knowledge.ts";
+import { p6SynthesisUserPrompt } from "../src/lib/codegen.server.ts";
 
 const brief = "build a kanban board with drag-and-drop columns and per-card due dates";
 const p = createProject({ brief });

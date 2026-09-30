@@ -23,12 +23,12 @@ W25–W28 deep audit, IDs `A*`/`C*`/`W-*`/`R*`/`T*`; append-only protocol in its
 
 | # | Where | What lives there |
 |---|---|---|
-| 1 | `src/lib/` (204 files) | The pure engine + logic. Start with `engine.ts` (phase state machine), `headless.ts` (journey driver), `codegen.server.ts` (P6 synthesis), `store.ts`, then `phases.ts` · `packet.ts` · `dod.ts` · `io.ts` · `errors.ts` (the `RT_E_*` registry). Tests are colocated `*.test.ts`. |
+| 1 | `src/lib/` (213 files) | The pure engine + logic. Start with `engine.ts` (phase state machine), `headless.ts` (journey driver), `codegen.server.ts` (P6 synthesis), `store.ts`, then `phases.ts` · `packet.ts` · `dod.ts` · `io.ts` · `errors.ts` (the `RT_E_*` registry). Tests are colocated `*.test.ts`. |
 | 2 | `src/components/` + `src/routes/` | The UI: `console.tsx` (main console) + TanStack routes. |
 | 3 | `scripts/rapidtool-cli.mjs` | The headless CLI — **39 verbs** (`grep -c 'case "'` is the count source of truth), single JSON object per call; contract = `scripts/README-cli.md`. |
-| 4 | `scripts/` (45) | `gate.sh` (the stability gate) · `run-eval.mjs` (eval harness) · guards/tooling + `*.test.mjs` suites. |
-| 5 | `fixes/` (532) | The **append-only landing logs** — one per lane per wave. The newest number = the current wave. Read the last few to know what just landed. |
-| 6 | `wave_plans/` (107) | Per-lane dispatch plans (`W4`→`W43`, one file per lane) + the convention note in `wave_plans/README.md`. |
+| 4 | `scripts/` (46) | `gate.sh` (the stability gate) · `run-eval.mjs` (eval harness) · guards/tooling + `*.test.mjs` suites. |
+| 5 | `fixes/` (587) | The **append-only landing logs** — one per lane per wave. The newest number = the current wave. Read the last few to know what just landed. |
+| 6 | `wave_plans/` (108) | Per-lane dispatch plans (`W4`→`W43`, one file per lane) + the convention note in `wave_plans/README.md`. |
 | 7 | `research/multiagent/` (103) | The analysis program: dossiers, readiness plans (`94`, `104`), defect ledgers (`93`), and the register **`thoroughanalysis.md`**. |
 | 8 | `research/eval-corpus/` (23) | The acceptance corpus: 11 brief fixtures + `graders/`. `research/eval-out/` = **tracked** trial outputs (`results.json`, `history.json`, emitted trees). |
 | 9 | Root docs | `README.md` (quickstart + honest limits) · `AGENTS.md` (working contract) · `RESUME.md` · `taskuniverselog.md` · `remainingwaves.md` · `finalsprint.md`. Full depth-2 map: **`docs-FOLDER-MAP.md`**. |

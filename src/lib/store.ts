@@ -124,7 +124,7 @@ type RapidState = {
   deepenResearch: (
     id: string,
     phase: PhaseId,
-  ) => Promise<{ ok: true } | { ok: false; error: string; code?: string }>;
+  ) => Promise<{ ok: true } | { ok: false; error: string; code?: ErrorCode }>;
   /** fixes/135: run the machine-verify loop on the project's P6 module (UI path). */
   runVerifyAsync: (
     id: string,
@@ -1001,7 +1001,8 @@ export const useRapid = create<RapidState>()(
           }));
           return { ok: true };
         } catch (err) {
-          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+          // 318_a2: classify the thrown path — the declaration above carries code?.
+          return { ok: false, error: err instanceof Error ? err.message : String(err), code: classifyError(err, "RT_E_INTERNAL") };
         }
       }),
       runVerifyAsync: (id: string) =>

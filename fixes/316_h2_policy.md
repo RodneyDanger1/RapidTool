@@ -73,3 +73,99 @@ Method: `grep -rn` for `writeFile|writeFileSync|appendFileSync|\.rm\(|rmSync|ren
 No code changes (disposition only) unless a write is a REAL escape — then a tiny fix + proof.
 
 *(Table: §4.1; scan command + raw counts: §4.0.)*
+
+### 4.0 — the scan (command + raw counts) — run 2026-09-30 @ HEAD `091b389` (W44 · A3; live tree incl. sibling lane edits)
+
+Command (verbatim; `cd` first — space in path; code-file includes + test exclusion stated explicitly, since §4's method text left them open):
+
+```bash
+cd "/c/Users/mnril/Desktop/RapidTool Main"
+grep -rnE 'writeFile|writeFileSync|appendFileSync|\.rm\(|rmSync|rename|unlink' src scripts --include='*.ts' --include='*.tsx' --include='*.mjs' > /tmp/a3_writes_raw.txt
+```
+
+Raw output: **559 rows** (incl. `*.test.*` rows). Test-file rows: **382**. Non-test working set: **177 rows across 37 files**. Per-file counts (verbatim from `cut -d: -f1 /tmp/a3_writes.txt | sort | uniq -c | sort -rn`):
+
+```
+     24 src/lib/headless.ts
+     16 scripts/run-eval.mjs
+     11 scripts/rapidtool-cli.mjs
+      9 src/lib/runtime-log.server.ts
+      9 src/lib/checkpoint.server.ts
+      8 src/lib/knowledge.ts
+      8 src/lib/algorithms.ts
+      8 scripts/write-atomic.mjs
+      7 src/lib/write-set.ts
+      7 src/lib/quarantine.ts
+      7 src/lib/compile-check.server.ts
+      7 src/lib/cassette.ts
+      7 src/components/console.tsx
+      5 src/lib/store.ts
+      5 src/lib/node-runner.server.ts
+      5 src/lib/git.server.ts
+      4 src/lib/selfmod.server.ts
+      4 src/lib/engine.ts
+      4 scripts/preview.mjs
+      3 src/lib/scaffold.ts
+      3 scripts/browser-smoke.mjs
+      1 × 16 files (watchdog · vector · vault · tracing · rt-ring · rt-events · rt-client · phases · packet · llm/providers/registry · llm/providers/deepseek · harvest · diagnose · design · compaction · auth/middleware)
+```
+
+Row accounting: **177 = 61 write-site rows + 116 non-site rows** (imports / comments / strings / store-action calls / git argv / catch-vars — §4.1b). Site rows classify as **39 harness-safe · 12 emitted-dir · 10 self-mod-candidate**. Scope note: the regex matches the §4 token set only — adjacent ops without a token (`mkdirSync`, `openSync(…, "a")`, `writeSync`) are outside this scan by construction.
+
+### 4.1 — the disposition table
+
+#### 4.1a — write sites (every row in exactly one class)
+
+| file | rows | class | basis / guard |
+|---|---|---|---|
+| `src/lib/cassette.ts` | :249,:250 | harness-safe | LLM cassette tape (caller-provided `tapePath` — the harness's own recording artifact); staging+rename hardened (:239-246) |
+| `src/lib/checkpoint.server.ts` | :228,:229,:233,:327,:333 | harness-safe | `<projectDir>/.rapidtool/checkpoint.json*`; A1-06 bad-dir refusal; sweep deliberately bounded to `checkpoint.json*` |
+| `src/lib/compile-check.server.ts` | :1403,:1440,:1447,:1997,:2098 | harness-safe | `rmSync` bounded to the module's own `mkdtemp` temp copies (test/run work copies) |
+| `src/lib/headless.ts` | :183,:190 | harness-safe | stale-lock reclaim (rename-aside + unlink) beside the store; O_EXCL claim (`:201-218`) |
+| `src/lib/headless.ts` | :237,:238,:241 | harness-safe | `saveProject` tmp+rename+sweep — the app's project-store JSON at the caller's project path |
+| `src/lib/headless.ts` | :253,:2094 | harness-safe | lock release (`<target>.lock`), best-effort in `finally` |
+| `src/lib/headless.ts` | :2391 | harness-safe | work-copy temp cleanup (best-effort) |
+| `src/lib/knowledge.ts` | :535,:536,:539 | harness-safe | knowledge-store JSON staging+rename+sweep (unique staging name per writer) |
+| `src/lib/node-runner.server.ts` | :268 | harness-safe | `mkdtemp` temp cleanup; unowned-dir guard (`:311`) |
+| `src/lib/runtime-log.server.ts` | :96,:104,:125 | harness-safe | NDJSON log dir: rotate rm + rotate rename + `appendFileSync` |
+| `scripts/browser-smoke.mjs` | :161,:171 | harness-safe | `checkedOutputPath(..., ["/workspace"], …)` allow-listed verdict JSON |
+| `scripts/preview.mjs` | :279,:309 | harness-safe | `ROOT/.grok/preview.pid` — the tooling's own dir |
+| `scripts/run-eval.mjs` | :1046 | harness-safe | `prepareCleanEmitDir` refuses any target outside the eval out dir (`:1035-1040`) before its rm |
+| `scripts/run-eval.mjs` | :2689,:2716,:2752,:2781,:2802,:2821 | harness-safe | `writeJsonAtomic` / `writeMarkerAtomic` / `results.json` under `OUT_DIR` (`EVAL_OUT_DIR` override; the driver's own artifact tree) — re-grepped post-A1-dedup + T5.4 (W44: line cites refreshed from the :2988-era pre-dedup rows) |
+| `scripts/write-atomic.mjs` | :77 | harness-safe | `handOver` is itself the guard: `stagingError` + `physicalInside`; refuses `public/` staging (`:52-58`) |
+| `src/lib/headless.ts` | :2059 | emitted-dir | emit ghost-file wipe inside the emit target (lock-held; snapshot/rollback) |
+| `src/lib/headless.ts` | :3047,:3048,:3052 | emitted-dir | `repairApply` tmp+rename+sweep into the tree; fence = `repairTreePathRefusal` + `REPAIR_TREE_ALLOWED_ROOTS` (`:2675-2712`) |
+| `src/lib/headless.ts` | :3391,:3397 | emitted-dir | `writeVault` notes → output dir (default homedir slug / `--out`; caller-resolved) |
+| `src/lib/quarantine.ts` | :113,:119 | emitted-dir | moves foreign files INSIDE the emit-dir root; `isInside` refusal; copy+unlink fallback |
+| `src/lib/write-set.ts` | :116,:122,:147,:171 | emitted-dir | apply/rollback; `absOf` + `physicalInside` narrow-only guard; emit + repair roots |
+| `src/lib/git.server.ts` | :664,:665,:668,:1014 | self-mod candidate | landing marker staging+rename+sweep into `<target>/.rapidtool/` — the repo being landed into; fence = the caller's allow-list (not the write) |
+| `scripts/rapidtool-cli.mjs` | :1243,:1264,:2492,:2534 | self-mod candidate | user-directed `--out`/`--html` artifact writes (target = whatever the user names — same trust class as a shell redirect; not an autonomous write) |
+| `scripts/rapidtool-cli.mjs` | :2186,:2187 | self-mod candidate | `edit --write` patch target (atomic tmp+rename); user-directed, project-scoped |
+
+#### 4.1b — non-site rows (no fs write of their own)
+
+| file | rows | what they are |
+|---|---|---|
+| `src/components/console.tsx` | 7 | store-action calls (`rename(projectId,…)`) + prose/JSX |
+| `src/lib/algorithms.ts` | 8 | stemming lexicon/prose ("rename"/"renamer") |
+| `src/lib/auth/middleware.ts` · `design.ts` · `diagnose.ts` · `packet.ts` · `phases.ts` · `compaction.ts` | 6 | comments / prompt strings ("do not rename") |
+| `src/lib/cassette.ts` · `checkpoint.server.ts` · `compile-check.server.ts` · `git.server.ts` · `knowledge.ts` · `node-runner.server.ts` · `runtime-log.server.ts` · `write-set.ts` | 30 | imports + design comments (the sites above cite them) |
+| `src/lib/engine.ts` | 4 | comments (B-12 rename scheme) |
+| `src/lib/harvest.ts` | 1 | regex label ("points to a rename") |
+| `src/lib/headless.ts` | 10 | import + comments |
+| `src/lib/llm/providers/deepseek.ts` · `registry.ts` | 2 | comments |
+| `src/lib/quarantine.ts` | 5 | comments + `catch (renameErr)` var rows |
+| `src/lib/rt-client.ts` · `rt-events.ts` · `rt-ring.ts` · `tracing.ts` · `watchdog.ts` · `vault.ts` · `vector.ts` | 7 | "EXPORT SURFACE … do not rename" comments |
+| `src/lib/scaffold.ts` | 3 | comments + emitted-code comment string |
+| `src/lib/selfmod.server.ts` | 4 | comments + git argv (`--no-renames` flags — read-side numstat, no fs write) |
+| `src/lib/store.ts` | 5 | type decl + comments + in-memory zustand action |
+| `scripts/browser-smoke.mjs` · `preview.mjs` | 3 | imports |
+| `scripts/rapidtool-cli.mjs` | 5 | import + comments + summary string |
+| `scripts/run-eval.mjs` | 9 | import + comments |
+| `scripts/write-atomic.mjs` | 7 | comment / import / signature default / refusal string |
+
+#### 4.1c — done-when verdict
+
+- **Every grep row carries a disposition:** 61 site rows → exactly one class each (39 + 12 + 10); 116 non-site rows → accounted above. Σ = 177 = the non-test command's row count (re-run 2026-09-30 @ `091b389`; re-runnable verbatim from §4.0).
+- **REAL escapes: NONE** (H2's finding re-confirmed on current bytes). The only arbitrary-target seams are (1) the git landing marker — the documented self-mod landing seam, fenced by the caller's allow-list, and (2) the CLI's user-directed `--out`/`--html`/`edit --write` targets — a user's explicit instruction, not a harness-initiated write. Both live as `self-mod candidate` rows, neither is an escape.
+- **Fixes applied: none — disposition-only, as §4 prescribes.**

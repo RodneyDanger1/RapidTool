@@ -98,7 +98,11 @@ function main() {
     ...(selfCheck
       ? {
           fixtures: {
-            // In-memory self-check: verify the audit logic on synthetic inputs (no repo dependence).
+            // Self-check: probe the audit logic against synthetic entry lists. The
+            // audit's existence check still resolves against the real ROOT —
+            // `existingNotFlagged` needs a real package.json on disk (this leg DOES
+            // depend on the repo; earlier "no repo dependence" wording was wrong).
+            // Report data only — advisory probe, never a gate.
             missingDetected: audit([{ doc: "<fixture>", paths: ["src/lib/__no_such_file__.ts"] }]).missing.length === 1,
             existingNotFlagged: audit([{ doc: "<fixture>", paths: ["package.json"] }]).missing.length === 0,
           },

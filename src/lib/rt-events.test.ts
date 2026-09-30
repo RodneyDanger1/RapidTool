@@ -51,6 +51,10 @@ test("catalogue: every event name maps to a legal scope (sync pin, mirrors error
       "diagnose.ran",
       "engine.phase_error",
       "engine.phase_fallback",
+      // W44 · T5.4 (fixes/318_a1_oracle.md): the eval driver's bounded run-level rows.
+      "eval.run_end",
+      "eval.run_error",
+      "eval.run_start",
       "harvest.error",
       "hydrate.empty",
       "hydrate.ok",

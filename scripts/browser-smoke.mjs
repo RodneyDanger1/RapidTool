@@ -141,8 +141,10 @@ try {
   }
 
   const brandWarnings = computeBrandWarnings({ hasCanvas: viewports.desktop.hasCanvas });
-  // Only a dev server answers /__app-env, so smoking the built output reads as
-  // indeterminate — report a divergence, never the absence of an observation.
+  // Only a dev server answers /__app-env: smoking a built-output preview reads
+  // as indeterminate (devAuthEnabled = null), and authInvariantWarnings() fires
+  // on a real divergence only (check-auth-invariant.mjs) — an unobservable side
+  // yields no warning at all: silence, never a finding.
   const authWarnings = authInvariantWarnings(
     compareAuthInvariant({
       devAuthEnabled: await probeDevAuthEnabled(url),

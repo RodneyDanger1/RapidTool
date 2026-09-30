@@ -80,7 +80,6 @@
  *      npm run eval -- --trials=3 [--all|--limit=N]   (trials + pass@k)
  */
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync, rmSync, renameSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { join, dirname, basename, resolve, relative, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -122,6 +121,22 @@ import {
 // event names (guardrail checked at emit time).
 import { isKnownRtEvent } from "../src/lib/rt-events.ts";
 import { appendRtLine, makeCliRow, resolveLogDir } from "../src/lib/runtime-log.server.ts";
+
+// W44 · A1 + parent completion (fixes/318_a1_oracle.md · T5.4): THE bounded
+// run-level emitter — run start + run end + the top-catch crash row, ≤3 rows
+// per run. The rt-events catalogue is the guardrail (an unknown name is
+// refused, never invented); telemetry must NEVER alter the run or its scores:
+// any failure here is swallowed.
+const EVAL_RT_SESSION = `ev-${Date.now().toString(36)}`;
+export function emitEvalRunRow(seed) {
+  try {
+    if (!seed || !isKnownRtEvent(seed.event)) return;
+    const row = makeCliRow(seed, EVAL_RT_SESSION);
+    appendRtLine(row, { logDir: resolveLogDir(null) });
+  } catch {
+    /* telemetry must never break the eval it observes */
+  }
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -384,9 +399,12 @@ export function parseGrader(raw, slug) {
     expectedKind = doc.expectedKind.trim();
   }
   // A3-f05/R11-f12 (W36 · N5 — landing the structure W30 §Graders spec'd;
-  // fixes/299 U1 completes it): optional per-kind expectedBehavior rows over
-  // the EMITTED TREE (not text presence). Shape-checked here — a grader that
-  // cannot be trusted never grades; evaluated by checkExpectedBehavior. Checks:
+  // fixes/299 U1 completes it; W44·A1: the row-shape validation DELEGATES to
+  // the shared oracle's `validateExpectedBehavior` — no local copy): optional
+  // per-kind expectedBehavior rows over the EMITTED TREE (not text presence).
+  // A grader that cannot be trusted never grades (the refusal strings are the
+  // grader-loading contract — byte-for-byte what the shared validator emits);
+  // the rows are evaluated later by checkExpectedBehavior. Checks:
   //   file-exists           — `path` must exist in the emitted tree manifest
   //   package-target-exists — the emitted package.json's `bin`|`main`|`exports`
   //                           target(s) must resolve to emitted files
@@ -399,89 +417,12 @@ export function parseGrader(raw, slug) {
   //                           structural skip (verified against the tree's
   //                           index.html, mirroring treeRun's resolveEntry),
   //                           never a silent pass. Rows that name neither an
-  //                           `entry` nor `uiShell` are REJECTED here: they
-  //                           could only ever read `pending` (the pre-U1
+  //                           `entry` nor `uiShell` are REJECTED: they could
+  //                           only ever read `pending` (the pre-U1
   //                           never-failing shape this lane closed).
-  const BEHAVIOR_CHECKS = new Set(["file-exists", "package-target-exists", "entry-runs"]);
-  const expectedBehavior = [];
-  if (doc.expectedBehavior !== undefined) {
-    if (!Array.isArray(doc.expectedBehavior)) {
-      return { ok: false, error: "expectedBehavior must be an array of rows" };
-    }
-    for (const [i, row] of doc.expectedBehavior.entries()) {
-      if (!row || typeof row !== "object" || Array.isArray(row)) {
-        return { ok: false, error: `expectedBehavior[${i}] is not an object` };
-      }
-      const id = typeof row.id === "string" ? row.id.trim() : "";
-      if (!id) return { ok: false, error: `expectedBehavior[${i}] carries no id` };
-      const check = typeof row.check === "string" ? row.check.trim() : "";
-      if (!BEHAVIOR_CHECKS.has(check)) {
-        return {
-          ok: false,
-          error: `expectedBehavior[${i}] (${id}): unknown check ${JSON.stringify(row.check)} — one of ${[...BEHAVIOR_CHECKS].join(" | ")}`,
-        };
-      }
-      if (check === "file-exists" && !(typeof row.path === "string" && row.path.trim().length > 0)) {
-        return { ok: false, error: `expectedBehavior[${i}] (${id}): file-exists needs a non-empty "path"` };
-      }
-      if (check === "package-target-exists" && !(row.target === "bin" || row.target === "main" || row.target === "exports")) {
-        return { ok: false, error: `expectedBehavior[${i}] (${id}): package-target-exists needs "target": "bin" | "main" | "exports"` };
-      }
-      // fixes/299 (U1): the entry-runs runtime shape — validated here so a
-      // runtime row can never again grade nothing (the pre-U1 `pending` trap).
-      let entryRunFields = null;
-      if (check === "entry-runs") {
-        const uiShell = row.uiShell === true;
-        const entry = typeof row.entry === "string" ? row.entry.trim().replace(/\\/g, "/").replace(/^\.\//, "") : "";
-        if (uiShell && entry) {
-          return { ok: false, error: `expectedBehavior[${i}] (${id}): uiShell is a structural skip — it must not also declare an "entry"` };
-        }
-        if (!uiShell && !entry) {
-          return { ok: false, error: `expectedBehavior[${i}] (${id}): entry-runs needs a non-empty "entry" (the emitted-tree-relative file to run) or "uiShell": true for a UI kind` };
-        }
-        if (row.mode !== undefined && row.mode !== "exec" && row.mode !== "import") {
-          return { ok: false, error: `expectedBehavior[${i}] (${id}): entry-runs mode must be "exec" | "import" (got ${JSON.stringify(row.mode)})` };
-        }
-        if (row.args !== undefined) {
-          if (!Array.isArray(row.args) || row.args.some((a) => typeof a !== "string")) {
-            return { ok: false, error: `expectedBehavior[${i}] (${id}): entry-runs args must be an array of strings` };
-          }
-          if (row.mode === "import") {
-            return { ok: false, error: `expectedBehavior[${i}] (${id}): entry-runs args apply to mode "exec" only (an import takes no argv)` };
-          }
-        }
-        if (row.expectExit !== undefined && !(Number.isInteger(row.expectExit) && row.expectExit >= 0 && row.expectExit <= 255)) {
-          return { ok: false, error: `expectedBehavior[${i}] (${id}): expectExit must be an integer 0..255` };
-        }
-        if (row.expectStdout !== undefined && !(typeof row.expectStdout === "string" && row.expectStdout.length > 0)) {
-          return { ok: false, error: `expectedBehavior[${i}] (${id}): expectStdout must be a non-empty string` };
-        }
-        if (row.expectStderr !== undefined && !(typeof row.expectStderr === "string" && row.expectStderr.length > 0)) {
-          return { ok: false, error: `expectedBehavior[${i}] (${id}): expectStderr must be a non-empty string` };
-        }
-        if (row.timeoutMs !== undefined && !(Number.isFinite(row.timeoutMs) && row.timeoutMs > 0)) {
-          return { ok: false, error: `expectedBehavior[${i}] (${id}): timeoutMs must be a positive finite number` };
-        }
-        entryRunFields = {
-          ...(uiShell ? { uiShell: true } : { entry }),
-          ...(row.mode === "exec" || row.mode === "import" ? { mode: row.mode } : {}),
-          ...(Array.isArray(row.args) && row.args.length > 0 ? { args: [...row.args] } : {}),
-          ...(Number.isInteger(row.expectExit) ? { expectExit: row.expectExit } : {}),
-          ...(typeof row.expectStdout === "string" ? { expectStdout: row.expectStdout } : {}),
-          ...(typeof row.expectStderr === "string" ? { expectStderr: row.expectStderr } : {}),
-          ...(Number.isFinite(row.timeoutMs) ? { timeoutMs: row.timeoutMs } : {}),
-        };
-      }
-      expectedBehavior.push({
-        id,
-        check,
-        ...(typeof row.path === "string" ? { path: row.path.trim() } : {}),
-        ...(typeof row.target === "string" ? { target: row.target } : {}),
-        ...(entryRunFields ?? {}),
-        ...(typeof row.note === "string" && row.note.trim().length > 0 ? { note: row.note.trim() } : {}),
-      });
-    }
-  }
+  const validatedBehavior = validateExpectedBehavior(doc.expectedBehavior);
+  if (!validatedBehavior.ok) return { ok: false, error: validatedBehavior.error };
+  const expectedBehavior = validatedBehavior.rows;
   const graderSlug = typeof doc.slug === "string" && doc.slug.trim() ? doc.slug.trim() : slug;
   if (slug && graderSlug !== slug) {
     return { ok: false, error: `grader slug "${graderSlug}" does not match corpus slug "${slug}"` };
@@ -643,9 +584,9 @@ export function treeRunToEvidence(outcome) {
 // ---------------------------------------------------------------------------
 // Trials, pass@k / pass^k / flakiness + the grader leak scan (W5-L5 T-107.5).
 // `checkAcceptance` reads files; since fixes/299 (U1) its `entry-runs` rows
-// also run the declared emitted entry through a bounded, env-minimal
-// spawnSync (the only spawn in this section) — nothing here writes into an
-// emitted tree.
+// also run the declared emitted entry through the shared bounded, env-minimal
+// oracle (`src/lib/entry-oracle.ts` — the spawn lives there, one truth with
+// the product path's treeRun) — nothing here writes into an emitted tree.
 // ---------------------------------------------------------------------------
 
 const round4 = (x) => Math.round(x * 10_000) / 10_000;
@@ -729,281 +670,44 @@ export function trialsSummary(outcomes, opts = {}) {
 // imported at the top; the leftover declaration here was the duplicate-symbol
 // SyntaxError that aborted this driver's leg.)
 
-/** Every path a package.json target value declares (string | nested object to
- *  depth 2 | string array) — the paths `package-target-exists` must resolve. */
-function packageTargetPaths(value) {
-  const out = [];
-  const visit = (v, depth) => {
-    if (depth > 2) return;
-    if (typeof v === "string") {
-      out.push(v);
-      return;
-    }
-    if (Array.isArray(v)) {
-      for (const x of v) visit(x, depth + 1);
-      return;
-    }
-    if (v && typeof v === "object") {
-      for (const x of Object.values(v)) visit(x, depth + 1);
-    }
-  };
-  visit(value, 0);
-  return out;
-}
-
 // ---------------------------------------------------------------------------
 // fixes/299 (U1 — closes the A3-f05 TODO; Q4 item a): `entry-runs` is a REAL,
 // bounded, honest runtime evaluation. Before this lane the row pushed
 // `pending` and never failed — the acceptance gate's one never-failing clause.
+// W44·A1 (fixes/318): the machinery (budget clamp, stream tail, env allowlist,
+// the bounded spawn itself) MOVED VERBATIM to the shared oracle
+// `src/lib/entry-oracle.ts` — one truth with the product path's treeRun. The
+// driver keeps this single-row seam as a thin delegate so the eval side and
+// the tree side can never drift.
 // ---------------------------------------------------------------------------
 
-/** Default per-row budget. Long enough for a cold node + strip-types start on
- *  this box (~1-2s observed), short enough that a hung entry cannot stall the
- *  eval; a row may override within [min, max]. */
-const ENTRY_RUN_TIMEOUT_MS = 15_000;
-const ENTRY_RUN_TIMEOUT_MIN_MS = 500;
-const ENTRY_RUN_TIMEOUT_MAX_MS = 60_000;
-const ENTRY_RUN_STDOUT_TAIL = 160;
-const ENTRY_RUN_STDERR_TAIL = 240;
-
-/** One-line, whitespace-collapsed, bounded tail of a child's stream — evidence
- *  a human can read inside results.json. */
-function entryRunTail(text, max) {
-  const t = String(text ?? "").replace(/\s+/g, " ").trim();
-  return t.length > max ? `${t.slice(0, max)}…` : t;
+/** fixes/299 (U1): one `entry-runs` row, evaluated for real — delegated to the
+ *  shared oracle (`runEntryOracle`): status ∈ { "pass", "fail", "ui-shell" } +
+ *  a human detail; bounded spawn over the emitted dir, env-minimal, row budget
+ *  clamped (entry-oracle.ts owns the contract). Reads + spawns only; never
+ *  writes. */
+export function evaluateEntryRunsRow(row, emittedDir, has) {
+  return runEntryOracle(row, emittedDir, has);
 }
 
-/** The bounded budget for one runtime row (row override clamped; default 15s). */
-function entryRunBudget(row) {
-  const v =
-    typeof row.timeoutMs === "number" && Number.isFinite(row.timeoutMs)
-      ? Math.floor(row.timeoutMs)
-      : ENTRY_RUN_TIMEOUT_MS;
-  return Math.min(Math.max(v, ENTRY_RUN_TIMEOUT_MIN_MS), ENTRY_RUN_TIMEOUT_MAX_MS);
-}
-
-/** fixes/299 (U1): the child environment for a runtime row — an ALLOWLIST of
- *  the vars a node process needs to start (Windows: SystemRoot / PATH / TEMP…).
- *  Nothing else passes through: no DEEPSEEK_* / provider config, no parent
- *  NODE_OPTIONS — the emitted entry cannot read the driver's credentials.
- *  Minimal ≠ an OS sandbox (the same bounded-runner caveat the repo states for
- *  node-runner.server.ts). */
-const ENTRY_RUN_ENV_ALLOW = Object.freeze([
-  "PATH",
-  "PATHEXT",
-  "SYSTEMROOT",
-  "SYSTEMDRIVE",
-  "COMSPEC",
-  "WINDIR",
-  "TEMP",
-  "TMP",
-  "USERPROFILE",
-  "HOME",
-  "NUMBER_OF_PROCESSORS",
-  "OS",
-]);
-function entryRunEnv() {
-  const env = {};
-  for (const key of ENTRY_RUN_ENV_ALLOW) {
-    const v = process.env[key];
-    if (typeof v === "string") env[key] = v;
-  }
-  return env;
-}
-
-/** fixes/299 (U1): one `entry-runs` row, evaluated for real. Returns
- *  `{ status, detail }` — status ∈ { "pass", "fail", "ui-shell" }:
- *    ui-shell — the row declared it (a UI kind). The structural premise is
- *               VERIFIED (index.html emitted — the exact signal treeRun's
- *               resolveEntry uses); a declared ui-shell whose tree carries no
- *               index.html FAILS, so the skip is true, never a free pass.
- *    exec     — spawnSync(node, [--experimental-strip-types?, <entry>, …args])
- *               bounded by the row budget, cwd = the emitted dir, env-minimal.
- *               pass = declared exit (default 0) within budget AND every
- *               declared stdout/stderr substring present; fail = timeout /
- *               spawn error / exit mismatch / missing pin.
- *    import   — node -e loads the entry as a module. The emitted entries carry
- *               a direct-run guard (argv[1] vs import.meta.url), so argv[1]
- *               must stay EMPTY: the path is embedded in the loader text, not
- *               passed as argv. pass = the import resolves and the process
- *               exits 0; a module that throws on import fails.
- *  Reads + spawns only; never writes. */
-function evaluateEntryRunsRow(row, emittedDir, has) {
-  if (row.uiShell === true) {
-    return has("index.html")
-      ? {
-          status: "ui-shell",
-          detail:
-            "structural UI-shell skip — index.html emitted, so this kind has no headless entry (a dev/build leg needs a network install); the same skip treeRun's own resolveEntry makes",
-        }
-      : {
-          status: "fail",
-          detail:
-            "declared uiShell, but the tree carries no index.html — the structural premise is false, so this is not a UI shell (never a silent pass)",
-        };
-  }
-  if (!has(row.entry)) {
-    return { status: "fail", detail: `entry not emitted: ${row.entry} — nothing to run` };
-  }
-  const abs = join(emittedDir, row.entry);
-  const isTs = /\.(ts|mts|cts)$/i.test(row.entry);
-  const mode = row.mode === "import" ? "import" : "exec";
-  const budget = entryRunBudget(row);
-  let argv;
-  if (mode === "import") {
-    const loader =
-      `const entry = ${JSON.stringify(abs)};` +
-      'const { pathToFileURL } = await import("node:url");' +
-      "const m = await import(pathToFileURL(entry).href);" +
-      'console.log("import ok: " + Object.keys(m).sort().join(","));';
-    argv = [...(isTs ? ["--experimental-strip-types"] : []), "--input-type=module", "-e", loader];
-  } else {
-    argv = [...(isTs ? ["--experimental-strip-types"] : []), abs, ...(Array.isArray(row.args) ? row.args : [])];
-  }
-  const t0 = Date.now();
-  const run = spawnSync(process.execPath, argv, {
-    cwd: emittedDir,
-    encoding: "utf8",
-    timeout: budget,
-    env: entryRunEnv(),
-    windowsHide: true,
-  });
-  const ms = Date.now() - t0;
-  const stdoutTail = entryRunTail(run.stdout, ENTRY_RUN_STDOUT_TAIL);
-  const stderrTail = entryRunTail(run.stderr, ENTRY_RUN_STDERR_TAIL);
-  const tails = `${stdoutTail ? ` · stdout: "${stdoutTail}"` : ""}${stderrTail ? ` · stderr: "${stderrTail}"` : ""}`;
-  const timedOut = Boolean(run.error && run.error.code === "ETIMEDOUT");
-  if (run.error && !timedOut) {
-    return {
-      status: "fail",
-      detail: `spawn failed (${run.error.code || run.error.message}) — ${mode} of ${row.entry} could not start`,
-    };
-  }
-  if (timedOut) {
-    return { status: "fail", detail: `timed out after ${budget}ms (budget, killed) — ${mode} of ${row.entry} did not finish${tails}` };
-  }
-  const exitDesc = run.status === null ? (run.signal ? `signal ${run.signal}` : "no exit status") : `exit ${run.status}`;
-  const expected = Number.isInteger(row.expectExit) ? row.expectExit : 0;
-  if (run.status !== expected) {
-    return { status: "fail", detail: `${exitDesc} ≠ declared exit ${expected} (${mode} of ${row.entry})${tails}` };
-  }
-  if (row.expectStdout !== undefined && !String(run.stdout ?? "").includes(row.expectStdout)) {
-    return { status: "fail", detail: `${exitDesc} in ${ms}ms, but stdout lacks ${JSON.stringify(row.expectStdout)}${tails}` };
-  }
-  if (row.expectStderr !== undefined && !String(run.stderr ?? "").includes(row.expectStderr)) {
-    return { status: "fail", detail: `${exitDesc} in ${ms}ms, but stderr lacks ${JSON.stringify(row.expectStderr)}${tails}` };
-  }
-  return {
-    status: "pass",
-    detail: `${exitDesc} in ${ms}ms (bounded ${budget}ms, env-minimal spawn, cwd = emitted dir)${tails}`,
-  };
-}
-
-/** W40·N4 (§R7-f03/f04) + fixes/299 (U1): evaluate the grader's declared
- *  `expectedBehavior` rows against the EMITTED TREE (the manifest +
- *  package.json) — never against text presence in the brief. Row statuses:
- *    file-exists           — pass/fail: the declared path resolves in the manifest;
- *    package-target-exists — pass/fail: every path the package.json target
- *                            declares resolves to an emitted file (a declared-
- *                            but-dangling target, or an undeclared target,
- *                            FAILS);
- *    entry-runs            — pass/fail/ui-shell: a bounded, env-minimal spawn
- *                            (exec or import) of the declared emitted entry —
- *                            the TODO(A3-f05) `pending` push is GONE; a broken
- *                            artifact now FAILS the row. A UI-kind row reads
- *                            the verified `ui-shell` structural skip instead of
- *                            an entry (never a silent pass).
- *  `ok` = no row FAILED (a ui-shell skip does not fail a tree, exactly as
- *  treeRun's entryGreen reads it); `complete` = no runtime row still awaits
- *  evidence — `ui-shell` is TERMINAL, so it never keeps `complete` false for a
- *  webapp/game tree. Reads files + runs the declared entry; never writes. */
+/** W40·N4 (§R7-f03/f04) + fixes/299 (U1) + W44·A1 (fixes/318): evaluate the
+ *  grader's declared `expectedBehavior` rows against the EMITTED TREE (the
+ *  manifest + package.json) — never against text presence in the brief. The
+ *  row loop and the record are DELEGATED to the shared oracle
+ *  (`checkEntryContract` over `manifestHas`/`manifestFind`) — the module's
+ *  record shape is byte-identical to what this function has always produced
+ *  (key order included; entry-oracle.ts EntryContractRecord). Row statuses:
+ *  file-exists / package-target-exists / entry-runs — the RUNTIME row is a
+ *  REAL bounded, env-minimal spawn (`runEntryOracle`): a broken artifact
+ *  FAILS the row, never a silent pass; a ui-shell row reads the verified
+ *  structural skip. `ok` = no row FAILED (a ui-shell skip does not fail a
+ *  tree, exactly as treeRun's entryGreen reads it); `complete` = no runtime
+ *  row still awaits evidence. Reads files + runs the declared entry; never
+ *  writes. */
 export function checkExpectedBehavior(grader, emittedDir, emittedFiles) {
   const files = normalizeEmittedFiles(emittedFiles);
   const declaredRows = Array.isArray(grader.expectedBehavior) ? grader.expectedBehavior : [];
-  const has = (p) => files.some((f) => f === p || f.endsWith(`/${p}`));
-  let pkg = null;
-  let pkgRel = null;
-  if (declaredRows.some((r) => r.check === "package-target-exists")) {
-    pkgRel = files.find((f) => f === "package.json" || f.endsWith("/package.json")) || null;
-    if (pkgRel) {
-      try {
-        pkg = JSON.parse(readFileSync(join(emittedDir, pkgRel), "utf8"));
-      } catch {
-        pkg = null;
-      }
-    }
-  }
-  const rows = [];
-  for (const row of declaredRows) {
-    if (row.check === "package-target-exists") {
-      const target = row.target;
-      let status = "fail";
-      let detail;
-      if (!pkg) {
-        detail = pkgRel === null ? "package.json absent from the emitted tree" : `${pkgRel} is not readable JSON`;
-      } else if (pkg[target] === undefined) {
-        detail = `package.json declares no "${target}"`;
-      } else {
-        const paths = packageTargetPaths(pkg[target]);
-        if (paths.length === 0) {
-          detail = `package.json "${target}" declares no path`;
-        } else {
-          const missing = paths
-            .map((t) => String(t).replace(/^\.\//, "").replace(/^\/+/, ""))
-            .filter((t) => !has(t));
-          if (missing.length === 0) {
-            status = "pass";
-            detail = `package.json "${target}" → ${paths.join(", ")} (emitted)`;
-          } else {
-            detail = `package.json "${target}" → ${missing.join(", ")} not emitted`;
-          }
-        }
-      }
-      rows.push({ id: row.id, check: row.check, target, status, detail });
-      continue;
-    }
-    if (row.check === "entry-runs") {
-      const verdict = evaluateEntryRunsRow(row, emittedDir, has);
-      rows.push({
-        id: row.id,
-        check: row.check,
-        ...(row.uiShell === true ? { uiShell: true } : { entry: row.entry }),
-        ...(row.mode === "import" ? { mode: "import" } : {}),
-        ...(Array.isArray(row.args) && row.args.length > 0 ? { args: row.args } : {}),
-        status: verdict.status,
-        detail: verdict.detail,
-      });
-      continue;
-    }
-    // file-exists (the only remaining parse-validated check)
-    const hit = has(row.path);
-    rows.push({
-      id: row.id,
-      check: row.check,
-      path: row.path,
-      status: hit ? "pass" : "fail",
-      detail: hit ? `emitted: ${row.path}` : `absent from the emitted tree: ${row.path}`,
-    });
-  }
-  return {
-    declared: rows.length,
-    rows,
-    passed: rows.filter((r) => r.status === "pass").length,
-    failed: rows.filter((r) => r.status === "fail").length,
-    // `pending` was the pre-U1 never-evaluated status; no row produces it now
-    // (parseGrader rejects a runtime row that names nothing to evaluate). The
-    // counter stays so the record shape and `complete` cannot silently rot.
-    pending: rows.filter((r) => r.status === "pending").length,
-    uiShell: rows.filter((r) => r.status === "ui-shell").length,
-    // ok = no row FAILED — a ui-shell structural skip is not a failure (the
-    // same reading treeRun's entryGreen applies to a ui-shell entry).
-    ok: rows.every((r) => r.status !== "fail"),
-    // complete = no runtime row still awaits evidence. A ui-shell row is
-    // TERMINAL (a verified structural skip), so it never keeps `complete`
-    // false for a webapp/game tree.
-    complete: rows.every((r) => r.status !== "pending"),
-    note: rows.length === 0 ? 'no expectedBehavior rows declared (v1 grader — the verification label reads "files+content only")' : null,
-  };
+  return checkEntryContract(declaredRows, emittedDir, manifestHas(files), manifestFind(files));
 }
 
 /** W40·N4 (§R7-f04): assert the emitted README's Kind line against the
@@ -3243,6 +2947,15 @@ async function main() {
 
   if (entries.length === 0) {
     console.log("note: no corpus entries present at research/eval-corpus — D3 parallel corpus writes may not have landed yet; nothing to evaluate. Results are data, exit 0.");
+    emitEvalRunRow({
+      level: "info",
+      scope: "eval-run",
+      event: "eval.run_end",
+      message: `eval run end (empty corpus) · mode=${mode} · 0 entries`,
+      capture: "run-eval.mjs:2950",
+      payload: { mode, entries: 0, empty: true },
+    });
+
     mkdirSync(OUT_DIR, { recursive: true });
     writeFileSync(
       RESULTS_PATH,
@@ -3284,6 +2997,15 @@ async function main() {
   if (mode === "keyed" && selected.length < targets.length) {
     console.log(`note: keyed leg bounded to ${selected.length} corpus entry (${selected[0].entry.slug}); pass --all or --limit=N for more; budget per P6 journey = ${JOURNEY_BUDGET} cycle(s)`);
   }
+
+  emitEvalRunRow({
+    level: "info",
+    scope: "eval-run",
+    event: "eval.run_start",
+    message: `eval run start · mode=${mode} · ${selected.length} target(s) of ${targets.length} · trials=${TRIALS}`,
+    capture: "run-eval.mjs:3001",
+    payload: { mode, targets: selected.length, trials: TRIALS },
+  });
 
   // OV-35(a) — the keyed preflight runs BEFORE any entry: a bad key must be a
   // class, not a quality reading (227 §2a). Keyless legs never probe (no
@@ -3461,6 +3183,19 @@ async function main() {
       "marker: keyed run finalized (finishedAt set) — results.json AND history.json are both written; a killed run would have left finishedAt:null",
     );
   }
+  emitEvalRunRow({
+    level: "info",
+    scope: "eval-run",
+    event: "eval.run_end",
+    message: `eval run end · mode=${mode} · ${rows.length} entr${rows.length === 1 ? "y" : "ies"} · meanOfNine=${Number((results.summary.meanTotal * 9).toFixed(4))} · skips=${skips.length}`,
+    capture: "run-eval.mjs:3186",
+    payload: {
+      mode,
+      entries: rows.length,
+      meanOfNine: Number((results.summary.meanTotal * 9).toFixed(4)),
+      skips: skips.length,
+    },
+  });
   console.log(`\nwrote ${RESULTS_PATH} · ${results.entries.length} entr${results.entries.length === 1 ? "y" : "ies"} · history appended to ${HISTORY_PATH}`);
   if (skips.length > 0) console.log(`skips recorded: ${skips.length} — ${skips.map((s) => s.slug ?? "corpus").join(", ")}`);
   console.log("exit 0 — results are data, not failures");
@@ -3487,6 +3222,14 @@ if (isMainModule) {
     } catch {
       /* nowhere to write */
     }
+    emitEvalRunRow({
+      level: "error",
+      scope: "eval-run",
+      event: "eval.run_error",
+      message: `eval driver crashed · ${e instanceof Error ? e.message : String(e)}`,
+      capture: "run-eval.mjs:3225",
+      payload: { mode: KEYED_OK ? "keyed" : "keyless" },
+    });
     console.error(`eval driver crashed: ${e instanceof Error ? e.stack : String(e)}`);
     process.exit(0);
   });

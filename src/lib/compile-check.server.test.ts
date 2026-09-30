@@ -1361,3 +1361,149 @@ describe("treeRun — the K3 substance marking rides the verdict (fixes/312_c6_u
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// W44 · A1 (fixes/318_a1_oracle.md · K1-R1 · 317_j1_oracle J1.2): the
+// WRONG-OUTPUT PIN. A tree that declares an `entry-runs` row its entry does
+// NOT satisfy must fail the tree-run verdict (outcome.ok:false, the failed row
+// NAMED in the error); a satisfied declaration passes; an absent declaration
+// adds nothing (no `behavior` key, byte-stable verdict hash). Wire:
+// compile-check.server.ts `treeBehaviorOf` + `treeRun`'s behavior fold; oracle:
+// the shared src/lib/entry-oracle.ts primitive (one truth with the eval side).
+// ---------------------------------------------------------------------------
+
+describe("treeRun — the tree-declared expectedBehavior contract BITES (W44·A1 · K1-R1)", () => {
+  /** Override the emitted main so the entry PRINTS — a real stdout pin to bite. */
+  const printingMain = `console.log("emit-ok");\nexport const boot = (): string => "ok";\n`;
+
+  it("(a) good tree + satisfied declared row → behavior.ok true and outcome.ok true", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      write(dir, "src/main.ts", printingMain);
+      write(
+        dir,
+        ".rapidtool/project.json",
+        JSON.stringify(
+          { expectedBehavior: [{ id: "r-boot", check: "entry-runs", entry: "src/main.ts", expectStdout: "emit-ok" }] },
+          null,
+          2,
+        ),
+      );
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true, `a satisfied declaration must not red the tree: ${JSON.stringify(r.behavior)}`);
+      assert.ok(r.behavior, "a declared row set ⇒ the behavior factor is present");
+      assert.equal(r.behavior!.source, ".rapidtool/project.json");
+      assert.equal(r.behavior!.declared, 1);
+      assert.equal(r.behavior!.ok, true);
+      assert.equal(r.behavior!.passed, 1);
+      assert.equal(r.behavior!.failed, 0);
+      const row = r.behavior!.rows[0]!;
+      assert.equal(row.id, "r-boot");
+      assert.equal(row.status, "pass");
+      assert.match(row.detail, /exit 0 in \d+ms/);
+      assert.match(row.detail, /cwd = emitted dir/, "the row is a bounded spawn over the run copy");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("(b) THE HEART — a declared row the entry does NOT satisfy → ok:false + error names the failed row", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      write(dir, "src/main.ts", printingMain);
+      write(
+        dir,
+        ".rapidtool/project.json",
+        JSON.stringify(
+          {
+            expectedBehavior: [
+              { id: "r-boot", check: "entry-runs", entry: "src/main.ts", expectStdout: "emit-ok" },
+              { id: "r-wrong", check: "entry-runs", entry: "src/main.ts", expectStdout: "NEVER-PRINTED" },
+            ],
+          },
+          null,
+          2,
+        ),
+      );
+      const r = await treeRunAsConsumer(dir);
+      // Everything else about this tree is GREEN: the compile census passes,
+      // every spec runs pass, the load-import entry smoke passes. The ONLY
+      // red is the declared contract — a green tree whose entry produces
+      // WRONG OUTPUT can no longer exit ok.
+      assert.equal(r.compile.ok, true);
+      assert.ok(r.tests.every((t) => t.run === "pass"), "specs green");
+      assert.equal(r.run!.run, "pass", "the entry smoke (load-import) passes — the K3 gap shape");
+      assert.equal(r.ok, false, "wrong output must red the verdict — never a green with a wrong-output entry");
+      assert.ok(r.behavior, "behavior factor present");
+      assert.equal(r.behavior!.ok, false);
+      assert.equal(r.behavior!.passed, 1, "the satisfied row still passes");
+      assert.equal(r.behavior!.failed, 1);
+      const failed = r.behavior!.rows.find((row) => row.id === "r-wrong");
+      assert.ok(failed, "the failed row is the declared one");
+      assert.equal(failed!.status, "fail");
+      assert.match(failed!.detail, /stdout lacks "NEVER-PRINTED"/);
+      // The verdict error names the FIRST failed row (id + its coded detail).
+      assert.match(r.error ?? "", /expectedBehavior contract FAILED/);
+      assert.match(r.error ?? "", /r-wrong/);
+      assert.match(r.error ?? "", /stdout lacks/);
+      // The decisive hash is re-derivable on the red verdict too.
+      assert.equal(r.verdictHash, treeVerdictHash(r));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("(c) absent declaration → NO behavior key + byte-stable, declaration-less verdict hash", async () => {
+    const dir = tempDir(); // no .rapidtool/ file at all
+    const noDecl = tempDir(); // SAME tree + project.json WITHOUT the declaration key
+    const declared = tempDir(); // SAME tree + project.json WITH the declaration
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      write(dir, "src/main.ts", printingMain);
+      const r1 = await treeRunAsConsumer(dir);
+      const r2 = await treeRunAsConsumer(dir);
+      assert.equal("behavior" in r1, false, "no declaration ⇒ no behavior key at all (byte-stable outcome)");
+      assert.equal(r1.behavior, undefined);
+      assert.equal(r1.verdictHash, r2.verdictHash, "the same declaration-less tree re-run re-derives the same hash");
+      assert.equal(r1.verdictHash, treeVerdictHash(r1), "the carried hash re-derives");
+
+      // The byte-stable cross-check needs the SAME file set: the declaration-
+      // FILE tree twice — once with the key (declared), once without (no key,
+      // still an absent declaration).
+      for (const root of [noDecl, declared]) {
+        writeEmittedTree(root, PASSING_SPEC);
+        write(root, "src/main.ts", printingMain);
+      }
+      write(noDecl, ".rapidtool/project.json", JSON.stringify({ name: "no-declaration" }, null, 2));
+      write(
+        declared,
+        ".rapidtool/project.json",
+        JSON.stringify(
+          {
+            name: "declared",
+            expectedBehavior: [{ id: "r-boot", check: "entry-runs", entry: "src/main.ts", expectStdout: "emit-ok" }],
+          },
+          null,
+          2,
+        ),
+      );
+      const rN = await treeRunAsConsumer(noDecl);
+      const rD = await treeRunAsConsumer(declared);
+      assert.equal("behavior" in rN, false, "a project.json without the key is still an absent declaration");
+      assert.equal(rD.verdictHash, treeVerdictHash(rD));
+      assert.notEqual(rD.verdictHash, rN.verdictHash, "a declared contract is decisive — it joins the canonical string");
+      const { behavior: _b, ...rDWithoutBehavior } = rD;
+      assert.equal(
+        treeVerdictHash(rDWithoutBehavior),
+        rN.verdictHash,
+        "strip the declaration factor → the exact declaration-less hash returns (the J1 key is additive-only)",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(noDecl, { recursive: true, force: true });
+      rmSync(declared, { recursive: true, force: true });
+    }
+  });
+});

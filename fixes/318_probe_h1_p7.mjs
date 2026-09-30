@@ -1,3 +1,6 @@
+// MOVED (W44 · 318_a4): was repo-root probe-h1-p7.mjs — runnable as before.
+// Run from the repo root: node --experimental-strip-types fixes/318_probe_h1_p7.mjs
+// Path fix on move: ./src/ → ../src/ import specifiers (same targets; no logic change).
 // ---------------------------------------------------------------------------
 // probe-h1-p7.mjs — H1/A4 · T1.4: the P7 hard-DoD falsification probe.
 //
@@ -19,10 +22,10 @@
 // a research corpus entry, exactly the shape bareNodeLiveOverlay writes for
 // fetched findings. It invents no gate verdicts: the re-run's runGate does.
 //
-// usage: node --experimental-strip-types probe-h1-p7.mjs
+// usage: node --experimental-strip-types fixes/318_probe_h1_p7.mjs   (from the repo root)
 // ---------------------------------------------------------------------------
-import { applyPhaseResult, emptyProject, wildStep } from "./src/lib/engine.ts";
-import { runGate } from "./src/lib/dod.ts";
+import { applyPhaseResult, emptyProject, wildStep } from "../src/lib/engine.ts";
+import { runGate } from "../src/lib/dod.ts";
 
 const approving = async () => ({
   ok: true,

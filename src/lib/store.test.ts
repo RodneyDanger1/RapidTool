@@ -391,6 +391,27 @@ test("runVerifyAsync unknown id carries the declared RT_E_PROJECT_MISSING code (
   if (!res.ok) assert.equal(res.code, "RT_E_PROJECT_MISSING");
 });
 
+test("deepenResearch unknown id carries the declared RT_E_PROJECT_MISSING code (318_a2)", async () => {
+  const res = await useRapid.getState().deepenResearch("no-such-project", 7);
+  assert.equal(res.ok, false);
+  if (!res.ok) assert.equal(res.code, "RT_E_PROJECT_MISSING");
+});
+
+test("deepenResearch classifies the thrown path — a real engine throw carries RT_E_INTERNAL (318_a2)", async () => {
+  // 318_a2: the engine's deepenResearch dereferences project.phases with `.find`
+  // (engine.ts:3323); a stored record whose `phases` is a non-array value — the
+  // H4 junk-shape family the hydration repair defends against — makes REAL engine
+  // code throw inside the store action's try. No mock, no monkeypatch: the arm
+  // under test is the production catch (store.ts:1005).
+  const p = install(seedProject({ phases: {} as unknown as Project["phases"] }));
+  const res = await useRapid.getState().deepenResearch(p.id, 7);
+  assert.equal(res.ok, false);
+  if (!res.ok) {
+    assert.equal(res.code, "RT_E_INTERNAL");
+    assert.match(res.error, /is not a function/);
+  }
+});
+
 test("runP6Journey guards an unknown project id (fixes/150 M4 ms4 journey mirror)", async () => {
   const res = await useRapid.getState().runP6Journey("no-such-project");
   assert.ok(!res.ok);

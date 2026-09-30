@@ -45,6 +45,9 @@ export const RT_SCOPES = [
   "runner-exec",
   "cli-command",
   "cli-log",
+  // W44·A1 (fixes/318_a1_oracle.md · T5.4): the eval driver's run-level rows
+  // (scripts/run-eval.mjs — host "cli", bounded start/end/crash set).
+  "eval-run",
   "hydrate",
   "watcher",
   "harvest-search",
@@ -188,6 +191,12 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
   // cli-command / cli-log (cli.error added for the main-catch row, CAP-7)
   "cli.invocation": "cli-command",
   "cli.error": "cli-log",
+  // eval-run (W43·H5 T5.4 — landed by W44·A1, fixes/318_a1_oracle.md): the
+  // eval driver's BOUNDED run-level rows (host "cli"): start + end (the
+  // empty-corpus run ends too) + the top-catch crash row — ≤3 per run.
+  "eval.run_start": "eval-run",
+  "eval.run_end": "eval-run",
+  "eval.run_error": "eval-run",
   // hydrate / persist (CAP-8)
   "hydrate.ok": "hydrate",
   "hydrate.recovered_corrupt": "hydrate",
@@ -240,6 +249,13 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 // wild.paused_policy is added AND emitted at engine.ts wildApproveGate's
 // policy-overlay refusal, so the +1 name is a +1 emitter; the dead list above
 // is unchanged (re-derived at the H2 landing, not inherited).
+// +3 names / W44·A1 T5.4 + parent completion re-count 2026-09-30
+// (fixes/318_a1_oracle.md; same non-test `event:` scan pattern): catalogue 60 ·
+// emitted 22 · dead 38 — eval.run_start / eval.run_end / eval.run_error are
+// added AND emitted at scripts/run-eval.mjs's bounded run-level hooks (start +
+// end + the top-catch crash row; ≤3 per run), so the +3 names are +3 emitters;
+// the dead list above is unchanged (re-derived at the T5.4 landing, not
+// inherited).
 // ---------------------------------------------------------------------------
 
 /** True when the event string is a catalogue member. */

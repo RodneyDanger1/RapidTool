@@ -78,6 +78,8 @@ const TS_EXTS = new Set([".ts", ".mts", ".cts", ".tsx", ".jsx"]);
 /** Honest cap: absurdly large files are a FAIL, never a silent skip. */
 const MAX_CHECK_BYTES = 2 * 1024 * 1024;
 
+/** Honest cap: absurdly large trees are a FAIL, never a silent partial walk
+ *  (mirrors MAX_CHECK_BYTES; 318 A3 · K1-R5 · J3-D6). */
 const MAX_FILES = 2000;
 
 function relPath(root: string, file: string): string {
@@ -138,8 +140,9 @@ function checkWithTypescript(file: string, code: string): { verdict: CompileVerd
 /**
  * Walk `dir` recursively and return one compile verdict per checkable code
  * file. Never fakes a pass: an unreadable dir, a code file the checker cannot
- * run, or a file over the byte budget is a loud FAIL (or a top-level error),
- * not a silent skip. Pure fs reads + node/ts checks — no writes.
+ * run, a file over the byte budget, or a tree over the file-count budget is a
+ * loud FAIL (or a top-level error), not a silent skip. Pure fs reads +
+ * node/ts checks — no writes.
  */
 export function compileCheckDir(dir: string): CompileCheckResult {
   const empty: CompileCheckResult = {
@@ -162,6 +165,7 @@ export function compileCheckDir(dir: string): CompileCheckResult {
   const verdicts: CompileFileVerdict[] = [];
   let skipped = 0;
   let filesSeen = 0;
+  let truncated = false;
   const walk = (current: string): void => {
     let entries: import("node:fs").Dirent<string>[] = [];
     try {
@@ -179,7 +183,20 @@ export function compileCheckDir(dir: string): CompileCheckResult {
     }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const e of entries) {
-      if (filesSeen >= MAX_FILES) return;
+      if (filesSeen >= MAX_FILES) {
+        // 318 A3 · K1-R5 · J3-D6: the cap is a FAIL, never a silent
+        // truncation — mirrors MAX_CHECK_BYTES's honest-cap rule. One
+        // tree-level row per walk (the guard trips on every unwound level).
+        if (!truncated) {
+          truncated = true;
+          verdicts.push({
+            file: ".",
+            verdict: "fail",
+            detail: `tree exceeds the ${MAX_FILES}-file compile-check budget — walk truncated, results incomplete`,
+          });
+        }
+        return;
+      }
       const full = join(current, e.name);
       if (e.isDirectory()) {
         if (!SKIP_DIRS.has(e.name)) walk(full);

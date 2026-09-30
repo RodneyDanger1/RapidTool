@@ -1,5 +1,8 @@
+// MOVED (W44 · 318_a4): was repo-root probe_n2_f316.mjs — runnable as before.
+// Run from the repo root: node --experimental-strip-types fixes/318_probe_n2_f316.mjs
+// Path fix on move: import specifier ./src/ → ../src/ (same target; no logic change).
 // probes N2 F3-16: the evidence digest now distinguishes spec sets with equal counts
-import { treeRunTestedEvidence } from "./src/lib/codegen.server.ts";
+import { treeRunTestedEvidence } from "../src/lib/codegen.server.ts";
 
 const mk = (files) => ({
   ok: true,

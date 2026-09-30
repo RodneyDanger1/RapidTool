@@ -68,12 +68,6 @@ const approving: WildReviewer = async () => ({
   feedback: SEAL_FEEDBACK,
   model: "test",
 });
-const rejecting: WildReviewer = async () => ({
-  ok: true,
-  verdict: "reject",
-  feedback: REJECT_FEEDBACK,
-  model: "test",
-});
 const notConfigured: WildReviewer = async () => ({ ok: false, reason: "not-configured" });
 
 /** Counted reviewer wrappers (one counter per pin). */

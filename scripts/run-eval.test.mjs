@@ -16,6 +16,7 @@ import {
   classifyRunOutcome,
   corpusDomainIndex,
   drainPipeline,
+  emitEvalRunRow,
   endTrialCallTap,
   finishRunMarker,
   formatFundednessLines,
@@ -58,6 +59,7 @@ import {
 } from "./run-eval.mjs";
 import { createProject, runUntilGate } from "../src/lib/headless.ts";
 import { ERROR_CODE_DOC } from "../src/lib/errors.ts";
+import { isKnownRtEvent } from "../src/lib/rt-events.ts";
 import { projectRoot } from "./with-app-env.mjs";
 
 /**
@@ -1457,5 +1459,51 @@ test("L1-E6(b) — MAX_HISTORY_ROWS pins the append bound + the persist slice wi
   const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
   assert.match(src, /writeJsonAtomic\(RESULTS_PATH, results\)/, "results.json persists atomically");
   assert.match(src, /writeJsonAtomic\(HISTORY_PATH, history\.slice\(-MAX_HISTORY_ROWS\)\)/, "history.json is capped + atomic");
+});
+
+// ---------------------------------------------------------------------------
+// W44 · T5.4 (fixes/318_a1_oracle.md) — the eval driver's bounded run-level
+// telemetry: catalogue-legal rows only (the guardrail refuses invented
+// names), host "cli", scope "eval-run", written where resolveLogDir points.
+// ---------------------------------------------------------------------------
+
+test("T5.4 — emitEvalRunRow writes catalogue-legal eval-run rows and refuses an invented name", () => {
+  const dir = mkdtempSync(join(tmpdir(), "eval-rt-"));
+  const saved = process.env.RAPIDTOOL_LOG_DIR;
+  process.env.RAPIDTOOL_LOG_DIR = dir;
+  try {
+    emitEvalRunRow({
+      level: "info",
+      scope: "eval-run",
+      event: "eval.run_start",
+      message: "t5.4 pin · start",
+      capture: "run-eval.test.mjs:0",
+      payload: { mode: "keyless", targets: 1 },
+    });
+    emitEvalRunRow({ level: "info", scope: "eval-run", event: "eval.invented", message: "must be refused", capture: "run-eval.test.mjs:0" });
+    const file = join(dir, "rapidtool.ndjson");
+    assert.ok(existsSync(file), "the legal row must land in resolveLogDir's file");
+    const rows = readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    assert.equal(rows.length, 1, "exactly one row — the invented name is refused, never fabricated");
+    assert.equal(rows[0].host, "cli", "host glue stamps cli");
+    assert.equal(rows[0].scope, "eval-run", "the eval-run scope");
+    assert.equal(rows[0].event, "eval.run_start");
+    assert.ok(isKnownRtEvent(rows[0].event), "the emitted name is a catalogue member");
+    assert.equal(rows[0].payload.mode, "keyless", "flat-scalar payload survives sanitize");
+  } finally {
+    if (saved === undefined) delete process.env.RAPIDTOOL_LOG_DIR;
+    else process.env.RAPIDTOOL_LOG_DIR = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T5.4 wiring guard — the driver's bounded emit sites + the guardrail are in the source", () => {
+  const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
+  assert.match(src, /if \(!seed \|\| !isKnownRtEvent\(seed\.event\)\) return;/, "the emitter refuses unknown names");
+  assert.match(src, /event: "eval\.run_start"/, "a run-start row");
+  assert.match(src, /event: "eval\.run_end"/, "run-end rows (main + empty-corpus paths)");
+  assert.match(src, /event: "eval\.run_error"/, "the top-catch crash row");
+  const emits = src.match(/emitEvalRunRow\(\{/g) ?? [];
+  assert.equal(emits.length, 4, `the bounded set: start + end(main) + end(empty) + error — got ${emits.length}`);
 });
 
