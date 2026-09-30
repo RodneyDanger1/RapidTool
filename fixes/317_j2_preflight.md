@@ -220,3 +220,19 @@ Both options are keyless-rehearsed above; nothing else on this list blocks them.
 | 5 | THE USER'S WORD | **OWNER-ACTION** — pick Option A and/or B (§5), record the command + env, then run |
 
 **The machine side of the merge rule is answered. What remains before the keyed run is the owner's two moves: fund the wallet, and give the word with the exact command.**
+
+---
+
+## 6 · RE-VERIFY AT THE W44 PHASE-1 EXIT — new HEAD `cdf2510` (2026-09-30)
+
+W44 finished the code remainder and re-ran the condition 1–3 evidence at the new HEAD. All commands keyless, foreground, run 2026-09-30 (logs: `~/w44_rv_*.log`; call-scope logs under `fixes/318_*`).
+
+| # | Condition | Re-verify evidence (at `cdf2510`) |
+|---|---|---|
+| 1 | **SEAL COMPLETE** | `node --experimental-strip-types fixes/318_probe_h1_p7.mjs` (moved path) → **SEAM HONORED**: armA `paused` (keyless floor) / armB `advanced` (edge consumed) · `node --experimental-strip-types --test src/lib/wild-seal.test.ts src/lib/wild-step.test.ts` → **39 tests · 39 pass · 0 fail** (incl. §S5 13-step arithmetic + margin 7) |
+| 2 | **GREEN BOUNDARY** | `bash scripts/gate.sh` → **`ok:true`** — all six gates exit 0 (typecheck 0 · lint 0 — first fully-warning-free run on record · gaps 0 · scripts 357/357 · lib 2465/2465 +1 skip · build 0), `wallMs` 248064. `npm test` standalone: 2823 tests · 2822 pass · 0 fail. Full JSON: `fixes/318_a5_verify.md`. |
+| 3 | **PROBES ANSWERED** | step arithmetic: `j2_arith_check.mjs` re-run → **both arms 13 steps · 13<=20 true · margin 7 · FINAL complete** (decisions P4/P5/P8/P9 autopilot) · no-mint: `j2_nomint_check.mjs` re-run → CASE-A no-mint + honest `p6.tree.tested.skipped` · CASE-B control mints · CASE-C red ⇒ no mint · the K1 door: the CLI taxonomy legs are green within the scripts suite (bare approve refuses coded; `--seat autopilot` works non-TTY) |
+
+**W44 code remainder — CLOSED (committed `cdf2510`):** the wrong-output pin (3 cases; the negative FAILS the verdict naming the row) · run-eval's 9 dead imports WIRED (dedup to `src/lib/entry-oracle.ts`; byte-identical 36/36; lint 0) · T5.4 (`eval-run` scope + `eval.run_start/end/error`; emitter + 4 bounded sites; census 60/22/38; behavioral emission proven) · store.ts's last uncoded catch (deepenResearch → `classifyError RT_E_INTERNAL`; pins incl. a real TypeError induction) · MAX_FILES loud truncation (+ probe) · W43 flipped to reality (27 LANDED / 1 LANDING / 15 OWED) · probes relocated (`fixes/318_probe_*`) · README/START-HERE counts (total 1,908) · lint 0 warnings.
+
+**Conditions 4 (wallet) + 5 (owner's word) are the run's last gates — Phase 2 owns them (the owner's key is staged; the keyed preflight is Phase 2's first command).**
