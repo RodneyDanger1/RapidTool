@@ -25,6 +25,9 @@
 import { complete, llmStatus } from "./llm.ts";
 import type { LlmModel, LlmResult } from "./llm.ts";
 import { dualChannelFailDetail, type ErrorCode } from "./errors.ts";
+// CF-SE2-3b (312 · E2; tail landed by 317 · J3): client-safe pure module (no
+// node:fs) — importing it here keeps the "no deepseek.server.ts" discipline.
+import { recordSessionSpend } from "./token-ledger.ts";
 import { phaseDef } from "./phases.ts";
 import type { PhaseId, Project } from "./types.ts";
 
@@ -267,6 +270,10 @@ export function createWildClassifier(
       system: WILD_SYSTEM,
       maxTokens: 320,
     });
+    // CF-SE2-3b (312 · E2; tail landed by 317 · J3): meter the classifier call
+    // into the process session ledger — I2: EVERY response that reports usage,
+    // success or refusal (the not-configured early-return above spends nothing).
+    if (res && res.usage) recordSessionSpend(res.usage);
     if (!res.ok) {
       return res.reason === "not-configured"
         ? { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" }

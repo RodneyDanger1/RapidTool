@@ -19,7 +19,7 @@ export type GateHealth = {
   flag: "ok" | "fast" | "rubber";
 };
 
-const round2 = (x: number): number => Math.round(x * 1000) / 1000;
+const round3 = (x: number): number => Math.round(x * 1000) / 1000;
 
 /**
  * Summarize human gate decisions inside a trailing window (default 7 days,
@@ -75,7 +75,7 @@ export function approvalHealth(
       ? Math.round(timed.reduce((sum, d) => sum + (d.decidedAt - d.requestedAt), 0) / timed.length)
       : 0;
   const rejects = human.filter((d) => d.decision === "reject").length;
-  const rejectRate = n > 0 ? round2(rejects / n) : 0;
+  const rejectRate = n > 0 ? round3(rejects / n) : 0;
 
   let flag: GateHealth["flag"] = "ok";
   // A03: no timing signal ⇒ no fast/rubber claim. A mean of 0 computed from

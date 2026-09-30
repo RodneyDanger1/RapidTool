@@ -27,6 +27,12 @@ import { extname, join, relative, resolve, sep } from "node:path";
 import ts from "typescript";
 import { fnv1a } from "./algorithms.ts";
 import { inventoryFromJobSources } from "./doctor.ts";
+// W43 · J1 (fixes/317_j1_oracle · 316_h5_oracle · T6.3): the ONE shared
+// behavioral-oracle primitive — the same module scripts/run-eval.mjs delegates
+// its eval-side `entry-runs` evaluation to, so the tree-side verdict and the
+// eval-side record can never fork on expectExit/expectStdout/expectStderr
+// semantics or on the row-validation refusals.
+import { checkEntryContract, validateExpectedBehavior, type EntryContractRecord } from "./entry-oracle.ts";
 import { runNodeBounded } from "./node-runner.server.ts";
 import { maskLiteralsAndComments } from "./sandbox.ts";
 
@@ -356,9 +362,11 @@ export type TreeProjectScriptsVerdict = {
 
 export type TreeRunOutcome = {
   /** True only when every compile verdict passes, every spec run passes, the
-   *  entry run passes or is an honest UI-shell skip, AND (216 · T-18) no
-   *  declared project script ran red — a tree that fails its own `npm test`
-   *  can never be `ok:true`, and a headless skip is never green (185-S5 / 192). */
+   *  entry run passes or is an honest UI-shell skip, no declared project
+   *  script ran red (216 · T-18) — a tree that fails its own `npm test` can
+   *  never be `ok:true`, and a headless skip is never green (185-S5 / 192) —
+   *  AND (W43 · J1) the tree's declared `expectedBehavior` contract, when it
+   *  declares one, has no FAILED row. */
   ok: boolean;
   /** Normalized absolute SUBJECT dir (never the deleted temp copy). */
   dir: string;
@@ -402,6 +410,14 @@ export type TreeRunOutcome = {
    *  machine verdict is unchanged; a different hash means it is not.
    *  Integrity, not cryptography (the repo's standing hash contract). */
   verdictHash?: string;
+  /** W43 · J1 (fixes/317_j1_oracle · 316_h5_oracle · T6.3): the tree-declared
+   *  behavioral contract verdict — present ONLY when the emitted
+   *  `.rapidtool/project.json` declares `expectedBehavior` rows (evaluated by
+   *  the shared oracle over the run copy). Absent ⇒ no factor: the outcome
+   *  object and `verdictHash` stay byte-identical to the pre-J1 verdict.
+   *  Optional so fixture objects in other lanes stay assignable; `treeRun()`
+   *  sets it whenever a declaration with rows is present. */
+  behavior?: TreeBehaviorVerdict;
 };
 
 /** W43 · C6 (fixes/312_c6_ux · 311_sd_product K3/K4) — the product-substance
@@ -440,6 +456,28 @@ export type TreeSubstance = {
    *  modules exist (so it can ride `TreeRunOutcome.note` without touching
    *  trees that carry no job-file signal at all). */
   note?: string;
+};
+
+/** W43 · J1 (fixes/317_j1_oracle · 316_h5_oracle · T6.3): the tree's OWN
+ *  declared behavioral contract — the top-level `expectedBehavior` rows in the
+ *  emitted `.rapidtool/project.json` ledger (the same row shape graders
+ *  declare), evaluated against the RUN COPY with the SHARED oracle primitive
+ *  (`src/lib/entry-oracle.ts`): per-row `file-exists` / `package-target-exists`
+ *  / `entry-runs`, where an `entry-runs` row is a REAL bounded spawn
+ *  (allowlisted env, row budget, cwd = the run copy) asserting the declared
+ *  exit/stdout/stderr — the load-import entry smoke above STAYS; this is the
+ *  stronger additive check. `ok = no row failed`; a failed row makes the tree
+ *  NOT ok. Present ONLY when the tree actually declares rows: an absent
+ *  declaration adds nothing to the outcome (and nothing to `verdictHash`), so
+ *  declaration-less trees keep byte-identical verdicts. */
+export type TreeBehaviorVerdict = EntryContractRecord & {
+  /** Where the declaration was read from — the tree's own ledger. */
+  source: ".rapidtool/project.json";
+  /** Set when the declaration itself could not be trusted: the shared
+   *  `validateExpectedBehavior` refusal text (the same refusal the grader
+   *  loader makes — a malformed contract never grades). `ok:false` with zero
+   *  evaluated rows; nothing is guessed into a pass. */
+  refusal?: string;
 };
 
 const DEFAULT_RUN_TIMEOUT_MS = 30_000;
@@ -598,6 +636,12 @@ export function treeSubstanceOf(dir: string, opts: { green?: boolean } = {}): Tr
  * FNV-1a hash of a tree-run's DECISIVE verdict fields (same hash contract as
  * dod.ts's `evidenceHash` — integrity, not cryptography). Re-run the tree and
  * call this again: the same hash means the machine verdict is unchanged.
+ *
+ * W43 · J1: the declared-contract factor joins the decisive set ONLY when the
+ * tree declares rows (a conditional key — a declaration-less tree's canonical
+ * string, and therefore its hash, is byte-identical to the pre-J1 verdict).
+ * Prose (`note` / row `detail` / `refusal` text) is not decisive, same
+ * doctrine as `compile.error`.
  */
 export function treeVerdictHash(outcome: TreeRunOutcome): string {
   const scripts = (["typecheck", "test", "build"] as const).map((key) => {
@@ -619,6 +663,16 @@ export function treeVerdictHash(outcome: TreeRunOutcome): string {
     substance: outcome.substance
       ? [outcome.substance.stubs, outcome.substance.reexports, outcome.substance.real, outcome.substance.verdict]
       : null,
+    ...(outcome.behavior
+      ? {
+          behavior: [
+            outcome.behavior.ok === true,
+            outcome.behavior.declared,
+            outcome.behavior.failed,
+            outcome.behavior.rows.map((r) => [r.id, r.status]),
+          ],
+        }
+      : {}),
   });
   return String(fnv1a(canonical));
 }
@@ -1048,6 +1102,64 @@ function readJsonIfAny(dir: string, rel: string): Record<string, unknown> | null
   }
 }
 
+/** W43 · J1 (fixes/317_j1_oracle · 316_h5_oracle · T6.3): tree-relative path
+ *  guard for the behavior leg's fs reads — rejects absolute/drive-letter
+ *  paths and `.`/`..`/empty segments so a declared row can never read outside
+ *  the run copy (the eval side matches a manifest, which cannot escape; this
+ *  is the fs-side equivalent). Returns the normalized path when safe, else
+ *  null ⇒ the row reports "not emitted", never a false pass. */
+function treeRelPath(p: unknown): string | null {
+  if (typeof p !== "string") return null;
+  const norm = p.split("\\").join("/").trim();
+  if (!norm || norm.startsWith("/") || /^[A-Za-z]:/.test(norm)) return null;
+  if (norm.split("/").some((seg) => seg === ".." || seg === "." || !seg)) return null;
+  return norm;
+}
+
+/** W43 · J1 (fixes/317_j1_oracle · 316_h5_oracle · T6.3): evaluate the tree's
+ *  OWN declared `expectedBehavior` contract — the top-level rows in the
+ *  emitted `.rapidtool/project.json` ledger, the same shape graders declare —
+ *  against the run copy with the SHARED oracle primitive
+ *  (`src/lib/entry-oracle.ts`, one truth with the eval side). `undefined` (no
+ *  declaration) ⇒ null (no factor, byte-stable). A declared-but-malformed row
+ *  set is REFUSED with the shared validator's own refusal text (the same
+ *  refusal the grader loader makes) — never silently ignored. Rows evaluate
+ *  over guarded fs reads (file-only) and, for `entry-runs`, REAL bounded
+ *  spawns (allowlisted env, row budget clamp, cwd = the run copy). Reads +
+ *  spawns only; never writes. */
+function treeBehaviorOf(dir: string): TreeBehaviorVerdict | null {
+  const declared = readJsonIfAny(dir, ".rapidtool/project.json")?.expectedBehavior;
+  if (declared === undefined) return null;
+  const source = ".rapidtool/project.json" as const;
+  const validated = validateExpectedBehavior(declared);
+  if (!validated.ok) {
+    return {
+      source,
+      declared: 0,
+      rows: [],
+      passed: 0,
+      failed: 0,
+      pending: 0,
+      uiShell: 0,
+      ok: false,
+      complete: true,
+      note: validated.error,
+      refusal: validated.error,
+    };
+  }
+  if (validated.rows.length === 0) return null;
+  const has = (p: string): boolean => {
+    const rel = treeRelPath(p);
+    if (rel === null) return false;
+    try {
+      return statSync(join(dir, rel)).isFile();
+    } catch {
+      return false;
+    }
+  };
+  return { source, ...checkEntryContract(validated.rows, dir, has, (rel) => (has(rel) ? rel : null)) };
+}
+
 /**
  * Resolve the kind-entry for a run: UI-shell kinds (root index.html = the
  * scaffold's webapp/game vite boot shell) are an honest skip; headless kinds
@@ -1387,14 +1499,38 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
           .join(" · ")}`
       ).slice(0, 1800);
     }
+    // W43 · J1 (fixes/317_j1_oracle · 316_h5_oracle · T6.3 · 311_sd_product
+    // K3/K4): the tree's OWN declared `expectedBehavior` contract — the
+    // top-level rows in the emitted `.rapidtool/project.json` ledger, the same
+    // row shape graders declare — evaluated with the SHARED oracle primitive
+    // over the run copy. ADDITIVE to the load-import entry smoke above (which
+    // STAYS): an `entry-runs` row is a REAL bounded spawn asserting the
+    // declared exit/stdout/stderr, so a tree whose entry DECLARES expected
+    // behavior but PRODUCES WRONG OUTPUT can no longer exit 0. Absent
+    // declaration ⇒ no factor (nothing new in the outcome, nothing new in
+    // `treeVerdictHash`); a refused (malformed) declaration is red.
+    const behavior = treeBehaviorOf(work);
+    if (behavior) {
+      outcome.behavior = behavior;
+      if (!behavior.ok) {
+        const firstFail = behavior.rows.find((r) => r.status === "fail");
+        const why = firstFail
+          ? `the tree's declared expectedBehavior contract FAILED (${behavior.source}): ${firstFail.id} — ${firstFail.detail}`
+          : `the tree's declared expectedBehavior contract was REFUSED (${behavior.source}): ${behavior.refusal ?? "malformed declaration"}`;
+        const combined = outcome.error ? `${outcome.error} · ${why}` : why;
+        outcome.error = combined.slice(0, 1800);
+      }
+    }
     const specsGreen = outcome.tests.length === 0 || outcome.tests.every((t) => t.run === "pass");
     // Fail-closed: missing entry verdict is NOT green. Headless skip is NOT
     // green. Only an executed pass or a structural UI-shell skip counts.
+    // W43 · J1: a declared contract's failed/refused rows are NOT green either.
     const entryGreen =
       !!outcome.run &&
       (outcome.run.run === "pass" ||
         (outcome.run.run === "skip" && outcome.run.kind === "ui-shell"));
-    outcome.ok = compile.ok && specsGreen && entryGreen && projectLeg.verdict.ok;
+    outcome.ok =
+      compile.ok && specsGreen && entryGreen && projectLeg.verdict.ok && (outcome.behavior?.ok ?? true);
     // W43 · C6 (fixes/312_c6_ux · 311_sd_product K3/K4): the substance census
     // rides every runnable verdict, and a non-clean census over an EXISTING
     // job-file set joins the top-level note — so a green tree-run whose job

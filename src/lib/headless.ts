@@ -91,7 +91,7 @@ import type { TokenLedger, TokenSpend } from "./token-ledger.ts";
 // (`packetBudgetBoundary`, F2-04), so the two surfaces can never drift.
 // token-ledger.ts / packet.ts are client-safe pure modules (no node:fs);
 // static import is safe in this backend module.
-import { sessionTokenBudget } from "./token-ledger.ts";
+import { recordSessionSpend, sessionTokenBudget } from "./token-ledger.ts";
 import { packetBudgetBoundary, type PacketBudget } from "./packet.ts";
 
 // ---------------------------------------------------------------------------
@@ -435,6 +435,11 @@ async function bareNodeLiveOverlay(project: Project, phase: PhaseId): Promise<Pr
       const comp = await completeDeepSeek(
         `Write a concise one-paragraph phase narrative for ${project.name} (${phaseDef(phase).code} ${phaseDef(phase).title}). ${ground}\n\nBrief: ${project.brief.slice(0, 400)}`,
       );
+      // CF-SE2-3b (312 · E2; tail landed by 317 · J3): the narrative call is
+      // metered into the process session ledger — I2: EVERY response that
+      // reports usage, success or refusal (a refusal that burned tokens still
+      // counts against the cap).
+      if (comp && comp.usage) recordSessionSpend(comp.usage);
       if (comp && comp.ok === true && typeof comp.text === "string" && comp.text.trim()) {
         narrative = comp.text.trim();
       } else {

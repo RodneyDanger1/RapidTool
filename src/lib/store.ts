@@ -130,7 +130,7 @@ type RapidState = {
     id: string,
   ) => Promise<
     | { ok: true; status?: string; iterations?: number; note?: string }
-    | { ok: false; error: string; status?: string; iterations?: number }
+    | { ok: false; error: string; status?: string; iterations?: number; code?: ErrorCode }
   >;
   /** fixes/150 (M4 ms4 — watchdog mirror): async UI face of the keyed P6
    *  journey (headless.driveP6Journey). Keyless runs are honest no-ops
@@ -153,7 +153,7 @@ type RapidState = {
     },
   ) => Promise<
     | { ok: true; outcome: "keyless" | "converged" | "failed"; cycles: number; budget: number; gate: P6JourneySurface["gate"] }
-    | { ok: false; error: string }
+    | { ok: false; error: string; code?: ErrorCode }
   >;
   runModuleReal: (
     id: string,
@@ -1037,7 +1037,8 @@ export const useRapid = create<RapidState>()(
             iterations: outcome.iterations,
           };
         } catch (err) {
-          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+          // 317_l1w: classify the thrown path — the declaration above carries code?.
+          return { ok: false, error: err instanceof Error ? err.message : String(err), code: classifyError(err, "RT_E_INTERNAL") };
         }
         }),
       // fixes/150 (M4 ms4 — watchdog mirror): async P6-journey face for the
@@ -1090,7 +1091,8 @@ export const useRapid = create<RapidState>()(
             gate: res.gate,
           };
         } catch (err) {
-          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+          // 317_l1w: classify the thrown path — the declaration above carries code?.
+          return { ok: false, error: err instanceof Error ? err.message : String(err), code: classifyError(err, "RT_E_INTERNAL") };
         }
         }),
       hydrated: false,
@@ -1601,7 +1603,8 @@ export const useRapid = create<RapidState>()(
               code: "RT_E_RUNNER_UNAVAILABLE",
             };
           } catch (err) {
-            return { ok: false, result: null, error: err instanceof Error ? err.message : String(err) };
+            // 317_l1w: F3-08 residue — the thrown path must not stay uncoded.
+            return { ok: false, result: null, error: err instanceof Error ? err.message : String(err), code: classifyError(err, "RT_E_INTERNAL") };
           }
         }),
       // Ingest an external agent's report (the two-way packet path). Validates

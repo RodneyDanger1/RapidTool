@@ -16,6 +16,10 @@
 //        are REAL re-asks; provider errors and DoD-floor rejects never retry.
 //   §S4  the keyless sealed park carries the coded unlock class ("agent-seal");
 //        without the flag the pause keeps the pre-seal park (opt-in consent).
+//   §S5  full-run step arithmetic: a sealed keyless run completes in exactly
+//        13 steps (1 per phase, P0..P12) — margin 7 vs the store driver's
+//        20-step loop cap (store.ts:1241/:1283). C1's SE1 count (17 = gates×2)
+//        is falsified by probe: a gated phase costs 1 step, not 2.
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -266,5 +270,47 @@ describe("§S4 the keyless seal park class + opt-in consent", () => {
     assert.ok(park);
     assert.equal(park.unlock, "human-retry", "the pre-seal unlock class");
     assert.notEqual(park.unlock, "agent-seal");
+  });
+});
+
+describe("§S5 full-run step arithmetic (313 C1/D1 — 13 steps, 1/phase, margin 7 vs the store cap 20)", () => {
+  it("a sealed keyless full run completes in exactly 13 steps — the driver's 20-step cap holds untouched", async () => {
+    // The brief must match the lattice's job/entity vocabulary: a vague brief
+    // falls back and P0 becomes a forceHuman gate (R3/B-03) — the run parks at
+    // step 1 by design. This is the same brief C1's probe used (13/13).
+    const p0 = emptyProject({
+      name: "Arithmetic",
+      brief:
+        "Build an inventory tracker for a small warehouse team: track products, stock levels, and reorder alerts with a simple dispatcher workflow.",
+    });
+    let p = p0;
+    p.wildMode = true;
+    p.wildRun = {
+      active: true,
+      phase: 0,
+      startedAt: Date.now(),
+      lastAutoLog: "pin",
+      lastAutoAt: Date.now(),
+      stoppedAt: null,
+      pause: false,
+    };
+    let steps = 0;
+    for (; steps < 20; ) {
+      const res = await wildStep(p, { reviewer: approving, agentSeal: true });
+      p = res.project;
+      steps += 1;
+      if (res.outcome !== "advanced") break;
+    }
+    assert.equal(steps, 13, "P0..P12 at one step per phase (SE1's 17-count is falsified — a gated phase advances in-step)");
+    assert.equal(p.status, "complete", "the P12 step finalizes in-step");
+    assert.ok(p.logs.some((l) => l.event === "wild.complete"), "wild.complete rides the final step");
+    assert.equal(p.decisions.length, 4, "the four stock HITL gates minted rows (P4/P5/P8/P9)");
+    const sealedRows = p.decisions.filter((d) => (d.note ?? "").includes("[seat agent-seal]"));
+    assert.equal(sealedRows.length, 4, "every sealed approval row carries the coded seat tag");
+    // The store driver's loop bound (store.ts:1241 `for (let step = 0; step < 20; ...)`;
+    // :1283 the coded `wild.cap` park). 13 < 20 ⇒ no cap raise needed (313 §S6).
+    const STORE_WILD_LOOP_CAP = 20;
+    assert.ok(steps <= STORE_WILD_LOOP_CAP, "within the driver cap");
+    assert.equal(STORE_WILD_LOOP_CAP - steps, 7, "exact margin 7");
   });
 });

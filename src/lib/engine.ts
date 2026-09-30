@@ -3813,8 +3813,11 @@ export type WildStepOptions = {
    *  `WILD_REVIEW_MAX_RETRIES` = 2). Only REJECT verdicts from the CLASSIFIER
    *  are re-asked (the deterministic DoD floor gives the same bytes, and a
    *  provider error is not a verdict) — after the bound the run parks with the
-   *  last verdict as the recorded reason. Non-integer/negative values clamp
-   *  to 0 (= no retry) so a hostile option can never loop. */
+   *  last verdict as the recorded reason. Negative/NaN/non-numeric values
+   *  clamp to 0 (= no retry) and positive fractions floor to an integer
+   *  (1.9 ⇒ 1). Not capped above: this seam is programmatic-only (the CLI
+   *  builds fixed opts, no flag), so the integer IS the caller's own bound
+   *  (315 V2 finding #7). */
   maxReviewRetries?: number;
   /** 313 D1 — base backoff between reject retries (ms), doubling per attempt
    *  like `expandBriefWithBackoff` (500 ⇒ 500/1000/2000…). Default
@@ -4190,9 +4193,11 @@ async function resolveWildReview(
   return { kind: "error", error: res.error ?? "Auto-Review classifier failed" };
 }
 
-/** 313 D1 — clamp a caller-supplied retry bound: a real non-negative integer
- *  wins (0 = no retry, exactly the plain resolver), anything else (negative,
- *  fractional, NaN, hostile) clamps to 0, and absent uses the default. */
+/** 313 D1 — clamp a caller-supplied retry bound: absent ⇒ the default
+ *  (`WILD_REVIEW_MAX_RETRIES`); a finite number ≥ 0 floors to an integer
+ *  bound (0 = no retry, exactly the plain resolver); negative/NaN/non-numeric
+ *  ⇒ 0. Deliberately not capped above — programmatic seam only (the CLI never
+ *  passes it), so the bound IS the caller's own choice (315 V2 finding #7). */
 function normalizeReviewRetries(v: unknown): number {
   if (v === undefined) return WILD_REVIEW_MAX_RETRIES;
   return typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;

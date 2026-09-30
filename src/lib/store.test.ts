@@ -385,10 +385,21 @@ test("runVerifyAsync guards a project with no generated source (fixes/135 UI ver
   assert.equal(after.lastTest, p.lastTest, "no verify outcome applied without a source");
 });
 
+test("runVerifyAsync unknown id carries the declared RT_E_PROJECT_MISSING code (317_l1w)", async () => {
+  const res = await useRapid.getState().runVerifyAsync("no-such-project");
+  assert.equal(res.ok, false);
+  if (!res.ok) assert.equal(res.code, "RT_E_PROJECT_MISSING");
+});
+
 test("runP6Journey guards an unknown project id (fixes/150 M4 ms4 journey mirror)", async () => {
   const res = await useRapid.getState().runP6Journey("no-such-project");
   assert.ok(!res.ok);
-  if (!res.ok) assert.match(res.error, /not found/i);
+  if (!res.ok) {
+    assert.match(res.error, /not found/i);
+    // 317_l1w: the declared failure arm carries code — the guard's
+    // RT_E_PROJECT_MISSING is readable, not type-hidden (317_l1's widening).
+    assert.equal(res.code, "RT_E_PROJECT_MISSING");
+  }
 });
 
 test("runP6Journey commits the honest budget-exhausted outcome via injected deps (fixes/150 M4 ms4)", async () => {
