@@ -66,5 +66,11 @@
 
 ## Bugs + fates (filled at consolidation)
 
+## Wave-1 closure (2026-09-30)
+- **Fixer proofs (parent re-run, fresh):** typecheck 0 · wild-step 30/30 · wild-seal+io+store 155/155 · cli-exit-taxonomy 12/12 · eslint 0 (7 files).
+- **BOUNDARY — `bash scripts/gate.sh` → `ok:true`** (wallMs 274784): typecheck 0 · lint 0 (`problems:null`) · assertionGaps 0 · testsScripts **358/358** · testsLib **2469/2469 +1 skip** · build 0. Full suite standalone: **2828 tests · 2827 pass · 1 skip · 0 fail.**
+- **Committed: `21c4731`** (fixer wave + all 319 logs; tree clean). Verification trail: `w44_tc3/ws/rest/cet/esl`, `w44_npmtest2`, `w44_gate2` logs; nothing claimed without bytes.
+- **Wave-2 queue (parent):** ① GAP-1 park-exit fix (review-park mint) ② small fixes #4 (review-prompt 320-char slice) / #5 (reject-text surfaces) / #6 (diagnose wildRun divergence) ③ then the keyed DRIVER wave: lexweb retry + `gate --live --autopilot` A/B (does the live layer carry P0 with real research?) + bounded `run-eval.mjs --keyed` for scores ④ F3's T9.3 §C promotion lane (headless/cli/run-eval owners).
+
 ## Verdict (final)
 (filled at consolidation — the one question: does RapidTool produce working software powered by a DeepSeek key?)
