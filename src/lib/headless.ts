@@ -85,6 +85,14 @@ import type { RtEventSeed } from "./rt-events.ts";
 
 import type { DoctorSpend } from "./doctor.ts";
 import type { TokenLedger, TokenSpend } from "./token-ledger.ts";
+// T5.5 (OV-41 spend half, W43 · H6): the summary envelope's spend half reads
+// the PROCESS session budget — the SAME T-107.6 accessor `recordSessionSpend`
+// records into — through the SAME boundary reader the packet envelope carries
+// (`packetBudgetBoundary`, F2-04), so the two surfaces can never drift.
+// token-ledger.ts / packet.ts are client-safe pure modules (no node:fs);
+// static import is safe in this backend module.
+import { sessionTokenBudget } from "./token-ledger.ts";
+import { packetBudgetBoundary, type PacketBudget } from "./packet.ts";
 
 // ---------------------------------------------------------------------------
 // File persistence (atomic write via write-then-rename).
@@ -1461,6 +1469,15 @@ export type ProjectSummary = {
    *  `scripts/next-action-arm-parity.test.mjs`. A caller never guesses the
    *  next step; `unknown` when nothing specific is knowable. */
   nextAction: NextAction;
+  /** T5.5 (OV-41 spend half, W43 · H6): the process session ledger's boundary
+   *  at summary time — `{spent, cap, stop_reason}` read from the SAME T-107.6
+   *  session accessor (`sessionTokenBudget()`) that `recordSessionSpend`
+   *  records into, through the SAME reader the packet envelope carries
+   *  (`packetBudgetBoundary`, F2-04) — one semantics, no drift. Always
+   *  present: the session budget always exists; `cap: null` states the
+   *  unmetered default explicitly (never collapsed into an absent case —
+   *  CF-SE2-3a). Read-only — summary() never spends, records, or throws. */
+  budget: PacketBudget;
 };
 
 /** JSON-safe summary for agent consumption (safe to print / pipe / store). */
@@ -1487,6 +1504,17 @@ export function summary(project: Project): ProjectSummary {
   // fixes/125 (W1 #2): a clean 'complete' must never hide failed DoD gates —
   // surface the census + the honest sealed-with-failures flag.
   const failed = failedGates(project);
+  // T5.5 (OV-41 spend half): the session ledger boundary — packet.ts's ONE
+  // reader (F2-04) over the process session accessor. The accessor always
+  // returns a budget object (lazily created), so the reader's null arm (no
+  // budget at all) is unreachable; the explicit unmetered floor keeps the
+  // envelope key ALWAYS PRESENT instead of absent — same key, same triple,
+  // same semantics as packet.ts's `budget:` block.
+  const budget: PacketBudget = packetBudgetBoundary(sessionTokenBudget()) ?? {
+    spent: 0,
+    cap: null,
+    stop_reason: null,
+  };
   return {
     name: project.name,
     currentPhase: project.currentPhase,
@@ -1501,6 +1529,8 @@ export function summary(project: Project): ProjectSummary {
     sealedWithFailures: failed.length > 0,
     // TASK-01 (W16-L2): the ONE next action — same 7-arm vocabulary as the UI.
     nextAction: nextAction(project),
+    // T5.5 (OV-41): the spend half — measured from the real session ledger, never estimated.
+    budget,
   };
 }
 
@@ -4160,6 +4190,26 @@ async function attachWildPlan(project: Project): Promise<Project> {
   };
 }
 
+/** 316 H3 (315 V2 finding #1): the P6 execution edge threaded into every
+ *  wild step this module drives — the SAME `runP6Edge` seam run/gate execute
+ *  through (W-02: keyed synthesis + the tree-run mint; keyless ⇒ the
+ *  documented floor passthrough). Both headless wild loops pass it as
+ *  `wildStep`'s `p6Edge`, so the agent seal's ONE DoD-repair pass re-runs the
+ *  REAL non-floor edge on a production sealed run instead of parking for
+ *  want of a seam nobody passed (the repair was production-dead — it read
+ *  `opts.p6Edge` and both loops passed none).
+ *  Keyed-only by construction: `runModeFor()` is the same trim-semantics
+ *  probe the engine's own guard reads, and a keyless host threads NOTHING —
+ *  its bytes stay exactly the pre-wire floor. `opts.p6Edge` (the explicit
+ *  injection seam) wins in ANY key state — the wildStep contract — so a
+ *  keyless pin can prove the hop end-to-end. */
+function p6EdgeForWildStep(opts: {
+  p6Edge?: (p: Project) => Promise<Project>;
+}): ((p: Project) => Promise<Project>) | undefined {
+  if (typeof opts.p6Edge === "function") return opts.p6Edge;
+  return runModeFor() === "keyed" ? runP6Edge : undefined;
+}
+
 /**
  * Wrapper over engine.wildStep — one bounded macro-run (default 24 steps,
  * clamped 1–48). Stops on any non-"advanced" outcome (paused/completed/noop)
@@ -4168,7 +4218,14 @@ async function attachWildPlan(project: Project): Promise<Project> {
  */
 export async function wildStartHeadless(
   project: Project,
-  opts: { maxSteps?: number; onEvent?: (seed: RtEventSeed) => void; agentSeal?: boolean } = {},
+  opts: {
+    maxSteps?: number;
+    onEvent?: (seed: RtEventSeed) => void;
+    agentSeal?: boolean;
+    /** 316 H3: injection seam for the P6 edge (mirrors the engine's
+     *  `p6Edge`); production callers omit it — see `p6EdgeForWildStep`. */
+    p6Edge?: (p: Project) => Promise<Project>;
+  } = {},
 ): Promise<WildStartShape> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 24, 1), 48);
   if (project.wildMode !== true) {
@@ -4182,6 +4239,9 @@ export async function wildStartHeadless(
   // key ⇒ the classifier actually verdicts; null ⇒ the engine default (the
   // keyless runs keep their exact bytes).
   const reviewer = await createNodeWildReviewer();
+  // 316 H3: resolve the P6 edge ONCE per macro-run (keyed ⇒ the real
+  // runP6Edge; keyless with no injected seam ⇒ undefined — nothing threaded).
+  const p6Edge = p6EdgeForWildStep(opts);
   // R13-f02 (W33 lane L2): a keyed host plans before the loop advances; keyless
   // ⇒ attachWildPlan returns the project unchanged (no field, no log row).
   let current = await attachWildPlan(project);
@@ -4197,6 +4257,8 @@ export async function wildStartHeadless(
     const res = await wildStep(current, {
       ...(reviewer ? { reviewer } : {}),
       ...(opts.agentSeal ? { agentSeal: true } : {}),
+      // 316 H3: the real P6 edge — the seal's DoD-repair pass re-runs it.
+      ...(p6Edge ? { p6Edge } : {}),
       onEvent: opts.onEvent ?? (() => undefined),
     });
     steps += 1;
@@ -4335,7 +4397,14 @@ export type WildLifecycleShape =
  *  (185-H1 — never dual-channel ok:true + error). */
 export async function wildStartRun(
   project: Project,
-  opts: { maxSteps?: number; onEvent?: (seed: RtEventSeed) => void; agentSeal?: boolean } = {},
+  opts: {
+    maxSteps?: number;
+    onEvent?: (seed: RtEventSeed) => void;
+    agentSeal?: boolean;
+    /** 316 H3: injection seam for the P6 edge (mirrors the engine's
+     *  `p6Edge`); production callers omit it — see `p6EdgeForWildStep`. */
+    p6Edge?: (p: Project) => Promise<Project>;
+  } = {},
 ): Promise<WildLifecycleShape> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 24, 1), 48);
   if (project.wildRun?.active === true) {
@@ -4357,6 +4426,9 @@ export async function wildStartRun(
   // R14-f01 (W33 lane F1): bind the Node-side Auto-Review classifier once for
   // the whole driven run (bare Node + key); null keeps the engine default.
   const reviewer = await createNodeWildReviewer();
+  // 316 H3: resolve the P6 edge ONCE for the whole driven run (keyed ⇒ the
+  // real runP6Edge; keyless with no injected seam ⇒ undefined).
+  const p6Edge = p6EdgeForWildStep(opts);
   const now = Date.now();
   const started: Project = {
     ...project,
@@ -4390,6 +4462,8 @@ export async function wildStartRun(
     const res = await wildStep(current, {
       ...(reviewer ? { reviewer } : {}),
       ...(opts.agentSeal ? { agentSeal: true } : {}),
+      // 316 H3: the real P6 edge — the seal's DoD-repair pass re-runs it.
+      ...(p6Edge ? { p6Edge } : {}),
       onEvent: opts.onEvent ?? (() => undefined),
     });
     steps += 1;

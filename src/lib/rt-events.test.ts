@@ -91,6 +91,7 @@ test("catalogue: every event name maps to a legal scope (sync pin, mirrors error
       "wild.driver_resumed",
       "wild.driver_stall",
       "wild.driver_start_refused",
+      "wild.paused_policy",
       "wild.step_error",
       "wild.step_ok",
       "wild.step_paused",

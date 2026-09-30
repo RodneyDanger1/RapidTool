@@ -41,7 +41,7 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs mine    --dir src/lib [--limit 200]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs knowledge --store patterns.json --save '{"project":"p","kind":"pattern","title":"…","tags":["a"],"body":"…"}'
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs knowledge --store patterns.json --find "auth refresh" [--limit 5]
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs wild    --project build.json [--start|--pause|--resume|--stop] [--steps 24]  # --start enables + begins a run; default steps an active run
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs wild    --project build.json [--start|--pause|--resume|--stop] [--steps 24] [--agent-seal]  # --start enables + begins a run; default steps an active run; --agent-seal = the sealed unattended policy (the ONLY verb that accepts it — approve/gate/run/resume/unattended REFUSE it, RT_E_VALIDATION)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs chat    --project build.json --ask "..." [--history '[{"role":"user","text":"..."}]']   # grounded copilot turn (needs DEEPSEEK_API_KEY)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs deepen  --project build.json [--phase 7]     # re-run live research over a completed research phase (0/7/11)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs lesson  --list --project build.json [--brief "…"] [--limit N]     # read-only: the project's lesson rows (kind/class/phase/score/evidence); --brief ranks via topLessonRows (fusionRank), else score-desc
@@ -111,6 +111,26 @@ function requireArg(args, key, cmd) {
 
 function flag(args, key) {
   return args[key] === true || args[key] === "true" || args[key] === "1";
+}
+
+// 316 H3 (315 V2 finding #4): the agent seal (`--agent-seal`) is a WILD-RUN
+// concept — it lives in the wild step's options and only the `wild` verb
+// threads it into effect. parseArgs absorbs ANY `--flag`, so the drive verbs
+// used to swallow it silently (a governance flag a caller could believe had
+// applied, when it never could). ONE coded pointer refusal, reused by every
+// arm whose driver can never carry the seal — name the flag, the code, and
+// the ONE door that does carry it.
+function refuseAgentSeal(cmdName) {
+  return respond(
+    {
+      ok: false,
+      error: `${cmdName}: --agent-seal does not apply here — the agent seal is a WILD-RUN concept (it opts the wild loop's classifier-as-approver policy into effect; coded [seat agent-seal] rows) and this verb's driver can never carry it.`,
+      code: "RT_E_VALIDATION",
+      remedy:
+        "The seal is a wild-run concept: use `wild --start --agent-seal` (or `wild --resume --agent-seal` for an active run) — the only verb that threads it into the wild loop; drop the flag here.",
+    },
+    1,
+  );
 }
 
 // E-25: single JSON object on stdout + the machine exit code. Every result
@@ -667,6 +687,10 @@ async function main() {
 
       case "run":
       case "gate": {
+        // 316 H3 (315 V2 finding #4): the seal cannot apply to this driver
+        // (runUntilGate never reads WildStepOptions.agentSeal) — refuse the
+        // absorbed flag with the pointer instead of silently ignoring it.
+        if (flag(args, "agent-seal")) return refuseAgentSeal(cmd);
         const project = loadProjectFor(cmd);
         const path = requireProjectPath(args, cmd);
         // W-47 / T-107.4 (W33 lane L2): `run --unattended` drives the keyed
@@ -764,6 +788,9 @@ async function main() {
       // age + the re-entry phase. `--project` accepts a project FILE (its dir is
       // the checkpoint home; the drive writes the file back) or a DIRECTORY.
       case "resume": {
+        // 316 H3 (315 V2 finding #4): same silent-absorb class — the seal is
+        // a wild-run concept; point at the door that carries it.
+        if (flag(args, "agent-seal")) return refuseAgentSeal("resume");
         const target = requireArg(args, "project", "resume");
         if (target.error) return respond({ ok: false, error: target.error, code: "RT_E_VALIDATION" }, 1);
         const t = resolveCheckpointTarget(target.value);
@@ -807,6 +834,9 @@ async function main() {
       // on a cadence. Stock HITL gates (P4/P5/P8/P9) still park for a human BY
       // DESIGN: exit 2 is the honest outcome, never a fake completion.
       case "unattended": {
+        // 316 H3 (315 V2 finding #4): same silent-absorb class — the seal is
+        // a wild-run concept; point at the door that carries it.
+        if (flag(args, "agent-seal")) return refuseAgentSeal("unattended");
         const target = requireArg(args, "project", "unattended");
         if (target.error) return respond({ ok: false, error: target.error, code: "RT_E_VALIDATION" }, 1);
         const t = resolveCheckpointTarget(target.value);
@@ -856,6 +886,11 @@ async function main() {
       }
 
       case "approve": {
+        // 316 H3 (315 V2 finding #4): `approve --agent-seal` used to be
+        // absorbed by parseArgs (silently ignored — the pre-fix no-op the V2
+        // deep-check reproduced). The seal cannot ride this door: `approve`
+        // drives the single human/machine gate decision, never the wild loop.
+        if (flag(args, "agent-seal")) return refuseAgentSeal("approve");
         const project = loadProjectFor("approve");
         if (project.status !== "awaiting_hitl" || !project.hitl) {
           return respond(
@@ -3958,7 +3993,7 @@ const USAGE = {
     gate: "gate --project <file.json> [--autopilot] [--live] [--unattended]  # advance until parked; --unattended forces autopilot+live",
     resume: "resume --project <file.json|dir> [--autopilot] [--live]  # T-107.7: read the per-phase checkpoint written beside the project dir by run/gate, admit it (identity + mode + integer phase sanity), hydrate it, and re-enter the drive at the recorded phase; prints the snapshot age — exit taxonomy identical to gate (2 = parked). Never a silent resume",
     unattended: "unattended --project <file.json|dir>  # W-47: scheduler-facing drive — re-enter from a checkpoint when one exists (crash recovery), else start from the named project file; autopilot + live until parked; NOT a daemon (a host hook — Windows Task Scheduler / cron — invokes it on a cadence); stock HITL gates still park for a human by design (exit 2)",
-    approve: "approve --project <file.json> (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed, name exactly one: --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY); --seat autopilot = explicit MACHINE attribution (`decidedBy:\"autopilot\"`, seat harness; works non-TTY — the documented agent door for a parked gate)",
+    approve: "approve --project <file.json> (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed, name exactly one: --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY); --seat autopilot = explicit MACHINE attribution (`decidedBy:\"autopilot\"`, seat harness; works non-TTY — the documented agent door for a parked gate); --agent-seal is REFUSED here (RT_E_VALIDATION) — the seal is a wild-run concept: `wild --start|--resume --agent-seal`",
     reject: "reject --project <file.json> --note <text>",
     retry: "retry --project <file.json>                  # unlock a rejected/blocked phase",
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",
@@ -3989,7 +4024,7 @@ const USAGE = {
     mine: "mine --dir <path> [--limit N]                # bounded structural codebase map + convention map",
     knowledge: "knowledge --store <file.json> (--save <json>|--find <query>) [--limit N]  # cross-project pattern store",
     lesson: "lesson (--list --project <file.json> [--brief <text>] [--limit N] | --propose --brief <text> [--title <t>] [--kind fix|pattern|note] [--tags a,b] [--project <name>] | --accept --project <file.json> --out <knowledge.json> [--actor <name>] [--limit N] | --supersede --knowledge-file <knowledge.json> --id <K...> [--evidence <text>|--reason <text>] [--by human|machine] | --refute --knowledge-file <knowledge.json> --id <K...> [--evidence <text>] | --advise (--project <file.json> | --knowledge-file <knowledge.json>) [--brief <text>] [--phase N] [--limit N] | --verify (--knowledge-file <knowledge.json> | --project <file.json>) --anchor <path> [--mark-stale] [--limit N] | --effect --project <file.json>)  # lesson family: list rows read-only (fusionRank vs --brief, else score-desc) / propose = bounded flash DRAFT, never writes (keyless drafts labeled 'draft (keyless)') / accept = THE human-gated cross-project write, actor recorded per row, idempotent per actor / supersede + refute = store telemetry (append-only rows + counters, never deletes) / advise = read-only ranked FAIL-class pre-flight (reproducedCount + counterEvidence printed as-is) / verify = anchor re-hash → ok | stale | anchor-missing (read-only unless --mark-stale: store counterEvidence telemetry only) / effect = F3 read-only cross-run learning MEASUREMENT (recurrence census: reproduced/unreproduced, per-class rates + per-row evidence with the accruing lesson.reproduced ledger rows; recurrence ≠ causation, census window, n≥2 'baseline only' floor — never an eval score)",
-    wild: "wild --project <file.json> [--start|--pause|--resume|--stop] [--steps N]  # wild-mode macro-run; --start enables + begins a run",
+    wild: "wild --project <file.json> [--start|--pause|--resume|--stop] [--steps N] [--agent-seal]  # wild-mode macro-run; --start enables + begins a run; --agent-seal = THE agent seal (a wild-run concept — the ONLY verb that accepts it): classifier-as-approver (coded [seat agent-seal] rows, never a human seat), bounded reject retries, ONE DoD-repair pass on a hard-DoD red",
     chat: "chat --project <file.json> --ask <text> [--history <json-array>]  # grounded copilot turn; slash tools /status /gate /packet /fixtures /ls /read /help work keyless; free-text needs DEEPSEEK_API_KEY",
     deepen: "deepen --project <file.json> [--phase N]    # re-run live research over a completed research phase (0/7/11)",
   },

@@ -358,3 +358,90 @@ describe("W-01 (fixes/271 · §R1-f01) — the wild P6 keyed edge seam", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// H2 (fixes/316_h2_policy.md · RS-03): the F4 per-action policy overlay is
+// consulted at the gate — a project's list may refuse the machine
+// self-approval. The refusal lands as the registered `wild.paused_policy`
+// event + a coded park, and the classifier is never asked for a refused
+// action. No list ⇒ the byte-identical classifier path (the no-list control).
+// ---------------------------------------------------------------------------
+
+describe("wildApproveGate policy-overlay refusal (H2 · fixes/316 · RS-03)", () => {
+  const APPROVE_FEEDBACK = "classifier consents to this gate — every criterion traced.";
+
+  it("refuses self-approval when the list denies hitl.approve — wild.paused_policy emitted, park coded", async () => {
+    let calls = 0;
+    const counting: WildReviewer = async () => {
+      calls += 1;
+      return { ok: true, verdict: "approve", feedback: APPROVE_FEEDBACK, model: "test" };
+    };
+    const r = recorder();
+    const p = wildFixture("awaiting_hitl");
+    (p as { wildPolicy?: unknown }).wildPolicy = { denyActions: ["hitl.approve"] };
+    const res = await wildStep(p, { reviewer: counting, onEvent: r.onEvent });
+    assert.equal(res.outcome, "paused");
+    assert.equal(res.code, "RT_E_GATE_PENDING");
+    assert.equal(calls, 0, "a refused action never spends a classifier call");
+    assert.equal(res.project.status, "awaiting_hitl", "the gate stays open for a human");
+    assert.equal(res.project.wildRun?.pause, true);
+    const park = res.project.wildRun?.park;
+    assert.ok(park, "park record stamped");
+    assert.equal(park.code, "RT_E_GATE_PENDING");
+    assert.equal(park.event, "wild.paused_policy");
+    assert.equal(park.unlock, "human-retry");
+    assert.ok(
+      park.reason.includes("policy.action-denied:hitl.approve"),
+      `park reason carries the refusal code: ${park.reason}`,
+    );
+    assert.deepEqual(
+      r.rows.map((x) => x.event),
+      ["wild.step_start", "wild.paused_policy", "wild.step_paused"],
+      "the registered refusal event sits between start and the generic step pause",
+    );
+    const row = r.rows[1];
+    assert.equal(row.scope, "wild-step");
+    assert.equal(row.code, "RT_E_GATE_PENDING");
+    assert.equal(row.capture, "src/lib/engine.ts:wildApproveGate");
+    assert.ok(String(row.message).includes("policy.action-denied:hitl.approve"), "overlay reason carried in detail");
+    assert.equal(row.payload?.policyCode, "policy.action-denied:hitl.approve");
+    assert.equal(row.payload?.rule, "denyActions");
+    assert.equal(row.payload?.action, "hitl.approve");
+  });
+
+  it("alwaysAsk maps to human-gate; an unreadable list fail-closes (never silently ignored)", async () => {
+    const ask = wildFixture("awaiting_hitl");
+    (ask as { wildPolicy?: unknown }).wildPolicy = { alwaysAsk: ["hitl.approve"] };
+    const res = await wildStep(ask, { reviewer: notConfiguredReviewer });
+    assert.equal(res.outcome, "paused");
+    assert.equal(res.project.wildRun?.park?.unlock, "human-gate");
+    assert.ok(String(res.project.wildRun?.park?.reason).includes("policy.action-ask:hitl.approve"));
+
+    const bad = wildFixture("awaiting_hitl");
+    (bad as { wildPolicy?: unknown }).wildPolicy = { allowActions: "not-a-list" };
+    const refused = await wildStep(bad, { reviewer: notConfiguredReviewer });
+    assert.equal(refused.outcome, "paused");
+    assert.equal(refused.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
+    assert.ok(
+      String(refused.project.wildRun?.park?.reason).includes("policy.action-list-unreadable:hitl.approve"),
+      "a malformed list refuses — it is never dropped as if unenforced",
+    );
+  });
+
+  it("no wildPolicy ⇒ classifier path unchanged (approval proceeds, no policy row)", async () => {
+    const r = recorder();
+    const p = wildFixture("awaiting_hitl");
+    p.enforceDod = false; // decouple this pin from the host key state — DoD is not its subject
+    const res = await wildStep(p, {
+      reviewer: async () => ({ ok: true, verdict: "approve", feedback: APPROVE_FEEDBACK, model: "test" }),
+      onEvent: r.onEvent,
+    });
+    assert.equal(res.outcome, "advanced");
+    assert.equal(
+      r.rows.some((x) => x.event === "wild.paused_policy"),
+      false,
+      "an absent list narrows nothing — byte-identical pre-H2 path",
+    );
+    assert.ok((res.project.logs ?? []).some((l) => l.event === "wild.approved"));
+  });
+});

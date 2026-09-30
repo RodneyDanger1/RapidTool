@@ -155,6 +155,10 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
   "wild.step_timeout": "wild-step",
   "wild.step_error": "wild-step",
   "wild.step_paused": "wild-step",
+  // H2 (fixes/316_h2_policy.md · RS-03): the F4 per-action policy overlay
+  // refuses a machine gate self-approval → the run parks coded. One name for
+  // the wildPause ledger row AND the rt seed, both emitted from wildApproveGate.
+  "wild.paused_policy": "wild-step",
   // wild-driver (CAP-6; wild.driver_error added per §3.6 catch row)
   "wild.driver_cap": "wild-driver",
   "wild.driver_stall": "wild-driver",
@@ -204,7 +208,7 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 // ---------------------------------------------------------------------------
 // TODO(N6-W3 · fixes/294_n6_sweeps.md §W1-W3; re-censused by P4 —
 // fixes/295_p4_sweeps.md; +1 name / R1 fixes/297; re-counted by A5 —
-// fixes/309_a5_evdocs.md at HEAD 2d2c74a): 38 of the 56 registered names
+// fixes/309_a5_evdocs.md at HEAD 2d2c74a): 38 of the 57 registered names
 // above have NO emitter anywhere in src/ or scripts/ —
 // no host passes them as `event:` (grep-verified; read-side matches in
 // diagnose.ts / rt-timeline.ts / rapidtool-cli.mjs do NOT count), and none is
@@ -231,6 +235,11 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 // emitted 18 · dead 38 — still 38 of 56; the dead list matched name-for-name on
 // the live mid-wave tree (wild.step_* emitter lines shifted with the 312 lanes;
 // names unchanged).)
+// +1 name / H2 re-count 2026-09-29 (fixes/316_h2_policy.md · RS-03; same
+// non-test `event:` scan pattern): catalogue 57 · emitted 19 · dead 38 —
+// wild.paused_policy is added AND emitted at engine.ts wildApproveGate's
+// policy-overlay refusal, so the +1 name is a +1 emitter; the dead list above
+// is unchanged (re-derived at the H2 landing, not inherited).
 // ---------------------------------------------------------------------------
 
 /** True when the event string is a catalogue member. */

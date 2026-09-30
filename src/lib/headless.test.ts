@@ -41,6 +41,7 @@ import type { ApproveActor, P6JourneyCycleContext } from "./headless.ts";
 import { runGate } from "./dod.ts";
 import { importProject } from "./io.ts";
 import { evaluatePolicy } from "./policy.ts";
+import { recordSessionSpend, resetSessionBudget } from "./token-ledger.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
 import { fnv1a } from "./algorithms.ts";
 import type { PhaseId, Project } from "./types.ts";
@@ -405,6 +406,53 @@ describe("packet / exportJson / summary", () => {
     assert.equal(s.sealedWithFailures, false);
     // and it survives JSON serialization
     assert.doesNotThrow(() => JSON.stringify(s));
+  });
+});
+
+describe("fixes/316_h6 (T5.5) — the summary envelope carries the session-budget spend half", () => {
+  // F2-04 semantics mirrored onto the SUMMARY surface: the triple is read from
+  // the SAME T-107.6 session ledger `recordSessionSpend` records into (via
+  // packet.ts's one boundary reader), `cap: null` states the unmetered default
+  // EXPLICITLY (never absent), and stop_reason fires only on a strict `>`
+  // crossing — landing exactly on the cap is still ok (199).
+
+  it("unmetered session ⇒ explicit {spent:0, cap:null, stop_reason:null} (key always present)", () => {
+    resetSessionBudget();
+    try {
+      const p = createProject({ brief: FIXTURE_BRIEF });
+      assert.deepEqual(summary(p).budget, { spent: 0, cap: null, stop_reason: null });
+      assert.doesNotThrow(() => JSON.stringify(summary(p).budget));
+    } finally {
+      resetSessionBudget();
+    }
+  });
+
+  it("recorded spend without a cap ⇒ {spent>0, cap:null, stop_reason:null}", () => {
+    resetSessionBudget();
+    try {
+      const p = createProject({ brief: FIXTURE_BRIEF });
+      recordSessionSpend({ promptTokens: 100, completionTokens: 50 });
+      assert.deepEqual(summary(p).budget, { spent: 150, cap: null, stop_reason: null });
+    } finally {
+      resetSessionBudget();
+    }
+  });
+
+  it("cap landing exactly is ok; a strict crossing flips stop_reason to budget_exhausted", () => {
+    const prev = process.env.RAPIDTOOL_TOKEN_CAP;
+    process.env.RAPIDTOOL_TOKEN_CAP = "100";
+    try {
+      resetSessionBudget(); // re-reads env ⇒ cap=100, empty ledger
+      const p = createProject({ brief: FIXTURE_BRIEF });
+      recordSessionSpend({ promptTokens: 100, completionTokens: 0 });
+      assert.deepEqual(summary(p).budget, { spent: 100, cap: 100, stop_reason: null });
+      recordSessionSpend({ promptTokens: 0, completionTokens: 1 });
+      assert.deepEqual(summary(p).budget, { spent: 101, cap: 100, stop_reason: "budget_exhausted" });
+    } finally {
+      if (prev === undefined) delete process.env.RAPIDTOOL_TOKEN_CAP;
+      else process.env.RAPIDTOOL_TOKEN_CAP = prev;
+      resetSessionBudget();
+    }
   });
 });
 

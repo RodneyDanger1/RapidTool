@@ -1804,7 +1804,11 @@ export function HomeScreen() {
             </button>
             <p className="font-mono text-xs text-faint">Phase 0 starts locked to the brief</p>
             {/* R6-f07: the launch button is disabled under 12 characters — say
-                why, with the same live counter shape as the rejection note. */}
+                why, with the same live counter shape as the rejection note.
+                H4 (fixes/316 · C6-U4): the 0-character case speaks too — the
+                button is disabled from the first paint, so its reason must be
+                visible before anything is typed (the old branch stayed silent
+                at 0/12 and left the disabled state unexplained). */}
             <p
               aria-live="polite"
               className={`w-full font-mono text-xs ${
@@ -1812,9 +1816,11 @@ export function HomeScreen() {
               }`}
             >
               {brief.trim().length}/12
-              {brief.trim().length > 0 && brief.trim().length < 12
-                ? " · brief too short — 12+ characters required before a build can open"
-                : ""}
+              {brief.trim().length === 0
+                ? " · no brief yet — 12+ characters required before a build can open"
+                : brief.trim().length < 12
+                  ? " · brief too short — 12+ characters required before a build can open"
+                  : ""}
             </p>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -1838,8 +1844,19 @@ export function HomeScreen() {
           </div>
           <ul className="scroll-thin mt-4 max-h-[420px] space-y-2 overflow-y-auto pr-1">
             {projects.length === 0 ? (
+              /* H4 (fixes/316 · C6-U4): the empty box now carries the house
+                 empty-state shape — status, what a build IS, and the exact
+                 pathway to the first one. The old one-liner ("Paste a brief to
+                 open Phase 0.") left "paste where?" open while the control it
+                 named sits in the other column, and said nothing about what
+                 would land here. */
               <li className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted">
-                No builds yet. Paste a brief to open Phase 0.
+                <p>No builds yet.</p>
+                <p className="mx-auto mt-1.5 max-w-[260px] text-xs leading-relaxed text-faint">
+                  A build is one brief and its governed 13-phase run. Type a brief of 12+
+                  characters (or pick a template), then click Open intake — the build appears
+                  here, open at Phase 0.
+                </p>
               </li>
             ) : (
               projects.map((p) => (

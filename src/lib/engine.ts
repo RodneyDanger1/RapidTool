@@ -13,7 +13,7 @@ import { compileAgentPacket } from "./packet.ts";
 // no cycle in. The seal's approval arms below mint `decidedVia.label` from
 // here ("autopilot/agent-seal"), the SAME vocabulary dod.ts cross-checks
 // against the row's `[seat agent-seal]` tag.
-import { seatLabel } from "./policy.ts";
+import { policyOverlayRefusal, seatLabel } from "./policy.ts";
 import {
   bootstrapMemory,
   feasibilityScorecard,
@@ -3781,10 +3781,15 @@ export function readWildPlan(project: Project): WildPlan {
 export type WildStepOptions = {
   reviewer?: WildReviewer;
   onEvent?: (seed: RtEventSeed) => void;
-  /** W-01 (fixes/271 · §R1-f01): test seam for the P6 execution edge. Present
-   *  ⇒ phase 6 executes through THIS function (any key state); absent ⇒ the
-   *  production guard (keyed ⇒ headless.runP6Edge, keyless ⇒ the deterministic
-   *  floor, byte-identical to the pre-seam engine). */
+  /** W-01 (fixes/271 · §R1-f01): seam for the P6 execution edge — resolved by
+   *  `wildExecEdgeFor` and shared with the seal's DoD-repair pass. Present ⇒
+   *  phase 6 executes through THIS function (any key state). 316 H3: the
+   *  headless wild loops (wildStartRun/wildStartHeadless) thread the
+   *  production `runP6Edge` through this seam on keyed hosts, so the seal's
+   *  ONE repair pass re-runs the SAME real edge instead of parking
+   *  production-dead; keyless hosts thread nothing. Absent ⇒ the production
+   *  guard (keyed ⇒ headless.runP6Edge, keyless ⇒ the deterministic floor,
+   *  byte-identical to the pre-seam engine). */
   p6Edge?: (p: Project) => Promise<Project>;
   /** 312 C3: bound on ONE Auto-Review classifier decision (ms). A reviewer
    *  call that never settles resolves as a coded RT_E_LLM_TIMEOUT pause
@@ -3821,12 +3826,15 @@ export type WildStepOptions = {
    *  sequential driver runs, with the documented `meta.liveUnavailable`
    *  waiver when live cannot run; keyless ⇒ the byte-identical floor). */
   liveEdge?: (p: Project) => Promise<Project>;
-  /** 313 D1 — test seam for the ONE DoD-repair pass (also fired by the seal).
+  /** 313 D1 — seam for the ONE DoD-repair pass (also fired by the seal).
    *  Present ⇒ a hard-DoD red calls THIS instead of re-running the phase's own
-   *  execution edge; return a repaired project whose exit gate is green, or
-   *  `null` to keep the honest park. Absent ⇒ the production repair (a
-   *  non-floor execution edge re-runs once; a pure-floor phase parks honestly —
-   *  a blind identical re-run is not a repair, B-07). */
+   *  execution edge (test seam — 316 H3 made it CONSUMED; it was declared but
+   *  read by nobody); return a repaired project whose exit gate is green, or
+   *  `null` to keep the honest park. Absent ⇒ the production repair — the SAME
+   *  edge the step executes through (`wildExecEdgeFor(phase, opts)`: the
+   *  injected p6Edge the headless loops thread, else the keyed synthesis
+   *  edge); a keyless/pure-floor phase parks honestly — a blind identical
+   *  re-run is not a repair, B-07. */
   dodRepair?: (p: Project, phase: PhaseId) => Promise<Project | null>;
 };
 
@@ -3948,24 +3956,70 @@ export function wildPause(
   return wildLog(stamped, phase, level, event, detail);
 }
 
+/** 316 H3 (313 D1 seam table; 315 V2 finding #1): the ONE resolution of a
+ *  phase's execution edge — shared by the execute site (wildStep) AND the
+ *  seal's repair pass, so the two can never drift again. The drift WAS the
+ *  finding: the execute site resolved the keyed production edge
+ *  (`opts.p6Edge ?? keyed ⇒ wildP6Edge`), the repair read `opts.p6Edge` only
+ *  — and no production caller passes it, so the repair was production-dead.
+ *  Resolution: an injected `opts.p6Edge` wins in ANY key state (the seam
+ *  contract — the headless wild loops thread the production `runP6Edge`
+ *  through it, 316 H3); else the keyed production edge (`wildP6Edge`, the
+ *  same headless.runP6Edge seam run/gate use); keyless/browser ⇒ null (the
+ *  byte-identical deterministic floor). Exported for the keyless selection
+ *  pin (a keyed pin only checks the SELECTION — never invokes it). P7's live
+ *  arm is H1's lane (316_h1_p7.md): extended HERE (the phase===7 arm below),
+ *  not at a second site. */
+export function wildExecEdgeFor(
+  phase: PhaseId,
+  opts: WildStepOptions | undefined,
+): ((p: Project) => Promise<Project>) | null {
+  if (phase === 7) {
+    // 316 H1: the P7 live arm — the injected `liveEdge` seam wins in ANY key
+    // state (the seam contract); else the keyed production live edge
+    // (`wildLiveEdge` — the SAME live layer the sequential driver runs, with
+    // the documented meta.liveUnavailable waiver inside it); keyless/browser
+    // ⇒ null (the byte-identical deterministic floor, the keyless contract).
+    if (typeof opts?.liveEdge === "function") return opts.liveEdge;
+    return keyedDeepSeekConfigured() ? wildLiveEdge : null;
+  }
+  if (phase !== 6) return null;
+  if (typeof opts?.p6Edge === "function") return opts.p6Edge;
+  return keyedDeepSeekConfigured() ? wildP6Edge : null;
+}
+
 /** 313 D1: the seal's ONE DoD-repair pass (both call sites: wildApproveGate
  *  post-approval / wildLeavePhase advance). Re-runs the phase's NON-FLOOR
- *  execution edge exactly once (the keyed P6 synthesis edge today; the injected
- *  seams) so a spurious red that a fresh attempt clears does not park an
- *  unattended run. A pure-floor phase returns an honest null — a blind
- *  identical re-run is not a repair (B-07). Never fabricates: the re-run's
- *  REAL gate verdict decides. */
+ *  execution edge exactly once so a spurious red that a fresh attempt clears
+ *  does not park an unattended run. Edge resolution (316 H3, seam table):
+ *  the injected `opts.dodRepair` seam first (finding #2 — declared, consumed
+ *  by nobody until now); else the SAME edge the step itself executes through
+ *  (`wildExecEdgeFor`) — so a real sealed run repairs through its REAL edge
+ *  (keyed P6 synthesis; a keyless/pure-floor phase returns an honest null —
+ *  a blind identical re-run is not a repair, B-07). Never fabricates: the
+ *  re-run's REAL gate verdict decides. */
 async function wildDodRepairOnce(
   project: Project,
   phase: PhaseId,
   opts: WildStepOptions | undefined,
 ): Promise<{ repaired: Project | null; detail: string }> {
-  const edge = phase === 6 ? opts?.p6Edge : undefined;
-  if (typeof edge !== "function") {
+  const seam = typeof opts?.dodRepair === "function" ? opts.dodRepair : null;
+  // 316 H3 fix-up: keep the picker's own 1-arg type (the union with the
+  // 2-arg seam confused the call-site check) — narrowed below.
+  const edge = seam === null ? wildExecEdgeFor(phase, opts) : null;
+  if (seam === null && edge === null) {
     return { repaired: null, detail: `no non-floor repair edge for P${phase} — honest park` };
   }
   try {
-    const after = await edge(project);
+    const after =
+      seam !== null
+        ? await seam(project, phase)
+        : typeof edge === "function"
+          ? await edge(project)
+          : null;
+    if (after === null) {
+      return { repaired: null, detail: `repair seam declined P${phase} — honest park` };
+    }
     const g = runGate(after, phase);
     return g.pass
       ? { repaired: after, detail: "repair pass re-ran the edge; gate cleared" }
@@ -4237,6 +4291,47 @@ async function wildApproveGate(
     const paused = wildPause(p, phase, "warn", "wild.paused_human", detail);
     return { project: paused, outcome: "paused", ran: true, error: `P${phase} is a human-only gate.`, code: "RT_E_GATE_PENDING" };
   }
+  // H2 (fixes/316_h2_policy.md · RS-03): the F4 per-action policy overlay is
+  // consulted BEFORE any machine self-approval — the project's list may narrow
+  // what its gates permit. Narrow-only by construction (policy.ts): it can
+  // refuse this action, never widen the seat rule above; a malformed list
+  // fail-closes through the refusal's own 'unreadable' branch, and an absent
+  // list returns null — byte-identical pre-H2 behavior. Placed before the
+  // classifier so a refused action never spends a review call; consulted under
+  // the seal too (the list narrows the sealed policy; nothing here widens it).
+  const policyRefusal = policyOverlayRefusal(
+    (p as { wildPolicy?: unknown }).wildPolicy,
+    "hitl.approve",
+    `gate:P${phase}`,
+  );
+  if (policyRefusal !== null) {
+    // RS-03(c): the refusal gets its registered event — one wildPause ledger
+    // row + one rt seed, both named wild.paused_policy, both carrying the
+    // overlay's OWN reason (its coded value + its detail). Unlock maps the
+    // refusal's own semantics: alwaysAsk needs an explicit human decision
+    // (human-gate); every hard refusal needs the list fixed first
+    // (human-retry) — a classifier retry cannot un-refuse it.
+    const unlock: WildParkUnlock = policyRefusal.rule === "alwaysAsk" ? "human-gate" : "human-retry";
+    const detail = `P${phase} approval gate refused by this project's per-action policy list — ${policyRefusal.code}: ${policyRefusal.detail}`;
+    opts?.onEvent?.({
+      level: "warn",
+      scope: "wild-step",
+      event: "wild.paused_policy",
+      message: detail,
+      capture: "src/lib/engine.ts:wildApproveGate",
+      code: "RT_E_GATE_PENDING",
+      phase,
+      projectId: p.id,
+      runRef:
+        p.wildRun?.startedAt !== null && p.wildRun?.startedAt !== undefined ? String(p.wildRun.startedAt) : null,
+      payload: { policyCode: policyRefusal.code, rule: policyRefusal.rule, action: policyRefusal.action },
+    });
+    const paused = wildPause(p, phase, "warn", "wild.paused_policy", detail, {
+      code: "RT_E_GATE_PENDING",
+      unlock,
+    });
+    return { project: paused, outcome: "paused", ran: true, error: detail, code: "RT_E_GATE_PENDING" };
+  }
   const resolved = seal
     ? await resolveWildReviewBounded(reviewer, p, phase, "gate", opts)
     : { decision: await resolveWildReview(reviewer, p, phase, "gate", opts?.reviewTimeoutMs), project: p };
@@ -4469,6 +4564,41 @@ async function wildP6Edge(project: Project): Promise<Project> {
       "warn",
       "wild.p6.edge_unavailable",
       `P6 keyed edge unavailable (${msg.slice(0, 160)}) — deterministic floor used.`,
+    );
+  }
+}
+
+/**
+ * 316 H1 (313_d1_seal.md S5 row; 315 V2 finding: the `liveEdge` seam was
+ * declared but never consumed — this function did not exist): the wild P7
+ * execution edge — phase 7's ONE keyed path. Loads the SEQUENTIAL DRIVER'S OWN
+ * live layer (`headless.runPhase(…, {live:true})` — engine.liveLayer plus the
+ * bare-node overlay: real Tavily/free-web findings + optional narrative, and
+ * the documented `meta.liveUnavailable` explained-dead-end when live cannot
+ * run) through the same concatenated-specifier idiom as wildP6Edge. A keyed
+ * enforceDod wild run therefore clears `p7-research` with a real corpus (or
+ * the waiver) instead of hard-stopping on a floor that can never satisfy it.
+ * Any load failure / missing export / seam throw falls back to the
+ * deterministic floor with a coded warn row — the honest minimum when the
+ * edge is absent: a refusal-NOTE on the record, never a silent skip and never
+ * a fabricated live pass (a wild step must never die on a seam-load failure).
+ */
+async function wildLiveEdge(project: Project): Promise<Project> {
+  const headlessSpec = "./head" + "less.ts";
+  try {
+    const hl = (await import(headlessSpec)) as {
+      runPhase?: (p: Project, phase: PhaseId, opts: { live?: boolean }) => Promise<Project>;
+    };
+    if (typeof hl.runPhase !== "function") throw new Error("headless.runPhase export missing");
+    return await hl.runPhase(project, 7, { live: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return wildLog(
+      applyPhaseResult(project, 7),
+      7,
+      "warn",
+      "wild.p7.edge_unavailable",
+      `P7 live edge unavailable (${msg.slice(0, 160)}) — deterministic floor used.`,
     );
   }
 }
@@ -4745,22 +4875,27 @@ export async function wildStep(
         r.id === phase ? { ...r, status: "running" as const, startedAt: r.startedAt ?? now } : r,
       ),
     };
-    // W-01 (fixes/271 · §R1-f01): phase 6 on a keyed host executes through the
-    // SHARED keyed P6 edge (headless.runP6Edge — synthesis + the tree-run
-    // mint) instead of the deterministic floor. Keyless hosts (and the
+    // W-01 (fixes/271 · §R1-f01) + 316 H3/H1: the ONE edge picker
+    // (`wildExecEdgeFor` — shared with the seal's DoD-repair pass so the two
+    // can never drift apart again; the drift WAS the 315 V2 finding): phase 6
+    // uses the injected `opts.p6Edge` (the headless wild loops thread the
+    // production `runP6Edge` here, keyed) else the keyed synthesis edge; phase
+    // 7 (H1) uses the injected `opts.liveEdge` else the keyed live edge (the
+    // same live layer the sequential driver runs). Keyless hosts (and the
     // browser, where keyedDeepSeekConfigured() is false) keep the exact floor
-    // bytes; an injected `opts.p6Edge` test seam wins in every key state.
-    const p6Edge =
-      phase === 6 ? (opts?.p6Edge ?? (keyedDeepSeekConfigured() ? wildP6Edge : null)) : null;
-    const executed = p6Edge !== null ? await p6Edge(running) : applyPhaseResult(running, phase);
+    // bytes — the picker returns null.
+    const execEdge = wildExecEdgeFor(phase, opts);
+    const executed = execEdge !== null ? await execEdge(running) : applyPhaseResult(running, phase);
     const done = wildLog(
       executed,
       phase,
       "info",
       "wild.exec",
-      p6Edge === null
+      execEdge === null
         ? `P${phase} executed (deterministic floor)`
-        : `P6 executed (${opts?.p6Edge ? "injected edge seam" : "keyed synthesis edge"})`,
+        : phase === 7
+          ? `P7 executed (${typeof opts?.liveEdge === "function" ? "injected edge seam" : "keyed live edge"})`
+          : `P6 executed (${opts?.p6Edge ? "injected edge seam" : "keyed synthesis edge"})`,
     );
     if (done.hitl?.phase === phase) {
       return finishStep(await wildApproveGate(done, phase, reviewer, opts), "gate");

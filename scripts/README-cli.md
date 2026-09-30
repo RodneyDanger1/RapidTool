@@ -157,8 +157,13 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs knowledge --store patt
 node --experimental-strip-types scripts/rapidtool-cli.mjs knowledge --store patterns.json --find "auth refresh" [--limit 5]
 
 # 27. Bounded headless wild-mode macro-run + lifecycle (--start enables Wild Mode AND begins
-#     a run; --pause/--resume/--stop control it; default steps an already-active run)
-node --experimental-strip-types scripts/rapidtool-cli.mjs wild --project build.json [--start] [--steps 24]
+#     a run; --pause/--resume/--stop control it; default steps an already-active run).
+#     --agent-seal = THE agent seal (313 D1; a WILD-RUN concept — this is the ONLY verb that
+#     accepts it): classifier-as-approver (coded [seat agent-seal] rows, never a human seat),
+#     bounded classifier-reject retries, and ONE DoD-repair pass on a hard-DoD red.
+#     approve/gate/run/resume/unattended REFUSE --agent-seal with RT_E_VALIDATION + the
+#     pointer back here — a governance flag is never silently ignored (316 H3).
+node --experimental-strip-types scripts/rapidtool-cli.mjs wild --project build.json [--start] [--steps 24] [--agent-seal]
 
 # 28. Grounded copilot turn over the project (needs DEEPSEEK_API_KEY) — same chat.server.ts
 #     function the UI Chat tab calls; --history is an optional JSON array of prior turns
