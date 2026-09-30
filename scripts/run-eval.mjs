@@ -101,6 +101,27 @@ import { emptyLedger, recordSpend, totalTokens, estimateCostUsd, sessionTokenBud
 // The eval side RECORDS the per-trial decision (additive `iterate` row block);
 // the live keyed firing is owner-gated and never engages in this leg.
 import { readIterateConfig, decideIterate, ITERATE_THRESHOLD_ENV } from "../src/lib/iterate.ts";
+// W43 · H5 (fixes/316_h5_oracle.md · T6.3): the behavioral oracle is ONE shared
+// module now — `src/lib/entry-oracle.ts` (moved VERBATIM out of this driver).
+// The product path (compile-check.server.ts `treeRun`) evaluates a tree's OWN
+// declared contract (`entry-runs` rows in `.rapidtool/project.json`) with the
+// same primitive; this driver delegates its eval-side evaluation to it, so
+// there is exactly one truth for expectExit / expectStdout / expectStderr
+// semantics and for the row-validation refusals.
+import {
+  checkEntryContract,
+  manifestFind,
+  manifestHas,
+  normalizeEmittedFiles,
+  runEntryOracle,
+  validateExpectedBehavior,
+} from "../src/lib/entry-oracle.ts";
+// W43 · H5 (fixes/316_h5_oracle.md · T5.4): run-level eval telemetry — the
+// driver stamps its OWN bounded rows (host "cli", scope "eval-run") so
+// `diagnose` can audit an eval run; the rt-events catalogue owns the legal
+// event names (guardrail checked at emit time).
+import { isKnownRtEvent } from "../src/lib/rt-events.ts";
+import { appendRtLine, makeCliRow, resolveLogDir } from "../src/lib/runtime-log.server.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -704,10 +725,9 @@ export function trialsSummary(outcomes, opts = {}) {
   };
 }
 
-/** Normalize an emitted-file manifest for path matching (posix separators). */
-function normalizeEmittedFiles(emittedFiles) {
-  return Array.isArray(emittedFiles) ? emittedFiles.map((f) => String(f).replace(/\\/g, "/")) : [];
-}
+// (316 I1: the local normalizeEmittedFiles was MOVED to src/lib/entry-oracle.ts —
+// imported at the top; the leftover declaration here was the duplicate-symbol
+// SyntaxError that aborted this driver's leg.)
 
 /** Every path a package.json target value declares (string | nested object to
  *  depth 2 | string array) — the paths `package-target-exists` must resolve. */

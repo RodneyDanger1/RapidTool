@@ -8,7 +8,8 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, applyPhaseResult, wildStep, type WildReviewer } from "./engine.ts";
+import { emptyProject, applyPhaseResult, wildStep, wildExecEdgeFor, type WildReviewer } from "./engine.ts";
+import { runGate } from "./dod.ts";
 import type { Project } from "./types.ts";
 
 /** An ACTIVE wild-run project pinned to one phase status (no gate open). */
@@ -443,5 +444,428 @@ describe("wildApproveGate policy-overlay refusal (H2 · fixes/316 · RS-03)", ()
       "an absent list narrows nothing — byte-identical pre-H2 path",
     );
     assert.ok((res.project.logs ?? []).some((l) => l.event === "wild.approved"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 316 H1 (313_d1_seal.md §S5 row; 315 V2 finding) — the wild P7 live edge.
+// Pre-wire the declared `opts.liveEdge` seam had ZERO consumers: the T1.4
+// probe (probe-h1-p7.mjs, repo root) drove a seeded enforceDod P7 through
+// `wildStep` and arm B ≡ arm A — P7 hard-stopped on a `p7-research` corpus
+// only the live layer can produce. Post-wire (engine.ts `wildExecEdgeFor`'s
+// phase-7 arm + the `wildLiveEdge` production edge) the same probe reads
+// SEAM HONORED (arm B: advanced, "P7 sealed → P8"). These pins lock that
+// wire at the seam:
+//   1. the injected seam is CONSUMED — P7 executes through it and advances;
+//   2. keyless without a seam keeps the byte-identical deterministic floor;
+//   3. a seeded enforceDod run's exact P7 pause text is intact (probe arm A).
+// ---------------------------------------------------------------------------
+
+/** Probe-h1-p7.mjs's seed shape: priors 0-6 sealed, cursor on a ready phase 7. */
+function p7WildFixture(): Project {
+  const p = emptyProject({
+    name: "WildP7",
+    brief: "A seeded enforceDod project for the wild P7 seam pins.",
+    enforceDod: true,
+  });
+  p.wildMode = true;
+  p.wildRun = {
+    active: true,
+    phase: 7,
+    startedAt: Date.now(),
+    lastAutoLog: "Wild run at P7",
+    lastAutoAt: Date.now(),
+    stoppedAt: null,
+    pause: false,
+  };
+  p.currentPhase = 7;
+  p.status = "running";
+  p.phases = p.phases.map((r) =>
+    r.id < 7 ? { ...r, status: "complete" as const } : r.id === 7 ? { ...r, status: "ready" as const } : r,
+  );
+  return p;
+}
+
+const approvingP7Reviewer: WildReviewer = async () => ({
+  ok: true,
+  verdict: "approve",
+  feedback: "P7 pin reviewer approves the advance.",
+  model: "pin",
+});
+
+/** The probe's seam shape: the real deterministic floor + the ONE thing the
+ *  live layer adds — a research corpus entry (nothing else, no verdicts). */
+function p7SeamResult(q: Project): Project {
+  const done = applyPhaseResult(q, 7);
+  return {
+    ...done,
+    research: [
+      ...(done.research ?? []),
+      {
+        query: "pin:p7-live-edge",
+        provider: "pin-seam",
+        items: [
+          {
+            title: "Pin finding (injected seam)",
+            url: "https://example.invalid/pin-h1-p7",
+            content: "Seam pin — exercises the corpus path only.",
+          },
+        ],
+      },
+    ],
+  };
+}
+
+describe("316 H1 — the wild P7 live-edge seam (the wire + the keyless floor)", () => {
+  it("executes P7 through the injected liveEdge seam exactly once and advances (the seam is CONSUMED)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const seen: Project[] = [];
+      const res = await wildStep(p7WildFixture(), {
+        reviewer: approvingP7Reviewer,
+        liveEdge: async (q) => {
+          seen.push(q);
+          return p7SeamResult(q);
+        },
+      });
+      assert.equal(seen.length, 1, "the injected seam is called exactly once");
+      assert.equal(seen[0]!.currentPhase, 7, "the seam receives the P7-running project");
+      assert.equal(
+        seen[0]!.phases.find((r) => r.id === 7)?.status,
+        "running",
+        "phase 7 is marked running before the edge executes",
+      );
+      assert.equal(res.outcome, "advanced", "the seam clears p7-research ⇒ the enforceDod leave check advances");
+      assert.equal(res.project.currentPhase, 8);
+      assert.equal((res.project.research ?? []).length, 1, "the seam's corpus rode the result through");
+      const exec = (res.project.logs ?? []).find((l) => l.event === "wild.exec");
+      assert.equal(exec?.detail, "P7 executed (injected edge seam)", "wild.exec names the injected seam (never the floor)");
+      assert.equal(
+        (res.project.logs ?? []).some((l) => l.event === "wild.paused_dod"),
+        false,
+        "no DoD park when the seam cleared the gate",
+      );
+      assert.ok(
+        (res.project.logs ?? []).some((l) => l.event === "wild.advance" && l.detail.includes("P7 sealed → P8")),
+        "the advance row proves the pre-wire hard-stop is cured",
+      );
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("keyless without a seam keeps the deterministic floor byte-for-byte (parity pin)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const seamless = await wildStep(p7WildFixture(), { reviewer: approvingP7Reviewer });
+      // Control: the same fixture driven through the same tail with the floor
+      // injected AS the edge — the ONLY intended difference is the wild.exec
+      // detail string (the seam-naming rule, pinned in the test above).
+      const control = await wildStep(p7WildFixture(), {
+        reviewer: approvingP7Reviewer,
+        liveEdge: async (q) => applyPhaseResult(q, 7),
+      });
+      // Same volatile-byte class as the P6 parity pin above (fixes/274 · W31):
+      // two independently-executed pipelines differ on per-run wall-clocks —
+      // the compiled packet text, phase record stamps, and the park record's
+      // `at` mirror. Never a behavior comparison.
+      const stripVolatiles = (s: string) =>
+        s
+          .replace(/compiled_at: [^\n]+/g, "compiled_at: FIXED")
+          .replace(/project_id: [^\n]+/g, "project_id: FIXED")
+          .replace(/"compiled_at": "[^"]+"/g, '"compiled_at": "FIXED"')
+          .replace(/"project_id": "[^"]+"/g, '"project_id": "FIXED"')
+          .replace(/"input_hash": "[^"]+"/g, '"input_hash": "FIXED"');
+      const normalize = (p: Project) => ({
+        ...p,
+        id: "fixture",
+        createdAt: 0,
+        artifacts: (p.artifacts ?? []).map((a) => ({ ...a, body: stripVolatiles(a.body) })),
+        logs: (p.logs ?? []).map((l) =>
+          l.event === "wild.exec" ? { ...l, ts: 0, detail: "FIXED" } : { ...l, ts: 0 },
+        ),
+        packet: stripVolatiles(p.packet),
+        traces: (p.traces ?? []).map((a) => ({ ...a, ranAt: 0 })),
+        wildRun: p.wildRun
+          ? {
+              ...p.wildRun,
+              startedAt: 0,
+              lastAutoAt: 0,
+              // 308 P-1/P-2: the park record rides every pause — its `at` is
+              // the same per-run volatile class as lastAutoAt; masked here,
+              // the record itself still compares in full.
+              park: p.wildRun.park ? { ...p.wildRun.park, at: 0 } : p.wildRun.park,
+              lastStep: p.wildRun.lastStep
+                ? {
+                    ...p.wildRun.lastStep,
+                    park: p.wildRun.lastStep.park
+                      ? { ...p.wildRun.lastStep.park, at: 0 }
+                      : p.wildRun.lastStep.park,
+                  }
+                : p.wildRun.lastStep,
+            }
+          : p.wildRun,
+        phases: (p.phases ?? []).map((r) => ({
+          ...r,
+          startedAt: r.startedAt === null ? null : 0,
+          completedAt: typeof r.completedAt === "number" ? 0 : r.completedAt,
+          gate: r.gate && typeof r.gate === "object" ? { ...(r.gate as object), checkedAt: 0 } : r.gate,
+        })),
+      });
+      assert.deepEqual(
+        normalize(seamless.project),
+        normalize(control.project),
+        "keyless no-seam == floor pipeline (modulo the seam-naming detail)",
+      );
+      assert.equal(seamless.outcome, control.outcome);
+      assert.equal(seamless.code, control.code);
+      // The park record must RIDE the pause on both sides (308 P-1/P-2).
+      assert.equal(seamless.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
+      assert.equal(seamless.project.wildRun?.park?.unlock, "human-gate");
+      const exec = (seamless.project.logs ?? []).find((l) => l.event === "wild.exec");
+      assert.equal(exec?.detail, "P7 executed (deterministic floor)", "the exact keyless floor detail bytes");
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("seeded enforceDod run keeps its exact P7 pause text (probe arm A, unchanged)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const res = await wildStep(p7WildFixture(), { reviewer: approvingP7Reviewer });
+      assert.equal(res.outcome, "paused");
+      assert.equal(res.code, "RT_E_GATE_PENDING");
+      assert.equal(
+        res.error,
+        "P7 DoD unmet — hard gate blocks advance: p7-research.",
+        "the exact hard-DoD error text the probe recorded (arm A)",
+      );
+      assert.equal(res.project.currentPhase, 7, "the cursor never moved past the red gate");
+      assert.equal((res.project.research ?? []).length, 0, "the floor produces no corpus");
+      assert.notEqual(res.project.meta?.liveUnavailable, true, "no waiver is fabricated by the keyless floor");
+      const row = (res.project.logs ?? []).find((l) => l.event === "wild.paused_dod");
+      assert.ok(row, "wild.paused_dod row present");
+      assert.equal(row!.detail, "P7 DoD unmet — hard gate blocks advance: p7-research");
+      assert.equal(res.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
+      assert.equal(res.project.wildRun?.park?.unlock, "human-gate");
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 316 H1/H3 — the ONE shared execution-edge picker (engine.wildExecEdgeFor),
+// the resolution both the execute site AND the seal's repair pass read (so
+// the two can never drift again — the drift WAS the 315 V2 finding). Three
+// states per phase arm:
+//   1. an injected seam wins in ANY key state (keyless and keyed);
+//   2. keyless without a seam ⇒ null (the byte-identical floor);
+//   3. keyed without a seam ⇒ the production edge function.
+// The keyed arms check the SELECTION only — the returned function is never
+// invoked (no keyed calls). Nothing resolves for phases outside 6/7.
+// ---------------------------------------------------------------------------
+
+describe("316 H1/H3 — the shared execution-edge picker states (wildExecEdgeFor)", () => {
+  const seam = async (q: Project): Promise<Project> => q;
+
+  it("state 1 — an injected seam wins in ANY key state (selection only, never invoked)", () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      assert.equal(wildExecEdgeFor(7, { liveEdge: seam }), seam, "keyless: the injected liveEdge wins");
+      assert.equal(wildExecEdgeFor(6, { p6Edge: seam }), seam, "keyless: the injected p6Edge wins");
+      process.env.DEEPSEEK_API_KEY = "selection-pin-not-a-real-key";
+      assert.equal(
+        wildExecEdgeFor(7, { liveEdge: seam }),
+        seam,
+        "keyed: the injected liveEdge STILL wins (the seam contract — any key state)",
+      );
+      assert.equal(
+        wildExecEdgeFor(6, { p6Edge: seam }),
+        seam,
+        "keyed: the injected p6Edge STILL wins (the W-01 contract)",
+      );
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("state 2 — keyless without a seam resolves null (the byte-identical deterministic floor)", () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      assert.equal(wildExecEdgeFor(7, undefined), null);
+      assert.equal(wildExecEdgeFor(7, {}), null);
+      assert.equal(wildExecEdgeFor(6, undefined), null, "the P6 arm keeps its keyless floor");
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("state 3 — keyed without a seam resolves the production edge function (selection only)", () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      process.env.DEEPSEEK_API_KEY = "selection-pin-not-a-real-key";
+      const p7 = wildExecEdgeFor(7, undefined);
+      const p6 = wildExecEdgeFor(6, undefined);
+      assert.equal(typeof p7, "function", "keyed P7 resolves the wildLiveEdge production edge");
+      assert.equal(typeof p6, "function", "keyed P6 resolves the wildP6Edge production edge");
+      assert.notStrictEqual(p7, p6, "phase 7 and phase 6 resolve distinct production edges");
+      assert.notStrictEqual(p7, seam, "an ABSENT seam never resolves to a caller function");
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("phases outside 6/7 never resolve an edge (no spillover)", () => {
+    assert.equal(wildExecEdgeFor(3, { liveEdge: seam, p6Edge: seam }), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 316 H3 (315 V2 findings #1/#2; final in 316_wd3_guard.md §RESCUES) — the
+// seal's ONE DoD-repair pass is CONSUMED: `wildDodRepairOnce` reads the
+// injected `opts.dodRepair` seam first (declared but consumed by nobody
+// before 316), else the SAME `wildExecEdgeFor(phase, opts)` edge the step
+// executes through — so the repair can never drift from the execute site
+// again (the drift WAS the finding: the repair read `opts.p6Edge` only and
+// was production-dead on a real sealed run). A repaired result whose OWN
+// re-run gate is green proceeds; a null/absent repair keeps the honest park.
+// The pins drive the same seeded P7 fixture through the real leave path:
+// the floor executes, its exit gate goes red on p7-research, and the seal's
+// repair pass is the only thing standing between red and the park.
+// ---------------------------------------------------------------------------
+
+describe("316 H3 — the seal's repair pass consumes the dodRepair seam", () => {
+  it("a repaired project ⇒ the DoD-red path proceeds (advance to P8; the seam saw the red candidate)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const calls: { phase: number; gatePass: boolean }[] = [];
+      const res = await wildStep(p7WildFixture(), {
+        reviewer: approvingP7Reviewer,
+        agentSeal: true,
+        dodRepair: async (q, phase) => {
+          calls.push({ phase, gatePass: runGate(q, 7).pass });
+          return {
+            ...q,
+            research: [
+              ...(q.research ?? []),
+              {
+                query: "pin:repair",
+                provider: "pin-repair",
+                items: [
+                  {
+                    title: "Repaired finding",
+                    url: "https://example.invalid/repair-h3",
+                    content: "Repair seam pin — clears p7-research.",
+                  },
+                ],
+              },
+            ],
+          };
+        },
+      });
+      assert.equal(calls.length, 1, "exactly ONE repair pass (313 D1's bound)");
+      assert.equal(calls[0]!.phase, 7, "the repair runs on the sealed phase");
+      assert.equal(calls[0]!.gatePass, false, "the repair runs on the DoD-RED candidate, never a green one");
+      assert.equal(res.outcome, "advanced", "a repaired green gate lets the unattended run proceed");
+      assert.equal(res.project.currentPhase, 8);
+      assert.equal((res.project.research ?? []).length, 1, "the REPAIRED project is the one that proceeds");
+      assert.equal(
+        (res.project.logs ?? []).some((l) => l.event === "wild.paused_dod"),
+        false,
+        "no park when the repair cleared the gate",
+      );
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("a null-returning seam ⇒ honest park naming the declined repair (probe-arm-A text intact)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const calls: number[] = [];
+      const res = await wildStep(p7WildFixture(), {
+        reviewer: approvingP7Reviewer,
+        agentSeal: true,
+        dodRepair: async (_q, phase) => {
+          calls.push(phase);
+          return null;
+        },
+      });
+      assert.equal(calls.length, 1, "the decline is consulted exactly once");
+      assert.equal(res.outcome, "paused");
+      assert.equal(res.code, "RT_E_GATE_PENDING");
+      assert.equal(res.error, "P7 DoD unmet — hard gate blocks advance: p7-research.");
+      const row = (res.project.logs ?? []).find((l) => l.event === "wild.paused_dod");
+      assert.ok(row, "wild.paused_dod row present");
+      assert.ok(
+        row!.detail.includes("(repair seam declined P7 — honest park)"),
+        `the park names the declined repair: ${row!.detail}`,
+      );
+      assert.equal(res.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
+      assert.equal(res.project.wildRun?.park?.unlock, "human-gate");
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("no seal ⇒ the seam is never called (opt-in consent — pre-seal bytes)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      let calls = 0;
+      const res = await wildStep(p7WildFixture(), {
+        reviewer: approvingP7Reviewer,
+        dodRepair: async () => {
+          calls += 1;
+          return null;
+        },
+      });
+      assert.equal(calls, 0, "agentSeal absent ⇒ the repair pass never fires");
+      assert.equal(res.outcome, "paused");
+      const row = (res.project.logs ?? []).find((l) => l.event === "wild.paused_dod");
+      assert.equal(
+        row!.detail,
+        "P7 DoD unmet — hard gate blocks advance: p7-research",
+        "no repair suffix when the seal is off (byte-identical pre-seal pause)",
+      );
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("seal, keyless, no seam ⇒ the honest no-edge park (a blind floor re-run is not a repair, B-07)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const res = await wildStep(p7WildFixture(), { reviewer: approvingP7Reviewer, agentSeal: true });
+      assert.equal(res.outcome, "paused");
+      assert.equal(res.code, "RT_E_GATE_PENDING");
+      const row = (res.project.logs ?? []).find((l) => l.event === "wild.paused_dod");
+      assert.ok(row, "wild.paused_dod row present");
+      assert.ok(
+        row!.detail.includes("(no non-floor repair edge for P7 — honest park)"),
+        `the park names the missing non-floor edge: ${row!.detail}`,
+      );
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
   });
 });

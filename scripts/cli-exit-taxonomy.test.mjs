@@ -44,6 +44,11 @@
 //      keyless `wild --start` must land wild.step_* rows in the NDJSON log
 //      while the success envelope stays the plain shape (the hop is
 //      emission-side only — it must never alter envelope or project bytes).
+//  10. (316 · H3/I2, behavioral spawn) the `--agent-seal` pointer refusals:
+//      `approve`/`gate` refuse CODED (exit 1) naming the wild door.
+//  11. (316 · H7's gap; I3 finisher, behavioral spawn) the fresh-command
+//      floor: bare / `--help` / unknown verb → exit 1 + one
+//      `RT_E_VALIDATION` envelope, no stack.
 //
 // House rules honored: cwd-independent (paths via import.meta.url — a
 // scripts-leg test must not depend on process cwd); failure messages name the
@@ -552,6 +557,131 @@ test("312 B-02 — the wild verb's onEvent hop lands wild.step_* rows in the NDJ
       stepRows.every((r) => r.host === "cli" && r.scope === "wild-step"),
       "every wild.step_* row must be a CLI-stamped wild-step row (makeCliRow)",
     );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Leg 10 (316 · H3, 315 V2 finding #4 — BEHAVIORAL spawn). `--agent-seal` is a
+// WILD-RUN concept; `wild --start|--resume --agent-seal` is the ONE door that
+// threads it into the wild loop. Before H3, parseArgs absorbed the flag on the
+// drive verbs, so `approve --agent-seal` / `gate --agent-seal` were silently
+// ignored — a governance flag a caller could believe had applied, when it
+// never could. The fix is ONE coded pointer refusal (RT_E_VALIDATION + the
+// remedy naming the wild door). This leg spawns the real CLI on both verbs
+// and pins the envelope bytes: the refusal fires on the flag alone — BEFORE
+// any project load (no `--project` is passed at all) — exits 1, and never
+// STACKs. A source-text doc guard keeps README-cli.md's refusal sentence.
+// ---------------------------------------------------------------------------
+test("316 H3 — `approve`/`gate --agent-seal` refuse CODED with the wild-door pointer (exit 1)", () => {
+  assert.ok(
+    readmeText.includes("approve/gate/run/resume/unattended REFUSE --agent-seal"),
+    "README-cli.md must keep the refusal sentence naming the five verbs that REFUSE --agent-seal (H3 · 315 V2 #4)",
+  );
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-seal-refusal-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  try {
+    for (const verb of ["approve", "gate"]) {
+      // No --project: the refusal must fire on the flag alone, before any load.
+      const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, verb, "--agent-seal"], {
+        cwd,
+        env,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      assert.equal(res.error, undefined, `spawn failed: ${String(res.error)}`);
+      const stderr = res.stderr ?? "";
+      assert.ok(
+        !/(^|\n)\s+at\s/.test(stderr),
+        `${verb} --agent-seal must never print a Node stack:\n${stderr}`,
+      );
+      assert.equal(
+        res.status,
+        1,
+        `${verb} --agent-seal → exit 1 (RT_E_VALIDATION is usage-class).\nstdout: ${res.stdout}\nstderr: ${stderr}`,
+      );
+      const json = JSON.parse(res.stdout);
+      assert.equal(json.cmd, verb, "the envelope names the verb the flag was refused on");
+      assert.equal(json.ok, false);
+      assert.equal(json.code, "RT_E_VALIDATION", "the absorbed seal flag must classify coded, never be swallowed");
+      assert.ok(
+        String(json.error).includes(`${verb}: --agent-seal does not apply here`),
+        `the refusal names the verb + flag: ${json.error}`,
+      );
+      assert.ok(
+        String(json.remedy).includes("wild --start --agent-seal"),
+        `the remedy names the ONE door that carries the seal: ${json.remedy}`,
+      );
+      assert.equal(json.exit_code, res.status, "the envelope's exit_code must equal the process exit");
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Leg 11 (316 · H7's survivability gap; I3 finisher — BEHAVIORAL spawn). H7's
+// sweep verified the fresh-command floor (bare / `--help` / unknown verb all
+// refuse cleanly: exit 1, one JSON envelope, RT_E_VALIDATION, no stack) but
+// nothing pinned it. One guard, three shapes: a fresh command must never
+// answer with a Node stack, a non-canonical exit, or stderr output — and its
+// refusal must carry the ERROR_CODE_DOC remedy (the K5/K6 coded-refusal seam).
+// ---------------------------------------------------------------------------
+test("316 I3 — the fresh-command floor: bare / --help / unknown verb refuse CODED (exit 1, RT_E_VALIDATION), never STACK", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-floor-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  const shapes = [
+    { argv: [], label: "(bare)", errorMatch: "Missing subcommand.", cmd: null },
+    { argv: ["--help"], label: "--help", errorMatch: "Missing subcommand.", cmd: null },
+    { argv: ["noverb-316"], label: "unknown verb", errorMatch: "Unknown subcommand: noverb-316", cmd: "noverb-316" },
+  ];
+  try {
+    for (const shape of shapes) {
+      const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...shape.argv], {
+        cwd,
+        env,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      assert.equal(res.error, undefined, `[${shape.label}] spawn failed: ${String(res.error)}`);
+      const stderr = res.stderr ?? "";
+      assert.ok(
+        !/(^|\n)\s+at\s/.test(stderr),
+        `[${shape.label}] the floor must never print a Node stack:\n${stderr}`,
+      );
+      assert.equal(
+        res.status,
+        1,
+        `[${shape.label}] a fresh-command refusal is usage-class: exit 1.\nstdout: ${res.stdout}\nstderr: ${stderr}`,
+      );
+      let json = null;
+      try {
+        json = JSON.parse(res.stdout);
+      } catch {
+        /* surfaced by the assert below */
+      }
+      assert.ok(json, `[${shape.label}] exactly one JSON envelope on stdout.\nstdout: ${res.stdout}`);
+      assert.equal(json.ok, false, `[${shape.label}] refusal envelope`);
+      assert.equal(json.cmd, shape.cmd, `[${shape.label}] the envelope's cmd matches the invocation shape`);
+      assert.equal(
+        json.code,
+        "RT_E_VALIDATION",
+        `[${shape.label}] the floor is the validation class — a generic/missing code means the guard drifted`,
+      );
+      assert.ok(String(json.error).includes(shape.errorMatch), `[${shape.label}] error names the shape: ${json.error}`);
+      assert.ok(
+        typeof json.remedy === "string" && json.remedy.length > 0,
+        `[${shape.label}] a coded refusal carries its ERROR_CODE_DOC remedy (the K5/K6 seam)`,
+      );
+      assert.equal(json.exit_code, res.status, `[${shape.label}] the envelope's exit_code must equal the process exit`);
+    }
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

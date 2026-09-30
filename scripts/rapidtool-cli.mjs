@@ -712,7 +712,42 @@ async function main() {
           // checkpoint beside the project dir; a complete seal clears it.
           checkpointDir: dirname(resolve(path)),
         });
-        h.saveProject(path, res.project);
+        // M6-04 (312 · E2's owed half; landed 316 · I4): the save goes through
+        // the ONE busy-aware helper — bounded wait-and-retry (each attempt
+        // re-enters saveProject, so the fixes/310 reclaimStaleLock discipline
+        // runs on every retry: a SIGKILL-orphaned lock is reclaimed, a
+        // transiently-held live lock usually clears inside the window). A
+        // still-live writer gets a CODED RT_E_BUSY refusal at the
+        // README-documented busy exit 1 — never the global net's exit 4, the
+        // 308 map6 lost-update mislabel — carrying `preserved`: the run
+        // checkpoint beside the project dir where the completed phase work
+        // lives (`resume --project` re-enters it), so writer contention can
+        // never silently discard a run's completed work again.
+        const saved = await h.saveProjectBusyAware(path, res.project);
+        if (!saved.ok) {
+          const cpModule = await checkpointDriver();
+          const cpPath = cpModule.checkpointPath(dirname(resolve(path)));
+          const cpPresent = existsSync(cpPath);
+          respond(
+            {
+              ok: false,
+              path,
+              ...(unattended ? { unattended: true } : {}),
+              code: "RT_E_BUSY",
+              error:
+                `${saved.error} — another writer held ${saved.lockPath} through the whole bounded retry window. ` +
+                (cpPresent
+                  ? `The completed phase work is preserved in the run checkpoint — wait for the writer to exit, then re-enter with \`resume --project ${path}\`.`
+                  : `No resume checkpoint exists for this run (a terminal seal clears it) — wait for the writer to exit, then re-run this verb.`),
+              preserved: { checkpoint: cpPath, present: cpPresent, resume: cpPresent ? `resume --project ${path}` : null },
+              steps: res.steps,
+              stopped: res.stopped,
+              outcome: res.outcome,
+            },
+            1,
+          );
+          return;
+        }
         // E-25: parked awaiting human / blocked → exit 2 (state fully on
         // stdout); complete / mid-run cap → 0.
         const parked = res.project.status === "awaiting_hitl" || res.project.status === "blocked";
@@ -2294,8 +2329,11 @@ async function main() {
       case "crew": {
         const project = loadProjectFor("crew");
         const opts = {};
-        if (typeof args.maxSteps === "string" && /^\d+$/.test(args.maxSteps)) {
-          opts.maxSteps = parseInt(args.maxSteps, 10);
+        // 316 H7 (carried by I4): parseArgs stores the raw `--max-steps` key —
+        // reading `args.maxSteps` silently ignored the ONE documented crew knob
+        // (the flag parsed fine, then no-oped). Read the key the parser writes.
+        if (typeof args["max-steps"] === "string" && /^\d+$/.test(args["max-steps"])) {
+          opts.maxSteps = parseInt(args["max-steps"], 10);
         }
         const res = await h.runCrew(project, opts);
         if (res.ok === false) {

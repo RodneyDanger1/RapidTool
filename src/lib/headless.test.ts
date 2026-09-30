@@ -261,6 +261,72 @@ describe("file persistence (atomic)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// fixes/316_h7 · ADDENDUM P1 (I3 finisher) — the interrupted-save pin. H7's
+// survivability sweep verified saveProject's temp+rename atomicity
+// (headless.ts:222-259) but nothing simulated an INTERRUPTED write: (a) a
+// killed writer's truncated temp must be inert, (b) a temp write that fails
+// inside the save must propagate with the original + lock state clean.
+// ---------------------------------------------------------------------------
+describe("fixes/316_h7 addendum P1 (I3) — an interrupted save never dents the original", () => {
+  it("a killed writer's truncated temp is inert — the original survives, the next save lands", () => {
+    const dir = tempDir();
+    try {
+      const path = join(dir, "build.json");
+      const v1 = createProject({ brief: FIXTURE_BRIEF });
+      saveProject(path, v1);
+      const v1Bytes = readFileSync(path, "utf8");
+      // Exactly what an interrupted (SIGKILLed) save leaves behind: a
+      // half-written temp beside an untouched target — the rename never ran.
+      writeFileSync(`${path}.tmp-99999-1`, v1Bytes.slice(0, Math.floor(v1Bytes.length / 2)), "utf8");
+      assert.equal(loadProject(path).id, v1.id, "a half-written temp must never affect the target");
+      const v2 = createProject({ brief: FIXTURE_BRIEF + " — second build" });
+      saveProject(path, v2);
+      assert.equal(loadProject(path).id, v2.id, "the next save lands cleanly alongside the residue");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a temp write that fails inside the save propagates — original intact, lock released, retry lands", () => {
+    const dir = tempDir();
+    const realNow = Date.now;
+    const FIXED = 1_700_000_000_000;
+    try {
+      const path = join(dir, "build.json");
+      const v1 = createProject({ brief: FIXTURE_BRIEF });
+      saveProject(path, v1);
+      // Deterministic fault: the save's temp name is pid+clock; freeze the
+      // clock and plant a DIRECTORY at that exact name, so writeFileSync
+      // throws inside the save's try (the aborted-write path). No fs
+      // monkeypatching — ESM named imports of node:fs are not patchable.
+      Date.now = () => FIXED;
+      mkdirSync(`${path}.tmp-${process.pid}-${FIXED}`);
+      const v2 = createProject({ brief: FIXTURE_BRIEF + " — second build" });
+      let thrown: unknown = null;
+      try {
+        saveProject(path, v2);
+      } catch (e) {
+        thrown = e;
+      }
+      assert.ok(thrown, "the aborted save must propagate its error, never claim success");
+      assert.notEqual(
+        (thrown as Error & { code?: string }).code,
+        "RT_E_BUSY",
+        "the lock was acquired — the throw comes from the WRITE step, not contention",
+      );
+      Date.now = realNow; // unblock the retry (the residue directory stays, as a killed writer's would)
+      assert.equal(loadProject(path).id, v1.id, "the original bytes survive a failed save's catch path");
+      assert.ok(!existsSync(`${path}.lock`), "the failed save still released its lock (finally)");
+      saveProject(path, v2);
+      assert.equal(loadProject(path).id, v2.id, "a retry after the failure lands");
+    } finally {
+      Date.now = realNow;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("runPhase (deterministic)", () => {
   it("synthesizes phase 0 (scorecard + packet) without throwing", async () => {
     const p = createProject({ brief: FIXTURE_BRIEF });

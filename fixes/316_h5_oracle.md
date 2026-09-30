@@ -22,12 +22,12 @@ Owns (per lane brief): `scripts/run-eval.mjs`, `scripts/run-eval.test.mjs`, the 
 
 | # | Item | Verdict | Evidence |
 |---|------|---------|----------|
-| R1 | Eval-side machinery read: entry-runs oracle + spec shape (`expectExit`/`expectedStdout`) | PENDING | |
-| R2 | Tree-run/emit path read: where the entry is spawned with ENTRY_RUN_TIMEOUT_MS | PENDING | |
-| W1 | Oracle reaches product path: entry-run verdict asserts declared exit/stdout, coded outcome, honest skip | PENDING | |
+| R1 | Eval-side machinery read: entry-runs oracle + spec shape (`expectExit`/`expectedStdout`) | PASS | Recon (prior session, watchdog-verified 5/5): `evaluateEntryRunsRow` `run-eval.mjs:811-877`; `checkExpectedBehavior` `:900-987`; row validate `:385-463`. |
+| R2 | Tree-run/emit path read: where the entry is spawned with ENTRY_RUN_TIMEOUT_MS | PASS | `compile-check.server.ts:1264 treeRun` → `resolveEntry :1059-1105` → `runEntryFile :1108-1133` = load-import only; `outcome.ok` :1397; consumers CLI `emit --run :1380-1421` + `tree-run :1718-1786` exit 1 on `!ok` for free. |
+| W1 | Oracle reaches product path: entry-run verdict asserts declared exit/stdout, coded outcome, honest skip | LANDING | |
 | P1 | Pin: good tree passes the new verdict | PENDING | |
 | P2 | Pin: entry-with-wrong-output FAILS the tree verdict (oracle bites) | PENDING | |
-| T1 | rt-events import + run-level emissions in run-eval.mjs (bounded, non-throwing) | PENDING | |
+| T1 | rt-events import + run-level emissions in run-eval.mjs (bounded, non-throwing) | LANDING | |
 | T2 | Pin: `grep -c rt-events run-eval.mjs` > 0 + telemetry smoke | PENDING | |
 | G1 | Gates: typecheck / lint / scoped tests / build | PENDING | |
 
@@ -35,3 +35,21 @@ Owns (per lane brief): `scripts/run-eval.mjs`, `scripts/run-eval.test.mjs`, the 
 
 - Entry: HEAD `564db1f` confirmed; clean tree. W43 briefs located (T6.3 line 78, T5.4 line 69).
 - Next: read `run-eval.mjs` 700–900 (oracle), the tree-run verdict seam, and the rt-events emit API.
+- **Landing pass (HEAD 71154b1).** Recon confirmed as H5 left it (watchdog-verified). Settled wire, keyless:
+  1. **One shared primitive, no second truth source**: new `src/lib/entry-oracle.ts` = the moved
+     `evaluateEntryRunsRow` body (`runEntryOracle`), the `checkExpectedBehavior` body
+     (`checkEntryContract`), and the parseGrader expectedBehavior row validation
+     (`validateExpectedBehavior`) — **verbatim moves**, so run-eval.mjs keeps byte-identical
+     output. `run-eval.mjs` delegates to it (its exported `checkExpectedBehavior` stays).
+  2. **The product wire**: `treeRun` reads a declaration from the emitted tree's own ledger
+     `.rapidtool/project.json` (top-level `expectedBehavior`, the same row shape graders use);
+     when declared, it runs a REAL bounded `spawnSync` per `entry-runs` row (15s clamp,
+     allowlisted env, cwd = the temp-copy subject) and the verdict gains a `behavior` factor
+     that ANDs into `outcome.ok`. Absent declaration ⇒ no factor, byte-stable (nothing new in
+     the outcome, nothing new in `treeVerdictHash`).
+  3. **T5.4**: `run-eval.mjs` imports `rt-events.ts` + `runtime-log.server.ts` and emits a
+     BOUNDED run-level telemetry set (`eval.run_start` / `eval.run_end` / crash `eval.run_error`,
+     ≤3 rows) in the wildStep seed shape; catalogue additions are additive + pinned.
+- Baseline claim re-checked at 71154b1: `grep -c "rt-events" scripts/run-eval.mjs` = 0 (T5.4 gap
+  real); `expectedBehavior` present only in run-eval.mjs + graders (no product-path carrier
+  exists — the in-tree `.rapidtool/project.json` declaration is the wire).
