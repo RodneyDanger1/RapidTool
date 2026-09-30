@@ -2416,6 +2416,39 @@ async function applyTreeRunTestedMint(project: Project, verdict: TreeRunOutcome)
 }
 
 /**
+ * T9.3 promotion (W44 · G3 · applied from fixes/319_f3_promote §C): a genuinely
+ * GREEN tree-run over an EMITTED dir promotes the dir's OWN
+ * `.rapidtool/project.json` record to the tested stamp + evidence hash the run
+ * just earned — the same self-guarded mint the journeys use (mintTreeRunTested:
+ * outcome.ok AND ≥1 executed assertion). A red run, an ok run that executed no
+ * spec, an already-tested project, or a dir that carries no record writes
+ * NOTHING into the dir (absence is honest; a stamp is never fabricated,
+ * downgraded, or repaired into existence).
+ */
+export async function promoteEmittedTreeTested(
+  project: Project,
+  dir: string,
+  outcome: TreeRunOutcome,
+): Promise<{ project: Project; promoted: boolean }> {
+  const before = (project.lastTest as { label?: string } | null | undefined)?.label ?? null;
+  const minted = await applyTreeRunTestedMint(project, outcome);
+  const after = (minted.lastTest as { label?: string } | null | undefined)?.label ?? null;
+  // Fresh mint only: `tested` earned by THIS verdict (idempotent with the
+  // mint's own early return; an existing stamp is never rewritten).
+  if (after !== "tested" || before === "tested") return { project: minted, promoted: false };
+  const recordPath = resolve(dir, ".rapidtool", "project.json");
+  if (!existsSync(recordPath)) return { project: minted, promoted: false };
+  try {
+    writeFileSync(recordPath, exportProjectJson(minted), "utf8");
+    return { project: minted, promoted: true };
+  } catch {
+    // best-effort: the minted LEDGER still returns to the caller; the artifact
+    // record is left exactly as emitted (never half-promoted).
+    return { project: minted, promoted: false };
+  }
+}
+
+/**
  * fixes/144 (M4-2): bounded produce→run→repair journey for keyed P6.
  *
  * Contract: `project` is positioned at the P6 live edge (priors sealed, the P6

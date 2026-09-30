@@ -15,8 +15,8 @@
 //   9. unclassified-errors (errors exist, no named rule)  10. none-detected
 //
 // EXPORT SURFACE (compile against these — do not rename):
-//   buildDiagnosis · type DiagnosisInput · type DiagnosisJson ·
-//   type DiagnosisCause
+//   buildDiagnosis · projectWildRun · type DiagnosisInput ·
+//   type DiagnosisJson · type DiagnosisCause
 // ---------------------------------------------------------------------------
 
 import { ERROR_CODE_DOC, type ErrorCode } from "./errors.ts";
@@ -31,8 +31,12 @@ export type DiagnosisWildRun = {
   startedAt: number | null;
   lastAutoAt: number | null;
   lastAutoLog: string | null;
+  /** Persisted stop timestamp, verbatim (null while the run was never stopped)
+   *  — never a read-time fallback (fixes/320 G2: a parked run reads null). */
   stoppedAt: number | null;
-  /** ms since lastAutoAt (stale ⇒ the step may be wedged). */
+  /** DERIVED, only while the run is genuinely progressing (active && !pause):
+   *  ms since lastAutoAt (stale ⇒ the step may be wedged). Parked/stopped runs
+   *  → null (fixes/320 G2 — no growing clock on a run that is not advancing). */
   overdueMs: number | null;
 } | null;
 
@@ -134,6 +138,46 @@ type RankedMatch = { class: string; summary: string; evidence: string[] };
 /** Error-row index refs cited as evidence (row order = input errors array). */
 function rowRefs(prefix: string, indices: number[]): string[] {
   return indices.map((i) => `${prefix}[${i}]`);
+}
+
+/**
+ * G2 (fixes/320): the ONE canonical projection from a persisted wildRun value
+ * to the diagnosis wildRun view. `raw` must be DISK TRUTH — the record as
+ * stored. Callers that load a project file pass `preserveWildRun: true` so the
+ * hydrate cannot force-stop a persisted active run into a read-time artifact
+ * first (engine.hydrateWildRun does exactly that by default; the CLI's
+ * diagnose load used to omit the flag — T1 F-D / T2 BUG-2).
+ *
+ * No read-time fabrication, ever:
+ *   • `stoppedAt` is the persisted number-or-null, VERBATIM — a run that was
+ *     never stopped keeps `null`; nothing here stamps `Date.now()`.
+ *   • `overdueMs` is derived ONLY while the run is genuinely progressing
+ *     (`active && !pause && lastAutoAt !== null`) — the same idiom the UI path
+ *     already uses (rt-client.ts `projectToDiagnosis`); a parked or stopped
+ *     run has no overdue clock, so the field is `null`, never a growing
+ *     `now - lastAutoAt`.
+ * Junk input (null / non-object / array) → null, never a throw — this feeds
+ * both the live Runtime Log pane and the CLI envelope (M3 hostile-input
+ * spirit, same as the guards inside buildDiagnosis).
+ */
+export function projectWildRun(raw: unknown, now: number): DiagnosisWildRun {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const w = raw as Record<string, unknown>;
+  const numOrNull = (x: unknown): number | null =>
+    typeof x === "number" && Number.isFinite(x) ? x : null;
+  const active = w.active === true;
+  const pause = w.pause === true;
+  const lastAutoAt = numOrNull(w.lastAutoAt);
+  return {
+    active,
+    pause,
+    phase: numOrNull(w.phase),
+    startedAt: numOrNull(w.startedAt),
+    lastAutoAt,
+    lastAutoLog: typeof w.lastAutoLog === "string" ? w.lastAutoLog : null,
+    stoppedAt: numOrNull(w.stoppedAt),
+    overdueMs: active && !pause && lastAutoAt !== null ? Math.max(0, now - lastAutoAt) : null,
+  };
 }
 
 /**

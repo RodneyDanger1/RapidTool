@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, applyPhaseResult, wildStep, wildExecEdgeFor, type WildReviewer } from "./engine.ts";
+import { emptyProject, applyPhaseResult, wildStep, wildExecEdgeFor, approveHitl, type WildReviewer } from "./engine.ts";
 import { runGate } from "./dod.ts";
 import { mintTreeRunTested } from "./codegen.server.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
@@ -1057,5 +1057,109 @@ describe("T6.2(c) — the no-mint ⇒ P6-red walk (W43 canon; fixes/317_j2_prefl
       if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
       else process.env.DEEPSEEK_API_KEY = savedKey;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GAP-1 (fixes/320_g1b_review_park.md · 319 FINDING-2): the ADVANCE-review
+// classifier reject mints the same human decision gate as the gate-review
+// reject — and the deterministic DoD-floor reject mints NOTHING (the keyless
+// pure-floor honesty story stays byte-identical). Drives the REAL floor exec
+// and the REAL P6 mint through the F2 harness (p6NoMintFixture +
+// p6SeamWith), in production order.
+// ---------------------------------------------------------------------------
+describe("GAP-1 advance-arm mint + floor control (fixes/320)", () => {
+  it("F2 harness + rejecting reviewer: minted forceHuman gate on P6; the floor reject stays unminted", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const rejectFb =
+        "P6 evidence is a skipped spec file — the tree executed nothing, so the phase cannot be honestly judged as tested. Remediate before any human advance decision.";
+      const rejecting: WildReviewer = async () => ({ ok: true, verdict: "reject", feedback: rejectFb, model: "pin" });
+      const res = await wildStep(p6NoMintFixture(), {
+        reviewer: rejecting,
+        p6Edge: p6SeamWith(greenExecutedOutcome()),
+      });
+      assert.equal(res.outcome, "paused", "a persistent classifier reject parks after the bound");
+      assert.equal(res.code, "RT_E_GATE_PENDING");
+      assert.equal(res.error, rejectFb);
+
+      const gate = res.project.hitl;
+      assert.ok(gate, "the advance-reject arm mints the human gate too");
+      assert.equal(gate.phase, 6);
+      assert.equal(gate.forceHuman, true);
+      assert.equal(gate.prompt, rejectFb);
+      assert.equal(res.project.status, "awaiting_hitl");
+      assert.equal(res.project.phases.find((r) => r.id === 6)?.status, "awaiting_hitl");
+      assert.equal(res.project.wildRun?.park?.unlock, "human-gate");
+      assert.equal(res.project.wildRun?.park?.resumeAction, "gate", "resume re-enters the gate — never a silent advance");
+
+      assert.throws(() => approveHitl(res.project, { decidedBy: "autopilot" }), /forceHuman/);
+      const done = approveHitl(res.project, { decidedBy: "human", note: "Accepting the P6 risk explicitly for this pin." });
+      assert.equal(done.hitl, null);
+      assert.equal(done.currentPhase, 7, "the human approve moves the cursor");
+
+      // CONTROL — the SAME walk resolving to the deterministic DoD-floor
+      // reject (source "dod") mints nothing: keyless pure-floor bytes hold.
+      const floor = await wildStep(p6NoMintFixture(), {
+        reviewer: notConfiguredReviewer,
+        p6Edge: p6SeamWith(greenNoSpecOutcome()),
+      });
+      assert.equal(floor.outcome, "paused");
+      assert.equal(floor.code, "RT_E_GATE_PENDING");
+      assert.equal(floor.project.hitl ?? null, null, "the DoD-floor reject mints NOTHING");
+      assert.notEqual(floor.project.status, "awaiting_hitl");
+      assert.ok(String(floor.error).includes("Deterministic DoD review"));
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BUG-5 (fixes/320_g1b_review_park.md · 319 FINDING-3b): the park surfaces
+// (reason + lastAutoLog) carry up to 600 chars + an explicit ellipsis — the
+// old 200/300 mid-word cuts hid the classifier's required-fixes list from
+// console/CLI readers (the ledger row was always full).
+// ---------------------------------------------------------------------------
+describe("BUG-5 park surface budget 600 + ellipsis (fixes/320)", () => {
+  const LONG = `critique head ${"x".repeat(650)} CRITIQUE_TAIL_MARKER`;
+
+  it("a long reject detail lands on both park surfaces at 600 chars + ellipsis", async () => {
+    const rejecting: WildReviewer = async () => ({ ok: true, verdict: "reject", feedback: LONG, model: "pin" });
+    const res = await wildStep(wildFixture("awaiting_hitl"), { reviewer: rejecting });
+    const expectedReason = `${LONG.slice(0, 600)}…`;
+    const expectedLog = `${`P0 review REJECTED: ${LONG}`.slice(0, 600)}…`;
+    assert.equal(res.project.wildRun?.park?.reason, expectedReason, "park.reason: 600 + ellipsis (was a 200 mid-word cut)");
+    assert.equal(res.project.wildRun?.lastAutoLog, expectedLog, "lastAutoLog: 600 + ellipsis (was a 300 mid-word cut)");
+    assert.ok(!expectedReason.includes("CRITIQUE_TAIL_MARKER"), "the cut is real: the tail marker sits beyond 600");
+  });
+
+  it("a short detail passes through byte-identically (no gratuitous ellipsis)", async () => {
+    const res = await wildStep(wildFixture("locked"), { reviewer: notConfiguredReviewer });
+    assert.equal(
+      res.project.wildRun?.lastAutoLog,
+      "P0 is locked — wild run paused.",
+      "under-budget details are byte-identical to the pre-fix surface",
+    );
+  });
+
+  it("the parkIfNull mirror also emits 600 + ellipsis on an over-budget error park", async () => {
+    const longErr = `provider exploded ${"y".repeat(650)} ERROR_TAIL_MARKER`;
+    const failing: WildReviewer = async () => ({ ok: false, reason: "error", error: longErr });
+    const res = await wildStep(wildFixture("awaiting_hitl"), { reviewer: failing });
+    assert.equal(res.outcome, "paused");
+    assert.equal(res.code, "RT_E_LLM_REJECTED");
+    assert.equal(
+      res.project.wildRun?.park?.reason,
+      `${longErr.slice(0, 600)}…`,
+      "parkIfNull's detail pre-slice raised to 600 + ellipsis",
+    );
+    assert.equal(
+      res.project.wildRun?.lastAutoLog,
+      `${`P0 Auto-Review failed: ${longErr}`.slice(0, 600)}…`,
+      "the error arm's lastAutoLog truncation",
+    );
   });
 });

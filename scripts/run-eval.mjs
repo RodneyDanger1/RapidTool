@@ -87,6 +87,7 @@ import {
   runUntilGate,
   approve,
   driveP6Journey,
+  promoteEmittedTreeTested,
   emitProject,
 } from "../src/lib/headless.ts";
 import { treeRun } from "../src/lib/compile-check.server.ts";
@@ -2074,6 +2075,20 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     // 3) Tree-run the emitted dir (M2 evidence) — ONCE, at the end.
     runOutcome = await treeRun(emitDir);
     treeEv = treeRunToEvidence(runOutcome);
+    // T9.3 promotion (W44 · G3 · applied from fixes/319_f3_promote §C): a
+    // green M2 run promotes the emitted artifact's OWN record to the tested
+    // stamp + evidence hash — the handover artifact then carries the machine
+    // verdict it earned. Additive evidence only (`treeRunToEvidence` pins
+    // assert fields, never a frozen key set — run-eval.test.mjs:171-191),
+    // best-effort: the M2 verdict itself stands regardless.
+    if (runOutcome && runOutcome.ok === true && treeEv) {
+      try {
+        const prom = await promoteEmittedTreeTested(finalProject, emitDir, runOutcome);
+        if (prom.promoted) treeEv.minted = true;
+      } catch {
+        /* promotion is best-effort evidence; the M2 verdict stands */
+      }
+    }
   } else {
     handoverEv = {
       emitted: false,

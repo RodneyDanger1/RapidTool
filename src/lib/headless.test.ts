@@ -22,6 +22,7 @@ import {
   loadProject,
   p6CycleLiveDeps,
   packet,
+  promoteEmittedTreeTested,
   reject,
   repairTreeDir,
   retry,
@@ -726,6 +727,40 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
       "green tree-run with executed specs ⇒ tested-equivalent minted (C-1 defuses the gate-before-mint deadlock)",
     );
     assert.ok((lt?.evidenceHash ?? "").length > 0, "the mint carries its evidence hash");
+  });
+
+  it("T9.3 (W44 · G3/320 · from 319_f3_promote §C): a green tree-run promotes the emitted dir's OWN project.json to tested + evidenceHash — red/no-spec/recordless dirs write nothing", async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, ".rapidtool"), { recursive: true });
+    const recordPath = join(dir, ".rapidtool", "project.json");
+    const base = createProject({ brief: FIXTURE_BRIEF });
+    writeFileSync(recordPath, JSON.stringify(base, null, 2), "utf8");
+    const executedVerdict: TreeRunOutcome = {
+      ok: true,
+      dir: "",
+      compile: { ok: true, dir: "", checked: 1, passed: 1, failed: 0, skipped: 0, verdicts: [] },
+      tests: [
+        { file: "tests/oracle.spec.ts", compile: "pass", run: "pass", tests: { pass: 1, fail: 0 }, detail: "1 passed" },
+      ],
+      run: { kind: "library", run: "skip", detail: "no entry to smoke" },
+    };
+    const prom = await promoteEmittedTreeTested(base, dir, executedVerdict);
+    assert.equal(prom.promoted, true, "fresh mint over a green executed run ⇒ the artifact record is promoted");
+    const record = JSON.parse(readFileSync(recordPath, "utf8")) as Project;
+    const lt = record.lastTest as { label?: string; evidenceHash?: string } | null | undefined;
+    assert.equal(lt?.label, "tested", "the emitted record carries the tested stamp");
+    assert.ok((lt?.evidenceHash ?? "").length > 0, "and its evidence hash");
+    const promotedBytes = readFileSync(recordPath, "utf8");
+    const red = await promoteEmittedTreeTested(base, dir, { ...executedVerdict, ok: false });
+    assert.equal(red.promoted, false);
+    assert.equal(readFileSync(recordPath, "utf8"), promotedBytes, "a red run writes nothing");
+    const noSpec = await promoteEmittedTreeTested(base, dir, { ...executedVerdict, tests: [] });
+    assert.equal(noSpec.promoted, false);
+    assert.equal(readFileSync(recordPath, "utf8"), promotedBytes, "an ok run that executed no spec writes nothing");
+    const bare = tempDir();
+    const miss = await promoteEmittedTreeTested(base, bare, executedVerdict);
+    assert.equal(miss.promoted, false, "a dir with no record is never stamped");
+    assert.equal(existsSync(join(bare, ".rapidtool", "project.json")), false, "and no record is fabricated into existence");
   });
 
   it("W-02 (fixes/271 · §R1-f02): the P6 edge reaches the tested mint from runPhase AND through runUntilGate (run/gate/wild — ONE seam)", async () => {

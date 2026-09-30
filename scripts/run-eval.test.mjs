@@ -57,7 +57,7 @@ import {
   writeJsonAtomic,
   writeRunStartMarker,
 } from "./run-eval.mjs";
-import { createProject, runUntilGate } from "../src/lib/headless.ts";
+import { createProject, promoteEmittedTreeTested, runUntilGate } from "../src/lib/headless.ts";
 import { ERROR_CODE_DOC } from "../src/lib/errors.ts";
 import { isKnownRtEvent } from "../src/lib/rt-events.ts";
 import { projectRoot } from "./with-app-env.mjs";
@@ -188,6 +188,39 @@ test("F4 (314): treeRunToEvidence carries the verdict hash — and never invents
   // Empty-string hash is not a hash.
   assert.equal(treeRunToEvidence({ ok: true, tests: [], verdictHash: "" }).verdictHash, undefined);
   assert.equal(treeRunToEvidence(null), null);
+});
+
+test("T9.3 (W44 · G3/320 · from 319_f3_promote §C): the promotion run-eval wires after a green M2 run stamps the emitted record; red leaves it byte-identical", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rapidtool-runeval-t93-"));
+  try {
+    mkdirSync(join(dir, ".rapidtool"), { recursive: true });
+    const recordPath = join(dir, ".rapidtool", "project.json");
+    const base = createProject({ brief: "T9.3 promotion pin: a deterministic tiny brief for the run-eval seam." });
+    writeFileSync(recordPath, JSON.stringify(base, null, 2), "utf8");
+    const greenOutcome = {
+      ok: true,
+      dir,
+      compile: { ok: true, dir, checked: 1, passed: 1, failed: 0, skipped: 0, verdicts: [] },
+      tests: [
+        { file: "tests/oracle.spec.ts", compile: "pass", run: "pass", tests: { pass: 1, fail: 0 }, detail: "1 passed" },
+      ],
+      run: { kind: "library", run: "skip", detail: "no entry to smoke" },
+    };
+    // The wire's own contract: the M2 evidence object accepts the additive
+    // `minted` field (nothing frozen), and a green outcome promotes.
+    const ev = treeRunToEvidence(greenOutcome);
+    ev.minted = true;
+    assert.equal(ev.minted, true, "the M2 evidence object accepts the promotion's additive `minted` field");
+    const prom = await promoteEmittedTreeTested(base, dir, greenOutcome);
+    assert.equal(prom.promoted, true, "a green run over the emitted dir promotes the dir's own record");
+    const stamped = readFileSync(recordPath, "utf8");
+    assert.match(stamped, /"label": "tested"/, "the emitted record carries the tested stamp");
+    const red = await promoteEmittedTreeTested(base, dir, { ...greenOutcome, ok: false });
+    assert.equal(red.promoted, false);
+    assert.equal(readFileSync(recordPath, "utf8"), stamped, "a red run leaves the record byte-identical");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("(a) emitted trees on disk carry no grader content (leak scan over the real artifacts)", (t) => {

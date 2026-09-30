@@ -23,7 +23,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, wildStep, type WildReviewer } from "./engine.ts";
+import { emptyProject, wildStep, approveHitl, rejectHitl, unlockRetry, type WildReviewer } from "./engine.ts";
 import { runGate } from "./dod.ts";
 import type { HitlDecision, Project } from "./types.ts";
 
@@ -306,5 +306,106 @@ describe("§S5 full-run step arithmetic (313 C1/D1 — 13 steps, 1/phase, margin
     const STORE_WILD_LOOP_CAP = 20;
     assert.ok(steps <= STORE_WILD_LOOP_CAP, "within the driver cap");
     assert.equal(STORE_WILD_LOOP_CAP - steps, 7, "exact margin 7");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §S6 GAP-1 — a CLASSIFIER review REJECT mints the human decision gate the
+// park's unlockText already promised (fixes/320_g1b_review_park.md · 319
+// FINDING-2). Before the mint the park advertised unlock:"human-gate" while
+// `hitl` stayed null: CLI approve/reject refused ("No pending gate…") and a
+// resume re-reviewed → re-rejected. The mint is the fix; these pins freeze it.
+// ---------------------------------------------------------------------------
+describe("§S6 GAP-1 review-reject mint (fixes/320)", () => {
+  const REJECT_CRITIQUE =
+    "P0 artifacts are generic floor boilerplate: no real domain research, the scorecard contradicts the brief, and the security section is a template. Rework with concrete evidence before this phase may advance.";
+
+  it("sealed reject mints a forceHuman gate on both layers; autopilot is refused; a human approve completes the phase", async () => {
+    const c = counting(() => ({ ok: true, verdict: "reject" as const, feedback: REJECT_CRITIQUE, model: "test" }));
+    const res = await wildStep(wildFixture(), { reviewer: c.reviewer, agentSeal: true, retryBackoffMs: 5 });
+    assert.equal(res.outcome, "paused", "the run still parks — mint ≠ auto-advance");
+    assert.equal(res.code, "RT_E_GATE_PENDING");
+    assert.equal(c.calls(), 3, "initial ask + exactly 2 retries, then the park");
+
+    // (1) the human door now exists on BOTH layers — the exact pair the CLI
+    // quick-fail gates test (rapidtool-cli.mjs:930/:1077).
+    assert.equal(res.project.status, "awaiting_hitl", "project status admits CLI approve/reject");
+    const gate = res.project.hitl;
+    assert.ok(gate, "was hitl:null — the dead end this helper fixes");
+    assert.equal(gate.phase, 0);
+    assert.equal(gate.forceHuman, true, "machine-only lock (R3/B-03)");
+    assert.equal(gate.title, "Review rejected — accept the risk or reject with a note");
+    assert.equal(gate.prompt, REJECT_CRITIQUE, "the FULL critique is the prompt — no slice");
+    assert.equal(typeof gate.requestedAt, "number");
+    assert.equal(res.project.phases[0].status, "awaiting_hitl", "the phase record enters the gate edge");
+
+    // (2) the park is coherent now: unlockText is TRUE and a resume re-enters the gate.
+    const park = res.project.wildRun?.park;
+    assert.ok(park);
+    assert.equal(park.unlock, "human-gate");
+    assert.equal(park.resumeAction, "gate", "a resume re-enters the gate — no silent advance");
+    assert.ok(park.unlockText.includes("A human must approve or reject the open gate"));
+
+    // (3) machine seats can never clear it (R3/B-03 throw).
+    assert.throws(
+      () => approveHitl(res.project, { decidedBy: "autopilot" }),
+      /forceHuman/,
+      "autopilot may not approve the minted gate",
+    );
+
+    // (4) a sealed machine resume refuses the minted gate BEFORE any classifier
+    // call (no re-review spend) and leaves the human door open.
+    const resumed = { ...res.project, wildRun: { ...res.project.wildRun!, pause: false } };
+    const again = await wildStep(resumed, { reviewer: c.reviewer, agentSeal: true, retryBackoffMs: 5 });
+    assert.equal(again.outcome, "paused");
+    assert.equal(again.code, "RT_E_GATE_PENDING");
+    assert.equal(c.calls(), 3, "the refused machine resume never re-asks the classifier");
+    assert.equal(again.project.status, "awaiting_hitl");
+    assert.equal(again.project.hitl?.prompt, REJECT_CRITIQUE, "the same minted gate survives the refusal");
+
+    // (5) the human approve completes the phase and moves the cursor.
+    const note = "Accepting the known floor risk for this pin — the critique stays on the ledger.";
+    const done = approveHitl(res.project, { decidedBy: "human", note });
+    assert.equal(done.hitl, null, "the gate closes on the human decision");
+    assert.equal(done.currentPhase, 1, "the cursor advances");
+    assert.equal(done.phases.find((r) => r.id === 0)?.status, "complete");
+    const row = done.decisions[done.decisions.length - 1];
+    assert.equal(row.decision, "approve");
+    assert.equal(row.decidedBy, "human");
+    assert.equal(row.note, note);
+    assert.equal(row.title, "Review rejected — accept the risk or reject with a note", "the ledger names the minted gate");
+  });
+
+  it("human reject-with-note records rejectionHistory; retry reopens the edge and the re-run carries the note", async () => {
+    const res = await wildStep(wildFixture(), {
+      reviewer: async () => ({ ok: true, verdict: "reject", feedback: REJECT_CRITIQUE, model: "test" }),
+    });
+    assert.equal(res.outcome, "paused", "the non-seal classifier reject also parks");
+    assert.ok(res.project.hitl?.forceHuman, "the mint is not seal-conditional");
+
+    const NOTE = "The scorecard must name the real domain and drop the boilerplate security template before P0 can stand.";
+    assert.throws(() => rejectHitl(res.project, "too short"), /12 characters/);
+    const rejected = rejectHitl(res.project, NOTE);
+    assert.equal(rejected.status, "blocked");
+    assert.equal(rejected.hitl, null, "the rejected gate closes");
+    const rec = rejected.phases.find((r) => r.id === 0)!;
+    assert.equal(rec.status, "rejected");
+    assert.equal(rec.rejectionNote, NOTE);
+    assert.deepEqual(rec.rejectionHistory?.map((h) => h.note), [NOTE], "append-only history carries the note");
+
+    const retried = unlockRetry(rejected);
+    assert.equal(retried.status, "running");
+    assert.equal(retried.phases.find((r) => r.id === 0)?.status, "ready", "the retry edge reopens");
+
+    // The note reaches the RE-RUN: applyPhaseResult(attempt=1) stamps the
+    // rejection-response block onto the regenerated artifact.
+    const rerun = await wildStep(
+      { ...retried, wildRun: { ...retried.wildRun!, pause: false } },
+      { reviewer: approving, agentSeal: true, retryBackoffMs: 5 },
+    );
+    assert.ok(
+      rerun.project.artifacts.some((a) => a.phase === 0 && (a.body ?? "").includes(NOTE)),
+      "the recorded note rides the regeneration (rejectionResponseBlock) — the repair loop closes",
+    );
   });
 });

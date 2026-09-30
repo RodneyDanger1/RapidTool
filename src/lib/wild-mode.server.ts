@@ -95,11 +95,26 @@ const WILD_SYSTEM =
 export function buildWildReviewPrompt(ctx: WildReviewContext): string {
   const def = phaseDef(ctx.phase);
   const p = ctx.project;
-  const artifacts = (p.artifacts ?? [])
-    .filter((a) => a.phase === ctx.phase)
-    .slice(0, 8)
-    .map((a) => `### ${a.title} (${a.kind})\n${(a.body ?? "").slice(0, 320)}`)
-    .join("\n\n");
+  // GAP-1 / BUG-4 (fixes/320_g1b_review_park.md — 319 FINDING-3a): the old
+  // 320-char per-artifact slice cut real evidence mid-sentence, and the
+  // reviewer then flagged OUR OWN truncation as a phase defect (the game
+  // build's "Security section is literally truncated mid-sentence" — a false
+  // critique of the artifact, disproved against the full body). Budget:
+  // 1200 chars per artifact (8 artifacts max) with a 6000-char total cap —
+  // comfortably above real artifact bodies, and an explicit ellipsis marks
+  // any cut so the reviewer can tell OUR budget cut from the artifact's own
+  // prose. (A cut here is a prompt-budget artifact, never a verdict input.)
+  const ARTIFACT_BODY_CAP = 1200;
+  const ARTIFACTS_TOTAL_CAP = 6000;
+  const clip = (s: string, cap: number): string => (s.length > cap ? `${s.slice(0, cap)}…` : s);
+  const artifacts = clip(
+    (p.artifacts ?? [])
+      .filter((a) => a.phase === ctx.phase)
+      .slice(0, 8)
+      .map((a) => `### ${a.title} (${a.kind})\n${clip(a.body ?? "", ARTIFACT_BODY_CAP)}`)
+      .join("\n\n"),
+    ARTIFACTS_TOTAL_CAP,
+  );
   const lastTest = p.lastTest
     ? `Last module test: ${p.lastTest.ok ? "PASS" : "FAIL"} — ${(p.lastTest.detail ?? "").slice(0, 200)}`
     : "Last module test: none";

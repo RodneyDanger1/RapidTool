@@ -1453,6 +1453,33 @@ async function main() {
               payload.error = bits.length > 0 ? bits.join("; ") : "tree-run failed";
               payload.code = "RT_E_TREE_RUN_FAILED";
             }
+            // T9.3 promotion (W44 · G3 · applied from fixes/319_f3_promote §C):
+            // a GREEN --run earns the tested stamp onto the emitted artifact
+            // ITSELF — the dir's own `.rapidtool/project.json` now carries
+            // label:"tested" + evidenceHash from THIS verdict. The mint
+            // self-guards (red / ok-but-no-spec runs promote nothing; an
+            // existing stamp is never rewritten). The ledger absorbs the
+            // promotion (repair parity), so a future re-emit never downgrades
+            // the record.
+            if (outcome.ok === true) {
+              const prom = await h.promoteEmittedTreeTested(project, res.dir, outcome);
+              if (prom.promoted) {
+                const lt = prom.project.lastTest;
+                payload.tested = {
+                  promoted: true,
+                  label: "tested",
+                  evidenceHash: lt && typeof lt.evidenceHash === "string" ? lt.evidenceHash : null,
+                };
+                if (typeof args.project === "string" && args.project.trim()) {
+                  try {
+                    h.saveProject(args.project, prom.project);
+                    payload.tested.ledgerSaved = true;
+                  } catch {
+                    payload.tested.ledgerSaved = false;
+                  }
+                }
+              }
+            }
           }
           respond(payload, payload.ok ? 0 : 1);
         } catch (err) {
@@ -3795,7 +3822,12 @@ async function main() {
           let chatLogRowCount = 0;
           if (typeof CLI_PROJECT === "string" && CLI_PROJECT.trim()) {
             try {
-              const p = h.loadProject(CLI_PROJECT);
+              // G2 (fixes/320): diagnose OBSERVES the persisted run — load it
+              // with preserveWildRun so engine.hydrateWildRun cannot force-stop
+              // a parked/active run into a read-time artifact (its browser-
+              // hydrate default); pause/resume/step/stop load the same way
+              // (this file's wild arm, :3543).
+              const p = h.loadProject(CLI_PROJECT, { preserveWildRun: true });
               try {
                 projectFileBytes = statSync(CLI_PROJECT).size;
               } catch {
@@ -3806,20 +3838,11 @@ async function main() {
               name = typeof p.name === "string" ? p.name : null;
               status = typeof p.status === "string" ? p.status : null;
               currentPhase = typeof p.currentPhase === "number" ? p.currentPhase : null;
-              const wr = p.wildRun;
-              if (wr && typeof wr === "object") {
-                const lastAutoAt = typeof wr.lastAutoAt === "number" ? wr.lastAutoAt : null;
-                wildRun = {
-                  active: wr.active === true,
-                  pause: wr.pause === true,
-                  phase: typeof wr.phase === "number" ? wr.phase : null,
-                  startedAt: typeof wr.startedAt === "number" ? wr.startedAt : null,
-                  lastAutoAt,
-                  lastAutoLog: typeof wr.lastAutoLog === "string" ? wr.lastAutoLog : null,
-                  stoppedAt: typeof wr.stoppedAt === "number" ? wr.stoppedAt : null,
-                  overdueMs: lastAutoAt != null ? Date.now() - lastAutoAt : null,
-                };
-              }
+              // G2 (fixes/320): the canonical projection now lives in
+              // diagnose.ts (`projectWildRun`) — disk truth verbatim; overdueMs
+              // derived ONLY for a progressing run (active && !pause), never a
+              // growing `now - lastAutoAt` on a parked/stopped run.
+              wildRun = rtDiag.projectWildRun(p.wildRun, Date.now());
             } catch (loadErr) {
               persistHealth = {
                 ok: false,

@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildDiagnosis, type DiagnosisInput } from "./diagnose.ts";
+import { buildDiagnosis, projectWildRun, type DiagnosisInput } from "./diagnose.ts";
 import { WILD_STEP_BUDGET_MS } from "./rt-events.ts";
 import type { RtEvent } from "./rt-events.ts";
 
@@ -350,4 +350,153 @@ test("M3-12: a junk crashSnapshot.at is refused honestly — no RangeError, no f
   // A non-object snapshot is not a snapshot at all — honest floor, no match.
   const diag2 = buildDiagnosis(baseInput({ crashSnapshot: 42 as unknown as null }));
   assert.equal(diag2.mostLikelyCause.class, "none-detected");
+});
+
+// ---------------------------------------------------------------------------
+// G2 (fixes/320): the diagnose wildRun projection — DISK TRUTH, no read-time
+// fabrication (T1 F-D · T2 BUG-2). Live repro: two consecutive keyless CLI
+// `diagnose` runs against the parked game run (scratch copy
+// C:/Users/mnril/g2_scratch/g2_game_parked.json of
+// C:/Users/mnril/w44_trial/game/build.json) reported active:false,
+// pause:false, stoppedAt ≈ each call's OWN read time (it MOVED: …806282 →
+// …810865) and a GROWING overdueMs (1990841 → 1995417), while the disk held
+// active:true, pause:true, stoppedAt:null. Cause: the diagnose load omitted
+// `preserveWildRun:true`, so engine.hydrateWildRun force-stopped the parked
+// run in memory (stamping `stoppedAt: Date.now()`), and the projection
+// derived overdueMs from any present lastAutoAt. The fixed contract lives in
+// `projectWildRun` (diagnose.ts) — the pin below carries the parked run's
+// exact disk scalars (byte-checked against the scratch copy by the fixes/320
+// §5 probe).
+// ---------------------------------------------------------------------------
+
+/** The parked game run's disk scalars — byte-faithful to
+ *  g2_game_parked.json:586-624 (the P0 review-reject park). The disk block
+ *  also carries `park`/`lastStep` records; the projection reads only the
+ *  scalars below. */
+const PARKED_GAME_WILD_RUN = {
+  active: true,
+  phase: 0,
+  startedAt: 1790783801207,
+  lastAutoAt: 1790783815484,
+  lastAutoLog:
+    'P0 review REJECTED: The phase artifacts do not deliver the substance the P0 brief requires. The scorecard is internally contradictory: it claims a "custom-software" domain with a single generic job ("deliver-core-workflow") and one entity ("player"), yet the scores reference "typed contracts + seque',
+  stoppedAt: null,
+  pause: true,
+};
+
+test("G2: a parked run projects disk truth — active/pause/stoppedAt verbatim, no overdue clock, stable across reads", () => {
+  const first = projectWildRun(PARKED_GAME_WILD_RUN, 1_790_786_000_000);
+  const second = projectWildRun(PARKED_GAME_WILD_RUN, 1_790_786_004_000);
+  assert.deepEqual(first, {
+    active: true,
+    pause: true,
+    phase: 0,
+    startedAt: 1790783801207,
+    lastAutoAt: 1790783815484,
+    lastAutoLog: PARKED_GAME_WILD_RUN.lastAutoLog,
+    stoppedAt: null,
+    overdueMs: null,
+  });
+  // Stable across two consecutive reads at different `now`s: nothing in the
+  // view moves with time — the pre-fix divergence stamped stoppedAt on EVERY
+  // call and grew overdueMs between them.
+  assert.deepEqual(second, first);
+  assert.equal(
+    JSON.stringify(first).includes("1790786000000"),
+    false,
+    "no read-time `now` leaks into the view (first read)",
+  );
+  assert.equal(
+    JSON.stringify(second).includes("1790786004000"),
+    false,
+    "no read-time `now` leaks into the view (second read)",
+  );
+});
+
+test("G2: overdueMs is derived only while the run progresses (active && !pause) — parked/stopped runs get null", () => {
+  const now = 2_000_000;
+  const progressing = projectWildRun(
+    {
+      active: true,
+      pause: false,
+      phase: 3,
+      startedAt: 1_900_000,
+      lastAutoAt: 1_900_000,
+      lastAutoLog: "P3 step",
+      stoppedAt: null,
+    },
+    now,
+  );
+  assert.equal(progressing!.overdueMs, 100_000, "an active, unpaused run gets the real elapsed ms (derived, not fabricated)");
+  assert.equal(progressing!.stoppedAt, null, "deriving an overdue clock never stamps a stop");
+  const skewed = projectWildRun(
+    { active: true, pause: false, phase: 3, startedAt: 1, lastAutoAt: now + 500, lastAutoLog: null, stoppedAt: null },
+    now,
+  );
+  assert.equal(skewed!.overdueMs, 0, "clock skew clamps at 0, never negative");
+  const stopped = projectWildRun(
+    {
+      active: false,
+      pause: false,
+      phase: 9,
+      startedAt: 1,
+      lastAutoAt: 1_500_000,
+      lastAutoLog: "done",
+      stoppedAt: 1_999_000,
+    },
+    now,
+  );
+  assert.equal(stopped!.stoppedAt, 1_999_000, "a genuine stop timestamp passes through verbatim");
+  assert.equal(stopped!.overdueMs, null, "a stopped run has no overdue clock");
+});
+
+test("G2: junk wildRun values floor to null (never a throw) and non-finite scalars are refused", () => {
+  for (const junk of [null, undefined, 42, "x", [], true]) {
+    assert.equal(projectWildRun(junk, 1), null);
+  }
+  const dirty = projectWildRun(
+    {
+      active: true,
+      pause: false,
+      phase: Number.NaN,
+      startedAt: Number.POSITIVE_INFINITY,
+      lastAutoAt: "9",
+      lastAutoLog: 7,
+      stoppedAt: Number.NaN,
+    },
+    10,
+  );
+  assert.deepEqual(dirty, {
+    active: true,
+    pause: false,
+    phase: null,
+    startedAt: null,
+    lastAutoAt: null,
+    lastAutoLog: null,
+    stoppedAt: null,
+    overdueMs: null,
+  });
+});
+
+test("G2: buildDiagnosis carries the projected parked run unchanged — identical across two reads, never a timeout/stop", () => {
+  const read = (now: number) =>
+    buildDiagnosis(
+      baseInput({
+        now,
+        project: { ...baseInput().project, wildRun: projectWildRun(PARKED_GAME_WILD_RUN, now) },
+      }),
+    );
+  const a = read(1_790_786_000_000);
+  const b = read(1_790_786_004_000);
+  assert.deepEqual(
+    a.project.wildRun,
+    b.project.wildRun,
+    "two consecutive reads agree — no read-time fields ride the envelope",
+  );
+  assert.deepEqual(a.project.wildRun, projectWildRun(PARKED_GAME_WILD_RUN, 1_790_786_000_000));
+  assert.equal(a.project.wildRun!.active, true);
+  assert.equal(a.project.wildRun!.pause, true);
+  assert.equal(a.project.wildRun!.stoppedAt, null);
+  assert.equal(a.project.wildRun!.overdueMs, null);
+  assert.equal(a.mostLikelyCause.class, "none-detected", "a parked run is not an incident");
 });

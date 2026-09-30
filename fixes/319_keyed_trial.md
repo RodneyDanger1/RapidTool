@@ -41,11 +41,11 @@
 | # | bug | source | severity | fate |
 |---|---|---|---|---|
 | 1 | LEX coverage gap for consumer briefs → guaranteed reframe park | T1 F-A · T2 BUG-1 · T3 | HIGH (agent-use story) | designed honesty; trial fix = LEX-hitting brief (lexweb). Product ticket: reframe prompt could surface the absent-noun hint (data already exists) |
-| 2 | review-park has **no CLI exit** (no pending gate; resume re-rejects) | parent probes | HIGH (blocks human loop) | TICKET **GAP-1** (mint approvable gate / route approve-reject) |
+| 2 | review-park has **no CLI exit** (no pending gate; resume re-rejects) | parent probes | HIGH (blocks human loop) | **FIXED** (wave-2.5 G1bis: mint lands on both classifier-reject arms; seal + autopilot still refused; 20/20 adversarial verified) |
 | 3 | `wild` has no live layer — no verb offers seal+live | parent (code read) | HIGH (fresh-run substance) | TICKET **GAP-2** (design; not a quick fix) |
-| 4 | review-prompt 320-char artifact slice | T2 BUG-4 (parent-verified) | MED | TICKET (small fix + pin) |
-| 5 | reject-text surface truncation | T1 F-C · T3 | LOW-MED | TICKET (small fix + pin) |
-| 6 | diagnose wildRun divergence (stopped vs parked) | T1 F-D · T2 BUG-2 | MED (tooling truth) | TICKET (small fix + pin) |
+| 4 | review-prompt 320-char artifact slice | T2 BUG-4 (parent-verified) | MED | **FIXED** (320→1200/6000 + pins). Sub-claim corrected: engine.ts:805-808 = secret-scrubber DISPLAY artifact, NOT a defect (hex-verified) |
+| 5 | reject-text surface truncation | T1 F-C · T3 | LOW-MED | **FIXED** (park.reason/lastAutoLog → 600 + ellipsis). Correction: envelope `note` was already FULL — not truncated |
+| 6 | diagnose wildRun divergence (stopped vs parked) | T1 F-D · T2 BUG-2 | MED (tooling truth) | **FIXED** (diagnose.ts projectWildRun + CLI wiring + live proof: read-time fabrication gone) |
 | 7 | NDJSON sparse — verdicts/retries only in `build.json.logs` | T3 | LOW (observability) | noted; decision ticket |
 | 8 | no per-call token/$ decomposition surfaced | T3 | LOW | noted (honesty already: "never estimated") |
 
@@ -71,6 +71,14 @@
 - **BOUNDARY — `bash scripts/gate.sh` → `ok:true`** (wallMs 274784): typecheck 0 · lint 0 (`problems:null`) · assertionGaps 0 · testsScripts **358/358** · testsLib **2469/2469 +1 skip** · build 0. Full suite standalone: **2828 tests · 2827 pass · 1 skip · 0 fail.**
 - **Committed: `21c4731`** (fixer wave + all 319 logs; tree clean). Verification trail: `w44_tc3/ws/rest/cet/esl`, `w44_npmtest2`, `w44_gate2` logs; nothing claimed without bytes.
 - **Wave-2 queue (parent):** ① GAP-1 park-exit fix (review-park mint) ② small fixes #4 (review-prompt 320-char slice) / #5 (reject-text surfaces) / #6 (diagnose wildRun divergence) ③ then the keyed DRIVER wave: lexweb retry + `gate --live --autopilot` A/B (does the live layer carry P0 with real research?) + bounded `run-eval.mjs --keyed` for scores ④ F3's T9.3 §C promotion lane (headless/cli/run-eval owners).
+
+## Wave-2/2.5 closure (2026-09-30)
+- **Landed + verified:** G2 diagnose disk-truth (helper + 4 pins + CLI wiring — live proof: a parked run reads `active:true,pause:true,stoppedAt:null,overdueMs:null`, stable across reads) · G3 T9.3 promotion (green `emit --run` stamps the emitted record `label:"tested"` + hash; red byte-identical; V-verified E2E) · G1bis review-park mint (both classifier-reject arms; `forceHuman:true`; machine seats + seal still refused; human approve/reject loop works; surfaces 200/300 → 600 + `…`; review slice 320 → 1200/6000).
+- **Adversarial verification:** 20/20 checks ALL PASS (pre-fix baseline: 11 FAIL) via V2's validated harness — after a recorded harness-flow correction (paused-run resume step; `engine.ts:4838` by-design noop).
+- **Boundary:** typecheck 0 · lint 0 · scripts 359/359 · lib 2482/2481+1 · gate.sh `ok:true` (253s — `w44_gate3.log`).
+- **Finding corrections (bytes):** FINDING-3a's artifact-defect sub-claim = redacted display artifact, not a defect · FINDING-3b's envelope-note arm falsified (note full; real cuts were park.reason/lastAutoLog — now raised) · review-slice claim CONFIRMED + fixed.
+- **Still open:** GAP-2 (seal+live — design ticket) · NDJSON observability note · per-call spend decomposition note · T9.3 repair-dir variant (G3 §D.1).
+- **Next: the keyed DRIVER wave** (lexweb retry + `gate --live --autopilot` A/B + bounded `run-eval.mjs --keyed`) on the frozen post-commit tree.
 
 ## Verdict (final)
 (filled at consolidation — the one question: does RapidTool produce working software powered by a DeepSeek key?)

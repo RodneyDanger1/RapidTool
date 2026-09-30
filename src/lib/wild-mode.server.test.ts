@@ -180,3 +180,40 @@ describe("createWildClassifier honesty (dual-channel + vacuous + keyless)", () =
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// GAP-1 / BUG-4 (fixes/320_g1b_review_park.md · 319 FINDING-3a): the review
+// prompt's artifact budget widened from 320×8 to 1200 per artifact with a
+// 6000 total cap — the old slice cut real evidence mid-sentence and the
+// reviewer then flagged OUR OWN truncation as a phase defect.
+// ---------------------------------------------------------------------------
+describe("GAP-1 review-prompt artifact budget 1200/6000 (fixes/320)", () => {
+  function art(id: string, title: string, body: string) {
+    return { id, phase: 0 as const, title, kind: "docs" as const, body };
+  }
+  const ctxWith = (artifacts: ReturnType<typeof art>[]) =>
+    reviewCtx({
+      project: {
+        ...emptyProject({ name: "Budget", brief: "A concrete brief for the wild-mode Auto-Review supervisor classifier." }),
+        artifacts,
+      },
+    });
+
+  it("per-artifact slice is 1200: deep evidence reaches the reviewer; the far tail is cut with an ellipsis", () => {
+    const body = `${"b".repeat(1100)}DEEP_MARKER_OK${"c".repeat(900)}TAILCUT_MARKER`;
+    const prompt = buildWildReviewPrompt(ctxWith([art("a1", "Deep", body)]));
+    assert.ok(prompt.includes("DEEP_MARKER_OK"), "chars ~1100-1115 are inside the 1200 budget (the old 320 cut them)");
+    assert.ok(prompt.includes(`${body.slice(0, 1200)}…`), "the per-artifact cap is exactly 1200 + ellipsis");
+    assert.ok(!prompt.includes("TAILCUT_MARKER"), "the far tail beyond 1200 is cut");
+  });
+
+  it("total artifact budget is 6000: the tail artifact is dropped with an explicit ellipsis", () => {
+    const artifacts = Array.from({ length: 6 }, (_, i) => art(`a${i}`, `TITLE${i + 1}`, `${"A".repeat(1200)}TAIL${i + 1}`));
+    const prompt = buildWildReviewPrompt(ctxWith(artifacts));
+    const section = prompt.split("Phase artifacts:\n")[1].split("\n\nLast module test:")[0];
+    assert.equal(section.length, 6001, "6000 chars + the terminal ellipsis");
+    assert.ok(section.endsWith("…"), "an explicit cut marker explains the truncation");
+    assert.ok(section.includes("### TITLE1"), "the head of the section is present");
+    assert.ok(!section.includes("### TITLE6"), "the tail artifact beyond the total cap is dropped");
+  });
+});

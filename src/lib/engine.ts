@@ -3883,6 +3883,18 @@ const WILD_UNLOCK_TEXT: Record<WildParkUnlock, string> = {
     "The agent seal could not consent (keyed classifier unavailable) — configure the classifier (DEEPSEEK_API_KEY), then resume the sealed run.",
 };
 
+/** GAP-1 surface fix (fixes/320_g1b_review_park.md — 319 FINDING-3b): the
+ *  park record's `reason` and `wildRun.lastAutoLog` used to cut at 200/300
+ *  chars mid-word, so console/CLI readers never saw the classifier's full
+ *  required-fixes list (the ledger row IS full — only the surfaces were cut).
+ *  Cap = 600 chars + an explicit ellipsis when a cut actually happened
+ *  (≤ 601 chars emitted; a short detail passes through byte-identically;
+ *  clipping an already-clipped string is idempotent). */
+const SURFACE_CAP = 600;
+function clipSurface(detail: string): string {
+  return detail.length > SURFACE_CAP ? `${detail.slice(0, SURFACE_CAP)}…` : detail;
+}
+
 /**
  * 306 F5 — what the next wild step would do at `phase`, derived from the
  * project's OWN status/records (never from a previous result). This is the ONE
@@ -3916,7 +3928,7 @@ function wildParkInfo(
   return {
     code: park.code,
     event,
-    reason: detail.slice(0, 200),
+    reason: clipSurface(detail),
     unlock: park.unlock,
     unlockText: WILD_UNLOCK_TEXT[park.unlock],
     resumePhase: phase,
@@ -3953,7 +3965,7 @@ export function wildPause(
   const stamped = wildPatch(p, {
     pause: true,
     park: info,
-    lastAutoLog: detail.slice(0, 300),
+    lastAutoLog: clipSurface(detail),
     lastAutoAt: Date.now(),
   });
   return wildLog(stamped, phase, level, event, detail);
@@ -4261,6 +4273,43 @@ function wildReviewLog(p: Project, phase: PhaseId, source: string, feedback: str
   return wildLog(p, phase, "info", "wild.review", `P${phase} review (${source}): ${feedback}`);
 }
 
+/** GAP-1 (fixes/320_g1b_review_park.md — 319 FINDING-2): a CLASSIFIER review
+ *  reject parks the run under a park that already advertises
+ *  unlock:"human-gate" + "A human must approve or reject the open gate
+ *  (console/CLI), then resume the run." — but before this helper `hitl` stayed
+ *  null, so CLI approve refused ("No pending gate…"), reject refused, and a
+ *  resume re-reviewed → re-rejected: the promised human door did not exist.
+ *  The mint makes the park true: the project and the phase record enter
+ *  `awaiting_hitl` (the status both CLI quick-fail gates test —
+ *  rapidtool-cli.mjs:930/:1077) and a forceHuman gate carries the FULL
+ *  critique as its prompt.
+ *
+ *  forceHuman is the load-bearing honesty: `approveHitl` throws for autopilot
+ *  (R3/B-03) and `wildApproveGate` refuses a forceHuman gate under the seal
+ *  too — machine seats can never clear this gate. A human approve completes
+ *  the phase and moves the cursor; a human reject-with-note records
+ *  `rejectionHistory` and reopens the retry edge. Mint ≠ auto-advance: the
+ *  caller still parks, and a machine resume re-enters the gate arm which
+ *  refuses again (no silent bypass, no re-review spend).
+ *
+ *  Called ONLY from the two classifier-reject arms; a DoD-floor reject
+ *  (source "dod") never mints — the caller guards it. */
+function mintReviewGatePark(p: Project, phase: PhaseId, feedback: string): Project {
+  const phases = p.phases.map((r) =>
+    r.id === phase ? { ...r, status: "awaiting_hitl" as const } : r,
+  );
+  const hitl: HitlRequest = {
+    phase,
+    title: "Review rejected — accept the risk or reject with a note",
+    prompt: feedback,
+    stakes:
+      "The Auto-Review classifier refused this phase — approve to accept the risk and continue, or reject with a note to send the phase back for repair.",
+    forceHuman: true,
+    requestedAt: Date.now(),
+  };
+  return { ...p, phases, status: "awaiting_hitl", hitl };
+}
+
 /** Approve an open approval gate (classifier self-approval), with checks.
  *
  *  313 D1 (312 C1 design) — the AGENT SEAL arms. `opts.agentSeal === true`
@@ -4362,8 +4411,14 @@ async function wildApproveGate(
   }
   const next = wildReviewLog(working, phase, decision.source, decision.feedback);
   if (decision.verdict === "reject") {
+    // GAP-1 (fixes/320_g1b_review_park.md): this arm is definitionally a
+    // CLASSIFIER reject (the deterministic DoD floor never judges gates —
+    // resolveWildReview returns unconfigured-gate/error for the other
+    // classes), so the mint is unconditional here: the human decision gate
+    // the park's unlockText promises now exists.
+    const gated = mintReviewGatePark(next, phase, decision.feedback);
     const paused = wildPause(
-      next,
+      gated,
       phase,
       "warn",
       "wild.reject",
@@ -4468,6 +4523,11 @@ async function wildLeavePhase(
   }
   let cur = wildReviewLog(resolved.project, phase, decision.source, decision.feedback);
   if (decision.verdict === "reject") {
+    // GAP-1 (fixes/320_g1b_review_park.md): a CLASSIFIER reject mints the
+    // human decision gate the park's unlockText promises. The deterministic
+    // DoD-floor reject (source "dod") mints NOTHING — the keyless pure-floor
+    // honesty story stays byte-identical.
+    if (decision.source === "classifier") cur = mintReviewGatePark(cur, phase, decision.feedback);
     const paused = wildPause(
       cur,
       phase,
@@ -4720,7 +4780,7 @@ export async function wildStep(
       result.project,
       result.project.currentPhase,
       "wild.paused",
-      (result.error ?? "Wild step paused").slice(0, 300),
+      clipSurface(result.error ?? "Wild step paused"),
       { code, unlock },
     );
     return { ...result, project: wildPatch(result.project, { park: info }) };
