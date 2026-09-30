@@ -49,6 +49,13 @@
 //  11. (316 · H7's gap; I3 finisher, behavioral spawn) the fresh-command
 //      floor: bare / `--help` / unknown verb → exit 1 + one
 //      `RT_E_VALIDATION` envelope, no stack.
+//  12. (T8.2 · 314 F5 K2/K5; 311_sd_product §1, behavioral spawn + source) the
+//      approve seat discipline: the seat is NEVER guessed — a bare approve
+//      (non-TTY) and a non-`autopilot` `--seat` value both refuse CODED
+//      (exit 1 + RT_E_VALIDATION + a remedy naming both seat paths), the
+//      explicit `--seat autopilot` machine door works non-TTY and stamps its
+//      own machine attribution, and the TTY arm's bytes (the K2 silent
+//      machine-attribution bug this guard killed) stay on disk.
 //
 // House rules honored: cwd-independent (paths via import.meta.url — a
 // scripts-leg test must not depend on process cwd); failure messages name the
@@ -682,6 +689,182 @@ test("316 I3 — the fresh-command floor: bare / --help / unknown verb refuse CO
       );
       assert.equal(json.exit_code, res.status, `[${shape.label}] the envelope's exit_code must equal the process exit`);
     }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Leg 12 (T8.2 · 314 F5 K2/K5 — 311_sd_product §1/§5 #2, BEHAVIORAL + source).
+// The K2 integrity bug: a bare `approve` on a TTY silently fell through to
+// `{decidedBy:"autopilot", seat:"harness"}` — a human's decision attributed to
+// the machine; the non-TTY arm pointed at "the autopilot gate" with no exact
+// next step. The F5 fix made the seat NAMED, exactly one of `--i-am-human`
+// (human ceremony, TTY only) or `--seat autopilot` (explicit machine door).
+// This leg drives a REAL parked gate (keyless create + `wild --start` parks on
+// the P4 stock gate) and pins the three seat shapes end-to-end: bare refuse,
+// non-seat `--seat` refuse, machine door works — plus the TTY arm's source
+// bytes (unreachable from a non-PTY spawn; the spawn arms below exercise the
+// non-TTY arm). The refusal fires AFTER the project load + gate-pending check
+// (rapidtool-cli.mjs :929-1015), hence the real park.
+// ---------------------------------------------------------------------------
+test("T8.2 — approve's seat is never guessed: bare / non-seat refuse CODED; `--seat autopilot` is the machine door", () => {
+  // TTY-arm source guard: the spawn arms below cannot carry a TTY, so the
+  // K2-killed text (a bare approval would be attributed to the MACHINE) is
+  // pinned as bytes: if it vanishes, that is a deliberate re-derivation.
+  assert.ok(
+    cliText.includes("process.stdin.isTTY === true"),
+    "rapidtool-cli.mjs must keep the TTY arm of the seat refusal (the K2 bug: a bare TTY approve silently minted decidedBy:\"autopilot\")",
+  );
+  assert.match(
+    cliText,
+    /no seat named[\s\S]{0,400}seat is never guessed/,
+    "the TTY arm's refusal text (bare approval would be attributed to the MACHINE — the seat is never guessed) must stay on disk",
+  );
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-seat-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  try {
+    // Harness: a real project parked on the P4 stock HITL gate, keyless. The
+    // brief matches the lattice vocabulary so P0-P3 advance deterministically;
+    // the classifier cannot self-approve keylessly ⇒ the loop parks at P4.
+    const proj = join(cwd, "seat-pin.json");
+    const created = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        CLI_PATH,
+        "create",
+        "--brief",
+        "Build an inventory tracker for a small warehouse team: track products, stock levels, and reorder alerts with a simple dispatcher workflow.",
+        "--name",
+        "SeatPin",
+        "--out",
+        proj,
+      ],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+    const walked = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "wild", "--project", proj, "--start", "--steps", "8"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(walked.status, 0, `wild --start must exit 0 (paused outcome).\nstdout: ${walked.stdout}\nstderr: ${walked.stderr}`);
+    const walkedJson = JSON.parse(walked.stdout);
+    assert.equal(walkedJson.outcome, "paused");
+    assert.equal(
+      walkedJson.summary.status,
+      "awaiting_hitl",
+      "harness precondition: the keyless wild run must park ON a gate (a drifted brief or floor moves the park — fix the fixture, never the assertions below)",
+    );
+    assert.equal(walkedJson.summary.currentPhase, 4, "the park must sit on the P4 stock gate for the approve legs");
+    assert.equal(walkedJson.summary.nextAction?.kind, "approve", "the park's next action is the approval this leg pins");
+
+    // Leg 1 — bare approve (non-TTY): the seat is never guessed (the 216/f5
+    // guard that killed the silent machine-attribution fall-through).
+    const bare = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "approve", "--project", proj], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    const bareStderr = bare.stderr ?? "";
+    assert.ok(
+      !/(^|\n)\s+at\s/.test(bareStderr),
+      `bare approve must never print a Node stack:\n${bareStderr}`,
+    );
+    assert.equal(
+      bare.status,
+      1,
+      `bare approve → exit 1 (RT_E_VALIDATION is usage-class).\nstdout: ${bare.stdout}\nstderr: ${bareStderr}`,
+    );
+    const bareJson = JSON.parse(bare.stdout);
+    assert.equal(bareJson.cmd, "approve");
+    assert.equal(bareJson.ok, false);
+    assert.equal(
+      bareJson.code,
+      "RT_E_VALIDATION",
+      "an unnamed seat is a usage-class refusal — never a fall-through to a machine-attributed approval (K2)",
+    );
+    assert.ok(
+      String(bareJson.error).includes("no claimable seat"),
+      `the non-TTY refusal says WHY (no claimable seat exists off-TTY): ${bareJson.error}`,
+    );
+    assert.ok(
+      String(bareJson.remedy).includes("--seat autopilot"),
+      `the remedy names the machine door: ${bareJson.remedy}`,
+    );
+    assert.ok(
+      String(bareJson.remedy).includes("--i-am-human"),
+      `the remedy names the human door: ${bareJson.remedy}`,
+    );
+    assert.equal(bareJson.exit_code, bare.status, "the envelope's exit_code must equal the process exit");
+
+    // Leg 2 — a NON-seat `--seat` value is refused with the 'autopilot' pointer.
+    const bogus = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "approve", "--project", proj, "--seat", "human"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    const bogusStderr = bogus.stderr ?? "";
+    assert.ok(
+      !/(^|\n)\s+at\s/.test(bogusStderr),
+      `--seat human must never print a Node stack:\n${bogusStderr}`,
+    );
+    assert.equal(bogus.status, 1, `a non-seat --seat value → exit 1.\nstdout: ${bogus.stdout}\nstderr: ${bogusStderr}`);
+    const bogusJson = JSON.parse(bogus.stdout);
+    assert.equal(bogusJson.ok, false);
+    assert.equal(bogusJson.code, "RT_E_VALIDATION", "an unknown seat value is a usage-class refusal");
+    assert.ok(
+      String(bogusJson.error).includes('--seat "human" is not a seat'),
+      `the refusal names the bad value verbatim: ${bogusJson.error}`,
+    );
+    assert.ok(
+      String(bogusJson.error).includes("'autopilot'"),
+      `the refusal names the ONE valid seat value: ${bogusJson.error}`,
+    );
+    assert.equal(bogusJson.exit_code, bogus.status, "the envelope's exit_code must equal the process exit");
+
+    // Leg 3 — the explicit machine door works non-TTY and stamps its own seat.
+    const autopilot = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "approve", "--project", proj, "--seat", "autopilot"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(
+      autopilot.status,
+      0,
+      `\`--seat autopilot\` must approve (the documented machine door).\nstdout: ${autopilot.stdout}\nstderr: ${autopilot.stderr}`,
+    );
+    const apJson = JSON.parse(autopilot.stdout);
+    assert.equal(apJson.ok, true);
+    assert.equal(apJson.exit_code, autopilot.status, "the envelope's exit_code must equal the process exit");
+    assert.equal(apJson.summary.currentPhase, 5, "the P4 gate was actually decided — the cursor moved to P5");
+    const gate = apJson.summary.lastGate;
+    assert.equal(gate?.phase, 4, "the recorded gate row is the P4 decision this leg made");
+    assert.equal(gate?.decision, "approve");
+    assert.equal(
+      gate?.decidedBy,
+      "autopilot",
+      "the machine door stamps its OWN attribution — never a human seat (the whole point of the explicit door)",
+    );
+    assert.ok(
+      String(gate?.note).includes("[seat harness]"),
+      `the row carries the decisively-labeled machine seat tag: ${gate?.note}`,
+    );
+    // The on-disk project agrees (a real decision, not an envelope flourish).
+    const onDisk = JSON.parse(readFileSync(proj, "utf8"));
+    assert.equal(onDisk.status, "running", "the approved project left the awaiting_hitl park");
+    assert.equal(onDisk.currentPhase, 5);
+    assert.equal(onDisk.hitl ?? null, null, "the gate cleared — no stale hitl block");
+    assert.equal(
+      onDisk.decisions[onDisk.decisions.length - 1]?.decidedBy,
+      "autopilot",
+      "the minted ledger row carries the machine actor",
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

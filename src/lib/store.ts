@@ -80,7 +80,8 @@ export type WildRunResult =
 
 export type ImportProjectResult =
   | { ok: true; id: string; name: string; replaced: boolean }
-  | { ok: false; error: string };
+  // 319_f1: the refusal arm threads io.ImportResult.code end-to-end.
+  | { ok: false; error: string; code?: ErrorCode };
 
 /** In-memory surface for LLM wiring (never persisted — derived from llmStatus()). */
 export type LlmStatusSurface = { configured: boolean; label: string; model?: string };
@@ -1949,7 +1950,8 @@ export const useRapid = create<RapidState>()(
       },
       importProject: (json) => {
         const parsed = parseProjectJson(json);
-        if (!parsed.ok) return { ok: false, error: parsed.error };
+        // 319_f1: forward the refusal code (undefined on the message-only arms).
+        if (!parsed.ok) return { ok: false, error: parsed.error, code: parsed.code };
         const project = parsed.project;
         // Add/replace: importing a project with an id already in the store
         // replaces it in place; otherwise the import is prepended. Either way

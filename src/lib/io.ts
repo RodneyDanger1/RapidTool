@@ -16,10 +16,11 @@
 import { hydrateProject } from "./engine.ts";
 import type { Project } from "./types.ts";
 import { coerceAcceptanceFixtures } from "./brief-fixtures.ts";
+import { classifyError, type ErrorCode } from "./errors.ts";
 
 export type ImportResult =
   | { ok: true; project: Project }
-  | { ok: false; error: string; code?: string };
+  | { ok: false; error: string; code?: ErrorCode };
 
 /** The pipeline always has exactly 13 phase records (P0..P12). */
 export const PHASE_COUNT = 13;
@@ -39,6 +40,9 @@ export const PHASE_COUNT = 13;
  * mint `RT_E_IMPORT_TOO_LARGE` (+ ERROR_CODE_DOC entry) and thread it through
  * `ImportResult` when the errors-registry pass lands — until then the message
  * is the contract.
+ * 319_f1: `ImportResult.code` now threads end-to-end for the parse/hydration
+ * refusals (both catches + store.importProject forward it); THIS too-large arm
+ * still returns a message only — the TODO above stays open.
  */
 export const IMPORT_MAX_CHARS = 5_000_000;
 
@@ -464,7 +468,14 @@ export function importProject(json: string, opts?: { preserveWildRun?: boolean }
   try {
     raw = JSON.parse(json);
   } catch (err) {
-    return { ok: false, error: `Invalid JSON: ${(err as Error).message}` };
+    // 319_f1: thread the refusal code end-to-end — a JSON.parse SyntaxError
+    // classifies to RT_E_VALIDATION (errors.ts matcher #6); the fallback
+    // names this arm even when a message fails the parse probe.
+    return {
+      ok: false,
+      error: `Invalid JSON: ${(err as Error).message}`,
+      code: classifyError(err, "RT_E_VALIDATION"),
+    };
   }
   if (!isPlainObject(raw)) {
     return { ok: false, error: "Expected a project object." };
@@ -511,7 +522,13 @@ export function importProject(json: string, opts?: { preserveWildRun?: boolean }
     const project = hydrateProject(raw as unknown as Project, opts);
     return { ok: true, project };
   } catch (err) {
-    return { ok: false, error: `Import failed during hydration: ${(err as Error).message}` };
+    // 319_f1: classify the thrown path — mirrors the L1W/318_a2 coded-catch
+    // pattern; a hydration failure is internal, never input validation.
+    return {
+      ok: false,
+      error: `Import failed during hydration: ${(err as Error).message}`,
+      code: classifyError(err, "RT_E_INTERNAL"),
+    };
   }
 }
 

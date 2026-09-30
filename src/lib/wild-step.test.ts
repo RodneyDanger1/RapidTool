@@ -10,6 +10,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { emptyProject, applyPhaseResult, wildStep, wildExecEdgeFor, type WildReviewer } from "./engine.ts";
 import { runGate } from "./dod.ts";
+import { mintTreeRunTested } from "./codegen.server.ts";
+import type { TreeRunOutcome } from "./compile-check.server.ts";
 import type { Project } from "./types.ts";
 
 /** An ACTIVE wild-run project pinned to one phase status (no gate open). */
@@ -862,6 +864,194 @@ describe("316 H3 — the seal's repair pass consumes the dodRepair seam", () => 
       assert.ok(
         row!.detail.includes("(no non-floor repair edge for P7 — honest park)"),
         `the park names the missing non-floor edge: ${row!.detail}`,
+      );
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T6.2(c) — THE NO-MINT ⇒ P6-RED WALK (W43 canon: wave_plans/W43/COMPLETION-TASKS.md
+// §F6/T6.2(c) + fixes/317_j2_preflight.md §3b, the CASE-A observation pinned).
+// A green tree-run that executed NO spec must never mint a "tested" stamp: the
+// honest producer (codegen.server.ts `mintTreeRunTested`, :3772) logs the coded
+// `p6.tree.tested.skipped` row and leaves `p6-verified` UNMET in runGate(6).
+// The enforceDod leave check then hard-stops the run on that red — the cursor
+// never leaves P6 (wild.paused_dod naming p6-verified) — and the SAME fixture
+// with one executed spec mints a tested stamp and advances. Keyless, in-memory:
+// the walk drives the REAL floor exec (`applyPhaseResult`) plus the REAL mint
+// through the documented `p6Edge` seam (the W-01 contract above), in the
+// production order (exec ⇒ tree-run mint on the post-exec project ⇒ leave
+// gate). No gate verdict is ever fabricated — the leave check's own runGate
+// decides. Load-bearing probe finding pinned here: the P6 floor exec OVERWRITES
+// lastTest with its honest `{ok:true, detail:"tests.pass"}` marker, so the mint
+// must ride the post-exec project (exactly where the keyed edge mints).
+// ---------------------------------------------------------------------------
+
+/** T6.2(c) fixture: priors 0-5 sealed, cursor on a ready phase 6, enforceDod
+ *  ON. The brief is stopword-only, so p6-brief-fit passes vacuously — the ONLY
+ *  degree of freedom between the two walk arms below is the minted stamp. */
+function p6NoMintFixture(): Project {
+  const p = emptyProject({
+    name: "P6NoMint",
+    brief: "A simple app with a list of items.",
+    enforceDod: true,
+  });
+  p.wildMode = true;
+  p.wildRun = {
+    active: true,
+    phase: 6,
+    startedAt: Date.now(),
+    lastAutoLog: "Wild run at P6",
+    lastAutoAt: Date.now(),
+    stoppedAt: null,
+    pause: false,
+  };
+  p.currentPhase = 6;
+  p.status = "running";
+  p.phases = p.phases.map((r) =>
+    r.id < 6 ? { ...r, status: "complete" as const } : r.id === 6 ? { ...r, status: "ready" as const } : r,
+  );
+  return p;
+}
+
+/** A green TreeRunOutcome whose one spec file was SKIPPED — 0 specs ran and 0
+ *  assertions executed (the UI-shell / no-spec tree shape; J2 §3b CASE-A). */
+function greenNoSpecOutcome(): TreeRunOutcome {
+  return {
+    ok: true,
+    dir: "C:/pin/tree",
+    compile: { ok: true, dir: "C:/pin/tree", checked: 1, passed: 1, failed: 0, skipped: 0, verdicts: [{ file: "src/generated.ts", verdict: "pass" }] },
+    tests: [{ file: "tests/oracle.spec.ts", compile: "pass", run: "skip", tests: { pass: 0, fail: 0 } }],
+    run: null,
+  };
+}
+
+/** The discriminating control: the same green shape with 1 spec PASSING —
+ *  2 assertions actually executed (J2 §3b CASE-B; deterministic hash). */
+function greenExecutedOutcome(): TreeRunOutcome {
+  return {
+    ok: true,
+    dir: "C:/pin/tree",
+    compile: { ok: true, dir: "C:/pin/tree", checked: 1, passed: 1, failed: 0, skipped: 0, verdicts: [{ file: "src/generated.ts", verdict: "pass" }] },
+    tests: [{ file: "tests/oracle.spec.ts", compile: "pass", run: "pass", tests: { pass: 2, fail: 0 } }],
+    run: null,
+  };
+}
+
+const approvingP6Reviewer: WildReviewer = async () => ({
+  ok: true,
+  verdict: "approve",
+  feedback: "P6 pin reviewer approves the advance.",
+  model: "pin",
+});
+
+/** The production order as one seam: REAL floor exec ⇒ REAL mint attempt on
+ *  the post-exec project (the keyed edge's own order — `mintTreeRunTested` is
+ *  invoked with the real TreeRunOutcome by driveP6Journey's converged branch).
+ *  Only the outcome differs between the two arms below. */
+const p6SeamWith = (outcome: TreeRunOutcome) => async (q: Project): Promise<Project> =>
+  mintTreeRunTested(applyPhaseResult(q, 6), outcome);
+
+describe("T6.2(c) — the no-mint ⇒ P6-red walk (W43 canon; fixes/317_j2_preflight §3b)", () => {
+  it("a green tree-run with NO executed spec never mints: honest skipped row, p6-verified stays unmet", () => {
+    const noSpec = mintTreeRunTested(p6NoMintFixture(), greenNoSpecOutcome());
+    assert.equal(noSpec.lastTest ?? null, null, "no 'tested' stamp for a run that executed nothing (honest absence)");
+    const skipped = (noSpec.logs ?? []).filter((l) => l.event === "p6.tree.tested.skipped");
+    assert.equal(skipped.length, 1, "exactly ONE honest skipped row explains the absence");
+    assert.equal(skipped[0]!.level, "warn");
+    assert.equal(skipped[0]!.phase, 6);
+    assert.equal(
+      skipped[0]!.detail,
+      'tree-run ok but no executable spec ran (0 spec file(s), 0 assertion(s)) — no "tested" stamp minted (honest: nothing executed headless)',
+      "the skipped row's exact honest detail bytes",
+    );
+    assert.equal(
+      (noSpec.logs ?? []).filter((l) => l.event === "p6.tree.tested").length,
+      0,
+      "no mint row may exist for a run that executed nothing",
+    );
+    assert.ok(
+      runGate(noSpec, 6).unmet.some((u) => u.id === "p6-verified"),
+      "the p6-verified criterion reads RED while no tested stamp exists",
+    );
+
+    // Control — one executed spec + assertions mints the stamp and clears the criterion.
+    const minted = mintTreeRunTested(p6NoMintFixture(), greenExecutedOutcome());
+    assert.equal(minted.lastTest?.label, "tested");
+    assert.equal(
+      // House cast (codegen.server.test.ts:567 idiom): the mint writes
+      // evidenceHash; the Project.lastTest type declares only ok/detail/label.
+      (minted.lastTest as { evidenceHash?: string } | null)?.evidenceHash,
+      "3655235467",
+      "the deterministic tree-run evidence hash (reproduces J2 §3b CASE-B)",
+    );
+    assert.equal((minted.logs ?? []).filter((l) => l.event === "p6.tree.tested").length, 1, "exactly one mint row");
+    assert.ok(
+      !runGate(minted, 6).unmet.some((u) => u.id === "p6-verified"),
+      "a REAL mint clears p6-verified — the gate discriminates",
+    );
+  });
+
+  it("enforceDod blocks leaving P6 on that red — and a minted stamp clears the walk (the cursor advances)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      // Arm 1 — no executed spec ⇒ no mint ⇒ the enforceDod leave check hard-stops.
+      const res = await wildStep(p6NoMintFixture(), {
+        reviewer: approvingP6Reviewer,
+        p6Edge: p6SeamWith(greenNoSpecOutcome()),
+      });
+      assert.equal(res.outcome, "paused");
+      assert.equal(res.code, "RT_E_GATE_PENDING");
+      assert.equal(
+        res.error,
+        "P6 DoD unmet — hard gate blocks advance: p6-verified.",
+        "the exact hard-DoD error naming the one red criterion",
+      );
+      assert.equal(res.project.currentPhase, 6, "the cursor never left P6");
+      assert.notEqual(res.project.lastTest?.label, "tested", "nothing minted — the honest absence rides the park");
+      assert.deepEqual(
+        runGate(res.project, 6).unmet.map((u) => u.id),
+        ["p6-verified"],
+        "p6-verified is the ONLY unmet criterion the walk stopped on (the mint's absence is the blocker)",
+      );
+      const row = (res.project.logs ?? []).find((l) => l.event === "wild.paused_dod");
+      assert.ok(row, "wild.paused_dod row present");
+      assert.equal(row!.detail, "P6 DoD unmet — hard gate blocks advance: p6-verified");
+      const blocked = (res.project.logs ?? []).find((l) => l.event === "dod.blocked");
+      assert.ok(
+        blocked && String(blocked.detail).includes("unmet: p6-verified"),
+        "the dod.blocked row names the criterion",
+      );
+      assert.equal(res.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
+      assert.equal(res.project.wildRun?.park?.unlock, "human-gate");
+      assert.equal(
+        (res.project.logs ?? []).filter((l) => l.event === "p6.tree.tested").length,
+        0,
+        "the skipped path never mints a tested row through the walk",
+      );
+
+      // Arm 2 (control) — one executed spec ⇒ the REAL mint clears p6-verified
+      // ⇒ the identical walk advances. Same fixture, same seam, same reviewer.
+      const ok = await wildStep(p6NoMintFixture(), {
+        reviewer: approvingP6Reviewer,
+        p6Edge: p6SeamWith(greenExecutedOutcome()),
+      });
+      assert.equal(ok.outcome, "advanced", "a minted tested stamp clears p6-verified — the leave check proceeds");
+      assert.equal(ok.project.currentPhase, 7, "the cursor advances to P7 only once the stamp exists");
+      assert.equal(ok.project.lastTest?.label, "tested");
+      assert.deepEqual(runGate(ok.project, 6).unmet, [], "gate green after the mint");
+      assert.equal(
+        (ok.project.logs ?? []).some((l) => l.event === "wild.paused_dod"),
+        false,
+        "no DoD park when the mint cleared the gate",
+      );
+      assert.ok(
+        (ok.project.logs ?? []).some((l) => l.event === "wild.advance" && l.detail.includes("P6 sealed → P7")),
+        "the advance row proves the pre-mint hard-stop is cured",
       );
     } finally {
       if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;

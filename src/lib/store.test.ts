@@ -719,6 +719,18 @@ test("importProject rejects invalid JSON with an inline error", () => {
   if (!res.ok) assert.match(res.error, /Invalid JSON/);
 });
 
+test("importProject threads a malformed import's RT_E_VALIDATION code end-to-end (319_f1)", () => {
+  // 319_f1: io.importProject classifies its JSON.parse catch (RT_E_VALIDATION,
+  // errors.ts matcher #6) and store.ts:1952 forwards `code: parsed.code` — the
+  // refusal envelope carries the declared code to the caller.
+  const res = useRapid.getState().importProject("{ not json");
+  assert.equal(res.ok, false);
+  if (!res.ok) {
+    assert.match(res.error, /Invalid JSON/);
+    assert.equal(res.code, "RT_E_VALIDATION");
+  }
+});
+
 test("importProject rejects a payload with a bad shape and leaves state untouched", () => {
   install(seedProject());
   const before = useRapid.getState().projects.length;

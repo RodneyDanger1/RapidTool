@@ -141,6 +141,18 @@ describe("importProject", () => {
     if (!res.ok) assert.match(res.error, /Invalid JSON/);
   });
 
+  it("319_f1: a malformed import refuses with the declared RT_E_VALIDATION code", () => {
+    // The catch-level code must ride the envelope, not just the message:
+    // classifyError maps a JSON.parse SyntaxError to RT_E_VALIDATION
+    // (errors.ts matcher #6) and the store forwards it end-to-end.
+    const res = importProject("{ not json");
+    assert.equal(res.ok, false);
+    if (!res.ok) {
+      assert.match(res.error, /Invalid JSON/);
+      assert.equal(res.code, "RT_E_VALIDATION");
+    }
+  });
+
   it("rejects non-object payloads (array, null, string)", () => {
     for (const bad of ["[]", "null", "\"hello\"", "42"]) {
       const res = importProject(bad);
