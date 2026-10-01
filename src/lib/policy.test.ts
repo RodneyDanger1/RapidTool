@@ -175,6 +175,12 @@ describe("policy — hitl.force can never be self-approved (Rule B)", () => {
       assert.equal(verdict.decision, "deny");
       assert.equal(reasonId(verdict), "force-requires-human-seat");
       assert.equal(verdict.fallback, "human-seat-token");
+      // 323 FIX-1: the article is fixed — every seat here renders as
+      // "autopilot/<seat>", so "a autopilot/harness seat" was a live typo.
+      assert.ok(
+        verdict.reason.includes(`an ${seatLabel(seat)} seat may never force`),
+        `reads "an ${seatLabel(seat)} seat" (was "a autopilot/…"): ${verdict.reason}`,
+      );
     }
   });
 

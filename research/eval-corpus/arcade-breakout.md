@@ -1,6 +1,6 @@
 ---
 name: "Arcade Breakout"
-brief: "A browser arcade game: a paddle, a ball and rows of bricks; three levels of increasing speed; score and high-score; keyboard controls; pause and resume; win and lose screens; canvas only."
+brief: "A browser arcade game for players: drag the paddle to bounce the ball and break rows of bricks across three levels of increasing speed; track the score live and persist the high score between sessions; keyboard controls, pause and resume, and win or lose screens — canvas only."
 kind: "game"
 domain: "gaming"
 expectedNouns: ["paddle", "ball", "brick", "level", "speed", "score", "highScore", "pause", "winScreen", "loseScreen"]

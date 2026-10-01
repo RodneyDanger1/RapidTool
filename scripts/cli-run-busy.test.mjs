@@ -29,7 +29,17 @@
 //      exit 1 + code RT_E_BUSY + a `preserved` checkpoint that exists on disk,
 //      never exit 4, never a Node stack (the 308 M3 STACK class);
 //   4. companion (316 · H7, carried by I4): `crew` reads the documented
-//      `--max-steps` key — the old camelCase read silently no-oped the flag.
+//      `--max-steps` key (the old camelCase read silently no-oped the flag).
+//   5. (fixes/323 FIX-2c · window #4 item 2, behavioral spawn) the checkpoint-
+//      staleness guard: `gate` parks at P4 → `approve --seat autopilot`
+//      advances the FILE to P5 → `unattended` must IGNORE the superseded P4
+//      snapshot WITH a notice (`checkpoint.ignored:true, superseded:true` +
+//      a reason naming P5/P4) and never rewind the file (the live pre-fix
+//      repro resumed the snapshot and saved the file back to P4).
+//   6. (fixes/323 FIX-2c · window #4 item 4, source leg) the repair arm's
+//      caller-attested dir promotion wiring: `res.minted === true` feeds
+//      promoteRepairedDirTested inside the converged branch; the failed
+//      branch stays a pure ledger save (a red run promotes nothing).
 //
 // House rules honored: cwd-independent (paths via import.meta.url); the
 // behavioral leg uses temp-dir cwd isolation (AGENTS.md scripts-leg rule).
@@ -221,5 +231,123 @@ test("316 H7 — crew reads the documented `--max-steps` key (parseArgs stores t
   assert.ok(
     !CLI_TEXT.includes("typeof args.maxSteps"),
     "the camelCase read is back — it silently ignores the ONE documented crew knob",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Leg 5 (fixes/323 FIX-2c · window #4 item 2, behavioral spawn) — checkpoint
+// staleness vs the named project file (X2b OBS). Live pre-fix repro
+// (2026-09-30, keyless): this exact sequence rewound the file — `gate` parks
+// at P4 (snapshot phase 4) → `approve --seat autopilot` moves the file to
+// P5/running → `unattended` resumed the P4 snapshot (steps:0) and saved the
+// file BACK to P4/awaiting_hitl. Post-fix the snapshot is ignored WITH a
+// notice and the drive starts from the file (P5).
+// ---------------------------------------------------------------------------
+test("FIX-2c — a stale checkpoint is ignored WITH a notice: an approve-advanced file is never rewound by `unattended`", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-i4-supersede-"));
+  const env = scrubbedEnv();
+  const BRIEF_FIX2C =
+    "Build an inventory tracker for a small warehouse team: track products, stock levels, and reorder alerts with a simple dispatcher workflow.";
+  try {
+    const proj = join(cwd, "supersede.json");
+    const created = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "create", "--brief", BRIEF_FIX2C, "--name", "Supersede", "--out", proj],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+
+    // Park at the P4 stock gate: the run commits a phase-4 checkpoint.
+    const gated = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "gate", "--project", proj], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 240_000,
+    });
+    assert.equal(gated.status, 2, `gate must park (exit 2).\nstdout: ${gated.stdout}\nstderr: ${gated.stderr}`);
+    assert.equal(
+      JSON.parse(gated.stdout).summary?.status,
+      "awaiting_hitl",
+      "harness precondition: the keyless gate run must park ON a gate (a drifted fixture — fix the fixture, never the assertions)",
+    );
+    const cpPath = join(cwd, ".rapidtool", "checkpoint.json");
+    assert.ok(existsSync(cpPath), "harness precondition: the parked run committed its per-phase checkpoint");
+    assert.equal(
+      JSON.parse(readFileSync(cpPath, "utf8")).run?.phase,
+      4,
+      "harness precondition: the snapshot re-enters at P4",
+    );
+
+    // The file advances PAST the snapshot — the X2b divergence.
+    const approved = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "approve", "--project", proj, "--seat", "autopilot"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(
+      approved.status,
+      0,
+      `approve --seat autopilot must land.\nstdout: ${approved.stdout}\nstderr: ${approved.stderr}`,
+    );
+    const afterApprove = JSON.parse(readFileSync(proj, "utf8"));
+    assert.equal(afterApprove.currentPhase, 5, "harness precondition: the file advanced to P5");
+    assert.equal(afterApprove.status, "running");
+
+    // The stale snapshot must not be consumed — and must not be silent.
+    const unatt = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "unattended", "--project", proj], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 240_000,
+    });
+    assert.equal(
+      unatt.status,
+      2,
+      `unattended must park (exit 2) driving from the file.\nstdout: ${unatt.stdout}\nstderr: ${unatt.stderr}`,
+    );
+    const json = JSON.parse(unatt.stdout);
+    assert.equal(json.exit_code, unatt.status, "the envelope's exit_code must equal the process exit");
+    assert.equal(json.resumed, false, "the superseded snapshot is NOT resumed (pre-fix: resumed:true + a rewind)");
+    assert.equal(json.checkpoint?.ignored, true, "the ignore is loud (checkpoint.ignored) — never silent");
+    assert.equal(json.checkpoint?.superseded, true, "the envelope names the supersession verdict");
+    assert.match(String(json.checkpoint?.reason), /P5/, `the reason names the file's phase: ${json.checkpoint?.reason}`);
+    assert.match(
+      String(json.checkpoint?.reason),
+      /P4/,
+      `the reason names the snapshot's re-entry phase: ${json.checkpoint?.reason}`,
+    );
+    const onDisk = JSON.parse(readFileSync(proj, "utf8"));
+    assert.equal(onDisk.currentPhase, 5, "the file is never rewound (pre-fix it fell back to 4/awaiting_hitl)");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Leg 6 (fixes/323 FIX-2c · window #4 item 4, source leg) — the repair arm's
+// caller-attested dir promotion wiring. The helper + its red/absent paths are
+// pinned in src/lib/headless.test.ts; this leg keeps the CALL SITE from
+// silently regressing out of the converged branch.
+// ---------------------------------------------------------------------------
+test("FIX-2c — the repair arm promotes the emitted dir's record via the caller-attested mint (source leg)", () => {
+  assert.match(
+    CLI_TEXT,
+    /h\.promoteRepairedDirTested\(res\.project,\s*res\.dir,\s*res\.minted === true\)/,
+    "the repair arm must promote the dir record through the caller-attested helper with res.minted as the attestation",
+  );
+  const armStart = CLI_TEXT.indexOf('case "repair":');
+  const armEnd = CLI_TEXT.indexOf('case "edit":');
+  assert.ok(armStart !== -1 && armEnd > armStart, "repair arm boundaries not found in the CLI source");
+  const arm = CLI_TEXT.slice(armStart, armEnd);
+  assert.match(
+    arm,
+    /if \(res\.ok\) \{[\s\S]{0,1200}h\.promoteRepairedDirTested\(/,
+    "the promotion must sit inside the converged (res.ok) branch",
+  );
+  const failedStart = arm.indexOf("RT_E_REPAIR_FAILED");
+  assert.ok(failedStart !== -1, "the failure branch must stay coded RT_E_REPAIR_FAILED");
+  assert.ok(
+    !arm.slice(failedStart).includes("promoteRepairedDirTested"),
+    "a red/exhausted repair promotes nothing — the failed branch is a pure ledger save",
   );
 });

@@ -37,6 +37,15 @@ export const WILD_CLASSIFIER_MODEL: LlmModel = "deepseek-v4-flash";
 /** Minimum feedback the classifier must produce for a logged review (chars). */
 export const WILD_FEEDBACK_MIN = 12;
 
+/** F-5 (W44 · 323 FIX-1): the classifier request's completion cap (tokens) —
+ *  the exact generation budget the model reply was given. */
+const WILD_REPLY_MAX_TOKENS = 320;
+
+/** F-5: appended to feedback when the reply consumed the full completion cap
+ *  — ONE explicit marker, so a capped reply is never logged as a silent
+ *  mid-sentence cut (321·D1 measured a 1467-char note ending mid-sentence). */
+const WILD_TRUNCATION_MARKER = `… [reply consumed the full ${WILD_REPLY_MAX_TOKENS}-token completion cap — the tail may be cut]`;
+
 export type WildGateInfo = {
   pass: boolean;
   unmet: { id: string; criterion: string }[];
@@ -283,7 +292,7 @@ export function createWildClassifier(
     const res = await completeFn(buildWildReviewPrompt(ctx), {
       model: WILD_CLASSIFIER_MODEL,
       system: WILD_SYSTEM,
-      maxTokens: 320,
+      maxTokens: WILD_REPLY_MAX_TOKENS,
     });
     // CF-SE2-3b (312 · E2; tail landed by 317 · J3): meter the classifier call
     // into the process session ledger — I2: EVERY response that reports usage,
@@ -347,7 +356,22 @@ export function createWildClassifier(
         };
       }
     }
-    return { ok: true, verdict: parsed.verdict, feedback: parsed.feedback, model: res.model ?? WILD_CLASSIFIER_MODEL };
+    // F-5 (W44 · 323 FIX-1): silent reply truncation — the 321·D1 note ended
+    // mid-sentence at ~1467 chars because the model reply hit THIS call's
+    // 320-token cap. `finish_reason` is read by the provider layer only on the
+    // empty-content refusal (llm/providers/deepseek.ts:534-539) and dropped on
+    // the success arm (:548-550), so `LlmResult` carries no length-stop report
+    // at this seam — the ONE completer-reported signal is `usage`. A reply
+    // that consumed the full cap MAY be cut: stamp ONE explicit marker so the
+    // logged note is never silently truncated. Appended AFTER every honesty
+    // check (a capped reply never resurrects a too-short or vacuous one), and
+    // only when usage actually reports the cap being consumed.
+    const capped =
+      res.usage !== undefined &&
+      typeof res.usage.completionTokens === "number" &&
+      res.usage.completionTokens >= WILD_REPLY_MAX_TOKENS;
+    const feedback = capped ? `${parsed.feedback}\n${WILD_TRUNCATION_MARKER}` : parsed.feedback;
+    return { ok: true, verdict: parsed.verdict, feedback, model: res.model ?? WILD_CLASSIFIER_MODEL };
   }
 
   return { wildClassifierReview };

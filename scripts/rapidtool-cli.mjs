@@ -180,7 +180,14 @@ function respond(result, exitCode) {
   try {
     if (typeof cliLogEvent === "function") {
       cliLogEvent({
-        level: exitCode === 0 ? "info" : "error",
+        // fixes/323 FIX-2c (window #4 item 3 · F-3): exit 2 is the taxonomy's
+        // PARK (awaiting_hitl / blocked) — the honest outcome, never a failure
+        // (README-cli §Agent contract). It logs at `warn` with an explicit
+        // `parked` payload tag; only true failures (exit 1/3/4) log `error`.
+        // No RT_E code rides a clean park: codes are for surfaced FAILURES
+        // (AGENTS.md honesty contract #4), and the envelope deliberately omits
+        // `code` on a clean park — the tag is the park marker, not a fake code.
+        level: exitCode === 0 ? "info" : exitCode === 2 ? "warn" : "error",
         scope: "cli-command",
         // OPS-4 (K13, W40 N5): emit the CATALOGUED name. The old free-form
         // `cli.<cmd>.ok|exit` strings are in no registry (RT_EVENT_NAMES has
@@ -193,7 +200,7 @@ function respond(result, exitCode) {
             ? out.error.slice(0, 200)
             : `${CMD ?? "command"} exit ${exitCode}`,
         code: typeof out.code === "string" ? out.code : undefined,
-        payload: { cmd: CMD ?? null, exitCode },
+        payload: { cmd: CMD ?? null, exitCode, ...(exitCode === 2 ? { parked: true } : {}) },
       });
     }
   } catch {
@@ -548,6 +555,8 @@ function respondDriveOutcome(h, res, { path, extras = {} }) {
         path,
         ...extras,
         code: "RT_E_GATE_PENDING",
+        remedy:
+          "A hard DoD red is repaired, not approved: read summary.failedGates (the unmet criteria), fix the phase's artifacts or re-run the phase, then re-run `gate` — no HITL accept/reject door exists for a red gate.",
         error:
           (Array.isArray(res.events) && res.events.length > 0
             ? res.events[res.events.length - 1]
@@ -766,6 +775,8 @@ async function main() {
               // invoked `run --unattended` must be able to see it parked).
               ...(unattended ? { unattended: true } : {}),
               code: "RT_E_GATE_PENDING",
+              remedy:
+                "A hard DoD red is repaired, not approved: read summary.failedGates (the unmet criteria), fix the phase's artifacts or re-run the phase, then re-run `gate` — no HITL accept/reject door exists for a red gate.",
               error:
                 (Array.isArray(res.events) && res.events.length > 0
                   ? res.events[res.events.length - 1]
@@ -833,9 +844,14 @@ async function main() {
         // id (an id reused by a different brief must fail closed); a directory names
         // no expected id — the checkpoint's own identity governs.
         let expected;
+        // fixes/323 FIX-2c (X2b OBS): the loaded file doubles as the staleness
+        // comparison subject below — a snapshot the file has moved past must
+        // never be silently resumed over it.
+        let fileProject = null;
         if (t.file && existsSync(t.file)) {
           try {
-            expected = { projectId: h.loadProject(t.file).id };
+            fileProject = h.loadProject(t.file);
+            expected = { projectId: fileProject.id };
           } catch {
             /* an unreadable file cannot pin identity — the checkpoint's own id governs */
           }
@@ -843,6 +859,37 @@ async function main() {
         const resumed = h.loadResumableCheckpoint(t.dir, expected);
         if (!resumed.ok) {
           return respond({ ok: false, path: resumed.path, dir: t.dir, code: resumed.code, error: resumed.error }, 1);
+        }
+        // fixes/323 FIX-2c (X2b OBS): ignore-with-notice when the named project
+        // FILE has superseded the snapshot (id / seal / brief / phase / state
+        // comparison — checkpointSupersededBy). The file is the current truth;
+        // driving from the snapshot would rewind it (the live X2b repro: a
+        // stale P4 gate-park snapshot rewound a file already advanced to P5).
+        // The notice rides `checkpoint` — never a silent switch.
+        const stale = fileProject ? h.checkpointSupersededBy(resumed.project, resumed.resumedFrom.phase, fileProject) : null;
+        if (stale && stale.superseded && fileProject) {
+          const res = await h.runUntilGate(fileProject, {
+            autopilot: flag(args, "autopilot"),
+            live: flag(args, "live"),
+            checkpointDir: t.dir,
+          });
+          if (t.file) h.saveProject(t.file, res.project);
+          respondDriveOutcome(h, res, {
+            path: t.file,
+            extras: {
+              resumed: false,
+              checkpoint: {
+                path: resumed.path,
+                savedAt: resumed.savedAt,
+                ageMs: Date.now() - resumed.savedAt,
+                resumedFrom: resumed.resumedFrom,
+                ignored: true,
+                superseded: true,
+                reason: stale.reason,
+              },
+            },
+          });
+          return;
         }
         const ageMs = Date.now() - resumed.savedAt;
         const res = await h.runUntilGate(resumed.project, {
@@ -876,25 +923,58 @@ async function main() {
         if (target.error) return respond({ ok: false, error: target.error, code: "RT_E_VALIDATION" }, 1);
         const t = resolveCheckpointTarget(target.value);
         const resumed = h.loadResumableCheckpoint(t.dir);
+        // fixes/323 FIX-2c (X2b OBS): the named FILE (when it exists) is loaded
+        // up front — a scheduler re-invocation must never resume a snapshot the
+        // file has moved past; the file is the current truth and drives below.
+        let fileProject = null;
+        if (t.file && existsSync(t.file)) {
+          try {
+            fileProject = h.loadProject(t.file);
+          } catch {
+            /* an unreadable file cannot join the comparison — the refusals below / the drive's own validation own that failure */
+          }
+        }
         let project;
         let extras = { unattended: true };
         if (resumed.ok) {
-          project = resumed.project;
-          extras = {
-            unattended: true,
-            resumed: true,
-            checkpoint: {
-              path: resumed.path,
-              savedAt: resumed.savedAt,
-              ageMs: Date.now() - resumed.savedAt,
-              resumedFrom: resumed.resumedFrom,
-            },
-          };
+          // fixes/323 FIX-2c (X2b OBS): ignore-with-notice when the file has
+          // superseded the snapshot (checkpointSupersededBy — id / seal / brief
+          // / phase / state). The stale snapshot is never consumed: the drive
+          // starts from the file and the notice rides `checkpoint`.
+          const stale = fileProject ? h.checkpointSupersededBy(resumed.project, resumed.resumedFrom.phase, fileProject) : null;
+          if (stale && stale.superseded && fileProject) {
+            project = fileProject;
+            extras = {
+              unattended: true,
+              resumed: false,
+              checkpoint: {
+                path: resumed.path,
+                savedAt: resumed.savedAt,
+                ageMs: Date.now() - resumed.savedAt,
+                resumedFrom: resumed.resumedFrom,
+                ignored: true,
+                superseded: true,
+                reason: stale.reason,
+              },
+            };
+          } else {
+            project = resumed.project;
+            extras = {
+              unattended: true,
+              resumed: true,
+              checkpoint: {
+                path: resumed.path,
+                savedAt: resumed.savedAt,
+                ageMs: Date.now() - resumed.savedAt,
+                resumedFrom: resumed.resumedFrom,
+              },
+            };
+          }
         } else if (resumed.code === "RT_E_CHECKPOINT_MISSING" && t.file && existsSync(t.file)) {
           // No checkpoint: a fresh project (or one whose COMPLETE seal cleared it) —
           // start from the file; the drive below writes a fresh checkpoint per phase.
           try {
-            project = h.loadProject(t.file);
+            project = fileProject ?? h.loadProject(t.file);
           } catch (err) {
             return respond(
               {
@@ -1013,6 +1093,28 @@ async function main() {
             1,
           );
         }
+        // W44 X2 (seeded ticket T · fixes/321_d2_monitor F-2): a forceHuman gate
+        // is HUMAN-ONLY (R3/B-03) — a rejected review park / failed P6 sandbox
+        // is never machine-cleared. The engine enforces this with a bare throw
+        // (engine.approveHitl), which main()'s internal catch wraps as
+        // RT_E_INTERNAL / exit 4 + the generic "retry / escalate" remedy — the
+        // WRONG class for a deterministic governance refusal. The gate's own
+        // state is already loaded here, so refuse CODED at the verb (usage
+        // class, exit 1, remedy = the human door) before the driver call; the
+        // engine throw stays as defense-in-depth (live bytes:
+        // C:/Users/mnril/w44_trial/live1/03_sealed_approve_autopilot.out).
+        if (machineSeat && project.hitl.forceHuman) {
+          return respond(
+            {
+              ok: false,
+              error: `approve: the open gate (P${project.hitl.phase}) is human-only (forceHuman — R3/B-03): a machine seat may never approve a forceHuman gate, and --force cannot carry it either.`,
+              code: "RT_E_VALIDATION",
+              remedy:
+                "Use the human door: run `approve --project <p> --i-am-human` from an interactive terminal (typed RT_HUMAN_SEAT_TOKEN re-entry), or send the phase back with `reject --project <p> --note <qualitative feedback>`. A forceHuman gate can never be machine-approved.",
+            },
+            1,
+          );
+        }
         // 216o (T-107.3 · P0-01/P0-06 · W5-L3 — the CLI length of the ONE seam):
         // the approve verb consults the policy seam BEFORE handing the decision
         // to the driver, which re-checks at the same seam (defense in depth, one
@@ -1104,7 +1206,63 @@ async function main() {
             1,
           );
         }
-        const updated = h.reject(project, note.value);
+        // 322 X2 (F-1 scripts half · D2 F-1): the reject door carries the SAME
+        // explicit-seat discipline as approve — the seat is never guessed, and a
+        // machine path can never mint a human actor. The pre-fix path left the
+        // seat to rejectHitl, which hardcoded decidedBy:"human" for EVERY caller
+        // (live bytes: live1/05_sealed_reject_note.out — a non-TTY machine
+        // reject stamped "human"). Exactly one seat: `--seat autopilot`
+        // (explicit machine attribution) or `--i-am-human` (human ceremony —
+        // TTY + typed RT_HUMAN_SEAT_TOKEN re-entry, refused off-TTY); the chosen
+        // actor rides h.reject's actor parameter (X1's seam).
+        const humanClaim = flag(args, "i-am-human");
+        const seatArg = args.seat;
+        const machineSeat = seatArg === "autopilot";
+        if (seatArg !== undefined && !machineSeat) {
+          const shown = seatArg === true ? "(no value)" : JSON.stringify(seatArg);
+          return respond(
+            {
+              ok: false,
+              error: `reject: --seat ${shown} is not a seat — name 'autopilot' for an explicit machine rejection, or drop --seat and pass --i-am-human for the human seat.`,
+              code: "RT_E_VALIDATION",
+              remedy:
+                "Re-run with exactly one seat: `reject --project <p> --note <t> --seat autopilot` (explicit machine attribution) or `reject --project <p> --note <t> --i-am-human` from an interactive terminal (human seat).",
+            },
+            1,
+          );
+        }
+        if (humanClaim && machineSeat) {
+          return respond(
+            {
+              ok: false,
+              error:
+                "reject: --i-am-human and --seat autopilot are mutually exclusive — a decision is either a person's or the machine's; name exactly one seat.",
+              code: "RT_E_VALIDATION",
+              remedy: "Drop one flag: keep `--i-am-human` for the human seat (TTY-only) or `--seat autopilot` for explicit machine attribution.",
+            },
+            1,
+          );
+        }
+        if (!humanClaim && !machineSeat) {
+          return respond(
+            {
+              ok: false,
+              error:
+                process.stdin.isTTY === true
+                  ? `reject: no seat named — a bare rejection would carry no claimed seat and the seat is never guessed. Name the seat: \`--i-am-human\` for a human decision (typed RT_HUMAN_SEAT_TOKEN re-entry at the prompt) or \`--seat autopilot\` for an explicit machine decision.`
+                  : `reject from a non-TTY names no claimable seat — the human seat needs an interactive terminal (--i-am-human + typed RT_HUMAN_SEAT_TOKEN re-entry; refused off-TTY) and a machine decision must be explicit. Next step: \`reject --project <p> --note <t> --seat autopilot\` for an explicit machine rejection, or run the verb from a terminal where a person can confirm.`,
+              code: "RT_E_VALIDATION",
+              remedy:
+                "Name exactly one seat: `--seat autopilot` (explicit machine attribution, works non-TTY) or `--i-am-human` from an interactive terminal (human seat, typed token re-entry).",
+            },
+            1,
+          );
+        }
+        const humanSeat = flag(args, "i-am-human") ? await humanSeatClaim("reject") : null;
+        if (humanSeat && humanSeat.error) {
+          return respond({ ok: false, error: humanSeat.error, code: "RT_E_VALIDATION" }, 1);
+        }
+        const updated = h.reject(project, note.value, humanSeat ? humanSeat.actor : { decidedBy: "autopilot", seat: "harness" });
         h.saveProject(requireProjectPath(args, "reject"), updated);
         respond({ ok: true, path: requireProjectPath(args, "reject"), summary: h.summary(updated) }, 0);
         return;
@@ -1900,6 +2058,15 @@ async function main() {
           };
           if (res.ok) {
             h.saveProject(path, res.project); // the ledger absorbs the dir edits
+            // T9.3 repair-dir variant (fixes/323 FIX-2c · 319_f3_promote §C4):
+            // the converged repair's FRESH mint is the caller attestation —
+            // promote the dir's OWN `.rapidtool/project.json` with the tested
+            // evidence THIS run earned. repairTreeDir mints on the LEDGER
+            // internally (recordGreen runs before the CLI sees the result), so
+            // promoteEmittedTreeTested's fresh-mint guard can never fire here;
+            // res.minted is true only when this repair flipped the label —
+            // a red/no-spec run reports false and writes nothing.
+            const promotedTree = h.promoteRepairedDirTested(res.project, res.dir, res.minted === true);
             return respond(
               {
                 ok: true,
@@ -1912,6 +2079,18 @@ async function main() {
                 minted: res.minted,
                 gate: res.gate,
                 import: importSummary,
+                ...(promotedTree.promoted
+                  ? {
+                      tested: {
+                        promoted: true,
+                        label: "tested",
+                        evidenceHash:
+                          res.project.lastTest && typeof res.project.lastTest.evidenceHash === "string"
+                            ? res.project.lastTest.evidenceHash
+                            : null,
+                      },
+                    }
+                  : {}),
                 applied: res.applied,
                 events: res.events,
               },
@@ -3880,7 +4059,18 @@ async function main() {
               currentPhase,
               wildRun,
             },
-            errors: chronological.filter((r) => r.level === "error" || r.level === "critical"),
+            errors: chronological.filter(
+              (r) =>
+                r.level === "error" ||
+                r.level === "critical" ||
+                // fixes/323 FIX-2c (F-3): exit-2 park rows ride the input so the
+                // verdict NAMES the park (class `honest-park`) instead of
+                // misreading it — true for new warn+parked rows AND for legacy
+                // error-level exit-2 rows already on disk (the pre-fix bytes
+                // read `level:"error", code:null`). buildDiagnosis separates
+                // them; they are never counted as errors.
+                rtDiag.isParkRow(r),
+            ),
             // OPS-9: the NEWEST 50 rows, presented oldest-first (was
             // `rows.slice(-50)` = the window's OLDEST rows, in reverse).
             timeline: chronological.slice(-50).map((r) => ({
@@ -4029,9 +4219,11 @@ async function humanSeatClaim(cmd) {
     const machineLine =
       cmd === "approve"
         ? "For an explicit MACHINE decision use `approve --project <p> --seat autopilot` — a bare call is never guessed a seat."
-        : cmd === "fixtures"
-          ? "Approving fixtures is a human-only decision (the autopilot seat can never approve them) — run the verb from a terminal where a person can confirm."
-          : "Use the autopilot seat instead (omit --i-am-human) or run the verb from a terminal where a person can confirm.";
+        : cmd === "reject"
+          ? "For an explicit MACHINE rejection use `reject --project <p> --note <t> --seat autopilot` — a bare call is never guessed a seat."
+          : cmd === "fixtures"
+            ? "Approving fixtures is a human-only decision (the autopilot seat can never approve them) — run the verb from a terminal where a person can confirm."
+            : "Use the autopilot seat instead (omit --i-am-human) or run the verb from a terminal where a person can confirm.";
     return {
       error:
         `${cmd}: --i-am-human refused — the human seat needs an interactive confirmation ` +

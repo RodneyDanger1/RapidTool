@@ -301,6 +301,21 @@ const PROSE_LINE_SHAPE = /^[A-Za-z][A-Za-z0-9 ,.:;!?'"()-]*$/;
  * the deliberation this gate exists for.
  */
 const PROSE_ARITH_MINUS = /\b[A-Za-z_$0-9][\w$]+\s+-\s+[A-Za-z_$0-9][\w$]+\b/;
+/**
+ * 322 X3 (BUG-4): ternary-expression code shape — a single-line `cond ? a : b`
+ * whose arms are single identifier/numeric tokens (unary minus and dotted
+ * paths admitted) at the end of the line (optional `;`/`,` terminal). `?`,
+ * `:`, `;` and `-` are sentence punctuation to PROSE_LINE_SHAPE and such a
+ * line carries no code-significant character at all, so it satisfied every
+ * prose floor and was refused as prose — burning EXP03's final synthesis cycle
+ * (`prose-in-code … line 78: "return negative ? -cents : cents;"`,
+ * 322_e2_monitor §BUG-4). Excluded up front like PROSE_ARITH_MINUS, end-
+ * anchored: a ternary is a whole-expression tail while deliberation prose
+ * ends in a sentence terminal (`.`/`!`/`?`) and stays caught. Accepted
+ * residual (same trade as W23-262/B1): a deliberation line ending exactly
+ * `word? word: word` with NO sentence terminal is no longer flagged — rare.
+ */
+const PROSE_TERNARY = /\?\s*-?(?:[A-Za-z_$][\w$]*(?:\.\w+)*|\d+(?:\.\d+)?)\s*:\s*-?(?:[A-Za-z_$][\w$]*(?:\.\w+)*|\d+(?:\.\d+)?)\s*[;,]?\s*$/;
 
 /**
  * 216f (T-09 / F-04): bare English prose written into a module body as code —
@@ -313,11 +328,14 @@ const PROSE_ARITH_MINUS = /\b[A-Za-z_$0-9][\w$]+\s+-\s+[A-Za-z_$0-9][\w$]+\b/;
  * sentence-shaped ASCII text and no code-significant character at all. No
  * legal top-level statement in the generated subset (functions, consts, object
  * literals, `module.exports` assigns, `'use strict';`) can match that shape —
- * prose-as-code always can. The one legal shape the raw sentence test WOULD
- * match — a spaced arithmetic minus between two operands (`balance: amountDue -
- * amountPaid`) — is excluded up front by PROSE_ARITH_MINUS (W23-262/B1: that
+ * prose-as-code always can. The two legal shapes the raw sentence test WOULD
+ * match are excluded up front: a spaced arithmetic minus between two operands
+ * (`balance: amountDue - amountPaid`) via PROSE_ARITH_MINUS (W23-262/B1: that
  * exact line refused run #2's chunk 2/7 and cascaded into 28 honest coverage
- * reds in the emitted suite; fixes/255 §2 + fixes/260 §2).
+ * reds in the emitted suite; fixes/255 §2 + fixes/260 §2), and a single-line
+ * ternary `cond ? a : b` with single-token arms (`return negative ? -cents :
+ * cents;`) via PROSE_TERNARY (322 X3, BUG-4: that exact line refused EXP03's
+ * final synthesis cycle; 322_e2_monitor §BUG-4).
  *
  * The masking here is deliberately LINE-SCOPED, not `maskLiteralsAndComments`:
  * the leaked blob's own deliberation quotes (`"implement every one"`) leave
@@ -453,6 +471,10 @@ export function proseLineHits(source: string): ProseLineHit[] {
     // is a code position (see PROSE_ARITH_MINUS) — never prose. Tested on the
     // MASKED text, so a dash inside a string/comment was already blanked above.
     if (PROSE_ARITH_MINUS.test(flat)) continue;
+    // 322 X3 (BUG-4): end-anchored ternary expression — code, never prose (see
+    // PROSE_TERNARY above). Tested on the MASKED text like PROSE_ARITH_MINUS,
+    // so arms inside strings/comments are already blanked away.
+    if (PROSE_TERNARY.test(flat)) continue;
     const hasParens = flat.includes("(") || flat.includes(")");
     const codeProbe = hasParens ? flat.replace(/[()]/g, "") : flat;
     // 216f (W2·R3 tightening): every code-significant char vetoes a line as
@@ -2384,15 +2406,19 @@ export function validateSynthesisModule(
 }
 
 /**
- * p6-brief-fit pre-acceptance (DOD[6] probe parity, dod.ts): ≥ half of the
- * brief's required noun tokens (min 1) must appear as code identifiers in
- * the module. Vocabulary-free briefs pass vacuously.
+ * p6-brief-fit pre-acceptance (DOD[6] probe parity, dod.ts): the brief's
+ * required noun tokens must appear as code identifiers in the module — bar
+ * max(1, ceil(required × 0.35)). 322 X1 (P6-C): recalibrated ½ → 0.35 —
+ * measured honest coverage (TS-truth mask, stem-tolerant) is 40–50%, so 0.35
+ * keeps ≥1 margin for stochastic keyed re-runs; placeholders (≈0 hits) still
+ * fail by construction. Vocabulary-free briefs pass vacuously. KEEP IN
+ * PARITY with dod.ts's p6-brief-fit probe.
  */
 export function briefFitSatisfied(brief: string, source: string): { ok: boolean; missing: string[] } {
   const { required } = briefNounHits(brief);
   if (required.length === 0) return { ok: true, missing: [] };
   const hits = identifierHits(required, source);
-  const need = Math.max(1, Math.ceil(required.length * 0.5));
+  const need = Math.max(1, Math.ceil(required.length * 0.35));
   return { ok: hits.length >= need, missing: required.filter((t) => !hits.includes(t)) };
 }
 

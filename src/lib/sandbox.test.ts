@@ -1,8 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import ts from "typescript";
 import {
   buildPhase6Module,
   healSource,
+  identifierHits,
+  maskLiteralsAndComments,
   runGenerated,
   runSandboxed,
   sandboxWorkerSource,
@@ -384,5 +387,85 @@ describe("verifyClaims (post-hoc claim gates)", () => {
     const r = verifyClaims([null, { kind: "file-exists" }] as unknown as ClaimRow[], {});
     assert.equal(r.ok, false);
     assert.equal(r.unmet.length, 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 322 X1 (P6-A/P6-B): masker regex-awareness + stem-tolerant identifierHits.
+// The masker legs are ground-truthed against the repo's own TS lexer (keyless):
+// strings + regex literals come from the parser AST, comments from the raw
+// scanner with its regex-context misreads (`//` inside `:\/\//`) dropped when
+// they overlap an AST string/regex range.
+// ---------------------------------------------------------------------------
+
+/** TS-lexer truth mask — what maskLiteralsAndComments must produce. */
+function tsTruthMask(src: string): string {
+  const sf = ts.createSourceFile("truth.ts", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const astRanges: Array<[number, number]> = [];
+  (function walk(n: ts.Node): void {
+    const isRegex = ts.isRegularExpressionLiteral
+      ? ts.isRegularExpressionLiteral(n)
+      : n.kind === ts.SyntaxKind.RegularExpressionLiteral;
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || isRegex) {
+      astRanges.push([n.getStart(sf), n.getEnd()]);
+    }
+    ts.forEachChild(n, walk);
+  })(sf);
+  const comments: Array<[number, number]> = [];
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, src);
+  let tok: ts.SyntaxKind;
+  while ((tok = scanner.scan()) !== ts.SyntaxKind.EndOfFileToken) {
+    if (tok === ts.SyntaxKind.SingleLineCommentTrivia || tok === ts.SyntaxKind.MultiLineCommentTrivia) {
+      comments.push([scanner.getTokenStart(), scanner.getTokenEnd()]);
+    }
+  }
+  const out = src.split("");
+  for (const [x, y] of astRanges) for (let i = x; i < y; i++) out[i] = " ";
+  for (const [x, y] of comments) {
+    if (!astRanges.some(([a, b]) => x < b && y > a)) for (let i = x; i < y; i++) out[i] = " ";
+  }
+  return out.join("");
+}
+
+describe("maskLiteralsAndComments (322 X1 · P6-A regex awareness)", () => {
+  it("masks the escape-regex class (update.ts:692) exactly like the TS lexer", () => {
+    // Pre-fix, the `"` inside `/"/g` opened a runaway string: 1610 chars of
+    // real code masked and pairing shifted to EOF in the same file.
+    const sample = `function esc(s) { return String(s).replace(/"/g, '&quot;'); }\nconst label = esc("menu");`;
+    assert.equal(maskLiteralsAndComments(sample), tsTruthMask(sample));
+    assert.deepEqual(identifierHits(["menu"], sample), [], "string content never counts");
+    assert.deepEqual(identifierHits(["label"], sample), ["label"], "real code identifiers still count");
+  });
+
+  it("division is not a regex: a `/` after an identifier stays code", () => {
+    const sample = 'const half = total / 2; const label = "menu";';
+    assert.equal(maskLiteralsAndComments(sample), tsTruthMask(sample));
+    assert.deepEqual(identifierHits(["menu"], sample), []);
+    assert.deepEqual(identifierHits(["total", "half"], sample), ["total", "half"]);
+  });
+
+  it("masks `:\\/\\//`-style escaped regexes without cascade", () => {
+    // The trailing comment sits on its own line: the raw scanner's regex-blind
+    // comment pass swallows a same-line comment into the regex misread, and the
+    // overlap filter would drop both. The masker itself has no such blindspot.
+    const sample = `if (/^[A-Za-z][A-Za-z0-9+.-]*:\\/\\//.test(filePath)) { return false; }\n// keep rest\nconst menu = "shop";`;
+    assert.equal(maskLiteralsAndComments(sample), tsTruthMask(sample));
+    assert.deepEqual(identifierHits(["menu"], sample), ["menu"], "code after the regex survives");
+    assert.deepEqual(identifierHits(["shop"], sample), [], "string after the regex is still masked");
+  });
+});
+
+describe("identifierHits (322 X1 · P6-B stem tolerance)", () => {
+  it("inflectional tolerance: brief nouns prove implementation through stems", () => {
+    assert.deepEqual(identifierHits(["updates"], "export function UpdateItem() {}"), ["updates"]);
+    assert.deepEqual(identifierHits(["publishes"], "function publishStaticSite() {}"), ["publishes"]);
+    assert.deepEqual(identifierHits(["menus"], "const menuItems = [];"), ["menus"]);
+  });
+
+  it("short-stem guard: stems < 4 chars never match (uses ≁ user)", () => {
+    // canonicalStem("uses") → "use" (3 chars) — guarded out of the stem rule.
+    assert.deepEqual(identifierHits(["uses"], "const user = 1;"), []);
+    // Plain sub-identifier behavior is unchanged (createBoard proves board).
+    assert.deepEqual(identifierHits(["board"], "function createBoard() {}"), ["board"]);
   });
 });

@@ -207,3 +207,22 @@ test("makeCliRow sanitizes per-row budgets (message ≤ 300 chars) and never thr
   assert.equal(r.ts, 42, "host-stamped ts honored");
   assert.equal(r.host, "cli");
 });
+
+test("FIX-2c: the exit-2 park row shape survives makeCliRow — level warn + payload.parked ride through sanitization", () => {
+  const r = makeCliRow(
+    {
+      level: "warn",
+      scope: "cli-command",
+      event: "cli.invocation",
+      message: "gate exit 2",
+      capture: "scripts/rapidtool-cli.mjs:200",
+      payload: { cmd: "gate", exitCode: 2, parked: true },
+    },
+    "sess-park",
+    42,
+  );
+  assert.equal(r.level, "warn", "an exit-2 park logs at warn (F-3) — the appender must not rewrite the level");
+  assert.equal(r.payload?.parked, true, "the parked tag survives the row pipeline");
+  assert.equal(r.payload?.exitCode, 2);
+  assert.equal(r.code ?? null, null, "a clean park carries no RT_E code");
+});

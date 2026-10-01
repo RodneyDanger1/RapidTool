@@ -23,6 +23,7 @@ import {
   p6CycleLiveDeps,
   packet,
   promoteEmittedTreeTested,
+  promoteRepairedDirTested,
   reject,
   repairTreeDir,
   retry,
@@ -417,6 +418,26 @@ describe("approve / reject / retry", () => {
     p = retry(p);
     assert.equal(p.status, "running");
     assert.equal(p.phases.find((r) => r.id === 4)?.status, "ready");
+  });
+
+  it("322 X1 (F-1/R-A): a machine reject records the harness autopilot seat — never decidedBy:human", async () => {
+    let p = createProject({ brief: FIXTURE_BRIEF });
+    p = (await runUntilGate(p)).project; // parked at P4
+    p = reject(p, "The isolation policy must enumerate per-role OAuth scopes.");
+    const row = p.decisions.at(-1);
+    assert.equal(row?.decision, "reject");
+    assert.equal(row?.decidedBy, HARNESS_APPROVE_ACTOR.decidedBy, "default seat = harness autopilot actor");
+    assert.equal(row?.decidedBy, "autopilot", "a machine reject can never mint decidedBy:human");
+
+    // The human seat is claimable only EXPLICITLY (R-A seam; the CLI layer owns
+    // the out-of-band token discipline for the claim — scripts/ seat flag).
+    let q = createProject({ brief: FIXTURE_BRIEF });
+    q = (await runUntilGate(q)).project;
+    q = reject(q, "The isolation policy must enumerate per-role OAuth scopes.", {
+      decidedBy: "human",
+      seat: "human-cli-i-am-human",
+    });
+    assert.equal(q.decisions.at(-1)?.decidedBy, "human", "an explicit human seat passes through");
   });
 });
 
@@ -998,6 +1019,101 @@ describe("C-1 repair seam — repairTreeDir's recordGreen mints before the gate 
       !res.gate!.unmet.some((u) => u.includes('lastTest.label === "tested"')),
       'p6-verified unmet ONLY when the gate ran before the mint (the pre-C-1 deadlock) — the mint must precede the gate',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/323 FIX-2c (window #4 item 4 · T9.3 repair-dir variant, from
+// fixes/319_f3_promote §C4/§D.1): the repair arm's caller-attested dir
+// promotion. repairTreeDir mints the tested stamp onto the LEDGER inside its
+// own recordGreen, so promoteEmittedTreeTested's fresh-mint guard can never
+// write the dir's OWN `.rapidtool/project.json` — the CLI arm instead attests
+// the fresh mint from ITS OWN result (res.minted) and calls the caller-attested
+// helper. Red / no-spec / un-attested / recordless paths write NOTHING.
+// ---------------------------------------------------------------------------
+describe("fixes/323 FIX-2c — repair arm's caller-attested dir promotion (T9.3 repair-dir variant)", () => {
+  it("a fresh-minted ledger promotes the dir record; un-attested / untested / recordless calls write nothing", async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, ".rapidtool"), { recursive: true });
+    const recordPath = join(dir, ".rapidtool", "project.json");
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    const mintedProject = {
+      ...base,
+      lastTest: { label: "tested", evidenceHash: "f2c0attest", checkedAt: 1 },
+    } as unknown as Project;
+    writeFileSync(recordPath, JSON.stringify(base, null, 2), "utf8");
+    const beforeBytes = readFileSync(recordPath, "utf8");
+
+    // The arm reaches this call only inside `if (res.ok)` with a fresh mint
+    // (`res.minted === true`) — a red or no-spec run reports false: nothing.
+    const off = promoteRepairedDirTested(mintedProject, dir, false);
+    assert.equal(off.promoted, false);
+    assert.equal(readFileSync(recordPath, "utf8"), beforeBytes, "no attestation ⇒ the record stands untouched");
+
+    const on = promoteRepairedDirTested(mintedProject, dir, true);
+    assert.equal(on.promoted, true, "the attested fresh mint promotes the dir's own record");
+    const promotedBytes = readFileSync(recordPath, "utf8");
+    const record = JSON.parse(promotedBytes) as Project;
+    const lt = record.lastTest as { label?: string; evidenceHash?: string } | null | undefined;
+    assert.equal(lt?.label, "tested", "the dir record carries the tested stamp");
+    assert.equal(lt?.evidenceHash, "f2c0attest");
+
+    const untested = promoteRepairedDirTested(base, dir, true);
+    assert.equal(untested.promoted, false, "a ledger without the tested label is never stamped, even attested");
+    assert.equal(readFileSync(recordPath, "utf8"), promotedBytes, "the record stands after the untested call");
+
+    const bare = tempDir();
+    const miss = promoteRepairedDirTested(mintedProject, bare, true);
+    assert.equal(miss.promoted, false, "a dir with no record is never stamped");
+    assert.equal(existsSync(join(bare, ".rapidtool", "project.json")), false, "and no record is fabricated into existence");
+  });
+
+  it("the REAL repair seam never attests a mint on the green-tree/red-gate shape — the arm's gate writes nothing", async () => {
+    // C-1 shape re-derived over a real repairTreeDir call: the honest P6 gate
+    // stays red on this fixture, so the run converges nowhere — the seam
+    // returns minted:false BY DESIGN (recordGreen: "tree-green + red gate is
+    // FAILED, never ok:true / minted tested"), and the dir record must stand
+    // exactly as it was (the red path promotes nothing).
+    const dir = tempDir();
+    mkdirSync(join(dir, ".rapidtool"), { recursive: true });
+    mkdirSync(join(dir, "src", "generated"), { recursive: true });
+    writeFileSync(join(dir, "src", "generated", "hvac.ts"), "export const hvac = () => 1;\n");
+    const recordPath = join(dir, ".rapidtool", "project.json");
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    writeFileSync(recordPath, JSON.stringify(base, null, 2), "utf8");
+    const beforeBytes = readFileSync(recordPath, "utf8");
+    const executedVerdict: TreeRunOutcome = {
+      ok: true,
+      dir: "",
+      compile: { ok: true, dir: "", checked: 1, passed: 1, failed: 0, skipped: 0, verdicts: [] },
+      tests: [
+        { file: "tests/oracle.spec.ts", compile: "pass", run: "pass", tests: { pass: 1, fail: 0 }, detail: "1 passed" },
+      ],
+      run: { kind: "library", run: "skip", detail: "no entry to smoke" },
+    };
+    const candidate: Project = {
+      ...base,
+      generatedTree: [
+        { path: "src/generated/hvac.ts", source: "export const hvac = () => 1;", hash: "f1", attempt: 0 },
+      ],
+    };
+    const res = await repairTreeDir(candidate, dir, { deps: { runTree: async () => executedVerdict } });
+    // Read the gate + attestation BEFORE the asserts (assert.equal narrows the
+    // fields, which would make the verbatim `res.minted === true` a dead,
+    // TS2367-flagged comparison).
+    const armGateOpen = res.ok === true;
+    const attestedMint = res.minted === true;
+    assert.equal(res.ok, false, "precondition: the honest P6 gate stays red here — no convergence (C-1 shape)");
+    assert.equal(
+      res.minted,
+      false,
+      "the seam never attests a mint on the green-tree/red-gate shape (that shape is FAILED by design), so the arm's attestation is absent and no promotion can ride it",
+    );
+    // The CLI arm's promotion expression, reproduced (reached only under
+    // `if (res.ok)` with the minted attestation).
+    const promoted = armGateOpen ? promoteRepairedDirTested(res.project, dir, attestedMint) : { promoted: false };
+    assert.equal(promoted.promoted, false, "a red-gate repair never promotes the dir record");
+    assert.equal(readFileSync(recordPath, "utf8"), beforeBytes, "the record stands exactly as it was");
   });
 });
 

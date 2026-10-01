@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildDiagnosis, projectWildRun, type DiagnosisInput } from "./diagnose.ts";
+import { buildDiagnosis, isParkRow, projectWildRun, type DiagnosisInput } from "./diagnose.ts";
 import { WILD_STEP_BUDGET_MS } from "./rt-events.ts";
 import type { RtEvent } from "./rt-events.ts";
 
@@ -499,4 +499,103 @@ test("G2: buildDiagnosis carries the projected parked run unchanged — identica
   assert.equal(a.project.wildRun!.stoppedAt, null);
   assert.equal(a.project.wildRun!.overdueMs, null);
   assert.equal(a.mostLikelyCause.class, "none-detected", "a parked run is not an incident");
+});
+
+// ---------------------------------------------------------------------------
+// fixes/323 FIX-2c (F-3 · window #4 item 3): exit-2 parks are not errors.
+// Live pre-fix bytes (keyless `gate` park, captured 2026-09-30): {"level":
+// "error",…,"event":"cli.invocation","message":"gate exit 2","code":null,
+// "payload":{"cmd":"gate","exitCode":2}} — that row ranked unclassified-errors
+// ("not a clean bill of health"). The pins below carry BOTH shapes: the legacy
+// error-level row already on disk, and the post-fix warn + `parked:true` row.
+// ---------------------------------------------------------------------------
+
+test("FIX-2c: a parks-only window ranks honest-park — never unclassified-errors, never the 'not a clean bill of health' language (legacy error-level row)", () => {
+  const park = rtRow({
+    level: "error", // the pre-fix bytes already on disk
+    scope: "cli-command",
+    event: "cli.invocation",
+    message: "gate exit 2",
+    payload: { cmd: "gate", exitCode: 2 },
+  });
+  const diag = buildDiagnosis(baseInput({ errors: [park] }));
+  assert.equal(diag.mostLikelyCause.class, "honest-park");
+  assert.ok(/park/i.test(diag.mostLikelyCause.summary), "the summary NAMES the park");
+  assert.equal(
+    /not a clean bill of health/.test(diag.mostLikelyCause.summary),
+    false,
+    "a park is not ill-health language",
+  );
+  assert.equal(/No error rows in window/.test(diag.mostLikelyCause.summary), false);
+  assert.deepEqual(diag.mostLikelyCause.evidence, ["errors[0]"]);
+  assert.ok(diag.actions.some((a) => /parked/i.test(a)), "the action names the parked state");
+});
+
+test("FIX-2c: the post-fix park shape (level warn + payload.parked:true) classifies identically", () => {
+  const diag = buildDiagnosis(
+    baseInput({
+      errors: [
+        rtRow({
+          level: "warn",
+          scope: "cli-command",
+          event: "cli.invocation",
+          message: "unattended exit 2",
+          payload: { cmd: "unattended", exitCode: 2, parked: true },
+        }),
+      ],
+    }),
+  );
+  assert.equal(diag.mostLikelyCause.class, "honest-park");
+  assert.deepEqual(diag.mostLikelyCause.evidence, ["errors[0]"]);
+});
+
+test("FIX-2c: park rows never inflate the unclassified count — a mixed window counts only the non-park rows", () => {
+  const diag = buildDiagnosis(
+    baseInput({
+      errors: [
+        rtRow({
+          level: "error",
+          scope: "cli-command",
+          event: "cli.invocation",
+          message: "gate exit 2",
+          payload: { cmd: "gate", exitCode: 2 },
+        }),
+        rtRow({ scope: "sys", event: "sys.uncaught_error", code: "RT_E_INTERNAL", message: "boom" }),
+      ],
+    }),
+  );
+  assert.equal(diag.mostLikelyCause.class, "unclassified-errors");
+  assert.ok(
+    /1 error\/critical row/.test(diag.mostLikelyCause.summary),
+    `only the non-park row counts: ${diag.mostLikelyCause.summary}`,
+  );
+  assert.deepEqual(diag.mostLikelyCause.evidence, ["errors[1]"], "the park row is never cited as an error");
+});
+
+test("FIX-2c: isParkRow — the generic parked tag wins anywhere; exit 1 / a string '2' / a missing payload never classify", () => {
+  assert.equal(
+    isParkRow(rtRow({ scope: "cli-command", event: "cli.invocation", payload: { cmd: "gate", exitCode: 2 } })),
+    true,
+    "the legacy error-level exit-2 row is a park",
+  );
+  assert.equal(
+    isParkRow(rtRow({ scope: "wild-step", event: "wild.step_paused", payload: { parked: true } })),
+    true,
+    "the explicit tag is the marker, wherever it rides",
+  );
+  assert.equal(
+    isParkRow(rtRow({ scope: "cli-command", event: "cli.invocation", payload: { cmd: "gate", exitCode: 1 } })),
+    false,
+    "exit 1 is a failure, never a park",
+  );
+  assert.equal(
+    isParkRow(rtRow({ scope: "cli-command", event: "cli.invocation", payload: { cmd: "gate", exitCode: "2" } })),
+    false,
+    "a string exit code is not the park marker",
+  );
+  assert.equal(
+    isParkRow(rtRow({ scope: "cli-command", event: "cli.invocation" })),
+    false,
+    "no payload → not a park",
+  );
 });

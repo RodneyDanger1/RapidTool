@@ -217,3 +217,117 @@ describe("GAP-1 review-prompt artifact budget 1200/6000 (fixes/320)", () => {
     assert.ok(!section.includes("### TITLE6"), "the tail artifact beyond the total cap is dropped");
   });
 });
+
+// ---------------------------------------------------------------------------
+// F-5 (W44 · 323 FIX-1) — silent reply truncation: a reply that consumed the
+// full 320-token completion cap is stamped with ONE explicit marker (the
+// 321·D1 note ended mid-sentence at ~1467 chars); a reply below the cap, or
+// one whose usage was never reported, stays byte-identical. The marker never
+// rescues a reply that failed an honesty check.
+// ---------------------------------------------------------------------------
+describe("F-5 classifier reply truncation marker (fixes/323)", () => {
+  // Byte-pinned literal (deliberately NOT imported from the module — a silent
+  // marker-text change must fail this pin).
+  const MARKER = "… [reply consumed the full 320-token completion cap — the tail may be cut]";
+  const REJECT_TEXT =
+    "VERDICT: reject\nFEEDBACK: The artifacts describe a different system than the brief, cite no measurable acceptance criteria, and the gate evidence does not match the recorded run — redo the phase.";
+  const configured = async () => ({ configured: true, models: ["deepseek-v4-flash"] });
+
+  it("a reply that consumed the full 320-token cap carries ONE explicit marker (request cap pinned at 320)", async () => {
+    const caps: Array<number | undefined> = [];
+    const { wildClassifierReview } = createWildClassifier(
+      async (_prompt, opts) => {
+        caps.push(opts?.maxTokens);
+        return {
+          ok: true,
+          text: REJECT_TEXT,
+          model: "deepseek-v4-flash",
+          usage: { promptTokens: 900, completionTokens: 320 },
+        };
+      },
+      configured,
+    );
+    const res = await wildClassifierReview(reviewCtx());
+    assert.equal(caps[0], 320, "the classifier call still asks for the 320-token completion cap (pinned byte)");
+    assert.equal(res.ok, true);
+    if (res.ok) {
+      assert.ok(res.feedback.includes("redo the phase"), "the model feedback is preserved verbatim");
+      assert.ok(res.feedback.endsWith(MARKER), "the marker is the last line of the feedback");
+      assert.equal(
+        res.feedback.split("… [reply consumed").length - 1,
+        1,
+        "exactly ONE marker — never stacked",
+      );
+    }
+  });
+
+  it("a reply below the cap stays byte-identical (no false positive)", async () => {
+    const bare = parseWildReview(REJECT_TEXT);
+    assert.ok(bare, "the fixture text parses (control)");
+    const { wildClassifierReview } = createWildClassifier(
+      async () => ({
+        ok: true,
+        text: REJECT_TEXT,
+        model: "deepseek-v4-flash",
+        usage: { promptTokens: 900, completionTokens: 319 },
+      }),
+      configured,
+    );
+    const res = await wildClassifierReview(reviewCtx());
+    assert.equal(res.ok, true);
+    if (res.ok) {
+      assert.equal(res.feedback, bare.feedback, "319 < 320: the parsed feedback verbatim, no marker");
+      assert.ok(!res.feedback.includes("completion cap"), "no marker anywhere");
+    }
+  });
+
+  it("usage absent ⇒ no marker (nothing was reported — never a guessed stamp)", async () => {
+    const bare = parseWildReview(REJECT_TEXT);
+    assert.ok(bare, "the fixture text parses (control)");
+    const { wildClassifierReview } = createWildClassifier(
+      async () => ({ ok: true, text: REJECT_TEXT, model: "deepseek-v4-flash" }),
+      configured,
+    );
+    const res = await wildClassifierReview(reviewCtx());
+    assert.equal(res.ok, true);
+    if (res.ok) {
+      assert.equal(res.feedback, bare.feedback, "no usage report ⇒ no claim — byte-identical feedback");
+    }
+  });
+
+  it("a capped reply never rescues a too-short or vacuous reply (checks precede the marker)", async () => {
+    const short = createWildClassifier(
+      async () => ({
+        ok: true,
+        text: "VERDICT: reject\nFEEDBACK: too short",
+        model: "deepseek-v4-flash",
+        usage: { promptTokens: 100, completionTokens: 320 },
+      }),
+      configured,
+    );
+    const shortRes = await short.wildClassifierReview(reviewCtx());
+    assert.equal(shortRes.ok, false);
+    if (!shortRes.ok) {
+      // parseWildReview drops sub-WILD_FEEDBACK_MIN feedback (:191), so the
+      // honest outcome is the unparseable-payload error — never a verdict,
+      // and never a marker.
+      assert.equal(shortRes.code, "RT_E_INTERNAL");
+      assert.match(shortRes.error ?? "", /unparseable verdict payload/);
+    }
+    const vacuous = createWildClassifier(
+      async () => ({
+        ok: true,
+        text: "VERDICT: approve\nFEEDBACK: looks good, approve",
+        model: "deepseek-v4-flash",
+        usage: { promptTokens: 100, completionTokens: 320 },
+      }),
+      configured,
+    );
+    const vacuousRes = await vacuous.wildClassifierReview(reviewCtx());
+    assert.equal(vacuousRes.ok, false);
+    if (!vacuousRes.ok) {
+      assert.equal(vacuousRes.code, "RT_E_VALIDATION");
+      assert.match(vacuousRes.error ?? "", /vacuous/);
+    }
+  });
+});

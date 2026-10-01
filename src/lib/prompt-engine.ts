@@ -66,9 +66,9 @@ export type ExpandBriefResult =
 export const EXPAND_BRIEF_MAX_CHARS = 4000;
 export const EXPAND_POLICY_MAX_CHARS = 240;
 export const EXPAND_POLICY_MAX_COUNT = 12;
-/** Prior-run lesson budget (fixes/98 §5 Tier 3): lesson rows are ≤240 chars by
- *  construction (LESSON_TEXT_MAX), but callers may pass arbitrary strings —
- *  each line is capped + marked, and the list is capped + deduped. */
+/** Prior-run lesson budget (fixes/98 §5 Tier 3): lesson rows are ≤ LESSON_TEXT_MAX
+ *  chars by construction (322 X3 raised that cap 240→600), but callers may pass
+ *  arbitrary strings — each line is capped + marked, and the list is capped + deduped. */
 export const EXPAND_LESSON_MAX_CHARS = 240;
 export const EXPAND_LESSON_MAX_COUNT = 12;
 

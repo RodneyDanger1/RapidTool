@@ -204,8 +204,11 @@ function systemJson(
       // ONLY when no budget object exists at all. CF-SE2-3a (312 · E2): a
       // present-but-unmetered budget is stated EXPLICITLY as `cap: null` —
       // never collapsed into the absent case. Key rides LAST, right after
-      // `spend:` (additive; PACKET_VERSION stays 3).
-      budget: packetBudgetBoundary(budget),
+      // `spend:` (additive; PACKET_VERSION stays 3). E3-1 (323 FIX-1): the
+      // block additionally carries `scope` — the disk-copy provenance label
+      // (packet-build process snapshot, NOT the run total; see
+      // packetBudgetEnvelope). The numeric triple is unchanged.
+      budget: packetBudgetEnvelope(budget),
     },
     null,
     2,
@@ -358,6 +361,10 @@ export type PacketSpend = {
  * unmetered (`RAPIDTOOL_TOKEN_CAP` unset); `stop_reason` fires ONLY via
  * `isBudgetExhausted` (spend actually crossed the cap — strict `>`, landing
  * exactly on the cap is still ok). Never an optimistic "ok", never fabricated.
+ * E3-1 (323 FIX-1): the COMPILED packet's envelope block is
+ * `PacketBudgetEnvelope` — this same triple plus `scope`, the packet-build
+ * provenance label (see PACKET_BUDGET_SCOPE); this bare type stays the shared
+ * shape every other surface (`summary()`) keeps.
  */
 export type PacketBudget = {
   /** `totalTokens(budget.ledger)` — the ledger's own sum. */
@@ -452,6 +459,32 @@ export function packetBudgetBoundary(
   };
 }
 
+/**
+ * E3-1 (W44 · 323 FIX-1): the DISK-side scope label the compiled packet's
+ * envelope block carries. Why it exists: the stored Agent Packet is compiled
+ * out of band from the leg that spends — every leg is a fresh process, so the
+ * boundary triple is the COMPILING process's session snapshot at packet-build
+ * time (E3 backend monitor measured the divergence: exp02's disk block read
+ * `spent: 0` while its P6 leg envelope read 18,378; exp01 read 15,884 vs
+ * Σ36,194). The label states the snapshot's provenance so a disk reader never
+ * misreads it as run spend — the numbers themselves are never renumbered (the
+ * triple stays `totalTokens(budget.ledger)`, no fabricated total). The
+ * `summary()` bare triple (headless.ts) is emitted BY the spending leg at leg
+ * end and stays unlabeled — this label is about the persisted packet copy.
+ */
+const PACKET_BUDGET_SCOPE =
+  "process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend";
+
+/** The envelope's budget block: the F2-04 triple + the E3-1 scope label. */
+type PacketBudgetEnvelope = PacketBudget & { scope: string };
+
+/** Labeled envelope block — the ONLY packet-side consumer; `packetBudgetBoundary`
+ *  itself keeps the bare triple every other surface shares (summary parity). */
+function packetBudgetEnvelope(budget: TokenBudget | null | undefined): PacketBudgetEnvelope | null {
+  const boundary = packetBudgetBoundary(budget);
+  return boundary ? { ...boundary, scope: PACKET_BUDGET_SCOPE } : null;
+}
+
 /** The `## Measured spend` prose block — rendered ONLY when a measured ledger
  *  is present, so every unmetered packet stays byte-identical. */
 function packetSpendSection(spend: PacketSpend): string[] {
@@ -516,7 +549,11 @@ export function compileAgentPacket(
     spendPrices?: TokenPrices | null;
     /** F2-04: the session budget whose boundary the envelope reports —
      *  defaults to `sessionTokenBudget()` (the process singleton). Tests pass
-     *  an explicit budget (the singleton lazily reads env ONCE per process). */
+     *  an explicit budget (the singleton lazily reads env ONCE per process).
+     *  E3-1 (323 FIX-1): the envelope LABELS the block as a packet-build
+     *  process snapshot (never the run total) — engine callers passing none
+     *  freeze the compiling process's partial spend; run spend lives in the
+     *  per-leg run envelopes. */
     budget?: TokenBudget | null;
   },
 ): string {

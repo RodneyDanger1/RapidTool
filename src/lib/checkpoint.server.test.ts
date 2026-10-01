@@ -29,6 +29,7 @@ import {
 } from "./checkpoint.server.ts";
 import { PHASES } from "./phases.ts";
 import type { Project } from "./types.ts";
+import { checkpointSupersededBy } from "./headless.ts";
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), "rapidtool-ckpt-"));
 
@@ -244,5 +245,112 @@ describe("checkpoint.server — the §A1 hardening pins (W36 N2)", () => {
   it("A3/M3-09: boundProjectForCheckpoint(null) yields the empty bounded copy — never a TypeError", () => {
     const out = boundProjectForCheckpoint(null as unknown as Project);
     assert.deepEqual(out, { logs: [], decisions: [], memory: [], artifacts: [], research: [], chatLog: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/323 FIX-2c (window #4 item 2 · X2b OBS): the checkpoint-STALENESS
+// comparison — a snapshot the named project FILE has moved past (id / seal /
+// brief / phase / state) reports superseded so resume/unattended ignore it
+// WITH a notice instead of silently rewinding the file. Live pre-fix repro
+// (keyless, 2026-09-30): `gate` parks at P4 (snapshot phase 4); `approve
+// --seat autopilot` moves the file to P5/running; the next `unattended`
+// resumed the P4 snapshot (steps:0) and rewound the on-disk file to
+// P4/awaiting_hitl. Post-fix the same call ignores the snapshot
+// (`checkpoint.ignored:true`) and the file stays at P5.
+// ---------------------------------------------------------------------------
+describe("FIX-2c — checkpoint staleness vs the named project file (X2b OBS)", () => {
+  const snap = (over: Partial<Project> = {}): Project =>
+    ({
+      id: "p-1",
+      brief: "intent",
+      status: "awaiting_hitl",
+      currentPhase: 4,
+      phases: [
+        { id: 0, status: "complete" },
+        { id: 1, status: "complete" },
+        { id: 2, status: "complete" },
+        { id: 3, status: "complete" },
+        { id: 4, status: "pending" },
+      ],
+      ...over,
+    }) as unknown as Project;
+
+  it("file at P5 vs snapshot re-entry P4 → superseded; the reason names both phases (the X2b shape)", () => {
+    const verdict = checkpointSupersededBy(snap(), 4, snap({ currentPhase: 5, status: "running" }));
+    assert.equal(verdict.superseded, true);
+    assert.match(String(verdict.reason), /P5/);
+    assert.match(String(verdict.reason), /P4/);
+  });
+
+  it("a file BEHIND the snapshot is NOT superseded — that is the crash-recovery shape resume exists for", () => {
+    const verdict = checkpointSupersededBy(
+      snap(),
+      4,
+      snap({
+        currentPhase: 2,
+        status: "running",
+        phases: [
+          { id: 0, status: "complete" },
+          { id: 1, status: "complete" },
+          { id: 2, status: "ready" },
+        ],
+      }),
+    );
+    assert.equal(verdict.superseded, false, "the file lagging the per-phase commits is the designed resume case");
+    assert.equal(verdict.reason, null);
+  });
+
+  it("the normal post-park shape (same phase/state) is NOT superseded — the designed resume stays", () => {
+    const verdict = checkpointSupersededBy(snap(), 4, snap());
+    assert.equal(verdict.superseded, false);
+  });
+
+  it("a sealed-complete file is superseded — a leftover snapshot must not rewind a terminal seal", () => {
+    const verdict = checkpointSupersededBy(snap(), 4, snap({ status: "complete", currentPhase: 12 }));
+    assert.equal(verdict.superseded, true);
+    assert.match(String(verdict.reason), /complete/);
+  });
+
+  it("an id mismatch is superseded first (a dir reused by a different project) — before any phase math", () => {
+    const verdict = checkpointSupersededBy(snap(), 4, snap({ id: "p-2", currentPhase: 4 }));
+    assert.equal(verdict.superseded, true);
+    assert.match(String(verdict.reason), /p-2/);
+    assert.match(String(verdict.reason), /p-1/);
+  });
+
+  it("a brief divergence is superseded — the snapshot no longer describes the file's intent", () => {
+    const verdict = checkpointSupersededBy(snap(), 4, snap({ brief: "different intent" }));
+    assert.equal(verdict.superseded, true);
+    assert.match(String(verdict.reason), /brief differs/);
+  });
+
+  it("a file recording MORE completed phases at the same cursor is superseded — it knows work the snapshot does not", () => {
+    const verdict = checkpointSupersededBy(
+      snap(),
+      4,
+      snap({
+        phases: [
+          { id: 0, status: "complete" },
+          { id: 1, status: "complete" },
+          { id: 2, status: "complete" },
+          { id: 3, status: "complete" },
+          { id: 4, status: "complete" },
+        ],
+      }),
+    );
+    assert.equal(verdict.superseded, true);
+    assert.match(String(verdict.reason), /5 completed phase/);
+  });
+
+  it("missing data skips its axis — string-less briefs / non-integer phases never false-supersede", () => {
+    const noBrief = checkpointSupersededBy(
+      snap({ brief: undefined } as Partial<Project>),
+      4,
+      snap({ brief: undefined } as Partial<Project>),
+    );
+    assert.equal(noBrief.superseded, false);
+    const noPhase = checkpointSupersededBy(snap(), 4, snap({ currentPhase: undefined } as Partial<Project>));
+    assert.equal(noPhase.superseded, false);
   });
 });

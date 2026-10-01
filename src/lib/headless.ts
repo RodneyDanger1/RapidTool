@@ -898,6 +898,87 @@ export function loadResumableCheckpoint(
   }
 }
 
+/**
+ * fixes/323 FIX-2c (X2b OBS · window #4 item 2) — the checkpoint-STALENESS
+ * comparison: a snapshot must never be silently resumed over a project file it
+ * has been superseded by. PURE (no fs, no clock): the CLI arms hand in the
+ * admitted snapshot's hydrated project + its re-entry phase and the named
+ * project FILE's already-loaded state, and get back whether re-entering the
+ * snapshot would override newer file state.
+ *
+ * Superseded when — first match names the reason:
+ *   1. identity: the file's id differs from the snapshot's (a dir reused by a
+ *      different project must never resume the old snapshot);
+ *   2. terminal seal: the file is already `complete` (nothing to re-enter past
+ *      the seal — a leftover snapshot must not rewind it);
+ *   3. brief divergence: both briefs are strings and differ (the states have
+ *      diverged — the snapshot no longer describes the file's intent);
+ *   4. phase: the file sits BEYOND the snapshot's re-entry phase (resuming
+ *      would rewind completed work — the live X2b shape: a stale gate-park
+ *      snapshot at P4 silently rewound a file already advanced to P5);
+ *   5. state: the file records MORE completed phases than the snapshot (the
+ *      file knows work the snapshot does not).
+ * A file BEHIND the snapshot is deliberately NOT superseded: that is the
+ * crash-recovery shape `resume` exists for (the file is only saved at the END
+ * of a drive, so a crash leaves it lagging the per-phase commits).
+ *
+ * Adjudicated NON-decisive axes (recorded, not silently dropped): full-project
+ * or per-file content hashes and file mtimes — after a NORMAL park the file is
+ * written after the checkpoint by the same drive, so it legitimately differs
+ * (hitl block, park-time logs) and is strictly newer; treating that as stale
+ * would flag every designed resume. The axes above are the ones that mean "the
+ * file moved past / diverged from the snapshot".
+ */
+export function checkpointSupersededBy(
+  snapshot: Project,
+  snapshotPhase: number,
+  file: Project,
+): { superseded: boolean; reason: string | null } {
+  const fileId = typeof file?.id === "string" && file.id.length > 0 ? file.id : null;
+  const snapId = typeof snapshot?.id === "string" && snapshot.id.length > 0 ? snapshot.id : null;
+  if (fileId !== null && snapId !== null && fileId !== snapId) {
+    return {
+      superseded: true,
+      reason: `the project file is a different project (id ${fileId} vs the snapshot's ${snapId})`,
+    };
+  }
+  if (file?.status === "complete") {
+    return {
+      superseded: true,
+      reason: "the project file is already sealed complete — the snapshot predates the seal",
+    };
+  }
+  const fileBrief = typeof file?.brief === "string" ? file.brief : null;
+  const snapBrief = typeof snapshot?.brief === "string" ? snapshot.brief : null;
+  if (fileBrief !== null && snapBrief !== null && fileBrief !== snapBrief) {
+    return {
+      superseded: true,
+      reason: "the project file's brief differs from the snapshot's — the states have diverged",
+    };
+  }
+  const filePhase =
+    typeof file?.currentPhase === "number" && Number.isInteger(file.currentPhase) ? file.currentPhase : null;
+  if (filePhase !== null && Number.isInteger(snapshotPhase) && filePhase > snapshotPhase) {
+    return {
+      superseded: true,
+      reason: `the project file is at P${filePhase} — beyond the snapshot's re-entry phase P${snapshotPhase}; resuming would rewind completed work`,
+    };
+  }
+  const countSealed = (p: Project): number =>
+    (Array.isArray(p?.phases) ? p.phases : []).filter(
+      (record) => (record as { status?: unknown } | null | undefined)?.status === "complete",
+    ).length;
+  const fileSealed = countSealed(file);
+  const snapSealed = countSealed(snapshot);
+  if (fileSealed > snapSealed) {
+    return {
+      superseded: true,
+      reason: `the project file records ${fileSealed} completed phase(s) — more than the snapshot's ${snapSealed}; the file knows work the snapshot does not`,
+    };
+  }
+  return { superseded: false, reason: null };
+}
+
 /** Advance the pipeline until it parks (awaiting_hitl / complete / blocked) or
  *  hits `maxSteps` (default 40 — 13 phases × ~2 iterations + margin). */
 export async function runUntilGate(
@@ -1241,9 +1322,19 @@ export function approve(
   return recorded === base ? base : stampPacket(recorded);
 }
 
-/** Reject the pending HITL gate (throws unless ≥12 chars of qualitative note). */
-export function reject(project: Project, note: string): Project {
-  return rejectHitl(project, note);
+/** Reject the pending HITL gate (throws unless ≥12 chars of qualitative note).
+ *
+ *  322 X1 (F-1): the minted row records an explicit ACTOR SEAT — a machine
+ *  caller defaults to the harness's own autopilot seat, so a machine reject
+ *  can never mint `decidedBy: "human"` (pre-fix: rejectHitl hardcoded it).
+ *  A human seat must be claimed explicitly by the caller (CLI: `--i-am-human`
+ *  + the out-of-band `RT_HUMAN_SEAT_TOKEN`, approve parity). */
+export function reject(
+  project: Project,
+  note: string,
+  actor: ApproveActor = HARNESS_APPROVE_ACTOR,
+): Project {
+  return rejectHitl(project, note, { decidedBy: actor.decidedBy });
 }
 
 /** Re-open a rejected phase for a retry (clears the block; note stays applied). */
@@ -2445,6 +2536,41 @@ export async function promoteEmittedTreeTested(
     // best-effort: the minted LEDGER still returns to the caller; the artifact
     // record is left exactly as emitted (never half-promoted).
     return { project: minted, promoted: false };
+  }
+}
+
+/**
+ * fixes/323 FIX-2c (T9.3 repair-dir variant · fixes/319_f3_promote §C4/§D.1) —
+ * the repair arm's dir promotion. `repairTreeDir` mints the tested stamp onto
+ * the LEDGER inside its own `recordGreen` before the CLI layer ever sees the
+ * result, so `promoteEmittedTreeTested`'s `before === "tested"` early return
+ * can never write the emitted dir's own `.rapidtool/project.json` — the T9.3
+ * promotion would never fire for the repair arm (adjudicated in
+ * fixes/323_f2_register.md). Here the CALLER attests the fresh mint from THIS
+ * invocation's own evidence (`result.minted` — set only when this repair run
+ * flipped the label to "tested"; never a pre-existing label, never a red or
+ * no-spec run). Keep this self-guarded: the write still requires the attested
+ * fresh `tested` label AND an existing dir record; a red run, a no-spec green
+ * run, an un-attested call, or a recordless dir writes NOTHING (absence is
+ * honest; a stamp is never fabricated into existence).
+ */
+export function promoteRepairedDirTested(
+  project: Project,
+  dir: string,
+  attestedFreshMint: boolean,
+): { promoted: boolean } {
+  if (attestedFreshMint !== true) return { promoted: false };
+  const label = (project.lastTest as { label?: string } | null | undefined)?.label ?? null;
+  if (label !== "tested") return { promoted: false };
+  const recordPath = resolve(dir, ".rapidtool", "project.json");
+  if (!existsSync(recordPath)) return { promoted: false };
+  try {
+    writeFileSync(recordPath, exportProjectJson(project), "utf8");
+    return { promoted: true };
+  } catch {
+    // best-effort: the minted LEDGER still returns to the caller; the artifact
+    // record is left exactly as it stood (never half-promoted).
+    return { promoted: false };
   }
 }
 

@@ -580,6 +580,30 @@ describe("P0-01/P0-02 brief-conformance probes (fixes/97)", () => {
     assert.ok(r.unmet.some((g) => g.id === "p6-brief-fit"));
   });
 
+  it("322 X1 (P6-C): p6-brief-fit bar 0.35 — need ceil(20×0.35)=7: six nouns FAIL, seven PASS", () => {
+    // Curated 20-noun prose brief (pairwise non-substring; verified stem-clean).
+    const NOUN20 =
+      "aurora basalt cipher dune ember fjord glade harbor isle juniper kestrel lagoon mesa nimbus orchid peak quarry ridge summit tundra";
+    const p = promote(runHeadless(seedProject({ brief: NOUN20 }), ALL_PHASES));
+    const src = (k: number) =>
+      NOUN20.split(" ")
+        .slice(0, k)
+        .map((n) => `const ${n} = 0;`)
+        .join("\n");
+    const six = { ...p, generatedSource: src(6) } as Project;
+    assert.ok(
+      runGate(six, 6).unmet.some((g) => g.id === "p6-brief-fit"),
+      "6 hits < the 0.35 need of 7 must stay red",
+    );
+    const seven = { ...p, generatedSource: src(7) } as Project;
+    assert.ok(
+      !runGate(seven, 6).unmet.some((g) => g.id === "p6-brief-fit"),
+      "7 hits ≥ the 0.35 need of 7 must pass",
+    );
+    // Provenance: the old ½ bar demanded 10 — this same 7-hit source was red
+    // under it (322 X1 measured honest coverage 40–50% on real artifacts).
+  });
+
   it("p0-brief-grounded records a vocabulary-bearing brief that sailed on the fallback lattice", () => {
     const vague = emptyProject({ name: "Vague", brief: "hi" });
     const parked = applyPhaseResult(vague, 0);

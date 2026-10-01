@@ -12,10 +12,12 @@
 //   1. wild-step-timeout   2. wild-paused-error   3. llm-unavailable
 //   4. persist-failure     5. corrupt-recovery    6. runner-failing
 //   7. mainthread-stall    8. freeze-pre-capture
-//   9. unclassified-errors (errors exist, no named rule)  10. none-detected
+//   9. unclassified-errors (non-park errors exist, no named rule)
+//  10. honest-park (ONLY exit-2 park rows in window — the designed outcome,
+//      never counted as an error; fixes/323 FIX-2c)  11. none-detected
 //
 // EXPORT SURFACE (compile against these — do not rename):
-//   buildDiagnosis · projectWildRun · type DiagnosisInput ·
+//   buildDiagnosis · projectWildRun · isParkRow · type DiagnosisInput ·
 //   type DiagnosisJson · type DiagnosisCause
 // ---------------------------------------------------------------------------
 
@@ -178,6 +180,25 @@ export function projectWildRun(raw: unknown, now: number): DiagnosisWildRun {
     stoppedAt: numOrNull(w.stoppedAt),
     overdueMs: active && !pause && lastAutoAt !== null ? Math.max(0, now - lastAutoAt) : null,
   };
+}
+
+/**
+ * fixes/323 FIX-2c (F-3): an exit-2 PARK row — `run`/`gate`/`resume`/
+ * `unattended` parked at a HITL gate or `blocked`, stamped by the CLI as a
+ * `cli.invocation` row with `payload.exitCode === 2` (plus `payload.parked:
+ * true` on rows written after the fix). A park is the taxonomy's honest
+ * outcome, NOT a failure — it carries no RT_E code (codes are for surfaced
+ * failures) and the envelope deliberately omits `code` on a clean park. Both
+ * shapes classify: legacy rows already on disk read `level:"error"` and must
+ * be recognized so the verdict NAMES the park instead of counting it among
+ * unclassified errors. Pure; junk rows → false, never a throw.
+ */
+export function isParkRow(row: RtEvent): boolean {
+  if (!row || typeof row !== "object") return false;
+  const payload = row.payload as { parked?: unknown; exitCode?: unknown } | null | undefined;
+  if (!payload || typeof payload !== "object") return false;
+  if (payload.parked === true) return true;
+  return row.event === "cli.invocation" && payload.exitCode === 2;
 }
 
 /**
@@ -354,16 +375,28 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisJson {
   // Honest floor when rows exist but no named heuristic matched.
   // Claiming "No error rows in window" while errors.length > 0 is a lie
   // (lone llm-call, hydrate.repaired, sys.uncaught_error, RT_E_GATES_FAILED, …).
+  // fixes/323 FIX-2c (F-3): exit-2 park rows are separated FIRST — a park is
+  // the designed outcome (exit 2 = parked at a gate / blocked), never an
+  // "unclassified error" and never the "not a clean bill of health" language:
+  // a parks-only window ranks `honest-park`; a mixed window counts ONLY the
+  // non-park rows (a park never inflates the error count).
   if (matches.length === 0 && errors.length > 0) {
-    const n = errors.length;
-    matches.push({
-      class: "unclassified-errors",
-      summary: `${n} error/critical row(s) in window did not match a named heuristic — not a clean bill of health.`,
-      evidence: rowRefs(
-        "errors",
-        errors.map((_, i) => i),
-      ),
-    });
+    const parkIdx: number[] = [];
+    const restIdx: number[] = [];
+    errors.forEach((row, i) => (isParkRow(row) ? parkIdx : restIdx).push(i));
+    if (restIdx.length === 0) {
+      matches.push({
+        class: "honest-park",
+        summary: `${parkIdx.length} exit-2 park row(s) in window — the project parked at a HITL gate (awaiting a decision) or blocked; a park is the designed outcome, not an error.`,
+        evidence: rowRefs("errors", parkIdx),
+      });
+    } else {
+      matches.push({
+        class: "unclassified-errors",
+        summary: `${restIdx.length} error/critical row(s) in window did not match a named heuristic — not a clean bill of health.`,
+        evidence: rowRefs("errors", restIdx),
+      });
+    }
   }
 
   const ordered = matches.length > 0 ? matches : [NONE_DETECTED];
@@ -401,6 +434,9 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisJson {
     ],
     "unclassified-errors": [
       "Read errors[].event and errors[].code — a named heuristic did not rank these rows; do not treat diagnose as none-detected.",
+    ],
+    "honest-park": [
+      "The project is parked (exit 2: awaiting_hitl / blocked) — resolve the open gate (approve/reject) or retry a rejected phase; a park is the designed outcome, not an error and not a progress signal.",
     ],
     "none-detected": ["No action — nothing ranks; re-check after reproducing the incident with the runtime tab open."],
   };

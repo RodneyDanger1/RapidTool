@@ -60,6 +60,7 @@ import {
 import { createProject, promoteEmittedTreeTested, runUntilGate } from "../src/lib/headless.ts";
 import { ERROR_CODE_DOC } from "../src/lib/errors.ts";
 import { isKnownRtEvent } from "../src/lib/rt-events.ts";
+import { intentLattice } from "../src/lib/algorithms.ts";
 import { projectRoot } from "./with-app-env.mjs";
 
 /**
@@ -955,6 +956,45 @@ test("OV-7: the corpus spans ≥2 domains and ≥2 of them carry ≥2 fixtures (
     assert.ok(briefs.every((b) => b.length > 0), `${d}: every fixture must carry a brief`);
     assert.equal(new Set(briefs).size, briefs.length, `${d}: fixture briefs must be distinct, not copies`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// FIX-2b (W44 window #4; D3's LEX root cause, fixes/321_d3_keyed_eval.md
+// :159-176) — the arcade-breakout fixture brief must HIT the LEX register.
+// The pre-rewrite brief scored 0 LEX hits → `lattice.vague:true` → scorecard
+// `reframe:true` → P0 forceHuman park → the eval's autopilot seat honestly
+// stalled (llmCalls 0). The rewritten brief keeps the SAME game intent and
+// was proven KEYLESS (create + wild --start --steps 1, deterministic P0:
+// C:/Users/mnril/f2b_probe/lexprobe323.sh → outcome:"advanced", vague:false,
+// verdict:"proceed", 0 reframe rows). This pin holds the LATTICE half
+// mechanically through the driver's own corpus loader + the engine's own
+// `intentLattice` (no second parser, no brief copy): a future edit that drops
+// the LEX vocabulary — or silently drops the game nouns — turns THIS red
+// before any keyed run spends a token on the guaranteed reframe park.
+// ---------------------------------------------------------------------------
+test("FIX-2b: the arcade-breakout fixture brief hits the LEX register (non-vague lattice) and keeps the game intent", () => {
+  const found = listCorpusEntries();
+  const entry = found.filter((f) => f.entry !== null).map((f) => f.entry).find((e) => e.slug === "arcade-breakout");
+  assert.ok(entry, "the arcade-breakout fixture must exist in the corpus (README is documentation, not an entry)");
+  const lat = intentLattice(entry.brief, entry.domain);
+  assert.equal(
+    lat.vague,
+    false,
+    `0 LEX hits ⇒ vague ⇒ scorecard reframe ⇒ P0 forceHuman park (the reframe the rewrite closes). jobs=${JSON.stringify(lat.jobs)} entities=${JSON.stringify(lat.entities)}`,
+  );
+  for (const job of ["drag", "track", "persist"]) {
+    assert.ok(lat.jobs.includes(job), `the brief must register LEX job \`${job}\`: ${JSON.stringify(lat.jobs)}`);
+  }
+  assert.ok(lat.entities.includes("player"), `the brief must register LEX actor \`player\`: ${JSON.stringify(lat.entities)}`);
+  // Intent guard: the LEX rewrite is additive vocabulary — every original game
+  // noun the grader's identifiers/capabilities line back to stays present.
+  for (const noun of ["paddle", "ball", "brick", "level", "speed", "score", "keyboard", "pause", "resume", "win", "lose", "canvas"]) {
+    assert.ok(
+      entry.brief.toLowerCase().includes(noun),
+      `the rewrite must keep the original game intent — \`${noun}\` missing from: ${entry.brief}`,
+    );
+  }
+  assert.equal(entry.kind, "game", "the declared kind stays `game` (the run-side grader's expectedKind)");
 });
 
 test("OV-7: the agent-facing brief carries no grader text (real corpus) and a planted leak is caught", () => {

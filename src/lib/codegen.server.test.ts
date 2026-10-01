@@ -360,6 +360,21 @@ describe("briefFitSatisfied (p6-brief-fit pre-acceptance)", () => {
     assert.equal(g.ok, false, "stopword-only oracle cases are vacuous and rejected");
     assert.match(g.reason ?? "", /reference no brief noun or contract function/);
   });
+
+  it("322 X1 (P6-C): bar 0.35 boundary — N=20 (6 fail / 7 pass), N=10 (3 fail / 4 pass)", () => {
+    const w20 =
+      "aurora basalt cipher dune ember fjord glade harbor isle juniper kestrel lagoon mesa nimbus orchid peak quarry ridge summit tundra".split(
+        " ",
+      );
+    const src = (k: number) => w20.slice(0, k).map((n) => `const ${n} = 0;`).join("\n");
+    const b20 = w20.join(" ");
+    assert.equal(briefFitSatisfied(b20, src(6)).ok, false, "ceil(20×0.35)=7 — six hits are one short");
+    assert.equal(briefFitSatisfied(b20, src(7)).ok, true, "seven hits meet the bar exactly");
+    const b10 = w20.slice(0, 10).join(" ");
+    assert.equal(briefFitSatisfied(b10, src(3)).ok, false, "ceil(10×0.35)=4 — three hits are one short");
+    assert.equal(briefFitSatisfied(b10, src(4)).ok, true, "four hits meet the bar exactly");
+    // KEEP IN PARITY with dod.ts's p6-brief-fit probe (same 0.35 bar).
+  });
 });
 
 describe("p6Synthesis prompts (byte-stable contract)", () => {
@@ -1811,6 +1826,9 @@ const LEGAL_PROSE_LOOKALIKES = [
   "return firstName / lastName / department / section;",
   "assign(firstName / lastName / department / section);",
   "const pick = (row) => row.price / row.qty;",
+  "return negative ? -cents : cents;",
+  "return flag ? alpha : beta;",
+  "balance: negative ? -cents : cents,",
 ];
 
 /** Records every synthesis prompt (one synthesis + its bounded repairs). */
@@ -1872,6 +1890,16 @@ describe("216f T-09/T-15 detectors (proseLineHits / nondeterministicPrimitiveHit
       [],
       "the legal-code control module carries zero prose hits",
     );
+  });
+
+  it("T-09 322 X3 (BUG-4): ternaries are code — prose question/colon shapes stay flagged", () => {
+    // The exact line the shipped heuristic refused (EXP03 cycle-3 log bytes).
+    assert.deepEqual(proseLineHits("return negative ? -cents : cents;"), []);
+    assert.deepEqual(proseLineHits("return items.length ? items : defaultItems;"), []);
+    // The exclusion must not widen to prose: sentence-terminal question/colon
+    // lines carry the same punctuation and MUST stay prose hits.
+    assert.equal(proseLineHits("Should we ship it? Yes: ship.").length, 1);
+    assert.equal(proseLineHits("Was it good? Yes: great.").length, 1);
   });
 
   it("T-15: flags Math.random in CODE; a literal/comment mention is data (masked contract)", () => {

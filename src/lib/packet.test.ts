@@ -992,20 +992,31 @@ test("W16 L4 OV-14: the packet carries the p6-arch reqTrace verdict for tree pro
 // exactly on the cap is still ok).
 // ---------------------------------------------------------------------------
 
-test("F2-04: an empty unmetered budget ⇒ explicit {spent:0, cap:null, stop_reason:null} (key always present)", () => {
+/** E3-1 (323 FIX-1): the disk-side scope label every packet envelope block
+ *  carries (byte-pinned literal — the code constant is deliberately NOT
+ *  imported, so a silent label change fails this pin). */
+const PACKET_BUDGET_SCOPE_LITERAL =
+  "process-session snapshot captured at packet build; never the run total — sum the per-leg run envelopes' budget.spent for run spend";
+
+test("F2-04: an empty unmetered budget ⇒ explicit {spent:0, cap:null, stop_reason:null} + E3-1 scope (key always present)", () => {
   const p = makeProject();
   const env = parseSystemJson(compileAgentPacket(p, { budget: createTokenBudget(null) }));
   assert.ok("budget" in env, "the key is present even for the unmetered default (always-present, additive)");
   assert.deepEqual(
     env.budget,
-    { spent: 0, cap: null, stop_reason: null },
+    { spent: 0, cap: null, stop_reason: null, scope: PACKET_BUDGET_SCOPE_LITERAL },
     "CF-SE2-3a: unmetered-by-default is STATED (cap:null), never collapsed into the null that means 'no budget at all'",
   );
   assert.ok("spend" in env, "the OV-41 spend key is untouched (precedent intact)");
   // Default path (no opts) reads the process singleton — equally empty under
   // the default keyless test env, so the same explicit block holds.
   if (!process.env.RAPIDTOOL_TOKEN_CAP) {
-    assert.deepEqual(parseSystemJson(compileAgentPacket(p)).budget, { spent: 0, cap: null, stop_reason: null });
+    assert.deepEqual(parseSystemJson(compileAgentPacket(p)).budget, {
+      spent: 0,
+      cap: null,
+      stop_reason: null,
+      scope: PACKET_BUDGET_SCOPE_LITERAL,
+    });
   }
 });
 
@@ -1013,7 +1024,25 @@ test("F2-04: spend recorded, no cap ⇒ {spent>0, cap:null, stop_reason:null}", 
   const p = makeProject();
   const ledger = recordSpend(emptyLedger(), { promptTokens: 120, completionTokens: 30 });
   const env = parseSystemJson(compileAgentPacket(p, { budget: createTokenBudget(null, ledger) }));
-  assert.deepEqual(env.budget, { spent: 150, cap: null, stop_reason: null });
+  assert.deepEqual(env.budget, { spent: 150, cap: null, stop_reason: null, scope: PACKET_BUDGET_SCOPE_LITERAL });
+});
+
+test("E3-1 (323 FIX-1): the envelope budget block is LABELED as a packet-build snapshot — spent stays the ledger's own sum, and the shared reader keeps the bare triple", () => {
+  const p = makeProject();
+  const ledger = recordSpend(emptyLedger(), { promptTokens: 131, completionTokens: 7 });
+  const budget = createTokenBudget(5_000_000, ledger);
+  const block = parseSystemJson(compileAgentPacket(p, { budget })).budget as {
+    spent: number;
+    scope?: unknown;
+  };
+  assert.equal(block.spent, 138, "the number is totalTokens(budget.ledger) — never adjusted, never fabricated");
+  assert.equal(block.scope, PACKET_BUDGET_SCOPE_LITERAL, "the disk block states its provenance (E3-1)");
+  assert.match(String(block.scope), /packet build/, "labels WHEN the snapshot was taken");
+  assert.match(String(block.scope), /never the run total/, "labels what it is NOT");
+  assert.match(String(block.scope), /run envelopes' budget\.spent for run spend/, "points run spend at the authoritative per-leg envelopes");
+  // Boundary pin: the SHARED reader is unchanged — summary()'s (headless.ts)
+  // bare-triple parity survives; only the packet envelope adds the label.
+  assert.deepEqual(packetBudgetBoundary(budget), { spent: 138, cap: 5_000_000, stop_reason: null });
 });
 
 test("F2-04: spend crossing the cap ⇒ budget_exhausted; landing ON the cap stays ok", () => {
@@ -1021,12 +1050,12 @@ test("F2-04: spend crossing the cap ⇒ budget_exhausted; landing ON the cap sta
   const over = createTokenBudget(10, recordSpend(emptyLedger(), { promptTokens: 25, completionTokens: 0 }));
   assert.deepEqual(
     parseSystemJson(compileAgentPacket(p, { budget: over })).budget,
-    { spent: 25, cap: 10, stop_reason: "budget_exhausted" },
+    { spent: 25, cap: 10, stop_reason: "budget_exhausted", scope: PACKET_BUDGET_SCOPE_LITERAL },
   );
   const onCap = createTokenBudget(10, recordSpend(emptyLedger(), { promptTokens: 10, completionTokens: 0 }));
   assert.deepEqual(
     parseSystemJson(compileAgentPacket(p, { budget: onCap })).budget,
-    { spent: 10, cap: 10, stop_reason: null },
+    { spent: 10, cap: 10, stop_reason: null, scope: PACKET_BUDGET_SCOPE_LITERAL },
     "strict `>`: landing exactly on the cap is still ok",
   );
 });

@@ -27,6 +27,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fnv1a, fusionRank, tokenizeWords } from "./algorithms.ts";
+import { briefNounHits, identifierHits } from "./sandbox.ts";
 import type { ErrorCode } from "./errors.ts";
 import type { HitlDecision, IntentLattice, JsonLog, MemoryEntry, PhaseId, Project } from "./types.ts";
 
@@ -758,8 +759,14 @@ export const LESSON_TAG = "lesson";
 export function isLessonTagged(tags: readonly string[] | undefined): boolean {
   return Array.isArray(tags) && tags.includes(LESSON_TAG);
 }
-/** Hard cap on a lesson row's text (bounded prompt injection, H43-P2-2). */
-export const LESSON_TEXT_MAX = 240;
+/** Hard cap on a lesson row's text (bounded prompt injection, H43-P2-2).
+ *  322 X3 (BUG-2): 240 → 600. At 240 the cut severed exactly the payload the
+ *  L2 row exists to carry (required-noun list + evidence hash; 322_e2_monitor
+ *  §BUG-2 — every live row len==240 ending mid-phrase, vs a 440-char intended
+ *  payload for the EXP03 shape). 600 is the house surface cap (engine.ts
+ *  `clipSurface`, SURFACE_CAP) with the same explicit-ellipsis convention
+ *  (≤ LESSON_TEXT_MAX + 1 chars emitted when a cut happens). */
+export const LESSON_TEXT_MAX = 600;
 /** Counter-evidence units before a K-tier row is retired (98 §6.2). */
 export const LESSON_RETIRE_COUNTER = 3;
 
@@ -936,10 +943,22 @@ function probeTagsFromSignature(signature: string): string[] {
 }
 
 /**
+ * 322 X3 (BUG-2): the house clip idiom (engine.ts `clipSurface`): collapse
+ * whitespace; when the cap actually cut, append ONE explicit ellipsis so a
+ * reader can never mistake a clipped row for a complete one (≤ LESSON_TEXT_MAX
+ * + 1 chars emitted). Short texts pass through byte-identically.
+ */
+function clipLessonText(raw: string): string {
+  const flat = raw.replace(/\s+/g, " ").trim();
+  return flat.length > LESSON_TEXT_MAX ? `${flat.slice(0, LESSON_TEXT_MAX)}…` : flat;
+}
+
+/**
  * The one row builder every writer goes through. Deterministic: content-
  * addressed id `lesson-<class>-<fnv8(text)>` (identical text ⇒ identical id ⇒
  * dedupeMemoryIds is an exact no-op), tags sorted+deduped and always carrying
- * [LESSON_TAG, classShort, level], text collapsed to ≤ LESSON_TEXT_MAX.
+ * [LESSON_TAG, classShort, level], text collapsed to ≤ LESSON_TEXT_MAX (+1
+ * when an explicit ellipsis marks a cut).
  *
  * 216g (112 §4.2 — T1): when `spec.signature` is given the id hashes THAT
  * instead of the text, so a recurrence of the same failure (same kind/phase/
@@ -952,9 +971,7 @@ function probeTagsFromSignature(signature: string): string[] {
  */
 export function lessonRow(spec: LessonSpec): MemoryEntry {
   const text =
-    typeof spec.text === "string"
-      ? spec.text.replace(/\s+/g, " ").trim().slice(0, LESSON_TEXT_MAX)
-      : "";
+    typeof spec.text === "string" ? clipLessonText(spec.text) : "";
   const signature = typeof spec.signature === "string" ? spec.signature.trim() : "";
   const raw = [
     LESSON_TAG,
@@ -1131,13 +1148,51 @@ export function vagueBriefLesson(
   });
 }
 
+/**
+ * 322 X3 (BUG-3): the union-tree brief-noun census for the L2 row — runs the
+ * SAME measurement the p6-brief-fit DoD probe runs (dod.ts:630-648): required
+ * brief nouns vs identifierHits over the union of the barrel `generatedSource`
+ * plus every `generatedTree` file. Returns null when there is no brief or no
+ * emitted artifact to measure — the row then says so instead of any hit claim.
+ * Pre-fix the row printed a literal "0 hits … none computed" on every live P6
+ * refusal while the sealed trees measured 6/22 (EXP01) and 7/18 (EXP02) — it
+ * misinformed about the red's cause (322_e2_monitor §BUG-3). Pure.
+ */
+function briefCensusOf(
+  project: Project,
+): { hits: number; required: number; missing: string[] } | null {
+  const brief = typeof project.brief === "string" ? project.brief : "";
+  if (!brief.trim()) return null;
+  const tree = Array.isArray(project.generatedTree) ? project.generatedTree : [];
+  const source =
+    tree.length > 0
+      ? [
+          project.generatedSource ?? "",
+          ...tree.map((f) => (f && typeof f.source === "string" ? f.source : "")),
+        ].join("\n")
+      : project.generatedSource ?? "";
+  if (!source) return null;
+  const { required } = briefNounHits(brief);
+  if (required.length === 0) return null;
+  const hits = identifierHits(required, source);
+  return {
+    hits: hits.length,
+    required: required.length,
+    missing: required.filter((t) => !hits.includes(t)),
+  };
+}
+
 /** L2 — template-emission (98 §2.3): a phase sealed with the gate unmet.
  *  Engine-detectable ⇒ factual. `evidenceHash` defaults to a deterministic
  *  content hash; pass the machine gate's hash when the caller has it.
  *  `source` mirrors M-08's E-18 provenance stamp: the engine seal path passes
  *  nothing (defaults "engine"); the agent-report path (98 §3 writer 2(a),
  *  report-intake.ts E-16 site) passes "agent-report" — same content-addressed
- *  id either way, so both writers stay idempotent (98 §3 anti-noise (b)). */
+ *  id either way, so both writers stay idempotent (98 §3 anti-noise (b)).
+ *  322 X3 (BUG-3): the text carries the real union-tree brief-noun census when
+ *  the project holds an emitted artifact (`briefCensusOf`) — never a literal
+ *  "0 hits" claim from an unmeasured surface; `nouns` callers supply the 0-hit
+ *  list explicitly. */
 export function templateEmissionLesson(
   project: Project,
   phase: PhaseId,
@@ -1154,14 +1209,29 @@ export function templateEmissionLesson(
     .filter((n): n is string => typeof n === "string" && n.trim() !== "")
     .map((n) => n.trim())
     .slice(0, 5);
-  const nounText = nounList.length ? nounList.join(", ") : "none computed";
+  // 322 X3 (BUG-3): never print a hit claim that was not measured. With an
+  // emitted artifact present, state the real union-tree census (hits/total +
+  // the 0-hit nouns — caller-supplied nouns win as the 0-hit list); without
+  // one, say so. The pre-fix "0 hits … none computed" text read as "zero hits"
+  // on rows whose sealed trees measured 6/22 and 7/18 (322_e2_monitor §BUG-3).
+  const census = briefCensusOf(project);
+  const missingText = nounList.length
+    ? nounList.join(", ")
+    : census && census.missing.length > 0
+      ? census.missing.slice(0, 5).join(", ") + (census.missing.length > 5 ? ", …" : "")
+      : "none";
+  const nounText = census
+    ? `required brief nouns present as identifiers in emitted source: ${census.hits}/${census.required} (0 hits: ${missingText})`
+    : nounList.length
+      ? `required brief nouns with 0 hits in emitted source: ${nounList.join(", ")}`
+      : `required brief noun hit census not computed (no emitted artifact on this project)`;
   const hash =
     typeof evidenceHash === "string" && evidenceHash.trim()
       ? evidenceHash.trim().slice(0, 16)
       : fnv8(`${project.brief}:${phase}:${ids.join(",")}:${nounText}`);
   const text =
     `L2 template-emission: phase P${phase} sealed with gate unmet (${ids.join(", ") || "unknown"}); ` +
-    `required brief nouns with 0 hits in emitted source: ${nounText}; evidenceHash=${hash}.`;
+    `${nounText}; evidenceHash=${hash}.`;
   // 216g (112 §4.2 — T1): signature = (phase, sorted unmet criterion ids). The
   // noun list and the evidence hash are process noise and stay in the text —
   // re-sealing the same unmet gate can no longer fork a row per emission.
@@ -1181,7 +1251,7 @@ export function templateEmissionLesson(
 /** L3 — verify-failure (98 §2.3). The optional `hypothesis` is model prose
  *  (Reflexion turn) and is stored ONLY behind the literal `| hypothesis:`
  *  marker — honest labeling, never as fact (98 §2.3 rule). Evidence detail is
- *  clipped to 140 chars inside the 240-char row budget.
+ *  clipped to 140 chars inside the LESSON_TEXT_MAX row budget.
  *
  *  216g (112 T1/T2): the optional `proof` carries the record's stable anchors
  *  (failing machine-case ids) and the RT_E class code. With anchors the id

@@ -253,7 +253,7 @@ export function evaluatePolicy(action: string, resource: string, ctx?: PolicyCtx
     }
     if (claimed.kind === "seat") {
       return deny(
-        `force-requires-human-seat — a ${label} seat may never force past a human gate; only a verified human seat may.`,
+        `force-requires-human-seat — an ${label} seat may never force past a human gate; only a verified human seat may.`,
         "human-seat-token",
       );
     }

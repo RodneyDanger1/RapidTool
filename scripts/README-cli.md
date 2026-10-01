@@ -76,7 +76,9 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs run --project build.js
 node --experimental-strip-types scripts/rapidtool-cli.mjs gate --project build.json [--autopilot] [--live]
 
 # 4. Approve / reject the pending gate (`reject` requires ≥12 characters of --note;
-#    a shorter note is refused — exit 1 RT_E_VALIDATION, nothing written)
+#    a shorter note is refused — exit 1 RT_E_VALIDATION, nothing written. Both
+#    verbs require an explicit seat: --seat autopilot (machine) or --i-am-human
+#    (TTY + typed RT_HUMAN_SEAT_TOKEN re-entry; refused off-TTY))
 node --experimental-strip-types scripts/rapidtool-cli.mjs approve --project build.json [--force]
 node --experimental-strip-types scripts/rapidtool-cli.mjs reject  --project build.json --note "Must enumerate per-role OAuth scopes."
 
@@ -228,8 +230,11 @@ gate, then `approve` (or `reject`) that gate explicitly, then `gate` again.
 ## Driving to completion (agent loop)
 
 Stock HITL gates (P4, P5, P8, P9) — and any `forceHuman` gate — are **never**
-auto-approved, even with `--autopilot` (governance rule R3/B-03). So the honest
-autopilot loop is:
+auto-approved, even with `--autopilot` (governance rule R3/B-03). An
+`approve --seat autopilot` on a `forceHuman` gate is refused CODED — exit 1,
+`RT_E_VALIDATION`, remedy = the human door (`--i-am-human` / `reject --note`) —
+never the exit-4 internal class: it is a deterministic governance refusal, not
+a runtime failure. So the honest autopilot loop is:
 
 ```
 loop:
@@ -1135,6 +1140,16 @@ hardcoded a human actor for every caller, including the eval harness).
   no human actor). A seat claim without its out-of-band evidence never lands.
   Ceiling (honest): an accountability control under the ledger-trust assumption
   (same-OS-user processes can read env/files), **not** a security boundary.
+
+### The same seat on `reject` (322 · F-1)
+
+The reject door carries the identical discipline: exactly one seat — `--seat autopilot`
+(`decidedBy: "autopilot"`, seat harness) or `--i-am-human` (the human two-channel claim,
+TTY only). A bare `reject` (either TTY state) is refused CODED — exit 1, `RT_E_VALIDATION`,
+with both seat doors in the remedy — and the chosen actor is stamped on the minted ledger
+row + `lastGate`, so a machine reject can never mint `decidedBy: "human"` (the pre-322
+behaviour: `rejectHitl` hardcoded the human stamp for every caller; live bytes
+`live1/05_sealed_reject_note.out`).
 
 The token is deliberately out-of-band: do not bake it into scripts, config
 files, `package.json`, or the project JSON — a process that merely inherited an

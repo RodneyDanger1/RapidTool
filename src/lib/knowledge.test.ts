@@ -370,12 +370,13 @@ describe("M-tier lesson surface (fixes/98 §2/§3)", () => {
       level: "L2",
       kind: "episodic",
       phase: 3,
-      text: `  ${"x".repeat(500)}  `,
+      text: `  ${"x".repeat(700)}  `,
       score: 0.6,
       source: "engine",
       tags: ["L2", "extra", "extra"],
     });
-    assert.equal(row.text.length, LESSON_TEXT_MAX, "H43-P2-2: text capped at 240");
+    assert.equal(row.text.length, LESSON_TEXT_MAX + 1, "H43-P2-2 (322 X3): capped at the raise cap");
+    assert.ok(row.text.endsWith("…"), "a clipped row is marked as clipped");
     assert.deepEqual(row.tags, ["L2", "drift", "extra", LESSON_TAG]);
     const junk = lessonRow({
       classShort: "drift",
@@ -614,7 +615,7 @@ describe("M-tier lesson surface (fixes/98 §2/§3)", () => {
     const l3 = verifyFailureLesson(p, 6, "cases failed: x y z", 2, "the fixture was wrong");
     assert.equal(l3.kind, "episodic");
     assert.match(l3.text, /\| hypothesis: the fixture was wrong/);
-    assert.ok(l3.text.length <= LESSON_TEXT_MAX, "hypothesis + evidence fit the 240-char budget");
+    assert.ok(l3.text.length <= LESSON_TEXT_MAX, "hypothesis + evidence fit the row budget");
 
     const l4 = verifiedProcedureLesson(p, 6, "6/6 machine-run cases passed");
     assert.equal(l4.kind, "procedural");
@@ -640,6 +641,41 @@ describe("M-tier lesson surface (fixes/98 §2/§3)", () => {
     assert.equal(drift.score, 0.6);
     assert.ok((drift.tags ?? []).includes("drift"));
     assert.match(drift.text, /L2-style drift/);
+  });
+
+  it("322 X3 (BUG-2): an L2 seal row's noun list + evidence hash survive inside the raised cap", () => {
+    const p = seedProject();
+    const row = templateEmissionLesson(
+      p,
+      6,
+      ["p6-verified", "p6-brief-fit"],
+      ["static", "marketing", "website", "shop", "visitors"],
+      "deadbeef",
+    );
+    assert.ok(row.text.includes("evidenceHash=deadbeef"), "the evidence hash survives the cap");
+    assert.ok(row.text.includes("visitors"), "the noun list tail survives the cap");
+    assert.ok(row.text.length <= LESSON_TEXT_MAX + 1);
+  });
+
+  it("322 X3 (BUG-3): the L2 row states the measured census — never an unmeasured '0 hits'", () => {
+    const p = seedProject();
+    const withArtifact = templateEmissionLesson(
+      {
+        ...p,
+        brief: "Build a kanban board with columns and cards",
+        generatedSource: "function createBoard() { return { columns: [] }; }",
+      },
+      6,
+      ["p6-brief-fit"],
+    );
+    assert.match(withArtifact.text, /present as identifiers in emitted source: \d+\/\d+/);
+    assert.ok(!withArtifact.text.includes("none computed"), "no unmeasured 'none computed' claim");
+    const noArtifact = templateEmissionLesson(
+      { ...p, generatedSource: "", generatedTree: [] },
+      6,
+      ["p6-brief-fit"],
+    );
+    assert.ok(noArtifact.text.includes("census not computed"), "neutral wording without an artifact");
   });
 
   it("absentLexNouns is deterministic and lattice-derived", () => {

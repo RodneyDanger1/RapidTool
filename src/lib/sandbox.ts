@@ -1,3 +1,5 @@
+import { canonicalStem } from "./algorithms.ts";
+
 // A02 (deep-audit-01): the denylist below must target ACTUAL primitive /
 // identifier usage in code — never engine-injected TEXT inside string literals
 // or comments. buildPhase6Module injects JSON-escaped literals (job names,
@@ -14,6 +16,44 @@ const FORBIDDEN =
 
 /** Exported denylist for keyed-synthesis producers (P0-01 Part B validation). */
 export const FORBIDDEN_PRIMITIVES = FORBIDDEN;
+
+/**
+ * 322 X1 (P6 fix): bounded regex-literal scan for the masker below. Returns the
+ * exclusive end index of a regex literal starting at `i`, or -1 when `i` does
+ * not plausibly open one (division, or unterminated on its line). `/"/g`-style
+ * escape regexes are routine in generated code (`.replace(/"/g, "&quot;")`);
+ * without this the scanner read the regex's quote chars as string openers and
+ * cascaded (322 X1 evidence: first divergence update.ts:692; 447-char tail +
+ * whole sibling files masked out of the tree union). Lexical split only — not
+ * a parser: a `/` opens a regex right after an operator/opening delimiter or a
+ * regex-legal keyword (never after an identifier, literal, `)` or `]`).
+ */
+function regexLiteralEnd(src: string, i: number): number {
+  let k = i - 1;
+  while (k >= 0 && (src[k] === " " || src[k] === "\t")) k--;
+  const prev = k < 0 ? "\n" : src[k];
+  const keyword =
+    /\b(return|typeof|case|in|of|new|delete|void|instanceof|do|else|yield|await)$/.test(
+      src.slice(Math.max(0, k - 12), k + 1),
+    );
+  if (prev !== "\n" && !"(,=:[!&|?{};+-*%^~<>".includes(prev) && !keyword) return -1;
+  let j = i + 1;
+  let inClass = false;
+  while (j < src.length) {
+    const d = src[j];
+    if (d === "\\") { j += 2; continue; }
+    if (d === "\n") return -1;
+    if (d === "[") inClass = true;
+    else if (d === "]") inClass = false;
+    else if (d === "/" && !inClass) {
+      j++;
+      while (j < src.length && /[a-z]/i.test(src[j])) j++;
+      return j;
+    }
+    j++;
+  }
+  return -1;
+}
 
 /**
  * Masks string literals ('…', "…", `…` — incl. `${…}` interpolation bodies)
@@ -47,6 +87,15 @@ export function maskLiteralsAndComments(src: string): string {
       out += " ".repeat(stop - i);
       i = stop;
       continue;
+    }
+    if (c === "/" && next !== "/" && next !== "*") {
+      // 322 X1 (P6): regex-literal branch — see regexLiteralEnd above.
+      const end = regexLiteralEnd(src, i);
+      if (end !== -1) {
+        out += " ".repeat(end - i);
+        i = end;
+        continue;
+      }
     }
     if (c === '"' || c === "'" || c === "`") {
       const quote = c;
@@ -254,7 +303,12 @@ export function identifierHits(required: string[], source: string): string[] {
   const lowers = identifiers.map((i) => i.toLowerCase());
   const out: string[] = [];
   for (const t of required) {
-    if (lowers.some((i) => i === t || i.includes(t))) out.push(t);
+    // 322 X1 (P6): inflectional tolerance — a brief noun proves implementation
+    // through its canonical stem too (`updates` ⇐ …Update…, `publishes` ⇐
+    // publishStaticSite). canonicalStem is the repo's single stemmer; guard
+    // (stem ≠ noun, ≥4 chars) keeps short stems from matching noise.
+    const stem = canonicalStem(t);
+    if (lowers.some((i) => i === t || i.includes(t) || (stem !== t && stem.length >= 4 && i.includes(stem)))) out.push(t);
   }
   return out;
 }

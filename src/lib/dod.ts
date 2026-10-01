@@ -622,8 +622,11 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       // Keyless policy: the deterministic placeholder fails this probe BY
       // CONSTRUCTION (its identifiers never carry brief vocabulary); a keyed
       // liveP6Synthesis module passes it. Vocabulary-free briefs pass
-      // vacuously (nothing to conform). Additive AFTER p6-verified so
-      // evidence-hash ordering of existing pairs is untouched.
+      // vacuously (nothing to conform). 322 X1 (P6-C): the conformance bar
+      // was recalibrated ½ → 0.35 (measured honest coverage 40–50%; ≥1 hit of
+      // margin for stochastic keyed re-runs) — rationale at the threshold
+      // return below. Additive AFTER p6-verified so evidence-hash ordering
+      // of existing pairs is untouched.
       id: "p6-brief-fit",
       criterion:
         "Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode)",
@@ -645,7 +648,13 @@ export const DOD: Record<PhaseId, GateItem[]> = {
               ].join("\n")
             : p.generatedSource ?? "";
         const hits = identifierHits(required, source);
-        return hits.length >= Math.max(1, Math.ceil(required.length * 0.5));
+        // 322 X1 (P6-C, parent pick): ½ → 0.35. The half-bar assumed
+        // entity-heavy briefs (fixes/97 kanban fixtures); prose-heavy product
+        // briefs carry flavor words no honest implementation names identifiers
+        // after. Measured honest coverage (TS-truth mask, stem-tolerant):
+        // 40–50% ⇒ 0.35 keeps ≥1 hit of margin on every measured artifact for
+        // stochastic keyed re-runs; anti-vacuity preserved (placeholders ≈ 0).
+        return hits.length >= Math.max(1, Math.ceil(required.length * 0.35));
       },
     },
     {
@@ -761,8 +770,12 @@ function evaluate(project: Project, items: GateItem[]): { ok: boolean }[] {
 
 /**
  * Machine-checkable DoD gate for one phase. evidenceHash = FNV-1a over the
- * sorted "id:pass|fail" pairs of every probe, so the same content always
- * yields the same hash and any content change flips it.
+ * sorted "id:pass|fail" pairs of every probe — a VERDICT-VECTOR fingerprint,
+ * not artifact evidence: the same probe verdict set always yields the same
+ * hash and any VERDICT change flips it, but it cannot attest artifact
+ * content — a content change that leaves every probe verdict unchanged, and
+ * two distinct projects with equal verdict sets, share a hash byte-for-byte
+ * (322 X3, OBS-6: e.g. every phase of D1 and EXP01 matched).
  */
 export function runGate(
   project: Project,
@@ -786,6 +799,8 @@ export function runGate(
   }
   const results = evaluate(project, items);
   const unmet = items.filter((_, i) => !results[i].ok);
+  // 322 X3 (OBS-6): verdict-vector fingerprint only — see the runGate docstring;
+  // it does not cover artifact content.
   const evidence = items
     .map((item, i) => `${item.id}:${results[i].ok ? "pass" : "fail"}`)
     .sort()

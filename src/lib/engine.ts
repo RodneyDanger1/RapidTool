@@ -1782,7 +1782,18 @@ export function approveHitl(
   return sealPacketArtifact(attachAlgorithms(withGate));
 }
 
-export function rejectHitl(project: Project, note: string): Project {
+export function rejectHitl(
+  project: Project,
+  note: string,
+  /**
+   * 322 X1 (F-1): explicit actor seat for the reject row. The pre-fix path
+   * hardcoded `decidedBy: "human"`, so every machine caller (the CLI reject
+   * verb) minted a human actor for a machine decision. Absent ⇒ the legacy
+   * human stamp — the console store path IS the human seat and keeps its
+   * byte-identical rows; headless/CLI machine paths pass the explicit seat.
+   */
+  opts?: { decidedBy?: HitlDecision["decidedBy"] },
+): Project {
   const phase = project.currentPhase;
   // CORE-01/CORE-02 (defensive): the append-only ledger must never record a
   // fabricated rejection — require a pending gate on the current edge and the
@@ -1806,7 +1817,7 @@ export function rejectHitl(project: Project, note: string): Project {
     title: project.hitl?.title ?? phaseDef(phase).title,
     decision: "reject",
     note,
-    decidedBy: "human",
+    decidedBy: opts?.decidedBy ?? "human",
     requestedAt: project.hitl?.requestedAt ?? now,
     decidedAt: now,
   };
