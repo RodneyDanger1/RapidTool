@@ -26,6 +26,13 @@
 import type { ResearchResult } from "./research.ts";
 // W40·N4: the shared knob sanitizer (this file used to carry its own copy).
 import { boundedInt } from "./bounded-int.ts";
+// 327 (L2): the fetch transport is node:https/http with a one-shot (non-pooled)
+// agent, not the global undici `fetch`. undici leaves a TLS teardown handle that
+// races the CLI's deliberate in-tick `process.exit()` on Node 24/Windows and
+// aborts the process (async.c assertion, 0xC0000409) — see `nodeFetch` below.
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
 
 const DDG_LITE = "https://lite.duckduckgo.com/lite/";
 const WIKI_API = "https://en.wikipedia.org/w/api.php";
@@ -74,15 +81,32 @@ const TRACKING_PARAMS = new Set([
 
 type FreeItem = { title: string; url: string; content: string };
 
+/** The transport's minimal response shape — a real `Response` satisfies it. */
+export type TextResponse = { ok: boolean; status: number; text(): Promise<string> };
+
+/**
+ * 327 (L2): the HTTP transport seam. The production default is `nodeFetch`
+ * (node:https/http, one-shot agent) — undici's global `fetch` cannot be used
+ * here: its TLS teardown handle outlives a completed probe and races the CLI's
+ * in-tick `process.exit()` on Node 24/Windows (libuv async.c assertion). Tests
+ * inject a fake through `FreeSearchOptions.fetchImpl`.
+ */
+export type SearchFetch = (
+  url: string,
+  init: { headers: Record<string, string>; signal: AbortSignal },
+) => Promise<TextResponse>;
+
 /** Test/dev hooks so callers can dial backoff/timeouts (defaults are real). */
 export type FreeSearchOptions = {
   maxResults?: number;
   timeoutMs?: number;
   attempts?: number;
   backoffMs?: number;
+  /** Override the network transport (tests); production uses `nodeFetch`. */
+  fetchImpl?: SearchFetch;
 };
 
-type FetchOptions = { timeoutMs: number; attempts: number; backoffMs: number };
+type FetchOptions = { timeoutMs: number; attempts: number; backoffMs: number; fetchImpl: SearchFetch };
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -101,6 +125,100 @@ function stripHtml(s: string): string {
     .trim();
 }
 
+/** Bounded redirect hops (fetch follows by default; parity without undici). */
+const MAX_HTTP_REDIRECTS = 5;
+/** Request headers shared by every provider call. `accept-encoding` is set
+ *  explicitly because node:https (unlike fetch) does not add/decode it. */
+const REQUEST_HEADERS = {
+  "user-agent": UA,
+  accept: "text/html,application/json,*/*",
+  "accept-encoding": "gzip, deflate, br",
+};
+
+/** Decompress a provider body by its `content-encoding` (identity on any
+ *  unsupported/corrupt encoding — the bytes are returned verbatim). */
+function decodeBody(body: Buffer, encoding: string | string[] | undefined): string {
+  const enc = (Array.isArray(encoding) ? encoding[0] : (encoding ?? "")).toLowerCase().trim();
+  try {
+    if (enc === "gzip" || enc === "x-gzip") return gunzipSync(body).toString("utf8");
+    if (enc === "deflate") return inflateSync(body).toString("utf8");
+    if (enc === "br") return brotliDecompressSync(body).toString("utf8");
+  } catch {
+    /* corrupt/unsupported encoding → raw bytes below */
+  }
+  return body.toString("utf8");
+}
+
+/**
+ * One provider request over node:https/node:http with `agent: false` — a
+ * one-shot connection that is never pooled, so the probe's socket cannot
+ * outlive the probe (327 L2; the undici alternative crashes the CLI's in-tick
+ * exit on Node 24/Windows). Follows up to `redirectsLeft` redirects; the
+ * caller's `signal` aborts every hop (bounded timeout lives in `fetchText`).
+ */
+function requestText(
+  url: string,
+  signal: AbortSignal,
+  redirectsLeft: number,
+): Promise<TextResponse> {
+  return new Promise((resolve, reject) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    const request = parsed.protocol === "http:" ? httpRequest : httpsRequest;
+    const req = request(parsed, { headers: REQUEST_HEADERS, agent: false }, (res) => {
+      const status = res.statusCode ?? 0;
+      const location = res.headers.location;
+      if (status >= 300 && status < 400 && location && redirectsLeft > 0) {
+        res.resume(); // drain the redirect socket so it closes here
+        requestText(new URL(location, parsed).toString(), signal, redirectsLeft - 1).then(resolve, reject);
+        return;
+      }
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      res.on("end", () => {
+        const text = decodeBody(Buffer.concat(chunks), res.headers["content-encoding"]);
+        resolve({ ok: status >= 200 && status < 300, status, text: async () => text });
+      });
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+    if (signal.aborted) {
+      req.destroy(new Error("aborted"));
+      return;
+    }
+    const onAbort = () => req.destroy(new Error("aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    req.on("close", () => signal.removeEventListener("abort", onAbort));
+    req.end();
+  });
+}
+
+// 327 (L2): the transport seam. Production uses node:https (`requestText`,
+// one-shot / never-pooled) because undici's global `fetch` leaves a TLS teardown
+// handle that races the CLI's in-tick `process.exit()` on Node 24/Windows —
+// libuv async.c assertion + 0xC0000409 (fixes/327_l2_cli_exit.md). Suites outside
+// this lane's ownership (e.g. lesson-writers.test.ts) fake the network by
+// REPLACING the global `fetch`; `nodeFetch` defers to `globalThis.fetch` whenever
+// it is not the reference seen here, so those stubs keep intercepting. Untouched
+// global → node:https. (This module is imported lazily, so the reference can be
+// captured after a stub was installed; the `.name` guard covers that case — a
+// test stub is never the native `fetch`.)
+const INITIAL_FETCH = globalThis.fetch;
+const CAPTURED_NATIVE = INITIAL_FETCH.name === "fetch";
+
+/** Production transport: bounded, non-pooled node:https/http, unless a caller
+ *  replaced the global `fetch` (test seam) — then defer to it. */
+const nodeFetch: SearchFetch = (url, init) => {
+  const current = globalThis.fetch;
+  if (current !== INITIAL_FETCH || !CAPTURED_NATIVE) return current(url, init);
+  return requestText(url, init.signal, MAX_HTTP_REDIRECTS);
+};
+
 /**
  * Fetch with bounded retry/backoff on transient failures only. A non-transient
  * HTTP status is thrown as `HTTP NNN` and never retried; network failures and
@@ -113,10 +231,7 @@ async function fetchText(url: string, opts: FetchOptions): Promise<string> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
     try {
-      const res = await fetch(url, {
-        headers: { "user-agent": UA, accept: "text/html,application/json,*/*" },
-        signal: controller.signal,
-      });
+      const res = await opts.fetchImpl(url, { headers: REQUEST_HEADERS, signal: controller.signal });
       if (res.ok) return await res.text();
       const err = new Error(`HTTP ${res.status}`);
       if (RETRYABLE_STATUS.has(res.status)) {
@@ -356,6 +471,7 @@ export async function freeWebSearch(
     timeoutMs: boundedInt(opts.timeoutMs, TIMEOUT_MS, 1, MAX_TIMER_MS),
     attempts: boundedInt(opts.attempts, MAX_ATTEMPTS, 1, 5),
     backoffMs: boundedInt(opts.backoffMs, BASE_BACKOFF_MS, 0, 10_000),
+    fetchImpl: opts.fetchImpl ?? nodeFetch,
   };
 
   // Root cause of the most recent provider failure, surfaced verbatim in the

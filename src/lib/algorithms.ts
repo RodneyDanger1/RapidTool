@@ -375,13 +375,39 @@ function phraseHits(text: string, vocab: string[]): string[] {
   });
 }
 
+/**
+ * Count contiguous (overlapping) occurrences of a stemmed term sequence in a
+ * stemmed token bag (326 L4). A single-token term reduces to a token count;
+ * a multi-word register entry (`work-order`, `same-day`) must have its words
+ * adjacent, so one phrase mention scores exactly one hit — the same weight a
+ * single-word mention earns. The previous whole-string `canonicalStem(term)`
+ * mangled hyphenated terms ("work-order" → "work-ord", its `er` stripped as an
+ * agent noun) and matched no bag token, so every multi-word term carried only
+ * the base 0.35 weight no matter how often the brief named it.
+ */
+function phraseCount(bag: string[], term: string[]): number {
+  if (term.length === 0 || bag.length < term.length) return 0;
+  let hits = 0;
+  for (let i = 0; i + term.length <= bag.length; i++) {
+    let match = true;
+    for (let j = 0; j < term.length; j++) {
+      if (bag[i + j] !== term[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) hits++;
+  }
+  return hits;
+}
+
 /** A1 — Intent Lattice */
 export function intentLattice(brief: string, domain: string): IntentLattice {
   // F2-84: never index/tokenize a non-string brief or domain — an empty brief
   // is the honest vague input, not a crash (hand-built / truncated payloads).
   const text = typeof brief === "string" ? brief : "";
   const dom = typeof domain === "string" && domain.length > 0 ? domain : "custom-software";
-  const bag = tokens(text);
+  const bag = tokens(text).map(canonicalStem);
   const nodes: IntentLattice["nodes"] = [];
   (Object.keys(LEX) as Array<keyof typeof LEX>).forEach((kind) => {
     for (const term of phraseHits(text, LEX[kind])) {
@@ -396,8 +422,15 @@ export function intentLattice(brief: string, domain: string): IntentLattice {
       // the node was under-weighted (0.35 vs 0.55 for the same mention count).
       // Both sides now iterate to the same fixed point, so singular/plural
       // inflections weight a node identically.
-      const termStem = canonicalStem(term);
-      const freq = bag.filter((t) => canonicalStem(t) === termStem).length;
+      //
+      // 326 L4: the term side is its own TOKEN sequence, not canonicalStem(term)
+      // over the whole string. Stemming "work-order" end-to-end produced
+      // "work-ord" (the trailing `er` read as an agent noun) and matched no bag
+      // token, so every hyphenated register term plateaued at 0.35. Both sides
+      // are tokenized through `tokens` (same STOP/hyphen rules) and counted as a
+      // contiguous phrase, so "work order" and "work-order" score identically
+      // and a single mention earns the same 0.55/0.7 a one-word term does.
+      const freq = phraseCount(bag, tokens(term).map(canonicalStem));
       nodes.push({
         kind,
         label: term,
@@ -522,8 +555,8 @@ export function fusionRank(
   // CORE-09: stem the lexical inputs (tokenizeWords, the same B-15 word-boundary
   // stemmed tokenizer phraseHits/intentLattice use) so inflected pairs match:
   // "reroute"/"rerouting", "invoice"/"invoicing", "jobs"/"job" score overlap
-  // instead of zero. The legacy unstemmed tokens() bag is kept only for
-  // intentLattice's raw frequency counts.
+  // instead of zero. The `tokens()` bag is kept for intentLattice's frequency
+  // counts (stemmed + phrase-counted, per 326 L4), not for ranking here.
   // F2-84 input normalization: a non-string query and a non-array/absent
   // memory list (hand-built or truncated payloads) must rank as empty input,
   // never throw — compileAgentPacket is the hot consumer and must not brick.

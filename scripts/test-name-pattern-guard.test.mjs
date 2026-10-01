@@ -2,14 +2,23 @@
 // test-name-pattern-guard.test.mjs — ledger #50 codified (W22-L1): the
 // `--test-name-pattern` no-op trap + the pairing recipe that closes it.
 //
-// THE TRAP (measured on this host's Node v22.23.2, FOREGROUND):
-//   `node --test --test-name-pattern=<x> file.test.mjs` where <x> matches NO
-//   test exits **0** and prints `1..0` (zero subtests ran) — yet the summary
-//   still reads `# tests 1 / # pass 1`, because it counts the FILE wrapper.
-//   A file whose tests FAIL reads green under a no-match filter (proven in
-//   case 1/3 below). W16's wave hit this, closed it "by pairing" locally, and
-//   ledger v1 row #50 kept the repo-wide codification open — this is that
-//   codification: executable pin + recipe (doc note in AGENTS.md).
+// THE TRAP (measured on Node v22.23.2 AND Node v24.15.0, FOREGROUND — the trap
+//   SHAPE is identical on both):
+//   `node --test --test-reporter=tap --test-name-pattern=<x> file.test.mjs`
+//   where <x> matches NO test exits **0** and prints `1..0` (zero subtests
+//   ran) — yet the summary still reads `# tests 1 / # pass 1`, because it
+//   counts the FILE wrapper. A file whose tests FAIL reads green under a
+//   no-match filter (proven in case 1/3 below). W16's wave hit this, closed it
+//   "by pairing" locally, and ledger v1 row #50 kept the repo-wide codification
+//   open — this is that codification: executable pin + recipe (doc note in
+//   AGENTS.md).
+//
+// RUNTIME NOTE (Node 22.23.2 → 24.15.0): the DEFAULT `node --test` reporter is
+//   runtime-dependent — **TAP** on 22, **spec** on 24 (`✔ …` / `ℹ tests 1`).
+//   The trap itself is unchanged on 24 (still exit 0, still masks a red file);
+//   only the default output FORMAT moved. `runFixture()` therefore passes
+//   `--test-reporter=tap` explicitly (as `npm test` + `scripts/gate.sh` do) so
+//   the TAP assertions target an explicit format, not a host default.
 //
 // THE RECIPE (what every filtered run must do): never read a filtered run as
 // green from its exit code alone — require the expected test's OWN
@@ -57,7 +66,15 @@ function runFixture(pattern) {
   const file = join(dir, "guard_fixture.test.mjs");
   writeFileSync(file, FIXTURE);
   try {
-    const args = ["--test", ...(pattern === null ? [] : [`--test-name-pattern=${pattern}`]), file];
+    // Pin the reporter EXPLICITLY: `node --test`'s default reporter is runtime-dependent
+    // (TAP on Node 22, spec on Node 24), so an unqualified child makes the TAP assertions
+    // below a host artifact. `npm test` + scripts/gate.sh already pass this flag.
+    const args = [
+      "--test",
+      "--test-reporter=tap",
+      ...(pattern === null ? [] : [`--test-name-pattern=${pattern}`]),
+      file,
+    ];
     // Scrub NODE_TEST_CONTEXT: this file runs INSIDE a `node --test` parent, which
     // exports the var to its children — a grandchild `node --test` would refuse
     // ("run() is being called recursively within a test file. skipping running

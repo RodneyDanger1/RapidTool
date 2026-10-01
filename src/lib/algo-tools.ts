@@ -619,6 +619,21 @@ export function complexityOf(source: string): ComplexityReport {
       }
     }
     const kwEnd = kwIdx + kind.length;
+    // 326 L4: a real `for`/`while` head is always parenthesized (`for await (`
+    // for the async form). A loop keyword the masker could not reach — a regex
+    // literal in statement position, e.g. `}` then `/for/.test(x)` or
+    // `if (ok) /while/.test(x)` — has no `(` after it and was counted as a
+    // phantom loop, publishing O(n)/O(n^2) for a function with no loops at all.
+    // `do` has no head and is left to the masker: its keyword is not
+    // distinguishable this way.
+    const afterKw = masked.slice(kwEnd);
+    const kwGap = afterKw.match(/^\s*/)![0].length;
+    const nextCh = afterKw[kwGap] ?? "";
+    const forAwait = kind === "for" && masked.startsWith("await", kwEnd + kwGap);
+    if ((kind === "for" || kind === "while") && nextCh !== "(" && !forAwait) {
+      pos = kwEnd;
+      continue;
+    }
     const bodyAt = bodyStartOf(masked, kwEnd);
     // A `while` that ends in `;` is the terminator of a do-while — skip it
     // (the `do` already recorded the loop).

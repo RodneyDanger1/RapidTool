@@ -20,6 +20,14 @@ import type { JsonLog, PhaseId, Project } from "./types.ts";
 // seam is populated before any synchronous applyPhaseResult call below.
 await import("./knowledge.ts");
 
+// fix 327 L1 — non-hermetic keyless suite. The host shell may carry a real
+// DEEPSEEK_API_KEY (this box sets one in the User scope), which flips
+// emptyProject's enforceDod create-default ON (engine.ts:1967) and makes
+// drainToComplete park instead of completing. This suite is deterministic and
+// keyless by construction, so isolate its process from the host key (node
+// --test runs each file in its own child; no restore is needed).
+delete process.env.DEEPSEEK_API_KEY;
+
 /** Drive a project to completion through the headless loop (deterministic). */
 async function drainToComplete(project: Project): Promise<Project> {
   let p = project;

@@ -355,6 +355,34 @@ describe("complexityOf", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 326 L4 — loop keywords inside an unmasked regex literal are not loops. The
+// masker treats a `/` after `}` / `)` as division (it cannot tell statement-
+// position regex from a division operand), so `/for/` / `/while/` in that
+// position used to be counted as phantom loops — publishing O(n)/O(n^2) for a
+// function with no loops. A real `for`/`while` head is always parenthesized.
+// ---------------------------------------------------------------------------
+
+describe("326 L4 — regex-literal loop keywords are not counted as loops", () => {
+  const PHANTOM_FOR = [
+    "function helper(){}",
+    "/for/.test('x');",
+    "for (let i = 0; i < 3; i++) { sink(i); }",
+  ].join("\n");
+  const PHANTOM_WHILE = "exports.g = (ok) => { if (ok) {} /while/.test('x'); return 1; };";
+
+  it("counts the real loop only, never the `/for/` / `/while/` literal", () => {
+    const a = complexityOf(PHANTOM_FOR);
+    assert.equal(a.loops, 1, "the statement-position `/for/` literal must not be a loop");
+    assert.deepEqual(a.lineRefs, [3], "only the real `for` on line 3 is reported");
+    assert.equal(a.notation, "O(n)");
+    const b = complexityOf(PHANTOM_WHILE);
+    assert.equal(b.loops, 0, "the `/while/` literal after `)` must not be a loop");
+    assert.deepEqual(b.lineRefs, []);
+    assert.equal(b.notation, "O(1)");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // specToAlgorithm — LLM synthesis (G-27 keyed half)
 // ---------------------------------------------------------------------------
 

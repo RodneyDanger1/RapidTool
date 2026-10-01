@@ -1,8 +1,10 @@
-import { afterEach, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { freeWebSearch } from "./websearch.server.ts";
+import { freeWebSearch, type SearchFetch } from "./websearch.server.ts";
 
-const realFetch = globalThis.fetch;
+// 327 (L2): the transport is injected per call (`fetchImpl`) instead of stubbing
+// `globalThis.fetch` — production uses node:https, so the global fetch stub no
+// longer intercepts provider calls.
 
 function htmlResponse(html: string): Response {
   return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
@@ -14,16 +16,12 @@ function jsonResponse(obj: unknown): Response {
   });
 }
 
-afterEach(() => {
-  globalThis.fetch = realFetch;
-});
-
 // No backoff delay so tests don't sleep; attempts still exercise the retry loop.
 const FAST = { attempts: 2, backoffMs: 0 };
 
 describe("freeWebSearch", () => {
   it("parses DuckDuckGo lite HTML into titled results with decoded URLs", async () => {
-    globalThis.fetch = (async (url: unknown) => {
+    const fetchImpl = (async (url: unknown) => {
       if (String(url).includes("duckduckgo")) {
         return htmlResponse(
           `<a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage&amp;rut=x" class='result-link'>Example &amp; Co</a>` +
@@ -31,9 +29,9 @@ describe("freeWebSearch", () => {
         );
       }
       return jsonResponse({ query: { search: [] } });
-    }) as typeof fetch;
+    }) as SearchFetch;
 
-    const res = await freeWebSearch("example", FAST);
+    const res = await freeWebSearch("example", { ...FAST, fetchImpl });
     assert.equal(res.ok, true);
     if (res.ok) {
       assert.equal(res.provider, "duckduckgo");
@@ -45,7 +43,7 @@ describe("freeWebSearch", () => {
   });
 
   it("dedupes results by normalized URL (www, trailing slash, tracking params)", async () => {
-    globalThis.fetch = (async (url: unknown) => {
+    const fetchImpl = (async (url: unknown) => {
       if (String(url).includes("duckduckgo")) {
         return htmlResponse(
           `<a href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage&amp;rut=1">First</a>` +
@@ -55,9 +53,9 @@ describe("freeWebSearch", () => {
         );
       }
       return jsonResponse({ query: { search: [] } });
-    }) as typeof fetch;
+    }) as SearchFetch;
 
-    const res = await freeWebSearch("dupe", FAST);
+    const res = await freeWebSearch("dupe", { ...FAST, fetchImpl });
     assert.equal(res.ok, true);
     if (res.ok) {
       assert.equal(res.provider, "duckduckgo");
@@ -68,7 +66,7 @@ describe("freeWebSearch", () => {
 
   it("retries a transient 429 once before succeeding", async () => {
     let ddgCalls = 0;
-    globalThis.fetch = (async (url: unknown) => {
+    const fetchImpl = (async (url: unknown) => {
       if (String(url).includes("duckduckgo")) {
         ddgCalls++;
         if (ddgCalls === 1) return new Response("rate limited", { status: 429 });
@@ -77,9 +75,9 @@ describe("freeWebSearch", () => {
         );
       }
       return jsonResponse({ query: { search: [] } });
-    }) as typeof fetch;
+    }) as SearchFetch;
 
-    const res = await freeWebSearch("retry", FAST);
+    const res = await freeWebSearch("retry", { ...FAST, fetchImpl });
     assert.equal(res.ok, true);
     if (res.ok) {
       assert.equal(res.provider, "duckduckgo");
@@ -89,7 +87,7 @@ describe("freeWebSearch", () => {
   });
 
   it("falls back to SearXNG when DuckDuckGo yields no results", async () => {
-    globalThis.fetch = (async (url: unknown) => {
+    const fetchImpl = (async (url: unknown) => {
       const u = String(url);
       if (u.includes("duckduckgo")) {
         return htmlResponse("<html><body>no results</body></html>");
@@ -102,9 +100,9 @@ describe("freeWebSearch", () => {
         });
       }
       return jsonResponse({ query: { search: [] } });
-    }) as typeof fetch;
+    }) as SearchFetch;
 
-    const res = await freeWebSearch("searxng", FAST);
+    const res = await freeWebSearch("searxng", { ...FAST, fetchImpl });
     assert.equal(res.ok, true);
     if (res.ok) {
       assert.equal(res.provider, "searxng");
@@ -115,7 +113,7 @@ describe("freeWebSearch", () => {
   });
 
   it("falls back to Wikipedia when DuckDuckGo and SearXNG yield no results", async () => {
-    globalThis.fetch = (async (url: unknown) => {
+    const fetchImpl = (async (url: unknown) => {
       const u = String(url);
       if (u.includes("duckduckgo")) {
         return htmlResponse("<html><body>no results</body></html>");
@@ -133,9 +131,9 @@ describe("freeWebSearch", () => {
           ],
         },
       });
-    }) as typeof fetch;
+    }) as SearchFetch;
 
-    const res = await freeWebSearch("logistics", FAST);
+    const res = await freeWebSearch("logistics", { ...FAST, fetchImpl });
     assert.equal(res.ok, true);
     if (res.ok) {
       assert.equal(res.provider, "wikipedia");
@@ -146,7 +144,7 @@ describe("freeWebSearch", () => {
   });
 
   it("enriches the top Wikipedia hits with their real intro extract", async () => {
-    globalThis.fetch = (async (url: unknown) => {
+    const fetchImpl = (async (url: unknown) => {
       const u = String(url);
       if (u.includes("duckduckgo")) return htmlResponse("no results");
       if (u.includes("searx")) return jsonResponse({ results: [] });
@@ -162,9 +160,9 @@ describe("freeWebSearch", () => {
           search: [{ title: "Logistics automation", snippet: "Short <b>snippet</b>." }],
         },
       });
-    }) as typeof fetch;
+    }) as SearchFetch;
 
-    const res = await freeWebSearch("logistics", FAST);
+    const res = await freeWebSearch("logistics", { ...FAST, fetchImpl });
     assert.equal(res.ok, true);
     if (res.ok) {
       assert.equal(res.provider, "wikipedia");
@@ -176,10 +174,10 @@ describe("freeWebSearch", () => {
   });
 
   it("returns an honest coded error when all providers are unavailable", async () => {
-    globalThis.fetch = (async () => {
+    const fetchImpl = (async () => {
       throw new Error("network down");
-    }) as typeof fetch;
-    const res = await freeWebSearch("anything", FAST);
+    }) as SearchFetch;
+    const res = await freeWebSearch("anything", { ...FAST, fetchImpl });
     assert.equal(res.ok, false);
     if (!res.ok) {
       assert.equal(res.code, "RT_E_RESEARCH_UNAVAILABLE");
@@ -189,13 +187,13 @@ describe("freeWebSearch", () => {
   });
 
   it("returns an honest coded error when providers return zero results", async () => {
-    globalThis.fetch = (async (url: unknown) => {
+    const fetchImpl = (async (url: unknown) => {
       const u = String(url);
       if (u.includes("duckduckgo")) return htmlResponse("<html><body>no results</body></html>");
       if (u.includes("searx")) return jsonResponse({ results: [] });
       return jsonResponse({ query: { search: [] } });
-    }) as typeof fetch;
-    const res = await freeWebSearch("nothing-here", FAST);
+    }) as SearchFetch;
+    const res = await freeWebSearch("nothing-here", { ...FAST, fetchImpl });
     assert.equal(res.ok, false);
     if (!res.ok) {
       assert.equal(res.code, "RT_E_RESEARCH_UNAVAILABLE");
@@ -205,12 +203,12 @@ describe("freeWebSearch", () => {
 
   it("rejects an empty query with RT_E_VALIDATION and never fetches", async () => {
     let fetches = 0;
-    globalThis.fetch = (async () => {
+    const fetchImpl = (async () => {
       fetches++;
       return htmlResponse("<html></html>");
-    }) as typeof fetch;
+    }) as SearchFetch;
     for (const bad of ["", "   ", "\n\t"]) {
-      const res = await freeWebSearch(bad, FAST);
+      const res = await freeWebSearch(bad, { ...FAST, fetchImpl });
       assert.equal(res.ok, false);
       if (!res.ok) {
         assert.equal(res.reason, "error");
@@ -223,7 +221,7 @@ describe("freeWebSearch", () => {
 
   it("retries a transient network error exactly once before succeeding", async () => {
     let ddgCalls = 0;
-    globalThis.fetch = (async (url: unknown) => {
+    const fetchImpl = (async (url: unknown) => {
       if (String(url).includes("duckduckgo")) {
         ddgCalls++;
         if (ddgCalls === 1) throw new TypeError("fetch failed: network down");
@@ -232,9 +230,9 @@ describe("freeWebSearch", () => {
         );
       }
       return jsonResponse({ query: { search: [] } });
-    }) as typeof fetch;
+    }) as SearchFetch;
 
-    const res = await freeWebSearch("flaky", FAST);
+    const res = await freeWebSearch("flaky", { ...FAST, fetchImpl });
     assert.equal(res.ok, true);
     if (res.ok) {
       assert.equal(res.provider, "duckduckgo");
@@ -245,15 +243,15 @@ describe("freeWebSearch", () => {
 
   it("gives up after the bounded attempt count on a persistent network error", async () => {
     let ddgCalls = 0;
-    globalThis.fetch = (async (url: unknown) => {
+    const fetchImpl = (async (url: unknown) => {
       if (String(url).includes("duckduckgo")) {
         ddgCalls++;
         throw new TypeError("fetch failed: network down");
       }
       return jsonResponse({ query: { search: [] } });
-    }) as typeof fetch;
+    }) as SearchFetch;
 
-    const res = await freeWebSearch("flaky", { attempts: 1, backoffMs: 0 });
+    const res = await freeWebSearch("flaky", { attempts: 1, backoffMs: 0, fetchImpl });
     assert.equal(res.ok, false);
     if (!res.ok) assert.equal(res.code, "RT_E_RESEARCH_UNAVAILABLE");
     assert.equal(ddgCalls, 1, "attempts:1 must mean exactly one fetch");

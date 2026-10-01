@@ -462,6 +462,35 @@ describe("109 T-12 — verify-safety regression block", () => {
 });
 
 // ---------------------------------------------------------------------------
+// fixes/327 L5 — the compile verdict is parsed last-marker-wins, exactly like
+// HARNESS_EXPORTS. The old `/^HARNESS_COMPILE fail/` (no `m`) matched only at
+// position 0, so a compiling module whose OWN first stdout line began with the
+// marker was falsely refused ("source failed to compile") even though the
+// harness compiled it fine. The harness's real marker is emitted after the
+// module body, so it always wins.
+// ---------------------------------------------------------------------------
+describe("fixes/327 L5 — harness compile verdict (last-marker-wins)", () => {
+  it("a module that prints the compile marker but COMPILES is not falsely refused", { skip: !available }, async () => {
+    const res = await runCases('console.log("HARNESS_COMPILE fail"); exports.add = (a, b) => a + b;', [
+      { id: "add", expression: "add(2,3) === 5" },
+    ]);
+    assert.equal(
+      res.pass,
+      true,
+      `a compiling module must not be refused by its own stdout: ${JSON.stringify(res)}`,
+    );
+    assert.equal(res.compileError, undefined);
+    assert.equal(res.results[0]?.pass, true);
+  });
+
+  it("control: a real syntax error still names the compile failure", { skip: !available }, async () => {
+    const res = await runCases("exports.add = (", [{ id: "add", expression: "add(2,3) === 5" }]);
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, "source failed to compile in the harness");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 216i (112 T1/T2) — the lesson-loop pins. W3-L3 wired the record-gated mint
 // (verify.server.ts `gatedFailureMint`) and the consumer accrual (verify.ts
 // `applyVerifyOutcome`) but landed ZERO pins; these four assertions go red if

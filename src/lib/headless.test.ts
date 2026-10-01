@@ -50,6 +50,16 @@ import type { PhaseId, Project } from "./types.ts";
 import type { RtEventSeed } from "./rt-events.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 
+// fix 327 L1 — non-hermetic keyless suite. The host shell may carry a real
+// DEEPSEEK_API_KEY (this box sets one in the User scope), which flips
+// emptyProject's enforceDod create-default ON (engine.ts:1967) and makes
+// drainToComplete park instead of completing — failing fixes/144, the
+// end-to-end round-trip, E-25 and 185-H1 at their keyless preconditions. The
+// create-default pins below set/restore the key themselves, so they still
+// exercise the keyed branch. node --test runs each file in its own child; the
+// CLI children are already forced keyless by runCli (DEEPSEEK_API_KEY: "").
+delete process.env.DEEPSEEK_API_KEY;
+
 const tempDir = (): string => mkdtempSync(join(tmpdir(), "rapidtool-headless-"));
 
 /** 310 (B1 · M6-01/M6-02): a pid that is provably DEAD on this host — a real
@@ -664,7 +674,14 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
     // FAILS (it must never return a bare "converged" on its own red gate).
     assert.equal(res.outcome, "failed");
     assert.equal(res.cycles, 3);
-    assert.equal(runCalls, 3, "green tree-run on cycle 3 stops the loop (red gate is terminal)");
+    // fixes/326 F1b: cycle 3 === budget — the gate-repair diversion is only
+    // available while `cycle < budget`, so the red gate is terminal exactly
+    // at the budget edge (the runCalls pin below is unchanged).
+    assert.equal(runCalls, 3, "green tree-run on cycle 3 (== budget) stops the loop — no diversion budget left; terminal at the budget edge");
+    assert.ok(
+      !(res.project.logs ?? []).some((l) => l.event === "p6.journey.gate-repair"),
+      "no gate-repair diversion at the budget edge (cycle === budget)",
+    );
     // Cycle 2 + 3 each received the PREVIOUS cycle's tree-run failure tail.
     assert.equal(seen[0]!.cycle, 1);
     assert.equal(seen[0]!.tail, undefined, "cycle 1 has no prior tail");
@@ -712,6 +729,112 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
       "no failure log on a genuinely-converged journey",
     );
     assert.ok(res.events.some((e) => e.includes("P6 journey converged")), "events trail says converged");
+  });
+
+  it("fixes/326 F1b: green tree-run + red fit-class gate → ONE bounded gate-repair cycle; the repaired tree re-records the gate green and converges (no shortcut)", async () => {
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    const seen: { cycle: number; gateRepair?: string }[] = [];
+    // The synthesized tree carries a recorded missing-list row (the real
+    // dod.reqtrace shape) so the diversion context has RECORDED evidence to
+    // scrape — the engine adds no requirement the brief never had.
+    const synthesize = async (p: Project, ctx: P6JourneyCycleContext): Promise<Project> => {
+      seen.push({ cycle: ctx.cycle, gateRepair: ctx.gateRepair });
+      const t = withTree(p);
+      if (ctx.cycle === 1) {
+        return {
+          ...t,
+          logs: [
+            ...(t.logs ?? []),
+            {
+              ts: Date.now(),
+              phase: 6 as PhaseId,
+              level: "warn" as const,
+              event: "dod.reqtrace",
+              detail: "p6-arch FAIL · tree (2 files) · missing: track, drag, drop, persist",
+            },
+          ].slice(-200),
+        };
+      }
+      return t;
+    };
+    // Stateful gate recorder: cycle 1's green tree weighs RED (fit-class
+    // unmet — the criterion the diversion must feed forward); cycle 2's
+    // repaired tree weighs GREEN. Both records come from this seam — the
+    // journey gets no gate shortcut, the second record IS the repaired pass.
+    let gateCalls = 0;
+    const redThenGreenGate = (p: Project): Project => {
+      gateCalls += 1;
+      const passed = gateCalls > 1;
+      return {
+        ...p,
+        phases: (p.phases ?? []).map((ph) =>
+          ph.id === 6
+            ? {
+                ...ph,
+                gate: passed
+                  ? { passed: true, unmet: [], evidenceHash: "326f1bcafe", checkedAt: 1 }
+                  : { passed: false, unmet: ["p6-brief-fit"], evidenceHash: "326f1bdead", checkedAt: 1 },
+              }
+            : ph,
+        ),
+      };
+    };
+    const res = await driveP6Journey(base, {
+      budget: 3,
+      deps: { synthesize, runTree: async () => greenVerdict, recordGate: redThenGreenGate },
+    });
+    assert.equal(res.outcome, "converged", "the repaired tree re-records the gate green — real convergence, never a forced pass");
+    assert.equal(res.cycles, 2, "exactly ONE diverted cycle: cycle 1 red gate → cycle 2 repaired");
+    assert.equal(gateCalls, 2, "the gate was recorded twice (once per green tree-run) — no shortcut");
+    assert.ok(res.gate && res.gate.passed === true, "the winning verdict is the honestly re-recorded green gate");
+    assert.equal(seen.length, 2, "synthesis ran exactly twice");
+    assert.equal(seen[0]!.gateRepair, undefined, "cycle 1 carries no gate-repair context");
+    assert.ok(
+      seen[1]!.gateRepair!.includes("p6-brief-fit"),
+      "cycle-2 ctx.gateRepair carries the recorded unmet criterion",
+    );
+    assert.ok(
+      seen[1]!.gateRepair!.includes("missing: track, drag, drop, persist"),
+      "cycle-2 ctx.gateRepair carries the recorded missing-list excerpt",
+    );
+    const logs = res.project.logs ?? [];
+    const divert = logs.filter((l) => l.event === "p6.journey.gate-repair");
+    assert.equal(divert.length, 1, "ONE diversion row — at most one per journey");
+    assert.equal(divert[0]!.level, "warn", "the diversion is recorded as a warn row");
+    assert.ok(logs.some((l) => l.event === "p6.journey.converged"), "the converged row is written only by the honest gate pass");
+    assert.ok(res.events.some((e) => e.includes("one bounded gate-repair cycle")), "events trail names the diversion");
+  });
+
+  it("fixes/326 F1b: a SECOND red gate after the single diversion still FAILS — synthesize ×2, one diversion row, never converged", async () => {
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    let synthCalls = 0;
+    const synthesize = async (p: Project): Promise<Project> => {
+      synthCalls += 1;
+      return withTree(p);
+    };
+    // Always-red gate with a non-empty unmet class: the first red diverts
+    // ONCE; the second red must not divert again (fixes/159 F4 preserved —
+    // a second red gate is terminal FAILED, never a silent seal).
+    const alwaysRedGate = (p: Project): Project => ({
+      ...p,
+      phases: (p.phases ?? []).map((ph) =>
+        ph.id === 6
+          ? { ...ph, gate: { passed: false, unmet: ["p6-brief-fit"], evidenceHash: "326f1bdead", checkedAt: 1 } }
+          : ph,
+      ),
+    });
+    const res = await driveP6Journey(base, {
+      budget: 3,
+      deps: { synthesize, runTree: async () => greenVerdict, recordGate: alwaysRedGate },
+    });
+    assert.equal(res.outcome, "failed", "a second red gate still FAILS — never a silent seal");
+    assert.equal(res.cycles, 2, "the second red gate is terminal");
+    assert.equal(synthCalls, 2, "no third synthesis — the journey spends exactly one diversion");
+    const logs = res.project.logs ?? [];
+    assert.equal(logs.filter((l) => l.event === "p6.journey.gate-repair").length, 1, "exactly ONE diversion row");
+    assert.equal(logs.filter((l) => l.event === "p6.journey.failed").length, 1, "the failure is recorded once");
+    assert.ok(!logs.some((l) => l.event === "p6.journey.converged"), "never converged on a red gate");
+    assert.equal(res.gate!.passed, false, "the recorded verdict stays red — no forced pass");
   });
 
   it("C-1 (WB-1): a genuinely green tree-run that EXECUTED specs mints the tested-equivalent before the gate — the deadlock must not need gate.passed to mint", async () => {
@@ -1227,6 +1350,31 @@ describe("fixes/153 (P2) — the refusal→next-cycle loop: cycle N+1 knows cycl
     // Both evidence kinds ride together when both exist.
     const both = p6CycleLiveDeps({ cycle: 3, treeFailureTail: tail, refusal });
     assert.deepEqual(Object.keys(both!).sort(), ["synthesisRefusal", "treeFailure"]);
+  });
+
+  it("p6CycleLiveDeps (fixes/326 F1b): gateRepair-only → exactly {gateRepair}; all-three keys; ~700 cap; absent ctx keeps the legacy key-sets", () => {
+    // Absent gateRepair: the fixes/153 key-sets above stay EXACTLY as they
+    // were — the additive field materializes no key (byte-identity guard).
+    const tail = "src/api/board.spec.ts: fail — expected dispatchBoard to exist";
+    assert.deepEqual(Object.keys(p6CycleLiveDeps({ cycle: 2, treeFailureTail: tail })!), ["treeFailure"]);
+    assert.deepEqual(
+      Object.keys(p6CycleLiveDeps({ cycle: 2, refusal: "RT_E_LLM_REJECTED · nope" })!),
+      ["synthesisRefusal"],
+      "refusal-only ctx materializes no gateRepair key",
+    );
+    // Gate-repair-only ctx → { gateRepair } only.
+    const gateRepair = "P6 DoD unmet: p6-brief-fit | Recorded missing requirements: missing: track, drag, drop, persist";
+    const g = p6CycleLiveDeps({ cycle: 2, gateRepair });
+    assert.deepEqual(Object.keys(g!), ["gateRepair"]);
+    assert.equal(g!.gateRepair, gateRepair);
+    // All three evidence kinds ride together.
+    const all = p6CycleLiveDeps({ cycle: 3, treeFailureTail: tail, refusal: "RT_E_LLM_REJECTED · nope", gateRepair });
+    assert.deepEqual(Object.keys(all!).sort(), ["gateRepair", "synthesisRefusal", "treeFailure"]);
+    // Bounded to the 700-char gate-repair cap (the refusal-cap discipline).
+    const capped = p6CycleLiveDeps({ cycle: 2, gateRepair: "x".repeat(900) });
+    assert.equal(capped!.gateRepair!.length, 700, "gate-repair context is bounded to 700 chars");
+    // Empty gateRepair is no gateRepair at all.
+    assert.equal(p6CycleLiveDeps({ cycle: 2, gateRepair: "" }), undefined);
   });
 
   it("tree-failure-only journey → no refusal context reaches cycle 2 (driver byte-identity)", async () => {

@@ -63,6 +63,14 @@ contract in full) lives in **`AGENT_GUIDE.md`**; the CLI machine contract is
   runner-timing flake (`exec.test.ts` grandchild test) which passes standalone.
 - Full gate: `bash scripts/gate.sh` (typecheck → lint → scripts → src suite → build;
   `--double` catches flakes).
+- **`node --test` reporter + the `--test-name-pattern` no-op trap** (pinned by
+  `scripts/test-name-pattern-guard.test.mjs`): the default `node --test` reporter is
+  runtime-dependent — **TAP** on Node 22, **spec** on Node 24 — so any test that parses a
+  child `node --test`'s output must pass `--test-reporter=tap` explicitly (`npm test` and
+  `gate.sh` already do). Independently: a `--test-name-pattern` matching ZERO tests exits
+  **0** and still masks a failing file on BOTH runtimes — never read a filtered run as
+  green from its exit code alone; require the expected test's own `ok N - <name>` line in
+  the same output.
 - CLI: `node --experimental-strip-types scripts/rapidtool-cli.mjs <verb> …` — single JSON
   object on stdout, exit taxonomy 0/1/2/3/4 (exit 2 = parked at a HITL gate or
   `blocked` — the docs' `scripts/README-cli.md` §Agent contract owns the full

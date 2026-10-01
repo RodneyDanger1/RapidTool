@@ -1205,3 +1205,71 @@ test("A6c/M3-18: junk collection containers compile to honest empty forms — ne
   }
 });
 
+// ---------------------------------------------------------------------------
+// R2-f05 (W-25e, fixes/327 L5) — ROW-level junk. The A6c/M3-18 block above
+// pins junk CONTAINERS; a null ROW inside a well-formed array was still
+// fatal. io.ts's own comments name the sites ("a null row crashes the packet
+// crew render (c.role read)" / "…the packet oracle render (t.name read)"),
+// and hydrate keeps those rows raw (engine.ts:2611-2612) — so a persisted
+// payload reaches compileAgentPacket with the row shape, and a throw here
+// walks the documented wipe chain (isoFromMs docblock). Each shape must
+// compile to an honest form instead.
+// ---------------------------------------------------------------------------
+
+test("R2-f05: a null/foreign ROW in any project collection compiles — never a TypeError", () => {
+  const base = { name: "junk", id: "j", currentPhase: 0, brief: "x" } as unknown as Project;
+  const shapes: [string, Record<string, unknown>][] = [
+    ["artifacts:[null]", { artifacts: [null] }],
+    ["artifacts:[{no body}]", { artifacts: [{ id: "a", phase: 0, kind: "docs", title: "t" }] }],
+    ["crew:[null]", { crew: [null] }],
+    ["oracle:[null]", { oracle: [null] }],
+    ["oracle:[42]", { oracle: [42] }],
+    ["decisions:[null]", { decisions: [null] }],
+    ["phases:[null]", { phases: [null] }],
+    ["specGraph:{order:[42],nodes:[null]}", { specGraph: { order: [42], nodes: [null] } }],
+    ["contracts:{entities:[null]}", { contracts: { entities: [null], endpoints: [] } }],
+    ["contracts:{entities:[{name:'x'}]}", { contracts: { entities: [{ name: "x" }], endpoints: [] } }],
+    [
+      "scorecard:{axes:[null]}",
+      { scorecard: { verdict: "x", axes: [null], bottlenecks: [], attackVectors: [] } },
+    ],
+  ];
+  for (const [label, extra] of shapes) {
+    assert.doesNotThrow(
+      () => compileAgentPacket({ ...base, ...extra } as unknown as Project),
+      `compile must survive the row-level junk shape ${label}`,
+    );
+  }
+  // The junk row must not silently fabricate a section either: the crew section
+  // still renders (its placeholder is for an EMPTY collection, not a junk one).
+  const out = compileAgentPacket({ ...base, crew: [null] } as unknown as Project);
+  assert.ok(out.includes("## Crew (A8)"), "crew section still renders for a junk row");
+  // The export-profile wrapper reads the same spec-graph rows (profileScopeFiles).
+  assert.doesNotThrow(
+    () =>
+      exportProfiles["aider"].wrap(
+        "packet-body",
+        { ...base, specGraph: { order: [42], nodes: [null] } } as unknown as Project,
+      ),
+    "export profiles must survive a null spec-graph node row too",
+  );
+});
+
+test("R2-f05: lastTest.ok must be the boolean TRUE to render pass (declare-or-strike)", () => {
+  const p = makeProject();
+  p.lastTest = { ok: "yes", detail: "hand-edited" } as unknown as Project["lastTest"];
+  const out = compileAgentPacket(p);
+  assert.ok(out.includes("(last run): FAIL"), `a non-boolean ok is not a pass (got: ${out.match(/P6 [^\n]*/)?.[0]})`);
+  assert.ok(!out.includes("(last run): pass"), 'never prints pass for {ok:"yes"}');
+  const truthy = makeProject();
+  truthy.lastTest = {
+    label: "tested",
+    ok: true,
+    detail: "3/3 machine-run cases passed",
+  } as Project["lastTest"];
+  assert.ok(
+    compileAgentPacket(truthy).includes("(last run): pass"),
+    "ok === true still renders pass (the fix tightens, never weakens)",
+  );
+});
+

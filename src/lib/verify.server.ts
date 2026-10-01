@@ -520,6 +520,15 @@ export async function runCases(
   const results: CaseResult[] = [];
   let forged = false;
   let callables = "";
+  // fixes/327 L5: the compile verdict is read with the SAME last-line-wins
+  // discipline as HARNESS_EXPORTS below. The old `/^HARNESS_COMPILE fail/`
+  // (no `m` flag) only matched at position 0, so a compiling module whose own
+  // stdout began with the marker forged a "failed to compile" refusal — a
+  // false rejection of a module the harness never even tried to parse. The
+  // harness's real marker is ALWAYS emitted after the module body finishes
+  // (and is the ONLY marker when construction throws), so last-wins can never
+  // flip a real compile failure to a pass.
+  let compileMarker = "";
   for (const line of out.split("\n")) {
     // T-01 (109 C-01): the harness's OWN export inventory, emitted right
     // after the compile call. Last line wins — the module source has already
@@ -528,6 +537,10 @@ export async function runCases(
     const trimmed = line.trim();
     if (trimmed.startsWith("HARNESS_EXPORTS")) {
       callables = trimmed.slice("HARNESS_EXPORTS".length).trim();
+      continue;
+    }
+    if (trimmed.startsWith("HARNESS_COMPILE ")) {
+      compileMarker = trimmed.slice("HARNESS_COMPILE ".length).trim();
       continue;
     }
     const m = /^ORACLE_RESULT (.+?) (pass|fail)(?: (.*))?$/.exec(trimmed);
@@ -539,8 +552,7 @@ export async function runCases(
     seen.add(m[1]);
     results.push({ id: m[1], pass: m[2] === "pass", detail: m[3] ?? "" });
   }
-  const compileFail = /^HARNESS_COMPILE fail/.test(out);
-  if (compileFail) {
+  if (compileMarker.startsWith("fail")) {
     return { pass: false, results, compileError: "source failed to compile in the harness" };
   }
   // T-01 (109 C-01): refuse the run when the module exports no callable name.

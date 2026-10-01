@@ -27,6 +27,14 @@ import { emptyProject, wildStep, approveHitl, rejectHitl, unlockRetry, type Wild
 import { runGate } from "./dod.ts";
 import type { HitlDecision, Project } from "./types.ts";
 
+// fix 327 L1 — non-hermetic keyless suite. The host shell may carry a real
+// DEEPSEEK_API_KEY (this box sets one in the User scope), which flips
+// emptyProject's enforceDod create-default ON (engine.ts:1967) and turns every
+// pin below into a keyed hard-DoD park. These pins inject their own reviewer
+// and are keyless by construction, so isolate this file's process from the host
+// key (node --test runs each file in its own child; no restore is needed).
+delete process.env.DEEPSEEK_API_KEY;
+
 /** An ACTIVE wild-run project parked on one edge (gate open or phase complete). */
 function wildFixture(
   opts: { phase?: 0 | 4; status?: "awaiting_hitl" | "complete"; forceHuman?: boolean } = {},

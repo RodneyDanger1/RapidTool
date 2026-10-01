@@ -1054,3 +1054,35 @@ describe("deriveTypeSignatures — capability scope drives signature count (fixe
     assert.ok(noEntities[1]!.includes("FlipRun[]"), `second signature carries the job's Run row — got ${noEntities[1]}`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 326 L4 — multi-word register terms weight like single-word terms. The freq
+// count used `canonicalStem(term)` over the WHOLE term string; for a hyphenated
+// entry ("work-order") the trailing `er` was stripped as an agent noun
+// ("work-ord") and matched no bag token, so every multi-word term plateaued at
+// the 0.35 base weight no matter how literally the brief named it (the same
+// under-weighting class as 109 T-07, still live for hyphenated terms).
+// ---------------------------------------------------------------------------
+
+describe("326 L4 — multi-word register terms weight by phrase mentions", () => {
+  const weightOf = (brief: string, label: string, domain: string): number | undefined =>
+    intentLattice(brief, domain).nodes.find((n) => n.label === label)?.weight;
+  // The implementation's own weight formula — compared exactly, not rounded.
+  const expectWeight = (freq: number, constraint: boolean): number =>
+    Math.min(1, 0.35 + freq * 0.2 + (constraint ? 0.15 : 0));
+
+  it("scores a hyphenated term by its phrase, matching a one-word term", () => {
+    assert.equal(weightOf("create a work order for the site", "work-order", "construction"), expectWeight(1, false));
+    assert.equal(weightOf("work-order management", "work-order", "construction"), expectWeight(1, false));
+    assert.equal(weightOf("set up follow-up reminders", "follow-up", "construction"), expectWeight(1, false));
+    // constraint terms carry the extra +0.15 prior at one mention
+    assert.equal(weightOf("same-day delivery", "same-day", "logistics"), expectWeight(1, true));
+    // single-word path unchanged (0.55 for one mention)
+    assert.equal(weightOf("track a ledger", "ledger", "analytics"), expectWeight(1, false));
+    // repeated phrase mentions escalate exactly like the single-word path
+    const once = weightOf("work order for the site", "work-order", "construction");
+    const thrice = weightOf("work order work order work order", "work-order", "construction");
+    assert.equal(once, expectWeight(1, false));
+    assert.ok((thrice ?? 0) > (once ?? 0), `repeated phrase mentions must raise the weight (${thrice} vs ${once})`);
+  });
+});

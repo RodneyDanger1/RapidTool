@@ -705,7 +705,12 @@ function specRunnerCode(specAbs: string, innerTimeoutMs: number, cwd: string): s
     `let r = null;`,
     `let caught = null;`,
     `try {`,
-    `  r = spawnSync(process.execPath, ["--test", spec], {`,
+    // 327 (parent): the reporter is pinned to TAP. `parseTapSummary` reads the
+    // `# tests/# pass/# fail` summary, which is only emitted by the TAP
+    // reporter; the runtime default moved to `spec` on Node 24, so every
+    // emitted spec read as "no TAP pass" and every green tree was judged red.
+    // Explicit on purpose — the same class as the 327 L3 scripts-leg pin.
+    `  r = spawnSync(process.execPath, ["--test", "--test-reporter=tap", spec], {`,
     `    encoding: "utf8",`,
     `    timeout: ${innerTimeoutMs},`,
     `    maxBuffer: 4194304,`,

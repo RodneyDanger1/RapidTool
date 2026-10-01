@@ -51,6 +51,28 @@ function quoteNote(note: string | undefined, cap: number): string {
   return clean.length > cap ? `${clean.slice(0, cap)}…` : clean;
 }
 
+/**
+ * R2-f05 (W-25e, fixes/327 L5): the ROW-level floor the A6c/M3-18 container
+ * guards left open. `hydrateProject` keeps crew/oracle rows raw
+ * (engine.ts:2611-2612) and io.ts's `defendRowArray` repairs rows on the
+ * import path ONLY — a persisted payload can reach compileAgentPacket carrying
+ * a null/foreign row or an artifact with no `body`, and ONE such row used to
+ * throw a TypeError out of the compile. That throw walks stampPacket →
+ * attachAlgorithms → seedIfEmpty → recoverFromCorruptPersistence and re-seeds
+ * the store EMPTY (the wipe chain isoFromMs documents). Total floor: a
+ * non-string reads "", a non-array reads []. Valid rows render byte-identically.
+ */
+function str(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+/** R2-f05: read a collection's rows as opaque records so a null/foreign row
+ *  can never throw at a property read. Replaces the bare
+ *  `Array.isArray(x) ? x : []` at ROW-render sites only. */
+function rows(v: unknown): Array<Record<string, unknown> | null> {
+  return Array.isArray(v) ? (v as Array<Record<string, unknown> | null>) : [];
+}
+
 /** E-11: deterministic corpus fingerprint — FNV-1a over the sorted corpus URLs so an
  *  agent can detect corpus change between two packets without re-reading prose. */
 function researchHash(project: Project): string {
@@ -120,8 +142,10 @@ function systemJson(
 ): string {
   // A3 (M3-14): the envelope reads three project collections directly — a
   // foreign `{}` payload must render the empty forms, never throw.
-  const decisionRows = Array.isArray(project.decisions) ? project.decisions : [];
-  const phaseRows = Array.isArray(project.phases) ? project.phases : [];
+  // R2-f05 (fixes/327 L5): rows are read opaquely too — a null/foreign ROW
+  // (`decisions:[null]`, `phases:[null]`) used to throw at `d.phase`/`p.id`.
+  const decisionRows = rows(project.decisions);
+  const phaseRows = rows(project.phases);
   const sandbox = project.sandbox ?? { runtime: "sync-template", ramMb: null, timeoutS: 0, isolated: false };
   // SWEEP-2 (esc-1): escape raw backticks as \u0060 so the envelope stays a
   // single parseable ```json block. JSON.stringify does NOT escape backticks,
@@ -173,21 +197,21 @@ function systemJson(
           ? { phase: phase.id, attempts: loop.count, last_note: quoteNote(loop.note ?? undefined, 300) }
           : null,
       decisions: decisionRows.map((d) => ({
-        phase: d.phase,
-        decision: d.decision,
-        decided_by: d.decidedBy,
+        phase: d?.phase ?? null,
+        decision: d?.decision ?? null,
+        decided_by: d?.decidedBy ?? null,
         // K7 payout (W40 solo): the machine block dropped the seat provenance the prose
         // carries (F2-01) — additive key, null when absent (G2 item 1).
-        decided_via: d.decidedVia ?? null,
-        note: d.note != null ? quoteNote(d.note, 200) : null,
-        requested_at: d.requestedAt,
-        decided_at: d.decidedAt,
+        decided_via: d?.decidedVia ?? null,
+        note: d?.note != null ? quoteNote(str(d?.note) || undefined, 200) : null,
+        requested_at: d?.requestedAt ?? null,
+        decided_at: d?.decidedAt ?? null,
       })),
       phases: phaseRows.map((p) => ({
-        id: p.id,
-        status: p.status,
-        rejections: p.rejectionHistory?.length ?? 0,
-        gate_passed: p.gate ? p.gate.passed : null,
+        id: p?.id ?? null,
+        status: p?.status ?? null,
+        rejections: rows(p?.rejectionHistory).length,
+        gate_passed: p?.gate ? ((p.gate as { passed?: unknown }).passed ?? null) : null,
       })),
       // T-14 (106 §6, finding F-11): the honest coverage census — a run
       // stopped at P6 executed 7 of 13 phases and the P7–P12 tail produced 0
@@ -232,7 +256,11 @@ function systemJson(
  * `compiledAtFor` clamp was UPPER-bound-only — a negative `1e300` passed
  * `Number.isFinite` AND `Math.min`, then threw).
  */
-function isoFromMs(ms: number): string {
+function isoFromMs(ms: unknown): string {
+  // R2-f05 (fixes/327 L5): the parameter is `unknown` because row-level junk
+  // (a null decision row, a non-numeric `decidedAt`) reaches this render — the
+  // body's total guard (non-finite ⇒ epoch) already handled that; the old
+  // `number` signature only forced every call site to pre-check.
   const n = typeof ms === "number" && Number.isFinite(ms) ? ms : 0;
   return new Date(Math.min(Math.max(n, -8.64e15), 8.64e15)).toISOString();
 }
@@ -600,8 +628,10 @@ export function compileAgentPacket(
   // guarantees arrays, but a foreign `{}` payload must compile to an honest
   // skeleton instead of throwing at `.filter()` — the Array.isArray fallback
   // phaseCoverage/curHistory already use.
-  const decisionRows = Array.isArray(project.decisions) ? project.decisions : [];
-  const phaseRows = Array.isArray(project.phases) ? project.phases : [];
+  // R2-f05 (fixes/327 L5): decisions/phases are read opaquely — a null/foreign
+  // ROW (`decisions:[null]`, `phases:[null]`) used to throw here as well.
+  const decisionRows = rows(project.decisions);
+  const phaseRows = rows(project.phases);
   const artifactRows = Array.isArray(project.artifacts) ? project.artifacts : [];
   // A6c (325 BUG A / M3-18): the last unguarded member of this trio — a junk
   // `{}` memory container threw "not iterable" at countIdCollisions (:82 ← :640).
@@ -687,12 +717,15 @@ export function compileAgentPacket(
   for (const m of displayRanked) {
     if (provenIds.has(m.id)) displayedProven += 1;
   }
+  // R2-f05 (fixes/327 L5): a null artifact row, or a row with no `body`, used
+  // to throw at `a.kind`/`a.body.length` out of the compile (wipe chain).
   const artifacts = artifactRows
-    .filter((a) => a.kind !== "packet")
+    .filter((a) => a?.kind !== "packet")
     .slice(-8)
     .map((a) => {
-      const body = a.body.length > 900 ? `${a.body.slice(0, 900)}…` : a.body;
-      return `### P${a.phase} · ${a.title}\n${body}`;
+      const body = str(a?.body);
+      const text = body.length > 900 ? `${body.slice(0, 900)}…` : body;
+      return `### P${a?.phase ?? "?"} · ${str(a?.title)}\n${text}`;
     })
     .join("\n\n");
   // M-06: live research citations survive outside the trimmed-artifact window.
@@ -725,13 +758,17 @@ export function compileAgentPacket(
     ? `PENDING HITL: ${project.hitl.title}\n${project.hitl.prompt}\nStakes: ${project.hitl.stakes}`
     : "No pending HITL.";
   // T2/Q-303: append-only decision journal → one row per decision (rejects quote the note).
+  // R2-f05 (fixes/327 L5): a null/foreign decision row renders an honest blank
+  // row instead of throwing at `d.decidedAt`/`d.phase`.
   const ledgerRows = decisionRows.map((d) => {
-    const when = isoFromMs(d.decidedAt);
-    const base = `- P${d.phase} · ${d.decision} · ${d.decidedBy} · ${when}`;
-    return d.decision === "reject" ? `${base} — "${quoteNote(d.note, 200)}"` : base;
+    const when = isoFromMs(d?.decidedAt);
+    const base = `- P${d?.phase ?? "?"} · ${str(d?.decision)} · ${str(d?.decidedBy)} · ${when}`;
+    return d?.decision === "reject"
+      ? `${base} — "${quoteNote(str(d?.note) || undefined, 200)}"`
+      : base;
   });
   // T9/B-04: if the CURRENT phase is in a rejection loop, say so with attempt count + last note.
-  const curRecord = phaseRows.find((p) => p.id === project.currentPhase);
+  const curRecord = phaseRows.find((p) => p?.id === project.currentPhase);
   // A1-34: `?? []` is not a shape guard on persisted data — a corrupt
   // non-array rejectionHistory must read as "no rejections" (the old
   // non-null-assertion pair below it documented a guarantee that did not
@@ -742,17 +779,21 @@ export function compileAgentPacket(
   const lastLoopNote = loopCount > 0 ? (rejHistory[loopCount - 1]?.note ?? null) : null;
   // B-04/Q-303: the free-form prior-rejection dump becomes a compact pointer once the ledger
   // can back it; legacy payloads (rejectionNote without ledger rows) keep the detail lines.
+  // R2-f05 (fixes/327 L5): row-level junk reads opaquely — `p?.id` / `rows(...)`.
   const priorRejected = phaseRows.filter(
-    (p) => Boolean(p.rejectionNote) || (p.rejectionHistory?.length ?? 0) > 0,
+    (p) => Boolean(p?.rejectionNote) || rows(p?.rejectionHistory).length > 0,
   );
-  const hasRejectDecisions = decisionRows.some((d) => d.decision === "reject");
+  const hasRejectDecisions = decisionRows.some((d) => d?.decision === "reject");
   const priorBlock = priorRejected.length
     ? hasRejectDecisions
       ? `Prior rejections: see "## Decision ledger (HITL)" below.`
       : `Prior rejection notes:\n${priorRejected
           .map((p) => {
-            const h = p.rejectionHistory ?? [];
-            return `- P${p.id}: ${p.rejectionNote ?? (h.length ? h[h.length - 1].note : "(recorded)")}`;
+            const h = rows(p?.rejectionHistory);
+            const rn = p?.rejectionNote;
+            const note =
+              typeof rn === "string" ? rn : h.length ? str(h[h.length - 1]?.note) : "(recorded)";
+            return `- P${p?.id ?? "?"}: ${note}`;
           })
           .join("\n")}`
     : "";
@@ -786,20 +827,24 @@ export function compileAgentPacket(
   const sandbox = project.sandbox ?? { runtime: "sync-template", ramMb: null, timeoutS: 0, isolated: false };
   // A6c (325 BUG A / M3-18): crew/contracts/oracle junk containers read as
   // empty (their render sites already carry the honest placeholders).
-  const crewRows = (Array.isArray(project.crew) ? project.crew : []).map(
-    (c) => `- ${c.role}${c.active ? " [ACTIVE]" : ""} (${c.budgetTokens} tok): ${c.mandate} → ${c.handoff}`,
+  // R2-f05 (fixes/327 L5): row-level junk — a null crew/contract/oracle row used
+  // to throw at `c.role`/`e.name`/`t.name` (io.ts's own comments name two of
+  // these read sites; io repairs rows on the import path only).
+  const crewRows = rows(project.crew).map(
+    (c) =>
+      `- ${str(c?.role)}${c?.active === true ? " [ACTIVE]" : ""} (${c?.budgetTokens ?? 0} tok): ${str(c?.mandate)} → ${str(c?.handoff)}`,
   );
   const contractRows = [
-    ...(Array.isArray(project.contracts?.entities) ? project.contracts.entities : []).map(
-      (e) => `- ${e.name}: ${e.fields.map((f) => `${f.name}:${f.type}`).join(", ")}`,
+    ...rows(project.contracts?.entities).map(
+      (e) => `- ${str(e?.name)}: ${rows(e?.fields).map((f) => `${str(f?.name)}:${str(f?.type)}`).join(", ")}`,
     ),
-    ...(Array.isArray(project.contracts?.endpoints) ? project.contracts.endpoints : []).map(
-      (e) => `- ${e.method} ${e.path} (${e.job})`,
+    ...rows(project.contracts?.endpoints).map(
+      (e) => `- ${str(e?.method)} ${str(e?.path)} (${str(e?.job)})`,
     ),
   ];
-  const oracleRows = (Array.isArray(project.oracle) ? project.oracle : [])
+  const oracleRows = rows(project.oracle)
     .slice(0, 8)
-    .map((t) => `- ${t.name}: ${t.given} ⇒ ${t.expect}`);
+    .map((t) => `- ${str(t?.name)}: ${str(t?.given)} ⇒ ${str(t?.expect)}`);
   const full = [
     `# RapidTool Agent Packet v${PACKET_VERSION} — ${project.name}`,
     ``,
@@ -846,11 +891,13 @@ export function compileAgentPacket(
     ``,
     `## Spec graph order (A5)`,
     // A6c (325 BUG A / M3-18): junk specGraph containers read as no graph.
+    // R2-f05 (fixes/327 L5): a null/foreign node ROW used to throw at `x.id`
+    // inside the `.find` (found by probe #3 — the same row-level class).
     (Array.isArray(project.specGraph?.order) ? project.specGraph.order : [])
       .map((id) => {
-        const nodes = Array.isArray(project.specGraph?.nodes) ? project.specGraph.nodes : [];
-        const n = nodes.find((x) => x.id === id);
-        return n ? `- [${n.owner}] ${n.file} — ${n.purpose}` : `- ${id}`;
+        const nodes = rows(project.specGraph?.nodes);
+        const n = nodes.find((x) => x?.id === id);
+        return n ? `- [${str(n.owner)}] ${str(n.file)} — ${str(n.purpose)}` : `- ${id}`;
       })
       .join("\n") || "(run algorithms first)",
     ``,
@@ -879,7 +926,11 @@ export function compileAgentPacket(
             : project.lastTest.label === "real-run"
               ? "real run"
               : "template self-test"
-        } (last run): ${project.lastTest.ok ? "pass" : "FAIL"} — ${project.lastTest.detail}${
+          // R2-f05 (fixes/327 L5): declare-or-strike — the P6 gate (dod.ts)
+          // demands `ok === true`, so a hand-edited `{ok:"yes"}` must render
+          // FAIL, never "pass". `str()` keeps a missing detail from printing
+          // the literal "undefined".
+        } (last run): ${project.lastTest.ok === true ? "pass" : "FAIL"} — ${str(project.lastTest.detail)}${
           (project.lastTest as { evidenceHash?: string }).evidenceHash
             ? ` · evidence ${(project.lastTest as { evidenceHash?: string }).evidenceHash}`
             : ""
@@ -946,8 +997,9 @@ export function compileAgentPacket(
           `(deterministic feasibility estimate — template-derived, not live research)`,
           `Overall ${project.scorecard.overall}/10 (${project.scorecard.verdict})`,
           // A6c (325 BUG A / M3-18): junk scorecard collections read as empty.
-          ...(Array.isArray(project.scorecard.axes) ? project.scorecard.axes : []).map(
-            (a) => `- ${a.label}: ${a.score}/10 — ${a.note}`,
+          // R2-f05 (fixes/327 L5): a null axis row used to throw at `a.label`.
+          ...rows(project.scorecard.axes).map(
+            (a) => `- ${str(a?.label)}: ${a?.score ?? "?"}/10 — ${str(a?.note)}`,
           ),
           `Bottlenecks: ${(Array.isArray(project.scorecard.bottlenecks) ? project.scorecard.bottlenecks : []).join("; ")}`,
           `Attack vectors: ${(Array.isArray(project.scorecard.attackVectors) ? project.scorecard.attackVectors : []).join("; ")}`,
@@ -1085,11 +1137,13 @@ function profileScopeFiles(project: Project): string[] {
   // render — a `{}` order/nodes must read as "no scope" (export profiles wrap
   // foreign payloads too; the for-of/`.find` below would throw).
   const order = Array.isArray(project.specGraph?.order) ? project.specGraph.order : [];
-  const nodes = Array.isArray(project.specGraph?.nodes) ? project.specGraph.nodes : [];
+  const nodes = rows(project.specGraph?.nodes);
   const files: string[] = [];
   for (const id of order) {
-    const n = nodes.find((x) => x.id === id);
-    if (n?.file && !files.includes(n.file)) files.push(n.file);
+    // R2-f05 (fixes/327 L5): `x?.id` — a null node row used to throw here too.
+    const n = nodes.find((x) => x?.id === id);
+    const file = str(n?.file);
+    if (file && !files.includes(file)) files.push(file);
   }
   return files;
 }
