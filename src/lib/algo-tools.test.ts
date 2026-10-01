@@ -654,6 +654,25 @@ describe("exportedNamesOf — ESM multi-declarator + destructuring (328 P3)", ()
   });
 });
 
+describe("exportedNamesOf — ESM re-export lists (329)", () => {
+  it("inventories the EXPORTED name of `export { … }` lists (alias wins, local otherwise)", () => {
+    assert.deepEqual(exportedNamesOf("export { a, b as c };"), ["a", "c"]);
+    assert.deepEqual(exportedNamesOf('export { x } from "./m.ts";'), ["x"]);
+    assert.deepEqual(exportedNamesOf('export { a as b, c } from "./m.ts";'), ["b", "c"]);
+    assert.deepEqual(exportedNamesOf("export {a,b};"), ["a", "b"]);
+  });
+
+  it("never invent a runtime name from a type-only specifier or from non-code", () => {
+    // `export type { … }` is a type list — no runtime binding to call
+    assert.deepEqual(exportedNamesOf("export type { T };"), []);
+    // inline `type` specifier inside a value list is skipped; the real name stays
+    assert.deepEqual(exportedNamesOf("export { type T, real };"), ["real"]);
+    // masked strings/comments can never contribute a phantom export
+    assert.deepEqual(exportedNamesOf('const s = "export { fake };";'), []);
+    assert.deepEqual(exportedNamesOf("// export { fake }\n"), []);
+  });
+});
+
 describe("complexityOf — do-while terminator vs empty-body while; /do/ phantom (328 P3)", () => {
   it("counts a standalone `while (cond);` empty-body loop (was O(1))", () => {
     const r = complexityOf("exports.f = (c) => { while (c); return 1; };");

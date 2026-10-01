@@ -1425,11 +1425,25 @@ async function main() {
         if (typeof args.knowledge === "string" && args.knowledge.trim()) {
           try {
             const k = await knowledgeDriver();
-            const store = new k.KnowledgeStore(resolve(args.knowledge));
-            const proven = store.injectProven(project.name, { limit: 5 });
-            const seeds = proven.map((p) => k.provenToLessonRow(p));
+            // 329: use the knowledge module's OWN store->rows resolver instead of
+            // a second copy of it here. 328 P5 found `provenRowsFromStore` had NO
+            // production caller while this arm reimplemented it inline (and used
+            // injectProven directly, so a read failure could only throw). The
+            // helper additionally reports a DEGRADED read (reason + code) that
+            // this arm surfaces as the same coded refusal it always returned.
+            const resolved = k.provenRowsFromStore(resolve(args.knowledge), project.name, { limit: 5 });
+            if (resolved.degraded) {
+              return respond(
+                {
+                  ok: false,
+                  error: `packet: cannot seed tier-1 lessons from ${args.knowledge}: ${resolved.reason ?? "the store could not be read"}`,
+                  code: resolved.code ?? "RT_E_INTERNAL",
+                },
+                4,
+              );
+            }
             const pkt = await packetDriver();
-            text = pkt.compileAgentPacket(project, { proven: seeds });
+            text = pkt.compileAgentPacket(project, { proven: resolved.rows });
           } catch (err) {
             return respond(
               {

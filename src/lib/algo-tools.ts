@@ -341,6 +341,27 @@ export function exportedNamesOf(source: string): string[] {
   while ((m = esmVar.exec(masked)) !== null) {
     for (const n of esmDeclaratorNames(masked, m.index + m[0].length)) names.add(n);
   }
+  // 329: ESM re-export LISTS — `export { a, b as c }` and `export { x } from "…"`
+  // (the form 328 P3 recorded as not inventoried). The EXPORTED name is what a
+  // consumer sees, so `b as c` contributes `c`, and a bare `a` contributes `a`.
+  // `export type { … }` never matches (`type` sits between `export` and `{`), and
+  // an inline `type` specifier is skipped — a type is not a runtime name the
+  // prompt's cases can call. The list carries no `=`/declarator, so it cannot
+  // collide with the paths above; the masker has already blanked strings.
+  const esmReexport = /\bexport\s*\{([^}]*)\}/g;
+  while ((m = esmReexport.exec(masked)) !== null) {
+    for (const part of m[1]!.split(",")) {
+      const seg = part.trim();
+      if (!seg || seg.startsWith("type ") || seg.startsWith("type\t")) continue;
+      const alias = /\bas\s+([A-Za-z_$][\w$]*)$/.exec(seg);
+      if (alias !== null) {
+        names.add(alias[1]!);
+        continue;
+      }
+      const local = esReadIdent(seg, 0);
+      if (local !== null) names.add(local.name);
+    }
+  }
   const list = [...names];
   list.sort();
   return list;
