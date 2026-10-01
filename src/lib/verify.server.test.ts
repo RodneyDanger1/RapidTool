@@ -957,3 +957,64 @@ describe("fixes/328 P3 — generateCases diagnoses an empty reply honestly", () 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// fixes/330 P3 — the reference gate must require a VALUE-position read. The
+// 328 P3 gate scanned every identifier TOKEN, so a data-only mention of the
+// export name — an object-literal KEY (`({add:1}).add === 1`) or regex content
+// (`({r:/add/})`) — satisfied it while the module was never touched: the exact
+// 109 C-01 shape, re-opened one layer down. Each forge row is RED against
+// HEAD's verify.server.ts; the controls prove the stricter scan still accepts
+// every prompt-allowed form (typeof, a call, a property OF the export, a
+// ternary alternate, and legitimate division/regex text).
+// ---------------------------------------------------------------------------
+describe("fixes/330 P3 — runCases reference gate rejects data-only mentions", () => {
+  const SRC = "exports.add = (a, b) => a + b;";
+
+  it("an object key that spells the export name is NOT a reference", { skip: !available }, async () => {
+    const res = await runCases(SRC, [{ id: "c1", expression: "({add:1}).add === 1" }]);
+    assert.equal(res.results[0]?.pass, true, "the literal itself is TRUE — the gate refuses the pass");
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, NO_EXPORT_REFERENCE_REASON);
+  });
+
+  it("regex content that spells the export name is NOT a reference", { skip: !available }, async () => {
+    const res = await runCases(SRC, [{ id: "c1", expression: "({r:/add/}).r.source.length === 3" }]);
+    assert.equal(res.results[0]?.pass, true);
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, NO_EXPORT_REFERENCE_REASON);
+  });
+
+  it("a property access alone is NOT a reference (a value-position read is required)", { skip: !available }, async () => {
+    // `add` appears twice — as the object KEY and as the property — and neither
+    // reads the exported binding.
+    const res = await runCases(SRC, [{ id: "c1", expression: "typeof ({add:1}).add === 'number'" }]);
+    assert.equal(res.results[0]?.pass, true);
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, NO_EXPORT_REFERENCE_REASON);
+  });
+
+  it("control: typeof, a call, a property OF the export, division and ternary text all still reference", { skip: !available }, async () => {
+    const forms = [
+      "typeof add === 'function'",
+      "add(2,3) === 5",
+      "add.length === 2",
+      "add.length / 2 === 1",
+      "true ? 1 === 1 : add(1,1) === 2",
+      "add.length === 2 && /^\\d+$/.test('12')",
+    ];
+    for (const expression of forms) {
+      const res = await runCases(SRC, [{ id: "c1", expression }]);
+      assert.equal(res.pass, true, `${expression} must stay a valid reference: ${JSON.stringify(res)}`);
+      assert.equal(res.compileError, undefined);
+    }
+  });
+
+  it("control: a mixed set with one real case still passes", { skip: !available }, async () => {
+    const res = await runCases(SRC, [
+      { id: "good", expression: "add(2,3) === 5" },
+      { id: "noise", expression: "({add:1}).add === 1" },
+    ]);
+    assert.equal(res.pass, true, `one real reference grounds the set: ${JSON.stringify(res)}`);
+  });
+});

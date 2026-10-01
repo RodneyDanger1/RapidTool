@@ -680,9 +680,13 @@ export async function harvestForPacket(project: Project, opts: HarvestOptions = 
 // ---------------------------------------------------------------------------
 // Learning-loop harvest evidence (fixes/98 §3 honest-negative extension —
 // fixes/101): a rate-limited or EMPTY harvest is ENGINE-DETECTABLE negative
-// evidence. It earns a lesson row so the next run knows the environment (not
-// the brief) may have caused the miss, and can retry or tighten scope instead
-// of re-deriving the same queries. Level "L2" follows the drift-row precedent
+// evidence. `harvestResultLesson` DERIVES the row that would tell the next run
+// the environment (not the brief) caused the miss, so it can retry or tighten
+// scope instead of re-deriving the same queries. ⚠️ DECLARE-OR-STRIKE (330 P4):
+// no production seam calls either builder yet — the only harvest caller
+// (headless.ts's `harvest` wrapper → the read-only `harvest` CLI verb) holds no
+// persisted project, so in a real RUN no row is minted until a seam is
+// specified (see fixes/330_4_cartographer.md §1.2). Level "L2" follows the drift-row precedent
 // in knowledge.ts (negative-evidence class, distinct classShort); rows are
 // content-addressed via lessonRow, so re-synthesis can never fork (98 §3
 // anti-noise (a)). Honest floor: nothing here fabricates a repo or a claim.

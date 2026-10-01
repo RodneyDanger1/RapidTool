@@ -44,7 +44,7 @@ import {
 import { fnv1a } from "./algorithms.ts";
 import { failedGates, hardDodBlockInto, hardDodMessage, recordGateInto, runGate } from "./dod.ts";
 import { approvedAcceptanceFixtures } from "./brief-fixtures.ts";
-import { runSummaryLesson, templateEmissionLesson } from "./knowledge.ts";
+import { runSummaryLesson, templateEmissionLesson, type RankableLessonRow } from "./knowledge.ts";
 import { exportPacketText, exportProjectJson, importProject, slugName } from "./io.ts";
 import { applyReportResult, validateReport, type ReportApplyReason } from "./report-intake.ts";
 import { canEnter, PHASES, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
@@ -549,6 +549,9 @@ export async function runPhase(
      *  (driveP6Journey deps). Production callers omit it — the default is the
      *  real keyed journey. */
     p6Deps?: Partial<P6JourneyDeps>;
+    /** T4 (112 §4.4 / 216g): caller-supplied cross-project proven lesson rows
+     *  for the phase-6 synthesis prompt (driveP6Journey). Absent ⇒ legacy. */
+    proven?: readonly RankableLessonRow[];
   } = {},
 ): Promise<Project> {
   if (!Number.isInteger(phase) || phase < 0 || phase > 12) return project;
@@ -558,7 +561,7 @@ export async function runPhase(
     // through the ONE runP6Edge seam (keyed ⇒ driveP6Journey synthesis +
     // tree-run mint; keyless ⇒ the same deterministic floor liveLayer(…, 6)
     // produces). Before this, run/gate could synthesize but never mint.
-    if (phase === 6) return await runP6Edge(project, opts.p6Deps);
+    if (phase === 6) return await runP6Edge(project, opts.p6Deps, opts.proven);
     // E-12: delegate to the engine's liveLayer (single live implementation).
     const viaEngine = await liveLayer(project, phase);
     // Detect whether the engine layer actually produced live content. Under
@@ -653,6 +656,8 @@ async function runReady(
   live: boolean,
   /** W-02 (fixes/271): threaded injection seam for the phase-6 edge. */
   p6Deps?: Partial<P6JourneyDeps>,
+  /** T4 (112 §4.4 / 216g): caller-supplied proven lesson rows for P6. */
+  proven?: readonly RankableLessonRow[],
 ): Promise<{ project: Project; stopped: boolean; error?: string; dodBlocked?: boolean }> {
   if (!priorsSealed(project.phases, phase)) {
     return { project, error: `Cannot enter P${phase} — prior phases are not sealed.`, stopped: true };
@@ -665,7 +670,7 @@ async function runReady(
     ),
     status: "running" as const,
   };
-  const updated = await runPhase(running, phase, { live, p6Deps });
+  const updated = await runPhase(running, phase, { live, p6Deps, proven });
   return finishPhase(updated, phase, autopilot);
 }
 
@@ -720,6 +725,8 @@ async function advanceOnce(
   live: boolean,
   /** W-02 (fixes/271): threaded injection seam for the phase-6 edge. */
   p6Deps?: Partial<P6JourneyDeps>,
+  /** T4 (112 §4.4 / 216g): caller-supplied proven lesson rows for P6. */
+  proven?: readonly RankableLessonRow[],
 ): Promise<{ project: Project; stopped: boolean; error?: string; dodBlocked?: boolean }> {
   const phase = project.currentPhase;
   const rec = project.phases.find((p) => p.id === phase);
@@ -771,10 +778,10 @@ async function advanceOnce(
     if (!priorsSealed(project.phases, next)) {
       return { project, error: `P${phase} must stay sealed.`, stopped: true };
     }
-    return runReady(advanceTo(project, next), next, autopilot, live, p6Deps);
+    return runReady(advanceTo(project, next), next, autopilot, live, p6Deps, proven);
   }
   if (rec.status === "complete") return { project, error: "Pipeline complete.", stopped: true };
-  return runReady(project, phase, autopilot, live, p6Deps);
+  return runReady(project, phase, autopilot, live, p6Deps, proven);
 }
 
 /** Why a run/gate invocation ended (F-02/F-04 closure — store's stoppedReason
@@ -1010,6 +1017,10 @@ export async function runUntilGate(
     maxSteps?: number;
     /** W-02 (fixes/271): threaded injection seam for the phase-6 edge. */
     p6Deps?: Partial<P6JourneyDeps>;
+    /** T4 (112 §4.4 / 216g): caller-supplied cross-project proven lesson rows
+     *  (from `knowledge.provenRowsFromStore`) for the P6 synthesis prompt.
+     *  Threaded to the phase-6 journey; absent/empty ⇒ byte-identical runs. */
+    proven?: readonly RankableLessonRow[];
     /** T-107.7 (W33 lane L2): the project's working dir. When present, every
      *  committed phase writes the bounded run checkpoint beside `.rapidtool/`
      *  (`commitRunCheckpoint`) and a terminal complete clears it
@@ -1030,7 +1041,7 @@ export async function runUntilGate(
   while (iterations < maxSteps) {
     iterations += 1;
     const before = p;
-    const r = await advanceOnce(p, autopilot, live, opts.p6Deps);
+    const r = await advanceOnce(p, autopilot, live, opts.p6Deps, opts.proven);
     p = r.project;
     if (r.error) events.push(r.error);
     if (r.dodBlocked) dodBlocked = true;
@@ -2239,6 +2250,12 @@ export type P6JourneyCycleContext = {
    *  tree-run/red-gate cycle, fed to the next synthesis as deps.gateRepair.
    *  Present ONLY on a diverted repair cycle (at most one per journey). */
   gateRepair?: string;
+  /** T4 (112 §4.4 / 216g): the caller's resolved cross-project proven lesson
+   *  rows (`knowledge.provenRowsFromStore(...).rows`), supplied once through
+   *  the run options and carried on EVERY cycle so the synthesis prompt ranks
+   *  them with the project's own memory lessons. Absent/empty ⇒
+   *  `p6CycleLiveDeps` materializes no key and the call is byte-identical. */
+  proven?: readonly RankableLessonRow[];
 };
 
 /** fixes/153 (P2): deps.synthesisRefusal cap — the bounded refusal excerpt a
@@ -2255,7 +2272,9 @@ const P6_JOURNEY_REFUSAL_MAX = 200;
  *  deps.synthesisRefusal (the previous cycle's refusal class + bounded
  *  reason — read by codegen's PRIMARY-prompt reader
  *  withSynthesisRefusalContext; fixes/328 F1 closed the reader fixes/153 P2
- *  deferred). An absent/empty context ⇒ undefined ⇒
+ *  deferred) and deps.proven (T4 · 112 §4.4: the caller's cross-project
+ *  lesson rows, ranked by codegen's lesson sites alongside project memory).
+ *  An absent/empty context ⇒ undefined ⇒
  *  the legacy byte-identical liveLayer(p, 6) call (zero behavior change);
  *  a tree-failure-only ctx yields exactly { treeFailure } — no
  *  synthesisRefusal key — byte-identical to fixes/147. Exported so the
@@ -2273,17 +2292,23 @@ export type P6CycleLiveDepsShape = {
   /** fixes/326 F1b: bounded unmet-requirements context for the ONE
    *  gate-repair cycle (see P6JourneyCycleContext.gateRepair). */
   gateRepair?: string;
+  /** T4 (112 §4.4 / 216g): the caller's cross-project proven lesson rows,
+   *  carried verbatim onto engine.LiveLayerDeps.proven ⇒ codegen's lesson
+   *  sites. Present ONLY when the campaign supplied at least one row. */
+  proven?: readonly RankableLessonRow[];
 };
 
 export function p6CycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDepsShape | undefined {
   const tail = typeof ctx.treeFailureTail === "string" ? ctx.treeFailureTail : "";
   const refusal = typeof ctx.refusal === "string" ? ctx.refusal : "";
   const gateRepair = typeof ctx.gateRepair === "string" ? ctx.gateRepair : "";
-  if (tail.length === 0 && refusal.length === 0 && gateRepair.length === 0) return undefined;
+  const proven = Array.isArray(ctx.proven) && ctx.proven.length > 0 ? ctx.proven : null;
+  if (tail.length === 0 && refusal.length === 0 && gateRepair.length === 0 && proven === null) return undefined;
   const deps: P6CycleLiveDepsShape = {};
   if (tail.length > 0) deps.treeFailure = tail;
   if (refusal.length > 0) deps.synthesisRefusal = refusal.slice(0, P6_JOURNEY_REFUSAL_MAX);
   if (gateRepair.length > 0) deps.gateRepair = gateRepair.slice(0, P6_JOURNEY_GATE_REPAIR_MAX);
+  if (proven !== null) deps.proven = proven;
   return deps;
 }
 /**
@@ -2306,10 +2331,11 @@ export type P6JourneyDeps = {
   /** Produce/repair seam — one synthesis attempt. Default: the live-layer P6
    *  synthesis seam the headless loop uses today (engine.liveLayer for phase
    *  6, which applies the deterministic floor then runs codegen
-   *  liveP6Synthesis when keyed). The cycle context reaches codegen TWO ways:
-   *  the tree-failure tail rides deps.treeFailure through liveLayer's additive
-   *  deps param (fixes/147 E2 — codegen's only tree-failure reader) and the
-   *  durable record trail is the `p6.tree.failure` log. */
+   *  liveP6Synthesis when keyed). The cycle context reaches codegen through
+   *  liveLayer's additive deps param (engine forwards the object verbatim):
+   *  treeFailure (fixes/147 E2), synthesisRefusal (fixes/153 P2 · 328 F1),
+   *  gateRepair (fixes/326 F1b) and proven (T4 · 330); the `p6.tree.failure`
+   *  log is the durable record trail. */
   synthesize: (project: Project, ctx: P6JourneyCycleContext) => Promise<Project>;
   /** Tree verdict seam. Default: emit the generatedTree to a temp dir
    *  (emitProject — the M2/M3 tree emission path) and run it via
@@ -2661,10 +2687,20 @@ export function promoteRepairedDirTested(
  */
 export async function driveP6Journey(
   project: Project,
-  opts: { budget?: number; deps?: Partial<P6JourneyDeps>; workDir?: string } = {},
+  opts: {
+    budget?: number;
+    deps?: Partial<P6JourneyDeps>;
+    workDir?: string;
+    /** T4 (112 §4.4 / 216g): caller-supplied cross-project proven lesson rows
+     *  carried on EVERY cycle's ctx (⇒ p6CycleLiveDeps ⇒ codegen). */
+    proven?: readonly RankableLessonRow[];
+  } = {},
 ): Promise<P6JourneyResult> {
   const budget =
     typeof opts.budget === "number" && opts.budget > 0 ? Math.floor(opts.budget) : P6_JOURNEY_DEFAULT_BUDGET;
+  // T4: normalize once — an absent/empty supply materializes no ctx key, so a
+  // journey without rows builds the exact ctx it did before (byte-identity).
+  const proven = Array.isArray(opts.proven) && opts.proven.length > 0 ? opts.proven : null;
   const events: string[] = [];
   const usingDefaultSeam = opts.deps?.synthesize === undefined;
   // KEYLESS = no-op passthrough: byte-identical same-reference floor. Only the
@@ -2695,6 +2731,7 @@ export async function driveP6Journey(
   let gateRepairUsed = false;
   for (let cycle = 1; cycle <= budget; cycle++) {
     const ctx: P6JourneyCycleContext = { cycle };
+    if (proven !== null) ctx.proven = proven;
     if (treeTail !== null) ctx.treeFailureTail = treeTail;
     if (refusal !== null) ctx.refusal = refusal;
     if (gateRepair !== null) {
@@ -2888,8 +2925,16 @@ export async function driveP6Journey(
  * caller (repair/journey parity); only "keyless" (nothing ran) swaps back to
  * the floor, so a failed cycle is never silently hidden behind it.
  */
-export async function runP6Edge(project: Project, deps?: Partial<P6JourneyDeps>): Promise<Project> {
-  const j = await driveP6Journey(project, deps ? { deps } : {});
+export async function runP6Edge(
+  project: Project,
+  deps?: Partial<P6JourneyDeps>,
+  /** T4 (112 §4.4 / 216g): caller-supplied proven lesson rows for P6. */
+  proven?: readonly RankableLessonRow[],
+): Promise<Project> {
+  const j = await driveP6Journey(project, {
+    ...(deps ? { deps } : {}),
+    ...(Array.isArray(proven) && proven.length > 0 ? { proven } : {}),
+  });
   return j.outcome === "keyless" ? applyPhaseResult(project, 6) : j.project;
 }
 

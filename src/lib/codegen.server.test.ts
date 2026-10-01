@@ -74,6 +74,7 @@ import type { ExpandBriefResult } from "./prompt-engine.ts";
 import type { VerifyOutcome } from "./verify.server.ts";
 import type { LlmResult } from "./llm.ts";
 import type { Project } from "./types.ts";
+import type { RankableLessonRow } from "./knowledge.ts";
 import { exportProjectJson, importProject, type ArtifactProvenance } from "./io.ts";
 
 // --- fixtures -----------------------------------------------------------------
@@ -1860,6 +1861,125 @@ describe("liveP6Synthesis deps.synthesisRefusal rides the PRIMARY synthesis prom
     const ri = primary.indexOf("P6 PREVIOUS-REFUSAL CONTEXT");
     assert.ok(gi >= 0 && ri >= 0, "both context blocks are present on the primary prompt");
     assert.ok(gi < ri, "the gateRepair block precedes the refusal block (stable composition order)");
+  });
+});
+
+// --- T4 (112 §4.4 / 216g): cross-project proven lessons reach the prompts ---
+// `knowledge.provenRowsFromStore` resolves a configured KnowledgeStore into
+// rankable rows; `lessonLinesForBrief` already accepts `opts.proven`. This pins
+// that the rows actually reach ALL THREE lesson sites (expansion advisory +
+// single-module PRIMARY + every tree chunk PRIMARY). Absent/empty ⇒ the legacy
+// prompt bytes (the additive-field discipline gateRepair/synthesisRefusal use).
+
+describe("liveP6Synthesis deps.proven ranks cross-project lessons into the prompts (T4 · 112 §4.4)", () => {
+  /** One resolved cross-project row, shaped exactly as `provenToLessonRow`
+   *  produces them (id prefixed `proven-`, source "research"). */
+  const PROVEN: readonly RankableLessonRow[] = [
+    {
+      id: "proven-K1deadbeef",
+      kind: "semantic",
+      phase: 0,
+      text: "MARKER_PROVEN: a prior accepted run shipped a board that dropped the empty-column rejection guard — keep it.",
+      score: 0.95,
+      source: "research",
+      tags: ["lesson"],
+    },
+  ];
+
+  /** Run the single-module PRIMARY synthesis once, capturing every model prompt
+   *  and the expansion lessons argument; memory is lesson-free so the only
+   *  possible lesson source is deps.proven. */
+  const runPrimary = async (
+    proven?: readonly RankableLessonRow[],
+  ): Promise<{ prompts: string[]; expandLessons: readonly string[] | undefined }> => {
+    const raw = p6Base();
+    const base: Project = {
+      ...raw,
+      memory: (raw.memory ?? []).filter((m) => !(m.tags ?? []).includes("lesson")),
+    };
+    const prompts: string[] = [];
+    let expandLessons: readonly string[] | undefined;
+    const complete = async (p: string): Promise<LlmResult> => {
+      prompts.push(p);
+      return { ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(base, {
+      complete,
+      expand: async (_brief: string, lessons?: readonly string[]) => {
+        expandLessons = lessons;
+        return { ok: true, spec: KANBAN_SPEC };
+      },
+      verify: async () => ({
+        status: "passed",
+        iterations: 1,
+        evidence: "3/3 machine-run cases passed on iteration 1",
+        finalSource: KANBAN_MODULE,
+        cases: [],
+      }),
+      ...(proven === undefined ? {} : { proven }),
+    });
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim());
+    return { prompts, expandLessons };
+  };
+
+  it("single-module: proven rows append the PRIOR LESSONS block; absent/empty keep the legacy prompt bytes", async () => {
+    const legacy = await runPrimary();
+    assert.equal(legacy.prompts.length, 1, "one primary synthesis call (legacy run)");
+    assert.equal(legacy.prompts[0]!.includes("PRIOR LESSONS"), false, "no proven rows ⇒ no lessons block");
+    assert.equal(legacy.expandLessons, undefined, "no proven rows ⇒ the expansion call keeps its legacy arity");
+    // Absent vs empty array are BOTH the legacy bytes (byte-identity control).
+    for (const empty of [undefined, [] as readonly RankableLessonRow[]]) {
+      const got = await runPrimary(empty);
+      assert.equal(got.prompts[0], legacy.prompts[0], "absent/empty deps.proven keeps the prompt byte-identical");
+    }
+    const withProven = await runPrimary(PROVEN);
+    assert.equal(withProven.prompts.length, 1, "one primary synthesis call (proven run)");
+    assert.ok(
+      withProven.prompts[0]!.startsWith(legacy.prompts[0]!),
+      "proven rows only APPEND the advisory lessons block (legacy prefix byte-identical)",
+    );
+    assert.ok(withProven.prompts[0]!.includes("PRIOR LESSONS"), "the lessons block is present");
+    assert.ok(withProven.prompts[0]!.includes("MARKER_PROVEN"), "the proven row's text reaches the prompt");
+    assert.equal(withProven.prompts[0]!.split("PRIOR LESSONS").length - 1, 1, "the block appears ONCE");
+  });
+
+  it("expansion site: proven rows reach the expansion fn's advisory lessons", async () => {
+    const withProven = await runPrimary(PROVEN);
+    assert.ok(
+      withProven.expandLessons !== undefined && withProven.expandLessons.length > 0,
+      "the expansion call receives lesson lines",
+    );
+    assert.ok(
+      (withProven.expandLessons ?? []).some((l) => l.includes("MARKER_PROVEN")),
+      "the cross-project row is ranked into the expansion advisory block",
+    );
+  });
+
+  it("chunked: every chunk's PRIMARY prompt carries the proven lesson; absent keeps the legacy bytes", async () => {
+    const base = p6Base(LEDGER_BRIEF);
+    const withDeps = chunkedDeps();
+    const legacyDeps = chunkedDeps();
+    const qWith = await liveP6Synthesis(base, { ...withDeps.deps, proven: PROVEN });
+    const qLegacy = await liveP6Synthesis(base, legacyDeps.deps);
+    assert.ok((qWith.generatedTree ?? []).length >= 2, "the chunked tree assembled");
+    assert.deepEqual(
+      (qLegacy.generatedTree ?? []).map((f) => f.path),
+      (qWith.generatedTree ?? []).map((f) => f.path),
+      "the additive lessons do not change the tree shape",
+    );
+    const synth = (ps: string[]): string[] => ps.filter((p) => p.includes("TYPE SIGNATURES (must export"));
+    const withPrompts = synth(withDeps.prompts);
+    const legacyPrompts = synth(legacyDeps.prompts);
+    assert.equal(withPrompts.length, legacyPrompts.length, "same number of chunk synthesis calls");
+    assert.ok(withPrompts.length >= 2, "a real multi-chunk run");
+    for (let i = 0; i < withPrompts.length; i++) {
+      assert.equal(legacyPrompts[i]!.includes("PRIOR LESSONS"), false, `chunk ${i + 1} legacy: no lessons block`);
+      assert.ok(
+        withPrompts[i]!.startsWith(legacyPrompts[i]!),
+        `chunk ${i + 1}'s prompt keeps the legacy prefix and appends only the lessons block`,
+      );
+      assert.ok(withPrompts[i]!.includes("MARKER_PROVEN"), `chunk ${i + 1} carries the proven row's text`);
+    }
   });
 });
 

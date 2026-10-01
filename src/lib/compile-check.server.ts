@@ -266,6 +266,12 @@ export function compileCheckDir(dir: string): CompileCheckResult {
 //                            load/execution crashes is run=fail with the
 //                            error tail (never a fabricated pass)
 //   TreeRunOutcome.run     — the kind-entry smoke verdict or an honest skip
+//   TreeRunOutcome.core    — 330 Transit: for a UI-shell tree the kind entry
+//                            is an honest skip, so the tree's GENERATED CORE
+//                            (package main / first job-* module / the
+//                            generatedSource host) is smoke-loaded here — an
+//                            unloadable core reds the tree. Absent when the
+//                            kind entry already covers the core or none exists.
 //   TreeRunOutcome.project — 216 (T-18): the emitted project's OWN declared
 //                            package.json `typecheck`/`test` scripts, run under
 //                            the same bounded runner (real exit codes + bounded
@@ -290,7 +296,9 @@ export function compileCheckDir(dir: string): CompileCheckResult {
 //     an honest skip); headless kinds resolve their entry from package.json
 //     "main", else the first job-* module of .rapidtool/project.json's spec
 //     graph (the tree's core module / generated-source host as the scaffold
-//     names it), else "src/generated.ts" when generatedSource exists.
+//     names it), else "src/generated.ts" when generatedSource exists. (330
+//     Transit: a UI-shell tree additionally smoke-loads that same core — the
+//     UI skip must never hide an unloadable generated product.)
 //   * purity: treeRun only READS the emitted dir + spawns the runner (which
 //     runs in its own scratch cwd); it never writes into the project tree or
 //     mutates a project record.
@@ -383,7 +391,8 @@ export type TreeRunOutcome = {
    *  script ran red (216 · T-18) — a tree that fails its own `npm test` can
    *  never be `ok:true`, and a headless skip is never green (185-S5 / 192) —
    *  AND (W43 · J1) the tree's declared `expectedBehavior` contract, when it
-   *  declares one, has no FAILED row. */
+   *  declares one, has no FAILED row — AND (330 Transit) a UI-shell tree's
+   *  generated-core smoke, when one ran, did not fail. */
   ok: boolean;
   /** Normalized absolute SUBJECT dir (never the deleted temp copy). */
   dir: string;
@@ -394,6 +403,17 @@ export type TreeRunOutcome = {
   tests: TreeSpecVerdict[];
   /** Kind-entry smoke verdict (always present for a runnable dir). */
   run: TreeEntryVerdict | null;
+  /** 330 Transit (emitted-artifact integrity): for a STRUCTURAL UI-shell tree
+   *  (root index.html) the kind entry is an honest skip — the UI is not
+   *  executable headless — so the tree's GENERATED CORE (package.json "main",
+   *  else the first job-* module of .rapidtool/project.json's spec graph, else
+   *  src/generated.ts when the record carries generatedSource) would never be
+   *  load-checked. When such a core resolves it is smoke-loaded here under the
+   *  same bounded runner: an unloadable core (a CommonJS body in the ESM
+   *  package, a top-level throw) makes the tree NOT ok. Absent when the kind
+   *  entry already covers the core, or when no core resolves — so a UI shell
+   *  with no generated substance keeps its byte-identical skip verdict. */
+  core?: TreeEntryVerdict;
   /** Set when the dir is unreadable, holds no code files, or (216 · T-18) a
    *  declared project script ran red — the top-level reason the tree is not ok. */
   error?: string;
@@ -676,6 +696,10 @@ export function treeVerdictHash(outcome: TreeRunOutcome): string {
     ],
     tests: (outcome.tests ?? []).map((t) => [t.file, t.run]),
     run: outcome.run ? [outcome.run.kind ?? null, outcome.run.run, outcome.run.entry ?? null] : null,
+    // 330 Transit: the generated-core smoke joins the decisive set ONLY when a
+    // core was actually resolved (a tree with no core keeps its byte-identical
+    // hash — same conditional-key doctrine as `behavior`).
+    ...(outcome.core ? { core: [outcome.core.kind ?? null, outcome.core.run, outcome.core.entry ?? null] } : {}),
     project: outcome.project ? [outcome.project.ok === true, scripts] : null,
     substance: outcome.substance
       ? [outcome.substance.stubs, outcome.substance.reexports, outcome.substance.real, outcome.substance.verdict]
@@ -1183,29 +1207,22 @@ function treeBehaviorOf(dir: string): TreeBehaviorVerdict | null {
 }
 
 /**
- * Resolve the kind-entry for a run: UI-shell kinds (root index.html = the
- * scaffold's webapp/game vite boot shell) are an honest skip; headless kinds
- * resolve package.json "main", else the first job-* module of the emitted
- * .rapidtool/project.json spec graph (the tree's core / generated-source
- * host), else src/generated.ts when the record carries generatedSource.
- * Never guesses: no resolvable entry ⇒ skip with the reason.
+ * The record-first HEADLESS entry a tree declares for itself: package.json
+ * "main", else the first job-* module of the emitted .rapidtool/project.json
+ * spec graph (the tree's core / generated-source host), else src/generated.ts
+ * when the record carries generatedSource. Returns the repo-relative path ONLY
+ * when it exists on disk; null when the tree owns no headless entry. Shared by
+ * resolveEntry (every non-UI-shell kind) and the 330 Transit UI-shell core
+ * smoke — one resolution, so the two can never disagree.
  */
-function resolveEntry(dir: string): { entry: string | null; kind: string; reason?: string } {
-  const record = readJsonIfAny(dir, ".rapidtool/project.json");
-  const coarse = typeof record?.kind === "string" && COARSE_KIND_LABEL[record.kind] ? (record.kind as string) : "";
-  const label = coarse ? COARSE_KIND_LABEL[coarse] : "";
-  if (existsSync(join(dir, "index.html"))) {
-    // Structural UI-shell skip — record kind (app→webapp, game, …) must NOT
-    // leak into `kind`, because entryGreen is `skip && kind === "ui-shell"`.
-    return { entry: null, kind: "ui-shell", reason: "UI shell — not executable headless" };
-  }
-  const headlessLabel = label || "headless";
+function resolveHeadlessEntry(dir: string): string | null {
   const pkg = readJsonIfAny(dir, "package.json");
   const main = typeof pkg?.main === "string" ? sanitizeRelPath(pkg.main) : null;
   if (main) {
     const full = join(dir, main);
-    if (existsSync(full) && statSync(full).isFile()) return { entry: main, kind: headlessLabel };
+    if (existsSync(full) && statSync(full).isFile()) return main;
   }
+  const record = readJsonIfAny(dir, ".rapidtool/project.json");
   const sg = record && typeof record.specGraph === "object" && record.specGraph !== null ? (record.specGraph as Record<string, unknown>) : null;
   const nodes = Array.isArray(sg?.nodes) ? (sg.nodes as Record<string, unknown>[]).filter((n) => n && typeof n === "object") : [];
   const order = Array.isArray(sg?.order) ? (sg.order as unknown[]).filter((id): id is string => typeof id === "string") : [];
@@ -1223,13 +1240,36 @@ function resolveEntry(dir: string): { entry: string | null; kind: string; reason
     const cand = sanitizeRelPath(n.file);
     if (!cand) continue;
     const full = join(dir, cand);
-    if (existsSync(full) && statSync(full).isFile()) return { entry: cand, kind: headlessLabel };
+    if (existsSync(full) && statSync(full).isFile()) return cand;
   }
   if (typeof record?.generatedSource === "string" && record.generatedSource.trim().length > 0) {
     const cand = "src/generated.ts";
     const full = join(dir, cand);
-    if (existsSync(full) && statSync(full).isFile()) return { entry: cand, kind: headlessLabel };
+    if (existsSync(full) && statSync(full).isFile()) return cand;
   }
+  return null;
+}
+
+/**
+ * Resolve the kind-entry for a run: UI-shell kinds (root index.html = the
+ * scaffold's webapp/game vite boot shell) are an honest skip; headless kinds
+ * resolve package.json "main", else the first job-* module of the emitted
+ * .rapidtool/project.json spec graph (the tree's core / generated-source
+ * host), else src/generated.ts when the record carries generatedSource.
+ * Never guesses: no resolvable entry ⇒ skip with the reason.
+ */
+function resolveEntry(dir: string): { entry: string | null; kind: string; reason?: string } {
+  const record = readJsonIfAny(dir, ".rapidtool/project.json");
+  const coarse = typeof record?.kind === "string" && COARSE_KIND_LABEL[record.kind] ? (record.kind as string) : "";
+  const label = coarse ? COARSE_KIND_LABEL[coarse] : "";
+  if (existsSync(join(dir, "index.html"))) {
+    // Structural UI-shell skip — record kind (app→webapp, game, …) must NOT
+    // leak into `kind`, because entryGreen is `skip && kind === "ui-shell"`.
+    return { entry: null, kind: "ui-shell", reason: "UI shell — not executable headless" };
+  }
+  const headlessLabel = label || "headless";
+  const core = resolveHeadlessEntry(dir);
+  if (core) return { entry: core, kind: headlessLabel };
   return {
     entry: null,
     kind: headlessLabel,
@@ -1491,6 +1531,16 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
       outcome.run = await runEntryFile(work, entry.entry, entry.kind, timeoutMs);
     } else {
       outcome.run = { kind: entry.kind, run: "skip", detail: entry.reason };
+      // 330 Transit: the UI-shell skip is honest for the KIND entry (the UI is
+      // not executable headless) — but the tree's GENERATED CORE is plain
+      // generated code that must still LOAD. The emitted spec imports only its
+      // own surfaces and compile-check is a parse, so without this smoke an
+      // unloadable core (a CommonJS body in the ESM package, a top-level throw)
+      // passes every gate green. Smoke it; a failure reds the tree below.
+      if (entry.kind === "ui-shell") {
+        const core = resolveHeadlessEntry(work);
+        if (core) outcome.core = await runEntryFile(work, core, "generated-core", timeoutMs);
+      }
     }
     // 216 (T-18) + 217d: the emitted project's OWN toolchain — `npm run
     // typecheck`, `npm test` and (deps permitting) the declared `build`
@@ -1551,8 +1601,17 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
       !!outcome.run &&
       (outcome.run.run === "pass" ||
         (outcome.run.run === "skip" && outcome.run.kind === "ui-shell"));
+    // 330 Transit: a UI-shell tree's generated core that cannot LOAD is never
+    // green (a UI-shell skip only covers the UI, never the produced code).
+    const coreGreen = outcome.core === undefined || outcome.core.run === "pass";
+    if (!coreGreen && outcome.core) {
+      const why =
+        `the emitted product's generated core module failed to LOAD (${outcome.core.entry}): ` +
+        `${(outcome.core.detail ?? outcome.core.run).slice(0, 300)}`;
+      outcome.error = (outcome.error ? `${outcome.error} · ${why}` : why).slice(0, 1800);
+    }
     outcome.ok =
-      compile.ok && specsGreen && entryGreen && projectLeg.verdict.ok && (outcome.behavior?.ok ?? true);
+      compile.ok && specsGreen && entryGreen && coreGreen && projectLeg.verdict.ok && (outcome.behavior?.ok ?? true);
     // W43 · C6 (fixes/312_c6_ux · 311_sd_product K3/K4): the substance census
     // rides every runnable verdict, and a non-clean census over an EXISTING
     // job-file set joins the top-level note — so a green tree-run whose job

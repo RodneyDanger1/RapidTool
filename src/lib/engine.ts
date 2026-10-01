@@ -4,6 +4,10 @@ import { clientSafeServerSpecifier } from "./server-spec.ts";
 // P6-synthesis awaits. See settle.ts for the measured mock-starvation proof.
 import { isBareNodeHost, isTrustedCallable, settleWithin } from "./settle.ts";
 import type { ErrorCode } from "./errors.ts";
+// T4 (112 §4.4 / 216g): the proven cross-project lesson-row shape the journey
+// threads through LiveLayerDeps into codegen. TYPE-ONLY — erased at runtime, so
+// this adds no static edge to knowledge.ts (which engine loads lazily above).
+import type { RankableLessonRow } from "./knowledge.ts";
 import { classifyError, ERROR_CODES } from "./errors.ts";
 import { flattenStack } from "./rt-events.ts";
 import type { RtEventSeed } from "./rt-events.ts";
@@ -3075,6 +3079,11 @@ export type LiveLayerDeps = {
    *  unmet P6 DoD requirements) — forwarded verbatim to codegen
    *  liveP6Synthesis alongside treeFailure. Absent ⇒ legacy call unchanged. */
   gateRepair?: string;
+  /** T4 (112 §4.4 / 216g): the caller's resolved cross-project proven lesson
+   *  rows (from `knowledge.provenRowsFromStore`) — forwarded verbatim to
+   *  codegen, whose lesson sites rank them with the memory lessons. Absent ⇒
+   *  legacy call unchanged (byte-identical prompts). */
+  proven?: readonly RankableLessonRow[];
 };
 
 /**
@@ -3135,7 +3144,13 @@ async function upgradeP6Keyed(floor: Project, deps?: LiveLayerDeps): Promise<Pro
     const codegen = (await import(codegenSpec)) as {
       liveP6Synthesis?: (
         p: Project,
-        deps?: { treeFailure?: string; gateRepair?: string; synthesisRefusal?: string; patchRepairs?: boolean },
+        deps?: {
+          treeFailure?: string;
+          gateRepair?: string;
+          synthesisRefusal?: string;
+          patchRepairs?: boolean;
+          proven?: readonly RankableLessonRow[];
+        },
       ) => Promise<Project>;
     };
     if (typeof codegen.liveP6Synthesis === "function" && isTrustedCallable(codegen.liveP6Synthesis)) {

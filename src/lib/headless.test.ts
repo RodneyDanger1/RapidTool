@@ -25,6 +25,7 @@ import {
   promoteEmittedTreeTested,
   promoteRepairedDirTested,
   reject,
+  repairCycleLiveDeps,
   repairTreeDir,
   retry,
   runAcceptance,
@@ -40,6 +41,7 @@ import {
   withCommonJsExports,
 } from "./headless.ts";
 import type { ApproveActor, P6JourneyCycleContext } from "./headless.ts";
+import type { RankableLessonRow } from "./knowledge.ts";
 import { runGate } from "./dod.ts";
 import { importProject } from "./io.ts";
 import { evaluatePolicy } from "./policy.ts";
@@ -1421,6 +1423,84 @@ describe("fixes/153 (P2) — the refusal→next-cycle loop: cycle N+1 knows cycl
     // channel (ctx doc: tree-run failure tail "(or refusal)"), so the last
     // refusal text is ALSO the outstanding tail evidence on the result.
     assert.ok(res.treeTail!.includes("refusal reason #3"), "no-tree refusal rides the tail channel as the outstanding evidence");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T4 (112 §4.4 / 216g) — the caller's cross-project proven lesson rows ride the
+// journey: run opts → driveP6Journey ctx → p6CycleLiveDeps → engine LiveLayerDeps
+// → codegen lesson sites. Absent/empty ⇒ ctx carries NO proven key and every
+// downstream call is byte-identical to pre-330.
+// ---------------------------------------------------------------------------
+describe("T4 · 112 §4.4 — the caller's proven lesson rows thread into every cycle ctx", () => {
+  const PROVEN: readonly RankableLessonRow[] = [
+    {
+      id: "proven-K1deadbeef",
+      kind: "semantic",
+      phase: 0,
+      text: "MARKER_PROVEN: a prior accepted run shipped a board that dropped the empty-column rejection guard — keep it.",
+      score: 0.95,
+      source: "research",
+      tags: ["lesson"],
+    },
+  ];
+  const redVerdict = (): TreeRunOutcome => ({
+    ok: false,
+    dir: "",
+    compile: { ok: false, dir: "", checked: 0, passed: 0, failed: 1, skipped: 0, verdicts: [] },
+    tests: [{ file: "src/api/board.spec.ts", compile: "pass", tests: { pass: 0, fail: 1 }, run: "fail", detail: "never converges" }],
+    run: null,
+  });
+
+  it("p6CycleLiveDeps: proven-only → exactly {proven}; absent/empty materialize NO key (byte-identity)", () => {
+    assert.equal(p6CycleLiveDeps({ cycle: 1 }), undefined, "no context → undefined (legacy call)");
+    assert.equal(p6CycleLiveDeps({ cycle: 1, proven: [] }), undefined, "empty proven is no proven at all");
+    const d = p6CycleLiveDeps({ cycle: 1, proven: PROVEN });
+    assert.deepEqual(Object.keys(d!), ["proven"], "proven-only ctx materializes only the proven key");
+    assert.equal(d!.proven, PROVEN, "the rows are carried verbatim (same reference)");
+    // The four-key combination keeps every prior channel intact + adds proven.
+    const all = p6CycleLiveDeps({
+      cycle: 3,
+      treeFailureTail: "src/api/board.spec.ts: fail — x",
+      refusal: "RT_E_LLM_REJECTED · nope",
+      gateRepair: "P6 DoD unmet: p6-brief-fit",
+      proven: PROVEN,
+    });
+    assert.deepEqual(Object.keys(all!).sort(), ["gateRepair", "proven", "synthesisRefusal", "treeFailure"]);
+    // The repair mapping (spread) carries proven too, with patchRepairs on.
+    const r = repairCycleLiveDeps({ cycle: 2, proven: PROVEN });
+    assert.equal(r.proven, PROVEN, "repairCycleLiveDeps spreads proven through");
+    assert.equal(r.patchRepairs, true);
+  });
+
+  it("driveP6Journey: opts.proven lands on every cycle ctx; absent leaves ctx.proven undefined", async () => {
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    const withTree = (p: Project): Project => ({
+      ...p,
+      generatedTree: [{ path: "src/generated.ts", source: "export const hvac = () => 1;", hash: "f1", attempt: 0 }],
+    });
+    const seen: (readonly RankableLessonRow[] | undefined)[] = [];
+    const synthesize = async (p: Project, ctx: P6JourneyCycleContext): Promise<Project> => {
+      seen.push(ctx.proven);
+      return withTree(p);
+    };
+    const res = await driveP6Journey(base, {
+      budget: 2,
+      deps: { synthesize, runTree: async () => redVerdict() },
+      proven: PROVEN,
+    });
+    assert.equal(res.outcome, "failed");
+    assert.equal(seen.length, 2, "both budgeted cycles ran");
+    assert.equal(seen[0], PROVEN, "cycle 1 ctx carries the caller's rows");
+    assert.equal(seen[1], PROVEN, "cycle 2 ctx carries them again (constant across the journey)");
+    // Control: no proven supplied ⇒ ctx carries NO key on any cycle.
+    const bare: (readonly RankableLessonRow[] | undefined)[] = [];
+    const synthesizeBare = async (p: Project, ctx: P6JourneyCycleContext): Promise<Project> => {
+      bare.push(ctx.proven);
+      return withTree(p);
+    };
+    await driveP6Journey(base, { budget: 2, deps: { synthesize: synthesizeBare, runTree: async () => redVerdict() } });
+    assert.deepEqual(bare, [undefined, undefined], "absent proven ⇒ ctx.proven stays undefined (byte-identical journey)");
   });
 });
 

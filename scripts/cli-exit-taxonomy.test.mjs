@@ -1693,3 +1693,243 @@ test(
   },
 );
 
+// ---------------------------------------------------------------------------
+// 330 Switchboard (BEHAVIORAL spawn). The agent seal is a WILD-RUN concept: the
+// CLI banner and USAGE.wild both say `wild` is "the ONLY verb that accepts it",
+// yet until 330 only five drive verbs refused it (316 H3) — every OTHER verb
+// (reject/emit/create/scan/…) silently absorbed the governance flag and
+// returned a SUCCESS envelope (probed pre-fix: `reject/emit/create/scan
+// --agent-seal` all exit 0 ok:true). A governance flag is never silently
+// ignored, so the refusal is hoisted to ONE pre-dispatch guard. This leg spawns
+// every family verb with the bare flag (no --project — the refusal fires on the
+// flag alone, before any load) and asserts the coded pointer, plus that `wild`
+// is NOT caught by that guard (it is the ONE door).
+// ---------------------------------------------------------------------------
+test("330 Switchboard — `--agent-seal` refuses CODED on every verb but `wild` (the ONE door)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-seal-all-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  try {
+    // One verb per family, incl. the four that silently absorbed it pre-fix.
+    const verbs = [
+      "reject", "emit", "create", "scan", "edit", "summary", "packet", "export",
+      "doctor", "vault", "bench", "swarm", "mine", "knowledge", "chat", "deepen",
+      "fixtures", "harvest", "prompt", "verify", "crew", "lesson", "artifacts",
+      "design", "diagram", "search", "tree-run", "repair", "ingest", "retry",
+      "unattended", "resume", "approve", "gate", "run",
+    ];
+    for (const verb of verbs) {
+      const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, verb, "--agent-seal"], {
+        cwd,
+        env,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      assert.equal(res.status, 1, `${verb} --agent-seal → exit 1 (usage-class).\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+      assert.ok(!/(^|\n)\s+at\s/.test(res.stderr ?? ""), `${verb} --agent-seal must never print a Node stack`);
+      const json = JSON.parse(res.stdout);
+      assert.equal(json.cmd, verb, "the envelope names the verb the flag was refused on");
+      assert.equal(json.ok, false, `${verb}: the absorbed governance flag must never ride a success envelope`);
+      assert.equal(json.code, "RT_E_VALIDATION");
+      assert.ok(
+        String(json.error).includes(`${verb}: --agent-seal does not apply here`),
+        `${verb}: the refusal names the verb + flag: ${json.error}`,
+      );
+      assert.ok(String(json.remedy).includes("wild --start --agent-seal"), `${verb}: remedy names the ONE door`);
+      assert.equal(json.exit_code, res.status, `${verb}: envelope exit_code must equal the process exit`);
+    }
+    // `wild` is the ONE door — the pre-dispatch guard must not catch it (with no
+    // --project it refuses for the missing arg, NOT for the seal).
+    const wild = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "wild", "--agent-seal"], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    const wj = JSON.parse(wild.stdout);
+    assert.ok(
+      !String(wj.error).includes("--agent-seal does not apply here"),
+      `wild is the ONE verb that accepts the seal; it must not refuse its own flag: ${wj.error}`,
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 330 Switchboard (BEHAVIORAL spawn). R5-f10/A2-f11 refused a VALUELESS path
+// flag for `--out`/`--html`; the `packet --knowledge` flag shipped without that
+// guard — a bare `--knowledge` parses to `true`, the `typeof === "string"` read
+// silently ignored it, and the packet was served UNSEEDED under a success
+// envelope (probed pre-fix: `packet --project P --knowledge` → exit 0 ok:true).
+// Both spellings now refuse CODED; a real store still seeds (smoke).
+// ---------------------------------------------------------------------------
+test("330 Switchboard — `packet --knowledge` refuses a valueless/empty flag CODED, a real store still seeds", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-knowledgeflag-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  try {
+    const proj = join(cwd, "proj.json");
+    const store = join(cwd, "store.json");
+    const created = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        CLI_PATH,
+        "create",
+        "--brief",
+        "Build an inventory tracker for a small warehouse team: track products, stock levels, and reorder alerts with a simple dispatcher workflow.",
+        "--name",
+        "KnowledgeFlagPin",
+        "--out",
+        proj,
+      ],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+
+    for (const spelling of ["--knowledge", "--knowledge="]) {
+      const res = spawnSync(
+        process.execPath,
+        ["--experimental-strip-types", CLI_PATH, "packet", "--project", proj, spelling],
+        { cwd, env, encoding: "utf8", timeout: 120_000 },
+      );
+      assert.equal(res.status, 1, `packet ${spelling} must refuse (exit 1).\nstdout: ${res.stdout}`);
+      const json = JSON.parse(res.stdout);
+      assert.equal(json.ok, false, `packet ${spelling}: the valueless knowledge flag must not melt away`);
+      assert.equal(json.code, "RT_E_VALIDATION");
+      assert.match(String(json.error), /--knowledge requires a path/);
+    }
+
+    const saved = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        CLI_PATH,
+        "knowledge",
+        "--store",
+        store,
+        "--save",
+        JSON.stringify({
+          project: "OTHER PROJECT",
+          kind: "fix",
+          title: "Warehouse reorder guidance",
+          tags: ["lesson"],
+          body: "Reorder before stockout; verify thresholds.",
+          score: 0.9,
+        }),
+      ],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(saved.status, 0, `store fixture save failed.\nstdout: ${saved.stdout}\nstderr: ${saved.stderr}`);
+    const seeded = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "packet", "--project", proj, "--knowledge", store],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(seeded.status, 0, `packet --knowledge <store> must succeed.\nstdout: ${seeded.stdout}`);
+    assert.equal(JSON.parse(seeded.stdout).ok, true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 330 Switchboard (T4 — BEHAVIORAL spawn). `run`/`gate`/`unattended` gained the
+// same `--knowledge <store.json>` seed `packet` carries: the CLI resolves the
+// store through knowledge.provenRowsFromStore and hands the rows to the headless
+// driver as `proven` (the T4 synthesis-prompt hop). A configured store that
+// cannot be read is the SAME coded refusal as the packet arm (exit 4, the
+// store's own reason); a valueless flag refuses coded; absent flag is the
+// unchanged drive.
+// ---------------------------------------------------------------------------
+test("330 Switchboard (T4) — `run`/`gate`/`unattended --knowledge`: accepted store, coded degraded refusal, valueless refusal", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-t4knowledge-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  try {
+    const proj = join(cwd, "proj.json");
+    const store = join(cwd, "store.json");
+    const bad = join(cwd, "bad.json");
+    writeFileSync(bad, "{ not json", "utf8");
+    const created = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        CLI_PATH,
+        "create",
+        "--brief",
+        "Build a servo tuning rig for CNC loop calibration with a dispatcher.",
+        "--name",
+        "T4KnowledgePin",
+        "--out",
+        proj,
+      ],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+    const saved = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        CLI_PATH,
+        "knowledge",
+        "--store",
+        store,
+        "--save",
+        JSON.stringify({
+          project: "OTHER PROJECT",
+          kind: "fix",
+          title: "Calibrate servo loop gains",
+          tags: ["lesson"],
+          body: "Tighten the servo loop gains from the deterministic floor.",
+          score: 0.9,
+        }),
+      ],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(saved.status, 0, `store fixture save failed.\nstdout: ${saved.stdout}\nstderr: ${saved.stderr}`);
+
+    // Accepted on all three drive verbs (parked exit 2, or 0 mid-run — never a
+    // knowledge-specific refusal).
+    for (const verb of ["run", "gate", "unattended"]) {
+      const res = spawnSync(
+        process.execPath,
+        ["--experimental-strip-types", CLI_PATH, verb, "--project", proj, "--knowledge", store],
+        { cwd, env, encoding: "utf8", timeout: 180_000 },
+      );
+      assert.ok([0, 2].includes(res.status), `${verb} --knowledge <store> must be accepted: exit ${res.status}\n${res.stdout}`);
+      const json = JSON.parse(res.stdout);
+      assert.ok(
+        !String(json.error).includes("cannot seed proven lessons"),
+        `${verb}: a readable store must not be refused: ${json.error}`,
+      );
+    }
+
+    // Degraded (corrupt) store → exit 4, RT_E_VALIDATION, the store's own reason.
+    const degraded = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "run", "--project", proj, "--knowledge", bad],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(degraded.status, 4, `a corrupt store is a coded runtime refusal (exit 4).\nstdout: ${degraded.stdout}`);
+    const dj = JSON.parse(degraded.stdout);
+    assert.equal(dj.ok, false);
+    assert.equal(dj.code, "RT_E_VALIDATION", "the degraded store carries the resolver's own code");
+    assert.match(String(dj.error), /cannot seed proven lessons from .*bad\.json/);
+
+    // Valueless flag → exit 1 usage refusal (never a silent no-op).
+    const bare = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "run", "--project", proj, "--knowledge"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(bare.status, 1, "a valueless --knowledge refuses (exit 1)");
+    const bj = JSON.parse(bare.stdout);
+    assert.equal(bj.code, "RT_E_VALIDATION");
+    assert.match(String(bj.error), /--knowledge requires a path/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+

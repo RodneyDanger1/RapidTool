@@ -14,6 +14,7 @@ import {
   LESSON_TAG,
   LESSON_TEXT_MAX,
   lessonRow,
+  lessonLog,
   selectLessons,
   shouldPromoteLesson,
   lessonEvidenceDetail,
@@ -720,6 +721,23 @@ describe("M-tier lesson surface (fixes/98 §2/§3)", () => {
     assert.equal(pressureAt(new Array(60).fill(row), 61), false);
   });
 
+  it("330 P4: lessonLog never throws into the caller — a project without a logs array still gets the row", () => {
+    // The pre-330 `[...p.logs]` raised "p.logs is not iterable" on a hand-built
+    // project (probe: fixes/330_4_cartographer). The ledger append must be
+    // junk-tolerant like every other reader in this module.
+    const bare = { brief: "x" } as unknown as Parameters<typeof lessonLog>[0];
+    const q = lessonLog(bare, 1 as PhaseId, "info", "lesson.capture", "row minted");
+    assert.equal(q.logs.length, 1, "the row lands even with no prior logs array");
+    assert.equal(q.logs[0].event, "lesson.capture");
+    assert.equal(q.logs[0].phase, 1);
+    // A normal project still appends and keeps the 200-row cap.
+    const p = seedProject();
+    const prevCount = p.logs.length;
+    const q2 = lessonLog(p, 2 as PhaseId, "warn", "lesson.refused", "no anchor");
+    assert.equal(q2.logs.length, prevCount + 1);
+    assert.equal(q2.logs[q2.logs.length - 1].event, "lesson.refused");
+  });
+
   it("proposeLessonFallback + buildSupersedeEntry + consolidatedRunNote deterministic floors", () => {
     const prop = proposeLessonFallback({
       project: "alpha",
@@ -963,6 +981,28 @@ describe("216g / 112 T1 — deterministic failure-signature ids (no per-run fork
       "distinct unanchored failures stay distinct",
     );
   });
+
+  it("330 P4: the L2 signature hashes the FULL anchor set, not the 6-sliced display list", () => {
+    const p = seedProject();
+    // §4.2 rule 1: the sorted, deduped anchor SET is the identity. Before 330
+    // the builder sliced to 6 BEFORE the signature, so once >6 unmet ids
+    // arrived the id depended on input ORDER (probe: forward vs reverse
+    // diverged). The anchor set must be order/size independent.
+    const twelve = ["c01", "c02", "c03", "c04", "c05", "c06", "c07", "c08", "c09", "c10", "c11", "c12"];
+    const forward = templateEmissionLesson(p, 6, twelve);
+    const reverse = templateEmissionLesson(p, 6, [...twelve].reverse());
+    assert.equal(forward.id, reverse.id, "the same 12-id anchor set ⇒ ONE row regardless of input order");
+    assert.match(forward.id, /^lesson-template-emission-[0-9a-f]{8}$/, "id shape unchanged");
+    // The display list stays capped at 6 (bounded text), but the identity is
+    // the full set: a 12-id gate and a 6-id subset are DIFFERENT rows.
+    assert.notEqual(forward.id, templateEmissionLesson(p, 6, twelve.slice(0, 6)).id, "a real superset is a different failure");
+    // The ≤6 case is unchanged: existing row ids are not re-minted.
+    assert.equal(
+      templateEmissionLesson(p, 3, ["p3-mcp", "p3-extra"]).id,
+      templateEmissionLesson(p, 3, ["p3-extra", "p3-mcp"]).id,
+      "≤6 anchors still canonicalize exactly as before",
+    );
+  });
 });
 
 describe("216g / 112 T2 — counterexample-or-nothing (no anchor ⇒ refuse:no-proof)", () => {
@@ -995,6 +1035,21 @@ describe("216g / 112 T2 — counterexample-or-nothing (no anchor ⇒ refuse:no-p
     const unmapped = failureLessonFromRecord({ kind: "harvest-degraded", phase: 7, anchors: ["rate-limit"] });
     const refusedUnmapped = refusalOf(unmapped);
     assert.ok(refusedUnmapped.reason.includes("no builder registered"), "the gap is named, not hidden");
+  });
+
+  it("330 P4: a 'drift' record refuses with the TRUE reason, never 'no builder registered in knowledge.ts'", () => {
+    // driftLesson() IS in this module — the generic message is a false claim for
+    // this kind (probe: fixes/330_4_cartographer). The refusal must name the
+    // real cause: a FailureRecord cannot carry the earlier phase / hash refs.
+    const drift = failureLessonFromRecord(
+      { kind: "drift", phase: 9, anchors: ["earlier:p3", "p3-mcp"] },
+      { project: seedProject() },
+    );
+    const refused = refusalOf(drift);
+    assert.ok(!refused.reason.includes("no builder registered"), "never claim no builder exists when driftLesson does");
+    assert.ok(refused.reason.includes("driftLesson"), "the real builder is named");
+    assert.ok(refused.reason.includes("earlier phase"), "the reconstructability gap is named");
+    assert.equal(refused.log.event, "lesson.refused", "the refusal is still recorded on the ledger");
   });
 
   it("a case-id-anchored record mints the row, and the record path converges with the direct path", () => {

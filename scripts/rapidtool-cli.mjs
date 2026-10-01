@@ -619,6 +619,47 @@ function respondDriveOutcome(h, res, { path, extras = {} }) {
 }
 
 // ---------------------------------------------------------------------------
+// 330 Switchboard (T4): the ONE `--knowledge` resolver for the run-driving
+// verbs. `run`/`gate`/`unattended` thread the human-accepted cross-project
+// lesson rows into the headless driver as `proven` — the same tier-1 seed the
+// `packet` arm carries (`packet.ts:compileAgentPacket({proven})`), so a store
+// of accepted lessons reaches the expansion chain through the drive path too.
+//
+// The limit is the codegen chain's OWN constant (`EXPAND_LESSON_RANK_LIMIT`,
+// knowledge.ts:45) read off the module — never a magic number that can drift
+// from it. A valueless `--knowledge` is refused loudly (R5-f10 class: a bare
+// flag parses to `true` and would otherwise be silently ignored). A configured
+// store that cannot be read is a coded refusal at exit 4 carrying the store's
+// own reason — the packet arm's exact shape (329 · 328 P5) — never a silent
+// "no lessons". Absent flag ⇒ `{ present: false }` and the option is omitted,
+// so the drive stays byte-identical to today.
+// ---------------------------------------------------------------------------
+async function resolveProvenRows(cmdName, args, project) {
+  if (typeof args.knowledge === "undefined") return { present: false };
+  if (pathFlagMissing(args.knowledge)) {
+    return respond(
+      { ok: false, error: pathFlagRefusalError(cmdName, "knowledge", args.knowledge), code: "RT_E_VALIDATION" },
+      1,
+    );
+  }
+  const k = await knowledgeDriver();
+  const resolved = k.provenRowsFromStore(resolve(args.knowledge), project.name, {
+    limit: k.EXPAND_LESSON_RANK_LIMIT,
+  });
+  if (resolved.degraded) {
+    return respond(
+      {
+        ok: false,
+        error: `${cmdName}: cannot seed proven lessons from ${args.knowledge}: ${resolved.reason ?? "the store could not be read"}`,
+        code: resolved.code ?? "RT_E_INTERNAL",
+      },
+      4,
+    );
+  }
+  return { present: true, rows: resolved.rows };
+}
+
+// ---------------------------------------------------------------------------
 // Subcommands.
 // ---------------------------------------------------------------------------
 async function main() {
@@ -634,6 +675,17 @@ async function main() {
     respond({ ok: false, error: "Missing subcommand.", usage: USAGE, code: "RT_E_VALIDATION" }, 1);
     return;
   }
+
+  // 330 Switchboard (probed): the agent seal is a WILD-RUN concept — the CLI
+  // banner and USAGE.wild both state `wild` is "the ONLY verb that accepts it",
+  // yet only five drive verbs actually refused it (316 H3). Every other verb
+  // (reject/emit/create/scan/… — 30+) silently ABSORBED the governance flag and
+  // returned a success envelope, so a caller could believe the seal had applied
+  // when it never could. A governance flag is never silently ignored: the
+  // refusal is hoisted to ONE pre-dispatch guard covering every non-wild verb,
+  // before ANY project load (hoisted above the per-arm sites it replaces, which
+  // are now redundant).
+  if (cmd !== "wild" && flag(args, "agent-seal")) return refuseAgentSeal(cmd);
 
   // E-25: shared project loader — missing/bad project file is a usage-class
   // error (exit 1), never an internal error (exit 4).
@@ -723,9 +775,10 @@ async function main() {
       case "run":
       case "gate": {
         // 316 H3 (315 V2 finding #4): the seal cannot apply to this driver
-        // (runUntilGate never reads WildStepOptions.agentSeal) — refuse the
-        // absorbed flag with the pointer instead of silently ignoring it.
-        if (flag(args, "agent-seal")) return refuseAgentSeal(cmd);
+        // (runUntilGate never reads WildStepOptions.agentSeal) — the absorbed
+        // flag is refused with the pointer instead of silently ignored. The
+        // refusal now fires from the ONE pre-dispatch guard in main() (330),
+        // before this arm is even reached.
         const project = loadProjectFor(cmd);
         const path = requireProjectPath(args, cmd);
         // W-47 / T-107.4 (W33 lane L2): `run --unattended` drives the keyed
@@ -739,6 +792,10 @@ async function main() {
         const autopilot = unattended ? true : cmd === "gate" ? flag(args, "autopilot") : false;
         const live = unattended ? true : flag(args, "live");
         const maxSteps = cmd === "run" && !unattended ? 1 : undefined; // run = single step; gate/unattended = until parked
+        // 330 Switchboard (T4): optional `--knowledge <store.json>` seeds the
+        // expansion chain with accepted cross-project lessons (the driver's
+        // `proven` option — the same rows the packet arm threads).
+        const proven = await resolveProvenRows(cmd, args, project);
         const res = await h.runUntilGate(project, {
           autopilot,
           live,
@@ -746,6 +803,7 @@ async function main() {
           // T-107.7 (W33 lane L2): the per-phase commit writes the bounded
           // checkpoint beside the project dir; a complete seal clears it.
           checkpointDir: dirname(resolve(path)),
+          ...(proven.present ? { proven: proven.rows } : {}),
         });
         // M6-04 (312 · E2's owed half; landed 316 · I4): the save goes through
         // the ONE busy-aware helper — bounded wait-and-retry (each attempt
@@ -861,8 +919,8 @@ async function main() {
       // the checkpoint home; the drive writes the file back) or a DIRECTORY.
       case "resume": {
         // 316 H3 (315 V2 finding #4): same silent-absorb class — the seal is
-        // a wild-run concept; point at the door that carries it.
-        if (flag(args, "agent-seal")) return refuseAgentSeal("resume");
+        // a wild-run concept; the pointer refusal rides the ONE pre-dispatch
+        // guard in main() (330).
         const target = requireArg(args, "project", "resume");
         if (target.error) return respond({ ok: false, error: target.error, code: "RT_E_VALIDATION" }, 1);
         const t = resolveCheckpointTarget(target.value);
@@ -943,8 +1001,8 @@ async function main() {
       // DESIGN: exit 2 is the honest outcome, never a fake completion.
       case "unattended": {
         // 316 H3 (315 V2 finding #4): same silent-absorb class — the seal is
-        // a wild-run concept; point at the door that carries it.
-        if (flag(args, "agent-seal")) return refuseAgentSeal("unattended");
+        // a wild-run concept; the pointer refusal rides the ONE pre-dispatch
+        // guard in main() (330).
         const target = requireArg(args, "project", "unattended");
         if (target.error) return respond({ ok: false, error: target.error, code: "RT_E_VALIDATION" }, 1);
         const t = resolveCheckpointTarget(target.value);
@@ -1020,7 +1078,16 @@ async function main() {
             1,
           );
         }
-        const res = await h.runUntilGate(project, { autopilot: true, live: true, checkpointDir: t.dir });
+        // 330 Switchboard (T4): optional `--knowledge <store.json>` seeds the
+        // expansion chain with accepted cross-project lessons (same resolver
+        // as run/gate).
+        const proven = await resolveProvenRows("unattended", args, project);
+        const res = await h.runUntilGate(project, {
+          autopilot: true,
+          live: true,
+          checkpointDir: t.dir,
+          ...(proven.present ? { proven: proven.rows } : {}),
+        });
         if (t.file) h.saveProject(t.file, res.project);
         respondDriveOutcome(h, res, { path: t.file ?? t.dir, extras });
         return;
@@ -1031,7 +1098,8 @@ async function main() {
         // absorbed by parseArgs (silently ignored — the pre-fix no-op the V2
         // deep-check reproduced). The seal cannot ride this door: `approve`
         // drives the single human/machine gate decision, never the wild loop.
-        if (flag(args, "agent-seal")) return refuseAgentSeal("approve");
+        // The pointer refusal now rides the ONE pre-dispatch guard in main()
+        // (330), before this arm is reached.
         const project = loadProjectFor("approve");
         if (project.status !== "awaiting_hitl" || !project.hitl) {
           // 326 F2b (C1 · E2-OBS-5 class): the RT_E_GATE_PENDING registry
@@ -1421,6 +1489,21 @@ async function main() {
             1,
           );
         }
+        // 330 Switchboard (probed): the same R5-f10 class for `--knowledge` —
+        // a bare `packet --knowledge` parses to `true`, so the
+        // `typeof args.knowledge === "string"` read below silently ignored the
+        // flag and served the unseeded packet (a knowledge flag that appears to
+        // apply but does not). Refuse it loudly, naming the flag.
+        if (pathFlagMissing(args.knowledge)) {
+          return respond(
+            {
+              ok: false,
+              error: pathFlagRefusalError("packet", "knowledge", args.knowledge),
+              code: "RT_E_VALIDATION",
+            },
+            1,
+          );
+        }
         let text;
         if (typeof args.knowledge === "string" && args.knowledge.trim()) {
           try {
@@ -1431,7 +1514,9 @@ async function main() {
             // injectProven directly, so a read failure could only throw). The
             // helper additionally reports a DEGRADED read (reason + code) that
             // this arm surfaces as the same coded refusal it always returned.
-            const resolved = k.provenRowsFromStore(resolve(args.knowledge), project.name, { limit: 5 });
+            const resolved = k.provenRowsFromStore(resolve(args.knowledge), project.name, {
+              limit: k.EXPAND_LESSON_RANK_LIMIT,
+            });
             if (resolved.degraded) {
               return respond(
                 {
@@ -2731,14 +2816,25 @@ async function main() {
           if (scan.ok !== true) {
             return respond({ ok: false, dir: scan.dir, error: scan.error, code: scan.code }, 1);
           }
+          const findings = scan.findings;
           const payload = {
-            ok: scan.findings.length === 0,
+            ok: findings.length === 0,
             dir: scan.dir,
             scanned: scan.scanned,
-            findings: scan.findings,
+            findings,
             advisory: true,
             note: "advisory finding surface — never blocks an emit (218 §3.4 / OV-21)",
           };
+          if (findings.length > 0) {
+            // 330 Switchboard (probed): the sibling check-verbs carry an
+            // `error` on a non-ok result (`check` → its reason, `tree-run` →
+            // the first not-ok tail); `scan` shipped an EMPTY one, so every
+            // findings envelope auto-classified as the opaque RT_E_UNKNOWN
+            // with NO message — an agent branching on `code` read a designed
+            // advisory outcome as an opaque failure. Name the outcome; the
+            // findings array remains the payload.
+            payload.error = `scan: ${findings.length} advisory finding(s) in ${scan.dir} — heuristics, not verdicts; review findings[].rule (advisory, never blocks an emit)`;
+          }
           return respond(payload, payload.ok ? 0 : 1);
         } catch (err) {
           return respond(
@@ -4375,10 +4471,10 @@ const USAGE = {
   description: "File-based headless RapidTool driver (no browser).",
   commands: {
     create: "create --brief <text> [--name <text>] [--advisory] [--out <file.json>]   # default out: <slug>.json in the CWD (intermediate control file); --advisory: advisory DoD gates even when DEEPSEEK_API_KEY is set (keyed runs default enforceDod ON)",
-    run: "run --project <file.json> [--live] [--unattended]   # advance one phase; --unattended = autopilot+live forced until parked (the scheduler-facing twin is the `unattended` verb)",
-    gate: "gate --project <file.json> [--autopilot] [--live] [--unattended]  # advance until parked; --unattended forces autopilot+live",
+    run: "run --project <file.json> [--live] [--unattended] [--knowledge <store.json>]   # advance one phase; --unattended = autopilot+live forced until parked (the scheduler-facing twin is the `unattended` verb); --knowledge seeds the P6 expansion with human-accepted cross-project lesson rows (proven), same store->rows resolver as `packet`",
+    gate: "gate --project <file.json> [--autopilot] [--live] [--unattended] [--knowledge <store.json>]  # advance until parked; --unattended forces autopilot+live; --knowledge as on run",
     resume: "resume --project <file.json|dir> [--autopilot] [--live]  # T-107.7: read the per-phase checkpoint written beside the project dir by run/gate, admit it (identity + mode + integer phase sanity), hydrate it, and re-enter the drive at the recorded phase; prints the snapshot age — exit taxonomy identical to gate (2 = parked). Never a silent resume",
-    unattended: "unattended --project <file.json|dir>  # W-47: scheduler-facing drive — re-enter from a checkpoint when one exists (crash recovery), else start from the named project file; autopilot + live until parked; NOT a daemon (a host hook — Windows Task Scheduler / cron — invokes it on a cadence); stock HITL gates still park for a human by design (exit 2)",
+    unattended: "unattended --project <file.json|dir> [--knowledge <store.json>]  # W-47: scheduler-facing drive — re-enter from a checkpoint when one exists (crash recovery), else start from the named project file; autopilot + live until parked; NOT a daemon (a host hook — Windows Task Scheduler / cron — invokes it on a cadence); stock HITL gates still park for a human by design (exit 2); --knowledge as on run/gate",
     approve: "approve --project <file.json> (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed, name exactly one: --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY); --seat autopilot = explicit MACHINE attribution (`decidedBy:\"autopilot\"`, seat harness; works non-TTY — the documented agent door for a parked gate); --agent-seal is REFUSED here (RT_E_VALIDATION) — the seal is a wild-run concept: `wild --start|--resume --agent-seal`",
     reject: "reject --project <file.json> --note <text> (--i-am-human | --seat autopilot)   # the seat is never guessed, name exactly one: --seat autopilot = explicit MACHINE attribution (works non-TTY — the documented agent door for rejecting a parked gate); --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY)",
     retry: "retry --project <file.json>                  # unlock a rejected/blocked phase",

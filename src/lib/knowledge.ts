@@ -1201,10 +1201,14 @@ export function templateEmissionLesson(
   evidenceHash?: string,
   source: MemoryEntry["source"] = "engine",
 ): MemoryEntry {
-  const ids = (Array.isArray(unmet) ? unmet : [])
+  // 330 P4 (112 §4.2 rule 1): the anchor SET — sorted, deduped — is the row's
+  // identity. The display list is capped at 6, but the signature must hash the
+  // FULL canonical set: slicing before canonicalization made the id depend on
+  // input ORDER once >6 unmet ids arrived (the same unmet gate forked a row).
+  const allIds = (Array.isArray(unmet) ? unmet : [])
     .filter((u): u is string => typeof u === "string" && u.trim() !== "")
-    .map((u) => u.trim())
-    .slice(0, 6);
+    .map((u) => u.trim());
+  const ids = allIds.slice(0, 6);
   const nounList = (Array.isArray(nouns) ? nouns : [])
     .filter((n): n is string => typeof n === "string" && n.trim() !== "")
     .map((n) => n.trim())
@@ -1235,7 +1239,9 @@ export function templateEmissionLesson(
   // 216g (112 §4.2 — T1): signature = (phase, sorted unmet criterion ids). The
   // noun list and the evidence hash are process noise and stay in the text —
   // re-sealing the same unmet gate can no longer fork a row per emission.
-  const signature = failureSignature({ kind: "gate-unmet", phase, anchors: ids });
+  // 330 P4: `allIds` (the full set) — not the 6-sliced display `ids` — feeds the
+  // signature, so the row's identity is order/size independent.
+  const signature = failureSignature({ kind: "gate-unmet", phase, anchors: allIds });
   return lessonRow({
     classShort: "template-emission",
     level: "L2",
@@ -1491,6 +1497,16 @@ export function failureLessonFromRecord(
       ),
     };
   }
+  // 330 P4 (declare-or-strike): `drift` DOES have a builder in THIS module
+  // (driftLesson, above) — but a FailureRecord carries no earlier phase and no
+  // hash refs, so this dispatcher cannot reconstruct it. The generic message
+  // below would falsely claim "no builder registered in knowledge.ts for kind
+  // 'drift'" (probe: fixes/330_4_cartographer). Refuse with the true reason.
+  if (kind === "drift") {
+    return refuse(
+      "drift rows are minted by driftLesson() in this module, which needs the earlier phase and both evidence-hash refs a FailureRecord does not carry — its owning writer must call driftLesson directly",
+    );
+  }
   return refuse(
     `no builder registered in knowledge.ts for kind '${kind}' — its owning writer must mint the row`,
   );
@@ -1512,7 +1528,12 @@ export function lessonLog(
   event: string,
   detail: string,
 ): Project {
-  const logs = [...p.logs];
+  // 330 P4: the ledger append must never throw into the caller it observes
+  // (telemetry invariant). A hand-built / foreign project may lack `logs`;
+  // the old `[...p.logs]` raised "p.logs is not iterable" (probe:
+  // fixes/330_4_cartographer). Guard to the empty list, same as every other
+  // junk-tolerant reader in this module.
+  const logs = [...(Array.isArray(p?.logs) ? p.logs : [])];
   logs.push({ ts: Date.now(), phase, level, event, detail });
   return { ...p, logs: logs.slice(-200) };
 }

@@ -521,6 +521,70 @@ describe("treeRun — execute the emitted tree in-loop (fixes/144 M3/B3)", () =>
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // -------------------------------------------------------------------------
+  // 330 Transit — the emitted product's GENERATED CORE must actually LOAD.
+  // A UI-shell tree skips the kind-entry smoke (the UI is not executable
+  // headless) and its emitted spec imports only its own surfaces, so without
+  // this the generated code could be unloadable while every gate read green.
+  // -------------------------------------------------------------------------
+  const JOB_CORE_RECORD = (file: string): string =>
+    JSON.stringify({ kind: "app", specGraph: { nodes: [{ id: "job-flip", file }], order: ["job-flip"] } });
+
+  it("330 Transit: a UI-shell tree's generated core is load-smoked — a CommonJS core reds the tree", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "ui-cjs-core", type: "module" }));
+      write(dir, "index.html", "<!doctype html><html><body>app</body></html>\n");
+      // The precise unloadable shape: raw P6 CommonJS in a record whose
+      // generatedTree is empty (headless.materializeEmitTree early-returns on
+      // zero rows), embedded verbatim into the `"type":"module"` package.
+      write(dir, "src/jobs/flip.ts", "function add(a, b) { return a + b; }\nmodule.exports.add = add;\n");
+      write(dir, ".rapidtool/project.json", JOB_CORE_RECORD("src/jobs/flip.ts"));
+      const r = await treeRunAsConsumer(dir);
+      assert.ok(r.run, "kind-entry verdict present");
+      assert.equal(r.run!.run, "skip", "the UI shell itself stays an honest skip");
+      assert.equal(r.run!.kind, "ui-shell");
+      assert.ok(r.core, "the generated core was resolved and smoke-loaded");
+      assert.equal(r.core!.entry, "src/jobs/flip.ts");
+      assert.equal(r.core!.run, "fail", "a CommonJS body cannot load in the ESM package");
+      assert.equal(r.ok, false, "an unloadable generated core is never ok:true");
+      assert.ok((r.error ?? "").includes("generated core module failed to LOAD"), r.error);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("330 Transit: a UI-shell tree with a LOADABLE generated core stays green (control)", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "ui-esm-core", type: "module" }));
+      write(dir, "index.html", "<!doctype html><html><body>app</body></html>\n");
+      write(dir, "src/jobs/flip.ts", "export function add(a: number, b: number): number { return a + b; }\n");
+      write(dir, ".rapidtool/project.json", JOB_CORE_RECORD("src/jobs/flip.ts"));
+      const r = await treeRunAsConsumer(dir);
+      assert.ok(r.core, "core smoke ran");
+      assert.equal(r.core!.run, "pass");
+      assert.equal(r.ok, true, "a loadable core keeps the UI-shell skip green");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("330 Transit: a UI-shell tree with NO generated core keeps the byte-identical skip (no core factor)", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "ui-nocore", type: "module" }));
+      write(dir, "index.html", "<!doctype html><html><body>app</body></html>\n");
+      write(dir, "src/app.ts", "export const ui = 'shell';\n");
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.core, undefined, "no core resolves ⇒ no core verdict, no hash factor");
+      assert.equal(r.run!.kind, "ui-shell");
+      assert.equal(r.ok, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

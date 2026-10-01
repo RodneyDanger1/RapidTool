@@ -111,7 +111,7 @@ import {
   type DeepSeekCompleteOptions,
 } from "./deepseek.server.ts";
 import { expandBrief, EXPAND_LESSON_RANK_LIMIT, lessonLinesForBrief, type ExpandBriefResult } from "./prompt-engine.ts";
-import { selectLessons } from "./knowledge.ts";
+import { selectLessons, type RankableLessonRow } from "./knowledge.ts";
 import { verifyAndFixServer, type VerifyOutcome } from "./verify.server.ts";
 import type { ErrorCode } from "./errors.ts";
 import type { LlmResult } from "./llm.ts";
@@ -2507,6 +2507,14 @@ export type P6SynthesisDeps = {
    *  legacy full-rewrite repair; a refusal returns the legacy path unchanged.
    *  Absent/false keeps every prompt byte and the model-call count legacy. */
   patchRepairs?: boolean;
+  /** T4 (112 §4.4 / 216g): human-accepted CROSS-PROJECT lesson rows, resolved
+   *  by the caller via `knowledge.provenRowsFromStore`. When present they rank
+   *  alongside the project's own memory lessons at EVERY lesson site here —
+   *  the expansion call's advisory lines AND both PRIMARY synthesis prompts
+   *  (single-module + every tree chunk) — through `lessonLinesForBrief`'s
+   *  `opts.proven`. Absent/empty ⇒ each site passes `proven: undefined` and
+   *  produces byte-identical legacy prompts (the additive-field discipline). */
+  proven?: readonly RankableLessonRow[];
 };
 
 /** Number of expandBrief attempts on a transient/timeout failure (backoff). */
@@ -2993,6 +3001,10 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   // T-107.1 (216r · W7-L1): the opt-in patch-repair level (see
   // P6SynthesisDeps.patchRepairs) — false unless the caller asks for it.
   const patchRepairs = deps?.patchRepairs === true;
+  // T4 (112 §4.4 / 216g): the caller's resolved cross-project proven rows —
+  // ranked with the memory lessons at every lesson site below; absent/empty ⇒
+  // opts.proven is undefined ⇒ byte-identical legacy prompts.
+  const proven = deps?.proven;
   const brief = typeof project.brief === "string" ? project.brief : "";
   if (!brief.trim() || !Array.isArray(project.phases)) return project;
 
@@ -3030,11 +3042,12 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
     // score-capped, phase-agnostic fallback) → lessonLinesForBrief (FusionRank
     // against the brief + provenance-visible line form) → expandBrief lessons.
     // Advisory only: ranking never changes gate inputs; empty memory keeps the
-    // legacy byte-identical expansion prompt (lessons omitted).
+    // legacy byte-identical expansion prompt (lessons omitted). T4 (112 §4.4):
+    // the caller's proven cross-project rows rank alongside the memory rows.
     const lessonLines = lessonLinesForBrief(
       brief,
       selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
-      { limit: EXPAND_LESSON_RANK_LIMIT },
+      { limit: EXPAND_LESSON_RANK_LIMIT, proven },
     );
     const note = typeof project.notes === "string" ? project.notes.trim() : "";
     const withNotes = note ? [`project.notes: ${note.slice(0, 240)}`, ...lessonLines] : lessonLines;
@@ -3077,14 +3090,14 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   const chunkGroups = chunkTypeSignatures(specRecord.typeSignatures);
   if (singleModuleLibraryKind(project) && chunkGroups.length <= 1) {
     return synthesizeSingleModule(project, brief, specRecord, signatureNames, complete, verify, treeFailure,
-      patchRepairs, gateRepair, synthesisRefusal);
+      patchRepairs, gateRepair, synthesisRefusal, proven);
   }
   // fixes/216k (105 TA-15, W6-L1): the chunked driver computes its own
   // chunk→file plan (treeChunkPlan) and consumption order (orderTreeChunks)
   // INSIDE — the caller no longer passes a flat grouping. Job-keyed chunks land
   // at their spec-graph `src/jobs/*.ts` paths; a job-less graph keeps the
   // pre-216k index-keyed mapping byte-for-byte (treeChunkPlan's legacy branch).
-  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair, synthesisRefusal);
+  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair, synthesisRefusal, proven);
 }
 
 /**
@@ -3117,12 +3130,15 @@ async function synthesizeSingleModule(
   /** fixes/328 F1 (Ledger): the previous cycle's refusal context — appended to
    *  the PRIMARY prompt (withSynthesisRefusalContext); absent ⇒ legacy bytes. */
   synthesisRefusal?: string,
+  /** T4 (112 §4.4 / 216g): the caller's resolved cross-project proven rows,
+   *  ranked with the memory lessons; absent/empty ⇒ legacy prompt bytes. */
+  proven?: readonly RankableLessonRow[],
 ): Promise<Project> {
   // --- Step 2 (legacy): synthesis (one call + one bounded repair re-prompt) --
   const lessonLines = lessonLinesForBrief(
     brief,
     selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
-    { limit: EXPAND_LESSON_RANK_LIMIT },
+    { limit: EXPAND_LESSON_RANK_LIMIT, proven },
   );
   // R10-f01 (W39 Z2): project.contracts rides the prompt — the model used to
   // write the module body blind to the A6 data contract (G3's wire).
@@ -3421,6 +3437,9 @@ async function synthesizeChunkedTree(
    *  EVERY chunk's PRIMARY prompt (withSynthesisRefusalContext); absent ⇒
    *  legacy bytes. */
   synthesisRefusal?: string,
+  /** T4 (112 §4.4 / 216g): the caller's resolved cross-project proven rows,
+   *  ranked with the memory lessons on every chunk; absent/empty ⇒ legacy. */
+  proven?: readonly RankableLessonRow[],
 ): Promise<Project> {
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
@@ -3464,7 +3483,7 @@ async function synthesizeChunkedTree(
     const lessonLines = lessonLinesForBrief(
       brief,
       selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
-      { limit: EXPAND_LESSON_RANK_LIMIT },
+      { limit: EXPAND_LESSON_RANK_LIMIT, proven },
     );
     // R10-f01 (W39 Z2): the same project-level contract block on every chunk.
     const user = withSynthesisRefusalContext(

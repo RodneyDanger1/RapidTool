@@ -200,6 +200,22 @@ const EMITTED_REFUSAL_CODE = "RT_E_VALIDATION";
 /** `<RT_E code> · <reason>` — the prefix every emitted failure path carries. */
 const emittedRefusal = (reason: string): string => `${EMITTED_REFUSAL_CODE} · ${reason}`;
 
+/**
+ * 330 Transit (emitted-artifact integrity): CommonJS residue that CANNOT load
+ * inside the `"type":"module"` package this emitter declares — `module.exports`
+ * anywhere, or a bare `exports.`/`exports =` assignment head (never
+ * `xexports.`/`reexports.` look-alikes). Same shape as headless.ts's
+ * `CJS_RESIDUE_RE` (the emit-time materializer's guard), mirrored here because
+ * the materializer only rewrites project.generatedTree rows — a lone
+ * generatedSource (no tree) and any direct scaffold caller bypass it, and a
+ * CJS body embedded verbatim throws `ReferenceError: module is not defined in
+ * ES module scope` at import, so the emitted product would be unloadable.
+ */
+const CJS_MODULE_RESIDUE_RE = /module\.exports|(?:^|[^\w$.])exports\s*(?:\.|=[^=])/;
+
+/** Emitted code extensions whose bodies must be ESM (the declared package). */
+const EMITTED_CODE_EXT_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i;
+
 // ---------------------------------------------------------------------------
 // Small deterministic text helpers (escaping lives here, once)
 // ---------------------------------------------------------------------------
@@ -3308,6 +3324,40 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
             ? safeNodePath(firstJob.node.file, firstJob.node.id, firstJob.index)
             : "src/generated.ts";
         })();
+
+  // --- 330 Transit: emitted-format integrity ---------------------------------
+  // packageJson() below declares `"type": "module"`, and this emitter's own
+  // infra (src/main.tsx, tests/oracle.spec.ts, vite.config.ts, the api/store/ui
+  // modules) is ESM. A module body assembled VERBATIM from generated substance
+  // that still carries CommonJS residue cannot load in that tenant, yet
+  // compile-check is a syntactic parse (a CJS body parses fine), the emitted
+  // spec imports only its own surfaces, and a webapp's tree-run entry is a
+  // UI-shell skip — so the unloadable product would ship with every gate green
+  // (reproduced live on a generatedSource-only CJS project: `tree-run` ok:true
+  // while `import()` throws TypeError). The emit pipeline's materializer
+  // (headless.materializeEmitTree) rewrites TREE residue before this runs, but
+  // it early-returns when there are no tree rows, so a lone generatedSource and
+  // any direct scaffold caller are unguarded. Never ship bytes that contradict
+  // the package we declare — refuse loudly (declare-or-strike).
+  const cjsOffenders: string[] = [];
+  for (const tf of treeAccepted) {
+    if (EMITTED_CODE_EXT_RE.test(tf.path) && CJS_MODULE_RESIDUE_RE.test(tf.source)) cjsOffenders.push(tf.path);
+  }
+  if (!treeMode && generated && CJS_MODULE_RESIDUE_RE.test(generated)) {
+    cjsOffenders.push(plannedHostPath ?? "src/generated.ts");
+  }
+  if (cjsOffenders.length > 0) {
+    return {
+      ok: false,
+      error: emittedRefusal(
+        `assembled generated module body is CommonJS but the emitted package declares "type":"module" — ` +
+          `importing it throws "module is not defined in ES module scope", so the emitted product could not load ` +
+          `(offending file(s): ${cjsOffenders.slice(0, 5).join(", ")}${cjsOffenders.length > 5 ? `, +${cjsOffenders.length - 5} more` : ""}). ` +
+          `Materialize the module to ESM (codegen.materializeImportableTree) before emitting; the emitter refuses rather than ship an unloadable tree.`,
+      ),
+    };
+  }
+
   /** leftover job labels the loop bridges to that host (fixes/196). */
   const plannedBridgedLabels = new Set<string>();
   if (!treeMode && plannedHostPath) {

@@ -495,8 +495,16 @@ export const NO_CALLABLE_EXPORTS_REASON =
  * brief's literal-only case set (`1 === 1`, `({board:1}).board === 1`) could
  * still mint a "machine-verified" pass against a module it never evaluates. The
  * prompt's own allowed forms (`add(2,3) === 5`, `typeof buildPlan === 'function'`)
- * both NAME an export, so requiring one such reference closes the vacuity hole
- * without rejecting the prompt's allowed forms.
+ * both NAME an export in a VALUE position, so requiring one such reference
+ * closes the vacuity hole without rejecting the prompt's allowed forms.
+ *
+ * fixes/330 P3 (109 C-01, the 328 P3 gate's own residual): the first cut
+ * scanned EVERY identifier token, so a data-only mention of the export name —
+ * an object-literal KEY (`({add: 1}).add === 1`) or a regex literal's content
+ * (`({r: /add/})`) — satisfied the gate while the module was never touched,
+ * re-opening C-01 one layer down. The gate now requires a VALUE-position read
+ * (`referenceIdentifiers`), which an object key / property access / regex
+ * content is not.
  */
 export const NO_EXPORT_REFERENCE_REASON =
   "no oracle case references an exported callable name — machine verification is vacuous";
@@ -613,11 +621,14 @@ export async function runCases(
   // compiled, so this cannot be forged; a case that merely evaluates a literal
   // proves nothing about the module. Reference (not call) is the bar because
   // `typeof buildPlan === 'function'` is an explicitly-allowed prompt form.
+  // fixes/330 P3: the reference must be a VALUE-position read — an object-literal
+  // KEY (`({add:1}).add === 1`) or regex content (`({r:/add/})`) names the export
+  // without ever touching it, so it may not satisfy the gate (109 C-01's shape).
   const callableNames = new Set(callables.split(",").map((s) => s.trim()).filter(Boolean));
   let referencesExport = false;
   for (const c of validated) {
     const code = stripStringsAndComments(c.expression);
-    for (const name of referencedIdentifiers(code)) {
+    for (const name of referenceIdentifiers(code)) {
       if (callableNames.has(name)) {
         referencesExport = true;
         break;
@@ -677,13 +688,86 @@ function calledIdentifiers(code: string): string[] {
 }
 
 /**
- * fixes/328 P3 (109 C-01): identifiers NAMED anywhere in a case expression —
- * called or merely referenced (`typeof buildPlan === 'function'` names
- * `buildPlan` without calling it). Used by runCases' reference gate to require
- * that at least one case touches the module's measured export inventory.
+ * fixes/330 P3: mask regex-literal contents (`/add/`) with spaces, length- and
+ * newline-preserving, for the reference scan. stripStringsAndComments() blanks
+ * strings/comments but NOT regex literals, so `/add/` would otherwise
+ * contribute a phantom `add` token. A `/` is masked as a regex only when the
+ * previous non-space code char is an expression-start/operator position AND an
+ * unescaped closing `/` is found — division (`a / b`) is left as code. Pure.
  */
-function referencedIdentifiers(code: string): string[] {
-  return [...code.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)].map((m) => m[0]);
+function maskRegexLiterals(code: string): string {
+  const PRECEDERS = new Set(["", "(", "[", "{", ",", ":", "?", "=", "!", "&", "|", "+", "-", "*", "%", "^", "~", "<", ">", "/", ";"]);
+  const chars = code.split("");
+  let prev = "";
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]!;
+    if (ch === "/" && PRECEDERS.has(prev)) {
+      let j = i + 1;
+      let closed = false;
+      while (j < chars.length) {
+        const cj = chars[j]!;
+        if (cj === "\n") break;
+        if (cj === "\\") {
+          j += 2;
+          continue;
+        }
+        if (cj === "/") {
+          closed = true;
+          break;
+        }
+        j++;
+      }
+      if (closed) {
+        for (let k = i; k <= j; k++) if (chars[k] !== "\n") chars[k] = " ";
+        i = j;
+        while (i + 1 < chars.length && /[a-z]/i.test(chars[i + 1]!)) {
+          chars[i + 1] = " ";
+          i++;
+        }
+        prev = " ";
+        continue;
+      }
+    }
+    if (!/\s/.test(ch)) prev = ch;
+  }
+  return chars.join("");
+}
+
+/**
+ * fixes/328 P3, tightened by fixes/330 P3 (109 C-01): identifiers a case
+ * expression reads in a VALUE position — called or merely referenced
+ * (`typeof buildPlan === 'function'` names `buildPlan` without calling it).
+ * Used by runCases' reference gate to require that at least one case touches
+ * the module's measured export inventory.
+ *
+ * A bare token scan is NOT enough: an object-literal KEY (`({add:1}).add`), a
+ * PROPERTY ACCESS (`obj.add`) and regex content (`/add/`) all contain the
+ * export spelling without reading the export binding, so each minted a
+ * "machine-verified" pass for a module the case never touched. Keys and
+ * property accesses are dropped here (a `? :` alternate after `?` is a read,
+ * and a spread's `...name` still reads `name`); regex content is masked first.
+ */
+function referenceIdentifiers(code: string): string[] {
+  const masked = maskRegexLiterals(code);
+  const out: string[] = [];
+  for (const m of masked.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
+    const start = m.index ?? 0;
+    const end = start + m[0].length;
+    // property access `.name` (but not a spread's `...name`, which reads it)
+    let p = start - 1;
+    while (p >= 0 && /\s/.test(masked[p]!)) p--;
+    if (p >= 0 && masked[p] === "." && !(p - 1 >= 0 && masked[p - 1] === ".")) continue;
+    // object-literal key `name:` (but `cond ? name : other` reads `name`)
+    let n = end;
+    while (n < masked.length && /\s/.test(masked[n]!)) n++;
+    if (n < masked.length && masked[n] === ":") {
+      let r = start - 1;
+      while (r >= 0 && /\s/.test(masked[r]!)) r--;
+      if (!(r >= 0 && masked[r] === "?")) continue;
+    }
+    out.push(m[0]);
+  }
+  return out;
 }
 
 /**

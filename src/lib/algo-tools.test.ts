@@ -743,3 +743,96 @@ describe("propertyTestsFor — a valid-but-empty reply is diagnosed honestly (32
     if (!res.ok) assert.match(res.error ?? "", /unparseable property payload/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 330 P3 — three residual inventory/complexity defects left by 328/329:
+//   (1) the `module.exports.` CJS regex omitted `.` from its left boundary, so
+//       a member-chain tail `obj.module.exports.x` advertised a PHANTOM export
+//       (the same class 109 T-08 fixed for the bare `exports.` form);
+//   (2) `module.exports = { … }` — the reassignment style the verify harness
+//       explicitly supports (109 T-05) — was not inventoried at all ("(none)");
+//   (3) `export * as ns from "…"` (a real named export) was not inventoried;
+//   (4) complexityOf counted `obj.for(x)` / a method named `for` as a loop,
+//       publishing O(n) for a module with no loops at all.
+// Each assertion below is RED against HEAD's algo-tools.ts (scratch proof in
+// fixes/330_3_assayer.md); the controls prove every REAL form still counts.
+// ---------------------------------------------------------------------------
+describe("exportedNamesOf — 330 P3 module boundary + object-literal exports", () => {
+  it("never reports a member-chain `…module.exports.x` as a module export", () => {
+    assert.deepEqual(exportedNamesOf("obj.module.exports.x = 1;"), [], "member chain, not module");
+    assert.deepEqual(exportedNamesOf("a.b.module.exports.z = 3;"), []);
+    assert.deepEqual(exportedNamesOf("my_module.exports.x = 1;"), []);
+    // control: a statement-position `module.exports.z` still counts
+    assert.deepEqual(exportedNamesOf("module.exports.z = 3;"), ["z"]);
+  });
+
+  it("inventories `module.exports = { … }` keys (shorthand, value, method, getter/async)", () => {
+    assert.deepEqual(exportedNamesOf("module.exports = { add, run };"), ["add", "run"]);
+    assert.deepEqual(exportedNamesOf("module.exports = { add: (a, b) => a + b };"), ["add"]);
+    assert.deepEqual(exportedNamesOf("module.exports = { add(a, b) { return a + b; } };"), ["add"]);
+    assert.deepEqual(exportedNamesOf("module.exports = { get g() { return 1; } };"), ["g"]);
+    assert.deepEqual(exportedNamesOf("module.exports = { async load() {}, go };"), ["go", "load"]);
+    assert.deepEqual(exportedNamesOf("module.exports = { a: f(1, 2), b: 2 };"), ["a", "b"]);
+  });
+
+  it("never invents a nested/spread/computed name and never reads non-code", () => {
+    // a nested object's keys are not top-level exports
+    assert.deepEqual(exportedNamesOf("module.exports = { wrap: { inner: 1 }, run };"), ["run", "wrap"]);
+    // a held-out spread's names are not statically knowable
+    assert.deepEqual(exportedNamesOf("module.exports = { ...base, add };"), ["add"]);
+    assert.deepEqual(exportedNamesOf("module.exports = { [k]: 1, add };"), ["add"]);
+    // controls: member-chain opener, string and comment lookalikes
+    assert.deepEqual(exportedNamesOf("obj.module.exports = { a: 1 };"), []);
+    assert.deepEqual(exportedNamesOf('const s = "module.exports = { z }";'), []);
+    assert.deepEqual(exportedNamesOf("// module.exports = { z }"), []);
+  });
+
+  it("inventories a namespace re-export `export * as ns from` (a real named export)", () => {
+    assert.deepEqual(exportedNamesOf("export * as ns from './m';"), ["ns"]);
+    assert.deepEqual(exportedNamesOf("export*as ns from './m';"), ["ns"]);
+    // a bare `export * from` re-exports an unknowable set — never a guessed name
+    assert.deepEqual(exportedNamesOf("export * from './m';"), []);
+    assert.deepEqual(exportedNamesOf("const s = \"export * as x from './m'\";"), []);
+  });
+});
+
+describe("complexityOf — 330 P3 property/method-name loop keywords are not loops", () => {
+  it("does not count `obj.for(x)` / `obj.while(x)` / `obj?.do(x)` as loops", () => {
+    assert.equal(complexityOf("const v = obj.for(x);").loops, 0);
+    assert.equal(complexityOf("const v = obj.while(x);").loops, 0);
+    assert.equal(complexityOf("obj?.do(x);").loops, 0);
+    assert.equal(complexityOf("a.do(b).for(c);").notation, "O(1)");
+    assert.deepEqual(complexityOf("const v = obj.for(x);").lineRefs, []);
+  });
+
+  it("does not count a method named `for` (class body or object literal)", () => {
+    assert.equal(complexityOf("class C { for(x) {} }").loops, 0);
+    assert.equal(complexityOf("const o = { for(x) {} };").loops, 0);
+    assert.equal(complexityOf("const o = { get for() { return 1; } };").loops, 0);
+  });
+
+  it("control: every REAL for-form is still counted", () => {
+    const real = [
+      "for (let i = 0; i < n; i++) { x++; }",
+      "for (const y of ys) { x++; }",
+      "for (const k in o) { x++; }",
+      "for (;;) { x++; }",
+      "for (let i = 0; i < n; i++) acc += i;",
+      "async function f() { for await (const y of ys) { x++; } }",
+      "outer: for (;;) { break outer; }",
+    ];
+    for (const src of real) {
+      assert.equal(complexityOf(src).loops, 1, `must count the real loop: ${src}`);
+    }
+    assert.equal(
+      complexityOf("for (let i = 0; i < n; i++) { for (let j = 0; j < n; j++) { x++; } }").notation,
+      "O(n^2)",
+    );
+  });
+
+  it("control: while / do-while / labelled while are unchanged", () => {
+    assert.equal(complexityOf("while (lo <= hi) { lo++; }").loops, 1);
+    assert.equal(complexityOf("do { x++; } while (c);").loops, 1);
+    assert.equal(complexityOf("outer: while (c) { break outer; }").loops, 1);
+  });
+});

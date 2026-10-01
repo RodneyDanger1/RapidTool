@@ -1191,3 +1191,59 @@ describe("fixes/328 P2 — REAL per-job modules + HTTP wiring (TA-15/P0-04)", ()
     assert.deepEqual(scaffoldProject(p), scaffoldProject(p));
   });
 });
+
+// ---------------------------------------------------------------------------
+// 330 Transit — emitted-format integrity: the emitter never ships a module the
+// package it declares cannot load. packageJson() declares `"type":"module"` and
+// this emitter's own infra is ESM, so a CommonJS body assembled verbatim
+// (`module.exports` / `exports.x =`) throws "module is not defined in ES module
+// scope" at import — while compile-check is a parse (a CJS body parses fine) and
+// the emitted spec imports only its own surfaces. Reproduced live: a
+// generatedSource-only CJS project emitted ok:true and `tree-run` read ok:true
+// while `import()` threw. The emit-time materializer rewrites TREES, not a lone
+// generatedSource, and direct callers bypass it entirely. Declare-or-strike.
+// ---------------------------------------------------------------------------
+describe("330 Transit — emitted-format integrity (never ship an unloadable module)", () => {
+  it("REFUSES a generatedSource-only CommonJS body (the package declares type:module)", () => {
+    const p = primed({
+      generatedSource: "function add(a, b) { return a + b; }\nmodule.exports.add = add;\n",
+      generatedTree: [],
+    });
+    const r = scaffoldProject(p);
+    assert.equal(r.ok, false, "an unloadable generated module must never emit ok:true");
+    assert.ok(!r.ok);
+    assert.match((r as { ok: false; error: string }).error, /CommonJS/);
+    assert.match((r as { ok: false; error: string }).error, /"type":"module"/);
+    assert.ok(
+      (r as { ok: false; error: string }).error.includes("src/jobs/") ||
+        (r as { ok: false; error: string }).error.includes("src/generated.ts"),
+      (r as { ok: false; error: string }).error,
+    );
+  });
+
+  it("REFUSES a CommonJS TREE row (tree mode) and names the offending file", () => {
+    const p = primed({
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated/get-property.ts", source: "function a() {}\nmodule.exports.a = a;\n", hash: "h1", attempt: 0 },
+      ],
+    });
+    const r = scaffoldProject(p);
+    assert.equal(r.ok, false);
+    assert.ok((r as { ok: false; error: string }).error.includes("src/generated/get-property.ts"));
+  });
+
+  it("control: clean ESM generatedSource and tree still emit ok:true", () => {
+    const src = primed({ generatedSource: "export function add(a: number, b: number): number { return a + b; }\n" });
+    const r1 = scaffoldProject(src);
+    assert.equal(r1.ok, true, !r1.ok ? r1.error : "");
+    const tree = primed({
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated/util.ts", source: "export function util(): number { return 1; }\n", hash: "h1", attempt: 0 },
+      ],
+    });
+    const r2 = scaffoldProject(tree);
+    assert.equal(r2.ok, true, !r2.ok ? r2.error : "");
+  });
+});

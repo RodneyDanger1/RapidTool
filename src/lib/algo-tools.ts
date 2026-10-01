@@ -275,6 +275,47 @@ function esCollectBindingNames(masked: string, i: number, out: string[]): number
   return i;
 }
 
+/**
+ * fixes/330 P3: names exported by `module.exports = { … }`. Top-level keys
+ * only: a leading `get `/`set `/`async ` modifier is stripped, and `...spread`
+ * / computed `[expr]` keys contribute nothing (a spread's names are not
+ * statically knowable; the masker has already blanked string keys). Balanced
+ * scanning keeps a nested object / call / method body from splitting on its
+ * own commas.
+ */
+function moduleExportsObjectNames(masked: string): string[] {
+  const out: string[] = [];
+  const opener = /(^|[^A-Za-z0-9_$.])module\s*\.\s*exports\s*=\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = opener.exec(masked)) !== null) {
+    const openBrace = m.index + m[0].length - 1;
+    let depth = 0;
+    let segStart = openBrace + 1;
+    const flush = (end: number): void => {
+      const seg = masked.slice(segStart, end).trim();
+      if (!seg || seg.startsWith("...") || seg.startsWith("[")) return;
+      const mod = /^(?:get|set|async)\s+/.exec(seg);
+      const id = esReadIdent(mod ? seg.slice(mod[0].length) : seg, 0);
+      if (id !== null) out.push(id.name);
+    };
+    for (let i = openBrace; i < masked.length; i++) {
+      const c = masked[i]!;
+      if (c === "{" || c === "(" || c === "[") depth++;
+      else if (c === "}" || c === ")" || c === "]") {
+        depth--;
+        if (depth === 0) {
+          flush(i);
+          break;
+        }
+      } else if (c === "," && depth === 1) {
+        flush(i);
+        segStart = i + 1;
+      }
+    }
+  }
+  return out;
+}
+
 /** Names bound by an `export const|let|var` declarator list starting at the
  *  first declarator; stops at the first top-level `;`. */
 function esmDeclaratorNames(masked: string, start: number): string[] {
@@ -319,14 +360,21 @@ export function exportedNamesOf(source: string): string[] {
   // (that spelling carried no left boundary, so it fired mid-identifier) and
   // the prompt then advertised a phantom export. The bare form requires a
   // non-identifier, non-`$`, non-`.` boundary; the module form requires a
-  // boundary that is not an identifier char or `$` — so `my_module.exports.x`
-  // and `obj.exports.y` never match, while `module.exports.z` / `exports.real`
-  // still do.
+  // boundary that is not an identifier char, `$` or `.` — so `my_module.exports.x`,
+  // `obj.exports.y` AND `obj.module.exports.z` never match, while
+  // `module.exports.z` / `exports.real` still do (fixes/330 P3: the module form
+  // omitted `.`, so a member-chain tail `obj.module.exports.z` was reported as a
+  // module export — the same phantom class 109 T-08 fixed for the bare form).
   const cjsBare = /(^|[^A-Za-z0-9_$.])exports\.([A-Za-z_$][\w$]*)\s*=/g;
-  const cjsModule = /(^|[^A-Za-z0-9_$])module\.exports\.([A-Za-z_$][\w$]*)\s*=/g;
+  const cjsModule = /(^|[^A-Za-z0-9_$.])module\.exports\.([A-Za-z_$][\w$]*)\s*=/g;
   let m: RegExpExecArray | null;
   while ((m = cjsBare.exec(masked)) !== null) names.add(m[2]);
   while ((m = cjsModule.exec(masked)) !== null) names.add(m[2]);
+  // 330 P3: the reassignment form the verify harness explicitly supports
+  // (109 T-05) — `module.exports = { … }` — was not inventoried, so the
+  // property-case prompt advertised "(none)" for a module that plainly
+  // exports its API.
+  for (const n of moduleExportsObjectNames(masked)) names.add(n);
   // ESM declarations: `function` (incl. `async` / `function*` generators) and
   // `class` each carry a single hoisted name. `const/let/var` declarations may
   // bind MANY names and may destructure — 328 P3 parses the whole declarator
@@ -362,6 +410,13 @@ export function exportedNamesOf(source: string): string[] {
       if (local !== null) names.add(local.name);
     }
   }
+  // 330 P3: a namespace re-export — `export * as ns from "…"` — IS a real
+  // named export the prompt's cases can call (`ns.fn()`); it was the one
+  // `export *` spelling whose name is statically knowable. (A bare
+  // `export * from "…"` still re-exports an unknowable set and stays
+  // un-inventoried — never a guessed name.)
+  const esmNamespace = /\bexport\s*\*\s*as\s+([A-Za-z_$][\w$]*)\s+from\b/g;
+  while ((m = esmNamespace.exec(masked)) !== null) names.add(m[1]!);
   const list = [...names];
   list.sort();
   return list;
@@ -850,6 +905,16 @@ export function complexityOf(source: string): ComplexityReport {
       }
     }
     const kwEnd = kwIdx + kind.length;
+    // 330 P3: `for`/`while`/`do` are legal property NAMES after `.`, so
+    // `obj.for(x)` / `obj?.do(y)` are property accesses, not loops — without
+    // this a module with no loops at all published O(n) (`const v = obj.for(x);`).
+    // A real loop keyword is never preceded by `.`.
+    let prevNc = kwIdx - 1;
+    while (prevNc >= 0 && /\s/.test(masked[prevNc]!)) prevNc--;
+    if (prevNc >= 0 && masked[prevNc] === ".") {
+      pos = kwEnd;
+      continue;
+    }
     // 326 L4: a real `for`/`while` head is always parenthesized (`for await (`
     // for the async form). A loop keyword the masker could not reach — a regex
     // literal in statement position, e.g. `}` then `/for/.test(x)` or
@@ -878,6 +943,17 @@ export function complexityOf(source: string): ComplexityReport {
       if (term >= 0) doTerminators.add(term);
     }
     const bodyAt = bodyStartOf(masked, kwEnd);
+    // 330 P3: a real `for` head is a `;`-clause / `of` / `in` form. A method or
+    // call named `for` (`class C { for(x){} }`, `const o = { for(x){} }`,
+    // `for(x)` in value position) has none of those, so it is NOT a loop — the
+    // previous scan published O(n) for a class with no loops at all.
+    if (kind === "for") {
+      const forHead = masked.slice(kwEnd, bodyAt);
+      if (!forHead.includes(";") && !/\bof\b/.test(forHead) && !/\bin\b/.test(forHead)) {
+        pos = kwEnd;
+        continue;
+      }
+    }
     // A `while` that ends in `;` is skipped ONLY when it is the terminator of a
     // `do` recorded above — a standalone `while (cond);` is a real empty-body
     // loop and is counted (328 P3: the old unconditional skip published O(1)

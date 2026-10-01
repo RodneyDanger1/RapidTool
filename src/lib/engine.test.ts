@@ -30,8 +30,9 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, hydrateProject, wildStep, type WildReviewer } from "./engine.ts";
+import { emptyProject, hydrateProject, liveLayer, wildStep, type WildReviewer } from "./engine.ts";
 import { wildResumeRun } from "./headless.ts";
+import type { RankableLessonRow } from "./knowledge.ts";
 import type { Project, WildParkInfo } from "./types.ts";
 
 /** An ACTIVE wild-run project parked on the P0 approval gate (wild-seal.test.ts shape). */
@@ -243,5 +244,47 @@ describe("§A1-2 a minted park's event names its OWN recording row (325 A1b)", (
     const h = await pauseArm(human);
     assert.equal(h.park.event, "wild.paused_human");
     assert.ok(h.rows.includes("wild.paused_human"), "the human-only wild.paused_human row exists");
+  });
+});
+
+describe("T4 · 112 §4.4 — deps.proven is additive on the engine's keyless P6 floor (330 · Composer)", () => {
+  /** One resolved cross-project row (provenToLessonRow shape). */
+  const PROVEN: readonly RankableLessonRow[] = [
+    {
+      id: "proven-K1deadbeef",
+      kind: "semantic",
+      phase: 0,
+      text: "MARKER_PROVEN: a prior accepted run dropped the empty-column rejection guard — keep it.",
+      score: 0.95,
+      source: "research",
+      tags: ["lesson"],
+    },
+  ];
+
+  it("liveLayer(p, 6, { proven }) returns the byte-identical keyless floor as liveLayer(p, 6)", async () => {
+    // The engine forwards deps verbatim to codegen ONLY on the keyed path; this
+    // pins that adding proven changes nothing when keyless (no key ⇒ the
+    // deterministic floor both times — the additive-field byte-identity law).
+    const saved = process.env.DEEPSEEK_API_KEY;
+    delete process.env.DEEPSEEK_API_KEY;
+    try {
+      const p = emptyProject({ name: "Proven", brief: "A kanban board tool with columns, cards and drag." });
+      const plain = await liveLayer(p, 6);
+      const withProven = await liveLayer(p, 6, { proven: PROVEN });
+      assert.equal(withProven.generatedSource, plain.generatedSource, "keyless generated source unchanged");
+      assert.deepEqual(
+        withProven.artifacts.map((a) => a.title),
+        plain.artifacts.map((a) => a.title),
+        "keyless artifacts unchanged",
+      );
+      assert.deepEqual(
+        withProven.logs.map((l) => l.event),
+        plain.logs.map((l) => l.event),
+        "keyless log events unchanged (proven mints no row)",
+      );
+    } finally {
+      if (saved === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = saved;
+    }
   });
 });

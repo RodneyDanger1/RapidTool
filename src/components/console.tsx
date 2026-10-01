@@ -1741,6 +1741,10 @@ export function HomeScreen() {
 
   return (
     <div className="min-h-dvh bg-bg">
+      {/* R6-f12 (330_6): bound the Home header too — a throw in it (Mark / the
+          help entry) previously unmounted the whole intake screen. Additive:
+          PaneBoundary renders children unchanged when healthy. */}
+      <PaneBoundary label="Home header">
       <header className="flex items-center justify-between border-b border-line px-5 py-4">
         <div className="flex items-center gap-3">
           <Mark />
@@ -1764,6 +1768,7 @@ export function HomeScreen() {
           </button>
         </div>
       </header>
+      </PaneBoundary>
 
       {/* R6-f12: pane boundary — a render throw in the home content keeps the
           header (shell) mounted and lands one `ui.pane_crash` row. */}
@@ -2681,6 +2686,14 @@ export function RunScreen({ id }: { id: string }) {
 
   return (
     <div className="flex min-h-dvh flex-col bg-bg">
+      {/* R6-f12 (330_6): the Run header (name/rename, status chips, Autopilot,
+          Wild, Guide/Settings/Shortcuts) was the last unwrapped Run surface —
+          a render throw there unmounted the WHOLE Run screen via the router's
+          AppErrorComponent (white screen), which a browser probe confirmed
+          (forced WildToggle throw → rail + sidebar + tabs all gone). Bound it
+          like the rail/center/sidebar so a header crash is contained and one
+          `ui.pane_crash` row lands. */}
+      <PaneBoundary label="Run header">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 sm:px-5">
         <div className="flex items-center gap-3">
           <Link to="/" className="flex items-center gap-3">
@@ -2810,6 +2823,7 @@ export function RunScreen({ id }: { id: string }) {
           <ThemeToggle />
         </div>
       </header>
+      </PaneBoundary>
 
       <div className="grid flex-1 lg:grid-cols-[240px_minmax(0,1fr)_300px]">
         {/* R6-f12: the phase rail is its own pane — a render throw in it keeps
