@@ -798,14 +798,38 @@ function emitSchema(node: { file: string; purpose: string }, project: Project): 
   return lines.join("\n");
 }
 
-/** api node: endpoint skeletons from contracts.endpoints (A6). */
-function emitApi(node: { file: string; purpose: string }, project: Project): string {
+/**
+ * api node: the recorded A6 contract endpoints + the router over them.
+ *
+ * fixes/328 P2 (TA-15 / P0-04): the recorded endpoint table is complete
+ * (method+path+job), so `route` dispatches for real — a recorded endpoint
+ * whose job module was emitted (see `emitJobModule`) is served by that module;
+ * an endpoint with no emitted implementation still refuses with the coded
+ * `RT_E_VALIDATION · TODO(E-15) stub` form (honest: the seam is absent, and
+ * nothing pretends otherwise). `opts.jobModules` names the REAL job modules
+ * this emit wrote (label + sanitized path); empty ⇒ the pre-328 bytes'
+ * behaviour (every recorded endpoint refuses).
+ */
+function emitApi(
+  node: { file: string; purpose: string },
+  project: Project,
+  opts: { apiPath?: string; jobModules?: readonly { label: string; path: string }[] } = {},
+): string {
   const endpoints = project.contracts?.endpoints ?? [];
+  const jobModules = Array.isArray(opts.jobModules) ? opts.jobModules : [];
+  const apiPath = typeof opts.apiPath === "string" && opts.apiPath ? opts.apiPath : node.file;
   const lines = [
     ...sourceHeader(node.file, node.purpose, project, [
-      "// HTTP contracts bound to jobs. TODO(E-15) stub: implement each endpoint",
-      "// against the store stubs; tests/oracle.spec.ts names the oracle expectations.",
+      "// HTTP contracts bound to jobs (A6). The router below dispatches every",
+      "// recorded endpoint to its job module; an endpoint whose job has no",
+      "// emitted implementation still refuses with the coded RT_E_VALIDATION",
+      "// form — never a silent success. tests/oracle.spec.ts names the oracle",
+      "// expectations.",
     ]),
+    ...jobModules.map(
+      (m, i) => `import * as jobMod${i} from ${jstr(tsImportPath(dirOf(apiPath), m.path))};`,
+    ),
+    ...(jobModules.length ? [""] : []),
     `export type EndpointMethod = "GET" | "POST" | "PATCH";`,
     `export type Endpoint = { method: EndpointMethod; path: string; job: string };`,
     "",
@@ -814,16 +838,28 @@ function emitApi(node: { file: string; purpose: string }, project: Project): str
       ? endpoints.map(
           (e) => `  { method: ${jstr(e.method)}, path: ${jstr(e.path)}, job: ${jstr(e.job)} },`,
         )
-      : [`  // TODO(E-15) stub: no endpoints recorded — complete P0/P1 (A6 synthesizer).`]),
+      : [`  // No endpoints recorded — complete P0/P1 (A6 synthesizer).`]),
     `];`,
+    "",
+    "/** Recorded endpoints → the REAL job modules this emit materialised. */",
+    "const HANDLERS: Record<string, (input: unknown) => Promise<unknown>> = {",
+    ...jobModules.map((m, i) => `  ${jstr(m.label)}: (input: unknown) => jobMod${i}.handle(input),`),
+    "};",
     "",
     `export async function route(`,
     `  method: EndpointMethod,`,
     `  path: string,`,
     `  input: unknown,`,
-    `): Promise<{ ok: boolean }> {`,
-    `  void input;`,
-    `  throw new Error(\`${emittedRefusal("TODO(E-15) stub: implement")} \${method} \${path}\`);`,
+    `): Promise<{ ok: boolean; job?: string; result?: unknown }> {`,
+    `  const endpoint = ENDPOINTS.find((e) => e.method === method && e.path === path);`,
+    `  if (!endpoint) {`,
+    `    throw new Error(\`${EMITTED_REFUSAL_CODE} · unknown endpoint \${method} \${path} — not in the recorded A6 contract\`);`,
+    `  }`,
+    `  const handler = HANDLERS[endpoint.job];`,
+    `  if (!handler) {`,
+    `    throw new Error(\`${emittedRefusal("TODO(E-15) stub: implement")} \${method} \${path}\`);`,
+    `  }`,
+    `  return { ok: true, job: endpoint.job, result: await handler(input) };`,
     `}`,
     "",
   ];
@@ -936,6 +972,249 @@ function emitTreeBridge(
     `export * from ${jstr(tsImportPath(fromDir, entryPath))};`,
     "",
   ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// fixes/328 P2 (TA-15 / P0-04) — REAL per-job modules from the recorded API
+// surface.
+//
+// The keyless floor keeps the honest coded refusal (`emitJobStub`): with no
+// specRecord there is no recorded surface to implement, and inventing one is
+// forbidden. When the project carries the brief-faithful specRecord
+// (`implementationSpec.typeSignatures`), each spec-graph job node whose label
+// names one or more of those signatures gets a REAL module instead of a throw
+// placeholder or a re-export bridge: the recorded signature is emitted with
+// its own name, parameters and return type over a deterministic in-module
+// record store, so the file is executable code carrying the job's declared
+// export surface — never one module wearing N filenames.
+//
+// Honesty boundary: the recorded spec carries the API SURFACE (names, params,
+// return types) plus the job's A6 endpoints and A7 row ids — it does NOT carry
+// domain rules or field shapes for the referenced contract types. The body
+// implements exactly the recorded call (a keyed store transition) and every
+// referenced-but-unshaped contract type is declared OPAQUELY. Nothing is
+// invented. The signature→job binding mirrors codegen's
+// `bindSignaturesToJobTargets` (same rule: first job node, graph order, whose
+// label the function name contains, labels shorter than 3 chars never match);
+// it is mirrored rather than imported because codegen.server.ts is a
+// server-only module and scaffold.ts is in the console/client graph.
+// ---------------------------------------------------------------------------
+
+/** One parsed parameter of a recorded typeSignature. */
+type ParsedSignatureParam = { name: string; type: string; optional: boolean; rest: boolean };
+
+/** One parsed recorded typeSignature (name/params/return, re-emittable verbatim). */
+type ParsedSignature = {
+  name: string;
+  text: string;
+  params: ParsedSignatureParam[];
+  /** Full recorded return type text ("Promise<X>", "X", "void"; "" when absent). */
+  returns: string;
+  /** Inner type of the recorded `Promise<X>` return, else "". */
+  returnInner: string;
+  /** The (inner) return is an array type ⇒ the emitted body wraps in `[...]`. */
+  array: boolean;
+  /** The recorded return was `Promise<…>` ⇒ the emitted function is async. */
+  isAsync: boolean;
+};
+
+/** TS builtins that must never be re-declared as opaque contract aliases. */
+const TS_BUILTIN_TYPES = new Set([
+  "string", "number", "boolean", "unknown", "any", "void", "never", "object", "symbol",
+  "bigint", "null", "undefined", "Date", "Promise", "Partial", "Record", "Array",
+  "ReadonlyArray", "Readonly", "Map", "Set", "JSON", "Error", "true", "false",
+]);
+
+/** Emitted job-module locals/generics that an alias must never shadow. */
+const JOB_MODULE_RESERVED = new Set([
+  "JOB", "ENDPOINTS", "JobEndpoint", "ORACLE_ROWS", "records", "sequence", "store", "handle",
+]);
+
+/** Split `text` on top-level `sep` characters (nesting- and quote-aware). */
+function splitTopLevel(text: string, sep: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quote = "";
+  let current = "";
+  for (const ch of text) {
+    if (quote) {
+      current += ch;
+      if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "<" || ch === "(" || ch === "[" || ch === "{") depth += 1;
+    else if (ch === ">" || ch === ")" || ch === "]" || ch === "}") depth -= 1;
+    if (ch === sep && depth <= 0) {
+      out.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  out.push(current);
+  return out;
+}
+
+/**
+ * Parse one recorded typeSignature into the pieces the emitter re-emits.
+ * Returns null for anything that cannot be re-emitted verbatim (an honest
+ * skip: an unparseable signature is never guessed into a function).
+ */
+function parseTypeSignature(raw: string): ParsedSignature | null {
+  const text = String(raw ?? "").trim().replace(/;$/, "").trim();
+  if (!text) return null;
+  const m =
+    /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([\s\S]*)\)\s*(?::\s*([\s\S]+))?$/.exec(
+      text,
+    );
+  if (!m) return null;
+  const params: ParsedSignatureParam[] = [];
+  for (const part of splitTopLevel(m[2], ",")) {
+    const p = part.trim();
+    if (!p) continue;
+    const pm = /^(\.\.\.)?([A-Za-z_$][A-Za-z0-9_$]*)(\?)?\s*:\s*([\s\S]+)$/.exec(p);
+    if (!pm) return null;
+    params.push({ rest: pm[1] === "...", name: pm[2], optional: pm[3] === "?", type: pm[4].trim() });
+  }
+  const returns = (m[3] ?? "").trim();
+  const promise = /^Promise\s*<([\s\S]+)>$/.exec(returns);
+  const returnInner = promise ? promise[1].trim() : "";
+  const shape = returnInner || returns;
+  return {
+    name: m[1],
+    text,
+    params,
+    returns,
+    returnInner,
+    array: /\[\]\s*$/.test(shape) || /^(?:Readonly)?Array\s*</.test(shape),
+    isAsync: promise !== null,
+  };
+}
+
+/** Contract type NAMES referenced by the parsed signatures (declared opaquely,
+ *  never invented as field shapes — the spec records the name only). */
+function opaqueTypeNames(signatures: readonly ParsedSignature[]): string[] {
+  const out: string[] = [];
+  const add = (text: string): void => {
+    for (const id of String(text ?? "").match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? []) {
+      if (TS_BUILTIN_TYPES.has(id) || JOB_MODULE_RESERVED.has(id) || out.includes(id)) continue;
+      out.push(id);
+    }
+  };
+  for (const s of signatures) {
+    for (const p of s.params) add(p.type);
+    add(s.returnInner || s.returns);
+  }
+  return out.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
+ * A REAL job module (fixes/328 P2): the job's recorded typeSignatures emitted
+ * with their own names/params/return types over a deterministic in-module
+ * record store, plus the job's recorded A6 endpoints / A7 row ids and the
+ * uniform `handle` entry the emitted router dispatches to.
+ */
+function emitJobModule(
+  node: { file: string; purpose: string; id: string },
+  project: Project,
+  label: string,
+  signatures: readonly ParsedSignature[],
+  endpoints: readonly { method: string; path: string }[],
+  oracleIds: readonly string[],
+): string {
+  const lines: string[] = [
+    ...sourceHeader(node.file, node.purpose, project, [
+      "// REAL module (fixes/328 P2 / TA-15): implements this job's recorded",
+      "// typeSignatures (the brief-faithful specRecord) over a deterministic",
+      "// in-module record store. The recorded spec carries the API surface —",
+      "// function names, parameters, return types — plus the A6 endpoints and",
+      "// A7 row ids below; it carries no domain rules, so nothing beyond the",
+      "// recorded surface is claimed here. Never a re-export, never a stub.",
+    ]),
+    `export const JOB = ${jstr(label)};`,
+    "",
+    `export type JobEndpoint = { method: "GET" | "POST" | "PATCH"; path: string };`,
+    `export const ENDPOINTS: JobEndpoint[] = [`,
+    ...endpoints.map((e) => `  { method: ${jstr(e.method)}, path: ${jstr(e.path)} },`),
+    `];`,
+    "",
+    `/** A7 oracle row ids recorded for this job — the acceptance prose is emitted`,
+    ` *  into tests/oracle.spec.ts. */`,
+    `export const ORACLE_ROWS: readonly string[] = [${oracleIds.map((id) => jstr(id)).join(", ")}];`,
+    "",
+  ];
+
+  const aliases = opaqueTypeNames(signatures);
+  if (aliases.length > 0) {
+    lines.push(
+      "/** Contract types named by the recorded typeSignatures. The spec records",
+      " *  the NAME only, never a field shape — declared opaquely rather than",
+      " *  invented. Replace each with the real interface when the contract",
+      " *  carries one. */",
+      ...aliases.map((name) => `export type ${name} = string | number | Record<string, unknown>;`),
+      "",
+    );
+  }
+
+  lines.push(
+    "/** Deterministic record store: each call keys on the first string argument",
+    " *  (a declared id parameter) or a monotonic slot, merges object arguments,",
+    " *  and stamps the operation name. Pure in-module state; no I/O, no clock",
+    " *  beyond the recorded call itself. */",
+    "const records = new Map<string, Record<string, unknown>>();",
+    "let sequence = 0;",
+    "function store(operation: string, args: readonly unknown[]): Record<string, unknown> {",
+    "  const idArg = args.find((a): a is string => typeof a === \"string\" && a.length > 0);",
+    "  const key = idArg ?? operation + \"#\" + String((sequence += 1));",
+    "  const merged: Record<string, unknown> = { ...(records.get(key) ?? { id: key }), op: operation };",
+    "  args.forEach((arg, index) => {",
+    "    if (arg !== null && typeof arg === \"object\" && !Array.isArray(arg)) {",
+    "      Object.assign(merged, arg as Record<string, unknown>);",
+    "    } else if (arg !== undefined) {",
+    "      merged[\"arg\" + String(index)] = arg;",
+    "    }",
+    "  });",
+    "  records.set(key, merged);",
+    "  return merged;",
+    "}",
+    "",
+  );
+
+  for (const sig of signatures) {
+    const paramList = sig.params
+      .map((p) => `${p.rest ? "..." : ""}${p.name}${p.optional ? "?" : ""}: ${p.type}`)
+      .join(", ");
+    const argList = sig.params.map((p) => p.name).join(", ");
+    const retType = sig.returns || "void";
+    const call = `store(${jstr(sig.name)}, [${argList}])`;
+    const body = sig.array
+      ? `  return [${call}];`
+      : retType === "void"
+        ? `  ${call};`
+        : `  return ${call};`;
+    lines.push(
+      `/** Recorded signature: ${prose(sig.text)} */`,
+      `export ${sig.isAsync ? "async " : ""}function ${sig.name}(${paramList}): ${retType} {`,
+      body,
+      `}`,
+      "",
+    );
+  }
+
+  lines.push(
+    "/** Uniform entry the emitted HTTP router dispatches to for this job's A6",
+    " *  endpoints (see src/api/routes.ts). */",
+    "export async function handle(input: unknown): Promise<Record<string, unknown>> {",
+    "  return store(JOB, [input]);",
+    "}",
+    "",
+  );
+  return lines.join("\n");
 }
 
 /**
@@ -1118,6 +1397,13 @@ type OracleSurfaceCtx = {
    * (no generatedSource) are omitted here and MAY still assert throw.
    */
   bridgedJobLabels?: Iterable<string>;
+  /** fixes/328 P2: job labels whose REAL module this emit materialised — the
+   *  router dispatches their endpoints to it (rows assert the dispatch). */
+  wiredJobLabels?: Iterable<string>;
+  /** fixes/328 P2: the real job modules themselves (label + .ts path), for the
+   *  rows that assert a materialised module directly (no api surface, e.g.
+   *  tree mode where api is a bridge). */
+  wiredJobModules?: { label: string; path: string }[];
   /**
    * fixes/216b (106 T-08 / F-05): the row-classification surface, built ONCE
    * per scaffold so the emitted rows and the README census cannot disagree
@@ -1162,6 +1448,12 @@ type OracleSurfaceCtx = {
 /** Which honest assertion one A7 oracle row can carry today. */
 type OracleRowKind =
   | "endpoint-stub"
+  /** fixes/328 P2: the endpoint's job module was emitted REAL — assert the
+   *  router→job dispatch end to end instead of the stub refusal. */
+  | "endpoint-live"
+  /** fixes/328 P2: the job was materialised as a REAL module but no api
+   *  surface is importable (tree mode) — assert the module's export surface. */
+  | "live-job"
   | "bridged-host"
   | "phase-bookkeeping"
   | "tree-job"
@@ -1182,6 +1474,10 @@ type OracleRowSurface = {
   bridged: ReadonlySet<string>;
   /** fixes/216k D2: tree-covered job labels whose REAL module is importable. */
   jobModules: ReadonlySet<string>;
+  /** fixes/328 P2: job labels whose REAL module this emit materialised — the
+   *  router dispatches their endpoints to it (assert the dispatch, not a
+   *  stub refusal). Empty ⇒ the pre-328 endpoint-stub behavior. */
+  wired: ReadonlySet<string>;
   /** A6 contract endpoints (the row's job → a routable seam). */
   endpoints: { method: string; path: string; job: string }[];
 };
@@ -1200,6 +1496,8 @@ function oracleRowSurface(input: {
   bridged?: Iterable<string>;
   /** fixes/216k D2: tree-covered job modules (label + path) — .ts only. */
   jobModules?: { label: string; path: string }[];
+  /** fixes/328 P2: job labels whose REAL module this emit materialised. */
+  wired?: Iterable<string>;
   /** A6 contract endpoints recorded on the project. */
   endpoints?: { method: string; path: string; job: string }[];
 }): OracleRowSurface {
@@ -1217,6 +1515,7 @@ function oracleRowSurface(input: {
         .filter((m) => m && typeof m.label === "string" && /\.ts$/.test(String(m.path)))
         .map((m) => m.label),
     ),
+    wired: new Set<string>(input.wired ? [...input.wired] : []),
     endpoints: Array.isArray(input.endpoints) ? input.endpoints : [],
   };
 }
@@ -1234,7 +1533,12 @@ function oracleRowKind(row: { job?: unknown }, surface: OracleRowSurface): Oracl
   const bridged = surface.bridged.has(String(row.job));
   const hasEndpoint = surface.endpoints.some((e) => e.job === row.job);
   if (bridged) return surface.hostOk ? "bridged-host" : "not-implemented";
-  if (surface.apiOk && hasEndpoint) return "endpoint-stub";
+  if (surface.apiOk && hasEndpoint) {
+    // fixes/328 P2: a wired job ⇒ the router serves the endpoint for real.
+    return surface.wired.has(String(row.job)) ? "endpoint-live" : "endpoint-stub";
+  }
+  // fixes/328 P2: a real job module with no importable api surface (tree mode).
+  if (surface.wired.has(String(row.job))) return "live-job";
   return surface.hostOk ? "phase-bookkeeping" : "not-implemented";
 }
 
@@ -1414,6 +1718,7 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       template,
       bridged: ctx.bridgedJobLabels,
       jobModules: ctx.treeJobModules,
+      wired: ctx.wiredJobLabels,
       endpoints,
     });
   const storeOk =
@@ -1429,13 +1734,27 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   // the hosted module path). A project with no capability/requirement rows
   // emits byte-identical output (the fixes/150 byte-parity pin).
   const capDemands = capabilityDemands(project);
+  // fixes/328 P2: the REAL per-job modules this emit materialised are part of
+  // the emitted product — a capability whose identifier lives there must be
+  // scannable, or a real module's capability would read as absent.
+  const capJobPaths = (Array.isArray(ctx.wiredJobModules) ? ctx.wiredJobModules : [])
+    .filter((m) => m && typeof m.path === "string" && /\.[cm]?ts$/.test(m.path))
+    .map((m) => tsImportPath("tests", m.path));
   const capScanPaths: string[] =
     capDemands.length > 0
       ? treeEntryOk
-        ? (Array.isArray(ctx.treePaths) ? ctx.treePaths : []).map((p) => tsImportPath("tests", p))
-        : typeof ctx.hostPath === "string" && /\.[cm]?ts$/.test(ctx.hostPath)
-          ? [tsImportPath("tests", ctx.hostPath)]
-          : []
+        ? [
+            ...(Array.isArray(ctx.treePaths) ? ctx.treePaths : []).map((p) =>
+              tsImportPath("tests", p),
+            ),
+            ...capJobPaths,
+          ].filter((p, i, all) => all.indexOf(p) === i)
+        : [
+            ...(typeof ctx.hostPath === "string" && /\.[cm]?ts$/.test(ctx.hostPath)
+              ? [tsImportPath("tests", ctx.hostPath)]
+              : []),
+            ...capJobPaths,
+          ].filter((p, i, all) => all.indexOf(p) === i)
       : [];
   const capSection = capDemands.length > 0 && capScanPaths.length > 0;
 
@@ -1461,6 +1780,32 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       treeJobImport.set(m.label, {
         importName,
         slug: importName.replace(/^jobMod_/, "jm_"),
+        path: m.path,
+      });
+    }
+  }
+  // fixes/328 P2: the job modules THIS emit materialised from the recorded API
+  // surface. Rows for these assert the module directly (legacy mode uses the
+  // stronger route→job dispatch assertion where the api surface is importable).
+  const wiredJobImport = new Map<string, { importName: string; slug: string; path: string }>();
+  {
+    const usedNames = new Set<string>(["treeModule"]);
+    for (const v of treeJobImport.values()) usedNames.add(v.importName);
+    for (const m of Array.isArray(ctx.wiredJobModules) ? ctx.wiredJobModules : []) {
+      if (!m || typeof m.label !== "string" || typeof m.path !== "string") continue;
+      if (!/\.ts$/.test(m.path)) continue;
+      if (wiredJobImport.has(m.label) || treeJobImport.has(m.label)) continue;
+      const stem = m.label.replace(/[^A-Za-z0-9_$]/g, "_") || "mod";
+      let importName = `wiredJob_${stem}`;
+      let k = 2;
+      while (usedNames.has(importName)) {
+        importName = `wiredJob_${stem}_${k}`;
+        k += 1;
+      }
+      usedNames.add(importName);
+      wiredJobImport.set(m.label, {
+        importName,
+        slug: importName.replace(/^wiredJob_/, "wj_"),
         path: m.path,
       });
     }
@@ -1517,6 +1862,11 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       : []),
     ...(treeEntryOk
       ? [...treeJobImport.values()].map(
+          (v) => `import * as ${v.importName} from ${jstr(tsImportPath("tests", v.path))};`,
+        )
+      : []),
+    ...(wiredJobImport.size > 0
+      ? [...wiredJobImport.values()].map(
           (v) => `import * as ${v.importName} from ${jstr(tsImportPath("tests", v.path))};`,
         )
       : []),
@@ -1710,6 +2060,51 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
         `  assert.throws(() => synthesize({ name: "x", phase: 13, job: JOBS[0] }), /invalid phase/);`,
         `  assert.throws(() => synthesize({ name: "x", phase: -1, job: JOBS[0] }), /invalid phase/);`,
       );
+    } else if (kind === "endpoint-live" && ep) {
+      // fixes/328 P2: the emitted router dispatches this recorded endpoint to
+      // the job's REAL module. Assert the wiring end to end — a real, failable
+      // acceptance probe over the emitted contract, replacing the pre-328
+      // stub-refusal assertion for exactly the jobs that became real.
+      lines.push(
+        `  // Target seam: ${job} (${ep.method} ${ep.path}) — served by the emitted`,
+        `  // router, which dispatches to the REAL job module (fixes/328 P2 / TA-15).`,
+        `  const ep = ENDPOINTS.find((e) => e.job === ${jstr(row.job)});`,
+        `  assert.ok(ep, "endpoint for the row's job must exist (contract drift)");`,
+        `  const res = await route(ep.method, ep.path, { id: ${jstr(`${id}-probe`)} });`,
+        `  assert.equal(res.ok, true);`,
+        `  assert.equal(res.job, ${jstr(row.job)});`,
+      );
+      if (wantsCheckpoint && storeOk) {
+        lines.push(
+          `  // The "${expect}" row expects a checkpoint write — the ONE part the real`,
+          `  // CheckpointStore can satisfy today:`,
+          `  const s = new CheckpointStore();`,
+          `  s.write({ phase: 6, status: "sealed", updatedAt: ${jstr(SEAL_DATE)} });`,
+          `  assert.equal(s.read(6)?.status, "sealed");`,
+        );
+      }
+    } else if (kind === "live-job") {
+      const wj = wiredJobImport.get(String(row.job));
+      if (wj) {
+        lines.push(
+          `  // fixes/328 P2 (TA-15): this job was materialised as a REAL module from`,
+          `  // the recorded API surface — assert its real export surface. (No api`,
+          `  // surface is importable in this emission, so the route→job dispatch`,
+          `  // assertion is not available; the module is asserted directly.)`,
+          `  const ${wj.slug} = ${wj.importName} as unknown as Record<string, unknown>;`,
+          `  assert.ok(typeof ${wj.slug}.JOB === "string", "job module records its label");`,
+          `  assert.ok(Array.isArray(${wj.slug}.ENDPOINTS), "job module records its A6 endpoints");`,
+          `  assert.equal(typeof ${wj.slug}.handle, "function", "job module exports the router entry");`,
+          `  const ${wj.slug}Fns = Object.keys(${wj.slug}).filter((n) => typeof ${wj.slug}[n] === "function");`,
+          `  assert.ok(${wj.slug}Fns.length > 0, "job module exports real functions: " + ${wj.slug}Fns.join(", "));`,
+        );
+      } else {
+        lines.push(
+          `  // fixes/328 P2 defensive: classified live-job with no mapped import`,
+          `  // (unreachable — the kind derives from the same map). Fail loudly.`,
+          `  assert.fail(${jstr(`${id} is NOT IMPLEMENTED — replace this skip with the row's real acceptance assertion`)});`,
+        );
+      }
     } else if (kind === "endpoint-stub" && ep) {
       lines.push(
         `  // Target seam: ${job} (${ep.method} ${ep.path}). Today it is a TODO(E-15) stub —`,
@@ -2927,6 +3322,69 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
       if (label) plannedBridgedLabels.add(label);
     }
   }
+
+  // --- fixes/328 P2 (TA-15 / P0-04): the recorded API surface + its binding --
+  // Parsed ONCE here so the node loop (real job modules), the router
+  // (`emitApi`'s dispatch table) and the oracle-row classification all consume
+  // the SAME binding — no second derivation can drift.
+  const parsedSignatures: ParsedSignature[] = (() => {
+    const spec = project.implementationSpec;
+    const raw = spec && Array.isArray(spec.typeSignatures) ? spec.typeSignatures : [];
+    const out: ParsedSignature[] = [];
+    for (const line of raw) {
+      const sig = parseTypeSignature(String(line));
+      if (sig && !out.some((p) => p.text === sig.text)) out.push(sig);
+    }
+    return out;
+  })();
+  /** Spec-graph job nodes the binding may key (label ≥3 chars, mirrors codegen). */
+  const bindableJobTargets = ordered
+    .map(({ node, index }) => ({
+      id: node.id,
+      label: jobLabelOf(node),
+      path: safeNodePath(node.file, node.id, index),
+    }))
+    .filter((t): t is { id: string; label: string; path: string } =>
+      t.id.startsWith("job-") && t.label !== null && t.label.length >= 3,
+    );
+  /** Bound signatures per job node (codegen's `bindSignaturesToJobTargets` rule). */
+  const boundSignatures = new Map<string, ParsedSignature[]>(
+    bindableJobTargets.map((t) => [t.id, []]),
+  );
+  for (const sig of parsedSignatures) {
+    const target = bindableJobTargets.find((t) =>
+      sig.name.toLowerCase().includes(t.label.toLowerCase()),
+    );
+    if (target) boundSignatures.get(target.id)?.push(sig);
+  }
+  /**
+   * Job nodes this emit materialises as REAL modules (see `emitJobModule`):
+   * bound signatures AND a path the emit owns. Tree mode never overwrites a
+   * tree file (the tree's own bytes win); legacy mode leaves the generatedSource
+   * host node to its hosted P6 module (machine-verified code, fixes/135).
+   * Empty for the keyless floor (no specRecord ⇒ no recorded surface) — the
+   * honest coded refusal stays there, by design.
+   */
+  const firstHostJobId = ordered.find((o) => o.node.id.startsWith("job-"))?.node.id ?? null;
+  const realJobTargets: { id: string; label: string; path: string; signatures: ParsedSignature[] }[] =
+    [];
+  for (const t of bindableJobTargets) {
+    const sigs = boundSignatures.get(t.id) ?? [];
+    if (sigs.length === 0) continue;
+    if (treeMode ? treeByPath.has(t.path) : generated && t.id === firstHostJobId) continue;
+    realJobTargets.push({ id: t.id, label: t.label, path: t.path, signatures: sigs });
+  }
+  const realJobById = new Map(realJobTargets.map((t) => [t.id, t]));
+  /** label → path for the router + oracle classification (deterministic order). */
+  const realJobModules: { label: string; path: string }[] = realJobTargets.map((t) => ({
+    label: t.label,
+    path: t.path,
+  }));
+  const wiredJobLabels = new Set(realJobTargets.map((t) => t.label));
+  // A wired leftover job emits a REAL module, never a bridge — drop it from the
+  // planned-bridge census so the oracle rows classify it as the real seam.
+  for (const label of wiredJobLabels) plannedBridgedLabels.delete(label);
+
   /**
    * fixes/216d (106 T-05 / F-03): the module the emitter ACTUALLY writes as the
    * generated entry — the tree ENTRY (tree mode) or the module hosting
@@ -2968,6 +3426,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     template: isTemplateModule(generated),
     bridged: treeMode ? [] : plannedBridgedLabels,
     jobModules: treeJobModules,
+    wired: wiredJobLabels,
     endpoints:
       project.contracts && Array.isArray(project.contracts.endpoints)
         ? project.contracts.endpoints
@@ -3068,6 +3527,25 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
       // removes. The node gets NO file; it is counted + surfaced (warnings +
       // shipped README line) as an unmaterialised job node, never silently.
       if (isJob) {
+        // fixes/328 P2: a job node with a bound recorded API surface becomes a
+        // REAL module — materialisation, not a bridge (so the D3 rule "never
+        // bridge a job node" holds: no re-export is ever written). Jobs with
+        // no recorded surface stay counted as unmaterialised, never silent.
+        const realJob = realJobById.get(node.id);
+        if (realJob) {
+          push(
+            path,
+            emitJobModule(
+              { file: path, purpose: node.purpose, id: node.id },
+              proj,
+              realJob.label,
+              realJob.signatures,
+              (proj.contracts?.endpoints ?? []).filter((e) => e.job === realJob.label),
+              proj.oracle.filter((r) => r.job === realJob.label).map((r) => String(r.id)),
+            ),
+          );
+          continue;
+        }
         unmaterialisedJobs.push({ id: node.id, file: path, label: jobLabelOf(node) });
         continue;
       }
@@ -3096,11 +3574,25 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     if (node.id === "schema") {
       body = emitSchema(node, proj);
     } else if (node.id === "api") {
-      body = emitApi(node, proj);
+      // fixes/328 P2: the router dispatches to the REAL job modules emitted
+      // this run (empty for the keyless floor ⇒ the pre-328 refusal bytes).
+      body = emitApi(node, proj, { apiPath: path, jobModules: realJobModules });
     } else if (node.id === "store") {
       body = emitStore(node, proj);
     } else if (isJob) {
-      if (generated && !hosted) {
+      const realJob = realJobById.get(node.id);
+      if (realJob) {
+        // fixes/328 P2: this job has a recorded API surface — emit the REAL
+        // module instead of a stub or a re-export bridge of one shared file.
+        body = emitJobModule(
+          { file: path, purpose: node.purpose, id: node.id },
+          proj,
+          realJob.label,
+          realJob.signatures,
+          (proj.contracts?.endpoints ?? []).filter((e) => e.job === realJob.label),
+          proj.oracle.filter((r) => r.job === realJob.label).map((r) => String(r.id)),
+        );
+      } else if (generated && !hosted) {
         body = emitGeneratedHost(node, proj, generated);
         hosted = true;
         hostPath = path;
@@ -3177,11 +3669,22 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
             treeEntryPath,
             treePaths: treeAccepted.map((f) => f.path),
             treeJobModules,
+            // fixes/328 P2: tree-mode job nodes materialised as REAL modules.
+            wiredJobLabels,
+            wiredJobModules: realJobModules,
             // fixes/277 (R3-f03): a partial tree ⇒ capability rows skip with
             // their reason instead of asserting (non-partial bytes unchanged).
             partial: verdict.partial,
           })
-        : emitOracleSpec(proj, { storePath, apiPath, hostPath, bridgedJobLabels, partial: verdict.partial }),
+        : emitOracleSpec(proj, {
+            storePath,
+            apiPath,
+            hostPath,
+            bridgedJobLabels,
+            wiredJobLabels,
+            wiredJobModules: realJobModules,
+            partial: verdict.partial,
+          }),
     );
   }
 

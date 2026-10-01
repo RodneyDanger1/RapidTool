@@ -2812,11 +2812,15 @@ export function RunScreen({ id }: { id: string }) {
       </header>
 
       <div className="grid flex-1 lg:grid-cols-[240px_minmax(0,1fr)_300px]">
-        <PhaseRail
-          project={project}
-          viewPhase={viewPhase}
-          onViewPhase={(phase) => setViewPhase((prev) => (prev === phase ? null : phase))}
-        />
+        {/* R6-f12: the phase rail is its own pane — a render throw in it keeps
+            the rest of the Run screen mounted instead of unmounting the grid. */}
+        <PaneBoundary label="Phase rail">
+          <PhaseRail
+            project={project}
+            viewPhase={viewPhase}
+            onViewPhase={(phase) => setViewPhase((prev) => (prev === phase ? null : phase))}
+          />
+        </PaneBoundary>
         {/* R6-f12 (S4 hunk, re-applied): the Run content boundary — a render
             throw here keeps the Run header + phase rail + diagnostics mounted
             and lands one `ui.pane_crash` row. */}
@@ -3645,6 +3649,9 @@ export function RunScreen({ id }: { id: string }) {
             onClick={() => setSidebarOpen(false)}
           />
         ) : null}
+        {/* R6-f12: the sidebar is its own pane (gate health, shell surfaces,
+            diagnostics) — a render throw here must not unmount the Run screen. */}
+        <PaneBoundary label="Run sidebar">
         <aside
           id="run-sidebar"
           className={
@@ -3738,6 +3745,7 @@ export function RunScreen({ id }: { id: string }) {
             ))}
           </ol>
         </aside>
+        </PaneBoundary>
       </div>
 
       <SettingsDialog
@@ -6995,7 +7003,10 @@ function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void
  *    corrupt-safe, `RT_E_CHECKPOINT_MISSING` when absent / `RT_E_VALIDATION` on
  *    junk), so the console has no read seam yet: this card shows the
  *    store-level truth it CAN see (the wild run state) + TODO(N2) for the seam.
- *  - unattended — `RT_E_UNATTENDED_UNSUPPORTED` (errors.ts:508; W-47).
+ *  - unattended — the `unattended` CLI verb is REAL (W36; scheduler-facing
+ *    drive). `RT_E_UNATTENDED_UNSUPPORTED` is registered (errors.ts:79/:533)
+ *    but has NO throw site today, so the row names the real verb + its real
+ *    limits and does not cite the unthrown code as a live refusal (W-47).
  *  - stream — T5.1 shell: one-shot transport, no `--stream`, no console pane.
  *  - cassette — T5.7 shell: library on disk, zero wire points.
  *  - seat — S4's `seat.ts` never landed (nothing on disk, no registry code);
@@ -7068,10 +7079,10 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           </p>
           <p
             className="mt-0.5 text-xs text-muted"
-            title="RT_E_UNATTENDED_UNSUPPORTED — no scheduler/daemon/queue host in this product; blockers W-01 (keyed wild P6 seam) and W-02 (mint reachability) are not landed keyed. Supervised wild/gate runs remain available."
+            title="W-47: there is no scheduler/daemon/queue in this product. `unattended --project` is the scheduler-facing CLI drive (it re-enters from the run checkpoint when one exists, else starts from the file, and drives autopilot+live until parked — a stock HITL gate still parks with exit 2). The console has no schedule control. End-to-end unattended completion stays blocked while W-01 (keyed wild P6 seam) and W-02 (mint reachability) are unlanded keyed."
           >
-            refused by design — no scheduler/daemon host (
-            <span className="font-mono">RT_E_UNATTENDED_UNSUPPORTED</span>)
+            no in-product scheduler — the CLI <span className="font-mono">unattended</span> verb
+            resumes from a checkpoint when an external hook invokes it; stock HITL gates still park
           </p>
         </li>
         <li>

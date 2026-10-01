@@ -1572,6 +1572,12 @@ async function main() {
           // judge the intended tree only (A1-f07: the "tested" tree must not
           // be a mixed tree). A failed move flips the envelope ok:false +
           // RT_E_FOREIGN_FILES — the module never silently drops (R11-f08).
+          // A FAILED move means the survivors are STILL in the dir, so the
+          // judging legs below are suppressed (foreignLeftInPlace): a green
+          // --run over a mixed tree would otherwise mint `tested` over bytes
+          // the factory never authored — the exact A1-f07 defect the move
+          // exists to prevent.
+          let foreignLeftInPlace = false;
           if (Array.isArray(res.survivors) && res.survivors.length > 0) {
             const q = await quarantineDriver();
             const moved = await q.quarantineFiles(target, res.survivors);
@@ -1585,9 +1591,14 @@ async function main() {
                 "quarantine move failed: " +
                 moved.failed.map((f) => `${f.path} (${f.error})`).join(", ");
               payload.code = "RT_E_FOREIGN_FILES";
+              foreignLeftInPlace = true;
             }
           }
-          if (flag(args, "verify-kind")) {
+          if (foreignLeftInPlace) {
+            payload.judgingSkipped =
+              "foreign files could not be quarantined — --verify-kind/--check/--run did not run (the tree is still mixed; R11-f08 · A1-f07)";
+          }
+          if (!foreignLeftInPlace && flag(args, "verify-kind")) {
             const cc = await checkDriver();
             // fixes/216z (T4.1 / TA-16): the leg is async — scratch-copy npm
             // ci/install + the tree's declared build/test under the bounded
@@ -1600,7 +1611,7 @@ async function main() {
               payload.code = "RT_E_VERIFY_KIND_FAILED";
             }
           }
-          if (flag(args, "check")) {
+          if (!foreignLeftInPlace && flag(args, "check")) {
             const cc = await checkDriver();
             const check = cc.compileCheckDir(res.dir);
             payload.check = check;
@@ -1618,7 +1629,7 @@ async function main() {
           // under the bounded runner + one kind-entry smoke — and appends the
           // TreeRunOutcome (compile/tests/run). Exit 1 when the tree is not
           // ok (red tree is never a clean emit — loud, never a faked pass).
-          if (flag(args, "run")) {
+          if (!foreignLeftInPlace && flag(args, "run")) {
             const cc = await checkDriver();
             const outcome = await cc.treeRun(res.dir);
             payload.treeRun = outcome;

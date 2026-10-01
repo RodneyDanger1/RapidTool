@@ -1733,6 +1733,136 @@ describe("liveP6Synthesis deps.gateRepair rides the PRIMARY synthesis prompts (f
   });
 });
 
+// --- fixes/328 F1 (Ledger): the previous-refusal context on the PRIMARY prompts ---
+// Closes PREP-2: `deps.synthesisRefusal` was produced by headless
+// p6CycleLiveDeps but read by NOTHING — a refused cycle re-synthesized blind.
+// It now rides the SAME PRIMARY prompt seams as gateRepair (single-module +
+// every tree chunk) as ONE bounded, whitespace-collapsed block; absent/blank ⇒
+// byte-identical legacy bytes, so a cycle that was NOT refused synthesizes
+// exactly as before.
+
+describe("liveP6Synthesis deps.synthesisRefusal rides the PRIMARY synthesis prompts (fixes/328 F1)", () => {
+  /** Single-line, no whitespace runs ⇒ collapse is the identity here; the
+   *  collapse + bound are exercised by their own test below. */
+  const REFUSAL = "RT_E_LLM_REJECTED · the model refused the multi-file tree brief: returned a stub only";
+  const block = (t: string): string =>
+    "\n\nP6 PREVIOUS-REFUSAL CONTEXT (the previous synthesis cycle was REFUSED — this is the refusal class and the model's own recorded reason, NOT a new requirement; correct the stated cause and return a valid envelope):\n" +
+    t;
+
+  /** Run the single-module primary synthesis once and return every prompt the
+   *  model saw (exactly one on a clean envelope). */
+  const runPrimary = async (synthesisRefusal?: string): Promise<string[]> => {
+    const base = p6Base();
+    const prompts: string[] = [];
+    const complete = async (p: string): Promise<LlmResult> => {
+      prompts.push(p);
+      return { ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(base, {
+      complete,
+      expand: async () => ({ ok: true, spec: KANBAN_SPEC }),
+      verify: async () => ({
+        status: "passed",
+        iterations: 1,
+        evidence: "3/3 machine-run cases passed on iteration 1",
+        finalSource: KANBAN_MODULE,
+        cases: [],
+      }),
+      ...(synthesisRefusal === undefined ? {} : { synthesisRefusal }),
+    });
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim());
+    return prompts;
+  };
+
+  it("single-module: the block is appended to the primary prompt exactly once; absent deps keep the legacy bytes", async () => {
+    const withRefusal = await runPrimary(REFUSAL);
+    const legacy = await runPrimary();
+    assert.equal(withRefusal.length, 1, "one primary synthesis call");
+    assert.equal(legacy.length, 1, "one primary synthesis call (legacy run)");
+    assert.equal(
+      withRefusal[0],
+      legacy[0]! + block(REFUSAL),
+      "the refusal block is appended once to the legacy prompt bytes",
+    );
+    assert.equal(withRefusal[0]!.split("P6 PREVIOUS-REFUSAL CONTEXT").length - 1, 1, "the block appears ONCE");
+    assert.equal(legacy[0]!.includes("P6 PREVIOUS-REFUSAL CONTEXT"), false, "absent deps.synthesisRefusal ⇒ no block");
+  });
+
+  it("single-module: blank/whitespace-only synthesisRefusal is byte-identical to the legacy prompt", async () => {
+    const legacy = await runPrimary();
+    for (const blank of ["", "   ", "\n\t  \n"]) {
+      const got = await runPrimary(blank);
+      assert.equal(got[0], legacy[0], `blank refusal ${JSON.stringify(blank)} keeps the legacy bytes`);
+    }
+  });
+
+  it("single-module: multi-line reason is whitespace-collapsed and the block is bounded to 200 chars", async () => {
+    const messy = await runPrimary("RT_E_LLM_REJECTED ·   the model\nrefused\t the  tree   brief");
+    assert.ok(
+      messy[0]!.includes(block("RT_E_LLM_REJECTED · the model refused the tree brief")),
+      "a whitespace-collapsed single-line block (newlines/tabs/runs → one space)",
+    );
+    const long = await runPrimary("Z".repeat(260));
+    assert.ok(long[0]!.endsWith(block("Z".repeat(200))), "a >200-char refusal is capped at the 200-char bound");
+    assert.equal(long[0]!.includes("Z".repeat(201)), false, "the cap never leaks a 201st char into the prompt");
+  });
+
+  it("chunked: every PRIMARY chunk prompt carries the block once when deps.synthesisRefusal is present; absent keeps the legacy bytes", async () => {
+    const base = p6Base(LEDGER_BRIEF);
+    const withDeps = chunkedDeps();
+    const legacyDeps = chunkedDeps();
+    const qWith = await liveP6Synthesis(base, { ...withDeps.deps, synthesisRefusal: REFUSAL });
+    const qLegacy = await liveP6Synthesis(base, legacyDeps.deps);
+    assert.ok((qWith.generatedTree ?? []).length >= 2, "the chunked tree assembled");
+    assert.deepEqual(
+      (qLegacy.generatedTree ?? []).map((f) => f.path),
+      (qWith.generatedTree ?? []).map((f) => f.path),
+      "the additive context does not change the tree shape",
+    );
+    const synth = (ps: string[]): string[] => ps.filter((p) => p.includes("TYPE SIGNATURES (must export"));
+    const withPrompts = synth(withDeps.prompts);
+    const legacyPrompts = synth(legacyDeps.prompts);
+    assert.equal(withPrompts.length, legacyPrompts.length, "same number of chunk synthesis calls");
+    assert.ok(withPrompts.length >= 2, "a real multi-chunk run");
+    for (let i = 0; i < withPrompts.length; i++) {
+      assert.equal(
+        withPrompts[i],
+        legacyPrompts[i] + block(REFUSAL),
+        `chunk ${i + 1}'s primary prompt = legacy bytes + one block`,
+      );
+      assert.equal(withPrompts[i]!.split("P6 PREVIOUS-REFUSAL CONTEXT").length - 1, 1, `chunk ${i + 1} carries the block once`);
+    }
+  });
+
+  it("both gateRepair and synthesisRefusal present ⇒ both blocks, gateRepair first (composition order)", async () => {
+    const base = p6Base();
+    const prompts: string[] = [];
+    const complete = async (p: string): Promise<LlmResult> => {
+      prompts.push(p);
+      return { ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(base, {
+      complete,
+      expand: async () => ({ ok: true, spec: KANBAN_SPEC }),
+      verify: async () => ({
+        status: "passed",
+        iterations: 1,
+        evidence: "3/3 machine-run cases passed on iteration 1",
+        finalSource: KANBAN_MODULE,
+        cases: [],
+      }),
+      gateRepair: "P6 DoD unmet: p6-brief-fit | Recorded missing requirements: missing: x",
+      synthesisRefusal: REFUSAL,
+    });
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim());
+    const primary = prompts[0]!;
+    const gi = primary.indexOf("P6 GATE REPAIR CONTEXT");
+    const ri = primary.indexOf("P6 PREVIOUS-REFUSAL CONTEXT");
+    assert.ok(gi >= 0 && ri >= 0, "both context blocks are present on the primary prompt");
+    assert.ok(gi < ri, "the gateRepair block precedes the refusal block (stable composition order)");
+  });
+});
+
 // --- fixes/148 (F1): the kind-scoped tree trigger ----------------------------
 // The chunk/tree decision must consider the DELIVERY KIND, not signature count
 // alone (fixes/145 M1=0 root cause — a ≤8-signature WEBAPP brief fell into

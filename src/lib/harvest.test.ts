@@ -848,4 +848,28 @@ describe("harvest lesson rows — honest negative evidence (fixes/98)", () => {
     assert.ok(fallback.id.startsWith("lesson-harvest-empty-"), "unknown reason falls back to empty");
     assert.ok(fallback.text.includes(`brief "${FIXTURE_BRIEF.slice(0, 60)}"`), "blank detail falls back to brief context");
   });
+
+  it("328 P5: the SAME harvest failure converges on ONE row (a differing detail tail cannot fork it)", () => {
+    const p = seedProject();
+    // The note/detail is volatile (a rate-limit message varies per backend and
+    // run); reason+phase are the failure's identity. Two recurrences that agree
+    // there but differ in the note must NOT mint two rows (112 §4.2 T1).
+    const a = harvestEvidenceLesson(p, { reason: "rate-limit", detail: "GitHub API returned HTTP 403", phase: 1 });
+    const b = harvestEvidenceLesson(p, { reason: "rate-limit", detail: "secondary rate limit hit; retry after 60s", phase: 1 });
+    assert.equal(b.id, a.id, "same reason+phase ⇒ ONE row id regardless of the note");
+    assert.notEqual(b.text, a.text, "the volatile detail still rides the row TEXT");
+
+    // Different reason / different phase stay DIFFERENT rows (never over-collapse).
+    const empty = harvestEvidenceLesson(p, { reason: "empty", detail: a.text, phase: 1 });
+    assert.notEqual(empty.id, a.id, "a different reason is a different failure");
+    const laterPhase = harvestEvidenceLesson(p, { reason: "rate-limit", detail: a.text, phase: 6 });
+    assert.notEqual(laterPhase.id, a.id, "a different phase is a different failure");
+
+    // The derivation path inherits the convergence: two harvest outcomes that
+    // agree on reason+phase but not on the note text mint the SAME row id.
+    const r1 = harvestResultLesson(p, { hits: [], notes: ["rate limit from backend A"] });
+    const r2 = harvestResultLesson(p, { hits: [], notes: ["rate limit from backend B"] });
+    assert.ok(r1 && r2, "premise: two rate-limit outcomes each derive a row");
+    assert.equal(r2!.id, r1!.id, "harvestResultLesson converges on reason+phase, not the note");
+  });
 });

@@ -6,6 +6,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { exportProjectJson, slugName } from "./io.ts";
+import { inventoryFromJobSources } from "./doctor.ts";
 import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
 import type { Project, SpecGraph } from "./types.ts";
 import { DEPLOY_HONESTY_STAMP, deployNotes, deplyNotes, projectKindOf, scaffoldProject } from "./scaffold.ts";
@@ -323,15 +324,32 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
       /TODO\(E-15\) stub/,
       "emitted routes.ts carries the canonical marker the oracle reject-regex asserts",
     );
-    const throwMsg = routesBody.match(/throw new Error\(`([^`]+)`\)/)?.[1];
-    assert.ok(throwMsg, "emitted route() must reject via a template-literal Error");
-    const simulated = throwMsg!
+    // fixes/328 P2: the emitted router now carries TWO coded refusals — an
+    // unrecorded endpoint (contract drift, `unknown endpoint`) and a recorded
+    // endpoint whose job has no emitted implementation (the TODO stub form).
+    // The oracle reject-regex targets the LATTER, so simulate that one; the
+    // unknown-endpoint refusal is asserted separately (both are real paths).
+    const throwMsgs = [...routesBody.matchAll(/throw new Error\(`([^`]+)`\)/g)].map(
+      (m) => m[1]!,
+    );
+    const stubMsg = throwMsgs.find((m) => m.includes("TODO(E-15) stub"));
+    assert.ok(stubMsg, "emitted route() must reject via a template-literal Error");
+    const simulated = stubMsg!
       .replace("${method}", "GET")
       .replace("${path}", "/v1/example");
     assert.match(
       simulated,
       /TODO\(E-15\) stub/,
       "simulated route() rejection (runtime interpolation) matches the oracle reject-regex",
+    );
+    const unknownMsg = throwMsgs.find((m) => m.includes("unknown endpoint"));
+    assert.ok(unknownMsg, "the router also refuses an unrecorded endpoint with a coded reason");
+    assert.match(
+      unknownMsg!
+        .replace("${method}", "GET")
+        .replace("${path}", "/v1/example"),
+      /RT_E_VALIDATION · unknown endpoint GET \/v1\/example/,
+      "the unknown-endpoint refusal is coded and names the unrecorded wire",
     );
   });
 
@@ -1030,5 +1048,146 @@ describe("A3/M4-16 — deplyNotes/deployNotes twin", () => {
   it("deplyNotes resolves to the canonical deployNotes (call site + exports agree)", () => {
     assert.equal(deplyNotes, deployNotes, "one function, two names — the legacy spelling is alias-only");
     assert.equal(typeof deployNotes(seedProject()), "string", "the wired name is callable");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/328 P2 (TA-15 / P0-04) — REAL per-job modules + real HTTP wiring.
+//
+// The recorded specRecord (`implementationSpec.typeSignatures`) is the line
+// between real and refusal: bound signatures ⇒ a real module / a dispatched
+// endpoint; no recorded surface (the keyless floor) ⇒ the honest coded stub
+// stays. These pins carry TEETH: they read the emitted bytes AND classify them
+// with the doctor's own census so "real" here means what `doctor --tree` says.
+// ---------------------------------------------------------------------------
+describe("fixes/328 P2 — REAL per-job modules + HTTP wiring (TA-15/P0-04)", () => {
+  /** primed project + a recorded specRecord (the keyed half of the boundary). */
+  const keyed = (typeSignatures: string[], over: Partial<Project> = {}): Project => ({
+    ...primed(over),
+    implementationSpec: {
+      requirements: [],
+      edgeCases: [],
+      errorHandling: [],
+      typeSignatures,
+      dataFlow: [],
+      negativeConstraints: [],
+      source: "prompt-verb",
+      briefHash: "h",
+      createdAt: 0,
+    },
+  });
+  /** The doctor's own classifier — the census authority, not a regex of ours. */
+  const jobKinds = (files: ScaffoldFile[]): Record<string, string> =>
+    Object.fromEntries(
+      inventoryFromJobSources(
+        files
+          .filter((f) => f.path.startsWith("src/jobs/"))
+          .map((f) => ({ path: f.path, source: f.body })),
+      ).files.map((r) => [r.path, r.kind]),
+    );
+
+  it("a bound job becomes a REAL module (real signature, no TODO, no re-export)", () => {
+    const p = keyed(["runDispatch(command: DispatchCommand): Promise<Tech>"]);
+    const files = okFiles(scaffoldProject(p));
+    const dispatch = files.find((f) => f.path === "src/jobs/dispatch.ts")!;
+    assert.ok(dispatch, "the wired job module is emitted");
+    assert.ok(
+      dispatch.body.includes("export async function runDispatch(command: DispatchCommand): Promise<Tech>"),
+      "the RECORDED signature is emitted verbatim",
+    );
+    assert.ok(
+      dispatch.body.includes(`export const ENDPOINTS: JobEndpoint[] = [\n  { method: "POST", path: "/v1/dispatch" },`),
+      "the job carries its recorded A6 endpoint",
+    );
+    assert.ok(dispatch.body.includes('export const ORACLE_ROWS: readonly string[] = ["orc-1"'),
+      "the job carries its recorded A7 row ids");
+    const kinds = jobKinds(files);
+    assert.equal(kinds["src/jobs/dispatch.ts"], "real", "doctor's classifier agrees: real");
+    assert.equal(kinds["src/jobs/reroute.ts"], "stub", "an unwired job keeps the honest coded stub");
+    assert.equal(kinds["src/jobs/scan.ts"], "stub", "an unwired job keeps the honest coded stub");
+    // The type the spec names but does not shape is declared opaquely — never
+    // invented as a field list.
+    assert.ok(dispatch.body.includes("export type DispatchCommand = string | number | Record<string, unknown>;"));
+    assert.ok(!/^\s*(export\s+)?interface\s/m.test(dispatch.body), "no invented field shape");
+  });
+
+  it("the emitted router dispatches wired jobs and still refuses unwired ones", () => {
+    const p = keyed(["runDispatch(command: DispatchCommand): Promise<Tech>"]);
+    const files = okFiles(scaffoldProject(p));
+    const api = files.find((f) => f.path === "src/api/routes.ts")!;
+    assert.ok(api.body.includes('import * as jobMod0 from "../jobs/dispatch.ts";'), "router imports the real module");
+    assert.ok(api.body.includes('"dispatch": (input: unknown) => jobMod0.handle(input),'), "router dispatches by job");
+    assert.ok(api.body.includes("return { ok: true, job: endpoint.job, result: await handler(input) };"));
+    // Refusals stay REAL paths: unrecorded endpoint AND recorded-but-unwired job.
+    assert.match(api.body, /unknown endpoint \$\{method\} \$\{path\}/);
+    assert.match(api.body, /TODO\(E-15\) stub: implement/);
+    // Keyless floor: no wired jobs ⇒ no imports/handlers, every endpoint refuses.
+    const floor = okFiles(scaffoldProject(primed())).find((f) => f.path === "src/api/routes.ts")!;
+    assert.ok(!floor.body.includes("jobMod0"), "no handler wiring without a recorded surface");
+    assert.ok(floor.body.includes("const HANDLERS: Record<string, (input: unknown) => Promise<unknown>> = {\n};"));
+  });
+
+  it("the emitted spec asserts the reported row class: live dispatch vs honest refusal", () => {
+    const p = keyed(["runDispatch(command: DispatchCommand): Promise<Tech>"]);
+    const spec = bodyOf(scaffoldProject(p), "tests/oracle.spec.ts");
+    assert.ok(
+      spec.includes("const res = await route(ep.method, ep.path, { id: \"orc-1-probe\" });"),
+      "the wired row calls the router for real",
+    );
+    assert.ok(spec.includes("assert.equal(res.job, \"dispatch\");"), "and asserts the dispatched job");
+    assert.match(
+      spec,
+      /assert\.rejects\(route\(ep\.method, ep\.path, \{\}\), \/RT_E_VALIDATION · TODO\\\(E-15\\\) stub\/\)/,
+      "the unwired row keeps the coded stub-rejection assertion",
+    );
+    // Capability rows must scan the materialised job modules, not only the host.
+    assert.ok(spec.includes('"../src/jobs/dispatch.ts"'), "the real job module is in the capability scan set");
+  });
+
+  it("a job with no bound recorded signature keeps the honest coded refusal", () => {
+    const p = keyed(["unrelatedThing(a: number): Promise<void>"]);
+    const files = okFiles(scaffoldProject(p));
+    const kinds = jobKinds(files);
+    for (const path of ["src/jobs/dispatch.ts", "src/jobs/reroute.ts", "src/jobs/scan.ts"]) {
+      assert.equal(kinds[path], "stub", `${path}: no recorded surface ⇒ the coded stub, never an invented body`);
+    }
+    assert.ok(
+      files.find((f) => f.path === "src/jobs/dispatch.ts")!.body.includes("TODO(E-15) stub: implement job dispatch"),
+    );
+  });
+
+  it("tree mode materialises the uncovered bound job node as a REAL module (never a bridge)", () => {
+    const p = keyed(["runDispatch(command: DispatchCommand): Promise<Tech>"], {
+      generatedTree: [
+        { path: "src/generated/util.ts", source: "export function util(): number { return 1; }\n", hash: "h1", attempt: 0 },
+      ],
+    });
+    const result = scaffoldProject(p);
+    const files = okFiles(result);
+    const kinds = jobKinds(files);
+    assert.equal(kinds["src/jobs/dispatch.ts"], "real", "the bound job materialises real in tree mode");
+    assert.equal(
+      kinds["src/jobs/reroute.ts"],
+      undefined,
+      "an unbound job stays unmaterialised in tree mode — never a stub, never a bridge",
+    );
+    const warnings = result.ok ? (result.warnings ?? []) : [];
+    assert.ok(
+      !warnings.some((w: string) => w.includes('"src/jobs/dispatch.ts"')),
+      "a materialised job is no longer reported unmaterialised",
+    );
+    assert.ok(
+      warnings.some((w: string) => w.includes('"src/jobs/reroute.ts"')),
+      "the genuinely unmaterialised node stays LOUDLY reported",
+    );
+  });
+
+  it("stays deterministic with a recorded surface (same project ⇒ byte-identical files)", () => {
+    const p = keyed([
+      "runDispatch(command: DispatchCommand): Promise<Tech>",
+      "runReroute(command: RerouteCommand): Promise<Dispatcher>",
+      "runScan(command: ScanCommand): Promise<Parts>",
+    ]);
+    assert.deepEqual(scaffoldProject(p), scaffoldProject(p));
   });
 });

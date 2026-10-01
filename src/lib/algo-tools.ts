@@ -25,13 +25,13 @@
 //     propertyTestsFor(...)  — source + brief -> property-STYLE cases in the
 //                              verify.server.ts VerifyCase shape
 //                              ({id, expression}); parsed by the shared
-//                              parseOracleJson, so the case contract is the
+//                              parseOracleCases, so the case contract is the
 //                              same parser the verify lane runs.
 //
 // No function here writes files or fabricates model output.
 // ---------------------------------------------------------------------------
 import { completeDeepSeek, isDeepSeekConfigured } from "./deepseek.server.ts";
-import { parseOracleJson } from "./verify.server.ts";
+import { parseOracleCases } from "./verify.server.ts";
 import type { VerifyCase } from "./verify.server.ts";
 import type { ErrorCode } from "./errors.ts";
 
@@ -160,6 +160,140 @@ export type PropertyCasesResult =
       code: ErrorCode;
     };
 
+// ---------------------------------------------------------------------------
+// 328 P3 — ESM binding-name inventory (register: the 327 lane's residual).
+//
+// The old single-name regex captured only the FIRST declarator of an
+// `export const|let|var` list and nothing at all from a destructuring pattern,
+// so `export const a = 1, b = 2` reported ["a"] and `export const {x} = o`
+// reported [] — the property-case prompt then told the model the module
+// exports "(none)" while it plainly exported callables. These helpers parse
+// the declarator list and its binding patterns over the masker's view (strings
+// /comments/regex already blanked, so a separator can only be real code).
+// ---------------------------------------------------------------------------
+
+const ES_ID_START = /[A-Za-z_$]/;
+const ES_ID_CHAR = /[A-Za-z0-9_$]/;
+
+function esSkipWs(masked: string, i: number): number {
+  while (i < masked.length && /\s/.test(masked[i]!)) i++;
+  return i;
+}
+
+function esReadIdent(masked: string, i: number): { name: string; end: number } | null {
+  if (i >= masked.length || !ES_ID_START.test(masked[i]!)) return null;
+  let j = i + 1;
+  while (j < masked.length && ES_ID_CHAR.test(masked[j]!)) j++;
+  return { name: masked.slice(i, j), end: j };
+}
+
+/** Skip a balanced `(...)`/`[...]`/`{...}` group starting at `i`. */
+function esSkipBalanced(masked: string, i: number): number {
+  const open = masked[i];
+  const close = open === "(" ? ")" : open === "[" ? "]" : "}";
+  let depth = 0;
+  for (; i < masked.length; i++) {
+    const c = masked[i];
+    if (c === open) depth++;
+    else if (c === close) {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return masked.length;
+}
+
+/** If the next non-space char is `=`, skip the initializer to the first
+ *  top-level char in `stops` (or the enclosing closer); else return `i`. */
+function esSkipDefault(masked: string, i: number, stops: string): number {
+  i = esSkipWs(masked, i);
+  if (masked[i] !== "=") return i;
+  i++;
+  let depth = 0;
+  for (; i < masked.length; i++) {
+    const c = masked[i];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") {
+      if (depth === 0) return i;
+      depth--;
+    } else if (depth === 0 && stops.includes(c)) return i;
+  }
+  return i;
+}
+
+/** Collect the names a binding target at `i` binds (identifier, object or array
+ *  pattern); returns the index past the target (its default, if any, included). */
+function esCollectBindingNames(masked: string, i: number, out: string[]): number {
+  i = esSkipWs(masked, i);
+  const c = masked[i];
+  if (c === "{") {
+    i++;
+    for (;;) {
+      i = esSkipWs(masked, i);
+      if (i >= masked.length) return i;
+      if (masked[i] === "}") return i + 1;
+      if (masked[i] === ",") { i++; continue; }
+      if (masked.startsWith("...", i)) {
+        const rest = esReadIdent(masked, i + 3);
+        if (rest !== null) { out.push(rest.name); i = rest.end; } else i += 3;
+        continue;
+      }
+      if (masked[i] === "[") {
+        // computed key `[expr]: target` — only the TARGET binds a name
+        i = esSkipBalanced(masked, i);
+        i = esSkipWs(masked, i);
+        if (masked[i] === ":") i = esCollectBindingNames(masked, i + 1, out);
+        i = esSkipDefault(masked, i, ",}");
+        continue;
+      }
+      const key = esReadIdent(masked, i);
+      if (key === null) { i++; continue; }
+      i = esSkipWs(masked, key.end);
+      if (masked[i] === ":") {
+        i = esCollectBindingNames(masked, i + 1, out); // `key: target` — target binds
+      } else {
+        out.push(key.name); // shorthand (optionally with a default)
+      }
+      i = esSkipDefault(masked, i, ",}");
+    }
+  }
+  if (c === "[") {
+    i++;
+    for (;;) {
+      i = esSkipWs(masked, i);
+      if (i >= masked.length) return i;
+      if (masked[i] === "]") return i + 1;
+      if (masked[i] === ",") { i++; continue; } // elision hole
+      const before = i;
+      i = esCollectBindingNames(masked, i, out);
+      if (i === before) { i++; continue; }
+      i = esSkipDefault(masked, i, ",]");
+    }
+  }
+  const id = esReadIdent(masked, i);
+  if (id !== null) { out.push(id.name); return id.end; }
+  return i;
+}
+
+/** Names bound by an `export const|let|var` declarator list starting at the
+ *  first declarator; stops at the first top-level `;`. */
+function esmDeclaratorNames(masked: string, start: number): string[] {
+  const out: string[] = [];
+  let i = start;
+  for (;;) {
+    i = esSkipWs(masked, i);
+    if (i >= masked.length) break;
+    const before = i;
+    i = esCollectBindingNames(masked, i, out);
+    if (i === before) i++;
+    i = esSkipDefault(masked, i, ",;");
+    i = esSkipWs(masked, i);
+    if (masked[i] === ",") { i++; continue; }
+    break;
+  }
+  return out;
+}
+
 /**
  * Export-name inventory of a module source, for the property-case prompt.
  *
@@ -169,10 +303,11 @@ export type PropertyCasesResult =
  * never be reported as a real export — the prompt tells the model "the
  * module exports these names ONLY", so a phantom name would push the model
  * into writing cases that fail at runtime. Covers the ESM declaration forms
- * this codebase emits (function incl. async + generators, class,
- * const/let/var) plus CommonJS `exports.x = …` / `module.exports.x = …`
- * assignments. Member-chain lookalikes (`obj.exports.x = …`) are excluded —
- * they are object properties, not module exports. Deterministic, sorted.
+ * this codebase emits (function incl. async + generators, class, const/let/var
+ * incl. multi-declarator lists and destructuring patterns — 328 P3) plus
+ * CommonJS `exports.x = …` / `module.exports.x = …` assignments. Member-chain
+ * lookalikes (`obj.exports.x = …`) are excluded — they are object properties,
+ * not module exports. Deterministic, sorted.
  */
 export function exportedNamesOf(source: string): string[] {
   if (typeof source !== "string") return [];
@@ -192,11 +327,20 @@ export function exportedNamesOf(source: string): string[] {
   let m: RegExpExecArray | null;
   while ((m = cjsBare.exec(masked)) !== null) names.add(m[2]);
   while ((m = cjsModule.exec(masked)) !== null) names.add(m[2]);
-  // ESM declarations: function (incl. `async` and `function*` generators),
-  // class, const/let/var. `export default` has no hoisted name to inventory.
-  const esm =
-    /\bexport\s+(?:async\s+)?(?:function(?:\s*\*\s*|\s+)|class\s+|const\s+|let\s+|var\s+)([A-Za-z_$][\w$]*)/g;
-  while ((m = esm.exec(masked)) !== null) names.add(m[1]);
+  // ESM declarations: `function` (incl. `async` / `function*` generators) and
+  // `class` each carry a single hoisted name. `const/let/var` declarations may
+  // bind MANY names and may destructure — 328 P3 parses the whole declarator
+  // list (esmDeclaratorNames) instead of capturing only the first identifier
+  // (which missed `a = 1, b = 2` and every `{x} = o` / `[p, q] = arr` pattern,
+  // publishing "(none)" for a module that does export callables). `export
+  // default` has no hoisted name to inventory.
+  const esmDecl =
+    /\bexport\s+(?:async\s+)?(?:function(?:\s*\*\s*|\s+)|class\s+)([A-Za-z_$][\w$]*)/g;
+  while ((m = esmDecl.exec(masked)) !== null) names.add(m[1]);
+  const esmVar = /\bexport\s+(?:const|let|var)\s+/g;
+  while ((m = esmVar.exec(masked)) !== null) {
+    for (const n of esmDeclaratorNames(masked, m.index + m[0].length)) names.add(n);
+  }
   const list = [...names];
   list.sort();
   return list;
@@ -251,16 +395,22 @@ export async function propertyTestsFor(
       : { ok: false, reason: "error", error: res.error, code: res.code ?? "RT_E_INTERNAL" };
   }
   // Shared parser with the verify lane: the returned cases ARE VerifyCases.
-  const cases = parseOracleJson(res.text);
-  if (cases === null) {
+  // fixes/328 P3: the discriminating parse separates a valid-but-EMPTY reply
+  // from a malformed one — the conflation the verify lane's generateCases()
+  // also now distinguishes (the 327 lane's owed pin).
+  const parsed = parseOracleCases(res.text);
+  if (!parsed.ok) {
     return {
       ok: false,
       reason: "error",
-      error: "model returned an unparseable property payload",
+      error:
+        parsed.reason === "empty"
+          ? "model returned a valid JSON reply with no usable cases (empty property set)"
+          : "model returned an unparseable property payload",
       code: "RT_E_VALIDATION",
     };
   }
-  return { ok: true, cases };
+  return { ok: true, cases: parsed.cases };
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +659,62 @@ function skipParens(masked: string, i: number): number {
   return masked.length;
 }
 
+/** Skip a brace-balanced `{...}` group starting at `i` (masker's view). */
+function skipBraces(masked: string, i: number): number {
+  let depth = 0;
+  for (; i < masked.length; i++) {
+    const c = masked[i];
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return masked.length;
+}
+
+/** Skip one statement body to its terminating `;` / enclosing `}` at depth 0. */
+function skipStatement(masked: string, i: number): number {
+  let depth = 0;
+  for (; i < masked.length; i++) {
+    const c = masked[i];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") {
+      if (depth === 0) return i;
+      depth--;
+    } else if (c === ";" && depth === 0) return i + 1;
+  }
+  return i;
+}
+
+/**
+ * 328 P3 (326 L4 residual): the `while` that TERMINATES the `do` whose body
+ * starts just past `doKwEnd`, or -1 when this `do` is not followed by a
+ * terminator. A do-while tail is the ONLY `while (…);` that must not be
+ * counted (the `do` already recorded the loop); a standalone empty-body
+ * `while (cond);` is a real (busy-wait) loop and must be. Distinguishing them
+ * needs the preceding `do` body, which the keyword scan alone cannot see.
+ */
+function doWhileTerminatorIdx(masked: string, doKwEnd: number): number {
+  const bodyAt = bodyStartOf(masked, doKwEnd);
+  let after: number;
+  if (masked[bodyAt] === "{") {
+    after = skipBraces(masked, bodyAt);
+  } else {
+    after = skipStatement(masked, bodyAt);
+  }
+  let j = after;
+  while (j < masked.length && /\s/.test(masked[j])) j++;
+  if (
+    masked.startsWith("while", j) &&
+    (j === 0 || !/[A-Za-z0-9_$]/.test(masked[j - 1])) &&
+    !/[A-Za-z0-9_$]/.test(masked[j + 5] ?? "")
+  ) {
+    return j;
+  }
+  return -1;
+}
+
 /** Position just past a loop keyword's condition/`await` preamble (points at `{`, `;`, or body start). */
 function bodyStartOf(masked: string, from: number): number {
   let j = from;
@@ -576,6 +782,10 @@ export function complexityOf(source: string): ComplexityReport {
   const braceIsLoop: boolean[] = [];
   const loopFrames: { lin: number; hal: number; nesting: number }[] = [];
   let pending: { lin: number; hal: number; nesting: number } | null = null;
+  // 328 P3: kwIdx of each `while` that terminates a `do` we recorded — the ONLY
+  // `while (…);` the scan may skip (a standalone empty-body `while (cond);` is a
+  // real loop and must be counted).
+  const doTerminators = new Set<number>();
   const kwRe = /\b(for|while|do)\b/g;
   let pos = 0;
   for (;;) {
@@ -634,10 +844,25 @@ export function complexityOf(source: string): ComplexityReport {
       pos = kwEnd;
       continue;
     }
+    // 328 P3 (326 L4 residual): `do` — alone among the loop keywords — has no
+    // parenthesized head to key on, so a statement-position regex literal the
+    // masker left as code (`/do/.test(x)` after `}` / `)`) still matched. A
+    // real `do` keyword is never flanked by a regex literal's `/` delimiters.
+    if (kind === "do" && (masked[kwIdx - 1] === "/" || masked[kwEnd] === "/")) {
+      pos = kwEnd;
+      continue;
+    }
+    if (kind === "do") {
+      const term = doWhileTerminatorIdx(masked, kwEnd);
+      if (term >= 0) doTerminators.add(term);
+    }
     const bodyAt = bodyStartOf(masked, kwEnd);
-    // A `while` that ends in `;` is the terminator of a do-while — skip it
-    // (the `do` already recorded the loop).
-    if (kind === "while" && masked[bodyAt] === ";") {
+    // A `while` that ends in `;` is skipped ONLY when it is the terminator of a
+    // `do` recorded above — a standalone `while (cond);` is a real empty-body
+    // loop and is counted (328 P3: the old unconditional skip published O(1)
+    // for a busy-wait loop).
+    if (kind === "while" && masked[bodyAt] === ";" && doTerminators.has(kwIdx)) {
+      doTerminators.delete(kwIdx);
       pos = kwEnd;
       continue;
     }

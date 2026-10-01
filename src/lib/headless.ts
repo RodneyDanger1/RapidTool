@@ -2248,13 +2248,14 @@ export type P6JourneyCycleContext = {
  *  next cycle's prompt budget). */
 const P6_JOURNEY_REFUSAL_MAX = 200;
 
-/** fixes/147 (E2) + fixes/153 (P2): map a journey cycle's context onto
- *  engine.liveLayer's additive P6 deps (LiveLayerDeps) — which the engine
- *  forwards verbatim into codegen liveP6Synthesis as deps.treeFailure (the
- *  tree-failure reader) and deps.synthesisRefusal (the previous cycle's
- *  refusal class + bounded reason — CARRIED on deps for the codegen seam;
- *  the codegen-side reader is still owed (fixes/153 P2 deferred it — no
- *  reader in tree as of 326)). An absent/empty context ⇒ undefined ⇒
+/** fixes/147 (E2) + fixes/153 (P2) + fixes/328 F1: map a journey cycle's
+ *  context onto engine.liveLayer's additive P6 deps (LiveLayerDeps) — which
+ *  the engine forwards verbatim into codegen liveP6Synthesis as
+ *  deps.treeFailure (the bounded repair re-prompts' tree-failure reader) and
+ *  deps.synthesisRefusal (the previous cycle's refusal class + bounded
+ *  reason — read by codegen's PRIMARY-prompt reader
+ *  withSynthesisRefusalContext; fixes/328 F1 closed the reader fixes/153 P2
+ *  deferred). An absent/empty context ⇒ undefined ⇒
  *  the legacy byte-identical liveLayer(p, 6) call (zero behavior change);
  *  a tree-failure-only ctx yields exactly { treeFailure } — no
  *  synthesisRefusal key — byte-identical to fixes/147. Exported so the
@@ -2457,10 +2458,10 @@ function treeRunFailureTail(o: TreeRunOutcome): string {
  *  on the record) AND threaded as deps.treeFailure through liveLayer's
  *  additive deps param (fixes/147 E2); a previous-cycle refusal rides the
  *  same additive param as deps.synthesisRefusal — a bounded excerpt of the
- *  refusal class + model reason. CARRIED on deps for the codegen seam; the
- *  codegen-side reader is still owed (fixes/153 P2 deferred it — no reader
- *  in tree as of 326). codegen liveP6Synthesis reads deps?.treeFailure for
- *  tree-repair re-prompts. p6CycleLiveDeps is the single ctx→deps mapping. */
+ *  refusal class + model reason, read by codegen's PRIMARY-prompt reader
+ *  withSynthesisRefusalContext (fixes/328 F1). codegen liveP6Synthesis reads
+ *  deps?.treeFailure for tree-repair re-prompts. p6CycleLiveDeps is the
+ *  single ctx→deps mapping. */
 /** The shared cycle-synthesis core: floor stamping + the live-layer call. The
  *  two defaults below differ ONLY in the ctx→deps mapping they pass. */
 async function synthesizeCycle(

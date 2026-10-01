@@ -265,9 +265,27 @@ export function sanitizeOracleExpression(raw: unknown): OracleExpressionCheck {
   return { ok: true, expression };
 }
 
-/** Parse a DeepSeek JSON reply into verification cases. Tolerant of fences. */
-export function parseOracleJson(text: string): VerifyCase[] | null {
-  if (typeof text !== "string") return null;
+export type OracleCasesParse =
+  | { ok: true; cases: VerifyCase[] }
+  | { ok: false; reason: "empty" | "unparseable" };
+
+/**
+ * Discriminating parse of a DeepSeek case reply.
+ *
+ * fixes/328 P3 (register: the 327 lane owed this pin, fixes/257 §OV-13): the
+ * legacy `VerifyCase[] | null` return collapses two DIFFERENT outcomes — a
+ * well-formed reply whose `cases` array is empty (the model answered, with no
+ * cases) and a malformed reply the parser could not decode. generateCases'
+ * repair prompt then tells an empty-but-VALID reply it "was not valid JSON"
+ * (a false statement to the model) and no caller can branch on the difference.
+ *
+ * "unparseable" = no case array could be decoded at all (non-string, bad JSON,
+ * missing / wrong-typed `cases`). "empty" = a case array decoded but produced
+ * ZERO usable rows (an explicitly empty array, or every row skipped for a
+ * missing id/expression). `ok: true` always carries ≥1 case.
+ */
+export function parseOracleCases(text: string): OracleCasesParse {
+  if (typeof text !== "string") return { ok: false, reason: "unparseable" };
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
@@ -277,13 +295,13 @@ export function parseOracleJson(text: string): VerifyCase[] | null {
   try {
     obj = JSON.parse(cleaned);
   } catch {
-    return null;
+    return { ok: false, reason: "unparseable" };
   }
   const arr =
     obj && typeof obj === "object" && !Array.isArray(obj)
       ? (obj as Record<string, unknown>).cases
       : obj;
-  if (!Array.isArray(arr)) return null;
+  if (!Array.isArray(arr)) return { ok: false, reason: "unparseable" };
   const cases: VerifyCase[] = [];
   for (const c of arr) {
     if (c && typeof c === "object") {
@@ -322,7 +340,20 @@ export function parseOracleJson(text: string): VerifyCase[] | null {
       if (id && expression) cases.push({ id, expression });
     }
   }
-  return cases.length > 0 ? cases : null;
+  return cases.length > 0 ? { ok: true, cases } : { ok: false, reason: "empty" };
+}
+
+/**
+ * Parse a DeepSeek JSON reply into verification cases. Tolerant of fences.
+ *
+ * Legacy contract kept byte-stable (existing callers/tests branch on
+ * `=== null`): delegates to parseOracleCases() and flattens BOTH failure
+ * reasons to null. Callers that must react differently to an empty-but-valid
+ * reply (fixes/328 P3) use parseOracleCases() directly.
+ */
+export function parseOracleJson(text: string): VerifyCase[] | null {
+  const parsed = parseOracleCases(text);
+  return parsed.ok ? parsed.cases : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -456,6 +487,20 @@ export type CaseResult = { id: string; pass: boolean; detail: string };
 export const NO_CALLABLE_EXPORTS_REASON =
   "module exports no callable names — machine verification is vacuous";
 
+/**
+ * fixes/328 P3 (109 C-01 intersection half, owed by the 327 lane's N-4): the
+ * honest reason a run is refused when the module HAS callable exports but no
+ * case ever references one. The callable-inventory gate above proves the
+ * module offers an API; nothing yet proved a case touches it, so a vocabulary-free
+ * brief's literal-only case set (`1 === 1`, `({board:1}).board === 1`) could
+ * still mint a "machine-verified" pass against a module it never evaluates. The
+ * prompt's own allowed forms (`add(2,3) === 5`, `typeof buildPlan === 'function'`)
+ * both NAME an export, so requiring one such reference closes the vacuity hole
+ * without rejecting the prompt's allowed forms.
+ */
+export const NO_EXPORT_REFERENCE_REASON =
+  "no oracle case references an exported callable name — machine verification is vacuous";
+
 export async function runCases(
   source: string,
   cases: VerifyCase[],
@@ -563,6 +608,26 @@ export async function runCases(
   if (!callables) {
     return { pass: false, results, compileError: NO_CALLABLE_EXPORTS_REASON };
   }
+  // fixes/328 P3 (109 C-01 intersection half): at least one case must REFERENCE
+  // an exported callable name. The inventory above is measured from what really
+  // compiled, so this cannot be forged; a case that merely evaluates a literal
+  // proves nothing about the module. Reference (not call) is the bar because
+  // `typeof buildPlan === 'function'` is an explicitly-allowed prompt form.
+  const callableNames = new Set(callables.split(",").map((s) => s.trim()).filter(Boolean));
+  let referencesExport = false;
+  for (const c of validated) {
+    const code = stripStringsAndComments(c.expression);
+    for (const name of referencedIdentifiers(code)) {
+      if (callableNames.has(name)) {
+        referencesExport = true;
+        break;
+      }
+    }
+    if (referencesExport) break;
+  }
+  if (!referencesExport) {
+    return { pass: false, results, compileError: NO_EXPORT_REFERENCE_REASON };
+  }
   const allSeen = [...expected].every((id) => seen.has(id));
   return {
     pass:
@@ -609,6 +674,16 @@ function calledIdentifiers(code: string): string[] {
   // before a case is ever run, so spaces are the only separator that matters.
   for (const m of code.matchAll(/([A-Za-z_$][A-Za-z0-9_$]*)[ ]*[(]/g)) out.push(m[1]);
   return out;
+}
+
+/**
+ * fixes/328 P3 (109 C-01): identifiers NAMED anywhere in a case expression —
+ * called or merely referenced (`typeof buildPlan === 'function'` names
+ * `buildPlan` without calling it). Used by runCases' reference gate to require
+ * that at least one case touches the module's measured export inventory.
+ */
+function referencedIdentifiers(code: string): string[] {
+  return [...code.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)].map((m) => m[0]);
 }
 
 /**
@@ -832,30 +907,44 @@ export async function generateCases(
       ? { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" }
       : { ok: false, reason: "error", error: res.error, code: res.code ?? "RT_E_INTERNAL" };
   }
-  let cases = parseOracleJson(res.text);
-  if (cases === null) {
-    // audit-88 (A3): one bounded repair retry — a single malformed payload
-    // should not fail the whole verify run when the model can self-correct.
-    const retry = await runBudgetedCall(budget, () =>
-      callModel(
-        "weak",
-        [
-          "Your previous reply was not valid JSON with a {cases: [...]} array. Repair it now.",
-          "Return JSON ONLY: {\"cases\": [{\"id\": \"case-1\", \"expression\": \"<boolean expression>\"}]}.",
-          "Same rules as before: single boolean expressions, no semicolons/declarations/assignments.",
-        ].join("\n"),
-        { json: true },
-      ),
-    );
+  let parsed = parseOracleCases(res.text);
+  if (!parsed.ok) {
+    // audit-88 (A3): one bounded repair retry — a single malformed OR EMPTY
+    // payload should not fail the whole verify run when the model can
+    // self-correct. fixes/328 P3: the retry prompt is HONEST about WHICH
+    // failure happened — an empty-but-VALID reply is never told it "was not
+    // valid JSON" (the wrong diagnosis the 327 lane registered as owed).
+    const retryPrompt =
+      parsed.reason === "empty"
+        ? [
+            "Your previous reply was valid JSON but carried no cases.",
+            "Return JSON ONLY: {\"cases\": [{\"id\": \"case-1\", \"expression\": \"<boolean expression>\"}]}.",
+            "Return 2-5 cases, each ONE boolean expression over the module's exported names.",
+          ].join("\n")
+        : [
+            "Your previous reply was not valid JSON with a {cases: [...]} array. Repair it now.",
+            "Return JSON ONLY: {\"cases\": [{\"id\": \"case-1\", \"expression\": \"<boolean expression>\"}]}.",
+            "Same rules as before: single boolean expressions, no semicolons/declarations/assignments.",
+          ].join("\n");
+    const retry = await runBudgetedCall(budget, () => callModel("weak", retryPrompt, { json: true }));
     if (isBudgetStopRefusal(retry)) return retry;
     if (!retry.ok) {
       return { ok: false, reason: "error", error: "model returned an unparseable oracle payload", code: "RT_E_INTERNAL" };
     }
-    cases = parseOracleJson(retry.text);
+    parsed = parseOracleCases(retry.text);
   }
-  if (cases === null) {
-    return { ok: false, reason: "error", error: "model returned an unparseable oracle payload", code: "RT_E_INTERNAL" };
+  if (!parsed.ok) {
+    const empty = parsed.reason === "empty";
+    return {
+      ok: false,
+      reason: "error",
+      error: empty
+        ? "model returned a valid JSON reply with no usable cases (empty oracle) — refused (nothing to machine-verify)"
+        : "model returned an unparseable oracle payload",
+      code: empty ? "RT_E_VALIDATION" : "RT_E_INTERNAL",
+    };
   }
+  let cases = parsed.cases;
   // E-08 (A4-b): pin the A7 oracle ids — a returned case list that DROPS a
   // pinned row must never be accepted (the verify loop would otherwise mint a
   // machine pass on a reduced oracle). One bounded repair retry naming the

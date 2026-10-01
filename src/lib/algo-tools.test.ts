@@ -622,3 +622,105 @@ describe("exportedNamesOf — CJS export detection (109 T-08)", () => {
     assert.deepEqual(exportedNamesOf(src), ["alpha", "beta", "delta", "gamma"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 328 P3 — the 327 lane's recorded residuals, pinned with teeth:
+//   (1) exportedNamesOf missed multi-declarator / destructured ESM exports;
+//   (2) complexityOf skipped a standalone empty-body `while (cond);` and
+//       phantom-counted a statement-position `/do/` regex literal.
+// Each assertion is RED against HEAD's algo-tools.ts (scratch proof in
+// fixes/328_p3_assayer.md §teeth).
+// ---------------------------------------------------------------------------
+
+describe("exportedNamesOf — ESM multi-declarator + destructuring (328 P3)", () => {
+  it("inventories EVERY declarator of a multi-name export (was: first only)", () => {
+    assert.deepEqual(exportedNamesOf("export const a = 1, b = 2;"), ["a", "b"]);
+    assert.deepEqual(exportedNamesOf("export let a, b, c;"), ["a", "b", "c"]);
+  });
+
+  it("inventories destructured exports (object, array, rename, default, rest)", () => {
+    assert.deepEqual(exportedNamesOf("export const {x} = o;"), ["x"]);
+    assert.deepEqual(exportedNamesOf("export const {a: b, c: d} = o;"), ["b", "d"]);
+    assert.deepEqual(exportedNamesOf("export const [p, q] = arr;"), ["p", "q"]);
+    assert.deepEqual(exportedNamesOf("export const {a = 1, ...rest} = o;"), ["a", "rest"]);
+  });
+
+  it("mixed declarator lists inventory correctly and never invent a name", () => {
+    assert.deepEqual(exportedNamesOf("export const m = 1, {n} = o, [r] = arr;"), ["m", "n", "r"]);
+    // initializer commas/brackets must not leak as names
+    assert.deepEqual(exportedNamesOf("export const a = f(1, 2), b = [3, 4];"), ["a", "b"]);
+    // control: `export default` still has no hoisted name to inventory
+    assert.deepEqual(exportedNamesOf("export default function f() {}"), []);
+  });
+});
+
+describe("complexityOf — do-while terminator vs empty-body while; /do/ phantom (328 P3)", () => {
+  it("counts a standalone `while (cond);` empty-body loop (was O(1))", () => {
+    const r = complexityOf("exports.f = (c) => { while (c); return 1; };");
+    assert.equal(r.loops, 1);
+    assert.deepEqual(r.lineRefs, [1]);
+    assert.equal(r.notation, "O(n)");
+  });
+
+  it("control: a do-while tail is still not double-counted (braced and unbraced)", () => {
+    const braced = complexityOf(
+      "exports.f = (n) => { let i=0; do { i++; } while (i < n); return i; };",
+    );
+    assert.equal(braced.loops, 1, `braced do-while is ONE loop: ${JSON.stringify(braced)}`);
+    const unbraced = complexityOf(
+      "exports.f = (n) => { let i=0; do i++; while (i < n); return i; };",
+    );
+    assert.equal(unbraced.loops, 1, `unbraced do-while is ONE loop: ${JSON.stringify(unbraced)}`);
+  });
+
+  it("control: a do followed by a SEPARATE empty-body while counts BOTH", () => {
+    const r = complexityOf(
+      "exports.f = (a, b) => { do { a(); } while (a); while (b); return 1; };",
+    );
+    assert.equal(r.loops, 2, `do + standalone while -> 2 loops: ${JSON.stringify(r)}`);
+  });
+
+  it("does not phantom-count a statement-position `/do/` regex literal (was 1 loop)", () => {
+    const a = complexityOf("function helper(){}\n/do/.test('x');\nexports.f = () => 1;");
+    assert.equal(a.loops, 0);
+    assert.deepEqual(a.lineRefs, []);
+    assert.equal(a.notation, "O(1)");
+    const b = complexityOf("exports.f = (ok) => { if (ok) {} /do/.test('x'); return 1; };");
+    assert.equal(b.loops, 0);
+  });
+
+  it("control: a real `do` with a regex-literal body is still counted", () => {
+    const r = complexityOf("exports.f = (ok) => { do /x/.test('y'); while (ok); return 1; };");
+    assert.equal(r.loops, 1);
+  });
+});
+
+describe("propertyTestsFor — a valid-but-empty reply is diagnosed honestly (328 P3)", () => {
+  it("reads 'empty property set', not 'unparseable'", async () => {
+    process.env[KEY] = "sk-test";
+    globalThis.fetch = (async () =>
+      okResponse({
+        model: "deepseek-v4-flash",
+        choices: [{ message: { content: '{"cases":[]}' } }],
+      })) as typeof fetch;
+    const res = await propertyTestsFor(SORT_SRC, "Sort arrays.");
+    assert.equal(res.ok, false);
+    if (!res.ok) {
+      assert.equal(res.code, "RT_E_VALIDATION");
+      assert.match(res.error ?? "", /empty property set/);
+      assert.doesNotMatch(res.error ?? "", /unparseable/);
+    }
+  });
+
+  it("control: a malformed reply still reads 'unparseable property payload'", async () => {
+    process.env[KEY] = "sk-test";
+    globalThis.fetch = (async () =>
+      okResponse({
+        model: "deepseek-v4-flash",
+        choices: [{ message: { content: "not json" } }],
+      })) as typeof fetch;
+    const res = await propertyTestsFor(SORT_SRC, "Sort arrays.");
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.match(res.error ?? "", /unparseable property payload/);
+  });
+});

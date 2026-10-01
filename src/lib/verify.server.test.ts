@@ -31,7 +31,10 @@ import {
   droppedPinnedOracleIds,
   generateCases,
   NO_CALLABLE_EXPORTS_REASON,
+  NO_EXPORT_REFERENCE_REASON,
   oracleBriefGrounded,
+  parseOracleCases,
+  parseOracleJson,
   runCases,
   sanitizeOracleExpression,
   verifyAndFixServer,
@@ -825,6 +828,129 @@ describe("T-107.6 budget seam (A3 catch wrapper)", () => {
         "generation + fix spend are both kept",
       );
       assert.equal(mock.calls.length, 2, "generation + the fix dispatch that crossed the cap");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/328 P3 — three pins the 327 wave registered as OWED:
+//   (1) parseOracleCases discriminates a valid-but-EMPTY reply from a
+//       malformed one (parseOracleJson's legacy `null` collapsed them);
+//   (2) runCases refuses a case set that never references an export (109
+//       C-01's intersection half — a literal-only set could mint a pass);
+//   (3) generateCases diagnoses an empty reply honestly ("valid JSON but no
+//       cases"), not with the false "not valid JSON" repair prompt.
+// Each assertion is RED against HEAD's verify.server.ts (proven in the
+// scratch tree; see fixes/328_p3_assayer.md §teeth).
+// ---------------------------------------------------------------------------
+
+describe("fixes/328 P3 — parseOracleCases vs legacy parseOracleJson", () => {
+  it("a valid-but-empty reply is 'empty' — NOT 'unparseable' (the owed pin)", () => {
+    assert.deepEqual(parseOracleCases('{"cases":[]}'), { ok: false, reason: "empty" });
+    assert.deepEqual(parseOracleCases("[]"), { ok: false, reason: "empty" });
+    assert.deepEqual(parseOracleCases('{"cases":[{"id":"","expression":"x"}]}'), {
+      ok: false,
+      reason: "empty",
+    });
+    assert.deepEqual(parseOracleCases("not json"), { ok: false, reason: "unparseable" });
+    assert.deepEqual(parseOracleCases("{}"), { ok: false, reason: "unparseable" });
+    assert.deepEqual(parseOracleCases('{"cases":"nope"}'), { ok: false, reason: "unparseable" });
+    assert.deepEqual(parseOracleCases(42 as unknown as string), { ok: false, reason: "unparseable" });
+  });
+
+  it("ok:true always carries >=1 case; determinism over the valid shape", () => {
+    const parsed = parseOracleCases('{"cases":[{"id":"a","expression":"1===1"}]}');
+    assert.equal(parsed.ok, true);
+    if (parsed.ok) assert.deepEqual(parsed.cases, [{ id: "a", expression: "1===1" }]);
+    assert.deepEqual(
+      parseOracleJson('{"cases":[{"id":"a","expression":"1===1"}]}'),
+      parseOracleJson('{"cases":[{"id":"a","expression":"1===1"}]}'),
+    );
+  });
+
+  it("legacy parseOracleJson is byte-stable: BOTH failure reasons flatten to null", () => {
+    assert.equal(parseOracleJson('{"cases":[]}'), null);
+    assert.equal(parseOracleJson("not json"), null);
+    assert.deepEqual(parseOracleJson('{"cases":[{"id":"a","expression":"1===1"}]}'), [
+      { id: "a", expression: "1===1" },
+    ]);
+  });
+});
+
+describe("fixes/328 P3 — runCases refuses a set that never references an export", () => {
+  const SRC = "exports.add = (a, b) => a + b; exports.buildPlan = () => ({ ok: true });";
+
+  it("a literal-only set can no longer mint a machine pass (109 C-01 shape)", { skip: !available }, async () => {
+    const res = await runCases(SRC, [{ id: "c1", expression: "1 === 1" }]);
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, NO_EXPORT_REFERENCE_REASON);
+    assert.equal(
+      res.results[0]?.pass,
+      true,
+      "the literal itself evaluates TRUE — the reference gate, not the case, refuses the pass",
+    );
+  });
+
+  it("an object-bookkeeping literal is refused too", { skip: !available }, async () => {
+    const res = await runCases(SRC, [{ id: "c1", expression: "({board:1}).board === 1" }]);
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, NO_EXPORT_REFERENCE_REASON);
+  });
+
+  it("control: BOTH prompt-allowed forms still pass (typeof and a call)", { skip: !available }, async () => {
+    const t = await runCases(SRC, [{ id: "c1", expression: "typeof buildPlan === 'function'" }]);
+    assert.equal(t.pass, true, `typeof <export> is an allowed prompt form: ${JSON.stringify(t)}`);
+    assert.equal(t.compileError, undefined);
+    const c = await runCases(SRC, [{ id: "c1", expression: "add(2,3) === 5" }]);
+    assert.equal(c.pass, true, `calling an export is an allowed prompt form: ${JSON.stringify(c)}`);
+  });
+
+  it("control: a mixed set with one real case still passes", { skip: !available }, async () => {
+    const res = await runCases(SRC, [
+      { id: "good", expression: "add(2,3) === 5" },
+      { id: "noise", expression: "1 === 1" },
+    ]);
+    assert.equal(res.pass, true, `one real case grounds the set: ${JSON.stringify(res)}`);
+  });
+});
+
+describe("fixes/328 P3 — generateCases diagnoses an empty reply honestly", () => {
+  it("a valid-but-empty reply gets the EMPTY repair prompt, never 'not valid JSON'", async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([{ cases: [] }, { cases: [] }]);
+    try {
+      const res = await generateCases(SOURCE, BRIEF, [], SEEDS, ORACLE_IDS);
+      assert.equal(res.ok, false);
+      if (!res.ok) {
+        assert.equal(res.reason, "error");
+        assert.equal(res.code, "RT_E_VALIDATION");
+        assert.match(res.error ?? "", /empty oracle/);
+        assert.doesNotMatch(res.error ?? "", /unparseable/);
+      }
+      assert.equal(mock.calls.length, 2, "one bounded repair retry");
+      assert.match(mock.calls[1]!.prompt, /valid JSON but carried no cases/);
+      assert.doesNotMatch(mock.calls[1]!.prompt, /not valid JSON/);
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("control: a malformed reply keeps the 'not valid JSON' retry and RT_E_INTERNAL", async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat(["totally not json", "totally not json"]);
+    try {
+      const res = await generateCases(SOURCE, BRIEF, [], SEEDS, ORACLE_IDS);
+      assert.equal(res.ok, false);
+      if (!res.ok) {
+        assert.equal(res.code, "RT_E_INTERNAL");
+        assert.match(res.error ?? "", /unparseable oracle payload/);
+      }
+      assert.equal(mock.calls.length, 2);
+      assert.match(mock.calls[1]!.prompt, /not valid JSON/);
     } finally {
       mock.restore();
       restoreKey();

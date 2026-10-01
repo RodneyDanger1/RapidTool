@@ -13,11 +13,13 @@
  *
  * Wiring (this wave): `scripts/rapidtool-cli.mjs`'s `emit` arm calls this
  * AFTER an ok emit that returned `survivors`, and reports `quarantined` +
- * `quarantineDir` on the envelope. TODO(R11-f08): lift the move INTO
- * `emitProject` (headless.ts:1675-1682 refusal / :1722 in-place `survivors`)
- * so EVERY forced caller quarantines, not just the CLI — 'headless.ts is
- * E1b's window this wave; the CLI-side seam is the safe placement' (see
- * fixes/272_s4_floor.md §[2]).
+ * `quarantineDir` on the envelope; when a move FAILS it suppresses the
+ * `--verify-kind`/`--check`/`--run` legs (`judgingSkipped`) so a green tree-run
+ * can never mint `tested` over a still-mixed tree. TODO(R11-f08): lift the move
+ * INTO `emitProject` (headless.ts:1675-1682 refusal / :1722 in-place
+ * `survivors`) so EVERY forced caller quarantines, not just the CLI —
+ * 'headless.ts is E1b's window this wave; the CLI-side seam is the safe
+ * placement' (see fixes/272_s4_floor.md §[2]).
  *
  * Note for the later lift: `walkEmitRel` skips `QUARANTINE_DIR_NAME`
  * (`headless.ts` EMIT_SKIP_DIRS), so a repeat emit over the same dir never

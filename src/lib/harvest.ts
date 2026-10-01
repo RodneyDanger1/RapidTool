@@ -28,7 +28,7 @@
 import { completeDeepSeek, DEEPSEEK_MODELS, isDeepSeekConfigured } from "./deepseek.server.ts";
 import { dualChannelFailDetail } from "./errors.ts";
 import { freeWebSearch } from "./websearch.server.ts";
-import { lessonRow } from "./knowledge.ts";
+import { failureSignature, lessonRow } from "./knowledge.ts";
 import type { ResearchResult } from "./research.ts";
 import type { MemoryEntry, PhaseId, Project } from "./types.ts";
 
@@ -700,9 +700,16 @@ const EMPTY_NOTE_RE = /empty|none|unavailable|failed|exhausted/i;
 /**
  * One lesson row for a harvest outcome (honest negative evidence, 98 §2.3
  * extension). Deterministic: content-addressed id `lesson-harvest-<reason>-…`,
- * text capped by lessonRow's 240-char budget, tags [lesson, harvest-<reason>,
- * L2, harvest, negative-evidence], source "engine", score 0.6. Same inputs
- * forever mint the same id — idempotent by construction.
+ * text capped by lessonRow's LESSON_TEXT_MAX budget, tags [lesson,
+ * harvest-<reason>, L2, harvest, negative-evidence], source "engine", score 0.6.
+ *
+ * 328 P5 (112 §4.2 — T1 convergence, the harvest half): the id hashes a STABLE
+ * signature — kind · phase · the harvest reason — never the volatile `detail`
+ * tail (a rate-limit message varies per backend/run). A recurrence of the SAME
+ * harvest failure therefore converges on ONE row instead of forking a new one
+ * per run; the human-readable detail still rides the row TEXT. Identical inputs
+ * are unchanged (still idempotent), and a different reason/phase stays a
+ * different row — the same contract the knowledge.ts builders honour.
  */
 export function harvestEvidenceLesson(
   project: Project,
@@ -712,6 +719,7 @@ export function harvestEvidenceLesson(
     opts.reason === "rate-limit" || opts.reason === "empty" || opts.reason === "degraded"
       ? opts.reason
       : "empty";
+  const phase: PhaseId = Number.isFinite(opts.phase) ? (opts.phase as PhaseId) : HARVEST_PHASE;
   const detail =
     typeof opts.detail === "string" ? opts.detail.replace(/\s+/g, " ").trim().slice(0, 160) : "";
   const briefHead =
@@ -726,15 +734,20 @@ export function harvestEvidenceLesson(
         ? "harvest served partial results under rate-limit pressure"
         : "live-source harvest returned no usable hits";
   const text = `L2 ${reason}: ${what} (${context}); honest negative evidence — nothing fabricated.`;
+  // The reason IS the class: no anchors and no detail tail, so the signature is
+  // stable across a differing rate-limit/empty note (failureSignature's
+  // anchor-less fallback would otherwise normalize the volatile detail).
+  const signature = failureSignature({ kind: "harvest-degraded", phase, classCode: reason });
   return lessonRow({
     classShort: `harvest-${reason}`,
     level: "L2",
     kind: "episodic",
-    phase: Number.isFinite(opts.phase) ? (opts.phase as PhaseId) : HARVEST_PHASE,
+    phase,
     text,
     score: 0.6,
     source: "engine",
     tags: ["harvest", "negative-evidence"],
+    signature,
   });
 }
 
