@@ -1095,6 +1095,44 @@ describe("chunked synthesis pure helpers (fixes/144 M2 / S-01 T2)", () => {
     assert.doesNotThrow(() => new Function(out));
   });
 
+  it("325 A3: a brace REGEX inside a dropped whole-object assign never leaves a dangling `};`", () => {
+    // Pre-fix the depth walk ignored regex literals: the `}` in `/}/g` closed
+    // the construct early and the emitted chunk carried a dangling `};` — a
+    // SyntaxError under the tenant's `"type":"module"` spec import. Assert on
+    // the PARSE, not the shape.
+    const src = [
+      "function parse(s) { return String(s); }",
+      "module.exports = {",
+      "  parse: parse,",
+      '  fmt: (s) => s.replace(/}/g, "!"),',
+      "};",
+      "function tail() { return 1; }",
+      "",
+    ].join("\n");
+    const out = stripCjsExportAssignments(src, ["parse"]);
+    assert.equal(out.includes("module.exports"), false, "the whole-object assign is gone");
+    assert.ok(out.includes("function parse(s) { return String(s); }"), "code before survives");
+    assert.ok(out.includes("function tail() { return 1; }"), "code AFTER the construct survives");
+    assert.doesNotThrow(() => new Function(out), "no dangling `};` — the stripped output must parse");
+    // TEETH: the pre-fix output shape (dangling `};`) does NOT parse.
+    assert.throws(
+      () => new Function("function parse(s) { return String(s); }\n};\nfunction tail() { return 1; }\n"),
+      SyntaxError,
+      "the pre-fix dangling-brace shape must be rejected — this test would have caught the bug",
+    );
+  });
+
+  it("325 A3: a `[`-opening regex inside a dropped whole-object assign does not swallow the rest of the file", () => {
+    // Pre-fix `/[{]/` added a phantom depth level and the construct consumed
+    // through EOF — `const keep = 1;` vanished, leaving only `export { keep };`
+    // (no binding) in the emitted file: `Export 'keep' is not defined`.
+    const src = ["module.exports = {", "  open: /[{]/,", "};", "const keep = 1;", ""].join("\n");
+    const out = stripCjsExportAssignments(src, ["open"]);
+    assert.equal(out.includes("module.exports"), false);
+    assert.ok(out.includes("const keep = 1;"), "code after the construct is preserved, not swallowed");
+    assert.doesNotThrow(() => new Function(out));
+  });
+
   it("W21-258: materializeImportableTree has NO single-file identity path — one chunk is materialized like N", () => {
     // fixes/175 returned single-file input unchanged ("legacy disk bytes");
     // fixes/258 removed that path: the emitted tenant always declares
@@ -1207,6 +1245,52 @@ describe("chunked synthesis pure helpers (fixes/144 M2 / S-01 T2)", () => {
     assert.ok(chunkFile.source.includes("export { getProperty, _internals };"), "listed + converted names exported");
   });
 
+  it("325 A3: regex-brace assigns + bare-`let` residuals materialize to IMPORTABLE ESM (W21-258 import legs)", () => {
+    // Leg 1 = A-2's dangling shape (`/}/g` inside the dropped whole-object
+    // assign): pre-fix the emitted chunk imported as SyntaxError.
+    const dangling = materializeImportableTree([
+      {
+        path: TREE_ENTRY_PATH,
+        source: [
+          "function parse(s) { return String(s); }",
+          "module.exports = {",
+          "  parse: parse,",
+          '  fmt: (s) => s.replace(/}/g, "!"),',
+          "};",
+          "function tail() { return 1; }",
+          "",
+        ].join("\n"),
+        exports: ["parse"],
+      },
+    ]);
+    const runDangling = importMaterializedTree(dangling);
+    assert.equal(runDangling.status, 0, `dangling leg must import — stderr:\n${runDangling.stderr}`);
+    assert.equal(runDangling.stdout.trim(), "TREE_IMPORT_OK exports=[parse]");
+    // Leg 2 = A-3's duplicate-declaration shape (`let cache;` + residual
+    // assign): pre-fix the chunk imported as
+    // `Identifier 'cache' has already been declared`.
+    const bare = materializeImportableTree([
+      {
+        path: TREE_ENTRY_PATH,
+        source: [
+          "let cache;",
+          "function compute() { return { ok: true }; }",
+          "module.exports.cache = cache || compute();",
+          "module.exports.compute = compute;",
+          "",
+        ].join("\n"),
+        exports: ["cache", "compute"],
+      },
+    ]);
+    assert.ok(
+      !bare.files.some((f) => f.source.includes("const cache =")),
+      "no duplicate `cache` declaration anywhere in the emitted tree",
+    );
+    const runBare = importMaterializedTree(bare);
+    assert.equal(runBare.status, 0, `bare-let leg must import — stderr:\n${runBare.stderr}`);
+    assert.equal(runBare.stdout.trim(), "TREE_IMPORT_OK exports=[cache,compute]");
+  });
+
   it("W21-258: neutralizeResidualCjsExports clears every remaining CJS export statement (real-artifact shape)", () => {
     // The shape run #2's accepted chunk shipped (fixes/255 §1): declared-name
     // assigns go first (stripCjsExportAssignments), then whatever CJS surface
@@ -1238,6 +1322,32 @@ describe("chunked synthesis pure helpers (fixes/144 M2 / S-01 T2)", () => {
     const commented = neutralizeResidualCjsExports("// module.exports.x = x;\nfunction x() {}\n");
     assert.deepEqual(commented.exported, []);
     assert.ok(commented.source.includes("// module.exports.x = x;"), "comments are never rewritten");
+  });
+
+  it("325 A3: a bare `let cache;` is a local binding — the residual assign drops, never a duplicate const", () => {
+    // Pre-fix `localBindingNames` only saw `const|let|var NAME =` shapes, so
+    // `module.exports.cache = cache || compute();` converted to
+    // `const cache = cache || compute();` beside the file's own `let cache;` —
+    // a duplicate declaration (and a TDZ self-reference) that killed the whole
+    // emitted tree at import.
+    const src = [
+      "let cache;",
+      "function compute() { return { ok: true }; }",
+      "module.exports.cache = cache || compute();",
+      "module.exports.compute = compute;",
+      "",
+    ].join("\n");
+    const out = neutralizeResidualCjsExports(stripCjsExportAssignments(src, ["cache", "compute"]));
+    assert.equal(out.source.split(/\b(?:const|let|var)\s+cache\b/).length - 1, 1, "exactly ONE declaration of cache");
+    assert.ok(out.source.includes("let cache;"), "the file's own declaration is kept");
+    assert.ok(!out.source.includes("const cache ="), "no duplicate const conversion");
+    assert.deepEqual(out.exported, ["cache"], "the name stays on the export surface");
+    assert.doesNotThrow(() => new Function(out.source));
+    // destructuring arm: `const { id } = row;` binds `id` — the residual
+    // `module.exports.id = id;` must not mint `const id = id;`.
+    const destructured = neutralizeResidualCjsExports("const { id } = row;\nmodule.exports.id = id;\n");
+    assert.ok(!destructured.source.includes("const id ="), "destructured names are bindings too");
+    assert.deepEqual(destructured.exported, ["id"]);
   });
 
   it("toGeneratedTreeFile: content-addressed fnv1a hash + attempt stamp", () => {
@@ -2315,6 +2425,28 @@ describe("216r patch primitives (W8-L5 pins)", () => {
     assert.ok(!p.includes("Tree-run failure context"), "no treeFailure → no context block (legacy bytes)");
     const withTree = p6SynthesisPatchRepairPrompt("d", windows, "src/jobs/rent.ts — tests fail: boom");
     assert.ok(withTree.endsWith("Tree-run failure context (failing file + first not-ok tail):\nsrc/jobs/rent.ts — tests fail: boom"));
+  });
+
+  it("325 A3: the FIRST FORM example is itself valid JSON (no trailing comma)", () => {
+    // Pre-fix the example ended `…"},}.` — a model copying the preferred form
+    // byte-for-byte produced a reply JSON.parse refuses, so the delta was
+    // refused on a technicality and the legacy full-rewrite repair burned an
+    // extra call. The prompt's own example must parse.
+    const p = p6SynthesisPatchRepairPrompt("the module uses a forbidden primitive: `fetch`", []);
+    const prefix = "Return JSON ONLY, FIRST FORM (preferred): ";
+    const line = p.split("\n").find((l) => l.startsWith(prefix)) ?? "";
+    assert.notEqual(line, "", "the FIRST FORM line is present");
+    const example = line.slice(prefix.length).replace(/\.$/, "");
+    const parsed = JSON.parse(example) as { patch?: { oldStr?: unknown; newStr?: unknown } };
+    assert.equal(typeof parsed.patch?.oldStr, "string", "the example's oldStr is a string");
+    assert.equal(typeof parsed.patch?.newStr, "string", "the example's newStr is a string");
+    assert.equal(p.includes('"},}'), false, "the pre-fix trailing-comma shape is gone");
+    // TEETH: the pre-fix example bytes do not parse.
+    assert.throws(
+      () => JSON.parse('{"patch":{"oldStr":"x","newStr":"y"},}'),
+      SyntaxError,
+      "the pre-fix trailing-comma example must be rejected",
+    );
   });
 });
 

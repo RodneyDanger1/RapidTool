@@ -353,4 +353,50 @@ describe("FIX-2c — checkpoint staleness vs the named project file (X2b OBS)", 
     const noPhase = checkpointSupersededBy(snap(), 4, snap({ currentPhase: undefined } as Partial<Project>));
     assert.equal(noPhase.superseded, false);
   });
+
+  // -------------------------------------------------------------------------
+  // fixes/325 A4 (edge probe of FIX-2c): a REJECTED file at the SAME edge the
+  // snapshot records. Every pre-existing axis reads equal (same id/brief/phase/
+  // sealed count) so the pre-fix verdict was superseded:false, and the CLI
+  // resume arm then rewrote the file from the snapshot — dropping the
+  // rejection note, its decision row and its memory row (live keyless repro:
+  // a4_scratch/probe2.mts: blocked/rejected + 1 reject decision → awaiting_hitl
+  // + 0 reject decisions). The file is the current truth here.
+  // -------------------------------------------------------------------------
+  it("325 A4: a file REJECTED at the snapshot's own edge is superseded — the snapshot predates the human rejection", () => {
+    const verdict = checkpointSupersededBy(
+      snap(), // snapshot: P4 awaiting_hitl, 4 sealed
+      4,
+      snap({
+        status: "blocked",
+        phases: [
+          { id: 0, status: "complete" },
+          { id: 1, status: "complete" },
+          { id: 2, status: "complete" },
+          { id: 3, status: "complete" },
+          { id: 4, status: "rejected" },
+        ],
+      }),
+    );
+    assert.equal(verdict.superseded, true, "a rejected file at the snapshot's re-entry edge must never be resumed over");
+    assert.match(String(verdict.reason), /rejected P4/);
+    // Both markers fire independently: a foreign/persisted payload that only
+    // carries the blocked project status (the status rejectHitl stamps) is
+    // superseded too, with no rejected record needed.
+    const blockedOnly = checkpointSupersededBy(snap(), 4, snap({ status: "blocked" }));
+    assert.equal(blockedOnly.superseded, true);
+    assert.match(String(blockedOnly.reason), /rejected P4/);
+    // The designed shapes are untouched by the new axis: a running/ready file
+    // at the same edge, and the post-park awaiting_hitl shape, stay resumable.
+    assert.equal(checkpointSupersededBy(snap(), 4, snap({ status: "running" })).superseded, false);
+    assert.equal(
+      checkpointSupersededBy(
+        snap(),
+        4,
+        snap({ phases: [...snap().phases.slice(0, 4), { id: 4, status: "ready" }] }),
+      ).superseded,
+      false,
+      "a retried (ready) edge is not a rejection — resume may re-park it",
+    );
+  });
 });

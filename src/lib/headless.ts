@@ -964,6 +964,27 @@ export function checkpointSupersededBy(
       reason: `the project file is at P${filePhase} — beyond the snapshot's re-entry phase P${snapshotPhase}; resuming would rewind completed work`,
     };
   }
+  // 6. rejection (fixes/325 A4): the file records a HITL REJECTION the snapshot
+  //    predates. The CLI `reject` verb writes the file at the SAME edge the
+  //    snapshot records (phase/seal/id/brief axes all read equal): the edge
+  //    record flips `awaiting_hitl` → `rejected`, project status →
+  //    `blocked` (engine.rejectHitl), and a reject decision + `hitl.rejected`
+  //    warn log + episodic memory row land in the append-only ledger. NONE of
+  //    that is in the snapshot (a rejection is a human act after the per-phase
+  //    commit; no drive path records it), so resuming the snapshot rewrites
+  //    the file from it and silently drops the rejection — note,
+  //    rejectionHistory, decision, memory row. Repro: a4_scratch/probe2.mts
+  //    (pre-fix verdict superseded:false, then a resume-drive rewrote the file
+  //    blocked/rejected → awaiting_hitl with 0 rejection rows).
+  const edgeRecord = (Array.isArray(file?.phases) ? file.phases : []).find(
+    (record) => (record as { id?: unknown } | null | undefined)?.id === snapshotPhase,
+  ) as { status?: unknown } | null | undefined;
+  if (edgeRecord?.status === "rejected" || file?.status === "blocked") {
+    return {
+      superseded: true,
+      reason: `the project file records a rejected P${snapshotPhase} (status ${String(file?.status)}) — the snapshot predates the human rejection; resuming would drop it`,
+    };
+  }
   const countSealed = (p: Project): number =>
     (Array.isArray(p?.phases) ? p.phases : []).filter(
       (record) => (record as { status?: unknown } | null | undefined)?.status === "complete",

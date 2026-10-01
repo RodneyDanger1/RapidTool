@@ -1137,3 +1137,71 @@ test("A3/M3-17: packetInputHash(null) fingerprints as the empty shape — never 
   assert.equal(packetInputHash(null as unknown as Project), packetInputHash({} as Project));
 });
 
+test("A6c/M3-18: junk collection containers compile to honest empty forms — never a TypeError (325 BUG A)", () => {
+  // The 14 shapes the A6 hunt byte-anchored (fixes/325_a6_hunt.md §A): a
+  // foreign `{}`/`42` in place of a collection used to crash compileAgentPacket
+  // (13 shapes) or packetInputHash (4 shapes) with "not iterable" / "is not a
+  // function"; each must now degrade to the empty form, exactly like M3-14.
+  const base = { name: "junk", id: "j", currentPhase: 0, brief: "x" } as unknown as Project;
+  const shapes: [string, Record<string, unknown>][] = [
+    ["memory:{}", { memory: {} }],
+    ["memory:42", { memory: 42 }],
+    ["crew:{}", { crew: {} }],
+    ["research:{}", { research: {} }],
+    ["oracle:{}", { oracle: {} }],
+    ["contracts:{entities:{},endpoints:{}}", { contracts: { entities: {}, endpoints: {} } }],
+    ["specGraph:{order:{},nodes:{}}", { specGraph: { order: {}, nodes: {} } }],
+    ["specGraph:{order:['a'],nodes:{}}", { specGraph: { order: ["a"], nodes: {} } }],
+    ["logs:{}", { logs: {} }],
+    ["decisions:{}", { decisions: {} }],
+    ["artifacts:{}", { artifacts: {} }],
+    [
+      "scorecard:{axes:{},bottlenecks:{},attackVectors:{}}",
+      { scorecard: { verdict: "x", axes: {}, bottlenecks: {}, attackVectors: {} } },
+    ],
+    ["lattice:{jobs:{}}", { lattice: { jobs: {} } }],
+    ["lattice:42", { lattice: 42 }],
+  ];
+  for (const [label, extra] of shapes) {
+    assert.doesNotThrow(
+      () => compileAgentPacket({ ...base, ...extra } as unknown as Project),
+      `compile must survive ${label}`,
+    );
+  }
+  // honesty: the junk containers render the SAME empty forms as absence
+  const memless = compileAgentPacket({ ...base, memory: {} } as unknown as Project);
+  assert.ok(memless.includes(EMPTY_MEM_LINE), "memory:{} reads as no rows (the empty-memory floor)");
+  const crewless = compileAgentPacket({ ...base, crew: {} } as unknown as Project);
+  assert.ok(crewless.includes("(crew not yet assembled)"), "crew:{} reads as no seats");
+  const latticeJunk = compileAgentPacket({ ...base, lattice: { jobs: {} } } as unknown as Project);
+  assert.ok(latticeJunk.includes("Jobs: unspecified"), "lattice.jobs:{} reads as no jobs");
+  const specJunk = compileAgentPacket({
+    ...base,
+    specGraph: { order: {}, nodes: {} },
+  } as unknown as Project);
+  assert.ok(specJunk.includes("(run algorithms first)"), "specGraph containers read as no graph");
+  // export-profile wrapper: the same junk spec-graph containers must not throw
+  // out of profileScopeFiles (fix-time discovery, same `?? []` class)
+  const wrapped = exportProfiles["aider"].wrap(
+    "packet-body",
+    { ...base, specGraph: { order: {}, nodes: {} } } as unknown as Project,
+  );
+  assert.ok(
+    wrapped.includes("(no spec-graph file scope recorded"),
+    "junk order/nodes read as no scope in the export profile",
+  );
+  // packetInputHash: junk forms fingerprint EXACTLY like the empty shape
+  for (const [label, extra] of [
+    ["memory:{}", { memory: {} }],
+    ["logs:{}", { logs: {} }],
+    ["decisions:{}", { decisions: {} }],
+    ["artifacts:{}", { artifacts: {} }],
+  ] as [string, Record<string, unknown>][]) {
+    assert.equal(
+      packetInputHash({ ...base, ...extra } as unknown as Project),
+      packetInputHash({ ...base } as unknown as Project),
+      `input_hash must be byte-equal to the empty shape for ${label}`,
+    );
+  }
+});
+

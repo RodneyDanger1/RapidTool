@@ -58,8 +58,12 @@ function researchHash(project: Project): string {
   // never churn the fingerprint (the live layer now dedups at append, this is
   // the belt-and-suspenders packet-side guard).
   const urls = new Set<string>();
-  for (const entry of project.research ?? []) {
-    for (const item of entry?.items ?? []) {
+  // A6c (325 BUG A / M3-18): junk corpus containers on a foreign payload read
+  // as the empty corpus — Array.isArray on BOTH the entry list and each
+  // entry's items list (the old `?? []` let a `{}` reach the for-of and throw
+  // "not iterable" out of systemJson → compileAgentPacket).
+  for (const entry of Array.isArray(project.research) ? project.research : []) {
+    for (const item of Array.isArray(entry?.items) ? entry.items : []) {
       if (item?.url) urls.add(item.url);
     }
   }
@@ -254,12 +258,15 @@ function compiledAtFor(project: Project): string {
     typeof project.createdAt === "number" && Number.isFinite(project.createdAt)
       ? project.createdAt
       : 0;
-  for (const row of project.logs ?? []) {
+  // A6c (325 BUG A / M3-18): junk logs/decisions containers read as empty —
+  // Array.isArray, same floor as M3-14 (the old `?? []` let a `{}` throw
+  // "object is not iterable" out of compiledAtFor ← :745).
+  for (const row of Array.isArray(project.logs) ? project.logs : []) {
     if (row && typeof row.ts === "number" && Number.isFinite(row.ts) && row.ts > latest) {
       latest = row.ts;
     }
   }
-  for (const d of project.decisions ?? []) {
+  for (const d of Array.isArray(project.decisions) ? project.decisions : []) {
     if (
       d &&
       typeof d.decidedAt === "number" &&
@@ -303,17 +310,21 @@ export function packetInputHash(project: Project): string {
   // itself. Same epoch/empty floor compiledAtFor documents.
   const src = project && typeof project === "object" ? project : ({} as Project);
   const rows: string[] = [`created:${ms(src.createdAt)}`];
-  for (const row of src.logs ?? []) rows.push(`log:${ms(row?.ts)}`);
-  for (const d of src.decisions ?? []) rows.push(`decision:${ms(d?.decidedAt)}`);
+  // A6c (325 BUG A / M3-18): junk container fields read as the empty form —
+  // Array.isArray, same floor as the M3-17 null-project guard above (the old
+  // `?? []` let a `{}` reach the for-of and throw "not iterable").
+  for (const row of Array.isArray(src.logs) ? src.logs : []) rows.push(`log:${ms(row?.ts)}`);
+  for (const d of Array.isArray(src.decisions) ? src.decisions : [])
+    rows.push(`decision:${ms(d?.decidedAt)}`);
   rows.push(`notes:${src.notes ?? ""}`);
-  for (const a of src.artifacts ?? []) {
+  for (const a of Array.isArray(src.artifacts) ? src.artifacts : []) {
     // The sealed packet artifact is the compile's output, not an input (see above).
     if (a?.kind === "packet") continue;
     rows.push(
       `artifact:${a?.id ?? ""}\u0001${a?.phase ?? ""}\u0001${a?.kind ?? ""}\u0001${a?.title ?? ""}\u0001${a?.body ?? ""}`,
     );
   }
-  for (const m of src.memory ?? []) {
+  for (const m of Array.isArray(src.memory) ? src.memory : []) {
     rows.push(
       `memory:${m?.id ?? ""}\u0001${m?.kind ?? ""}\u0001${m?.phase ?? ""}\u0001${m?.score ?? ""}\u0001${m?.text ?? ""}`,
     );
@@ -592,7 +603,9 @@ export function compileAgentPacket(
   const decisionRows = Array.isArray(project.decisions) ? project.decisions : [];
   const phaseRows = Array.isArray(project.phases) ? project.phases : [];
   const artifactRows = Array.isArray(project.artifacts) ? project.artifacts : [];
-  const memoryRows = project.memory ?? [];
+  // A6c (325 BUG A / M3-18): the last unguarded member of this trio — a junk
+  // `{}` memory container threw "not iterable" at countIdCollisions (:82 ← :640).
+  const memoryRows = Array.isArray(project.memory) ? project.memory : [];
   // OV-41 (W23-L4): measured spend from the T-107.6 ledger — a caller-threaded
   // ledger wins over the project's persisted slice (`types.ts:435`); every
   // number is a ledger field or a ledger-helper output. Absent ⇒ null ⇒ the
@@ -628,8 +641,9 @@ export function compileAgentPacket(
       tags: ["lesson"],
     }));
   const rankPool = provenRows.length === 0 ? memoryRows : [...memoryRows, ...provenRows];
+  // A6c (325 BUG A / M3-18): junk lattice.jobs container reads as no jobs.
   const ranked = fusionRank(
-    `${phase.title} ${briefRaw} ${lattice?.jobs?.join(" ") ?? ""}`,
+    `${phase.title} ${briefRaw} ${Array.isArray(lattice?.jobs) ? lattice.jobs.join(" ") : ""}`,
     rankPool,
     5,
   );
@@ -691,7 +705,8 @@ export function compileAgentPacket(
   // payload family) contributes nothing instead of throwing; a title-less
   // citation renders with a placeholder, never `- undefined — url` (the
   // "cite these" footer stands on this list).
-  const researchSources = (project.research ?? [])
+  // A6c (325 BUG A / M3-18): a junk research container reads as "no corpus".
+  const researchSources = (Array.isArray(project.research) ? project.research : [])
     .slice(-5)
     .flatMap((entry) => {
       const items = entry?.items;
@@ -769,16 +784,22 @@ export function compileAgentPacket(
   // A3 (M3-14): the rail's Execution line reads the sandbox the same way the
   // envelope does — a foreign `{}` payload degrades to the template claim.
   const sandbox = project.sandbox ?? { runtime: "sync-template", ramMb: null, timeoutS: 0, isolated: false };
-  const crewRows = (project.crew ?? []).map(
+  // A6c (325 BUG A / M3-18): crew/contracts/oracle junk containers read as
+  // empty (their render sites already carry the honest placeholders).
+  const crewRows = (Array.isArray(project.crew) ? project.crew : []).map(
     (c) => `- ${c.role}${c.active ? " [ACTIVE]" : ""} (${c.budgetTokens} tok): ${c.mandate} → ${c.handoff}`,
   );
   const contractRows = [
-    ...(project.contracts?.entities ?? []).map(
+    ...(Array.isArray(project.contracts?.entities) ? project.contracts.entities : []).map(
       (e) => `- ${e.name}: ${e.fields.map((f) => `${f.name}:${f.type}`).join(", ")}`,
     ),
-    ...(project.contracts?.endpoints ?? []).map((e) => `- ${e.method} ${e.path} (${e.job})`),
+    ...(Array.isArray(project.contracts?.endpoints) ? project.contracts.endpoints : []).map(
+      (e) => `- ${e.method} ${e.path} (${e.job})`,
+    ),
   ];
-  const oracleRows = (project.oracle ?? []).slice(0, 8).map((t) => `- ${t.name}: ${t.given} ⇒ ${t.expect}`);
+  const oracleRows = (Array.isArray(project.oracle) ? project.oracle : [])
+    .slice(0, 8)
+    .map((t) => `- ${t.name}: ${t.given} ⇒ ${t.expect}`);
   const full = [
     `# RapidTool Agent Packet v${PACKET_VERSION} — ${project.name}`,
     ``,
@@ -809,9 +830,10 @@ export function compileAgentPacket(
     ``,
     `## Intent lattice (A1)`,
     `Domain: ${project.domain}`,
-    `Jobs: ${(lattice?.jobs ?? []).join(", ") || "unspecified"}`,
-    `Entities: ${(lattice?.entities ?? []).join(", ") || "unspecified"}`,
-    `Constraints: ${(lattice?.constraints ?? []).join(", ") || "none declared"}`,
+    // A6c (325 BUG A / M3-18): junk lattice containers read as the empty form.
+    `Jobs: ${(Array.isArray(lattice?.jobs) ? lattice.jobs : []).join(", ") || "unspecified"}`,
+    `Entities: ${(Array.isArray(lattice?.entities) ? lattice.entities : []).join(", ") || "unspecified"}`,
+    `Constraints: ${(Array.isArray(lattice?.constraints) ? lattice.constraints : []).join(", ") || "none declared"}`,
     `Complexity: ${typeof lattice?.complexity === "number" ? lattice.complexity.toFixed(1) : "n/a"} / 10`,
     ``,
     `## Scheduler (A3)`,
@@ -823,9 +845,11 @@ export function compileAgentPacket(
     ...(crewRows.length ? crewRows : ["(crew not yet assembled)"]),
     ``,
     `## Spec graph order (A5)`,
-    (project.specGraph?.order ?? [])
+    // A6c (325 BUG A / M3-18): junk specGraph containers read as no graph.
+    (Array.isArray(project.specGraph?.order) ? project.specGraph.order : [])
       .map((id) => {
-        const n = project.specGraph?.nodes.find((x) => x.id === id);
+        const nodes = Array.isArray(project.specGraph?.nodes) ? project.specGraph.nodes : [];
+        const n = nodes.find((x) => x.id === id);
         return n ? `- [${n.owner}] ${n.file} — ${n.purpose}` : `- ${id}`;
       })
       .join("\n") || "(run algorithms first)",
@@ -921,9 +945,12 @@ export function compileAgentPacket(
       ? [
           `(deterministic feasibility estimate — template-derived, not live research)`,
           `Overall ${project.scorecard.overall}/10 (${project.scorecard.verdict})`,
-          ...project.scorecard.axes.map((a) => `- ${a.label}: ${a.score}/10 — ${a.note}`),
-          `Bottlenecks: ${project.scorecard.bottlenecks.join("; ")}`,
-          `Attack vectors: ${project.scorecard.attackVectors.join("; ")}`,
+          // A6c (325 BUG A / M3-18): junk scorecard collections read as empty.
+          ...(Array.isArray(project.scorecard.axes) ? project.scorecard.axes : []).map(
+            (a) => `- ${a.label}: ${a.score}/10 — ${a.note}`,
+          ),
+          `Bottlenecks: ${(Array.isArray(project.scorecard.bottlenecks) ? project.scorecard.bottlenecks : []).join("; ")}`,
+          `Attack vectors: ${(Array.isArray(project.scorecard.attackVectors) ? project.scorecard.attackVectors : []).join("; ")}`,
         ].join("\n")
       : "Not written — run Phase 0 first.",
     ...(spend ? packetSpendSection(spend) : []),
@@ -1054,8 +1081,11 @@ function profileEdge(project: Project): PhaseDef {
  * Empty when the project has no spec graph yet — callers fall back honestly.
  */
 function profileScopeFiles(project: Project): string[] {
-  const order = project.specGraph?.order ?? [];
-  const nodes = project.specGraph?.nodes ?? [];
+  // A6c (325 BUG A / M3-18): the same junk-container floor as the spec-graph
+  // render — a `{}` order/nodes must read as "no scope" (export profiles wrap
+  // foreign payloads too; the for-of/`.find` below would throw).
+  const order = Array.isArray(project.specGraph?.order) ? project.specGraph.order : [];
+  const nodes = Array.isArray(project.specGraph?.nodes) ? project.specGraph.nodes : [];
   const files: string[] = [];
   for (const id of order) {
     const n = nodes.find((x) => x.id === id);

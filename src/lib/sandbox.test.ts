@@ -444,6 +444,27 @@ describe("maskLiteralsAndComments (322 X1 · P6-A regex awareness)", () => {
     assert.deepEqual(identifierHits(["total", "half"], sample), ["total", "half"]);
   });
 
+  it("325 A3: postfix `++`/`--` — the following `/` is division, not a regex open", () => {
+    // Pre-fix the sign pair sat in the regex-opener set, so `i++ / 2` opened a
+    // phantom regex: the scanner consumed to the next `/` on the line, masking
+    // REAL code — `fetch` went invisible to the FORBIDDEN scan (an anti-gaming
+    // hole) and to identifierHits — and, in the mirror shape, left a real
+    // regex's body VISIBLE (a false forbidden refusal).
+    const division = "const a = i++ / 2; const y = fetch / z;";
+    assert.equal(maskLiteralsAndComments(division), tsTruthMask(division), "postfix division stays code");
+    assert.equal(maskLiteralsAndComments(division), division, "nothing to mask — no literals present");
+    assert.deepEqual(
+      identifierHits(["fetch", "window"], division),
+      ["fetch"],
+      "a real `fetch` reference must stay visible to the FORBIDDEN scan",
+    );
+    const mirror = "let n = 3; const q = n-- / 2; const re = /\\bfetch\\b/;";
+    assert.equal(maskLiteralsAndComments(mirror), tsTruthMask(mirror), "the real regex body is masked");
+    assert.deepEqual(identifierHits(["fetch"], mirror), [], "masked regex body: never a false forbidden hit");
+    const prefix = "const a = ++i / 2;";
+    assert.equal(maskLiteralsAndComments(prefix), tsTruthMask(prefix), "prefix `++i / 2` unchanged");
+  });
+
   it("masks `:\\/\\//`-style escaped regexes without cascade", () => {
     // The trailing comment sits on its own line: the raw scanner's regex-blind
     // comment pass swallows a same-line comment into the regex misread, and the

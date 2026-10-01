@@ -1863,7 +1863,11 @@ export function topLessonRows(
  *  different actor's accept is a different row, and re-accept by the same
  *  actor stays idempotent. Title = `Lesson <level> <class>` from the row's own
  *  tags (fallback to the row id); the row text rides in the body so the
- *  store's reuse-advice (`Reuse "<title>" …: <body>`) carries the lesson. */
+ *  store's reuse-advice (`Reuse "<title>" …: <body>`) carries the lesson.
+ *  A6b (325 BUG C): the class comes from `lessonClassTag` — the ONE classifier
+ *  (`lesson --list` parity) — so a `probe:`/`actor:` telemetry tag can never
+ *  masquerade as the class (the W16 on-disk shape titled accepted rows
+ *  `Lesson L2 probe:p6-brief-fit` and dropped the real class tag). */
 export function acceptedLessonEntry(opts: {
   project: string;
   actor: string;
@@ -1879,9 +1883,11 @@ export function acceptedLessonEntry(opts: {
     ? row.tags.filter((t): t is string => typeof t === "string" && t.trim() !== "").map((t) => t.trim())
     : [];
   const level = rowTags.find((t) => /^L[1-5]$/.test(t)) ?? null;
-  const cls = rowTags.find(
-    (t) => t !== LESSON_TAG && !/^L[1-5]$/.test(t) && t !== "accepted" && !t.startsWith("actor:"),
-  ) ?? null;
+  // A6c (325 BUG C): ONE classifier — `lessonClassTag` also skips the `probe:`
+  // telemetry tag (the old inline resolver skipped only `actor:`, so a
+  // probe-tagged row titled `Lesson L2 probe:p6-brief-fit` and the accepted
+  // row dropped its real class tag; see the docstring above).
+  const cls = lessonClassTag(rowTags);
   const tags = [
     LESSON_TAG,
     "accepted",

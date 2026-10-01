@@ -68,7 +68,11 @@ export const EXPAND_POLICY_MAX_CHARS = 240;
 export const EXPAND_POLICY_MAX_COUNT = 12;
 /** Prior-run lesson budget (fixes/98 §5 Tier 3): lesson rows are ≤ LESSON_TEXT_MAX
  *  chars by construction (322 X3 raised that cap 240→600), but callers may pass
- *  arbitrary strings — each line is capped + marked, and the list is capped + deduped. */
+ *  arbitrary strings — each line is capped + marked, and the list is capped + deduped.
+ *  A6c (325 BUG E / 322 X3 §Coupling sweep): this prompt-side re-cap DELIBERATELY
+ *  stays 240 while the record cap is 600 — record vs prompt are different budgets;
+ *  a legal 500-char row is still cut here WITH the explicit [TRUNCATED] marker, and
+ *  the record keeps the full payload. Comment parity only — no cap change. */
 export const EXPAND_LESSON_MAX_CHARS = 240;
 export const EXPAND_LESSON_MAX_COUNT = 12;
 

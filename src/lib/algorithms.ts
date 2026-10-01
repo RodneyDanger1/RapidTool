@@ -441,7 +441,12 @@ export function intentLattice(brief: string, domain: string): IntentLattice {
   // honesty signal is the flag, not emptied arrays.
   const vague = jobs.length === 0 && entities.length === 0;
   return {
-    domain,
+    // A6b (325 BUG B): the lattice carries the COERCED domain (`dom`) — the
+    // raw-param passthrough leaked null/42 onto `lattice.domain` (and
+    // bootstrapMemory then printed `Domain null;` into memory text). Every
+    // sibling consumer (planSpecGraph/scheduleConstraints) already reads the
+    // coerced value; this closes the last raw-domain site of the class.
+    domain: dom,
     jobs: jobs.length ? jobs : ["deliver-core-workflow"],
     entities: entities.length ? entities : ["operator", "record"],
     constraints,

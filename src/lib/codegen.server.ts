@@ -1178,7 +1178,13 @@ export function p6SynthesisPatchRepairPrompt(
     `Your previous module was refused by the deterministic validator: ${named || "(defect unnamed)"}.`,
     "Fix it with ONE bounded replacement instead of rewriting the module. The exact current source is quoted below — a replacement's oldStr must be copied from it character-for-character (whole lines, no line numbers, no added or removed indentation):",
     ...blocks,
-    'Return JSON ONLY, FIRST FORM (preferred): {"patch":{"oldStr":"<exact text copied from the quoted source — it must occur EXACTLY once in the module>","newStr":"<the replacement text; empty deletes the matched text>"},}.',
+    // 325 A3: the FIRST FORM example used to end `"},}.` — a trailing comma
+    // inside the object. The prompt demands "JSON ONLY" twice, but its own
+    // preferred example was INVALID JSON: a model copying it byte-for-byte
+    // produced an unreadable reply (JSON.parse refuses trailing commas), the
+    // delta was refused on a technicality and the legacy full-rewrite repair
+    // burned the extra call. The example must be parseable JSON — pinned.
+    'Return JSON ONLY, FIRST FORM (preferred): {"patch":{"oldStr":"<exact text copied from the quoted source — it must occur EXACTLY once in the module>","newStr":"<the replacement text; empty deletes the matched text>"}}.',
     'SECOND FORM, only if one unique replacement cannot fix the defect: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Change ONLY the named defect — every other line of the module stays byte-identical.",
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no rejection-path tests, no markdown fences.",
@@ -1918,23 +1924,23 @@ function isIdent(n: string): boolean {
   return IDENT_RE.test(n);
 }
 
-/** Net `{`/`[` depth contributed by one line, ignoring quoted strings and `//` comments.
- *  Used to consume a whole-object CJS assign to its matching close. */
+/** Net `{`/`[` depth contributed by one line, counting on the MASKED line only
+ *  (string/regex/comment bodies blanked to same-length spaces, indices
+ *  preserved). Used to consume a whole-object CJS assign to its matching close.
+ *
+ *  325 A3: the char-walk this replaced ignored REGEX literals, so a brace
+ *  inside one (`s.replace(/}/g, "")`) shifted the depth walk inside a dropped
+ *  `module.exports = {…}` construct: the construct closed early and a dangling
+ *  `};` was left in the emitted ESM (SyntaxError at import), or opened one
+ *  level too deep and SWALLOWED the rest of the file — leaving only
+ *  `export { keep };` with no binding (`Export 'keep' is not defined`).
+ *  REUSE of the masker keeps literals/comments/regex in ONE place.
+ */
 function bracketDelta(line: string): number {
+  const code = maskLiteralsAndComments(typeof line === "string" ? line : "");
   let d = 0;
-  let q: string | null = null;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i]!;
-    if (q !== null) {
-      if (c === "\\") i++;
-      else if (c === q) q = null;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      q = c;
-      continue;
-    }
-    if (c === "/" && line[i + 1] === "/") break;
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i]!;
     if (c === "{" || c === "[") d++;
     else if (c === "}" || c === "]") d--;
   }
@@ -1953,24 +1959,17 @@ const RESERVED_BINDING_WORDS = new Set([
   "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield",
 ]);
 
-/** Net `{`/`[`/`(` depth of one line, ignoring quoted strings and `//` comments.
- *  Same shape as `bracketDelta`, parens included: the skip/keep consumer for
- *  residual CJS statements must follow a multi-line call value to its close. */
+/** Net `{`/`[`/`(` depth of one line, counting on the MASKED line only
+ *  (string/regex/comment bodies blanked to same-length spaces, indices
+ *  preserved) — same shape as `bracketDelta`, parens included: the skip/keep
+ *  consumer for residual CJS statements must follow a multi-line call value to
+ *  its close. 325 A3: see bracketDelta — un-masked regex bodies shifted the
+ *  depth (a `/[{]/` inside a dropped assign swallowed the rest of the file). */
 function cjsStatementDelta(line: string): number {
+  const code = maskLiteralsAndComments(typeof line === "string" ? line : "");
   let d = 0;
-  let q: string | null = null;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i]!;
-    if (q !== null) {
-      if (c === "\\") i++;
-      else if (c === q) q = null;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      q = c;
-      continue;
-    }
-    if (c === "/" && line[i + 1] === "/") break;
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i]!;
     if (c === "{" || c === "[" || c === "(") d++;
     else if (c === "}" || c === "]" || c === ")") d--;
   }
@@ -1980,13 +1979,30 @@ function cjsStatementDelta(line: string): number {
 /** Top-level binding names the file already declares (function / class /
  *  const / let / var) — the same shapes `declaredNames` scans, minus its
  *  `module.exports.NAME =` rule: a residual CJS assignment must never mint a
- *  SECOND declaration of a name the file already binds. */
+ *  SECOND declaration of a name the file already binds.
+ *
+ *  325 A3: the `const|let|var NAME =` shape alone MISSED the bare and
+ *  destructured declarations — `let cache;`, `const { id } = input;`,
+ *  `const a = 0, b = 1;`. A residual `module.exports.cache = cache ||
+ *  compute();` then converted to `const cache = …` beside the file's own
+ *  `let cache;` (duplicate declaration — the whole emitted tree died at
+ *  import), and a self-referencing RHS became a TDZ crash. Every added form
+ *  binds a name at column 0; over-detection here is the SAFE direction (the
+ *  statement is dropped, never double-declared) — an inner-scope declaration
+ *  is still deliberately NOT a top-level binding (the `^` anchor stays). */
 function localBindingNames(source: string): Set<string> {
   const code = stripComments(String(source ?? ""));
   const names = new Set<string>();
   for (const m of code.matchAll(/^(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/gm)) names.add(m[1]!);
   for (const m of code.matchAll(/^(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/gm)) names.add(m[1]!);
   for (const m of code.matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/gm)) names.add(m[1]!);
+  // 325 A3: bare declarations (no initializer) …
+  for (const m of code.matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?=[;,]|$)/gm)) names.add(m[1]!);
+  // … and destructuring patterns: every identifier the pattern names is bound
+  // (`const { id, name } = row;` — `id`, `name`; `const [first] = rows;`).
+  for (const m of code.matchAll(/^(?:const|let|var)\s*[{[]([^}\]\n]*)[}\]]\s*=/gm)) {
+    for (const t of m[1]!.matchAll(/[A-Za-z_$][\w$]*/g)) names.add(t[0]!);
+  }
   return names;
 }
 

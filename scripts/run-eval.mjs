@@ -2972,21 +2972,21 @@ async function main() {
     });
 
     mkdirSync(OUT_DIR, { recursive: true });
-    writeFileSync(
-      RESULTS_PATH,
-      JSON.stringify(
-        {
-          generatedAt: new Date().toISOString(),
-          mode,
-          graderDir: GRADER_DIR,
-          entries: [],
-          summary: { entries: 0, meanTotal: 0, ...buildSummary([], skipped) },
-        },
-        null,
-        2,
-      ),
-      "utf8",
-    );
+    // W44 A5 (bug-hunter · scripts box): this path used a bare writeFileSync
+    // while writeJsonAtomic's own doc-block claims "no bare writeFileSync of
+    // results/history remains" — a kill between the truncating open and the
+    // write tears results.json (the stale-read class this repo already bit
+    // on: a tear reads as "the previous run"). Same atomic discipline as
+    // persist(); `corpusDir` joins the shape for parity with persist()'s
+    // legacy contract (the scorecard reader reads it).
+    writeJsonAtomic(RESULTS_PATH, {
+      generatedAt: new Date().toISOString(),
+      mode,
+      corpusDir: CORPUS_DIR,
+      graderDir: GRADER_DIR,
+      entries: [],
+      summary: { entries: 0, meanTotal: 0, ...buildSummary([], skipped) },
+    });
     process.exit(0);
   }
 
@@ -3233,7 +3233,15 @@ if (isMainModule) {
     // print + exit 0 per the results-are-data contract, after recording it.
     try {
       mkdirSync(OUT_DIR, { recursive: true });
-      writeFileSync(RESULTS_PATH, JSON.stringify({ generatedAt: new Date().toISOString(), mode: KEYED_OK ? "keyed" : "keyless", entries: [], error: e instanceof Error ? e.message : String(e) }, null, 2), "utf8");
+      // W44 A5 (bug-hunter · scripts box): the crash tombstone must be atomic
+      // too — a plain writeFileSync can leave a 0-byte/partial results.json
+      // (kill mid-write) that readers then misread as "the previous run".
+      writeJsonAtomic(RESULTS_PATH, {
+        generatedAt: new Date().toISOString(),
+        mode: KEYED_OK ? "keyed" : "keyless",
+        entries: [],
+        error: e instanceof Error ? e.message : String(e),
+      });
     } catch {
       /* nowhere to write */
     }

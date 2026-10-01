@@ -73,6 +73,17 @@
 //      designed outcome, never level:error (the pre-fix bytes read
 //      `level:"error", code:null` and diagnose ranked them unclassified-errors /
 //      "not a clean bill of health").
+//  16. (W44 A5 · fixes/325_a5_hunt.md B1+B3, source + behavioral spawns) the
+//      empty-VALUE path-flag refusals: `--out=` / `--html=` ("" after the `=`)
+//      used to pass every `typeof === "string"` read and `resolve("")` melted
+//      the write target into the process CWD (pre-fix live bytes: emit/vault
+//      exited 0 writing 15/17 files INTO the cwd; packet/create exited 4 with
+//      EISDIR/EPERM + a `.tmp` leak). This leg content-anchors all seven
+//      guard sites (pathFlagMissing, never `=== true`), spawns the empty
+//      spelling for the four repro'd verbs + export/design --html/diagram
+//      into fresh melt dirs (exit 1 + RT_E_VALIDATION + "(got an empty
+//      value)", nothing written), keeps the R5-f10 valueless bytes pinned,
+//      and pins B3: USAGE.reject must name both seats.
 //
 // House rules honored: cwd-independent (paths via import.meta.url — a
 // scripts-leg test must not depend on process cwd); failure messages name the
@@ -81,7 +92,7 @@
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -1260,6 +1271,181 @@ test("FIX-2c — an exit-2 park stamps level warn + payload.parked on its cli.in
       !rows.some((r) => r.payload?.exitCode === 2 && r.level === "error"),
       "no exit-2 row may log at error — the pre-fix defect this leg pins",
     );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Leg 16 (W44 A5 · fixes/325_a5_hunt.md B1+B3, source + behavioral spawns).
+// The empty-VALUE half of the R5-f10 path-flag class: `--out=` / `--html=`
+// store "" and used to pass every `typeof args.out === "string"` read, so
+// `resolve("")` silently resolved the write target to the process CWD.
+// Pre-fix live bytes (A5, scratch p1): `emit --out=` exit 0 + 15 files IN the
+// cwd; `vault --out=` exit 0 + 17 files in the cwd; `packet --out=` exit 4
+// (EISDIR opening the cwd dir as a file); `create --out=` exit 4 (rename onto
+// the cwd dir) + a `.tmp-<pid>` leak beside it. The fix routes all seven
+// guard sites through `pathFlagMissing` — the valueless message stays
+// byte-identical, the empty value is named as such. This leg also pins B3:
+// USAGE.reject must document its seat discipline (the 322 F-1 rule the help
+// payload hid). Deliberate adaptation: A5's cap left a pin sketch for four
+// verbs; this finisher widened the behavioral battery to every converted site
+// (all seven) since each spawn is a swallowable keyless child.
+// ---------------------------------------------------------------------------
+test("W44 A5 — an empty-value path flag refuses CODED (exit 1, RT_E_VALIDATION, nothing written) — the --out= CWD melt", () => {
+  // (a) source: every guard site reads pathFlagMissing (never the pre-fix
+  // `=== true` spelling), and USAGE.reject documents both seats (B3).
+  const guards = [
+    ["create", "out"],
+    ["packet", "out"],
+    ["export", "out"],
+    ["emit", "out"],
+    ["vault", "out"],
+    ["design", "html"],
+    ["diagram", "out"],
+  ];
+  for (const [verb, key] of guards) {
+    const armStart = cliText.indexOf(`case "${verb}":`);
+    assert.ok(armStart !== -1, `the ${verb} arm must exist in the CLI source`);
+    const nextCase = cliText.indexOf('case "', armStart + 10);
+    const arm = cliText.slice(armStart, nextCase === -1 ? undefined : nextCase);
+    assert.match(
+      arm,
+      new RegExp(`if \\(pathFlagMissing\\(args\\.${key}\\)\\)`),
+      `the ${verb} arm's --${key} guard must use pathFlagMissing — an EMPTY value (--${key}=) must never melt into the CWD`,
+    );
+  }
+  assert.ok(
+    !/args\.out === true|args\.html === true/.test(cliText),
+    "the valueless-only `=== true` spelling is back — it lets `--out=` (empty string) pass every `typeof === \"string\"` read into resolve(\"\")",
+  );
+  const rejectUsage = cliText.match(/\n {4}reject: "([^"]*)",/);
+  assert.ok(rejectUsage, "USAGE must carry a reject entry");
+  assert.match(
+    rejectUsage[1],
+    /--seat autopilot/,
+    "USAGE.reject must document the explicit machine seat (322 F-1: a bare reject is never guessed a seat)",
+  );
+  assert.match(rejectUsage[1], /--i-am-human/, "USAGE.reject must document the human-seat door it requires");
+
+  // (b) behavioral: one empty-value spawn per converted site, each in a FRESH
+  // melt cwd that must stay untouched (pre-fix the melt wrote INTO it).
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-emptyval-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  const BRIEF_EMPTYVAL =
+    "Build an inventory tracker for a small warehouse team: track products, stock levels, and reorder alerts with a simple dispatcher workflow.";
+  try {
+    const proj = join(cwd, "emptyval.json");
+    const created = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "create", "--brief", BRIEF_EMPTYVAL, "--name", "EmptyVal", "--out", proj],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+
+    const cases = [
+      {
+        label: "create --out=",
+        dir: "melt-create",
+        argv: ["create", "--brief", BRIEF_EMPTYVAL, "--name", "MeltC", "--out="],
+        errorMatch: "create --out requires a path (got an empty value)",
+      },
+      {
+        label: "packet --out=",
+        dir: "melt-packet",
+        argv: ["packet", "--project", proj, "--out="],
+        errorMatch: "packet --out requires a path (got an empty value)",
+      },
+      {
+        label: "emit --out=",
+        dir: "melt-emit",
+        argv: ["emit", "--project", proj, "--out="],
+        errorMatch: "emit --out requires a path (got an empty value)",
+      },
+      {
+        label: "vault --out=",
+        dir: "melt-vault",
+        argv: ["vault", "--project", proj, "--out="],
+        errorMatch: "vault --out requires a path (got an empty value)",
+      },
+      {
+        label: "export --out=",
+        dir: "melt-export",
+        argv: ["export", "--project", proj, "--out="],
+        errorMatch: "export --out requires a path (got an empty value)",
+      },
+      {
+        label: "design --html=",
+        dir: "melt-design",
+        argv: ["design", "--project", proj, "--html="],
+        errorMatch: "design --html requires a path (got an empty value)",
+      },
+      {
+        label: "diagram --out=",
+        dir: "melt-diagram",
+        argv: ["diagram", "--project", proj, "--kind", "phases", "--out="],
+        errorMatch: "diagram --out requires a path (got an empty value)",
+      },
+    ];
+    for (const shape of cases) {
+      const melt = join(cwd, shape.dir);
+      mkdirSync(melt, { recursive: true });
+      const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...shape.argv], {
+        cwd: melt,
+        env,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      const stderr = res.stderr ?? "";
+      assert.ok(!/(^|\n)\s+at\s/.test(stderr), `[${shape.label}] an empty-value refusal must never print a Node stack:\n${stderr}`);
+      assert.equal(
+        res.status,
+        1,
+        `[${shape.label}] an empty-value path flag is usage-class: exit 1, nothing written (pre-fix: exit 0 with the tree melted into the cwd, or exit 4).\nstdout: ${res.stdout}\nstderr: ${stderr}`,
+      );
+      let json = null;
+      try {
+        json = JSON.parse(res.stdout);
+      } catch {
+        /* surfaced below */
+      }
+      assert.ok(json, `[${shape.label}] exactly one JSON envelope on stdout.\nstdout: ${res.stdout}`);
+      assert.equal(json.ok, false, `[${shape.label}] refusal envelope`);
+      assert.equal(json.code, "RT_E_VALIDATION", `[${shape.label}] the empty-value refusal is the validation class`);
+      assert.ok(String(json.error).includes(shape.errorMatch), `[${shape.label}] error names the empty value: ${json.error}`);
+      assert.equal(json.exit_code, res.status, `[${shape.label}] the envelope's exit_code must equal the process exit`);
+      const strays = readdirSync(melt).filter((f) => f !== ".rapidtool");
+      assert.deepEqual(
+        strays,
+        [],
+        `[${shape.label}] the melt cwd must stay untouched — pre-fix this exact spelling emitted INTO the cwd (got: ${strays.join(", ")})`,
+      );
+    }
+
+    // The valueless R5-f10 spelling keeps its ORIGINAL refusal bytes — the
+    // empty-value widening must not have loosened the older guard.
+    const meltBare = join(cwd, "melt-valueless");
+    mkdirSync(meltBare, { recursive: true });
+    const bare = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "create", "--brief", BRIEF_EMPTYVAL, "--name", "MeltV", "--out"],
+      { cwd: meltBare, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(
+      bare.status,
+      1,
+      `[create --out (valueless)] exit 1.\nstdout: ${bare.stdout}\nstderr: ${bare.stderr}`,
+    );
+    const bareJson = JSON.parse(bare.stdout);
+    assert.equal(bareJson.code, "RT_E_VALIDATION");
+    assert.ok(
+      String(bareJson.error).includes("create --out requires a path (got a flag with no value)"),
+      `the R5-f10 valueless refusal must stay byte-identical: ${bareJson.error}`,
+    );
+    assert.deepEqual(readdirSync(meltBare).filter((f) => f !== ".rapidtool"), [], "the valueless refusal writes nothing either");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

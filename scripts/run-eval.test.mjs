@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   acceptanceFailReason,
   beginTrialCallTap,
@@ -1578,5 +1580,65 @@ test("T5.4 wiring guard — the driver's bounded emit sites + the guardrail are 
   assert.match(src, /event: "eval\.run_error"/, "the top-catch crash row");
   const emits = src.match(/emitEvalRunRow\(\{/g) ?? [];
   assert.equal(emits.length, 4, `the bounded set: start + end(main) + end(empty) + error — got ${emits.length}`);
+});
+
+// ---------------------------------------------------------------------------
+// W44 A5 (fixes/325_a5_hunt.md B2) — the empty-corpus `results.json` writer
+// was a bare writeFileSync (truncate-then-write: a kill mid-write tears the
+// file) AND omitted the legacy `corpusDir` key that persist() always writes
+// and the scorecard reader reads (`src/lib/scorecard.ts:284`; the recording
+// writer contract above sits at line ~557). This leg pins the fix at the
+// source (writeJsonAtomic + corpusDir, no bare writeFileSync in the block)
+// AND behaviorally: a REAL keyless empty-corpus spawn whose recorded shape
+// restores the legacy contract with no tmp residue beside the atomic write.
+// ---------------------------------------------------------------------------
+test("W44 A5 — the empty-corpus results.json writer is atomic and keeps the legacy corpusDir key (no tmp residue)", () => {
+  // (a) source slice: the empty-corpus block must write atomically, carry
+  // corpusDir, and never regress to a bare writeFileSync (the tear class).
+  const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
+  const start = src.indexOf("if (entries.length === 0) {");
+  const end = src.indexOf("process.exit(0);", start);
+  assert.ok(start !== -1 && end > start, "the empty-corpus block boundaries were not found in run-eval.mjs");
+  const block = src.slice(start, end);
+  assert.match(block, /writeJsonAtomic\(RESULTS_PATH, \{/, "the empty-corpus results.json must persist atomically (writeJsonAtomic)");
+  assert.match(block, /corpusDir:\s*CORPUS_DIR/, "the empty-corpus shape must keep the legacy corpusDir key");
+  assert.ok(
+    !/writeFileSync\(/.test(block),
+    "a bare writeFileSync is back in the empty-corpus writer — a kill mid-write tears results.json",
+  );
+
+  // (b) behavioral spawn: a REAL keyless run over an empty corpus dir.
+  const dir = mkdtempSync(join(tmpdir(), "rapidtool-a5-eval-empty-"));
+  const corpus = join(dir, "emptycorpus");
+  const out = join(dir, "out");
+  mkdirSync(corpus, { recursive: true });
+  try {
+    const env = { ...process.env, EVAL_CORPUS_DIR: corpus, EVAL_OUT_DIR: out };
+    delete env.DEEPSEEK_API_KEY;
+    const res = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", fileURLToPath(new URL("./run-eval.mjs", import.meta.url))],
+      { cwd: dir, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(res.status, 0, `an empty-corpus run is data: exit 0.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+    const resultsPath = join(out, "results.json");
+    assert.ok(existsSync(resultsPath), "the empty-corpus run must record results.json");
+    const doc = JSON.parse(readFileSync(resultsPath, "utf8"));
+    // The legacy contract restored: generatedAt / mode / corpusDir / graderDir /
+    // entries / summary (the pre-fix bytes omitted corpusDir entirely).
+    assert.equal(typeof doc.generatedAt, "string");
+    assert.equal(doc.mode, "keyless");
+    assert.equal(doc.corpusDir, resolve(corpus), "corpusDir must record the corpus the run walked");
+    assert.equal(typeof doc.graderDir, "string");
+    assert.ok(Array.isArray(doc.entries));
+    assert.equal(doc.entries.length, 0);
+    assert.equal(doc.summary.entries, 0);
+    // Atomic discipline: the same-dir tmp file was renamed away — nothing but
+    // results.json may sit beside it (a stray tmp = the tear window is back).
+    const strays = readdirSync(out).filter((f) => f !== "results.json");
+    assert.deepEqual(strays, [], `no tmp/half-written residue may remain beside results.json — got: ${strays.join(", ")}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 

@@ -113,6 +113,25 @@ function flag(args, key) {
   return args[key] === true || args[key] === "true" || args[key] === "1";
 }
 
+// W44 A5 (bug-hunter · scripts box): R5-f10 refused a VALUELESS path flag
+// (`--out` stored as `true`); the EMPTY-VALUE spelling (`--out=`, `--out ""`)
+// still melted through the `typeof args.out === "string"` reads into
+// `resolve("")` — the CWD. Reproduced keyless (C:/Users/mnril/a5_scratch/p1):
+// `emit --out=` exited 0 with 15 files silently emitted INTO the cwd;
+// `vault --out=` exited 0 with 17 vault files in the cwd; `packet --out=`
+// exited 4 opening the cwd as a file (EISDIR); `create --out=` exited 4
+// renaming onto the cwd dir (EPERM). A path-valued flag needs a NON-EMPTY
+// value: both spellings refuse in the SAME validation class (exit 1,
+// RT_E_VALIDATION), nothing written.
+function pathFlagMissing(v) {
+  return v === true || (typeof v === "string" && v.trim() === "");
+}
+
+/** The refusal text for a missing/empty path-flag value (pathFlagMissing). */
+function pathFlagRefusalError(cmd, key, v) {
+  return `${cmd} --${key} requires a path (got ${v === true ? "a flag with no value" : "an empty value"})`;
+}
+
 // 316 H3 (315 V2 finding #4): the agent seal (`--agent-seal`) is a WILD-RUN
 // concept — it lives in the wild step's options and only the `wild` verb
 // threads it into effect. parseArgs absorbs ANY `--flag`, so the drive verbs
@@ -677,9 +696,9 @@ async function main() {
         // R5-f10 (W29 · A2-f11): a valueless --out used to melt into the
         // default and silently write <slug>.json into the CWD — refuse loudly,
         // nothing written.
-        if (args.out === true) {
+        if (pathFlagMissing(args.out)) {
           return respond(
-            { ok: false, error: "create --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+            { ok: false, error: pathFlagRefusalError("create", "out", args.out), code: "RT_E_VALIDATION" },
             1,
           );
         }
@@ -1367,9 +1386,9 @@ async function main() {
         // R5-f10 (W29 · A2-f11): a valueless `--out` must never melt away into
         // the stdout default — parseArgs turns a bare flag into `true`, which
         // `typeof args.out === "string"` silently ignores. Refuse loudly.
-        if (args.out === true) {
+        if (pathFlagMissing(args.out)) {
           return respond(
-            { ok: false, error: "packet --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+            { ok: false, error: pathFlagRefusalError("packet", "out", args.out), code: "RT_E_VALIDATION" },
             1,
           );
         }
@@ -1409,9 +1428,9 @@ async function main() {
       case "export": {
         const project = loadProjectFor("export");
         // R5-f10 (W29 · A2-f11): valueless --out guard (see packet).
-        if (args.out === true) {
+        if (pathFlagMissing(args.out)) {
           return respond(
-            { ok: false, error: "export --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+            { ok: false, error: pathFlagRefusalError("export", "out", args.out), code: "RT_E_VALIDATION" },
             1,
           );
         }
@@ -1440,9 +1459,9 @@ async function main() {
           // --out keeps overriding. headless.emitProject mkdirSync(recursive)s
           // the target AND every file's parent before writeFileSync (headless.ts
           // emitProject) — no extra mkdir needed here.
-          if (args.out === true) {
+          if (pathFlagMissing(args.out)) {
             return respond(
-              { ok: false, error: "emit --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+              { ok: false, error: pathFlagRefusalError("emit", "out", args.out), code: "RT_E_VALIDATION" },
               1,
             );
           }
@@ -2487,9 +2506,9 @@ async function main() {
         try {
           // fixes/144 (M1): default = <home>/RapidTool Software/<slug>/vault —
           // same parent as the emitted software, per-project (--out overrides).
-          if (args.out === true) {
+          if (pathFlagMissing(args.out)) {
             return respond(
-              { ok: false, error: "vault --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+              { ok: false, error: pathFlagRefusalError("vault", "out", args.out), code: "RT_E_VALIDATION" },
               1,
             );
           }
@@ -2683,9 +2702,9 @@ async function main() {
         const project = loadProjectFor("design");
         try {
           // R5-f10 (W29 · A2-f11): valueless --html guard (see packet).
-          if (args.html === true) {
+          if (pathFlagMissing(args.html)) {
             return respond(
-              { ok: false, error: "design --html requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+              { ok: false, error: pathFlagRefusalError("design", "html", args.html), code: "RT_E_VALIDATION" },
               1,
             );
           }
@@ -2728,9 +2747,9 @@ async function main() {
           const svg = await h.buildDiagram(project, kind.value); // throws on unknown kind / missing module
           const result = { ok: true, kind: kind.value, bytes: Buffer.byteLength(svg, "utf8") };
           // R5-f10 (W29 · A2-f11): valueless --out guard (see packet).
-          if (args.out === true) {
+          if (pathFlagMissing(args.out)) {
             return respond(
-              { ok: false, error: "diagram --out requires a path (got a flag with no value)", code: "RT_E_VALIDATION" },
+              { ok: false, error: pathFlagRefusalError("diagram", "out", args.out), code: "RT_E_VALIDATION" },
               1,
             );
           }
@@ -4247,7 +4266,7 @@ const USAGE = {
     resume: "resume --project <file.json|dir> [--autopilot] [--live]  # T-107.7: read the per-phase checkpoint written beside the project dir by run/gate, admit it (identity + mode + integer phase sanity), hydrate it, and re-enter the drive at the recorded phase; prints the snapshot age — exit taxonomy identical to gate (2 = parked). Never a silent resume",
     unattended: "unattended --project <file.json|dir>  # W-47: scheduler-facing drive — re-enter from a checkpoint when one exists (crash recovery), else start from the named project file; autopilot + live until parked; NOT a daemon (a host hook — Windows Task Scheduler / cron — invokes it on a cadence); stock HITL gates still park for a human by design (exit 2)",
     approve: "approve --project <file.json> (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed, name exactly one: --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY); --seat autopilot = explicit MACHINE attribution (`decidedBy:\"autopilot\"`, seat harness; works non-TTY — the documented agent door for a parked gate); --agent-seal is REFUSED here (RT_E_VALIDATION) — the seal is a wild-run concept: `wild --start|--resume --agent-seal`",
-    reject: "reject --project <file.json> --note <text>",
+    reject: "reject --project <file.json> --note <text> (--i-am-human | --seat autopilot)   # the seat is never guessed, name exactly one: --seat autopilot = explicit MACHINE attribution (works non-TTY — the documented agent door for rejecting a parked gate); --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY)",
     retry: "retry --project <file.json>                  # unlock a rejected/blocked phase",
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",
     packet: "packet --project <file.json> [--out <file.md>] [--knowledge <store.json>]  # --knowledge seeds the Ranked-memory section with cross-project accepted lesson rows (tier-1, advisory)",

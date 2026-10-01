@@ -821,6 +821,20 @@ describe("M-tier lesson surface (fixes/98 §2/§3)", () => {
     }
   });
 
+  it("acceptedLessonEntry class resolution = lessonClassTag — probe: tags never masquerade (325 BUG C)", () => {
+    // A6c (325 BUG C): the old inline resolver skipped only `actor:`, so a
+    // probe-tagged row titled `Lesson L2 probe:p6-brief-fit` and the accepted
+    // row LOST its real class tag (unclassed in lessonOutcomeReport). The
+    // resolver now IS lessonClassTag — one classifier, `lesson --list` parity.
+    const project = { name: "p", brief: "b", generatedSource: "const x = 1;" } as never;
+    const row = templateEmissionLesson(project, 6, ["p6-brief-fit"], [], "abc12345", "engine");
+    assert.equal(lessonClassTag(row.tags), "template-emission", "fixture premise: the row has a real class");
+    const accepted = acceptedLessonEntry({ project: "p", actor: "cli-human", row });
+    assert.equal(accepted.title, "Lesson L2 template-emission", "the class survives the accept");
+    assert.ok(accepted.tags.includes("template-emission"), "the real class tag is carried");
+    assert.ok(!accepted.tags.some((t) => t.startsWith("probe:")), "no probe: tag becomes the class");
+  });
+
   it("topLessonRows + acceptedLessonEntry edge cases (212 residual)", () => {
     const a = manualLesson({
       classShort: "verify-failure",

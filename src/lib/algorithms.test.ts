@@ -774,6 +774,29 @@ describe("runAlgorithms", () => {
     const schema = out.specGraph.nodes.find((n) => n.id === "schema");
     assert.equal(schema?.file, "src/domain/custom_software.ts");
   });
+
+  it("carries the COERCED domain on the lattice, never the raw param (325 BUG B)", () => {
+    // A6b (325 BUG B): the last raw-domain site of the class — intentLattice's
+    // `return { domain }` leaked null/42 onto lattice.domain (bootstrapMemory
+    // then printed `Domain null;` into memory text). The lattice must carry the
+    // same coerced `dom` every sibling consumer reads, for junk and for real.
+    const nulled = runAlgorithms({
+      brief: "track jobs",
+      domain: null,
+      memory: [],
+      currentPhase: 0,
+    } as never);
+    assert.equal(nulled.lattice.domain, "custom-software", "null domain coerces to the default");
+    const numeric = runAlgorithms({
+      brief: "track jobs",
+      domain: 42,
+      memory: [],
+      currentPhase: 0,
+    } as never);
+    assert.equal(numeric.lattice.domain, "custom-software", "non-string domain coerces to the default");
+    assert.equal(intentLattice("track jobs", "").domain, "custom-software", "empty domain coerces");
+    assert.equal(intentLattice("track jobs", "health-ops").domain, "health-ops", "a real domain passes through");
+  });
 });
 
 // ---------------------------------------------------------------------------

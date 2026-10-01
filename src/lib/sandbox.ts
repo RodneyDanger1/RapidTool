@@ -37,6 +37,21 @@ function regexLiteralEnd(src: string, i: number): number {
       src.slice(Math.max(0, k - 12), k + 1),
     );
   if (prev !== "\n" && !"(,=:[!&|?{};+-*%^~<>".includes(prev) && !keyword) return -1;
+  // 325 A3: `+`/`-` open a regex only as a BINARY operator. `i++ / 2` is a
+  // division (the TS lexer says so), but the sign pair read as an operator
+  // position and the scanner then consumed to the next `/` on the line —
+  // masking real code out of the FORBIDDEN scan (a hidden `fetch`/`window`
+  // is an anti-gaming hole) and out of identifierHits, or leaving a real
+  // regex's body VISIBLE (a false forbidden hit). When the char before the
+  // sign is another sign, the pair is postfix `++`/`--`: division, not a
+  // regex opener. Prefix `++i / 2` (prev = identifier char) was already
+  // handled; binary `a + /re/` (prev sign, prior operand) stays a regex.
+  if (prev === "+" || prev === "-") {
+    let b = k - 1;
+    while (b >= 0 && (src[b] === " " || src[b] === "\t")) b--;
+    const before = b < 0 ? "\n" : src[b];
+    if (before === "+" || before === "-") return -1;
+  }
   let j = i + 1;
   let inClass = false;
   while (j < src.length) {

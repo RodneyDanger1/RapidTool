@@ -24,7 +24,7 @@ import {
   EXPAND_LESSON_MAX_COUNT,
   EXPAND_LESSON_RANK_LIMIT,
 } from "./prompt-engine.ts";
-import { lessonRow } from "./knowledge.ts";
+import { LESSON_TEXT_MAX, lessonRow } from "./knowledge.ts";
 import { BRIEF_TEMPLATES } from "./templates.ts";
 import type { MemoryEntry } from "./types.ts";
 
@@ -378,6 +378,23 @@ describe("expandBrief — prior-run lesson injection (fixes/98 §5 Tier 3)", () 
     assert.equal(bullets.filter((b) => b === "- dup row").length, 1, "deduped to one bullet");
     assert.ok(!content.includes("lesson 10"), "beyond-count lesson dropped");
     assert.ok(content.includes("- lesson 9"), "the 12th slot still fits");
+  });
+
+  it("325 BUG E: a 500-char row (legal in-record at the 600 cap) is still cut at the prompt cap, WITH the marker", async () => {
+    // Deliberate differential (322 X3 §Coupling sweep): record vs prompt are
+    // different budgets — the record cap is LESSON_TEXT_MAX (600), the
+    // prompt-side re-cap stays EXPAND_LESSON_MAX_CHARS (240). This pin makes
+    // the differential explicit: a row that is LEGAL in the record still
+    // reaches the prompt cut, and that cut is never silent.
+    const legalRow = "R".repeat(500);
+    assert.ok(legalRow.length <= LESSON_TEXT_MAX, "fixture premise: 500 is legal in-record");
+    const content = await captureWithLessons([legalRow]);
+    assert.ok(content.includes("…[TRUNCATED]"), "the prompt-side cut is marked");
+    assert.ok(!content.includes(legalRow), "the full 500-char row never reaches the model whole");
+    assert.ok(
+      content.includes("R".repeat(EXPAND_LESSON_MAX_CHARS)),
+      `keeps exactly the ${EXPAND_LESSON_MAX_CHARS}-char prompt budget`,
+    );
   });
 });
 

@@ -241,6 +241,31 @@ describe("§S3 bounded classifier-reject retry (313 D1)", () => {
     assert.equal(c.calls(), 1);
     assert.equal(r3.outcome, "paused");
   });
+
+  it("A2 (325): a reject→ERROR sequence stops at the error — one retry row, no mint, coded pause", async () => {
+    let n = 0;
+    const flaky: WildReviewer = async () => {
+      n += 1;
+      return n === 1
+        ? { ok: true, verdict: "reject", feedback: REJECT_FEEDBACK, model: "test" }
+        : { ok: false, reason: "error", error: "provider refused" };
+    };
+    const res = await wildStep(wildFixture(), { reviewer: flaky, agentSeal: true, retryBackoffMs: 5 });
+    assert.equal(n, 2, "the reject spent exactly ONE retry; the error is never re-asked");
+    assert.equal(res.project.logs.filter((l) => l.event === "wild.review_retry").length, 1, "one row per retry attempt");
+    assert.equal(
+      res.project.logs.find((l) => l.event === "wild.review_retry")?.detail,
+      "P0 review REJECTED (classifier) — retry 1/2 after 5ms backoff.",
+      "the row accounts the attempt that was actually spent",
+    );
+    assert.equal(res.outcome, "paused");
+    assert.equal(res.code, "RT_E_LLM_REJECTED", "a provider error is not a verdict — no gate mint");
+    assert.equal(res.error, "provider refused");
+    assert.equal(res.project.decisions.length, 0, "no approval row from an error path");
+    // The fixture's own gate is untouched — the review-reject mint never fired.
+    assert.equal(res.project.hitl?.prompt, "Approve?");
+    assert.equal(res.project.hitl?.forceHuman, false);
+  });
 });
 
 describe("§S4 the keyless seal park class + opt-in consent", () => {

@@ -2139,7 +2139,21 @@ function usableSchedule(v: unknown): v is SchedulerPlan {
 // 308 B-01 (B2) — runtime accept-lists for the two records the hydrate rebuild
 // used to erase (`park` / `lastStep`). types.ts erases the unions, so the
 // structural guards below mirror them by value.
-const WILD_PARK_UNLOCKS: readonly string[] = ["configure-key", "human-gate", "human-retry", "resume", "operator"];
+//
+// 325 A1: the park-unlock mirror used to be a hand-maintained array that read
+// `["configure-key","human-gate","human-retry","resume","operator"]` — 313 D1
+// added "agent-seal" to `WildParkUnlock` (types.ts:152) but not here, so
+// `usableWildPark` rejected every persisted SEALED park: hydrateWildRun kept
+// `pause:true` and dropped `park` (and, via the summary guard below, the whole
+// `lastStep` carrying it). The accept-set is now DERIVED from WILD_UNLOCK_TEXT
+// — the ONE `Record<WildParkUnlock, string>` map further down this module,
+// which is compile-time-exhaustive: a new union member fails typecheck there
+// until its text exists, and this guard then accepts it automatically. A lazy
+// read inside the predicate (never a module-init read) keeps declaration order
+// irrelevant.
+function acceptedParkUnlock(unlock: string): boolean {
+  return Object.keys(WILD_UNLOCK_TEXT).includes(unlock);
+}
 const WILD_STEP_OUTCOMES: readonly string[] = ["advanced", "completed", "paused"];
 const WILD_STEP_ACTIONS: readonly string[] = ["execute", "gate", "advance", "finalize", "park"];
 const WILD_NEXT_ACTIONS: readonly string[] = ["execute", "gate", "advance", "finalize", "park", "none"];
@@ -2159,7 +2173,7 @@ function usableWildPark(v: unknown): WildParkInfo | null {
     (p.event === null || typeof p.event === "string") &&
     typeof p.reason === "string" &&
     typeof unlock === "string" &&
-    WILD_PARK_UNLOCKS.includes(unlock) &&
+    acceptedParkUnlock(unlock) &&
     typeof p.unlockText === "string" &&
     typeof p.resumePhase === "number" &&
     typeof resumeAction === "string" &&
@@ -4787,10 +4801,23 @@ export async function wildStep(
     if (result.outcome !== "paused" || !wrp || wrp.park) return result;
     const code = result.code ?? null;
     const unlock: WildParkUnlock = code === "RT_E_GATE_PENDING" ? "human-gate" : "human-retry";
+    // 325 A1b: the park's `event` must name the ledger row that recorded the
+    // park (types.ts WildParkInfo.event) — 308 FIX-A item 5, listed and never
+    // landed. The fixed "wild.paused" string referenced a row that does NOT
+    // exist on ~14 pause arms (probe: unsealed classifier → the row is
+    // "wild.paused_classifier"; locked edge → "wild.error"). wildPause writes
+    // exactly ONE row and every pause arm returns straight after it, so the
+    // LAST log row IS that row; the fallback only fires if a future arm ever
+    // pauses without writing a wild.* row.
+    const lastRow = result.project.logs?.[result.project.logs.length - 1];
+    const event =
+      typeof lastRow?.event === "string" && lastRow.event.startsWith("wild.")
+        ? lastRow.event
+        : "wild.paused";
     const info = wildParkInfo(
       result.project,
       result.project.currentPhase,
-      "wild.paused",
+      event,
       clipSurface(result.error ?? "Wild step paused"),
       { code, unlock },
     );

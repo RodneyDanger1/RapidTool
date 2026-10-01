@@ -1115,6 +1115,61 @@ describe("GAP-1 advance-arm mint + floor control (fixes/320)", () => {
       else process.env.DEEPSEEK_API_KEY = savedKey;
     }
   });
+
+  it("A2 (325): machine resume of the advance-arm mint refuses BEFORE any classifier call (no re-spend)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.DEEPSEEK_API_KEY;
+      const rejectFb =
+        "P6 evidence is a skipped spec file — the tree executed nothing, so the phase cannot be honestly judged as tested. Remediate before any human advance decision.";
+      let calls = 0;
+      const rejecting: WildReviewer = async () => {
+        calls += 1;
+        return { ok: true, verdict: "reject", feedback: rejectFb, model: "pin" };
+      };
+      const res = await wildStep(p6NoMintFixture(), {
+        reviewer: rejecting,
+        agentSeal: true,
+        retryBackoffMs: 1,
+        p6Edge: p6SeamWith(greenExecutedOutcome()),
+      });
+      assert.equal(res.outcome, "paused");
+      assert.equal(res.code, "RT_E_GATE_PENDING");
+      assert.equal(calls, 3, "sealed initial ask + exactly 2 retries, then the park");
+      assert.equal(res.project.hitl?.phase, 6, "the advance-arm mint opened the human gate");
+      assert.equal(res.project.hitl?.forceHuman, true, "machine-only lock (R3/B-03)");
+
+      // A machine resume re-enters the GATE arm; the forceHuman refusal fires
+      // BEFORE the classifier, so the minted gate can never be resolved by a
+      // re-review spend (mirrors the §S6(4) pin for the gate arm).
+      const resumed = { ...res.project, wildRun: { ...res.project.wildRun!, pause: false } };
+      const again = await wildStep(resumed, {
+        reviewer: rejecting,
+        agentSeal: true,
+        retryBackoffMs: 1,
+        p6Edge: p6SeamWith(greenExecutedOutcome()),
+      });
+      assert.equal(again.outcome, "paused");
+      assert.equal(again.code, "RT_E_GATE_PENDING");
+      assert.equal(calls, 3, "the refused machine resume never re-asks the classifier");
+      assert.equal(again.project.hitl?.prompt, rejectFb, "the same minted gate survives the refusal");
+      assert.equal(again.project.phases.find((r) => r.id === 6)?.status, "awaiting_hitl");
+      assert.equal(again.project.wildRun?.park?.unlock, "human-gate");
+      assert.equal(again.project.wildRun?.park?.resumeAction, "gate", "a resume re-enters the gate — no silent advance");
+
+      // The human door still completes the phase (mint ≠ dead end).
+      const done = approveHitl(res.project, {
+        decidedBy: "human",
+        note: "Accepting the P6 risk explicitly for this pin.",
+      });
+      assert.equal(done.hitl, null, "the gate closes on the human decision");
+      assert.equal(done.currentPhase, 7, "the human approve moves the cursor");
+      assert.equal(done.phases.find((r) => r.id === 6)?.status, "complete");
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
