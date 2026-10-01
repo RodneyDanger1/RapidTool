@@ -2234,6 +2234,11 @@ export type P6JourneyCycleContext = {
    *  the next cycle's synthesis deps as a bounded deps.synthesisRefusal
    *  excerpt (fixes/153 P2) and named on the exhausted verdict. */
   refusal?: string;
+  /** fixes/326 F1b: the ONE bounded gate-repair cycle's context — the recorded
+   *  unmet P6 DoD requirements (criteria + missing lists) from a green
+   *  tree-run/red-gate cycle, fed to the next synthesis as deps.gateRepair.
+   *  Present ONLY on a diverted repair cycle (at most one per journey). */
+  gateRepair?: string;
 };
 
 /** fixes/153 (P2): deps.synthesisRefusal cap — the bounded refusal excerpt a
@@ -2246,10 +2251,10 @@ const P6_JOURNEY_REFUSAL_MAX = 200;
 /** fixes/147 (E2) + fixes/153 (P2): map a journey cycle's context onto
  *  engine.liveLayer's additive P6 deps (LiveLayerDeps) — which the engine
  *  forwards verbatim into codegen liveP6Synthesis as deps.treeFailure (the
- *  tree-failure reader) and deps.synthesisRefusal (the refusal reader added
- *  by fixes/153 P2: the previous cycle's refusal class + bounded reason, so
- *  the next attempt sees WHY the prior synthesis was refused and never
- *  re-requests byte-identical work). An absent/empty context ⇒ undefined ⇒
+ *  tree-failure reader) and deps.synthesisRefusal (the previous cycle's
+ *  refusal class + bounded reason — CARRIED on deps for the codegen seam;
+ *  the codegen-side reader is still owed (fixes/153 P2 deferred it — no
+ *  reader in tree as of 326)). An absent/empty context ⇒ undefined ⇒
  *  the legacy byte-identical liveLayer(p, 6) call (zero behavior change);
  *  a tree-failure-only ctx yields exactly { treeFailure } — no
  *  synthesisRefusal key — byte-identical to fixes/147. Exported so the
@@ -2264,15 +2269,20 @@ export type P6CycleLiveDepsShape = {
    *  set ONLY by `repairCycleLiveDeps` (the repair drivers). `p6CycleLiveDeps`
    *  never sets it, so the journey mapping stays byte-identical to fixes/153. */
   patchRepairs?: boolean;
+  /** fixes/326 F1b: bounded unmet-requirements context for the ONE
+   *  gate-repair cycle (see P6JourneyCycleContext.gateRepair). */
+  gateRepair?: string;
 };
 
 export function p6CycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDepsShape | undefined {
   const tail = typeof ctx.treeFailureTail === "string" ? ctx.treeFailureTail : "";
   const refusal = typeof ctx.refusal === "string" ? ctx.refusal : "";
-  if (tail.length === 0 && refusal.length === 0) return undefined;
+  const gateRepair = typeof ctx.gateRepair === "string" ? ctx.gateRepair : "";
+  if (tail.length === 0 && refusal.length === 0 && gateRepair.length === 0) return undefined;
   const deps: P6CycleLiveDepsShape = {};
   if (tail.length > 0) deps.treeFailure = tail;
   if (refusal.length > 0) deps.synthesisRefusal = refusal.slice(0, P6_JOURNEY_REFUSAL_MAX);
+  if (gateRepair.length > 0) deps.gateRepair = gateRepair.slice(0, P6_JOURNEY_GATE_REPAIR_MAX);
   return deps;
 }
 /**
@@ -2338,6 +2348,9 @@ export const P6_JOURNEY_DEFAULT_BUDGET = 3;
 /** Tails are capped before they enter the next cycle's synthesis context
  *  (parity with compile-check.server's VERDICT_TAIL_MAX). */
 const P6_JOURNEY_TAIL_MAX = 1500;
+/** fixes/326 F1b: cap for the one-shot gate-repair context (parity with the
+ *  refusal cap discipline — a long unmet list can never blow the prompt). */
+const P6_JOURNEY_GATE_REPAIR_MAX = 700;
 
 /** Direct DeepSeek env probe (the same probe codegen.server relies on —
  *  process.env.DEEPSEEK_API_KEY, not the server-fn llmStatus that always
@@ -2386,6 +2399,29 @@ function p6JourneyLog(project: Project, level: "info" | "warn" | "error", event:
   };
 }
 
+/** fixes/326 F1b PREP: the bounded context for the ONE gate-repair cycle —
+ *  the recorded unmet criteria + the concrete missing lists already on the
+ *  record (latest p6.synthesis.refused / dod.reqtrace rows). Recorded
+ *  evidence only; the engine adds no requirement the brief never had. */
+function gateRepairContextOf(project: Project, unmet: readonly string[]): string {
+  const logs = project.logs ?? [];
+  const scraped: string[] = [];
+  for (let i = logs.length - 1; i >= 0 && scraped.length < 3; i--) {
+    const l = logs[i];
+    if ((l.event === "p6.synthesis.refused" || l.event === "dod.reqtrace") && typeof l.detail === "string") {
+      const at = l.detail.indexOf("missing:");
+      if (at >= 0) scraped.push(l.detail.slice(at, at + 300));
+    }
+  }
+  return [
+    `P6 DoD unmet: ${unmet.join(" | ")}`,
+    scraped.length > 0 ? `Recorded missing requirements: ${scraped.join(" · ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, P6_JOURNEY_GATE_REPAIR_MAX);
+}
+
 /** First ~tail of a red TreeRunOutcome: top-level error, then the first
  *  failing spec, then (216 · T-18) a declared project script that ran red,
  *  then the entry verdict. Never empty on a !ok outcome. */
@@ -2421,10 +2457,10 @@ function treeRunFailureTail(o: TreeRunOutcome): string {
  *  on the record) AND threaded as deps.treeFailure through liveLayer's
  *  additive deps param (fixes/147 E2); a previous-cycle refusal rides the
  *  same additive param as deps.synthesisRefusal — a bounded excerpt of the
- *  refusal class + model reason (fixes/153 P2). codegen liveP6Synthesis reads
- *  deps?.treeFailure for tree-repair re-prompts and deps?.synthesisRefusal
- *  for refusal-aware re-prompts. p6CycleLiveDeps is the single ctx→deps
- *  mapping. */
+ *  refusal class + model reason. CARRIED on deps for the codegen seam; the
+ *  codegen-side reader is still owed (fixes/153 P2 deferred it — no reader
+ *  in tree as of 326). codegen liveP6Synthesis reads deps?.treeFailure for
+ *  tree-repair re-prompts. p6CycleLiveDeps is the single ctx→deps mapping. */
 /** The shared cycle-synthesis core: floor stamping + the live-layer call. The
  *  two defaults below differ ONLY in the ctx→deps mapping they pass. */
 async function synthesizeCycle(
@@ -2653,10 +2689,17 @@ export async function driveP6Journey(
   let p = project;
   let treeTail: string | null = null;
   let refusal: string | null = null;
+  // fixes/326 F1b: at most ONE gate-repair diversion per journey.
+  let gateRepair: string | null = null;
+  let gateRepairUsed = false;
   for (let cycle = 1; cycle <= budget; cycle++) {
     const ctx: P6JourneyCycleContext = { cycle };
     if (treeTail !== null) ctx.treeFailureTail = treeTail;
     if (refusal !== null) ctx.refusal = refusal;
+    if (gateRepair !== null) {
+      ctx.gateRepair = gateRepair;
+      gateRepair = null; // consume-once: the diversion is exactly one cycle
+    }
     let synthesized: Project;
     try {
       synthesized = await synthesize(p, ctx);
@@ -2778,6 +2821,27 @@ export async function driveP6Journey(
       // evidence names the failed gate + its unmet criteria (the honest
       // qualifier: the treeRun being green is what the DoD gate just weighed
       // and found wanting — "converged" would hide it).
+      // fixes/326 F1b: ONE bounded gate-repair cycle. A green tree-run with a
+      // red fit-class gate is REPAIRABLE within the existing budget — the
+      // artifact runs; the red criteria name the brief's own unmet
+      // vocabulary/capabilities. Spend exactly one cycle re-synthesizing WITH
+      // those recorded requirements as context. Honesty is untouched: the
+      // repaired tree faces the SAME tree-run + real gate probes; convergence
+      // still requires gate.passed === true, and a second red gate FAILS.
+      if (!gateRepairUsed && gate !== null && gate.unmet.length > 0 && cycle < budget) {
+        gateRepairUsed = true;
+        gateRepair = gateRepairContextOf(finalProject, gate.unmet);
+        p = p6JourneyLog(
+          finalProject,
+          "warn",
+          "p6.journey.gate-repair",
+          `tree-run ok but P6 gate FAIL (${gate.unmet.length} unmet) — one bounded gate-repair cycle with the unmet requirements as context`,
+        );
+        events.push(
+          `cycle ${cycle}: tree-run ok but P6 gate FAIL — one bounded gate-repair cycle (unmet requirements fed as context)`,
+        );
+        continue;
+      }
       const gateReason =
         gate === null
           ? "no P6 DoD gate record (phase 6 not complete) — converged cannot be asserted without a gate verdict"

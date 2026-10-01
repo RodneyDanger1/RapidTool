@@ -899,6 +899,63 @@ test("T8.2 — approve's seat is never guessed: bare / non-seat refuse CODED; `-
 });
 
 // ---------------------------------------------------------------------------
+// 326 F2b (C1) — approve/reject refusals on a NON-parked project must ship a
+// remedy that points at a REAL next step: the guard fires exactly when no
+// HITL door is open (hitl = null), so the registry's generic "route through
+// the open HITL prompt" reads as a phantom door (E2-OBS-5 class; fixed for
+// `gate`, pinned here for the approve/reject guards).
+// ---------------------------------------------------------------------------
+test("326 F2b C1 — approve/reject on a non-parked project refuse CODED with a real next step, never a phantom HITL door", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-nodoor-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  try {
+    const proj = join(cwd, "nodoor-pin.json");
+    const created = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        CLI_PATH,
+        "create",
+        "--brief",
+        "Build an inventory tracker for a small warehouse team: track products, stock levels, and reorder alerts with a simple dispatcher workflow.",
+        "--name",
+        "NoDoorPin",
+        "--out",
+        proj,
+      ],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+    for (const verb of ["approve", "reject"]) {
+      const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, verb, "--project", proj], {
+        cwd,
+        env,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      assert.ok(!/(^|\n)\s+at\s/.test(res.stderr ?? ""), `${verb}: refusal must never print a Node stack`);
+      assert.equal(res.status, 1, `${verb} on a non-parked project is a coded refusal (exit 1).\nstdout: ${res.stdout}`);
+      const json = JSON.parse(res.stdout);
+      assert.equal(json.cmd, verb);
+      assert.equal(json.ok, false);
+      assert.equal(json.code, "RT_E_GATE_PENDING");
+      assert.match(String(json.error), new RegExp(`No pending gate to ${verb} \\(status: intake\\)`));
+      assert.ok(
+        !String(json.remedy).includes("Route the project through the open HITL prompt"),
+        `${verb}: remedy must NOT point at a HITL prompt that cannot exist (hitl = null) — the phantom door.`,
+      );
+      assert.match(String(json.remedy), /`gate`/, `${verb}: remedy names the real next step`);
+      assert.match(String(json.remedy), /repaired, not approved/, `${verb}: keeps the red-gate honesty clause`);
+      assert.match(String(json.remedy), /never fabricate a decision/, `${verb}: keeps the anti-fabrication clause`);
+      assert.equal(json.exit_code, res.status, `${verb}: the envelope's exit_code must equal the process exit`);
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Leg 13 (W44 X2 · seeded ticket T / fixes/321_d2_monitor F-2 — BEHAVIORAL
 // spawn). The minted forceHuman gate (review-reject park / failed P6 sandbox)
 // is HUMAN-ONLY (R3/B-03). Before this leg, `approve --seat autopilot` on such
@@ -1450,4 +1507,189 @@ test("W44 A5 — an empty-value path flag refuses CODED (exit 1, RT_E_VALIDATION
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// W44 F2c (C2 · monitors' OBS-T3-1, adjudicated A) — `create`'s exit row is
+// scoped to the project it CREATED: CLI_PROJECT = out lands after saveProject
+// and before respond (which exits in-tick), so the row goes to
+// <--out dir>/.rapidtool/logs, never the invoker's cwd. Failure paths (no
+// project on disk yet) still stamp the cwd — that half is unchanged.
+// ---------------------------------------------------------------------------
+test("W44 F2c C2 — a create whose --out lands elsewhere stamps its exit row NEXT TO the created project, never the invoker's cwd (OBS-T3-1)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-createscope-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  try {
+    mkdirSync(join(cwd, "sub"), { recursive: true });
+    const proj = join(cwd, "sub", "createscope-pin.json");
+    const created = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        CLI_PATH,
+        "create",
+        "--brief",
+        "Build an inventory tracker for a small warehouse team: track products, stock levels, and reorder alerts with a simple dispatcher workflow.",
+        "--name",
+        "CreateScopePin",
+        "--out",
+        proj,
+      ],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+    const createdJson = JSON.parse(created.stdout);
+    assert.equal(createdJson.exit_code, created.status, "the envelope's exit_code must equal the process exit");
+
+    const rowsOf = (dir) => {
+      if (!existsSync(dir)) return [];
+      return readdirSync(dir)
+        .filter((f) => f.endsWith(".ndjson"))
+        .flatMap((f) => readFileSync(join(dir, f), "utf8").split(/\r?\n/))
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+    };
+
+    // POSITIVE: the created project's own log carries its birth row.
+    const outLogDir = join(cwd, "sub", ".rapidtool", "logs");
+    const outRows = rowsOf(outLogDir);
+    const outCreate = outRows.filter((r) => r.event === "cli.invocation" && r.payload?.cmd === "create");
+    assert.equal(
+      outCreate.length,
+      1,
+      `the create exit row must land next to the created project (${outLogDir}); got rows: ${outRows.map((r) => r.event).join(", ")}`,
+    );
+    assert.equal(outCreate[0].host, "cli", "host glue stamps cli");
+    assert.equal(outCreate[0].payload?.exitCode, 0, "the row records the successful exit");
+
+    // NEGATIVE: the invoker's cwd log holds NO create row (the OBS-T3-1
+    // pollution — trial cwd logs collected every create of every project).
+    const cwdCreate = rowsOf(join(cwd, ".rapidtool", "logs")).filter(
+      (r) => r.event === "cli.invocation" && r.payload?.cmd === "create",
+    );
+    assert.equal(cwdCreate.length, 0, "the invoker's cwd log must not hold the create row when --out points elsewhere");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 326 F2d (T3 [NEW-BUG] · doctor --tree path honesty; pre-fix bytes:
+// t3_scratch/dryrun_doctor_nopath.txt) — a non-existent `--tree` used to exit
+// 0 with ok:true / stubs:0 / files:[] — a false bill of health for a scan
+// that never happened. Now: coded RT_E_VALIDATION refusal (exit 1, the
+// `edit --dir` missing-dir class); a non-directory --tree refuses too (a
+// file path was false-empty before), and a real stub tree still scans.
+// ---------------------------------------------------------------------------
+test("326 F2d — `doctor --tree` refuses CODED on a non-existent / non-directory path (exit 1, RT_E_VALIDATION), never a false-clean ok:true census", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-doctree-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  try {
+    const tree = join(cwd, "tree");
+    mkdirSync(join(tree, "src", "jobs"), { recursive: true });
+    writeFileSync(
+      join(tree, "src", "jobs", "deliver_core_workflow.ts"),
+      'export function deliverCoreWorkflow() {\n  // TODO(E-15): stub\n  throw new Error("TODO");\n}\n',
+    );
+    const doctor = (target) =>
+      spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "doctor", "--tree", target], {
+        cwd,
+        env,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+
+    // CONTROL: the real tree still scans — the TODO(E-15) file is one stub.
+    const win = doctor(tree);
+    assert.equal(win.status, 0, `control scan failed.\nstdout: ${win.stdout}\nstderr: ${win.stderr}`);
+    const winJson = JSON.parse(win.stdout);
+    assert.equal(winJson.ok, true);
+    assert.equal(winJson.factory.inventory.stubs, 1, "the TODO(E-15) stub must be in the census");
+    assert.equal(winJson.factory.inventory.files[0]?.path, "src/jobs/deliver_core_workflow.ts");
+    assert.equal(winJson.exit_code, win.status);
+
+    // NON-EXISTENT: coded refusal — never ok:true/stubs:0.
+    const nopath = doctor(join(cwd, "NOPE_XYZ"));
+    assert.ok(!/(^|\n)\s+at\s/.test(nopath.stderr ?? ""), "refusal must never print a Node stack");
+    assert.equal(nopath.status, 1, `a non-existent --tree is a coded refusal (exit 1).\nstdout: ${nopath.stdout}`);
+    const nopathJson = JSON.parse(nopath.stdout);
+    assert.equal(nopathJson.ok, false, "a scan that never happened must never be ok:true");
+    assert.equal(nopathJson.code, "RT_E_VALIDATION");
+    assert.match(String(nopathJson.error), /does not exist — nothing to scan/);
+    assert.equal(nopathJson.exit_code, nopath.status);
+
+    // NON-DIRECTORY: a file as --tree was a false-empty scan too.
+    const filePath = join(cwd, "not-a-tree.ts");
+    writeFileSync(filePath, "export {};\n");
+    const nodir = doctor(filePath);
+    assert.equal(nodir.status, 1, `a file as --tree is a coded refusal (exit 1).\nstdout: ${nodir.stdout}`);
+    const nodirJson = JSON.parse(nodir.stdout);
+    assert.equal(nodirJson.ok, false);
+    assert.equal(nodirJson.code, "RT_E_VALIDATION");
+    assert.match(String(nodirJson.error), /is not a directory — nothing to scan/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 326 F2d (T3 [NEW-BUG] #2; pre-fix bytes: t3_scratch/dryrun_doctor_game_msys
+// .txt vs dryrun_doctor_game_win.txt) — git-bash hands `/c/Users/...` to the
+// CLI verbatim, and resolve() on win32 mangled it into `C:\c\Users\...` (a
+// silent FALSE-EMPTY scan) while the Windows-form path returned stubs:1.
+// Now the single-letter drive form is translated BEFORE resolve() — the MSYS
+// scan returns the SAME inventory as the win form — and any other POSIX
+// literal refuses CODED instead of being silently mapped onto a drive root.
+// ---------------------------------------------------------------------------
+test(
+  "326 F2d — `doctor --tree` translates MSYS drive forms (/c/...) to the Windows form: same inventory as win form, never silent mangling",
+  { skip: process.platform !== "win32" ? "win32-only: MSYS drive forms only exist against a Windows host" : false },
+  () => {
+    const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-doctreemsys-"));
+    const env = { ...process.env };
+    for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+    try {
+      const tree = join(cwd, "tree");
+      mkdirSync(join(tree, "src", "jobs"), { recursive: true });
+      writeFileSync(
+        join(tree, "src", "jobs", "deliver_core_workflow.ts"),
+        'export function deliverCoreWorkflow() {\n  // TODO(E-15): stub\n  throw new Error("TODO");\n}\n',
+      );
+      const msys = "/" + tree[0].toLowerCase() + tree.slice(2).replace(/\\/g, "/"); // C:\x → /c/x
+      const doctor = (target) =>
+        spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "doctor", "--tree", target], {
+          cwd,
+          env,
+          encoding: "utf8",
+          timeout: 120_000,
+        });
+
+      const win = doctor(tree);
+      assert.equal(win.status, 0, `win-form control failed.\nstdout: ${win.stdout}\nstderr: ${win.stderr}`);
+      const winJson = JSON.parse(win.stdout);
+
+      const msysRes = doctor(msys);
+      assert.equal(msysRes.status, 0, `MSYS-form scan must succeed.\nstdout: ${msysRes.stdout}\nstderr: ${msysRes.stderr}`);
+      const msysJson = JSON.parse(msysRes.stdout);
+      assert.equal(msysJson.ok, true);
+      const driveCaseNormalized = (inv) => ({ ...inv, scanned: String(inv.scanned).toLowerCase() });
+      assert.deepEqual(
+        driveCaseNormalized(msysJson.factory.inventory),
+        driveCaseNormalized(winJson.factory.inventory),
+        "the MSYS form must scan the SAME census as the Windows form (no C:\\c\\... shadow)",
+      );
+
+      // A non-drive POSIX literal has no unambiguous win32 meaning: refusal.
+      const posix = doctor("/tmp/f2d-not-a-mapped-drive");
+      assert.equal(posix.status, 1, "an unmappable POSIX literal refuses (exit 1)");
+      const posixJson = JSON.parse(posix.stdout);
+      assert.equal(posixJson.ok, false);
+      assert.equal(posixJson.code, "RT_E_VALIDATION");
+      assert.match(String(posixJson.error), /POSIX-style path/);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);
 

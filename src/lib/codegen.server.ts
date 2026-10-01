@@ -1066,6 +1066,17 @@ function repairTreeFailureTail(treeFailure?: string): string {
   return `\n\nTree-run failure context (failing file + first not-ok tail):\n${t.slice(0, REPAIR_TREE_FAILURE_TAIL_MAX)}`;
 }
 
+/** fixes/326 F1b PREP: bounded gate-repair context block for the PRIMARY
+ *  synthesis prompt. Deterministic + whitespace-collapsed; absent/blank ⇒
+ *  the prompt is byte-identical to the legacy text. */
+const REPAIR_GATE_CONTEXT_MAX = 700;
+function withGateRepairContext(user: string, gateRepair?: string): string {
+  const t = typeof gateRepair === "string" ? gateRepair.replace(/\s+/g, " ").trim() : "";
+  if (!t) return user;
+  return user +
+    `\n\nP6 GATE REPAIR CONTEXT (the previous cycle's tree-run was GREEN; the P6 DoD gate weighed it and REFUSED — implement these recorded unmet requirements with real working code, not renames or padding):\n${t.slice(0, REPAIR_GATE_CONTEXT_MAX)}`;
+}
+
 /** Repair re-prompt after an unparseable envelope (audit-88 bounded-retry pattern). */
 export function p6SynthesisRepairPrompt(treeFailure?: string): string {
   return [
@@ -2459,6 +2470,12 @@ export type P6SynthesisDeps = {
    *  re-prompt built during this synthesis appends it as a coded context
    *  block; omitted keeps the legacy byte-identical repair prompts. */
   treeFailure?: string;
+  /** fixes/326 F1b: the journey's one-shot gate-repair context — recorded
+   *  unmet P6 DoD requirements (criteria + missing lists) from a
+   *  green-tree-run/red-gate cycle. When present, the PRIMARY synthesis
+   *  prompt (single-module and every tree chunk) carries it as a bounded
+   *  "P6 GATE REPAIR CONTEXT" block; absent/blank ⇒ byte-identical legacy. */
+  gateRepair?: string;
   /** T-107.1 (216r · W7-L1): opt-in patch (str_replace) repair level — when
    *  true a LOCALIZED defect (soft forbidden primitive / non-deterministic
    *  primitive / prose-in-code) gets ONE bounded delta attempt BEFORE the
@@ -2942,6 +2959,8 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   // re-prompt of THIS synthesis when the caller supplied it (defensively
   // normalized at the prompt builders; absent ⇒ byte-identical legacy text).
   const treeFailure = deps?.treeFailure;
+  // fixes/326 F1b: the one-shot gate-repair context (journey PREP-1).
+  const gateRepair = deps?.gateRepair;
   // T-107.1 (216r · W7-L1): the opt-in patch-repair level (see
   // P6SynthesisDeps.patchRepairs) — false unless the caller asks for it.
   const patchRepairs = deps?.patchRepairs === true;
@@ -3028,14 +3047,14 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   // signatures keeps the legacy path (nothing to chunk).
   const chunkGroups = chunkTypeSignatures(specRecord.typeSignatures);
   if (singleModuleLibraryKind(project) && chunkGroups.length <= 1) {
-    return synthesizeSingleModule(project, brief, specRecord, signatureNames, complete, verify, treeFailure, patchRepairs);
+    return synthesizeSingleModule(project, brief, specRecord, signatureNames, complete, verify, treeFailure, patchRepairs, gateRepair);
   }
   // fixes/216k (105 TA-15, W6-L1): the chunked driver computes its own
   // chunk→file plan (treeChunkPlan) and consumption order (orderTreeChunks)
   // INSIDE — the caller no longer passes a flat grouping. Job-keyed chunks land
   // at their spec-graph `src/jobs/*.ts` paths; a job-less graph keeps the
   // pre-216k index-keyed mapping byte-for-byte (treeChunkPlan's legacy branch).
-  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs);
+  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair);
 }
 
 /**
@@ -3064,6 +3083,7 @@ async function synthesizeSingleModule(
   treeFailure?: string,
   /** T-107.1 (216r · W7-L1): the opt-in patch (str_replace) repair level. */
   patchRepairs = false,
+  gateRepair?: string,
 ): Promise<Project> {
   // --- Step 2 (legacy): synthesis (one call + one bounded repair re-prompt) --
   const lessonLines = lessonLinesForBrief(
@@ -3073,7 +3093,7 @@ async function synthesizeSingleModule(
   );
   // R10-f01 (W39 Z2): project.contracts rides the prompt — the model used to
   // write the module body blind to the A6 data contract (G3's wire).
-  const user = p6SynthesisUserPrompt(brief, specRecord, lessonLines, project.contracts);
+  const user = withGateRepairContext(p6SynthesisUserPrompt(brief, specRecord, lessonLines, project.contracts), gateRepair);
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
     json: true,
@@ -3360,6 +3380,7 @@ async function synthesizeChunkedTree(
   treeFailure?: string,
   /** T-107.1 (216r · W7-L1): the opt-in patch (str_replace) repair level. */
   patchRepairs = false,
+  gateRepair?: string,
 ): Promise<Project> {
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
@@ -3406,7 +3427,7 @@ async function synthesizeChunkedTree(
       { limit: EXPAND_LESSON_RANK_LIMIT },
     );
     // R10-f01 (W39 Z2): the same project-level contract block on every chunk.
-    const user = p6SynthesisChunkUserPrompt(brief, specRecord, chunk.signatures, prior, lessonLines, project.contracts);
+    const user = withGateRepairContext(p6SynthesisChunkUserPrompt(brief, specRecord, chunk.signatures, prior, lessonLines, project.contracts), gateRepair);
     // T-107.1 (216r): per-chunk patch-repair sink — the chunk plan's path IS
     // the emitted tree file's path; absent when the level is off (legacy).
     const patch: PatchRepairOptions | undefined = patchRepairs

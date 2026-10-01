@@ -704,6 +704,13 @@ async function main() {
         }
         const out = resolve(typeof args.out === "string" ? args.out : `${h.filename(project.name)}.json`);
         h.saveProject(out, project);
+        // 326 F2c (C2 · monitors' OBS-T3-1): the exit row belongs NEXT TO the
+        // project this command CREATED — CLI_PROJECT is the single input to
+        // resolveLogDir (:486), and respond() exits in-tick (:243) so no later
+        // verb logic reads it. Failure paths above still stamp the invoker's
+        // cwd because no project exists yet (the doc's split —
+        // runtime-log.server.ts:47-50 — now holds for create too).
+        CLI_PROJECT = out;
         // Surface the EFFECTIVE enforcement value (create default policy is
         // env-dependent, so the caller must never guess it).
         respond(
@@ -1027,8 +1034,21 @@ async function main() {
         if (flag(args, "agent-seal")) return refuseAgentSeal("approve");
         const project = loadProjectFor("approve");
         if (project.status !== "awaiting_hitl" || !project.hitl) {
+          // 326 F2b (C1 · E2-OBS-5 class): the RT_E_GATE_PENDING registry
+          // remedy ("Route the project through the open HITL prompt …") points
+          // at a door that CANNOT exist in this branch — it fires exactly when
+          // hitl is null (no park, no prompt). Keep the code + error bytes
+          // (recorded envelopes depend on them); ship the honest context
+          // remedy (an explicit `remedy` bypasses respond()'s registry
+          // default-attach, :190-192).
           return respond(
-            { ok: false, error: `No pending gate to approve (status: ${project.status}).`, code: "RT_E_GATE_PENDING" },
+            {
+              ok: false,
+              error: `No pending gate to approve (status: ${project.status}).`,
+              code: "RT_E_GATE_PENDING",
+              remedy:
+                "No HITL accept door is open (approve needs status=awaiting_hitl with a pending gate): read the latest verdict (`diagnose`; summary.failedGates / summary.lastGate) and drive the run forward with `gate` — a red DoD gate is repaired, not approved; never fabricate a decision.",
+            },
             1,
           );
         }
@@ -1196,8 +1216,17 @@ async function main() {
       case "reject": {
         const project = loadProjectFor("reject");
         if (project.status !== "awaiting_hitl" || !project.hitl) {
+          // 326 F2b (C1 · E2-OBS-5 class): same phantom-door remedy as approve
+          // — no HITL reject door exists when hitl is null; ship the honest
+          // context remedy instead of the registry default.
           return respond(
-            { ok: false, error: `No pending gate to reject (status: ${project.status}).`, code: "RT_E_GATE_PENDING" },
+            {
+              ok: false,
+              error: `No pending gate to reject (status: ${project.status}).`,
+              code: "RT_E_GATE_PENDING",
+              remedy:
+                "No HITL reject door is open (reject needs status=awaiting_hitl with a pending gate): read the latest verdict (`diagnose`; summary.failedGates / summary.lastGate) and drive the run forward with `gate` — a red DoD gate is repaired, not approved; never fabricate a decision.",
+            },
             1,
           );
         }
@@ -3964,7 +3993,67 @@ async function main() {
         // E-25: capability pre-flight — no project required. Never throws.
         // 214: optional --tree scans leftover job files (never invents bodies).
         try {
-          const tree = typeof args.tree === "string" && args.tree.trim() ? args.tree.trim() : "";
+          let tree = typeof args.tree === "string" && args.tree.trim() ? args.tree.trim() : "";
+          // 326 F2d (T3 [NEW-BUG] · doctor --tree path honesty): two false-
+          // clean classes closed here, both live-confirmed keyless.
+          if (tree && process.platform === "win32") {
+            // (a) MSYS drive forms. git-bash hands `/c/Users/...` to the CLI
+            // verbatim, and resolve() on win32 reads it as <cwd>\c\Users\...
+            // — a silent FALSE-EMPTY scan (the same tree via its Windows form
+            // returns stubs:1; live bytes: t3_scratch/dryrun_doctor_game_msys
+            // .txt vs …_win.txt). Translate the single-letter drive form
+            // (git-bash's own /c/.. ⇄ C:\.. mapping — unambiguous) BEFORE
+            // resolve(). Any other POSIX-literal --tree is refused rather
+            // than mapped onto a drive root nobody named (browser-guard.mjs
+            // R11-f06 class).
+            if (/^\/[A-Za-z](\/|$)/.test(tree)) {
+              tree = tree[1].toUpperCase() + ":" + (tree.length > 2 ? "\\" + tree.slice(3).replace(/\//g, "\\") : "\\");
+            } else if (tree.startsWith("/") && !tree.startsWith("//")) {
+              return respond(
+                {
+                  ok: false,
+                  error: `doctor: --tree ${JSON.stringify(tree)} is a POSIX-style path — on win32 it has no unambiguous meaning (resolve() would silently scan a drive root the caller never named). Pass a Windows path (C:\\...) or an MSYS drive form (/c/...).`,
+                  code: "RT_E_VALIDATION",
+                  tree: null,
+                },
+                1,
+              );
+            }
+          }
+          if (tree) {
+            // (b) a non-existent or non-directory --tree must never come back
+            // ok:true/stubs:0/files:[] — that reads as a clean health bill for
+            // a scan that never happened (T3 evidence: NOPE_XYZ exit 0). Same
+            // coded-refusal class as `edit --dir`'s missing-dir guard.
+            let treeStat = null;
+            try {
+              treeStat = statSync(tree);
+            } catch {
+              treeStat = null;
+            }
+            if (!treeStat) {
+              return respond(
+                {
+                  ok: false,
+                  error: `doctor: --tree ${JSON.stringify(tree)} does not exist — nothing to scan.`,
+                  code: "RT_E_VALIDATION",
+                  tree: resolve(tree),
+                },
+                1,
+              );
+            }
+            if (!treeStat.isDirectory()) {
+              return respond(
+                {
+                  ok: false,
+                  error: `doctor: --tree ${JSON.stringify(tree)} is not a directory — nothing to scan.`,
+                  code: "RT_E_VALIDATION",
+                  tree: resolve(tree),
+                },
+                1,
+              );
+            }
+          }
           const status = await h.doctorStatus(tree ? { treeDir: tree } : undefined);
           respond({ ok: true, ...status }, 0);
         } catch (err) {

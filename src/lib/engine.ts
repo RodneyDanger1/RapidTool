@@ -3061,6 +3061,10 @@ async function fetchResearch(
 /** Optional live-layer P6 synthesis context (see liveLayer's doc above). */
 export type LiveLayerDeps = {
   treeFailure?: string;
+  /** fixes/326 F1b: the journey's one-shot gate-repair context (recorded
+   *  unmet P6 DoD requirements) — forwarded verbatim to codegen
+   *  liveP6Synthesis alongside treeFailure. Absent ⇒ legacy call unchanged. */
+  gateRepair?: string;
 };
 
 /**
@@ -3119,7 +3123,7 @@ async function upgradeP6Keyed(floor: Project, deps?: LiveLayerDeps): Promise<Pro
     }
     const codegenSpec = clientSafeServerSpecifier("codegen");
     const codegen = (await import(codegenSpec)) as {
-      liveP6Synthesis?: (p: Project, deps?: { treeFailure?: string }) => Promise<Project>;
+      liveP6Synthesis?: (p: Project, deps?: { treeFailure?: string; gateRepair?: string }) => Promise<Project>;
     };
     if (typeof codegen.liveP6Synthesis === "function" && isTrustedCallable(codegen.liveP6Synthesis)) {
       // fixes/147 (E2): the journey driver's tree-failure tail rides the

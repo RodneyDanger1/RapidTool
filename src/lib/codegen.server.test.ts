@@ -1652,6 +1652,87 @@ describe("liveP6Synthesis deps.treeFailure threads into repair re-prompts (fixes
   });
 });
 
+// --- fixes/326 F1b: the one-shot gate-repair context on the PRIMARY prompts ---
+// The journey's diverted repair cycle feeds the recorded unmet P6 DoD
+// requirements through deps.gateRepair; codegen appends it as ONE bounded
+// block on the PRIMARY synthesis prompt (single-module and every tree chunk).
+// Absent/blank ⇒ the prompt stays byte-identical to the legacy text.
+
+describe("liveP6Synthesis deps.gateRepair rides the PRIMARY synthesis prompts (fixes/326 F1b)", () => {
+  /** A single-line context (whitespace-collapse is identity here) so the
+   *  expected block bytes are exact. */
+  const GATE_REPAIR =
+    "P6 DoD unmet: p6-brief-fit | Recorded missing requirements: missing: static, marketing, website";
+  const block = (t: string): string =>
+    "\n\nP6 GATE REPAIR CONTEXT (the previous cycle's tree-run was GREEN; the P6 DoD gate weighed it and REFUSED — implement these recorded unmet requirements with real working code, not renames or padding):\n" +
+    t;
+
+  it("single-module: the block is appended to the primary user prompt exactly once; absent deps keep the legacy bytes", async () => {
+    const run = async (gateRepair?: string): Promise<string[]> => {
+      const base = p6Base();
+      const prompts: string[] = [];
+      const complete = async (p: string): Promise<LlmResult> => {
+        prompts.push(p);
+        return { ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" };
+      };
+      const q = await liveP6Synthesis(base, {
+        complete,
+        expand: async () => ({ ok: true, spec: KANBAN_SPEC }),
+        verify: async () => ({
+          status: "passed",
+          iterations: 1,
+          evidence: "3/3 machine-run cases passed on iteration 1",
+          finalSource: KANBAN_MODULE,
+          cases: [],
+        }),
+        ...(gateRepair === undefined ? {} : { gateRepair }),
+      });
+      assertRecordedMaterialized(q, KANBAN_MODULE.trim());
+      return prompts;
+    };
+    const withRepair = await run(GATE_REPAIR);
+    const legacy = await run();
+    assert.equal(withRepair.length, 1, "one primary synthesis call");
+    assert.equal(legacy.length, 1, "one primary synthesis call (legacy run)");
+    const primary = withRepair[0]!;
+    // Byte-exact: the legacy prompt + exactly one bounded block appended.
+    assert.equal(
+      primary,
+      legacy[0]! + block(GATE_REPAIR),
+      "the gate-repair block is appended once to the legacy prompt bytes",
+    );
+    assert.equal(primary.split("P6 GATE REPAIR CONTEXT").length - 1, 1, "the block appears ONCE");
+    assert.equal(legacy[0]!.includes("P6 GATE REPAIR CONTEXT"), false, "absent deps.gateRepair ⇒ no block");
+  });
+
+  it("chunked: every PRIMARY chunk prompt carries the block once when deps.gateRepair is present; absent keeps the legacy bytes", async () => {
+    const base = p6Base(LEDGER_BRIEF);
+    const withDeps = chunkedDeps();
+    const legacyDeps = chunkedDeps();
+    const qWith = await liveP6Synthesis(base, { ...withDeps.deps, gateRepair: GATE_REPAIR });
+    const qLegacy = await liveP6Synthesis(base, legacyDeps.deps);
+    assert.ok((qWith.generatedTree ?? []).length >= 2, "the chunked tree assembled");
+    assert.deepEqual(
+      (qLegacy.generatedTree ?? []).map((f) => f.path),
+      (qWith.generatedTree ?? []).map((f) => f.path),
+      "the additive context does not change the tree shape",
+    );
+    const synth = (ps: string[]): string[] => ps.filter((p) => p.includes("TYPE SIGNATURES (must export"));
+    const withPrompts = synth(withDeps.prompts);
+    const legacyPrompts = synth(legacyDeps.prompts);
+    assert.equal(withPrompts.length, legacyPrompts.length, "same number of chunk synthesis calls");
+    assert.ok(withPrompts.length >= 2, "a real multi-chunk run");
+    for (let i = 0; i < withPrompts.length; i++) {
+      assert.equal(
+        withPrompts[i],
+        legacyPrompts[i] + block(GATE_REPAIR),
+        `chunk ${i + 1}'s primary prompt = legacy bytes + one block`,
+      );
+      assert.equal(withPrompts[i]!.split("P6 GATE REPAIR CONTEXT").length - 1, 1, `chunk ${i + 1} carries the block once`);
+    }
+  });
+});
+
 // --- fixes/148 (F1): the kind-scoped tree trigger ----------------------------
 // The chunk/tree decision must consider the DELIVERY KIND, not signature count
 // alone (fixes/145 M1=0 root cause — a ≤8-signature WEBAPP brief fell into
