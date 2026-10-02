@@ -1211,8 +1211,10 @@ export async function verifyAndFixServer(
         // L4 verified-procedure on a machine pass (Voyager commit-on-verify).
         // 216i note: a PASS is not a failure record, so the §4.3
         // counterexample gate (gatedFailureMint) does not apply here — the L4
-        // row keeps its direct builder and its stable evidence-derived id.
-        lesson: verifyOutcomeLesson("passed", 6, evidence, i + 1),
+        // row keeps its direct builder. 331 V1: its identity is the sorted
+        // machine-case ids (the set it PROVED), so the iteration count and the
+        // lint suffix in `evidence` can no longer fork the row.
+        lesson: verifyOutcomeLesson("passed", 6, evidence, i + 1, cases.map((c) => c.id)),
       };
     }
     if (i === maxIterations - 1) {

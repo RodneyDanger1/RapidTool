@@ -16,12 +16,14 @@ import {
   assembleTreeEntry,
   briefFitSatisfied,
   chunkTypeSignatures,
+  crossChunkDuplicateDeclarations,
   ENVELOPE_READ_EXCERPT_MAX,
   envelopeReadLogEntry,
   forbiddenPrimitiveHit,
   FORBIDDEN_PRIMITIVE_NAMES,
   injectMissingExports,
   liveP6Synthesis,
+  localBindingLines,
   materializeImportableTree,
   neutralizeResidualCjsExports,
   nondeterministicPrimitiveHit,
@@ -34,6 +36,8 @@ import {
   PATCH_REPAIR_WINDOW_MAX_LINES,
   p6SynthesisBriefFitRepairPrompt,
   p6SynthesisChunkUserPrompt,
+  p6SynthesisContractsLines,
+  p6SynthesisDuplicateDeclRepairPrompt,
   p6SynthesisExportRepairPrompt,
   p6SynthesisForbiddenRepairPrompt,
   p6SynthesisNondeterministicRepairPrompt,
@@ -44,13 +48,18 @@ import {
   p6SynthesisSystemPrompt,
   p6SynthesisUserPrompt,
   P6_SYNTH_MAX_TOKENS,
+  P6_SYNTH_PRIOR_MAX_FILES,
   P6_SYNTH_TIMEOUT_MS,
   relTsImport,
   signatureFunctionNames,
   singleModuleLibraryKind,
+  specGraphJobTargets,
   stripCjsExportAssignments,
   toGeneratedTreeFile,
   tokenLineNumbers,
+  orderTreeChunks,
+  treeChunkPlan,
+  treeChunkPlanCensus,
   treePathForChunk,
   TREE_CHUNK0_RELOCATED_PATH,
   TREE_ENTRY_PATH,
@@ -550,7 +559,10 @@ describe("injectMissingExports (fixes/121 last-mile deterministic repair)", () =
     assert.deepEqual(r.injected, ["listTenants"]);
     assert.ok(r.source.includes("module.exports.listTenants = listTenants;"), "binding appended");
     assert.ok(!r.source.includes("module.exports.recordPayment"), "undeclared name never injected");
-    assert.ok(!r.source.includes("module.exports.createProperty = createProperty;") || true);
+    assert.ok(
+      !r.source.includes("module.exports.createProperty = createProperty;"),
+      "an already-bound export is never re-injected as module.exports",
+    );
   });
 
   it("is a no-op when every claimed export is already bound or absent", () => {
@@ -962,6 +974,109 @@ describe("chunked synthesis pure helpers (fixes/144 M2 / S-01 T2)", () => {
     assert.deepEqual(chunkTypeSignatures([]), []);
     const dirty = [sigs[0]!, sigs[0]!, "   ", sigs[1]!];
     assert.deepEqual(chunkTypeSignatures(dirty), [[sigs[0], sigs[1]]], "dupes + blank lines collapse");
+  });
+
+  it("W45/331-4 treeChunkPlanCensus: the plan's declared-vs-planned shortfall is counted, never silent", () => {
+    const project = {
+      specGraph: {
+        nodes: [
+          { id: "job-0", file: "src/jobs/alpha.ts", purpose: "Implement job “alpha” against the contract" },
+          { id: "job-1", file: "src/jobs/beta.ts", purpose: "Implement job “beta” against the contract" },
+        ],
+      },
+    };
+    // Both jobs are named by their own signatures -> both plan a file.
+    const both = treeChunkPlanCensus(project, [
+      "runAlpha(command: AlphaCmd): Promise<Alpha>",
+      "listBetaRuns(id: string): Promise<BetaRun[]>",
+    ]);
+    assert.deepEqual(both.declared, ["alpha", "beta"]);
+    assert.deepEqual(both.planned, ["alpha", "beta"]);
+    assert.deepEqual(both.unbound, []);
+    assert.equal(both.legacy, false);
+    assert.ok(both.paths.includes("src/jobs/alpha.ts"));
+    assert.ok(both.paths.includes("src/jobs/beta.ts"));
+    // Only alpha is named -> beta gets no chunk: the counted shortfall.
+    const partial = treeChunkPlanCensus(project, ["runAlpha(command: AlphaCmd): Promise<Alpha>"]);
+    assert.deepEqual(partial.planned, ["alpha"]);
+    assert.deepEqual(partial.unbound, ["beta"]);
+    assert.equal(partial.legacy, false);
+    assert.equal(partial.paths.includes("src/jobs/beta.ts"), false, "an unbound job has no planned file");
+    // No signature binds to either job -> the legacy src/generated mapping; both counted.
+    const none = treeChunkPlanCensus(project, ["collectRent(payment: Payment): Receipt"]);
+    assert.deepEqual(none.unbound, ["alpha", "beta"]);
+    assert.equal(none.legacy, true);
+    assert.equal(none.paths.includes("src/jobs/alpha.ts"), false);
+    // The census is derived FROM the plan (no second path rule to drift).
+    const viaPlan = orderTreeChunks(
+      treeChunkPlan(project, [
+        "runAlpha(command: AlphaCmd): Promise<Alpha>",
+        "listBetaRuns(id: string): Promise<BetaRun[]>",
+      ]),
+    );
+    assert.deepEqual([...both.paths].sort(), viaPlan.map((c) => c.path).sort());
+  });
+
+  it("W45/331-4: the core sentinel job is never a coverage obligation (vague-brief parity)", () => {
+    const project = {
+      specGraph: {
+        nodes: [
+          { id: "job-0", file: "src/jobs/deliver_core_workflow.ts", purpose: "Implement job “deliver-core-workflow” against the contract" },
+        ],
+      },
+    };
+    const census = treeChunkPlanCensus(project, ["collectRent(payment: Payment): Receipt"]);
+    assert.deepEqual(census.declared, [], "the sentinel is not a declared capability");
+    assert.deepEqual(census.unbound, []);
+    assert.equal(census.legacy, true, "no keyable job chunk -> the legacy mapping");
+    assert.deepEqual(specGraphJobTargets(project).map((t) => t.label), ["deliver-core-workflow"]);
+  });
+
+  it("R10-f01 (331-4): p6SynthesisContractsLines renders the A6 contract; the chunk prompt carries it, absent keeps legacy bytes", () => {
+    assert.deepEqual(p6SynthesisContractsLines(null), []);
+    assert.deepEqual(p6SynthesisContractsLines({ entities: [], endpoints: [] }), []);
+    const contracts = {
+      entities: [{ name: "House", fields: [{ name: "id", type: "ulid" }, { name: "arv", type: "number" }] }],
+      endpoints: [{ method: "POST" as const, path: "/v1/flip", job: "flip" }],
+    };
+    const lines = p6SynthesisContractsLines(contracts);
+    assert.ok(lines.includes("entities:"));
+    assert.ok(lines.includes("- House (id:ulid, arv:number)"));
+    assert.ok(lines.includes("endpoints:"));
+    assert.ok(lines.includes("- POST /v1/flip (flip)"));
+    const spec = ledgerSpec(2);
+    const withC = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures, [], [], contracts);
+    assert.ok(withC.includes("DATA CONTRACTS"), "R10-f01: the contract reaches the chunk prompt");
+    assert.ok(withC.includes("- House (id:ulid, arv:number)"));
+    const without = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures, [], []);
+    assert.equal(without.includes("DATA CONTRACTS"), false, "no contract -> no block (legacy bytes)");
+    assert.ok(withC.startsWith(without), "the block is additive; the legacy bytes are the prefix");
+    // The 12-row cap is visible, never a silent cut.
+    const many = {
+      entities: Array.from({ length: 20 }, (_, i) => ({ name: `E${i}`, fields: [{ name: "id", type: "ulid" }] })),
+      endpoints: [],
+    };
+    const capped = p6SynthesisContractsLines(many);
+    assert.ok(capped.some((l) => l.includes("[CONTRACTS-ELIDED: 8 row(s) beyond the 12-row render cap")));
+  });
+
+  it("R12-f01 (331-4): the prior-file render is capped with a visible elision marker; only the newest files are re-sent", () => {
+    const prior: ChunkPriorFile[] = Array.from({ length: 20 }, (_, i) => ({
+      path: `src/generated/f${i}.ts`,
+      exports: [`f${i}`],
+      reqTrace: {},
+    }));
+    const spec = ledgerSpec(2);
+    const prompt = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures, prior, []);
+    assert.ok(
+      prompt.includes(`[PRIOR-ELIDED: 8 earlier file(s) beyond the ${P6_SYNTH_PRIOR_MAX_FILES}-file render cap`),
+      "the file-cap elision marker is visible",
+    );
+    assert.ok(prompt.includes("- src/generated/f19.ts exports: f19"), "the newest file is kept");
+    assert.equal(prompt.includes("- src/generated/f0.ts exports: f0"), false, "the oldest files past the cap are cut");
+    // ≤ the cap file lines are rendered at all (O(chunks²)→O(chunks·cap)).
+    const fileLines = prompt.split("\n").filter((l) => /^- src\/generated\/f\d+\.ts exports: /.test(l));
+    assert.equal(fileLines.length, P6_SYNTH_PRIOR_MAX_FILES);
   });
 
   it("p6SynthesisUserPrompt is byte-identical to the chunk builder (full sig list, no prior files)", () => {
@@ -1401,6 +1516,71 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
       assert.ok(p.includes("Track rent collection per tenant."), "full requirement list in every chunk prompt");
     }
     assert.deepEqual(f.calls, ["expand", "complete", "complete", "complete"]);
+  });
+
+  it("W45/331-4: the chunked driver persists ONE p6.tree.shortfall warn naming the unbound declared jobs", async () => {
+    // The LEDGER brief declares 4 capabilities (track/record/lease/rent) whose
+    // spec graph materialises 4 job nodes; every `collectRent<i>` signature names
+    // only `rent`, so the other three get no chunk and no file — silently, until
+    // this census. (The existing fixture never noticed: it only asserts rent.ts.)
+    const f = chunkedDeps();
+    const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), f.deps);
+    const rows = q.logs.filter((l) => l.event === "p6.tree.shortfall");
+    assert.equal(rows.length, 1, "one persisted row, not one per chunk");
+    assert.equal(rows[0]!.level, "warn");
+    assert.match(rows[0]!.detail, /no src\/jobs module will be synthesized/);
+    for (const label of ["track", "record", "lease"]) {
+      assert.match(rows[0]!.detail, new RegExp(`\\b${label}\\b`), `${label} is a declared job with no bound signature`);
+    }
+    assert.equal(/\brent\b/.test(rows[0]!.detail), false, "the bound job is not named");
+    // Negative control: a base whose only job node IS named logs nothing.
+    const onlyRent = p6Base(LEDGER_BRIEF);
+    onlyRent.specGraph = {
+      nodes: (onlyRent.specGraph?.nodes ?? []).filter(
+        (n) => !String(n.id).startsWith("job-") || n.file === "src/jobs/rent.ts",
+      ),
+    } as Project["specGraph"];
+    const clean = await liveP6Synthesis(onlyRent, chunkedDeps().deps);
+    assert.equal(clean.logs.some((l) => l.event === "p6.tree.shortfall"), false);
+  });
+
+  it("W45/331-4 (Finding B) e2e: a later chunk redeclaring an earlier export is refused, repaired, then accepted", async () => {
+    const base = p6Base(LEDGER_BRIEF);
+    const spec = ledgerSpec(20);
+    const groups = chunkTypeSignatures(spec.typeSignatures);
+    const chunkNames = groups.map((g) => signatureFunctionNames(g));
+    const prompts: string[] = [];
+    let synthIndex = 0;
+    // Chunk 1's first reply ALSO redeclares chunk 0's first export — the recorded
+    // real shape (flip.ts importing estimateARV AND declaring it). The bounded
+    // duplicate-declaration repair must then return the corrected chunk.
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      prompts.push(prompt);
+      if (!prompt.includes("TYPE SIGNATURES (must export")) {
+        const names = chunkNames[1] ?? [];
+        return { ok: true, text: JSON.stringify(chunkEnvelope(names, 1, names[0])), model: "deepseek-v4-flash" };
+      }
+      const idx = synthIndex++;
+      let names = chunkNames[idx] ?? [];
+      if (idx === 1) names = [...names, chunkNames[0]![0]!];
+      const priorFirst = idx > 0 ? chunkNames[idx - 1]?.[0] : undefined;
+      return { ok: true, text: JSON.stringify(chunkEnvelope(names, idx, priorFirst)), model: "deepseek-v4-flash" };
+    };
+    const expand = async () => ({ ok: true as const, spec });
+    const verify = async () => ({ status: "passed" as const, iterations: 0, evidence: "unused", finalSource: "", cases: [] });
+    const q = await liveP6Synthesis(base, { complete, expand, verify });
+    const dupRepairs = prompts.filter((p) => p.includes("already exported by "));
+    assert.equal(dupRepairs.length, 1, "exactly one duplicate-declaration repair fired");
+    assert.match(dupRepairs[0]!, /already exported by src\/jobs\/rent\.ts/);
+    assert.match(dupRepairs[0]!, /"collectRent0"/);
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "the repair converged — no chunk refused");
+    assert.equal(q.generatedTree?.length, 4, "barrel + 3 chunks (the repaired chunk accepted)");
+    // The repaired, materialized chunk imports the earlier chunk's exports but no
+    // longer declares them — the duplicate-import SyntaxError cannot ship.
+    const rent2 = (q.generatedTree ?? []).find((f) => f.path === "src/jobs/rent-2.ts");
+    assert.ok(rent2, "the repaired chunk is on disk");
+    assert.ok(rent2!.source.includes("import {"), "it imports its sibling");
+    assert.equal(/^(?:export\s+)?(?:async\s+)?function\s+collectRent0\s*\(/m.test(rent2!.source), false, "no redeclaration of the prior export");
   });
 
   it("multi-chunk success: tree files carry path + fnv1a hash + attempt 0; A0 ESM barrel is the entry", async () => {
@@ -2270,6 +2450,14 @@ const LEGAL_PROSE_LOOKALIKES = [
   "return negative ? -cents : cents;",
   "return flag ? alpha : beta;",
   "balance: negative ? -cents : cents,",
+  // W45/331-4: the two live false positives the repair loop refused
+  // (parent-keyed-findings §3b-2) — member-expression arithmetic minus and a
+  // ternary whose quoted arm masks away.
+  "return a.index - b.index;",
+  "const span = a.index - b.index;",
+  "return items.length ? items : defaultItems;",
+  "arvNote: arvAvailable ? undefined : 'ARV unavailable: no comparables',",
+  "label: ready ? 'yes' : 'no',",
 ];
 
 /** Records every synthesis prompt (one synthesis + its bounded repairs). */
@@ -2343,6 +2531,22 @@ describe("216f T-09/T-15 detectors (proseLineHits / nondeterministicPrimitiveHit
     assert.equal(proseLineHits("Was it good? Yes: great.").length, 1);
   });
 
+  it("W45/331-4: member-operand arithmetic minus and masked-literal ternary arms are code, never prose", () => {
+    // The two real repair-loop false positives (parent-keyed-findings §3b-2):
+    // repair's own patched output for invoice.ts / list-line-items.ts was refused
+    // as "prose-in-code", one reason the bounded repair loop could not converge.
+    assert.deepEqual(proseLineHits("return a.index - b.index;"), []);
+    assert.deepEqual(proseLineHits("arvNote: arvAvailable ? undefined : 'ARV unavailable: no comparables',"), []);
+    // Documented exclusions that already worked stay working.
+    assert.deepEqual(proseLineHits("balance: amountDue - amountPaid"), []);
+    assert.deepEqual(proseLineHits("return negative ? -cents : cents;"), []);
+    assert.deepEqual(proseLineHits("const total = subtotal - discounts;"), []);
+    // Controls: real deliberation prose is still caught (the class fix must not disarm the gate).
+    assert.equal(proseLineHits("I will write the code now and make sure it works.").length, 1);
+    assert.equal(proseLineHits("We should really just simplify the whole flow here.").length, 1);
+    assert.equal(proseLineHits("Should we ship it? Yes: ship.").length, 1);
+  });
+
   it("T-15: flags Math.random in CODE; a literal/comment mention is data (masked contract)", () => {
     assert.equal(
       nondeterministicPrimitiveHit(maskLiteralsAndComments('function f() { return "x" + Math.random(); }')),
@@ -2414,6 +2618,77 @@ describe("216f validateSynthesisModule gates (T-09 prose, T-15 Math.random)", ()
       .filter((l) => !l.startsWith("import "))
       .join("\n");
     assert.deepEqual(proseLineHits(bodyOnly), [], "the scaffold UI body itself is not prose-shaped");
+  });
+});
+
+describe("W45/331-4 (Finding B) cross-chunk duplicate declarations", () => {
+  const PRIOR = [{ path: "src/generated/list-line-items.ts", exports: ["estimateARV"] }];
+
+  it("validateSynthesisModule refuses a top-level redeclaration of an earlier chunk's export", () => {
+    const mod = [
+      "async function estimateARV(propertyId) { return { propertyId }; }",
+      "module.exports.estimateARV = estimateARV;",
+    ].join("\n");
+    const refused = validateSynthesisModule(mod, ["estimateARV"], ["estimateARV"], PRIOR);
+    assert.equal(refused.ok, false);
+    if (!refused.ok) {
+      assert.equal(refused.code, "RT_E_VALIDATION");
+      assert.match(refused.error, /cross-chunk duplicate declaration/);
+      assert.match(refused.error, /"estimateARV" \(declared at line 1; already exported by src\/generated\/list-line-items\.ts\)/);
+      assert.match(refused.error, /SyntaxError: Identifier 'estimateARV' has already been declared/);
+    }
+    // No prior chunks (the single-module path) is unchanged: still accepted.
+    assert.deepEqual(validateSynthesisModule(mod, ["estimateARV"], ["estimateARV"]), {
+      ok: true,
+      exports: ["estimateARV"],
+    });
+    // A prior export the module does NOT redeclare is fine.
+    assert.equal(
+      validateSynthesisModule(mod, ["estimateARV"], ["estimateARV"], [{ path: "x.ts", exports: ["other"] }]).ok,
+      true,
+    );
+  });
+
+  it("localBindingLines reports the DECLARATION line; comments/strings never report", () => {
+    const lines = localBindingLines(
+      [
+        "// function ghost()",
+        'const s = "function other()";',
+        "function real() { return 1; }",
+        "const also = 2;",
+        "const { picked } = input;",
+      ].join("\n"),
+    );
+    assert.deepEqual(lines.get("real"), [3]);
+    assert.deepEqual(lines.get("also"), [4]);
+    assert.deepEqual(lines.get("picked"), [5]);
+    assert.equal(lines.has("ghost"), false, "a commented declaration never reports");
+    assert.equal(lines.has("other"), false, "a string-literal declaration never reports");
+  });
+
+  it("crossChunkDuplicateDeclarations is deterministic and names every conflict", () => {
+    const mod = ["function a() {}", "function b() {}", "module.exports.a = a;", "module.exports.b = b;"].join("\n");
+    assert.deepEqual(
+      crossChunkDuplicateDeclarations(mod, [
+        { path: "src/generated/x.ts", exports: ["b"] },
+        { path: "src/generated/y.ts", exports: ["a"] },
+      ]),
+      [
+        { name: "b", line: 2, priorPath: "src/generated/x.ts" },
+        { name: "a", line: 1, priorPath: "src/generated/y.ts" },
+      ],
+    );
+    assert.deepEqual(crossChunkDuplicateDeclarations(mod, []), []);
+    assert.deepEqual(crossChunkDuplicateDeclarations(mod, null), []);
+  });
+
+  it("the duplicate repair prompt names the identifier, line and exporting sibling", () => {
+    const p = p6SynthesisDuplicateDeclRepairPrompt([
+      { name: "estimateARV", line: 546, priorPath: "src/generated/list-line-items.ts" },
+    ]);
+    assert.match(p, /"estimateARV" — declared at line 546; already exported by src\/generated\/list-line-items\.ts/);
+    assert.match(p, /SyntaxError/);
+    assert.match(p, /zero imports/);
   });
 });
 

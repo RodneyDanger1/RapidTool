@@ -576,7 +576,7 @@ describe("fixes/252 (W19-L1 · OV-13 + OV-29) — keyed live failures leave code
       const narr = keyedNarr[0];
       assert.equal(narr.level, "warn");
       assert.ok(
-        narr.detail.startsWith("RT_E_LLM_REJECTED · live narrative failed: "),
+        narr.detail.startsWith("RT_E_LLM_KEY_REJECTED · live narrative failed: "),
         `the provider's own registered class leads the row (got: ${narr.detail})`,
       );
       assert.ok(narr.detail.endsWith(" — deterministic result used instead"));

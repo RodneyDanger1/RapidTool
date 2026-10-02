@@ -97,6 +97,16 @@ export const ERROR_CODES = [
   // input validation. Append-only; consumers match string literals, never
   // array position.
   "RT_E_PATH_KIND_MISMATCH",
+  // W45 lane 331-1 (fixes/331_1_keywright.md): the keyed-path credentials
+  // family. Before this wave a rejected credential (HTTP 401) rode
+  // RT_E_LLM_REJECTED alongside rate limits/params, and the CLI's prose
+  // re-classifier collapsed it to RT_E_UNKNOWN — so an operator could not tell
+  // "wrong key" from "rate limited" from "opaque failure". KEY_REJECTED is the
+  // 401 class; KEY_SHADOWED is the observable conflict when a stale ambient
+  // DEEPSEEK_API_KEY differs from the repo `.env` key that wins. Append-only;
+  // consumers match string literals, never array position.
+  "RT_E_LLM_KEY_REJECTED",
+  "RT_E_LLM_KEY_SHADOWED",
 ] as const;
 
 /**
@@ -450,6 +460,18 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
       "The LLM provider refused the call because the account balance is exhausted (the provider's HTTP 402 / \"Insufficient Balance\" — a wallet class, not a generic refusal).",
     agentAction:
       "Stop consuming this account: do not retry (billing is not transient) and read NO keyed score from a run in this state — top up the account or switch keys, re-pass the fundedness probe, then re-run.",
+  },
+  RT_E_LLM_KEY_REJECTED: {
+    meaning:
+      "The LLM provider rejected the API key it was sent (HTTP 401 authentication failure) — the credential is invalid/revoked, not the request.",
+    agentAction:
+      "Fix the key at the source named in the message (the working-directory .env path or the process environment, tail-only), confirm which source wins under the documented precedence (scripts/README-cli.md \"API key resolution\"), then re-run; never paste the full key into logs.",
+  },
+  RT_E_LLM_KEY_SHADOWED: {
+    meaning:
+      "A stale/invalid ambient DEEPSEEK_API_KEY and the working-directory .env key are both present and differ — the .env key wins by the documented precedence, and the ambient key was ignored (surfaced, never silently shadowed).",
+    agentAction:
+      "No action needed to proceed (the .env key is in effect); to silence the signal, clear the stale ambient variable (Windows: remove the User-scope DEEPSEEK_API_KEY) or make it match the .env key. Compare by last-4 tails only.",
   },
   RT_E_RESEARCH_UNAVAILABLE: {
     meaning: "The live web-research backend is not configured or unreachable.",

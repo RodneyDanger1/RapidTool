@@ -3490,10 +3490,16 @@ export async function deepenResearch(
  * phase whose file space overlaps (spec-graph node files + that phase's
  * artifact titles) and compare the evidence hash to what was recorded at
  * completion. A later phase touching the same file can invalidate a prior
- * phase's exit evidence — callers (store/headless ingest) surface the drift as
- * a `regression.drift` warn log; nothing here mutates prior records.
- * Phases without a recorded gate (legacy runs that predate E-02 gate
- * recording) cannot be compared and are skipped.
+ * phase's exit evidence.
+ *
+ * 331 V2 (declare-or-strike): this scanner has NO production caller today —
+ * the repo-wide only hits are this docblock and the definition below, and no
+ * `regression.drift` log event is emitted anywhere. Wiring it needs the
+ * report-ingest seam that holds `report.files` (`store.ts ingestReport` /
+ * headless ingest — not reachable from this module), so today the drift it
+ * computes is never surfaced and no drift lesson is minted. Nothing here
+ * mutates prior records. Phases without a recorded gate (legacy runs that
+ * predate E-02 gate recording) cannot be compared and are skipped.
  */
 export function verifyPriorPhases(
   project: Project,
@@ -3899,9 +3905,14 @@ export type WildStepOptions = {
 };
 
 export function wildLog(p: Project, phase: PhaseId, level: JsonLog["level"], event: string, detail: string): Project {
+  // 331 V3 (telemetry invariant): a ledger append must never throw into the run
+  // it observes. A hand-built / foreign project may lack `logs`; the old
+  // `[...p.logs, …]` raised "p.logs is not iterable" — the same class the 330
+  // wave fixed in knowledge.ts lessonLog. Guard to the empty list.
+  const logs = Array.isArray(p?.logs) ? p.logs : [];
   return {
     ...p,
-    logs: [...p.logs, { ts: Date.now(), phase, level, event, detail }].slice(-200),
+    logs: [...logs, { ts: Date.now(), phase, level, event, detail }].slice(-200),
   };
 }
 

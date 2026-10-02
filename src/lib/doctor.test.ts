@@ -19,6 +19,7 @@ import {
   jobScopeShortfall,
   productCompleteFromProject,
   RAPIDTOOL_FACTORY_EVIDENCE,
+  treeEmissionCensus,
 } from "./doctor.ts";
 import { RUNNER_IS_NOT_A_SANDBOX } from "./sandbox-policy.ts";
 import { archTrace } from "./dod.ts";
@@ -253,6 +254,83 @@ describe("doctor factory — field-truth latch", () => {
     assert.equal(pre.reexports, 3);
     assert.equal(pre.real, 0);
     assert.equal(evidenceFromJobInventory(pre).realMultiJobProduct, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W45 · 331-4 (Composer) — the declared-vs-emitted job census
+// ---------------------------------------------------------------------------
+
+describe("W45 · 331-4 — declared-vs-emitted job census", () => {
+  /** The exact keyless P6 floor shape (sandbox.buildPhase6Module), embedded
+   *  verbatim by scaffold.emitGeneratedHost under the first job path. Its bytes
+   *  carry real statements, but they implement phase bookkeeping, not the job. */
+  const KEYLESS_TEMPLATE = [
+    'const JOBS = ["flip"];',
+    'const REJECTION = "";',
+    "function synthesize(spec) {",
+    '  if (spec.phase < 0 || spec.phase > 12) throw new Error("invalid phase");',
+    "  return { ok: true, name: spec.name, job: spec.job };",
+    "}",
+    "function test_no_skip() {}",
+  ].join("\n");
+
+  it("classifyJobSource: the deterministic keyless template is a leftover stub, not a real job", () => {
+    assert.equal(classifyJobSource(KEYLESS_TEMPLATE), "stub");
+    const inv = inventoryFromJobSources([{ path: "src/jobs/flip.ts", source: KEYLESS_TEMPLATE }], "/keyless");
+    assert.equal(inv.stubs, 1);
+    assert.equal(inv.real, 0);
+    assert.equal(inv.reexports, 0);
+    const ev = evidenceFromJobInventory(inv);
+    assert.equal(ev.leftoverJobsAreReexportsOrStubs, true, "a placeholder job is a leftover");
+    assert.equal(ev.realMultiJobProduct, false);
+    assert.equal(ev.productComplete, false);
+    // TEETH: the same shape without the template functions is a real job module.
+    assert.equal(classifyJobSource("export function runFlip() { return { ok: true }; }"), "real");
+  });
+
+  it("treeEmissionCensus names a declared job the tree never materialised (the café `track` shortfall)", () => {
+    const declared = ["track", "record", "flip", "show", "lease"];
+    const inv = inventoryFromJobSources([
+      { path: "src/jobs/flip.ts", source: "export function createFlipProject() { return 1; }" },
+      { path: "src/jobs/record.ts", source: "export function recordAcquisition() { return 1; }" },
+      { path: "src/jobs/show.ts", source: "export function bookShowing() { return 1; }" },
+      { path: "src/jobs/lease.ts", source: "export function createLease() { return 1; }" },
+    ]);
+    assert.deepEqual([inv.stubs, inv.reexports, inv.real], [0, 0, 4]);
+    const c = treeEmissionCensus(declared, inv);
+    assert.equal(c.declared, 5);
+    assert.deepEqual(c.materialised, ["record", "flip", "show", "lease"]);
+    assert.deepEqual(c.missing, ["track"]);
+    assert.equal(c.loud, true);
+    // Full coverage silences it — the census is a count, not a constant alarm.
+    const full = treeEmissionCensus(declared.slice(1), inv);
+    assert.equal(full.missing.length, 0);
+    assert.equal(full.loud, false);
+    // A stub at the job path never counts as materialised.
+    const stubInv = inventoryFromJobSources([
+      { path: "src/jobs/track.ts", source: 'throw new Error("RT_E_VALIDATION · TODO(E-15) stub: implement job track");' },
+    ]);
+    const sc = treeEmissionCensus(["track"], stubInv);
+    assert.deepEqual(sc.materialised, []);
+    assert.deepEqual(sc.missing, ["track"]);
+    // Sibling overflow (`flip-2.ts`) still materialises `flip`.
+    const sib = inventoryFromJobSources([{ path: "src/jobs/flip-2.ts", source: "export function addRenovationLineItem() { return 1; }" }]);
+    assert.deepEqual(treeEmissionCensus(["flip"], sib).materialised, ["flip"]);
+  });
+
+  it("treeEmissionCensus over the REAL tracked café run bytes: 10 declared, 0 materialised (5 reexport bridges)", () => {
+    const dir = join(REPO_ROOT, "research", "eval-out", "coffeehouse2home-property-ledger.run-2026-09-10");
+    const real = readRealExport("coffeehouse2home-property-ledger.run-2026-09-10");
+    const declared = (real.lattice as { jobs?: string[] }).jobs ?? [];
+    assert.equal(declared.length, 10, "the tracked export still declares 10 lattice jobs");
+    const inv = inventoryFromJobSources(readTreeJobSources(dir), dir);
+    assert.equal(inv.reexports, 5, "the 5 tree-bridge job files are reexport-only");
+    const c = treeEmissionCensus(declared, inv);
+    assert.equal(c.declared, 10);
+    assert.equal(c.materialised.length, 0, "no real job module on these bytes");
+    assert.equal(c.missing.length, 10);
+    assert.equal(c.loud, true);
   });
 });
 

@@ -2042,18 +2042,36 @@ const CJS_RESIDUE_RE = /module\.exports|(?:^|[^\w$.])exports\s*(?:\.|=[^=])/;
  * (proven live). Record fields are recomputed through codegen's own
  * toGeneratedTreeFile (fnv1a hash + preserved attempt) so the stored row never
  * disagrees with the emitted bytes. Returns the SAME project reference when
- * there is no tree or no residue (exact current bytes); a seam-load failure
- * also returns the project untouched — never a half-materialized tree.
+ * there is no materializable residue (exact current bytes); a seam-load
+ * failure also returns the project untouched — never a half-materialized tree.
+ *
+ * T1 (331-3 · fixes/330 §6.1): a LONE generatedSource (zero tree rows) is the
+ * legacy host path — the scaffold writes it verbatim at the first job node.
+ * The pre-331 guard early-returned on zero rows, so a `module.exports` body
+ * that reached an imported/stale record was never materialized and shipped
+ * unloadable into the `"type":"module"` package (330 Fix A then refused it —
+ * safe, but the path never CONVERTED). Treat that lone source as a
+ * single-row tree plan at TREE_ENTRY_PATH and run it through the SAME
+ * materializeImportableTree seam, so the path now converts: ESM chunk +
+ * src/generated.ts barrel that the emitted tenant can actually import. The
+ * multi-row branch is untouched (byte-identical to pre-331 for every stored
+ * tree). Residue in a generatedSource BESIDE a non-empty tree is dead data
+ * (tree mode never hosts generatedSource) and never reaches an emitted code
+ * file, so it is deliberately left alone rather than reshaping the tree.
  */
 async function materializeEmitTree(project: Project): Promise<Project> {
   const rows = Array.isArray(project.generatedTree) ? project.generatedTree : [];
-  if (rows.length === 0) return project;
-  if (!rows.some((r) => CJS_RESIDUE_RE.test(String(r?.source ?? "")))) return project;
+  const generatedSource = typeof project.generatedSource === "string" ? project.generatedSource : "";
+  const treeHasResidue = rows.some((r) => CJS_RESIDUE_RE.test(String(r?.source ?? "")));
+  const loneSourceHasResidue = rows.length === 0 && CJS_RESIDUE_RE.test(generatedSource);
+  if (!treeHasResidue && !loneSourceHasResidue) return project;
   try {
     const codegen = await import("./codegen.server.ts");
-    const { files, entrySource } = codegen.materializeImportableTree(
-      rows.map((r) => ({ path: r.path, source: r.source, exports: [] })),
-    );
+    const input =
+      rows.length > 0
+        ? rows.map((r) => ({ path: r.path, source: r.source, exports: [] }))
+        : [{ path: codegen.TREE_ENTRY_PATH, source: generatedSource, exports: [] }];
+    const { files, entrySource } = codegen.materializeImportableTree(input);
     if (files.length === 0) return project;
     const attempts = new Map(rows.map((r) => [r.path, typeof r.attempt === "number" ? r.attempt : 0]));
     return {
@@ -2256,6 +2274,14 @@ export type P6JourneyCycleContext = {
    *  them with the project's own memory lessons. Absent/empty ⇒
    *  `p6CycleLiveDeps` materializes no key and the call is byte-identical. */
   proven?: readonly RankableLessonRow[];
+  /** W45 (parent keyed finding D): the repo-relative file path(s) the previous
+   *  tree-run NAMED as failing (`treeRunFailureFiles` — the generated-core
+   *  LOAD shape included). `repairCycleLiveDeps` folds them into
+   *  `deps.treeFailure` as an explicit "Repair target file(s)" directive, so a
+   *  repair cycle targets the file it was told to fix instead of repairing
+   *  around it. Absent/empty ⇒ the directive is byte-identical to the legacy
+   *  tail. Set only by the repair drivers. */
+  repairTargets?: readonly string[];
 };
 
 /** fixes/153 (P2): deps.synthesisRefusal cap — the bounded refusal excerpt a
@@ -2322,7 +2348,22 @@ export function p6CycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDepsShap
  * tests share ONE mapping without a model.
  */
 export function repairCycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDepsShape {
-  return { ...(p6CycleLiveDeps(ctx) ?? {}), patchRepairs: true };
+  const base = p6CycleLiveDeps(ctx) ?? {};
+  const deps: P6CycleLiveDepsShape = { ...base, patchRepairs: true };
+  // W45 (parent keyed finding D): the failure tail NAMES the file, but codegen
+  // only appends `treeFailure` to a repair prompt that some OTHER defect
+  // triggered — so the named file can be repaired around. Pin it as an
+  // explicit directive block on the SAME `treeFailure` seam codegen already
+  // forwards (no new deps key, nothing dead). Capped so the prompt stays
+  // bounded; empty ⇒ byte-identical legacy deps.
+  const targets = Array.isArray(ctx.repairTargets)
+    ? ctx.repairTargets.filter((p): p is string => typeof p === "string" && p.length > 0).slice(0, 8)
+    : [];
+  if (targets.length > 0) {
+    const block = `Repair target file(s) named by the failure — fix these first:\n${targets.join("\n")}`;
+    deps.treeFailure = base.treeFailure ? `${base.treeFailure}\n\n${block}` : block;
+  }
+  return deps;
 }
 
 /** Injectable seams. The defaults ARE the production seams; fakes only replace
@@ -2472,6 +2513,34 @@ function treeRunFailureTail(o: TreeRunOutcome): string {
     return `entry ${o.run.entry ?? o.run.kind}: ${o.run.run}${o.run.detail ? ` — ${o.run.detail}` : ""}`;
   }
   return "tree-run not ok";
+}
+
+/** W45 (parent keyed finding D): the repo-relative file path(s) a red
+ *  tree-run NAMES as its failing subject. The generated-core LOAD failure
+ *  (`o.core`, the UI-shell shape) is read EXPLICITLY — it is distinct from the
+ *  per-spec test failure shape (`o.tests`) and from the emitted project's own
+ *  `npm run` leg — plus non-pass compile rows and a non-pass entry smoke. Used
+ *  by `repairTreeDir` to (a) put the named file into the repair directive so a
+ *  cycle can target it and (b) surface it as an explicit refusal when a cycle
+ *  does not address it, so a failing file is never silently skipped.
+ *  Deterministic order, deduped, repo-relative POSIX paths only. */
+export function treeRunFailureFiles(o: TreeRunOutcome): string[] {
+  const out: string[] = [];
+  const add = (p: unknown): void => {
+    if (typeof p !== "string" || p.length === 0) return;
+    if (p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) return;
+    // The scaffold-owned oracle spec is never a repair target: telling the
+    // model to "fix" the acceptance contract invites editing the test to pass
+    // instead of fixing the product. Its failure is still in the tail.
+    if (REPAIR_TREE_RESERVED.has(p)) return;
+    if (!out.includes(p)) out.push(p);
+  };
+  if (o.core && o.core.run !== "pass") add(o.core.entry);
+  for (const v of o.compile?.verdicts ?? []) if (v.verdict !== "pass") add(v.file);
+  if (o.run && o.run.run !== "pass" && o.run.run !== "skip") add(o.run.entry);
+  const spec = (o.tests ?? []).find((t) => t.run !== "pass");
+  if (spec) add(spec.file);
+  return out;
 }
 
 /** Default produce/repair seam — the live-layer P6 synthesis the headless run
@@ -2972,6 +3041,17 @@ const REPAIR_TREE_ALLOWED_ROOTS = [
   "tests/",
 ];
 
+/** scaffold.ts TREE_ALLOWED_FILES parity — exact repo-relative paths a tree
+ *  row may claim even though they sit outside every allowed root prefix.
+ *  `codegen.TREE_ENTRY_PATH` is `src/generated.ts` (the ESM barrel EVERY
+ *  materialized tree lands at): the emitter writes it, so the repair
+ *  re-import/apply discipline MUST admit it too — pre-331 the mirror lacked
+ *  this exact-file allowance, so the tree's own barrel was refused on both the
+ *  read (import) and write (apply) sides and could never round-trip. Exact
+ *  match (never a prefix) so a look-alike like `src/generated.ts.bak` stays
+ *  refused, exactly as scaffold.ts declares. */
+const REPAIR_TREE_ALLOWED_FILES = new Set(["src/generated.ts"]);
+
 /** scaffold.ts TREE_RESERVED parity — scaffold-owned files a tree row may
  *  never claim (tests/oracle.spec.ts is the machine-verified acceptance
  *  contract, always emitted by the scaffold itself). */
@@ -2999,7 +3079,10 @@ function repairTreePathRefusal(raw: unknown): string | null {
     return `path ${JSON.stringify(p)} contains an empty or traversal (..) segment`;
   if (parts.some((seg) => !REPAIR_TREE_SEGMENT.test(seg)))
     return `path ${JSON.stringify(p)} contains an unsafe segment (allowed: [A-Za-z0-9._-])`;
-  if (!REPAIR_TREE_ALLOWED_ROOTS.some((root) => p.startsWith(root)))
+  if (
+    !REPAIR_TREE_ALLOWED_ROOTS.some((root) => p.startsWith(root)) &&
+    !REPAIR_TREE_ALLOWED_FILES.has(p)
+  )
     return `path ${JSON.stringify(p)} is outside the scaffold's src/ subdirs and tests/`;
   return null;
 }
@@ -3194,7 +3277,11 @@ export type RepairTreeResult = {
   minted: boolean;
   /** First-import telemetry (the hash-checked edit report). */
   import: ImportTreeDirResult;
-  /** Repair writes performed onto the dir (union across cycles). */
+  /** Repair writes performed onto the dir (union across cycles). `refused`
+   *  carries two honest kinds, each with its reason in `warnings`: a row the
+   *  applier refused (path discipline / parse gate), and — W45 finding D — a
+   *  file the tree-run NAMED as its failure that the cycle neither wrote nor
+   *  refused, so a silently-skipped failing file can never look like progress. */
   applied: {
     written: string[];
     unchanged: string[];
@@ -3518,6 +3605,10 @@ export async function repairTreeDir(
   }
   // 3. Red first run → bounded repair cycle against the dir.
   let treeTail = treeRunFailureTail(verdict).slice(0, P6_JOURNEY_TAIL_MAX);
+  // W45 (parent keyed finding D): the file(s) the verdict NAMES — carried on
+  // each cycle's ctx so the directive explicitly targets them (and, below, so
+  // an un-addressed one is refused explicitly rather than silently skipped).
+  let failureFiles = treeRunFailureFiles(verdict);
   p = p6JourneyLog(p, "warn", "p6.tree.failure", treeTail);
   events.push(`tree-run fail (pre-cycle): ${treeTail.slice(0, 140)}`);
   let refusal: string | null = null;
@@ -3533,6 +3624,7 @@ export async function repairTreeDir(
     const ctx: P6JourneyCycleContext = { cycle };
     if (treeTail !== null) ctx.treeFailureTail = treeTail;
     if (refusal !== null) ctx.refusal = refusal;
+    if (failureFiles.length > 0) ctx.repairTargets = failureFiles;
     let synthesized: Project;
     try {
       synthesized = await synthesize(p, ctx);
@@ -3574,6 +3666,23 @@ export async function repairTreeDir(
     for (const w of apply.written) if (!applied.written.includes(w)) applied.written.push(w);
     for (const w of apply.warnings) if (!applied.warnings.includes(w)) applied.warnings.push(w);
     for (const r of apply.refused) if (!applied.refused.includes(r)) applied.refused.push(r);
+    // W45 (parent keyed finding D): the tree-run NAMED the file it failed on —
+    // for the generated-core LOAD shape that is `treeRun.core.entry`. If this
+    // cycle neither WROTE nor already refused a named file, record an explicit
+    // coded refusal for it: a repair that silently skips the file it was told
+    // to fix can never converge and must not read as progress. A file the
+    // applier refused for path/parse is already reported above.
+    for (const path of failureFiles) {
+      if (apply.written.includes(path) || apply.refused.includes(path)) continue;
+      if (!applied.refused.includes(path)) applied.refused.push(path);
+      const warning = `repair:apply:refused:${JSON.stringify(path)}:${
+        tree.some((r) => r?.path === path)
+          ? "the tree-run failure names this file but the cycle left it unchanged — the repair did not target it"
+          : "the tree-run failure names this file but the cycle produced no tree row for it — the repair did not target it"
+      }`;
+      if (!applied.warnings.includes(warning)) applied.warnings.push(warning);
+      events.push(`cycle ${cycle}: failure-named file not addressed by the repair: ${path}`);
+    }
     // 3b. Re-import: the ledger becomes the disk truth again (hash-checked).
     const reimported = importTreeDir(synthesized, target);
     p = reimported.project;
@@ -3637,6 +3746,9 @@ export async function repairTreeDir(
       };
     }
     treeTail = treeRunFailureTail(verdict).slice(0, P6_JOURNEY_TAIL_MAX);
+    // Re-derive the named file(s) each cycle: the next directive must target
+    // the CURRENT failure, not the one the previous cycle started with.
+    failureFiles = treeRunFailureFiles(verdict);
     p = p6JourneyLog(p, "warn", "p6.tree.failure", treeTail);
     events.push(`cycle ${cycle}: tree-run fail — ${treeTail.slice(0, 140)}`);
   }

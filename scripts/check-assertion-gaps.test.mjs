@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   findTautologies,
   findZeroAssertionTests,
+  lintFiles,
   lintSource,
   maskSource,
 } from "./check-assertion-gaps.mjs";
@@ -138,6 +139,50 @@ test("T-17 ignores tautologies that are data (strings, comments) — masking, no
   assert.deepEqual(findZeroAssertionTests(source), []);
 });
 
+test("T-17 presence-only: an always-truthy subject is flagged", () => {
+  for (const expr of ["{}", "[]", "() => 1", "function () {}", "new Set()", "typeof x", "/re/", '"non-empty"', "42", "`t`"]) {
+    const findings = findTautologies(`assert.ok(${expr});`);
+    assert.equal(findings.length, 1, `expected one finding for assert.ok(${expr}), saw ${JSON.stringify(findings)}`);
+    assert.equal(findings[0].rule, "tautology:presence-only");
+    assert.match(findings[0].reason, /cannot fail/);
+  }
+});
+
+test("T-17 presence-only: a falsifiable subject is never flagged", () => {
+  for (const expr of [
+    '["1", "2"].includes(x)',
+    "/re/.test(x)",
+    '"status" in phase',
+    'typeof x === "string"',
+    "x",
+    "x.length > 0",
+    "await thing()",
+    "Number(x)",
+    '""',
+    "0",
+  ]) {
+    assert.deepEqual(findTautologies(`assert.ok(${expr});`), [], `must not flag assert.ok(${expr})`);
+  }
+});
+
+test("T-17 typeof-only: typeof of an inline literal is flagged, a real value is not", () => {
+  for (const src of [
+    'assert.equal(typeof "x", "string");',
+    'assert.equal(typeof 1, "number");',
+    'assert.equal(typeof null, "object");',
+    'assert.equal(typeof [1], "object");',
+    'assert.equal(typeof function () {}, "function");',
+  ]) {
+    const findings = findTautologies(src);
+    assert.equal(findings.length, 1, `expected one finding for ${src}`);
+    assert.equal(findings[0].rule, "tautology:typeof-only");
+    assert.match(findings[0].reason, /cannot fail/);
+  }
+  assert.deepEqual(findTautologies('assert.equal(typeof value, "string");'), [], "a real value can have the wrong type");
+  assert.deepEqual(findTautologies('assert.equal(typeof "x", "number");'), [], "a mismatched type would fail");
+  assert.deepEqual(findTautologies('assert.equal(typeof [1], "function");'), []);
+});
+
 test("T-17 zero-assertion: a test callback with no assert and no throw is flagged", () => {
   const source = ['import { test } from "node:test";', "", 'test("does nothing", () => {', "  const x = 1;", "});"].join("\n");
   const findings = findZeroAssertionTests(source);
@@ -221,6 +266,26 @@ test("T-17 CLI: planted fixtures are reported as file:line and the run exits non
   assert.match(run.stdout, /5 finding\(s\)/);
 });
 
+test("T-17 CLI: presence-only and typeof-only plants trip the run (RED-first)", () => {
+  const dir = fixtureDir();
+  writeFileSync(
+    join(dir, "weak.test.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { test } from "node:test";',
+      "",
+      'test("presence only", () => { assert.ok({ id: 1 }); });',
+      'test("typeof only", () => { assert.equal(typeof "x", "string"); });',
+      "",
+    ].join("\n"),
+  );
+  const run = runChecker([dir]);
+  assert.equal(run.status, 1, `expected exit 1 for the planted weak assertions\n${run.stdout}`);
+  assert.ok(run.stdout.includes("[tautology:presence-only]"), run.stdout);
+  assert.ok(run.stdout.includes("[tautology:typeof-only]"), run.stdout);
+  assert.ok(run.stdout.includes("weak.test.mjs:4:"), run.stdout);
+});
+
 test("T-17 CLI: a clean fixture tree stays quiet and exits 0", () => {
   const dir = fixtureDir();
   writeFileSync(join(dir, "clean.test.mjs"), CLEAN_FIXTURE);
@@ -288,6 +353,14 @@ test("T-17 CLI: the live repo tree is scanned end-to-end without crashing", () =
   for (const line of lines.slice(0, -1)) {
     assert.match(line, /^.+:\d+: \[[a-z:-]+\] .+/, `finding line is not file:line-shaped: ${line}`);
   }
+});
+
+test("T-17 fail-closed: an unreadable path is reported, never silently skipped", () => {
+  const dir = fixtureDir();
+  const gone = join(dir, "gone.test.mjs");
+  const { findings, unreadable } = lintFiles([gone]);
+  assert.deepEqual(findings, []);
+  assert.deepEqual(unreadable, [gone], "a file the lint cannot read must be surfaced, not skipped");
 });
 
 test("T-17 self-application: this test file is clean under its own checker", () => {

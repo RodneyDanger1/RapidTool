@@ -823,14 +823,25 @@ export type FailureKind =
   | "drift";
 
 /**
+ * 331 V1 (verify-core): the kinds whose canonical signature can ADDRESS a
+ * lesson row. `verified-procedure` is the L4 machine-PASS identity (phase +
+ * sorted machine-case ids) — not a failure — but its row id must hash the same
+ * signature channel as every other content-addressed row, so the record shape
+ * `failureSignature` consumes admits it while `FailureKind` keeps its
+ * failure-only meaning.
+ */
+export type LessonSignatureKind = FailureKind | "verified-procedure";
+
+/**
  * 216g (112 §4.1): the normalized failure record — the missing object between
  * the failure log and a lesson row. `signature` is derived (never stored): the
  * ONLY thing hashed into the row id (§4.2). `detailTail` is the volatile
  * human-readable tail: it rides the row TEXT and is excluded from the id
- * whenever anchors exist.
+ * whenever anchors exist. 331 V1: `kind` admits the `verified-procedure` pass
+ * identity (LessonSignatureKind); every other field is unchanged.
  */
 export type FailureRecord = {
-  kind: FailureKind;
+  kind: LessonSignatureKind;
   phase: PhaseId;
   /** RT_E_* code of the refusal / failure class (optional; in the signature). */
   classCode?: string | null;
@@ -1305,17 +1316,38 @@ export function verifyFailureLesson(
 }
 
 /** L4 — verified-procedure (98 §2.3, Voyager commit-on-verify): a machine-run
- *  verify pass that PASSED. First lesson-derived `procedural` writer. No LLM. */
+ *  verify pass that PASSED. First lesson-derived `procedural` writer. No LLM.
+ *
+ *  331 V1 (verify-core): the row IDENTITY is `(phase, sorted machine-case
+ *  ids)` — the counterexample set that was PROVEN — not the evidence prose.
+ *  The evidence text embeds the iteration count and the lint suffix (per-run
+ *  process noise, 112 §4.2 rule 3), so hashing it forked one verified
+ *  procedure into a new row every time it recurred. When `proof.anchors` is
+ *  non-empty the id hashes a `verified-procedure` signature instead; the
+ *  evidence prose still rides the row TEXT. With no anchors (legacy callers)
+ *  the id keeps its original evidence-derived value — no existing row is
+ *  re-minted.
+ */
 export function verifiedProcedureLesson(
   project: Project,
   phase: PhaseId,
   evidence: string,
+  proof?: { anchors?: readonly string[] } | null,
 ): MemoryEntry {
   const ev = (typeof evidence === "string" ? evidence : "").replace(/\s+/g, " ").trim().slice(0, 140);
   const hash = fnv8(typeof evidence === "string" ? evidence : "");
   const text =
     `L4 verified-procedure: P${phase} verify passed — ${ev || "evidence absent"}; ` +
     `evidenceHash=${hash}. Reuse this module shape next run.`;
+  const anchors: string[] = [];
+  for (const a of Array.isArray(proof?.anchors) ? proof.anchors : []) {
+    const clean = typeof a === "string" ? a.trim() : "";
+    if (clean !== "" && !anchors.includes(clean)) anchors.push(clean);
+  }
+  const signature =
+    anchors.length > 0
+      ? failureSignature({ kind: "verified-procedure", phase, anchors })
+      : undefined;
   return lessonRow({
     classShort: "verified-procedure",
     level: "L4",
@@ -1324,6 +1356,7 @@ export function verifiedProcedureLesson(
     text,
     score: 0.8,
     source: "engine",
+    signature,
   });
 }
 
@@ -1355,7 +1388,15 @@ export function correctionLesson(project: Project, decision: HitlDecision): Memo
 
 /** Drift rows (98 §2.3): a later phase touched an earlier phase's files and
  *  the evidence hash changed (E-19 verifyPriorPhases). Episodic, score 0.6,
- *  never auto-promoted. */
+ *  never auto-promoted.
+ *
+ *  331 V2 (declare-or-strike): NO production caller exists today. The E-19
+ *  scanner (`engine.ts verifyPriorPhases`) is itself unwired — no
+ *  `regression.drift` row is emitted on any real run — so nothing observes a
+ *  file-touch drift signal to call this builder. Wiring it needs the
+ *  report-ingest seam that carries `report.files` (`store.ts ingestReport` /
+ *  headless ingest; neither is owned by this lane). The row shape stays
+ *  test-pinned; the caller is owed and registered in fixes/331_2_assayer.md. */
 export function driftLesson(
   project: Project,
   laterPhase: PhaseId,
@@ -1364,10 +1405,13 @@ export function driftLesson(
   newHash: string,
   unmetNow: readonly string[],
 ): MemoryEntry {
-  const ids = (Array.isArray(unmetNow) ? unmetNow : [])
+  // 331 V3 (same class as 330 P4): the signature must hash the FULL unmet-id
+  // set, not the 6-capped display list — slicing before the signature made the
+  // id depend on input order once >6 ids arrived (the same drift forked a row).
+  const allIds = (Array.isArray(unmetNow) ? unmetNow : [])
     .filter((u): u is string => typeof u === "string" && u.trim() !== "")
-    .map((u) => u.trim())
-    .slice(0, 6);
+    .map((u) => u.trim());
+  const ids = allIds.slice(0, 6);
   const text =
     `L2-style drift: phase P${laterPhase} touched files of P${earlierPhase}; ` +
     `evidence hash changed ${String(oldHash).slice(0, 8)}->${String(newHash).slice(0, 8)}; ` +
@@ -1377,7 +1421,7 @@ export function driftLesson(
   const signature = failureSignature({
     kind: "drift",
     phase: laterPhase,
-    anchors: [...ids, `earlier:P${earlierPhase}`],
+    anchors: [...allIds, `earlier:P${earlierPhase}`],
   });
   return lessonRow({
     classShort: "drift",
@@ -2003,16 +2047,23 @@ export function consolidatedRunNote(
  *  (they read only phase/evidence/iterations), so a seam with no Project in
  *  scope can still reuse the same builders — one content-addressed id either
  *  way (98 §3 anti-noise (b)). Passed → L4 verified-procedure; failed/error →
- *  L3 verify-failure. `not-configured` never reaches here (no lesson). */
+ *  L3 verify-failure. `not-configured` never reaches here (no lesson).
+ *
+ *  331 V1 (verify-core): `anchors` are the machine-case ids the run proved
+ *  (pass) or observed failing (fail) — the caller forwards them so the row id
+ *  is `(phase, sorted case ids)` and neither the iteration count nor the lint
+ *  suffix can fork it. Omit to keep the legacy evidence-derived id. */
 export function verifyOutcomeLesson(
   status: "passed" | "failed" | "error",
   phase: PhaseId,
   evidence: string,
   iterations: number,
+  anchors?: readonly string[],
 ): MemoryEntry {
+  const proof = Array.isArray(anchors) ? { anchors } : null;
   return status === "passed"
-    ? verifiedProcedureLesson(undefined as unknown as Project, phase, evidence)
-    : verifyFailureLesson(undefined as unknown as Project, phase, evidence, iterations);
+    ? verifiedProcedureLesson(undefined as unknown as Project, phase, evidence, proof)
+    : verifyFailureLesson(undefined as unknown as Project, phase, evidence, iterations, undefined, proof);
 }
 
 /** L5 — run-summary (98 §2.3 completion digest): one content-addressed lesson

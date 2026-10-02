@@ -3335,10 +3335,13 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   // UI-shell skip — so the unloadable product would ship with every gate green
   // (reproduced live on a generatedSource-only CJS project: `tree-run` ok:true
   // while `import()` throws TypeError). The emit pipeline's materializer
-  // (headless.materializeEmitTree) rewrites TREE residue before this runs, but
-  // it early-returns when there are no tree rows, so a lone generatedSource and
-  // any direct scaffold caller are unguarded. Never ship bytes that contradict
-  // the package we declare — refuse loudly (declare-or-strike).
+  // (headless.materializeEmitTree) rewrites stored TREE residue AND — since
+  // 331-3 — a lone generatedSource with residue (both convert to an ESM tree
+  // before this runs). A DIRECT scaffold caller bypasses that host-side seam
+  // (this function is pure + synchronous and cannot import codegen), so the
+  // residue still reaches here; that is the case this refuse closes. Never
+  // ship bytes that contradict the package we declare — refuse loudly
+  // (declare-or-strike).
   const cjsOffenders: string[] = [];
   for (const tf of treeAccepted) {
     if (EMITTED_CODE_EXT_RE.test(tf.path) && CJS_MODULE_RESIDUE_RE.test(tf.source)) cjsOffenders.push(tf.path);

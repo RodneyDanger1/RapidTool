@@ -1261,7 +1261,11 @@ function probeErrorText(e) {
  *  RT_E_VALIDATION (the request the vendor received failed its validation; the
  *  detail carries the requested model id — D1.4's drift question). Every other
  *  ending classifies too; a `null` code means "not a failure" (wire-ok) or "no
- *  wire evidence" (configured-unprobed). Pure — no network, no env reads. */
+ *  wire evidence" (configured-unprobed). Pure — no network, no env reads.
+ *  The JSDoc param is load-bearing under `checkJs`: a destructured parameter
+ *  with any default infers its type from those defaults alone, so `configured`
+ *  (no default) would read as an unknown property at every call site.
+ *  @param {{configured?: boolean, wire?: {attempted?: boolean, ok?: boolean, httpStatus?: number|null, code?: string|null, error?: string|null, model?: string|null, requestedModel?: string}|null}} [options] */
 export function classifyLlmPreflight({ configured, wire = null } = {}) {
   if (configured !== true) {
     return {
@@ -1774,7 +1778,8 @@ export function classifyRunOutcome(outcome) {
 /** Classify one drain ending. `position` is drainPipeline's own vocabulary:
  *  p6-gate (intentional handoff) · dod (coded hard stop, C-2) · terminal (a
  *  RunOutcome terminal) · stalled (the failure the triage exists to kill — now
- *  always accompanied by a code). */
+ *  always accompanied by a code).
+ *  @param {{outcome?: string|null, position?: string|null, code?: string|null}} [ending] */
 export function classifyDrainEnding({ outcome = null, position = null, code = null } = {}) {
   switch (position) {
     case "p6-gate":
@@ -1838,7 +1843,9 @@ function endingRecord({ p, res, approved, onTime, stall, position, code = null }
  * priors sealed — the exact P6 live edge driveP6Journey expects. Stopping the
  * FLOOR drain there means the journey is the ONLY phase-6 synthesis (the old
  * keyed flow ran the whole drain live:true — synthesis #1 inside the drain —
- * and then let the journey re-synthesize #2; fixes/146 §2 divergence #4). */
+ * and then let the journey re-synthesize #2; fixes/146 §2 divergence #4).
+ *  @param {any} project
+ *  @param {{keyed?: boolean, p6Gate?: boolean}} [options] */
 export async function drainPipeline(project, { keyed, p6Gate = false } = {}) {
   let p = project;
   let lastRes = null;
@@ -2873,7 +2880,9 @@ export function runMarkerState(outDir) {
 /** Run the entry loop under the marker: the marker is written BEFORE the first
  *  entry runs (ordering is the pin) and left unfinished — main() finalizes it
  *  only after BOTH persists return. Keyless: a no-op wrapper that writes
- *  nothing. `runner` is injectable so the ordering is testable durably. */
+ *  nothing. `runner` is injectable so the ordering is testable durably.
+ *  @param {any[]} selected
+ *  @param {{mode?: string, outDir?: string, runner?: (target: any) => any, markerExtra?: Record<string, any>}} [options] */
 export async function runWithMarker(selected, { mode, outDir, runner, markerExtra = {} } = {}) {
   let markerPath = null;
   let previousUnfinished = null;
@@ -2902,7 +2911,8 @@ export async function runWithMarker(selected, { mode, outDir, runner, markerExtr
  *  3–6/9 centred 4–5). A ≤4/9 keyed result is inside the predicted band: the
  *  branch is RE-TRACE (read the log, close the observed zeros) — a blind re-run
  *  re-measures the same tree and buys nothing. Keyed-only; keyless stays
- *  silent (byte-identity). */
+ *  silent (byte-identity).
+ *  @param {{mode?: string, meanOfNine?: number}} [options] */
 export function keyedRunDecision({ mode, meanOfNine } = {}) {
   if (mode !== "keyed") return { branch: "n/a", line: null };
   if (typeof meanOfNine !== "number" || !Number.isFinite(meanOfNine))

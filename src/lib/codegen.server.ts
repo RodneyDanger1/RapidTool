@@ -85,8 +85,11 @@
 //      also stamps a bounded `p6.synthesis.attempt` journal event (chunk
 //      index/count · attempt · timeoutMs · outcome ok/refused/timeout + the
 //      model's refusal-text excerpt — fixes/153 P1) so a reader sees WHY each
-//      call failed. A reply that ARRIVED but could not be READ as a patch or
-//      synthesis envelope stamps a bounded `p6.synthesis.envelope.unreadable`
+//      call failed. W45/331-4: when a declared spec-graph job's label is named
+//      by no typeSignature, `treeChunkPlanCensus` counts it and a bounded
+//      `p6.tree.shortfall` warn row names it — a declared job is never silently
+//      absent from the plan. A reply that ARRIVED but could not be READ as a
+//      patch or synthesis envelope stamps a bounded `p6.synthesis.envelope.unreadable`
 //      warn entry (on the patch level: the existing `p6.repair.patch.refused`
 //      event) carrying RT_E_LLM_REJECTED + a bounded received-text excerpt —
 //      fixes/217k (216y G6: the silent-null sink; absent/blank replies stay
@@ -300,7 +303,15 @@ const PROSE_LINE_SHAPE = /^[A-Za-z][A-Za-z0-9 ,.:;!?'"()-]*$/;
  * no longer catches (a spaced dash between two ≥2-char English words) is rare in
  * the deliberation this gate exists for.
  */
-const PROSE_ARITH_MINUS = /\b[A-Za-z_$0-9][\w$]+\s+-\s+[A-Za-z_$0-9][\w$]+\b/;
+/**
+ * W45/331-4 (class fix): one arithmetic operand. The member-expression
+ * alternative (`a.index`, `this.total`) is the missing form — the pre-fix
+ * `[A-Za-z_$0-9][\w$]+` cannot cross a `.`, so `return a.index - b.index;`
+ * stayed sentence-shaped and was refused as prose (the repair loop's own
+ * `src/jobs/invoice.ts` patch, parent-keyed-findings §3b-2).
+ */
+const PROSE_ARITH_OPERAND = String.raw`(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+|\d+(?:\.\d+)?|[A-Za-z_$0-9][\w$]+)`;
+const PROSE_ARITH_MINUS = new RegExp(String.raw`\b${PROSE_ARITH_OPERAND}\s+-\s+${PROSE_ARITH_OPERAND}\b`);
 /**
  * 322 X3 (BUG-4): ternary-expression code shape — a single-line `cond ? a : b`
  * whose arms are single identifier/numeric tokens (unary minus and dotted
@@ -311,11 +322,18 @@ const PROSE_ARITH_MINUS = /\b[A-Za-z_$0-9][\w$]+\s+-\s+[A-Za-z_$0-9][\w$]+\b/;
  * (`prose-in-code … line 78: "return negative ? -cents : cents;"`,
  * 322_e2_monitor §BUG-4). Excluded up front like PROSE_ARITH_MINUS, end-
  * anchored: a ternary is a whole-expression tail while deliberation prose
- * ends in a sentence terminal (`.`/`!`/`?`) and stays caught. Accepted
- * residual (same trade as W23-262/B1): a deliberation line ending exactly
- * `word? word: word` with NO sentence terminal is no longer flagged — rare.
+ * ends in a sentence terminal (`.`/`!`/`?`) and stays caught.
+ *
+ * W45/331-4 (class fix): an arm may also be a MASKED quoted literal — it
+ * blanks to a whitespace run, so the pre-fix arm pattern (token-only) failed
+ * on `arvNote: cond ? undefined : 'ARV …',` and the line was refused as prose
+ * (the repair loop's own `list-line-items.ts` patch, §3b-2). An arm is now
+ * token OR whitespace run. Accepted residual (same trade as W23-262/B1): a
+ * deliberation line ending exactly `word? word: word` (or a masked literal
+ * arm) with NO sentence terminal is no longer flagged — rare.
  */
-const PROSE_TERNARY = /\?\s*-?(?:[A-Za-z_$][\w$]*(?:\.\w+)*|\d+(?:\.\d+)?)\s*:\s*-?(?:[A-Za-z_$][\w$]*(?:\.\w+)*|\d+(?:\.\d+)?)\s*[;,]?\s*$/;
+const PROSE_TERNARY_ARM = String.raw`(?:\s+|-?(?:\d+(?:\.\d+)?|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*))`;
+const PROSE_TERNARY = new RegExp(String.raw`\?\s*${PROSE_TERNARY_ARM}\s*:\s*${PROSE_TERNARY_ARM}\s*[;,]?\s*$`);
 
 /**
  * 216f (T-09 / F-04): bare English prose written into a module body as code —
@@ -1240,6 +1258,35 @@ export function p6SynthesisSignatureRepairPrompt(
   ].join("\n") + repairTreeFailureTail(treeFailure);
 }
 
+/**
+ * W45/331-4 (Finding B): repair re-prompt for the cross-chunk duplicate-declaration
+ * class — the module declares a top-level name an EARLIER chunk already exports, so
+ * the materialized ESM (which imports that export) would fail to load with
+ * `SyntaxError: Identifier '…' has already been declared` (the real keyed tree:
+ * `src/jobs/flip.ts` imported `estimateARV` from `…/list-line-items.ts` and declared
+ * it again at line 546). Names each conflicting identifier + its declaration line +
+ * the exporting sibling file, so the model removes/renames its local binding and
+ * calls the earlier export directly. ONE bounded attempt; a repeat is refused.
+ */
+export function p6SynthesisDuplicateDeclRepairPrompt(
+  duplicates: readonly CrossChunkDuplicate[],
+  treeFailure?: string,
+): string {
+  const rows = (Array.isArray(duplicates) ? duplicates : []).filter((d) => d && typeof d.name === "string");
+  const detail = rows
+    .map((d) => `- "${d.name}" — declared at line ${d.line}; already exported by ${d.priorPath}`)
+    .join("\n");
+  const names = [...new Set(rows.map((d) => d.name))];
+  return [
+    "Your previous module declares top-level name(s) that an EARLIER file already exports:",
+    detail || "(none listed)",
+    "The build imports an earlier file's exports into this file as plain bindings; declaring the same name here is a load-time SyntaxError (\"Identifier '…' has already been declared\").",
+    `For each name above: DELETE your local declaration and call the earlier export BY NAME (it is already available in this file), or rename your own helper so it collides with no earlier file's exports${names.length ? ` (do NOT reuse ${names.join(", ")})` : ""}. Never import/require anything.`,
+    'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
+    "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no prose, no markdown fences.",
+  ].join("\n") + repairTreeFailureTail(treeFailure);
+}
+
 /** fixes/121 last-mile: deterministic CJS export-injection repair.
  *  For every claimed export the module declares at top level (`function NAME`,
  *  `const NAME =`, `let NAME =`, `var NAME =`) but never assigns to
@@ -1879,6 +1926,56 @@ export function orderTreeChunks(plan: readonly TreeChunk[]): TreeChunk[] {
 }
 
 /**
+ * W45/331-4: the sentinel job `intentLattice` (algorithms.ts) falls back to when
+ * a brief names no capability. It is not a declared capability, so it is never a
+ * plan coverage obligation (mirrors `deriveTypeSignatures`'s own filter).
+ */
+const CORE_SENTINEL_JOB = "deliver-core-workflow";
+
+/**
+ * W45/331-4: the counted declared-vs-planned job census for the tree plan. The plan
+ * (`treeChunkPlan`) materialises a chunk/file only for a job node whose label a
+ * typeSignature's function name contains; a declared job with no bound signature gets
+ * NO chunk and NO file — silently, until now. This is the ONE derivation of the
+ * plan-side shortfall: `declared` (spec-graph job labels, sentinel excluded),
+ * `planned` (labels that got ≥1 chunk), `unbound` (the counted shortfall — labels with
+ * no bound signature), `paths` (plan chunk paths) and `legacy` (the plan fell to the
+ * non-job src/generated mapping). Pure + deterministic; derived FROM `treeChunkPlan`
+ * (no second path rule to drift).
+ */
+export type TreePlanCensus = {
+  declared: string[];
+  planned: string[];
+  unbound: string[];
+  paths: string[];
+  legacy: boolean;
+};
+
+/** Count declared spec-graph jobs against the plan `treeChunkPlan` builds (see the type doc). */
+export function treeChunkPlanCensus(
+  project: Parameters<typeof treeChunkPlan>[0],
+  typeSignatures: readonly string[],
+  perChunk: number = P6_SYNTH_CHUNK_SIZE,
+): TreePlanCensus {
+  const targets = specGraphJobTargets(project);
+  const plan = treeChunkPlan(project, typeSignatures, perChunk);
+  const plannedLabels = new Set<string>();
+  for (const c of plan) {
+    if (typeof c.nodeId === "string" && c.nodeId.length > 0 && typeof c.label === "string") {
+      plannedLabels.add(c.label);
+    }
+  }
+  const declared = targets.map((t) => t.label).filter((l) => l !== CORE_SENTINEL_JOB);
+  return {
+    declared,
+    planned: declared.filter((l) => plannedLabels.has(l)),
+    unbound: declared.filter((l) => !plannedLabels.has(l)),
+    paths: plan.map((c) => c.path),
+    legacy: plan.every((c) => typeof c.nodeId !== "string" || c.nodeId.length === 0),
+  };
+}
+
+/**
  * Assemble the ENTRY module from the accepted tree files — the
  * concatenation-safe form of the tree (used for brief-fit vocabulary scan
  * and as generatedSource on the SINGLE-chunk legacy path). Each file's
@@ -2032,6 +2129,168 @@ function localBindingNames(source: string): Set<string> {
     for (const t of m[1]!.matchAll(/[A-Za-z_$][\w$]*/g)) names.add(t[0]!);
   }
   return names;
+}
+
+/** Blank string/template/comment spans in ONE line, carrying cross-line block
+ *  and template state (indices preserved, like `maskLiteralsAndComments`). Best-effort
+ *  lexical mask — `localBindingLines` scans declarations at column 0 only. */
+function maskCodeLine(line: string, state: { block: boolean; template: boolean }): string {
+  let out = "";
+  let j = 0;
+  let block = state.block;
+  let template = state.template;
+  while (j < line.length) {
+    const c = line[j]!;
+    const next = line[j + 1];
+    if (block) {
+      if (c === "*" && next === "/") {
+        block = false;
+        out += "  ";
+        j += 2;
+        continue;
+      }
+      out += " ";
+      j += 1;
+      continue;
+    }
+    if (template) {
+      if (c === "\\") {
+        out += "  ";
+        j += 2;
+        continue;
+      }
+      if (c === "`") template = false;
+      out += " ";
+      j += 1;
+      continue;
+    }
+    if (c === "/" && next === "/") {
+      out += " ".repeat(line.length - j);
+      break;
+    }
+    if (c === "/" && next === "*") {
+      block = true;
+      out += "  ";
+      j += 2;
+      continue;
+    }
+    if (c === "`") {
+      let k = j + 1;
+      let closed = -1;
+      while (k < line.length) {
+        if (line[k] === "\\") {
+          k += 2;
+          continue;
+        }
+        if (line[k] === "`") {
+          closed = k;
+          break;
+        }
+        k += 1;
+      }
+      if (closed === -1) {
+        template = true;
+        out += " ".repeat(line.length - j);
+        break;
+      }
+      out += " ".repeat(closed + 1 - j);
+      j = closed + 1;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      let k = j + 1;
+      let closed = -1;
+      while (k < line.length) {
+        if (line[k] === "\\") {
+          k += 2;
+          continue;
+        }
+        if (line[k] === c) {
+          closed = k;
+          break;
+        }
+        k += 1;
+      }
+      if (closed === -1) {
+        out += c;
+        j += 1;
+        continue;
+      }
+      out += " ".repeat(closed + 1 - j);
+      j = closed + 1;
+      continue;
+    }
+    out += c;
+    j += 1;
+  }
+  state.block = block;
+  state.template = template;
+  return out;
+}
+
+/**
+ * W45/331-4 (Finding B): top-level binding names a module declares, mapped to the
+ * 1-based line numbers of their declarations. Same declaration shapes as
+ * `localBindingNames` (function/class/const/let/var incl. bare + destructured), but
+ * line-preserving (a comment- or string-only line never reports) and returned as a
+ * name→lines map so a refusal can name WHERE the redeclaration is. Deterministic.
+ */
+export function localBindingLines(module: string): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  const add = (name: string, line: number): void => {
+    const arr = out.get(name);
+    if (arr === undefined) out.set(name, [line]);
+    else if (!arr.includes(line)) arr.push(line);
+  };
+  const lines = String(module ?? "").split("\n");
+  const state = { block: false, template: false };
+  for (let i = 0; i < lines.length; i++) {
+    const code = maskCodeLine(lines[i] ?? "", state);
+    if (!code.trim()) continue;
+    for (const m of code.matchAll(/^(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/gm)) add(m[1]!, i + 1);
+    for (const m of code.matchAll(/^(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/gm)) add(m[1]!, i + 1);
+    for (const m of code.matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?=[=;,]|$)/gm)) add(m[1]!, i + 1);
+    for (const m of code.matchAll(/^(?:const|let|var)\s*[{[]([^}\]\n]*)[}\]]\s*=/gm)) {
+      for (const t of m[1]!.matchAll(/[A-Za-z_$][\w$]*/g)) add(t[0]!, i + 1);
+    }
+  }
+  return out;
+}
+
+/** One top-level name a later chunk declares that an earlier chunk already exports. */
+export type CrossChunkDuplicate = { name: string; line: number; priorPath: string };
+
+/**
+ * W45/331-4 (Finding B): the cross-chunk duplicate-declaration census. `materializeImportableTree`
+ * imports EVERY earlier chunk's exports into a later file, so a later chunk that declares a
+ * top-level name an earlier chunk exports yields a file with both an `import { x }` and a local
+ * `x` — a load-time `SyntaxError: Identifier 'x' has already been declared` (the real keyed tree:
+ * `src/jobs/flip.ts` imported `estimateARV` from `…/list-line-items.ts` and declared it again at
+ * line 546). This is the ONE detector of that class: names in prior exports that are also local
+ * top-level bindings, with the declaration line and the exporting sibling. Deterministic, pure.
+ */
+export function crossChunkDuplicateDeclarations(
+  module: string,
+  priorChunks: readonly { path: string; exports: readonly string[] }[] | null | undefined,
+): CrossChunkDuplicate[] {
+  const chunks = (Array.isArray(priorChunks) ? priorChunks : []).filter(
+    (c): c is { path: string; exports: readonly string[] } => c !== null && typeof c === "object" && typeof c.path === "string",
+  );
+  if (chunks.length === 0) return [];
+  const lines = localBindingLines(String(module ?? ""));
+  const out: CrossChunkDuplicate[] = [];
+  const seen = new Set<string>();
+  for (const chunk of chunks) {
+    for (const raw of Array.isArray(chunk.exports) ? chunk.exports : []) {
+      if (typeof raw !== "string" || !isIdent(raw) || seen.has(raw)) continue;
+      const at = lines.get(raw);
+      if (at !== undefined && at.length > 0) {
+        seen.add(raw);
+        out.push({ name: raw, line: at[0]!, priorPath: chunk.path });
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -2380,6 +2639,11 @@ export function validateSynthesisModule(
   module: string,
   claimedExports: readonly string[],
   signatureNames: readonly string[],
+  /** W45/331-4 (Finding B): the earlier chunks of this tree (path + exports). When
+   *  present, a top-level declaration of a name an earlier chunk already exports is
+   *  refused — the materialized ESM imports that export, so the duplicate is a
+   *  load-time SyntaxError. Absent/null ⇒ the single-module path, byte-identical. */
+  priorChunks?: readonly { path: string; exports: readonly string[] }[] | null,
 ): ModuleValidation {
   if (typeof module !== "string" || !module.trim()) {
     return { ok: false, code: "RT_E_VALIDATION", error: "synthesis envelope carried an empty module" };
@@ -2445,6 +2709,22 @@ export function validateSynthesisModule(
       code: "RT_E_VALIDATION",
       error: `typeSignature functions not exported: ${missing.join(", ")}`,
     };
+  }
+  // W45/331-4 (Finding B): a later chunk must not redeclare a name an earlier chunk
+  // exports. Checked LAST so the specific export-surface repairs above keep priority;
+  // this is the class that ships an UNLOADABLE tree, so it is a refusal, not a warning.
+  if (Array.isArray(priorChunks) && priorChunks.length > 0) {
+    const dup = crossChunkDuplicateDeclarations(module, priorChunks);
+    if (dup.length > 0) {
+      const named = dup
+        .map((d) => `"${d.name}" (declared at line ${d.line}; already exported by ${d.priorPath})`)
+        .join(", ");
+      return {
+        ok: false,
+        code: "RT_E_VALIDATION",
+        error: `cross-chunk duplicate declaration: ${named} — the materialized ESM imports each earlier chunk's exports, so a same-named top-level declaration fails to load (SyntaxError: Identifier '${dup[0]!.name}' has already been declared)`,
+      };
+    }
   }
   return { ok: true, exports: claimed };
 }
@@ -3477,6 +3757,20 @@ async function synthesizeChunkedTree(
   // closure carries the chunk context so every model call of chunk i reports
   // chunk (i+1)/total + a sequential per-chunk attempt number.
   const attemptLogs: JsonLog[] = [...(project.logs ?? [])];
+  // W45/331-4: the plan-side shortfall — a declared spec-graph job whose label no
+  // typeSignature names gets no chunk and (in tree mode) no emitted file. Count it
+  // and persist the row on the project, so it survives into the packet/export
+  // instead of vanishing with the scaffold's in-process warnings array. Nothing is
+  // appended when every declared job is planned (byte-identity for the pipelines).
+  {
+    const census = treeChunkPlanCensus(project, specRecord.typeSignatures);
+    if (census.unbound.length > 0) {
+      const detail = `declared job node(s) with no bound signature — no src/jobs module will be synthesized: ${census.unbound.join(", ")} (their typeSignatures, if any, stay in the src/generated family)`;
+      if (!attemptLogs.some((l) => l.event === "p6.tree.shortfall" && l.detail === detail)) {
+        attemptLogs.push({ ts: Date.now(), phase: 6, level: "warn", event: "p6.tree.shortfall", detail });
+      }
+    }
+  }
 
   for (let i = 0; i < plan.length; i++) {
     const chunk = plan[i]!;
@@ -3511,6 +3805,10 @@ async function synthesizeChunkedTree(
       // 217k (W12 LANE B · G6): the unreadable-reply sink for this chunk's
       // envelope reads — the reply belongs to the planned file's path.
       (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, chunk.path)),
+      // W45/331-4 (Finding B): the earlier chunks of this tree. The materializer
+      // imports their exports into this file, so a redeclaration is refused by the
+      // validator and gets the bounded duplicate-declaration repair below.
+      prior,
     );
     if (!synth.ok) {
       return partialTreeRefuse(
@@ -3582,6 +3880,10 @@ async function synthesizeChunkEnvelope(
    *  envelope reads (the caller knows the planned file path); absent keeps the
    *  legacy no-op. */
   readSink?: EnvelopeReadSink,
+  /** W45/331-4 (Finding B): the earlier chunks of THIS tree (path + exports). The
+   *  module must not redeclare any of their exported names — the materializer imports
+   *  them. Absent ⇒ the legacy validation (single-module path), byte-identical. */
+  priorChunks?: readonly { path: string; exports: readonly string[] }[],
 ): Promise<{ ok: true; envelope: SynthesisEnvelope; servedModel: string } | { ok: false; code: ErrorCode; error: string }> {
   // fixes/153 (P1): sequential attempt numbering per chunk — one event per
   // model call (synthWithBackoff retries + each bounded repair re-prompt); an
@@ -3608,13 +3910,15 @@ async function synthesizeChunkEnvelope(
   if (envelope === null) {
     return { ok: false, code: "RT_E_LLM_REJECTED", error: "model returned an unparseable synthesis envelope after one repair attempt" };
   }
-  let validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames);
+  let validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames, priorChunks);
   if (!validation.ok) {
     const masked = maskLiteralsAndComments(envelope.module);
     const hit = forbiddenPrimitiveHit(masked);
     const unbound = unboundExportNames(envelope.module, envelope.exports);
     const repairableForbidden = hit.soft !== null && hit.hard === null;
     const missingSig = missingSignatureNames(envelope.exports, signatureNames);
+    // W45/331-4 (Finding B): the cross-chunk duplicate-declaration class.
+    const dup = crossChunkDuplicateDeclarations(envelope.module, priorChunks);
     // 216f (T-09/T-15): same two new bounded repair classes as the single-module
     // path — prose-in-code and Math.random each get ONE re-prompt naming the
     // exact defect; a repeat is refused. This is the LLM CHUNK gate: the only
@@ -3659,12 +3963,15 @@ async function synthesizeChunkEnvelope(
         });
         if (patched !== null) {
           envelope = patched;
-          validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames);
+          validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames, priorChunks);
           patchLanded = validation.ok;
         }
       }
     }
-    if (!patchLanded && (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0)) {
+    if (
+      !patchLanded &&
+      (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || dup.length > 0)
+    ) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
         : repairableForbidden
@@ -3673,7 +3980,9 @@ async function synthesizeChunkEnvelope(
             ? p6SynthesisSignatureRepairPrompt(missingSig, treeFailure)
             : nondet !== null
               ? p6SynthesisNondeterministicRepairPrompt(nondet, treeFailure)
-              : p6SynthesisProseRepairPrompt(prose, treeFailure);
+              : prose.length > 0
+                ? p6SynthesisProseRepairPrompt(prose, treeFailure)
+                : p6SynthesisDuplicateDeclRepairPrompt(dup, treeFailure);
       const repair = await completeCall(repairPrompt, opts);
       // FM-03 (W37 Y1): metered like every bounded repair call.
       const repairStop = accountRepairUsage(repair);
@@ -3684,7 +3993,7 @@ async function synthesizeChunkEnvelope(
         const repaired = parseSynthesisEnvelope(repair.text, readSink);
         if (repaired) {
           envelope = repaired;
-          validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames);
+          validation = validateSynthesisModule(envelope.module, envelope.exports, signatureNames, priorChunks);
         }
       }
     }

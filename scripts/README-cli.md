@@ -58,8 +58,60 @@ project end-to-end by reading only the JSON below.
 node --experimental-strip-types scripts/rapidtool-cli.mjs <command> ...
 ```
 
-Run it from the repo root (the CLI resolves `src/lib/headless.ts` relative to its
-own location, so the working directory doesn't matter).
+Run it from the repo root: the CLI resolves `src/lib/headless.ts` relative to its
+own location, and resolves `.env` (see "API key resolution") relative to the
+**working directory**.
+
+## API key resolution (DEEPSEEK_API_KEY)
+
+Keyed verbs (`crew`, `verify`, `prompt`, `chat`, `create`'s `enforceDod` default,
+… ) resolve the key from TWO sources, in this order (W45 · 331-1):
+
+1. **`<working directory>/.env`** — the `DEEPSEEK_API_KEY` entry. Run the CLI from
+   the repo root (the documented invocation) and this is the repo's own `.env`.
+2. **the process environment** — `DEEPSEEK_API_KEY` (on Windows this includes a
+   User/Machine-scope variable inherited into the shell).
+
+A process `DEEPSEEK_API_KEY` that is **present but blank/whitespace is an
+intentional DISABLE**: it forces the keyless floor and `.env` is NOT consulted.
+Absence is different — an *unset* variable lets `.env` supply the key. This is the
+repo's keyless-forcing convention (a harness that spawns the CLI with
+`DEEPSEEK_API_KEY: ""` keeps it keyless even when a real `.env` sits in the cwd).
+
+**The `.env` value WINS when both are present (non-blank).** Rationale: the `.env`
+beside the repo is the key store this checkout declares; a stale machine-scope
+variable must never silently shadow it — exactly the defect W45 repaired (a stale
+User-scope key made every keyed call 401 on a key the operator never chose).
+
+When both sources hold a non-blank, DIFFERENT value the run is not silent: the CLI
+prints a **loud, coded** signal to **stderr** naming BOTH last-4 tails and proceeds
+with the `.env` key —
+
+```
+[RT_E_LLM_KEY_SHADOWED] DEEPSEEK_API_KEY conflict: the .env key (<path>, tail …xxxx)
+WINS over the process-environment key (tail …yyyy); using the .env key.
+```
+
+Only the last 4 characters of any key are ever printed, logged, or returned; the
+full key never appears in an envelope, a telemetry row, or a refusal. A rejected
+credential (HTTP 401) is its own class — `RT_E_LLM_KEY_REJECTED` — and both the
+message and the envelope's `remedy` name the SOURCE the key came from (the `.env`
+path, or "the process environment"), by tail only.
+
+Resolution is cwd-relative by design (standard dotenv semantics): run from a
+directory with no `.env` (a scratch/temp dir) and the pure process-environment
+behavior applies unchanged, so tooling that spawns the CLI elsewhere stays keyless.
+
+### The app's own server path (dev / preview)
+
+The Vite dev and preview servers run through `scripts/with-app-env.mjs`, which
+declares the repo `.env` to the SERVER-SIDE resolver by setting
+`RAPIDTOOL_LLM_ENV_FILE` (a PATH — never a secret, never `VITE_`) in the child
+environment. The provider (`src/lib/llm/providers/key-source.server.ts`) applies
+this SAME rule on read, so the console's server functions — e.g. **Spawn crew**
+on `/run/<id>` — resolve the repo `.env` key instead of a stale User-scope one,
+and a rejected key still names its source. With no declared file the read is a
+plain `process.env` read, so a bare Node / unit-test process is unchanged.
 
 ## Commands
 
@@ -319,9 +371,11 @@ caps turns (default 12, server clamps 1–24).
 ```
 
 No key → honest failure, exit 3 (backend not configured):
-`{ "ok": false, "reason": "not-configured", "code": "RT_E_LLM_NOT_CONFIGURED", "error": "… — set DEEPSEEK_API_KEY in the environment to enable the crew" }`.
+`{ "ok": false, "reason": "not-configured", "code": "RT_E_LLM_NOT_CONFIGURED", "error": "… — set DEEPSEEK_API_KEY (repo .env or process environment) to enable the crew" }`.
 An agent should treat this as *actionable*, not as a crash — the machine never
-fabricates a session. A runtime/backend failure exits 4.
+fabricates a session. A runtime/backend failure exits 4; a rejected credential
+carries `RT_E_LLM_KEY_REJECTED` and names the key's source (see "API key
+resolution").
 
 ## Verify (`verify`)
 
@@ -979,6 +1033,8 @@ The emit→edit→re-emit verbs (`tree-run`/`repair`, fixes/150 wave G1) set the
 | `RT_E_LLM_TIMEOUT` | The LLM call exceeded its deadline. | Retry once if the task is idempotent, otherwise fall back to the deterministic path and report the timeout honestly. | 4 (crew/verify backend) |
 | `RT_E_LLM_REJECTED` | The LLM provider refused the request (401 auth, 402 billing, 429 rate limit, invalid params, or empty content). | Do not retry blindly; check key/balance/parameters, and surface the provider's own message to the user. | 4 (crew/verify backend) |
 | `RT_E_LLM_NO_BALANCE` | The LLM provider refused the call because the account balance is exhausted (the provider's HTTP 402 / "Insufficient Balance" — a wallet class, not a generic refusal). | Stop consuming this account: do not retry (billing is not transient) and read NO keyed score from a run in this state — top up the account or switch keys, re-pass the fundedness probe, then re-run. | 4 (crew/verify backend) |
+| `RT_E_LLM_KEY_REJECTED` | The LLM provider rejected the API key it was sent (HTTP 401 authentication failure) — the credential is invalid/revoked, not the request. | Fix the key at the source named in the message and `remedy` (the `.env` path or the process environment, tail-only), confirm which source wins under "API key resolution", then re-run; never paste the full key into logs. | 4 (crew/verify backend) |
+| `RT_E_LLM_KEY_SHADOWED` | A conflicting ambient `DEEPSEEK_API_KEY` and the `.env` key are both present and differ — the `.env` key wins by documented precedence and the ambient key was ignored (surfaced on stderr, never silently shadowed). | No action is needed to proceed; to silence the signal, clear the stale ambient variable (Windows: remove the User-scope `DEEPSEEK_API_KEY`) or make it match the `.env` key. Compare by last-4 tails only. | - (diagnostic; never fails the run) |
 | `RT_E_RESEARCH_UNAVAILABLE` | The live web-research backend is not configured or unreachable. | Proceed with the deterministic corpus, set liveUnavailable so the documented gate waiver applies, and never present fabricated findings as real research. | 3 (engine live-overlay domain) |
 | `RT_E_VALIDATION` | Input or model output failed validation and cannot be used. | Reject the payload, state the concrete validation rule that failed, and ask for corrected input instead of guessing. | 1 |
 | `RT_E_INTERNAL` | Unexpected internal failure (transport, serialization, server). | Log the full error, retry once if it may be transient, and escalate with the raw message rather than paraphrasing. | 4 |

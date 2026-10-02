@@ -18,6 +18,7 @@ import {
   emitProject,
   exportJson,
   HARNESS_APPROVE_ACTOR,
+  importTreeDir,
   ingest,
   loadProject,
   p6CycleLiveDeps,
@@ -34,6 +35,7 @@ import {
   runUntilGate,
   saveProject,
   summary,
+  treeRunFailureFiles,
   wildPauseRun,
   wildResumeRun,
   wildStartRun,
@@ -51,6 +53,7 @@ import { fnv1a } from "./algorithms.ts";
 import type { PhaseId, Project } from "./types.ts";
 import type { RtEventSeed } from "./rt-events.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
+import { TREE_ENTRY_PATH } from "./codegen.server.ts";
 
 // fix 327 L1 — non-hermetic keyless suite. The host shell may carry a real
 // DEEPSEEK_API_KEY (this box sets one in the User scope), which flips
@@ -1144,6 +1147,147 @@ describe("C-1 repair seam — repairTreeDir's recordGreen mints before the gate 
       !res.gate!.unmet.some((u) => u.includes('lastTest.label === "tested"')),
       'p6-verified unmet ONLY when the gate ran before the mint (the pre-C-1 deadlock) — the mint must precede the gate',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W45 (parent keyed findings C + D): the emitted tree's own entry barrel must
+// round-trip through the repair dir seam, and a repair cycle must TARGET the
+// file the tree-run names (including the generated-core LOAD shape) instead of
+// silently repairing around it.
+// ---------------------------------------------------------------------------
+describe("W45 — emitted entry round-trips through repair; the failing file is targeted", () => {
+  const emptyCompile = { ok: true, dir: "", checked: 1, passed: 1, failed: 0, skipped: 0, verdicts: [] };
+
+  it("Finding C: src/generated.ts (the emitter's TREE_ENTRY_PATH) is imported AND written by repair", async () => {
+    assert.equal(TREE_ENTRY_PATH, "src/generated.ts", "the emitter's entry path under test");
+    const dir = tempDir();
+    try {
+      const barrel = 'export * from "./generated/chunk-0.ts";\n';
+      const chunk = "export const x = 1;\n";
+      mkdirSync(join(dir, "src", "generated"), { recursive: true });
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "roundtrip", type: "module" }), "utf8");
+      writeFileSync(join(dir, TREE_ENTRY_PATH), barrel, "utf8");
+      writeFileSync(join(dir, "src", "generated", "chunk-0.ts"), chunk, "utf8");
+      const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+      const ledger: Project = {
+        ...base,
+        generatedTree: [
+          { path: TREE_ENTRY_PATH, source: barrel, hash: String(fnv1a(barrel)), attempt: 0 },
+          { path: "src/generated/chunk-0.ts", source: chunk, hash: String(fnv1a(chunk)), attempt: 0 },
+        ],
+      };
+      // Read side: the entry barrel re-imports (pre-fix it was refused).
+      const imported = importTreeDir(ledger, dir);
+      assert.equal(imported.refused.includes(TREE_ENTRY_PATH), false, "the tree entry barrel is imported, not refused");
+      assert.ok(imported.imported.includes(TREE_ENTRY_PATH), "the tree entry barrel is in the imported set");
+      // Write side: a repair cycle that changes the barrel must WRITE it.
+      const synth = async (p: Project): Promise<Project> => ({
+        ...p,
+        generatedTree: (p.generatedTree ?? []).map((r) =>
+          r.path === TREE_ENTRY_PATH ? { ...r, source: `${r.source}// repaired\n` } : r,
+        ),
+      });
+      const res = await repairTreeDir(ledger, dir, { budget: 1, deps: { synthesize: synth } });
+      assert.equal(res.applied.refused.includes(TREE_ENTRY_PATH), false, "the entry barrel is never path-refused");
+      assert.ok(res.applied.written.includes(TREE_ENTRY_PATH), `the repaired entry barrel is written: ${JSON.stringify(res.applied)}`);
+      assert.equal(
+        readFileSync(join(dir, TREE_ENTRY_PATH), "utf8"),
+        `${barrel}// repaired\n`,
+        "the repaired bytes land on disk",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("Finding D: a tree-run that names the generated core targets it — an un-addressed file is refused, never skipped", async () => {
+    const dir = tempDir();
+    try {
+      const flipPath = "src/jobs/flip.ts";
+      const flipSrc = 'import { estimateARV } from "../generated/list-line-items.ts";\nexport async function estimateARV(id: string) { return id.length; }\n';
+      const otherPath = "src/generated/create-property.ts";
+      const otherSrc = "export function createProperty(id: string) { return { id }; }\n";
+      const barrel = 'export * from "./generated/create-property.ts";\n';
+      mkdirSync(join(dir, "src", "jobs"), { recursive: true });
+      mkdirSync(join(dir, "src", "generated"), { recursive: true });
+      mkdirSync(join(dir, ".rapidtool"), { recursive: true });
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "flip", type: "module" }), "utf8");
+      writeFileSync(join(dir, "index.html"), "<!doctype html><html><body><div id=root></div></body></html>\n", "utf8");
+      writeFileSync(join(dir, TREE_ENTRY_PATH), barrel, "utf8");
+      writeFileSync(join(dir, otherPath), otherSrc, "utf8");
+      writeFileSync(join(dir, flipPath), flipSrc, "utf8");
+      writeFileSync(
+        join(dir, ".rapidtool", "project.json"),
+        JSON.stringify({ kind: "app", generatedSource: barrel, specGraph: { nodes: [{ id: "job-flip", file: flipPath }], order: ["job-flip"] } }),
+        "utf8",
+      );
+      const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+      const ledger: Project = {
+        ...base,
+        generatedTree: [
+          { path: TREE_ENTRY_PATH, source: barrel, hash: String(fnv1a(barrel)), attempt: 0 },
+          { path: otherPath, source: otherSrc, hash: String(fnv1a(otherSrc)), attempt: 0 },
+          { path: flipPath, source: flipSrc, hash: String(fnv1a(flipSrc)), attempt: 0 },
+        ],
+      };
+      // Mimic the real codegen outcome: a repair that changes OTHER files but
+      // leaves the file the tree-run named (the load failure) untouched.
+      const seenTargets: (readonly string[] | undefined)[] = [];
+      const synth = async (p: Project, ctx: { repairTargets?: readonly string[] }): Promise<Project> => {
+        seenTargets.push(ctx.repairTargets);
+        return {
+          ...p,
+          generatedTree: (p.generatedTree ?? []).map((r) =>
+            r.path === otherPath ? { ...r, source: `${r.source}// cycle touch\n` } : r,
+          ),
+        };
+      };
+      const res = await repairTreeDir(ledger, dir, { budget: 2, deps: { synthesize: synth } });
+      assert.equal(res.ok, false, "the tree stays red — no fabricated green verdict");
+      assert.ok(seenTargets[0]?.includes(flipPath), `the directive names the load-failing file: ${JSON.stringify(seenTargets[0])}`);
+      assert.ok(res.applied.written.includes(otherPath), "the cycle's other-file change landed");
+      assert.equal(res.applied.written.includes(flipPath), false, "the failing file was NOT changed by this repair");
+      assert.ok(res.applied.refused.includes(flipPath), `the un-addressed failing file is explicitly refused: ${JSON.stringify(res.applied)}`);
+      const warn = res.applied.warnings.find((w) => w.includes(flipPath));
+      assert.ok(warn && warn.includes("the repair did not target it"), `the refusal carries a reason: ${warn}`);
+      assert.ok(res.events.some((e) => e.includes("failure-named file not addressed by the repair") && e.includes(flipPath)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("treeRunFailureFiles: reads the core LOAD entry explicitly; excludes the scaffold oracle spec", () => {
+    const coreFail: TreeRunOutcome = {
+      ok: false,
+      dir: "",
+      compile: emptyCompile,
+      tests: [],
+      run: { kind: "ui-shell", run: "skip", detail: "UI shell — not executable headless" },
+      core: { kind: "generated-core", entry: "src/jobs/flip.ts", run: "fail", detail: "SyntaxError" },
+      error: "the emitted product's generated core module failed to LOAD (src/jobs/flip.ts): SyntaxError",
+    };
+    assert.deepEqual(treeRunFailureFiles(coreFail), ["src/jobs/flip.ts"], "the core LOAD entry is the named file");
+    const specFail: TreeRunOutcome = {
+      ...coreFail,
+      core: undefined,
+      run: { kind: "headless", entry: "src/main.ts", run: "fail", detail: "boom" },
+      tests: [{ file: "tests/oracle.spec.ts", compile: "pass", run: "fail", tests: { pass: 0, fail: 1 }, detail: "x" }],
+    };
+    const files = treeRunFailureFiles(specFail);
+    assert.ok(files.includes("src/main.ts"), "the failing entry is named");
+    assert.equal(files.includes("tests/oracle.spec.ts"), false, "the scaffold-owned oracle spec is never a repair target");
+  });
+
+  it("repairCycleLiveDeps: folds repairTargets into the treeFailure directive (and only then)", () => {
+    const tail = "the emitted product's generated core module failed to LOAD (src/jobs/flip.ts): SyntaxError";
+    const plain = repairCycleLiveDeps({ cycle: 2, treeFailureTail: tail });
+    assert.equal(plain.treeFailure, tail, "no targets ⇒ the legacy tail is byte-identical");
+    const targeted = repairCycleLiveDeps({ cycle: 2, treeFailureTail: tail, repairTargets: ["src/jobs/flip.ts"] });
+    assert.ok(targeted.treeFailure!.includes(tail), "the tail is preserved");
+    assert.ok(targeted.treeFailure!.includes("Repair target file(s) named by the failure — fix these first:"));
+    assert.ok(targeted.treeFailure!.includes("src/jobs/flip.ts"));
+    assert.equal(targeted.patchRepairs, true, "the repair level is still on");
   });
 });
 
@@ -2692,6 +2836,72 @@ describe("W-03 (fixes/271 · §R3-f01) — emit-time materialization of CJS-resi
       } finally {
         rmSync(dir2, { recursive: true, force: true });
       }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // T1 (331-3 · fixes/330 §6.1): the zero-row early return used to skip the
+  // materializer entirely, so a LONE generatedSource with CJS residue was
+  // never rewritten — 330 Fix A then refused it (safe, but the path never
+  // converted). The materializer now treats it as a single-row tree plan at
+  // TREE_ENTRY_PATH, so the path CONVERTS: ESM chunk + src/generated.ts barrel
+  // the `"type":"module"` tenant can import.
+  const loneCjs = (): Project => ({
+    ...createProject({ brief: FIXTURE_BRIEF, name: "EmitLoneCjs" }),
+    generatedTree: [],
+    generatedSource: "function add(a, b) { return a + b; }\nmodule.exports.add = add;\n",
+  });
+
+  it("T1 RED-first: a lone generatedSource with CJS residue CONVERTS — importable ESM at the tree entry, real import", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-emit-lone-cjs-"));
+    try {
+      const res = await emitProject(loneCjs(), dir);
+      assert.equal(res.ok, true, res.ok ? "" : res.error);
+      assert.ok(res.files.includes("src/generated.ts"), "the ESM barrel lands at the tree entry path");
+      assert.ok(res.files.includes("src/generated/chunk-0.ts"), "the module is relocated and rewritten");
+      const barrel = readFileSync(join(dir, "src/generated.ts"), "utf8");
+      const chunk = readFileSync(join(dir, "src/generated/chunk-0.ts"), "utf8");
+      assert.equal(barrel.includes("module.exports"), false, "0 residue in the barrel");
+      assert.equal(chunk.includes("module.exports"), false, "0 residue in the chunk");
+      assert.ok(chunk.includes("export { add }"), "the CJS surface is recovered as an ESM named export");
+      const record = JSON.parse(readFileSync(join(dir, ".rapidtool", "project.json"), "utf8")) as {
+        generatedTree: { path: string; source: string; hash: string }[];
+      };
+      assert.deepEqual(
+        record.generatedTree.map((r) => r.path),
+        ["src/generated.ts", "src/generated/chunk-0.ts"],
+        "the record carries the materialized tree",
+      );
+      for (const row of record.generatedTree) {
+        assert.equal(/module\.exports/.test(row.source), false, `record row ${row.path} carries no CJS residue`);
+        assert.equal(row.hash, String(fnv1a(row.source)), `record row ${row.path} hash matches its bytes`);
+      }
+      // A REAL import smoke under this `node --test` run: the emitted entry
+      // must load as an ES module and expose the recovered function.
+      const mod = (await import(pathToFileURL(join(dir, "src/generated.ts")).href)) as { add?: unknown };
+      assert.equal(typeof mod.add, "function", "the converted generated entry imports");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("T1 control: a CLEAN lone generatedSource is untouched — no synthesized tree, legacy host verbatim", async () => {
+    const cleanSrc = "function add(a: number, b: number): number { return a + b; }\nexport { add };\n";
+    const p: Project = {
+      ...createProject({ brief: FIXTURE_BRIEF, name: "EmitLoneClean" }),
+      generatedTree: [],
+      generatedSource: cleanSrc,
+    };
+    const dir = mkdtempSync(join(tmpdir(), "rt-emit-lone-clean-"));
+    try {
+      const res = await emitProject(p, dir);
+      assert.equal(res.ok, true, res.ok ? "" : res.error);
+      assert.equal(existsSync(join(dir, "src/generated.ts")), false, "no residue ⇒ no synthesized tree");
+      const host = res.ok
+        ? res.files.find((f) => readFileSync(join(dir, f), "utf8").includes(cleanSrc.trim()))
+        : undefined;
+      assert.ok(host, "the clean generatedSource still hosts verbatim at its legacy path");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -536,9 +536,11 @@ describe("treeRun — execute the emitted tree in-loop (fixes/144 M3/B3)", () =>
     try {
       write(dir, "package.json", JSON.stringify({ name: "ui-cjs-core", type: "module" }));
       write(dir, "index.html", "<!doctype html><html><body>app</body></html>\n");
-      // The precise unloadable shape: raw P6 CommonJS in a record whose
-      // generatedTree is empty (headless.materializeEmitTree early-returns on
-      // zero rows), embedded verbatim into the `"type":"module"` package.
+      // The precise unloadable shape: raw P6 CommonJS embedded verbatim into
+      // the `"type":"module"` package. A pre-331 emit reached this (the
+      // materializer early-returned on zero rows); the dir can still exist on
+      // disk (a stale emit, a `--force` survivor, a direct scaffold caller),
+      // so the core smoke must red it.
       write(dir, "src/jobs/flip.ts", "function add(a, b) { return a + b; }\nmodule.exports.add = add;\n");
       write(dir, ".rapidtool/project.json", JOB_CORE_RECORD("src/jobs/flip.ts"));
       const r = await treeRunAsConsumer(dir);
@@ -581,6 +583,61 @@ describe("treeRun — execute the emitted tree in-loop (fixes/144 M3/B3)", () =>
       assert.equal(r.core, undefined, "no core resolves ⇒ no core verdict, no hash factor");
       assert.equal(r.run!.kind, "ui-shell");
       assert.equal(r.ok, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // T1 (331-3): an emit that CONVERTS a lone generatedSource materializes a
+  // tree whose job node is uncovered (no file) — the generated core then
+  // resolves to the tree entry (src/generated.ts). Lock both verdicts.
+  it("T1 (331-3): a UI-shell tree whose generated core is the tree ENTRY (job file unmaterialised) is load-smoked", async () => {
+    const dir = tempDir();
+    try {
+      // The shape a converted emit produces: a job node is declared but its
+      // file is NOT written (tree mode never bridges an uncovered job node),
+      // the record carries generatedSource, and the ESM barrel lives at the
+      // tree entry. resolveHeadlessEntry must fall through to src/generated.ts.
+      const record = JSON.stringify({
+        kind: "app",
+        generatedSource: 'export * from "./generated/chunk-0.ts";\n',
+        specGraph: { nodes: [{ id: "job-flip", file: "src/jobs/flip.ts" }], order: ["job-flip"] },
+      });
+      write(dir, "package.json", JSON.stringify({ name: "ui-tree-entry", type: "module" }));
+      write(dir, "index.html", "<!doctype html><html><body>app</body></html>\n");
+      write(dir, "src/generated.ts", 'export * from "./generated/chunk-0.ts";\n');
+      write(dir, "src/generated/chunk-0.ts", "function add(a, b) { return a + b; }\nexport { add };\n");
+      write(dir, ".rapidtool/project.json", record);
+      const r = await treeRunAsConsumer(dir);
+      assert.ok(r.core, "the tree entry generated core was resolved and smoke-loaded");
+      assert.equal(r.core!.entry, "src/generated.ts");
+      assert.equal(r.core!.run, "pass", "the converted ESM barrel loads");
+      assert.equal(r.ok, true, "a loadable converted core keeps the UI-shell skip green");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("T1 (331-3): a tree ENTRY core carrying CommonJS residue reds the tree", async () => {
+    const dir = tempDir();
+    try {
+      const record = JSON.stringify({
+        kind: "app",
+        generatedSource: 'export * from "./generated/chunk-0.ts";\n',
+        specGraph: { nodes: [{ id: "job-flip", file: "src/jobs/flip.ts" }], order: ["job-flip"] },
+      });
+      write(dir, "package.json", JSON.stringify({ name: "ui-tree-entry-cjs", type: "module" }));
+      write(dir, "index.html", "<!doctype html><html><body>app</body></html>\n");
+      write(dir, "src/generated.ts", 'export * from "./generated/chunk-0.ts";\n');
+      // A residue-carrying chunk a stale/foreign dir could still hold.
+      write(dir, "src/generated/chunk-0.ts", "function add(a, b) { return a + b; }\nmodule.exports.add = add;\n");
+      write(dir, ".rapidtool/project.json", record);
+      const r = await treeRunAsConsumer(dir);
+      assert.ok(r.core, "the tree entry generated core was resolved");
+      assert.equal(r.core!.entry, "src/generated.ts");
+      assert.equal(r.core!.run, "fail");
+      assert.equal(r.ok, false, "an unloadable tree-entry core is never ok:true");
+      assert.ok((r.error ?? "").includes("generated core module failed to LOAD"), r.error);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

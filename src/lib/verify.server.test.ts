@@ -46,6 +46,8 @@ import type { OracleTest } from "./types.ts";
 // 216i (112 T1/T2): the lesson-loop pins below consume the client-safe
 // consumer half (verify.ts applyVerifyOutcome) over a real seeded project.
 import { applyVerifyOutcome } from "./verify.ts";
+// 331 V1: the L4 anchor contract this seam forwards cases.map(c => c.id) into.
+import { verifyOutcomeLesson } from "./knowledge.ts";
 import { seedProject } from "./testing/fixtures.ts";
 
 const available = runnerAvailable();
@@ -656,6 +658,60 @@ describe("216i (112 T1/T2) — verify lesson loop (refusal · signature id · ac
       const threeLesson = three.lesson;
       assert.ok(threeLesson, "run C minted a row for its own anchor set");
       assert.notEqual(threeLesson.id, oneLesson.id, "a different failing anchor set is a different row");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 331 V1 (verify-core) — the L4 PASS identity end-to-end through the verify
+// seam. A pass on iteration 1 and a pass on iteration 2 of the SAME proven
+// case set must mint ONE lesson id; pre-331 the id hashed the evidence tail
+// (iteration count), so a recurrence forked the row (probe:
+// fixes/330_4_cartographer §3.1).
+// ---------------------------------------------------------------------------
+describe("331 V1 — the verify seam anchors the L4 row to the proven case set", () => {
+  const PASS_SRC = "exports.add = (a, b) => a + b;";
+  const FAIL_SRC = "exports.add = (a, b) => a - b;";
+  const passCase = { cases: [{ id: "case-1", expression: "add(2,3) === 5" }] };
+
+  it("a pass at iteration 1 and a pass at iteration 2 (same case set) mint ONE id", { skip: !available }, async () => {
+    const restoreKey = withFakeKey();
+    // Run A passes immediately; run B fails once then the model returns the
+    // passing source, so B's evidence tail names iteration 2 — the exact
+    // per-run noise that used to fork the L4 row.
+    const mock = mockChat([passCase, passCase, PASS_SRC]);
+    try {
+      const a = await verifyAndFixServer(PASS_SRC, "", { maxIterations: 1 });
+      const b = await verifyAndFixServer(FAIL_SRC, "", { maxIterations: 2 });
+      assert.equal(a.status, "passed", `run A should pass: ${JSON.stringify(a)}`);
+      assert.equal(b.status, "passed", `run B should pass on its fix: ${JSON.stringify(b)}`);
+      assert.match(a.evidence, /iteration 1/, "run A's tail names iteration 1");
+      assert.match(b.evidence, /iteration 2/, "run B's tail names iteration 2");
+      const aLesson = a.lesson;
+      const bLesson = b.lesson;
+      assert.ok(aLesson, "run A minted the L4 row");
+      assert.ok(bLesson, "run B minted the L4 row");
+      assert.equal(aLesson.id, bLesson.id, "iteration drift must not fork the verified-procedure id");
+      assert.match(aLesson.id, /^lesson-verified-procedure-[0-9a-f]{8}$/);
+      // Call-site contract: verify.server.ts must forward `cases.map(c => c.id)`;
+      // recomputing the anchored id from the returned outcome must match it.
+      const aIds = (a.cases ?? []).map((c) => c.id);
+      assert.deepEqual(aIds, ["case-1"]);
+      assert.equal(
+        verifyOutcomeLesson("passed", 6, a.evidence, a.iterations, aIds).id,
+        aLesson.id,
+        "verifyOutcomeLesson recomputed with the same anchors reproduces the seam's id",
+      );
+      // And the id is NOT the unanchored evidence-derived id — proof the seam
+      // really passed anchors, not just that two strings happened to match.
+      assert.notEqual(
+        verifyOutcomeLesson("passed", 6, a.evidence, a.iterations).id,
+        aLesson.id,
+        "the seam really forwarded anchors (else the ids would coincide)",
+      );
     } finally {
       mock.restore();
       restoreKey();

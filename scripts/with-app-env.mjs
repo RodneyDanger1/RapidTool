@@ -11,6 +11,12 @@
  * a secret store, and only `VITE_` vars reach the browser anyway. A real
  * `process.env` entry always wins, so an explicit override still works.
  *
+ * W45·331-1 (Keywright) additionally declares the repo `.env` to the
+ * SERVER-SIDE LLM key resolver by setting `RAPIDTOOL_LLM_ENV_FILE` in the child
+ * env (`src/lib/llm/providers/key-source.server.ts`). That value is a PATH, not
+ * a secret, and is never `VITE_`-prefixed, so it can never reach the browser
+ * bundle; it lets the dev/preview server functions resolve the repo key.
+ *
  * That precedence also means the file governs this workspace only. A deployed
  * build runs with the provider's project env, where the deployer sets
  * `VITE_AUTH_ENABLED` itself (today unconditionally `"true"`), so the deployed
@@ -26,6 +32,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const APP_ENV_REL_PATH = ".grok/app-env.json";
+
+/** The `.env` file the server-side LLM key resolver is pointed at (W45·331-1). */
+export const LLM_ENV_REL_PATH = ".env";
+/** Env var carrying that file's path to the server process. Kept in sync with
+ *  `LLM_ENV_FILE_VAR` in src/lib/llm/providers/key-source.server.ts (pinned by
+ *  that module's test). Non-secret, server-side, never `VITE_`-prefixed. */
+export const LLM_ENV_FILE_VAR = "RAPIDTOOL_LLM_ENV_FILE";
 
 const VITE_PREFIX = "VITE_";
 
@@ -97,10 +110,20 @@ export function projectRoot() {
 export function isMainModule(moduleUrl) {
   const entry = process.argv[1];
   if (!entry) return false;
+  const self = fileURLToPath(moduleUrl);
   try {
-    return realpathSync(entry) === fileURLToPath(moduleUrl);
+    return realpathSync(entry) === self;
   } catch {
-    return false;
+    // Fail closed, not open: `false` here would make the caller's
+    // `if (isMainModule(...)) main()` a SILENT no-op (exit 0, nothing run).
+    // realpath only throws when argv[1] is missing/unreadable, so retry from
+    // this module's own path (always readable while it is executing), then
+    // fall back to the raw compare.
+    try {
+      return realpathSync(self) === entry;
+    } catch {
+      return entry === self;
+    }
   }
 }
 
@@ -147,6 +170,13 @@ function main(argv) {
     process.exit(2);
   }
   const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
+  // W45·331-1 (Keywright): declare the repo `.env` to the SERVER-SIDE key
+  // resolver (src/lib/llm/providers/key-source.server.ts). The provider reads
+  // non-VITE_ keys through it, applying `.env`-wins precedence + the coded
+  // RT_E_LLM_KEY_SHADOWED signal — so the dev/preview server functions (the
+  // console's "Spawn crew") use the repo key, not a stale User-scope one. Only
+  // a PATH crosses here: non-secret, server-only, never `VITE_`-prefixed.
+  env[LLM_ENV_FILE_VAR] = join(projectRoot(), LLM_ENV_REL_PATH);
   // Windows compat: Node's spawn cannot launch .cmd/.bat shims directly and does
   // not apply PATHEXT, so bare "vite" would ENOENT. Shelling out on win32 lets
   // cmd.exe resolve node_modules/.bin/vite.cmd; POSIX spawns directly (npm run

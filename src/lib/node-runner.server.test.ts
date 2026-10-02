@@ -89,7 +89,8 @@ describe("scrubbedEnv unchanged (B4 / 174-5)", () => {
       process.env.DEEPSEEK_API_KEY = "should-not-leak-into-child-env";
       const env = scrubbedEnv();
       assert.equal(env.DEEPSEEK_API_KEY, undefined);
-      assert.ok(typeof env.PATH === "string" || typeof env.Path === "string" || true);
+      const pathVar = env.PATH ?? env.Path;
+      assert.ok(typeof pathVar === "string" && pathVar.length > 0, "scrubbed env carries a non-empty PATH");
       // Proxy scrub still present
       assert.equal(env.NO_PROXY, "*");
     } finally {

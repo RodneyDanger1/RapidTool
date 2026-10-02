@@ -318,7 +318,21 @@ function errCode(err, fallback) {
 // best-effort contract as `code`: doc absent / unknown code / empty text →
 // the key is omitted and the envelope stays byte-identical to before.
 function remedyFor(code) {
-  if (typeof code !== "string" || code.length === 0 || errorDoc === null) return null;
+  if (typeof code !== "string" || code.length === 0) return null;
+  // W45·331-1 (Keywright): a rejected credential's remedy NAMES the source the
+  // key came from (repo .env path or process env) by tail only — the static
+  // registry action line cannot carry that provenance.
+  if (code === "RT_E_LLM_KEY_REJECTED" && KEY_SOURCE) {
+    const where = KEY_SOURCE.kind === "repo-env-file" ? KEY_SOURCE.path : "the process environment";
+    const also = KEY_SOURCE.conflict
+      ? ` A conflicting process-environment key (tail …${KEY_SOURCE.conflict.processEnvTail}) was ignored: the repo .env key wins by documented precedence.`
+      : "";
+    return (
+      `The provider rejected the key from ${where} (tail …${KEY_SOURCE.tail}). Replace/refresh that key, ` +
+      `confirm the source precedence (scripts/README-cli.md "API key resolution"), and never paste the full key into logs.${also}`
+    );
+  }
+  if (errorDoc === null) return null;
   const entry = errorDoc[code];
   const text = entry && typeof entry.agentAction === "string" ? entry.agentAction.trim() : "";
   return text.length > 0 ? text : null;
@@ -442,6 +456,93 @@ async function knowledgeDriver() {
 async function packetDriver() {
   if (!packetMod) packetMod = await import(PACKET_PATH);
   return packetMod;
+}
+
+// ---------------------------------------------------------------------------
+// W45·331-1 (Keywright): `.env` API-key resolution.
+//
+// The CLI used to read the process environment only, so a stale Windows
+// User-scope DEEPSEEK_API_KEY silently shadowed the funded key in the repo
+// `.env` and every keyed call 401'd on a key the operator never chose.
+// Precedence (documented in scripts/README-cli.md "API key resolution"):
+//
+//   <cwd>/.env  >  the process environment   (a conflicting ambient key is
+//   LOUD, coded (RT_E_LLM_KEY_SHADOWED) and tail-only — never a silent win).
+//   A process DEEPSEEK_API_KEY that is present but BLANK/whitespace is an
+//   intentional DISABLE: `.env` is NOT consulted and the run stays keyless
+//   (the repo's keyless-forcing convention, e.g. headless.test's runCli).
+//
+// Resolved from the WORKING DIRECTORY (standard dotenv semantics): the
+// documented invocations run from the repo root, so `<cwd>/.env` IS
+// `<repo>/.env` — and a child spawned with a different cwd (the CLI test
+// harnesses) keeps its own keyless environment untouched.
+//
+// The physical read lives here (this file already owns node:fs); the pure
+// parse/resolve logic lives in src/lib/llm/providers/key-resolution.ts.
+// ---------------------------------------------------------------------------
+const KEY_RESOLUTION_PATH = pathToFileURL(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "llm", "providers", "key-resolution.ts"),
+).href;
+const DOTENV_PATH = resolve(process.cwd(), ".env");
+const DEEPSEEK_SERVER_PATH = pathToFileURL(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "deepseek.server.ts"),
+).href;
+
+let keyResolutionMod = null;
+async function keyResolutionDriver() {
+  if (!keyResolutionMod) keyResolutionMod = await import(KEY_RESOLUTION_PATH);
+  return keyResolutionMod;
+}
+
+// Non-secret provenance respond() reads to build a dynamic remedy. NEVER the key.
+let KEY_SOURCE = null; // { kind, path, tail, conflict }
+
+/** Resolve DEEPSEEK_API_KEY from <cwd>/.env + the process env and INSTALL it. */
+async function installRepoEnvKey() {
+  let text = "";
+  try {
+    text = readFileSync(DOTENV_PATH, "utf8");
+  } catch {
+    text = ""; // no .env → the process environment is the only source
+  }
+  let mod;
+  try {
+    mod = await keyResolutionDriver();
+  } catch {
+    return; // resolution module absent → legacy process-env read, unchanged
+  }
+  // Declare the file for THIS process so the provider's own key read
+  // (resolveProcessKey via key-source.server.ts) resolves identically — e.g. a
+  // 401 then names `<cwd>/.env` rather than "the process environment".
+  process.env.RAPIDTOOL_LLM_ENV_FILE = DOTENV_PATH;
+  const parsed = mod.parseEnvFile(text);
+  const resolution = mod.resolveApiKey({
+    name: "DEEPSEEK_API_KEY",
+    envFileValue: parsed.DEEPSEEK_API_KEY ?? null,
+    envFilePath: DOTENV_PATH,
+    processValue: process.env.DEEPSEEK_API_KEY ?? null,
+  });
+  if (resolution.effective) {
+    process.env.DEEPSEEK_API_KEY = resolution.effective.value;
+    mod.setActiveKeySource(resolution.effective);
+    KEY_SOURCE = {
+      kind: resolution.effective.kind,
+      path: resolution.effective.path,
+      tail: resolution.effective.tail,
+      conflict: resolution.conflict,
+    };
+  } else {
+    mod.setActiveKeySource(null);
+    KEY_SOURCE = null;
+  }
+  if (resolution.conflict) {
+    // Loud, coded, tail-only. stderr only — stdout stays exactly one JSON object.
+    try {
+      process.stderr.write(mod.formatShadowWarning("DEEPSEEK_API_KEY", DOTENV_PATH, resolution.conflict) + "\n");
+    } catch {
+      /* stderr unusable — the conflict is still resolved, never silently */
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -686,6 +787,12 @@ async function main() {
   // before ANY project load (hoisted above the per-arm sites it replaces, which
   // are now redundant).
   if (cmd !== "wild" && flag(args, "agent-seal")) return refuseAgentSeal(cmd);
+
+  // W45·331-1 (Keywright): resolve DEEPSEEK_API_KEY from <repo>/.env + the
+  // process env BEFORE any dispatch, so every keyed verb (and create's
+  // enforceDod default) sees the repo's key, and a conflicting ambient key is
+  // surfaced loud + coded rather than silently shadowing it.
+  await installRepoEnvKey();
 
   // E-25: shared project loader — missing/bad project file is a usage-class
   // error (exit 1), never an internal error (exit 4).
@@ -2699,20 +2806,56 @@ async function main() {
         if (typeof args["max-steps"] === "string" && /^\d+$/.test(args["max-steps"])) {
           opts.maxSteps = parseInt(args["max-steps"], 10);
         }
-        const res = await h.runCrew(project, opts);
+        // W45·331-1: meter the run's REAL provider spend through the provider
+        // call tap (setLlmCallTap — the provider funnel every registry call
+        // routes through). The envelope reports measured usage, never an
+        // estimate; cleared in `finally` so no later verb sees the tap.
+        const { setLlmCallTap } = await import(DEEPSEEK_SERVER_PATH);
+        const crewUsage = { calls: 0, promptTokens: 0, completionTokens: 0 };
+        setLlmCallTap((rec) => {
+          crewUsage.calls += 1;
+          crewUsage.promptTokens += typeof rec.promptTokens === "number" ? rec.promptTokens : 0;
+          crewUsage.completionTokens +=
+            typeof rec.completionTokens === "number" ? rec.completionTokens : 0;
+        });
+        let res;
+        try {
+          res = await h.runCrew(project, opts);
+        } finally {
+          setLlmCallTap(null);
+        }
         if (res.ok === false) {
           const hint =
             res.reason === "not-configured"
-              ? " — set DEEPSEEK_API_KEY in the environment to enable the crew"
+              ? " — set DEEPSEEK_API_KEY (repo .env or process environment) to enable the crew"
               : "";
           const error =
             typeof res.error === "string" && res.error
               ? `${res.error}${hint}`
               : `crew unavailable (${res.reason ?? "error"})${hint}`;
           // E-25: backend not configured → 3; runtime/backend failure → 4.
-          return respond({ ok: false, reason: res.reason, error }, res.reason === "not-configured" ? 3 : 4);
+          // W45·331-1: carry the provider's own code (e.g. RT_E_LLM_KEY_REJECTED)
+          // instead of re-classifying the prose down to RT_E_UNKNOWN.
+          return respond(
+            {
+              ok: false,
+              reason: res.reason,
+              error,
+              ...(typeof res.code === "string" && res.code ? { code: res.code } : {}),
+            },
+            res.reason === "not-configured" ? 3 : 4,
+          );
         }
-        respond({ ok: true, messages: res.messages, artifacts: res.artifacts, stopped: res.stopped }, 0);
+        respond(
+          {
+            ok: true,
+            messages: res.messages,
+            artifacts: res.artifacts,
+            stopped: res.stopped,
+            ...(crewUsage.calls > 0 ? { usage: crewUsage } : {}),
+          },
+          0,
+        );
         return;
       }
 
@@ -3000,13 +3143,22 @@ async function main() {
         if (res.ok === false) {
           const hint =
             res.reason === "not-configured"
-              ? " — set DEEPSEEK_API_KEY in the environment to enable prompt expansion"
+              ? " — set DEEPSEEK_API_KEY (repo .env or process environment) to enable prompt expansion"
               : "";
           const error =
             typeof res.error === "string" && res.error
               ? `${res.error}${hint}`
               : `prompt expansion unavailable (${res.reason ?? "error"})${hint}`;
-          return respond({ ok: false, reason: res.reason, error }, res.reason === "not-configured" ? 3 : 4);
+          // W45·331-1: carry the provider's code (same reason as the crew arm).
+          return respond(
+            {
+              ok: false,
+              reason: res.reason,
+              error,
+              ...(typeof res.code === "string" && res.code ? { code: res.code } : {}),
+            },
+            res.reason === "not-configured" ? 3 : 4,
+          );
         }
         respond({ ok: true, spec: res.spec }, 0);
         return;

@@ -22,6 +22,13 @@ const GAME_SITE = JSON.stringify({ title: "Wild Race", type: "x:game", card: "cu
 const UTILITY_SITE = JSON.stringify({ title: "Invoice" });
 const UTILITY_CUSTOM_SITE = JSON.stringify({ title: "Invoice", card: "custom" });
 
+/**
+ * A scratch workspace root for one warning scenario. The JSDoc annotation is
+ * load-bearing under `checkJs`: a destructured parameter with some defaults
+ * infers its type from those defaults alone, so every other option reads as an
+ * unknown property at the call sites.
+ * @param {{siteJson?: string, cardFile?: string, narrowFile?: string, cardBytes?: number, narrowBytes?: number, pendingAgeMs?: number}} [options]
+ */
 function makeWorkspace({
   siteJson,
   cardFile,

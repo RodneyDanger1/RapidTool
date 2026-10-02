@@ -85,8 +85,8 @@ START="$(now_ms)"
 run typecheck "$TMP/typecheck.log" npm run typecheck > /dev/null
 run lint "$TMP/lint.log" npm run lint > /dev/null
 run assertionGaps "$TMP/assertionGaps.log" node scripts/check-assertion-gaps.mjs > /dev/null
-run testsScripts "$TMP/testsScripts.log" node --test "scripts/**/*.test.mjs" > /dev/null
-run testsLib "$TMP/testsLib.log" node --experimental-strip-types --test \
+run testsScripts "$TMP/testsScripts.log" node --test --test-reporter=tap "scripts/**/*.test.mjs" > /dev/null
+run testsLib "$TMP/testsLib.log" node --experimental-strip-types --test --test-reporter=tap \
   "src/lib/**/*.test.ts" > /dev/null
 run build "$TMP/build.log" npm run build > /dev/null
 
@@ -94,8 +94,8 @@ run build "$TMP/build.log" npm run build > /dev/null
 LOGS2_SCRIPTS=""
 LOGS2_LIB=""
 if [ "$DOUBLE" = 1 ]; then
-  run testsScripts2 "$TMP/testsScripts2.log" node --test "scripts/**/*.test.mjs" > /dev/null
-  run testsLib2 "$TMP/testsLib2.log" node --experimental-strip-types --test \
+  run testsScripts2 "$TMP/testsScripts2.log" node --test --test-reporter=tap "scripts/**/*.test.mjs" > /dev/null
+  run testsLib2 "$TMP/testsLib2.log" node --experimental-strip-types --test --test-reporter=tap \
     "src/lib/**/*.test.ts" > /dev/null
   LOGS2_SCRIPTS="$WINTMP/testsScripts2.log"
   LOGS2_LIB="$WINTMP/testsLib2.log"

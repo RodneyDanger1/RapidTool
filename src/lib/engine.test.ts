@@ -30,7 +30,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, hydrateProject, liveLayer, wildStep, type WildReviewer } from "./engine.ts";
+import { emptyProject, hydrateProject, liveLayer, wildLog, wildStep, type WildReviewer } from "./engine.ts";
 import { wildResumeRun } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
 import type { Project, WildParkInfo } from "./types.ts";
@@ -286,5 +286,38 @@ describe("T4 · 112 §4.4 — deps.proven is additive on the engine's keyless P6
       if (saved === undefined) delete process.env.DEEPSEEK_API_KEY;
       else process.env.DEEPSEEK_API_KEY = saved;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 331 V3 (telemetry invariant) — wildLog is a ledger writer: it must never
+// throw into the run it observes. Pre-fix `[...p.logs, …]` raised
+// "p.logs is not iterable" on a hand-built / foreign project with no `logs`
+// array (the same class the 330 wave fixed in knowledge.ts lessonLog).
+// ---------------------------------------------------------------------------
+describe("331 V3 — wildLog never throws into the run it observes", () => {
+  const base = () => emptyProject({ name: "Wild", brief: "A brief long enough to seal the lattice gate." });
+
+  it("control: appends one ledger row on a normal project", () => {
+    const p = base();
+    const q = wildLog(p, 3, "info", "wild.test", "hello");
+    assert.equal(q.logs.length, p.logs.length + 1, "exactly one row appended");
+    assert.equal(q.logs.at(-1)!.event, "wild.test");
+    assert.equal(q.logs.at(-1)!.phase, 3);
+  });
+
+  it("a hand-built project without a `logs` array still yields the row (never throws)", () => {
+    const foreign = { ...base(), logs: undefined } as unknown as Project;
+    const q = wildLog(foreign, 3, "warn", "wild.test", "no logs field");
+    assert.equal(q.logs.length, 1, "the row lands, nothing thrown");
+    assert.equal(q.logs[0]!.event, "wild.test");
+    assert.equal(q.logs[0]!.level, "warn");
+  });
+
+  it("the ≤200-row window is preserved", () => {
+    let p = base();
+    for (let i = 0; i < 205; i++) p = wildLog(p, 0, "info", "wild.tick", `t${i}`);
+    assert.equal(p.logs.length, 200, "capped at 200 like every log writer");
+    assert.equal(p.logs.at(-1)!.detail, "t204", "newest row survives the cap");
   });
 });

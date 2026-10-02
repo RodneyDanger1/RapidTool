@@ -1,9 +1,8 @@
 /**
  * Factory-honest doctor field (fixes/210 G1).
  *
- * Parent `headless.doctorStatus` currently hardcodes
- * `autonomousSoftwareFactory: false`. This module is the field-truth latch
- * so that flag can never become true without evidence:
+ * `headless.doctorStatus` derives `autonomousSoftwareFactory` through this
+ * module's `factoryClaim`, so the flag can never become true without evidence:
  *
  *   leftover jobs gone (not reexports / TODO(E-15) stubs)
  *   + real multi-job product
@@ -83,11 +82,32 @@ export type JobInventory = {
   files: Array<{ path: string; kind: JobSourceKind }>;
 };
 
+/**
+ * The deterministic keyless P6 template shape (`sandbox.buildPhase6Module`):
+ * a named job list + the three template functions. A model/recorded job module
+ * never carries all three (its exports are the spec's own signatures). Kept as
+ * a local shape test — doctor.ts stays client-safe (no sandbox.ts import).
+ */
+function isDeterministicTemplateModule(source: string): boolean {
+  return (
+    /\bconst JOBS = \[/.test(source) &&
+    /\bfunction synthesize\s*\(/.test(source) &&
+    /\bfunction test_no_skip\s*\(/.test(source)
+  );
+}
+
 /** Classify one source file. Never invents a job body — stubs stay stubs. */
 export function classifyJobSource(source: string): JobSourceKind {
   if (typeof source !== "string" || source.trim() === "") return "stub";
   if (source.includes("TODO(E-15)")) return "stub";
   if (/throw\s+new\s+Error\s*\(\s*(['"`])TODO\b/i.test(source)) return "stub";
+  // W45/331-4: the keyless floor (sandbox.buildPhase6Module) is a phase-
+  // bookkeeping placeholder that never implements the brief (its own doc; the
+  // p6-brief-fit DoD fails on it by construction). `scaffold.emitGeneratedHost`
+  // hosts it verbatim under the first job path, so counting it `real` made the
+  // census report {stubs:0,reexports:0,real:1} + leftover:false on a product
+  // with no job body at all. Count it as the leftover it is.
+  if (isDeterministicTemplateModule(source)) return "stub";
   const code = source
     .replace(/\/\*[\s\S]*?\*\//g, "\n")
     .replace(/\/\/[^\n]*/g, "")
@@ -167,6 +187,72 @@ export function jobScopeShortfall(
     materialised: materialisedNames.length,
     materialisedNames,
     missing,
+  };
+}
+
+/**
+ * W45/331-4: the declared-vs-emitted job census for a SCANNED tree. `jobScopeShortfall`
+ * counts declared `lattice.jobs` against materialised spec-graph NODES (the plan side);
+ * this counts them against the tree's REAL job FILES (the emitted side), so a declared
+ * job that has no signature naming it — e.g. the café export's `track` node — is counted
+ * and named instead of silently absent. Materialisation is the spec-graph job-file rule
+ * (`src/jobs/<label sanitized>.ts`, plus its `-2/-3` sibling overflow), matched against
+ * the inventory's `real` rows only: a stub/reexport/template file never counts as a
+ * materialised job. Pure; the caller (the `doctor --tree` path) supplies `lattice.jobs`
+ * and the scan output.
+ */
+export type TreeEmissionCensus = {
+  declared: number;
+  declaredNames: string[];
+  /** declared names with a REAL job module in the scan. */
+  materialised: string[];
+  /** declared names with no real module — the counted emitted-tree shortfall. */
+  missing: string[];
+  stubs: number;
+  reexports: number;
+  real: number;
+  /** True when `missing` is non-empty — the shortfall must be surfaced, never dropped. */
+  loud: boolean;
+};
+
+/** Sanitized spec-graph job-file stem for one declared label (algorithms.planSpecGraph rule). */
+function jobFileStem(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+}
+
+/** Count declared jobs against a tree scan's REAL job files (see `TreeEmissionCensus`). */
+export function treeEmissionCensus(
+  declared: readonly unknown[] | null | undefined,
+  inv: JobInventory,
+): TreeEmissionCensus {
+  const declaredNames: string[] = [];
+  for (const d of declared ?? []) {
+    if (typeof d !== "string" || !d.trim()) continue;
+    declaredNames.push(d.trim());
+  }
+  const realStems = (Array.isArray(inv?.files) ? inv.files : [])
+    .filter((f) => f?.kind === "real" && typeof f.path === "string")
+    .map((f) => {
+      const slash = f.path.lastIndexOf("/");
+      const base = slash >= 0 ? f.path.slice(slash + 1) : f.path;
+      return base.replace(/\.[A-Za-z0-9]+$/, "").toLowerCase();
+    });
+  const materialised: string[] = [];
+  const missing: string[] = [];
+  for (const name of declaredNames) {
+    const stem = jobFileStem(name);
+    const hit = realStems.some((s) => s === stem || s.startsWith(`${stem}-`));
+    (hit ? materialised : missing).push(name);
+  }
+  return {
+    declared: declaredNames.length,
+    declaredNames,
+    materialised,
+    missing,
+    stubs: inv?.stubs ?? 0,
+    reexports: inv?.reexports ?? 0,
+    real: inv?.real ?? 0,
+    loud: missing.length > 0,
   };
 }
 

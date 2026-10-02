@@ -65,6 +65,11 @@ import { classifyError } from "../../errors.ts";
 import type { ErrorCode } from "../../errors.ts";
 import type { LlmResult } from "../../llm.ts";
 import type { LlmProviderDescriptor, LlmProviderId } from "./registry.ts";
+// W45·331-1 (Keywright): same one-shot transport + credential-class mapping as
+// the DeepSeek provider (see one-shot-fetch.server.ts / key-resolution.ts).
+import { oneShotFetch } from "./one-shot-fetch.server.ts";
+import { describeKeySource, KEY_REJECTED_CODE } from "./key-resolution.ts";
+import { resolveProcessKey } from "./key-source.server.ts";
 
 // ---------------------------------------------------------------------------
 // The generic OpenAI-compatible shape
@@ -139,8 +144,10 @@ const OPENAI_COMPATIBLE_SPECS: ReadonlyMap<string, OpenAiCompatibleSpec> = new M
 // ---------------------------------------------------------------------------
 
 function env(key: string): string | undefined {
-  const v = process.env[key]?.trim();
-  return v || undefined;
+  // W45·331-1: read through the shared resolver (declared `.env` file over the
+  // process env); with no declared file this is the legacy process read.
+  const resolved = resolveProcessKey(key);
+  return resolved.effective ? resolved.effective.value : undefined;
 }
 
 /** Trim + dedupe a probed id list, dropping every non-string/blank entry. */
@@ -466,7 +473,7 @@ export async function completeOpenAiCompatible(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const deps: FetchDeps = {
-      fetch: opts.fetch ?? ((...args) => fetch(...args)),
+      fetch: opts.fetch ?? oneShotFetch,
       sleep: opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
       random: opts.random ?? Math.random,
     };
@@ -497,11 +504,19 @@ export async function completeOpenAiCompatible(
       // stays byte-identical; only the code changes for the 402 class.
       const refusalText = await describeError(spec.label, res);
       const noBalance = res.status === 402 || /insufficient balance/i.test(refusalText);
+      // W45·331-1: a rejected credential is its own class; name the key's
+      // source (a declared `.env` path, else the process environment), tail-only.
+      const keyRejected = res.status === 401;
+      const keyNote = keyRejected ? ` — key source: ${describeKeySource(key)}` : "";
       return {
         ok: false,
         reason: "error",
-        error: `${refusalText} — requested model: "${model}"${exhausted}`,
-        code: noBalance ? "RT_E_LLM_NO_BALANCE" : "RT_E_LLM_REJECTED",
+        error: `${refusalText} — requested model: "${model}"${exhausted}${keyNote}`,
+        code: noBalance
+          ? "RT_E_LLM_NO_BALANCE"
+          : keyRejected
+            ? KEY_REJECTED_CODE
+            : "RT_E_LLM_REJECTED",
       };
     }
 

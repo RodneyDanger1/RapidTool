@@ -14,6 +14,13 @@
  *        - `assert.equal(true, true)` and the identical-literal family
  *          (`false`/`null`/`undefined`/number pairs, any of equal/strictEqual/deepEqual/…)
  *        - same-operand equality — `assert.equal(x, x)`, `assert.strictEqual(a.b, a.b)`
+ *        - **presence-only subjects** — `assert.ok(<always-truthy expression>)`: an
+ *          object/array/function/regex/`new` literal, a non-empty string or
+ *          non-zero number, a template literal, or a bare `typeof …`. These
+ *          assert *presence* of a value that is truthy by construction.
+ *        - **typeof-only assertions** — `assert.equal(typeof <literal>, "<the
+ *          literal's own type>")` (e.g. `typeof "x"` === `"string"`), which is
+ *          true for every run.
  *   2. **zero-assertion test blocks** — an `it(...)`/`test(...)` (incl. `.only`/`.skip`
  *      variants) whose callback contains neither an `assert*` call nor a `throw`/`rejects`
  *      path — nothing in it can fail, so its green light only means it ran.
@@ -226,6 +233,8 @@ const RULE_TRUE_LITERAL = "tautology:true-literal";
 const RULE_LENGTH_FLOOR = "tautology:length-floor";
 const RULE_LITERAL_PAIR = "tautology:literal-pair";
 const RULE_SAME_OPERAND = "tautology:same-operand";
+const RULE_PRESENCE_ONLY = "tautology:presence-only";
+const RULE_TYPEOF_ONLY = "tautology:typeof-only";
 
 const EQUALITY_FNS = "equal|strictEqual|deepEqual|deepStrictEqual";
 const OPERAND = "[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*";
@@ -289,6 +298,125 @@ function continuedWindow(lines, start, maxLines = 8) {
   return text;
 }
 
+// ---------------------------------------------------------------------------
+// Rule 1b — presence-only subjects and typeof-only assertions
+//
+// R9-f06 named two blind spots: `assert.ok(obj)` that only establishes presence,
+// and assertions whose sole evidence is a `typeof`. Both are only a REAL gap
+// (a test that can never fail) in their unfalsifiable form, which is what these
+// two predicates match:
+//   - the asserted subject is an expression that is truthy by construction
+//     (`{…}`, `[…]`, `() => …`, `/re/`, `new X()`, a non-empty string/number,
+//     or a bare `typeof x`, which always yields a non-empty string);
+//   - `typeof <literal>` compared against that literal's own type.
+// A weak-but-falsifiable assertion (`assert.ok(maybeUndefined)`,
+// `assert.equal(typeof x, "string")` where x is a real value) is deliberately
+// NOT flagged: it can fail, so it is a weak test, not a test that cannot fail.
+// ---------------------------------------------------------------------------
+
+/** `text` is a single balanced `open`…`close` literal spanning the whole string. */
+function balancedOnly(text, open, close) {
+  if (!text.startsWith(open) || !text.endsWith(close)) return false;
+  let depth = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === open) depth += 1;
+    else if (text[i] === close) {
+      depth -= 1;
+      if (depth === 0 && i !== text.length - 1) return false;
+    }
+  }
+  return depth === 0;
+}
+
+/** Parens/brackets/braces balance back to zero only at the final character. */
+function bracketsBalanceToEnd(text) {
+  let depth = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === "(" || c === "[" || c === "{") depth += 1;
+    else if (c === ")" || c === "]" || c === "}") {
+      depth -= 1;
+      if (depth === 0 && i !== text.length - 1) return false;
+    }
+  }
+  return depth === 0;
+}
+
+/**
+ * Why the asserted subject can never be falsy, or `null` when it can.
+ * `maskedArg` decides structure (strings/regex bodies are blanked there, so a
+ * `}` inside a fixture string cannot confuse the brackets); `rawArg` decides
+ * literal *content* (string/number/regex).
+ */
+function alwaysTruthySubject(maskedArg, rawArg) {
+  if (!maskedArg) return null;
+  if (balancedOnly(maskedArg, "{", "}")) return "an object literal";
+  if (balancedOnly(maskedArg, "[", "]")) return "an array literal";
+  if (/^(?:async\s+)?(?:\([^()]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(maskedArg)) return "a function expression";
+  if (/^(?:async\s+)?function\b/.test(maskedArg)) return "a function expression";
+  if (/^new\s/.test(maskedArg) && bracketsBalanceToEnd(maskedArg)) return "a `new` expression";
+  if (/^typeof\b[^=!<>|&?:;,]*$/.test(maskedArg)) return "a bare `typeof` expression (always a non-empty string)";
+  if (/^\/(?:\\.|\[[^\]]*\]|[^/\\\n])+\/[gimsuy]*$/.test(rawArg)) return "a regex literal";
+  if (/^"(?:[^"\\]|\\.)+"$/.test(rawArg) || /^'(?:[^'\\]|\\.)+'$/.test(rawArg)) {
+    return "a non-empty string literal";
+  }
+  if (rawArg.length > 2 && /^`[\s\S]+`$/.test(rawArg)) return "a non-empty template literal";
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(rawArg) && Number(rawArg) !== 0) return "a non-zero number literal";
+  return null;
+}
+
+/** The `typeof` value of a literal written inline, or `null` when not a literal. */
+function typeofOfLiteral(text) {
+  if (text === "null") return "object";
+  if (text === "undefined") return "undefined";
+  if (text === "true" || text === "false") return "boolean";
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(text) || /^0[xob][0-9a-fA-F]+$/.test(text)) {
+    return "number";
+  }
+  if (/^-?\d+n$/.test(text)) return "bigint";
+  if (/^"(?:[^"\\]|\\.)*"$/.test(text) || /^'(?:[^'\\]|\\.)*'$/.test(text) || /^`[\s\S]*`$/.test(text)) {
+    return "string";
+  }
+  if (balancedOnly(text, "[", "]") || balancedOnly(text, "{", "}")) return "object";
+  if (/^(?:async\s+)?(?:\([^()]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(text) || /^(?:async\s+)?function\b/.test(text)) {
+    return "function";
+  }
+  if (/^\/(?:\\.|\[[^\]]*\]|[^/\\\n])+\/[gimsuy]*$/.test(text)) return "object";
+  return null;
+}
+
+/** Top-level argument spans of the call whose parens are `open`…`close`. */
+function callArgs(masked, open, close) {
+  const args = [];
+  let depth = 0;
+  let start = open + 1;
+  for (let i = open + 1; i < close; i += 1) {
+    const c = masked[i];
+    if (c === "(" || c === "[" || c === "{") depth += 1;
+    else if (c === ")" || c === "]" || c === "}") depth -= 1;
+    else if (c === "," && depth === 0) {
+      args.push([start, i]);
+      start = i + 1;
+    }
+  }
+  args.push([start, close]);
+  return args;
+}
+
+/** Every `assert(...)` / `assert.ok(...)` call and its top-level argument spans. */
+function assertCalls(masked) {
+  const calls = [];
+  const re = /(?<![.\w$])assert\b(?:\s*\.\s*ok\b)?\s*\(/g;
+  let m;
+  while ((m = re.exec(masked)) !== null) {
+    const open = m.index + m[0].length - 1;
+    const close = matchParen(masked, open);
+    if (close === -1) continue;
+    calls.push({ args: callArgs(masked, open, close) });
+  }
+  return calls;
+}
+
 /**
  * Tautological assertions, one finding per (line, rule). Returns
  * `{ line, offset, rule, reason, snippet }[]` (offset = index of the match, for callers
@@ -332,6 +460,41 @@ export function findTautologies(source) {
       push(offset, RULE_SAME_OPERAND, "both operands are the same expression — the comparison cannot fail");
     }
   }
+
+  // Presence-only subjects (R9-f06): `assert.ok(<always-truthy>)`. Scanned over the
+  // whole masked source so a wrapped, multi-line call is judged as one expression.
+  for (const call of assertCalls(masked)) {
+    const [s, e] = call.args[0];
+    const why = alwaysTruthySubject(masked.slice(s, e).trim(), source.slice(s, e).trim());
+    if (why) {
+      push(s, RULE_PRESENCE_ONLY, `asserting ${why} — always truthy, so the assertion cannot fail`);
+    }
+  }
+
+  // typeof-only assertions (R9-f06): `assert.equal(typeof <literal>, "<its own type>")`.
+  const RE_TYPEOF_LITERAL_CALL =
+    /(?<![.\w$])assert\s*\.\s*(?:equal|strictEqual|deepEqual|deepStrictEqual)\s*\(/g;
+  let tm;
+  while ((tm = RE_TYPEOF_LITERAL_CALL.exec(masked)) !== null) {
+    const open = tm.index + tm[0].length - 1;
+    const close = matchParen(masked, open);
+    if (close === -1) continue;
+    const args = callArgs(masked, open, close);
+    if (args.length < 2) continue;
+    const first = source.slice(args[0][0], args[0][1]).trim();
+    const second = source.slice(args[1][0], args[1][1]).trim();
+    const operand = /^typeof\s+([\s\S]+)$/.exec(first);
+    if (!operand) continue;
+    const type = typeofOfLiteral(operand[1].trim());
+    if (type && (second === `"${type}"` || second === `'${type}'`)) {
+      push(
+        args[0][0],
+        RULE_TYPEOF_ONLY,
+        "`typeof` of an inline literal compared against its own type — the assertion cannot fail",
+      );
+    }
+  }
+
   return findings.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule));
 }
 
@@ -404,13 +567,20 @@ export function lintSource(source, file) {
     .map((f) => ({ ...f, file }));
 }
 
+/**
+ * Test-shaped files under `dir`. An unreadable directory is NOT silently an
+ * empty one — it is collected (fail closed): a lint that skipped a subtree
+ * would report "clean" over files it never read.
+ */
 function listTestFiles(dir) {
   const found = [];
+  const unreadable = [];
   const walk = (current) => {
     let entries;
     try {
       entries = readdirSync(current, { withFileTypes: true });
     } catch {
+      unreadable.push(current);
       return;
     }
     for (const entry of entries) {
@@ -421,16 +591,19 @@ function listTestFiles(dir) {
     }
   };
   walk(dir);
-  return found;
+  return { found, unreadable };
 }
 
 /**
  * Resolve CLI targets to concrete files. Explicit files are linted as given; directories
- * are walked and filtered to the test-file shape. Returns `{ files, missing }`.
+ * are walked and filtered to the test-file shape.
+ * Returns `{ files, missing, unreadable }` — `unreadable` paths are a failure, never a
+ * silent skip (an unread file cannot be certified clean).
  */
 export function resolveTargets(entries, root = projectRoot()) {
   const missing = [];
   const files = [];
+  const unreadable = [];
   for (const entry of entries.length ? entries : DEFAULT_TARGETS) {
     const abs = resolve(root, entry);
     let stat;
@@ -440,20 +613,25 @@ export function resolveTargets(entries, root = projectRoot()) {
       missing.push(entry);
       continue;
     }
-    if (stat.isDirectory()) files.push(...listTestFiles(abs));
-    else files.push(abs);
+    if (stat.isDirectory()) {
+      const walked = listTestFiles(abs);
+      files.push(...walked.found);
+      unreadable.push(...walked.unreadable);
+    } else files.push(abs);
   }
-  return { files: [...new Set(files)].sort(), missing };
+  return { files: [...new Set(files)].sort(), missing, unreadable };
 }
 
-/** Lint resolved paths and return the flat finding list. */
+/** Lint resolved paths. Returns `{ findings, unreadable }` — see `resolveTargets`. */
 export function lintFiles(files, root = projectRoot()) {
   const findings = [];
+  const unreadable = [];
   for (const file of files) {
     let source;
     try {
       source = readFileSync(file, "utf8");
     } catch {
+      unreadable.push(file);
       continue;
     }
     for (const f of lintSource(source, file)) {
@@ -462,7 +640,7 @@ export function lintFiles(files, root = projectRoot()) {
       findings.push({ ...f, file: (relative(root, file) || file).replace(/\\/g, "/") });
     }
   }
-  return findings;
+  return { findings, unreadable };
 }
 
 /** One-line, grep-able rendering: `file:line: [rule] reason — <source line>`. */
@@ -474,7 +652,7 @@ function main(argv) {
   const json = argv.includes("--json");
   const entries = argv.filter((a) => !a.startsWith("--"));
   const root = projectRoot();
-  const { files, missing } = resolveTargets(entries, root);
+  const { files, missing, unreadable } = resolveTargets(entries, root);
   if (missing.length) {
     console.error(`[assertion-gap] no such path: ${missing.join(", ")}`);
     process.exit(2);
@@ -483,17 +661,28 @@ function main(argv) {
     console.error("[assertion-gap] no test files resolved — nothing to check");
     process.exit(2);
   }
-  const findings = lintFiles(files, root);
+  const linted = lintFiles(files, root);
+  const findings = linted.findings;
+  const unreadableAll = [...unreadable, ...linted.unreadable];
   if (json) {
-    console.log(JSON.stringify({ files: files.length, findings }, null, 2));
+    console.log(
+      JSON.stringify({ files: files.length, findings, unreadable: unreadableAll }, null, 2),
+    );
   } else {
     for (const f of findings) console.log(formatFinding(f));
     const scope = `${files.length} test file${files.length === 1 ? "" : "s"}`;
-    if (findings.length === 0) {
+    if (findings.length === 0 && unreadableAll.length === 0) {
       console.log(`[assertion-gap] clean — ${scope} scanned, 0 findings`);
-    } else {
+    } else if (findings.length > 0) {
       console.log(`[assertion-gap] ${findings.length} finding(s) across ${scope} — fix the assertion, do not delete it`);
     }
+  }
+  if (unreadableAll.length > 0) {
+    // Fail closed: a subtree/file this lint could not read is not a clean one.
+    console.error(
+      `[assertion-gap] could not read ${unreadableAll.length} path(s) — refusing to report clean: ${unreadableAll.join(", ")}`,
+    );
+    process.exit(2);
   }
   process.exit(findings.length === 0 ? 0 : 1);
 }

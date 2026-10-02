@@ -35,6 +35,7 @@ import {
   acceptedLessonEntry,
   failureSignature,
   failureLessonFromRecord,
+  verifyOutcomeLesson,
   type FailureLessonOutcome,
   provenRowsFromStore,
   lessonLinesForBrief,
@@ -1002,6 +1003,91 @@ describe("216g / 112 T1 — deterministic failure-signature ids (no per-run fork
       templateEmissionLesson(p, 3, ["p3-extra", "p3-mcp"]).id,
       "≤6 anchors still canonicalize exactly as before",
     );
+  });
+
+  it("331 V3: the drift signature hashes the FULL unmet set, not the 6-sliced display list", () => {
+    const p = seedProject();
+    const twelve = ["c01", "c02", "c03", "c04", "c05", "c06", "c07", "c08", "c09", "c10", "c11", "c12"];
+    const fwd = driftLesson(p, 9, 3, "aaaa1111", "bbbb2222", twelve);
+    const rev = driftLesson(p, 9, 3, "aaaa1111", "bbbb2222", [...twelve].reverse());
+    assert.equal(fwd.id, rev.id, "the same >6 unmet-id set ⇒ ONE drift row regardless of input order");
+    assert.match(fwd.id, /^lesson-drift-[0-9a-f]{8}$/, "id shape unchanged");
+    assert.notEqual(
+      fwd.id,
+      driftLesson(p, 9, 3, "aaaa1111", "bbbb2222", twelve.slice(0, 6)).id,
+      "a real superset is a different drift (identity is the full set)",
+    );
+    assert.equal(
+      driftLesson(p, 9, 3, "aaaa1111", "bbbb2222", ["p3-a", "p3-b"]).id,
+      driftLesson(p, 9, 3, "aaaa1111", "bbbb2222", ["p3-b", "p3-a"]).id,
+      "≤6 anchors still canonicalize exactly as before",
+    );
+    assert.ok(!fwd.text.includes("c07"), "the display list stays capped at 6 (only the id hashes all 12)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 331 V1 (verify-core) — the L4 verified-procedure identity is the sorted
+// machine-case ids, NOT the evidence prose. Pre-fix the id hashed
+// `"N/N machine-run cases passed on iteration I[; lint …]"`, so the iteration
+// count forked one verified procedure across recurrences (probe:
+// fixes/330_4_cartographer §3.1 — three iterations, three ids, SAME? false).
+// The no-anchor (legacy) path below reproduces that fork in-process; the
+// anchored path is the fix.
+// ---------------------------------------------------------------------------
+describe("331 V1 — verifiedProcedureLesson id is anchored to the proven case set", () => {
+  const p = seedProject();
+  const cases3 = ["case-1", "case-2", "case-3"];
+  const cases5 = ["case-1", "case-2", "case-3", "case-4", "case-5"];
+
+  it("the same proven case set mints ONE id across iteration/lint drift (RED on HEAD)", () => {
+    // Two recurrences of the same 3-case pass, differing only in the evidence
+    // tail (iteration count + lint advisory) — process noise, not identity.
+    const r1 = verifiedProcedureLesson(p, 6, "3/3 machine-run cases passed on iteration 1", { anchors: cases3 });
+    const r2 = verifiedProcedureLesson(
+      p,
+      6,
+      "3/3 machine-run cases passed on iteration 4; lint advisory: no-explicit-any x2",
+      { anchors: cases3 },
+    );
+    assert.equal(r1.id, r2.id, "iteration/lint drift must not fork the verified-procedure row");
+    assert.match(r1.id, /^lesson-verified-procedure-[0-9a-f]{8}$/, "id shape unchanged");
+    assert.notEqual(r1.text, r2.text, "the evidence tail still rides the human-readable TEXT");
+  });
+
+  it("the id is order-independent and case-set-sensitive (3/3 ≠ 5/5)", () => {
+    const forward = verifiedProcedureLesson(p, 6, "3/3 passed on iteration 1", { anchors: cases3 });
+    const reverse = verifiedProcedureLesson(p, 6, "different evidence", { anchors: [...cases3].reverse() });
+    assert.equal(forward.id, reverse.id, "anchor order is canonicalized (sorted)");
+    assert.notEqual(
+      forward.id,
+      verifiedProcedureLesson(p, 6, "3/3 passed on iteration 1", { anchors: cases5 }).id,
+      "a different proven case set is a different verified procedure",
+    );
+  });
+
+  it("no anchors keeps the legacy evidence-derived id (existing rows are not re-minted)", () => {
+    const legacy = verifiedProcedureLesson(p, 6, "6/6 machine-run cases passed");
+    assert.match(legacy.id, /^lesson-verified-procedure-[0-9a-f]{8}$/);
+    // The legacy identity still hashes the text: two different evidence strings
+    // are two different rows (the pre-331 behavior), which is exactly why the
+    // anchored path above is needed.
+    assert.notEqual(
+      legacy.id,
+      verifiedProcedureLesson(p, 6, "6/6 machine-run cases passed on iteration 3").id,
+      "unanchored legacy ids remain evidence-derived",
+    );
+    assert.notEqual(legacy.id, verifiedProcedureLesson(p, 6, "6/6 machine-run cases passed", { anchors: cases3 }).id);
+  });
+
+  it("verifyOutcomeLesson forwards the anchors to the L4 builder", () => {
+    const a = verifyOutcomeLesson("passed", 6, "3/3 passed on iteration 1", 1, cases3);
+    const b = verifyOutcomeLesson("passed", 6, "3/3 passed on iteration 2", 2, cases3);
+    assert.equal(a.id, b.id, "the outcome seam forwards anchors so the iteration count cannot fork the row");
+    assert.notEqual(a.id, verifyOutcomeLesson("passed", 6, "3/3 passed on iteration 1", 1, cases5).id);
+    // The no-anchor outcome path keeps the legacy id.
+    const legacy = verifyOutcomeLesson("passed", 6, "3/3 machine-run cases passed", 1);
+    assert.match(legacy.id, /^lesson-verified-procedure-[0-9a-f]{8}$/);
   });
 });
 

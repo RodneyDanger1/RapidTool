@@ -1933,3 +1933,125 @@ test("330 Switchboard (T4) — `run`/`gate`/`unattended --knowledge`: accepted s
   }
 });
 
+
+// ---------------------------------------------------------------------------
+// Leg 21 (W45 · 331-1 Keywright) — API-key resolution + the loud coded conflict.
+//
+// F1: the CLI used to read the process environment only, so a stale Windows
+// User-scope DEEPSEEK_API_KEY silently shadowed the funded key in the repo
+// `.env` and every keyed call 401'd on a key the operator never chose. The fix
+// resolves `<cwd>/.env` > process env and surfaces a DIFFERENT ambient key as a
+// loud, coded, tail-only signal on stderr (stdout stays one JSON object).
+// ---------------------------------------------------------------------------
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+test("W45 331-1 — a conflicting ambient key is LOUD + CODED (RT_E_LLM_KEY_SHADOWED), .env wins, tail-only", () => {
+  const envPath = join(REPO_ROOT, ".env");
+  if (!existsSync(envPath)) return; // no .env in this checkout → nothing to shadow
+  const m = /^\s*DEEPSEEK_API_KEY\s*=\s*(.+?)\s*$/m.exec(readFileSync(envPath, "utf8"));
+  if (!m) return;
+  const envKey = m[1].replace(/^["']|["']$/g, "");
+  if (!envKey) return;
+  const envTail = envKey.slice(-4);
+  const ambient = "sk-ambient-0000000000000000000000ZZZZ";
+
+  const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "create"], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, DEEPSEEK_API_KEY: ambient },
+    encoding: "utf8",
+    timeout: 120_000,
+  });
+  const stderr = res.stderr ?? "";
+  // The refusal is the ordinary missing-brief validation — the conflict is a
+  // DIAGNOSTIC, never a fatal refusal (a clean shell must still succeed).
+  assert.equal(res.status, 1, `a usage refusal stays exit 1.\nstdout: ${res.stdout}\nstderr: ${stderr}`);
+  const json = JSON.parse(res.stdout); // stdout is STILL exactly one JSON object
+  assert.equal(json.code, "RT_E_VALIDATION");
+  assert.match(stderr, /RT_E_LLM_KEY_SHADOWED/, "the conflict must be LOUD and CODED on stderr");
+  assert.ok(stderr.includes("ZZZZ"), "must name the ambient key's last-4 tail");
+  assert.ok(stderr.includes(envTail), "must name the .env key's last-4 tail");
+  assert.ok(!stderr.includes(ambient), "never the full ambient key");
+  assert.ok(!stderr.includes(envKey), "never the full .env key");
+});
+
+test("W45 331-1 — a .env elsewhere does not leak into a child spawned with a different cwd (keyless isolation)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-dotenv-"));
+  try {
+    const ambient = "sk-ambient-0000000000000000000000ZZZZ";
+    const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "create"], {
+      cwd,
+      env: { ...process.env, DEEPSEEK_API_KEY: ambient },
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    const stderr = res.stderr ?? "";
+    assert.ok(
+      !/RT_E_LLM_KEY_SHADOWED/.test(stderr),
+      `no .env in the cwd → no conflict signal (the temp-cwd test harness stays keyless):\n${stderr}`,
+    );
+    assert.equal(JSON.parse(res.stdout).code, "RT_E_VALIDATION");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("W45 331-1 — the CLI resolves .env, carries the provider's credential code, and names the source in the remedy", () => {
+  assert.match(cliText, /await installRepoEnvKey\(\);/, "main() must install the .env-resolved key before dispatch");
+  assert.match(cliText, /key-resolution\.ts/, "the precedence logic lives in the pure key-resolution module");
+  assert.match(
+    cliText,
+    /typeof res\.code === "string" && res\.code \? \{ code: res\.code \}/,
+    "keyed arms must carry the provider's own code (never re-classify prose to RT_E_UNKNOWN)",
+  );
+  assert.match(
+    cliText,
+    /code === "RT_E_LLM_KEY_REJECTED" && KEY_SOURCE/,
+    "a rejected key's remedy must use the installed source provenance",
+  );
+  assert.match(cliText, /KEY_SOURCE\.tail/, "the remedy must be tail-only");
+  assert.match(cliText, /usage: crewUsage/, "the crew envelope must report measured provider usage");
+  assert.ok(!/KEY_SOURCE\.value/.test(cliText), "the secret value must never be read for a remedy");
+});
+
+test("W45 331-1 — README documents the precedence and the loud coded conflict", () => {
+  assert.match(readmeText, /## API key resolution/, "the precedence rule must be documented");
+  assert.match(readmeText, /the `\.env` value WINS when both are present/i);
+  assert.match(readmeText, /RT_E_LLM_KEY_SHADOWED/);
+  assert.match(readmeText, /RT_E_LLM_KEY_REJECTED/);
+});
+
+test("W45 331-1 — a blank process DEEPSEEK_API_KEY disables .env (keyless floor), never a shadow signal", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-blankkey-"));
+  try {
+    const proj = join(cwd, "blank.json");
+    const env = { ...process.env, DEEPSEEK_API_KEY: "" };
+    const created = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "create", "--brief", "A tiny blank-key keyless probe project.", "--name", "BlankKey", "--out", proj],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `fixture create failed.\n${created.stdout}\n${created.stderr}`);
+
+    // cwd = the REPO ROOT, where a real .env exists — the blank must still WIN.
+    const res = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "crew", "--project", proj],
+      { cwd: REPO_ROOT, env, encoding: "utf8", timeout: 120_000 },
+    );
+    const stderr = res.stderr ?? "";
+    assert.equal(
+      res.status,
+      3,
+      `a blank key is an intentional DISABLE ⇒ keyless floor (exit 3), never a keyed run.\nstdout: ${res.stdout}\nstderr: ${stderr}`,
+    );
+    const json = JSON.parse(res.stdout);
+    assert.equal(json.ok, false);
+    assert.equal(json.code, "RT_E_LLM_NOT_CONFIGURED");
+    assert.ok(
+      !/RT_E_LLM_KEY_SHADOWED/.test(stderr),
+      `a blank key must not consult .env at all (no shadow signal):\n${stderr}`,
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

@@ -1,5 +1,42 @@
 {
+  // R15-f04 / WA-02 (W45 · lane 331-6) — the scripts-tree typecheck.
+  //
+  // `npm test` runs the `scripts/**` leg, but `npm run typecheck` (tsconfig.json)
+  // puts only `src` + `server` in the program, so every script — including the
+  // agent-facing `scripts/rapidtool-cli.mjs` — was invisible to a type checker.
+  // This project puts the whole scripts tree INSIDE a real tsc program:
+  //
+  //   npx tsc -p tsconfig.scripts.json --noEmit
+  //
+  // Pinned by `scripts/typecheck-scripts.test.mjs`: it proves (a) every
+  // `scripts/**/*.mjs` is in the program, and (b) no NEW error appears beyond
+  // the checked-in ratchet budget (`scripts/scripts-typecheck-budget.json`).
+  // A new error in any script fails the suite; fixing one only shrinks the
+  // budget.
+  //
+  // Posture and why (measured 2026-10-02):
+  //  - `noImplicitAny: false` — the tree is untyped .mjs with almost no JSDoc.
+  //    Under full strict it reports 1334 errors, 621 of them pure TS7006
+  //    implicit-any plus ~300 TS2339 cascades from the resulting `{}` types.
+  //  - `useUnknownInCatchVariables: false` — keeps `catch (e)` usable in
+  //    untyped JS (the tree accesses `e.code`/`e.message` throughout).
+  //  - `strictNullChecks` STAYS ON. Turning it off (i.e. `strict: false`)
+  //    breaks discriminated-union narrowing by widening `ok: true | false`,
+  //    which floods the transitively-imported `src/lib` files with ~600 false
+  //    "property does not exist" errors. Do not set `strict: false` here.
+  // 189 errors remain across 15 files (38 of them in `scripts/rapidtool-cli.mjs`,
+  // owned by lane 331-1); the budget records each file's count. Reaching zero is
+  // a separate migration — see the lane log.
   "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noImplicitAny": false,
+    "useUnknownInCatchVariables": false
+  },
   "include": ["scripts"],
-  "//": "R15-f04 (W31 T2 fixes/273_t2_r15.md) — STAGED, NOT IN gate.sh: tsconfig.json's program sees only src+server, so scripts/** (incl. rapidtool-cli.mjs) is invisible to `npm run typecheck`. Run: npx tsc -p tsconfig.scripts.json --noEmit  |  Measured at land time (2026-09-26): 1030 errors (rapidtool-cli.mjs 299, run-eval.mjs 284, test files ~280; mostly TS7006 implicit-any under checkJs).  |  TODO(R15-f04): fold into gate.sh step 1 next to `tsc --noEmit` the moment it is green."
+  // `include: ["scripts"]` alone leaves `scripts/grok-pwa-shared.mjs` OUT of the
+  // program: TypeScript treats a committed `foo.d.mts` as the declaration of
+  // `foo.mjs` and drops the implementation from directory inclusion (only the
+  // declaration ends up checked). The explicit `files` entry pulls the 17 KB
+  // implementation back in — which immediately surfaced 6 real errors in it.
+  "files": ["scripts/grok-pwa-shared.mjs"]
 }

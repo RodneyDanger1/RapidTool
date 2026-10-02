@@ -9,7 +9,12 @@
  * `callModel` from `./registry.ts` instead (src/lib/llm/providers/registry.ts
  * owns the explicit-model rule).
  *
- * Reads the key from `process.env.DEEPSEEK_API_KEY` ONLY — never
+ * Reads the key through the shared resolver `./key-source.server.ts` (W45·331-1):
+ * a server-side entry point may declare a `.env` file via
+ * `RAPIDTOOL_LLM_ENV_FILE` (the CLI and `scripts/with-app-env.mjs` do), and the
+ * resolver applies the documented precedence (`.env` wins over a differing
+ * ambient value, loud + coded; a present-but-blank process value disables). With
+ * NO declared file this is a plain `process.env.DEEPSEEK_API_KEY` read. Never
  * `import.meta.env`, never a `VITE_` prefix (Vite would inline the secret into
  * the public bundle). The browser-facing contract lives in `../../llm.ts`; this
  * module is the raw fetch and must never be imported from client code.
@@ -30,8 +35,15 @@
  * `{ ok: false, reason: "not-configured" }` and NEVER fabricates model text.
  */
 
+import { appendFileSync } from "node:fs";
 import type { LlmModel, LlmResult } from "../../llm.ts";
 import { classifyError } from "../../errors.ts";
+// W45·331-1 (Keywright): the one-shot transport (undici's TLS handle races the
+// CLI's in-tick process.exit on Node 24/Windows) and the key-source provenance
+// a rejected 401 names.
+import { oneShotFetch } from "./one-shot-fetch.server.ts";
+import { describeKeySource, KEY_REJECTED_CODE } from "./key-resolution.ts";
+import { resolveProcessKey } from "./key-source.server.ts";
 
 export const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 
@@ -114,13 +126,13 @@ export function jitteredBackoffDelayMs(
   return Math.floor(cap * clamped);
 }
 
-function env(key: string): string | undefined {
-  const v = process.env[key]?.trim();
-  return v || undefined;
-}
-
 export function deepseekApiKey(): string | undefined {
-  return env("DEEPSEEK_API_KEY");
+  // W45·331-1: the key read goes through the shared resolver, so any server-side
+  // entry point that declared a `.env` file (dev server / CLI) gets the same
+  // precedence + coded shadow signal the CLI has — the stale ambient value
+  // never silently wins. With no declared file this is the legacy process read.
+  const resolved = resolveProcessKey("DEEPSEEK_API_KEY");
+  return resolved.effective ? resolved.effective.value : undefined;
 }
 
 export function isDeepSeekConfigured(): boolean {
@@ -216,7 +228,12 @@ type DeepSeekFetchDeps = {
 };
 
 const defaultDeps: DeepSeekFetchDeps = {
-  fetch: (...args) => fetch(...args),
+  // W45·331-1: one-shot node:https/http (never pooled). Undici's global fetch
+  // leaves a TLS teardown handle that races the CLI's deliberate in-tick
+  // `process.exit()` on Node 24/Windows — libuv async.c assertion + 0xC0000409
+  // (fixes/327_l2_cli_exit.md). `oneShotFetch` still defers to a replaced
+  // global fetch, so the test seam (llm.test.ts / chat.test.ts) is unchanged.
+  fetch: oneShotFetch,
   sleep,
   random: Math.random,
 };
@@ -488,11 +505,21 @@ async function completeDeepSeekInner(
       // the TEXT as well as the status — see isInsufficientFundsText above for
       // the widened, still-narrow shapes.
       const noBalance = res.status === 402 || isInsufficientFundsText(refusalText);
+      // W45·331-1 (Keywright, F3): a rejected CREDENTIAL is its own class, and
+      // its message names the SOURCE the key came from (repo .env path or the
+      // process environment) by last-4 tail only — so a two-key conflict is
+      // diagnosable from the tail alone, and no full secret is ever emitted.
+      const keyRejected = res.status === 401;
+      const keyNote = keyRejected ? ` — key source: ${describeKeySource(key)}` : "";
       return {
         ok: false,
         reason: "error",
-        error: `${refusalText} — requested model: "${model}"${exhausted}`,
-        code: noBalance ? "RT_E_LLM_NO_BALANCE" : "RT_E_LLM_REJECTED",
+        error: `${refusalText} — requested model: "${model}"${exhausted}${keyNote}`,
+        code: noBalance
+          ? "RT_E_LLM_NO_BALANCE"
+          : keyRejected
+            ? KEY_REJECTED_CODE
+            : "RT_E_LLM_REJECTED",
       };
     }
 
@@ -705,7 +732,7 @@ export async function completeDeepSeek(
   opts: DeepSeekCompleteOptions = {},
 ): Promise<LlmResult> {
   const res = await completeDeepSeekInner(prompt, opts);
-  tapLlmCall({
+  const record: LlmCallTapRecord = {
     at: Date.now(),
     ok: res.ok === true,
     requestedModel:
@@ -728,6 +755,27 @@ export async function completeDeepSeek(
     ...(res.ok === true && res.usage && typeof res.usage.cacheMissTokens === "number"
       ? { cacheMissTokens: res.usage.cacheMissTokens }
       : {}),
-  });
+  };
+  tapLlmCall(record);
+  appendUsageRecord(record);
   return res;
+}
+
+/**
+ * W45·331-1 (Keywright) — OPT-IN usage log. When `RAPIDTOOL_LLM_USAGE_LOG` holds
+ * a file path, every completed provider call appends ONE JSON line (the same
+ * tail-safe `LlmCallTapRecord` the tap carries: model, code, token counts — no
+ * prompt, no key). Unset ⇒ byte-identical behavior; this exists so a driver that
+ * cannot install the in-process tap (e.g. the Vite dev server behind the
+ * console's "Spawn crew") can still read the call's REAL measured usage. Never
+ * throws into the call it observes.
+ */
+function appendUsageRecord(record: LlmCallTapRecord): void {
+  const path = process.env.RAPIDTOOL_LLM_USAGE_LOG?.trim();
+  if (!path) return;
+  try {
+    appendFileSync(path, JSON.stringify(record) + "\n");
+  } catch {
+    /* best-effort telemetry; the call result is unaffected */
+  }
 }

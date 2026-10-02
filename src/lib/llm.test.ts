@@ -117,8 +117,12 @@ describe("llm complete", () => {
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.equal(result.reason, "error");
-      assert.equal(result.code, "RT_E_LLM_REJECTED");
+      // W45·331-1 (F3): a rejected CREDENTIAL is its own class, and the message
+      // names the key SOURCE by last-4 tail (never the full secret).
+      assert.equal(result.code, "RT_E_LLM_KEY_REJECTED");
       assert.match(result.error ?? "", /invalid/i);
+      assert.match(result.error ?? "", /key source/);
+      assert.ok(!(result.error ?? "").includes("sk-bad"), "the full key must never ride the message");
     }
   });
 
