@@ -94,11 +94,13 @@ Boundary report: **`fixes/332_0_parent.md`**; register append: **`AW46-c01…c09
 `fixes/332_1…332_6_*.md`.
 
 Headline results: the keyed run's last-mile failure (generated code reading a property off a
-non-awaited async sibling call) is now a deterministic refusal routed into the bounded repair, so a
-green tree-run is reachable; the persisted run spend is real (`doctor --project` reports it); a clean
-game tree no longer reds the tree-run; the tree-run's unverified state is machine-readable; the CLI is
-typecheck-clean and `scripts/**` is inside the typecheck; `create --brief <path>` is fixed; and the
-console chip reflects key validity rather than key presence.
+non-awaited async sibling call) is now a deterministic refusal routed into the bounded repair, and a
+**fresh keyed run now completes P6** — green tree-run, `lastTest.label: "tested"`, `P6 DoD: PASS`,
+`emit --run ok:true`, `leftoverJobsAreReexportsOrStubs: false`, factory gaps down from four to two (see
+`fixes/332_0_parent.md` §4). Also: the persisted run spend is real (`doctor --project` reports it); a
+clean game tree no longer reds the tree-run; the tree-run's unverified state is machine-readable; the
+CLI is typecheck-clean and `scripts/**` is inside the typecheck; `create --brief <path>` is fixed; and
+the console chip reflects key validity rather than key presence.
 
 ## Suggested persona charter (all lanes)
 

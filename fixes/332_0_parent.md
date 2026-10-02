@@ -87,7 +87,53 @@ verified **already resolved** on disk; the register text was stale and is correc
 7. **`research/multiagent/thoroughanalysis.md`** — `AW46-c01…c09` (the stale-row corrections plus the
    wave's new findings).
 
-## 4. Owed / reported, not fixed (honest)
+## 4. ADDENDUM — the keyed end-to-end verification (parent, after the commit)
+
+Run after the boundary commit, on a scratch project outside the repo, with the brief prose passed
+inline (`--kind webapp`). **This is the first keyed run in the record that completes P6.**
+
+| Step | Result |
+|---|---|
+| keyed P0→P4 | `researchCount: 5`, `spent: 537`, exit 2 (the P4 HITL gate) |
+| `approve --seat autopilot` ×2 | `decidedBy: "autopilot"`, no human claim |
+| keyed P6 | **`DoD gate — P6: Result: PASS — All criteria met for phase 6`** |
+| `p6-arch` | **PASS**, tree (5 files) |
+| `lastTest` | **`{ok:true, label:"tested", detail:"tree-run green: compile 12/12 file(s) · 1 spec file(s) pass · 18 assertion(s) · specs [tests/oracle.spec.ts] · entry ui-shell skip", evidenceHash:"4137835017"}`** |
+| run state | advanced to **P8**, `awaiting_hitl` — P6 and P7 both cleared |
+| `emit --run` | **`ok:true`, exit 0** — the emitted tree passes its own gates |
+| `emit` substance | `{stubs: 0, reexports: 0}` |
+| persisted spend | `tokenUsage: {promptTokens: 12890, completionTokens: 11026, calls: 6}` — written by the run, read back |
+
+`doctor --project <p> --tree <tree>`:
+
+```
+autonomousSoftwareFactory: false
+leftoverJobsAreReexportsOrStubs: false        <- was true in every prior record
+inventory: {stubs: 0, reexports: 0, real: 2}
+gaps: ["no human-approved fixtures (decidedBy:\"human\")",
+       "product-complete bar not met (skip≠green; stubs≠complete)"]
+```
+
+**What this establishes.** The green tree-run minted a machine-`tested` verdict
+(`mintTreeRunTested`) and the P6 DoD gate passed, so the last-mile defect the 332 wave targeted is
+resolved in practice on a fresh keyed run, not only in a unit test. The factory's own gap list shrank
+from four entries to two, and the two that remain are honest limits rather than defects:
+
+- **`no human-approved fixtures`** is by design: only a human seat can stamp `decidedBy:"human"`, and no
+  machine path may mint it. It is an **owner action** — the operator approves fixtures through the CLI
+  or the console.
+- **`product-complete bar not met`** reflects `real: 2` job modules against the `{0,0,≥3}` M-A bar on
+  this run; the census varies run to run with the model's decomposition (an earlier run reached
+  `real: 3`). The unbound declared jobs are now named by the census rather than dropped silently.
+
+`autonomousSoftwareFactory` therefore stays **false**, correctly: the remaining distance is a human
+acceptance act plus job coverage that the model's decomposition does not yet reach on every run.
+
+To reproduce: `create --brief "<brief prose>" --kind webapp --out <p>.json`, then keyed
+`gate --autopilot --live` (parks P4), `approve --seat autopilot`, keyed `gate` twice more, then
+`emit --run`. The stale-machine-key note applies (the repo wins over it and prints the coded signal).
+
+## 5. Owed / reported, not fixed (honest)
 
 1. **`TreeRunOutcome.verified` has no consumer flip.** A fresh emitted tree now carries
    `verified:false, unverified:["typecheck","build"]`, but no consumer refuses on it yet — the CLI exit
