@@ -29,9 +29,15 @@ test("parseWriteAtomicArgs needs exactly a staged file and a target", () => {
     staged: ".grok/og.tmp",
     target: "public/og.jpg",
   });
-  assert.match(parseWriteAtomicArgs([]).error, /usage:/);
-  assert.match(parseWriteAtomicArgs([".grok/og.tmp"]).error, /usage:/);
-  assert.match(parseWriteAtomicArgs(["a", "b", "c"]).error, /unexpected argument: c/);
+  const noArgs = parseWriteAtomicArgs([]);
+  assert.ok(noArgs.error, "an empty argv must be a usage error");
+  assert.match(noArgs.error, /usage:/);
+  const missingTarget = parseWriteAtomicArgs([".grok/og.tmp"]);
+  assert.ok(missingTarget.error, "a missing target must be a usage error");
+  assert.match(missingTarget.error, /usage:/);
+  const extra = parseWriteAtomicArgs(["a", "b", "c"]);
+  assert.ok(extra.error, "an extra argument must be refused");
+  assert.match(extra.error, /unexpected argument: c/);
 });
 
 test("stagingError refuses a temp inside public/ and a no-op move", () => {
@@ -44,22 +50,20 @@ test("stagingError refuses a temp inside public/ and a no-op move", () => {
     }),
     null,
   );
-  assert.match(
-    stagingError({
-      staged: "/workspace/public/og.jpg.tmp",
-      target: "/workspace/public/og.jpg",
-      publicDir,
-    }),
-    /vite build ships that directory verbatim/,
-  );
-  assert.match(
-    stagingError({
-      staged: "/workspace/public/og.jpg",
-      target: "/workspace/public/og.jpg",
-      publicDir,
-    }),
-    /same path/,
-  );
+  const insidePublic = stagingError({
+    staged: "/workspace/public/og.jpg.tmp",
+    target: "/workspace/public/og.jpg",
+    publicDir,
+  });
+  assert.ok(insidePublic, "a temp inside public/ must be refused");
+  assert.match(insidePublic, /vite build ships that directory verbatim/);
+  const noop = stagingError({
+    staged: "/workspace/public/og.jpg",
+    target: "/workspace/public/og.jpg",
+    publicDir,
+  });
+  assert.ok(noop, "a no-op move must be refused");
+  assert.match(noop, /same path/);
 });
 
 test("handOver replaces the target and clears the staged file", () => {

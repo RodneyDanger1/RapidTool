@@ -2165,3 +2165,67 @@ test("W46 332-4 (S3) — a valueless value flag is REFUSED coded before dispatch
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+/**
+ * W48 · 334-4 (S2). A fresh emitted tree declares `typecheck`/`build`, but with
+ * no `node_modules/` they never execute: the tree is `ok:true` (nothing ran
+ * red) YET its toolchain is UNVERIFIED. Before this pin `emit --run` exited 0
+ * on that tree, indistinguishable from a fully-verified run. The landed
+ * signal is a SEPARATE honest one — `ok` is not redefined (the P6 tested-mint
+ * still fires) and the new exit class is 5, not 1. `tree-run` carries it too.
+ */
+test("W48 · 334-4 (S2): emit --run on an unverified tree exits 5 (green, declared scripts unrun)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-unverified-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  const BRIEF =
+    "A small internal tool that reconciles invoice line items for a three-person accounting team.";
+  try {
+    const proj = join(cwd, "unverified.json");
+    const created = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "create", "--brief", BRIEF, "--name", "Unverified", "--out", proj],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+
+    const tree = join(cwd, "tree");
+    const ran = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "emit", "--project", proj, "--out", tree, "--run"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(
+      ran.status,
+      5,
+      `a green tree whose declared scripts never ran must exit 5 (distinguishable from verified 0 and from red 1).\nstdout: ${ran.stdout}\nstderr: ${ran.stderr}`,
+    );
+    const envelope = JSON.parse(ran.stdout);
+    assert.equal(envelope.ok, true, "`ok` is NOT redefined — nothing ran red");
+    assert.equal(envelope.code, undefined, "exit 5 is not an error class — no RT_E code rides it");
+    assert.equal(envelope.declaredScriptsVerified, false, "the envelope names the unverified toolchain");
+    assert.equal(envelope.unverified, true);
+    assert.ok(
+      Array.isArray(envelope.unverifiedDeclaredScripts) && envelope.unverifiedDeclaredScripts.includes("typecheck"),
+      `unverifiedDeclaredScripts must name typecheck, saw ${JSON.stringify(envelope.unverifiedDeclaredScripts)}`,
+    );
+    assert.equal(
+      envelope.unverifiedDeclaredScripts.includes("build"),
+      true,
+      "the declared build script is unverified too",
+    );
+    assert.match(String(envelope.unverifiedNote), /UNVERIFIED/);
+    // The embedded verdict carries the same truth (one source, not a second copy).
+    assert.equal(envelope.treeRun.ok, true);
+    assert.deepEqual(envelope.treeRun.unverifiedDeclaredScripts, envelope.unverifiedDeclaredScripts);
+
+    // README-cli.md documents the new class and the envelope contract.
+    assert.match(readmeText, /Exit 5/, "README-cli.md must document exit 5");
+    assert.match(readmeText, /unverifiedDeclaredScripts/, "README-cli.md must name the envelope field");
+    assert.match(readmeText, /declaredScriptsVerified: false/, "README-cli.md must name the verified flag");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

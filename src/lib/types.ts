@@ -566,6 +566,15 @@ export type Project = {
    *  what `accumulateSpend` actually stores (`calls` / cache keys). Optional
    *  keys stay optional: a legacy 2-key slice is a valid measured spend. */
   tokenUsage?: import("./token-ledger.ts").SpendSlice;
+
+  /** W48 · 334-2: the last keyed-call outcome, persisted so a FRESH process can
+   *  see that the previous run's key was refused. The tap is process-local, so
+   *  without this a new `doctor` could only report `keyState: "unverified"`.
+   *  Written by `headless.foldLastKeyedOutcome` (the only writer); read by
+   *  `headless.resolveDoctorKeyState` and `doctor.readLastKeyedOutcome`.
+   *  `keySource` is tail-only (a path/scope plus the last 4 chars) — never a key.
+   *  Absent on legacy records stays absent; a junk blob is dropped by readers. */
+  lastKeyedOutcome?: { code: string; at: number; keySource?: string };
   /** Persisted-shape version marker (B-25/R9): 2 = post-repair shape. */
   _v?: number;
 };

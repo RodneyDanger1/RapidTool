@@ -61,10 +61,12 @@ function withPhase0(patch) {
   return { ...p, phases: p.phases.map((r) => (r.id === 0 ? { ...r, ...patch } : r)) };
 }
 
+/** @type {import("../src/lib/types.ts").HitlRequest} */
 const HITL = { phase: 0, title: "P0 review", prompt: "Approve P0?", stakes: "gate", requestedAt: 1 };
 const RED_GATE = { passed: false, unmet: ["p0-brief-fit"], evidenceHash: "deadbeef", checkedAt: 1 };
 
-/** One fixture per arm; `run` appears twice (rejected sub-arm + default arm). */
+/** One fixture per arm; `run` appears twice (rejected sub-arm + default arm).
+ *  @type {Array<[string, () => import("../src/lib/types.ts").Project]>} */
 const ARM_FIXTURES = [
   ["unknown", () => ({ ...base(), phases: [] })],
   ["running", () => withPhase0({ status: "running" })],

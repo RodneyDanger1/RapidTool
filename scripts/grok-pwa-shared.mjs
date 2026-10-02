@@ -151,7 +151,12 @@ export function stripInstallParams(url) {
   return rest ? `${path}?${rest}` : path;
 }
 
-export function renderInstallPageHtml(template, { host, url } = {}) {
+/** Render one install page: substitutes {{APP_NAME}} and {{APP_URL}} (the app
+ *  URL with the install params stripped).
+ *  @param {string} template
+ *  @param {{ host?: string, url?: string }} [ctx] */
+export function renderInstallPageHtml(template, ctx = {}) {
+  const { host, url } = ctx;
   return String(template)
     .replaceAll("{{APP_NAME}}", escapeHtml(appNameFromHost(host)))
     .replaceAll("{{APP_URL}}", escapeHtml(stripInstallParams(url)));
@@ -333,6 +338,7 @@ function applyCustomCardFromFs(site, cwd) {
   return { ...site, card: "custom", image: disk };
 }
 
+/** @param {{ host?: string, appName?: string, site?: { title?: string, description?: string, type?: string, banner?: string, card?: string, image?: string }, documentTitle?: string, cwd?: string }} [ctx] */
 export function grokOgHeadTags({
   host = "",
   appName = DEFAULT_APP_NAME,
@@ -501,7 +507,8 @@ export function createHeadInjector(ctx = {}) {
     });
 
   return {
-    /** @param {Uint8Array | string} chunk @returns {Buffer[]} chunks ready to emit */
+    /** @param {Uint8Array | string} chunk
+     *  @returns {Buffer[]} chunks ready to emit */
     push(chunk) {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       if (done) return [buf];
@@ -511,7 +518,10 @@ export function createHeadInjector(ctx = {}) {
       if (at === -1) return [];
       done = true;
       pending = [];
-      const closeLen = joined.toString("latin1", at).match(/^<\/head>/i)[0].length;
+      const closeMatch = joined.toString("latin1", at).match(/^<\/head>/i);
+      // findHeadClose matched the same bytes at `at`, so this cannot miss.
+      if (!closeMatch) return [];
+      const closeLen = closeMatch[0].length;
       const head = apply(joined.subarray(0, at + closeLen).toString("utf8"));
       return [Buffer.concat([Buffer.from(head, "utf8"), joined.subarray(at + closeLen)])];
     },

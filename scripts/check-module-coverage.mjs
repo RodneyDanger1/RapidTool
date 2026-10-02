@@ -14,7 +14,9 @@
  * `src/lib` module graph, and report every module nothing reaches. A module
  * with zero importing test is a failure unless it is on the explicit,
  * reviewed allowlist below — each entry carries a reason, so the allowlist is
- * a decision record, not a blanket exemption.
+ * a decision record, not a blanket exemption. The guard also FAILS on a
+ * *stale* entry (a module now reached by a test), so the allowlist can only
+ * shrink by adding a real test, never linger as a silent exemption.
  *
  * Usage:
  *   node scripts/check-module-coverage.mjs            # text findings, exit 0/1
@@ -32,7 +34,7 @@ import { isMainModule, projectRoot } from "./with-app-env.mjs";
  * no test today, never that having no test is fine.
  */
 const UNCOVERED_NO_OWNER =
-  "reached by no test; no lane in the W45 table owns this surface — recorded for the next wave (R9-f05), not exempted as correct.";
+  "reached by no test; uncovered and unowned in the W48 lane table — a test or an owner is owed (R9-f05), recorded so a regression cannot fall back to a silent exemption.";
 
 /**
  * Modules that are deliberately not covered, each with the reason a reviewer
@@ -63,11 +65,11 @@ export const COVERAGE_ALLOWLIST = {
   "src/lib/auth/use-current-user.ts": `auth client hook. ${UNCOVERED_NO_OWNER}`,
   "src/lib/auth/verify.server.ts": `auth verification (server half). ${UNCOVERED_NO_OWNER}`,
   // --- the remainder R9-f05 named ---
-  "src/lib/app-data/index.ts": `server-only app-data barrel. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/db.ts": `database connection factory (reached only through the build/migrate path). ${UNCOVERED_NO_OWNER}`,
-  "src/lib/error-component.tsx": `React error boundary (no client render harness in the repo). ${UNCOVERED_NO_OWNER}`,
-  "src/lib/multiplayer/index.ts": `multiplayer barrel. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/multiplayer/p2p.ts": `multiplayer P2P transport. ${UNCOVERED_NO_OWNER}`,
+  "src/lib/app-data/index.ts": `client-safe app-data barrel (types + login helpers); the server-only halves are covered, this barrel has no importer — wire it to a consumer or delete it. ${UNCOVERED_NO_OWNER}`,
+  "src/lib/db.ts": `server-only SQL/PGlite factory; no module imports it yet (the build/migrate path names it only in prose) — wire a consumer or delete it. ${UNCOVERED_NO_OWNER}`,
+  "src/lib/error-component.tsx": `React error boundary; imported only by routes/router, which no test reaches (no client render harness in the repo). ${UNCOVERED_NO_OWNER}`,
+  "src/lib/multiplayer/index.ts": `barrel for the dormant P2P client; nothing imports it. ${UNCOVERED_NO_OWNER}`,
+  "src/lib/multiplayer/p2p.ts": `DORMANT by design (documented HONESTY header): no /api/rtc relay and no consumer ship today; keep as the relay contract and test it when a relay lands. ${UNCOVERED_NO_OWNER}`,
 };
 
 const SPEC_RE = /\b(?:from|import|require)\s*\(?\s*["']([^"']+)["']/g;
@@ -207,12 +209,31 @@ export function moduleCoverageGaps(root = projectRoot()) {
   return { total: modules.length, covered: covered.size, gaps, unreadable };
 }
 
-/** Split the gap list into the reviewed allowlist and everything else. */
+/**
+ * Split the gap list into the reviewed allowlist and everything else.
+ * @param {string[]} gaps
+ * @param {Record<string, string>} [allowlist]
+ */
 export function partitionGaps(gaps, allowlist = COVERAGE_ALLOWLIST) {
   return {
     allowlisted: gaps.filter((g) => allowlist[g]),
     unallowlisted: gaps.filter((g) => !allowlist[g]),
   };
+}
+
+/**
+ * Allowlist entries that no longer describe a gap — the module IS reached by a
+ * test now. Such an entry is a hole in the ratchet: it would silently re-exempt
+ * the module if a later change orphaned it again. A stale entry fails the guard
+ * so it must be deleted (the allowlist may only shrink by adding a real test).
+ * @param {string[]} gaps
+ * @param {Record<string, string>} [allowlist]
+ */
+export function staleAllowlistEntries(gaps, allowlist = COVERAGE_ALLOWLIST) {
+  const gapSet = new Set(gaps);
+  return Object.keys(allowlist)
+    .filter((file) => !gapSet.has(file))
+    .sort();
 }
 
 function main(argv) {
@@ -225,13 +246,14 @@ function main(argv) {
   const root = projectRoot();
   const { total, covered, gaps, unreadable } = moduleCoverageGaps(root);
   const { allowlisted, unallowlisted } = partitionGaps(gaps);
+  const stale = staleAllowlistEntries(gaps);
   if (unreadable.length > 0) {
     // Fail closed: a subtree this walk could not read is not evidence of coverage.
     console.error(`[module-coverage] could not read ${unreadable.length} path(s): ${unreadable.join(", ")}`);
     process.exit(2);
   }
   if (json) {
-    console.log(JSON.stringify({ total, covered, gaps, allowlisted, unallowlisted }, null, 2));
+    console.log(JSON.stringify({ total, covered, gaps, allowlisted, unallowlisted, stale }, null, 2));
   } else {
     for (const g of gaps) {
       const reason = COVERAGE_ALLOWLIST[g];
@@ -241,11 +263,16 @@ function main(argv) {
           : `${g}: [module-coverage] no test reaches this module — add a test or an allowlist entry with a reason`,
       );
     }
+    for (const g of stale) {
+      console.log(
+        `${g}: [module-coverage] STALE allowlist entry — this module is reached by a test now; delete the entry`,
+      );
+    }
     console.log(
-      `[module-coverage] ${covered}/${total} src/lib modules reached by a test · ${allowlisted.length} allowlisted · ${unallowlisted.length} unallowlisted gap(s)`,
+      `[module-coverage] ${covered}/${total} src/lib modules reached by a test · ${allowlisted.length} allowlisted · ${unallowlisted.length} unallowlisted gap(s) · ${stale.length} stale allowlist entr${stale.length === 1 ? "y" : "ies"}`,
     );
   }
-  process.exit(unallowlisted.length === 0 ? 0 : 1);
+  process.exit(unallowlisted.length === 0 && stale.length === 0 ? 0 : 1);
 }
 
 if (isMainModule(import.meta.url)) {

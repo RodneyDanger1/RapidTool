@@ -2453,12 +2453,21 @@ function matchParenClose(text: string, open: number): number {
 /**
  * The member access starting at `start`, if any — the tail a Promise would be
  * read through. Accepts the four lexical forms an emitted module uses:
- * `.name`, `?.name`, `["name"]`, `?.["name"]`. `masked` and `raw` are the
- * same-length views of the source (masking preserves offsets), so a computed
- * key's literal text is read from `raw` while the structure is read from
- * `masked`. Returns null when the next token is not a member access. Pure.
+ * `.name`, `?.name`, `["name"]`, `?.["name"]`, plus a computed key bound to a
+ * top-level const string literal (`[K]` where `const K = "then"`). `masked` and
+ * `raw` are the same-length views of the source (masking preserves offsets), so
+ * a computed key's literal text is read from `raw` while the structure is read
+ * from `masked`. `literals` resolves an identifier key when the value is
+ * statically known; an unresolvable key stays a computed read with no name
+ * (conservative — 333-1 F-1). Returns null when the next token is not a member
+ * access. Pure.
  */
-function memberAccessAfter(masked: string, raw: string, start: number): { kind: "member" | "computed"; name: string | null } | null {
+function memberAccessAfter(
+  masked: string,
+  raw: string,
+  start: number,
+  literals: ReadonlyMap<string, string> = new Map(),
+): { kind: "member" | "computed"; name: string | null } | null {
   let i = start;
   while (i < masked.length && (masked[i] === " " || masked[i] === "\t" || masked[i] === "\n" || masked[i] === "\r")) i++;
   let chained = false;
@@ -2472,7 +2481,9 @@ function memberAccessAfter(masked: string, raw: string, start: number): { kind: 
   while (i < masked.length && (masked[i] === " " || masked[i] === "\t")) i++;
   if (masked[i] === "[") {
     const rawKey = /^\s*(?:\?\.\s*)?\[\s*(['"])([^'"]*)\1\s*\]/.exec(raw.slice(start));
-    return { kind: "computed", name: rawKey !== null ? rawKey[2]! : null };
+    if (rawKey !== null) return { kind: "computed", name: rawKey[2]! };
+    const identKey = /^\s*(?:\?\.\s*)?\[\s*([A-Za-z_$][\w$]*)\s*\]/.exec(masked.slice(start));
+    return { kind: "computed", name: identKey !== null ? literals.get(identKey[1]!) ?? null : null };
   }
   if (chained) {
     const m = /^([A-Za-z_$][\w$]*)/.exec(masked.slice(i));
@@ -2481,22 +2492,92 @@ function memberAccessAfter(masked: string, raw: string, start: number): { kind: 
   return null;
 }
 
+/** Index of the `}` matching the `{` at `open`, or -1. Masked text only. */
+function matchBraceClose(text: string, open: number): number {
+  if (open < 0 || text[open] !== "{") return -1;
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    const c = text[i]!;
+    if (c === "{") depth += 1;
+    else if (c === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** Top-level `const NAME = "literal"` values in a module, used to resolve a
+ *  computed member key lexically (`fn(id)[K]` with `const K = "then"`). The raw
+ *  line carries the value (masking blanks literal bodies); the masked line must
+ *  still be the declaration head, so a `// const K = "…"` comment never binds.
+ *  A `let`/`var` or a reassigned binding is not resolved (conservative). Pure. */
+function constStringLiterals(src: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const state = { block: false, template: false };
+  for (const line of src.split("\n")) {
+    const code = maskCodeLine(line, state);
+    const head = /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=/.exec(code);
+    const raw = /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(['"])([^'"]*)\2\s*;?\s*$/.exec(line);
+    if (raw !== null && head !== null && head[1] === raw[1]) out.set(raw[1], raw[3]);
+  }
+  return out;
+}
+
+/** Body ranges of every `async NAME(…) { … }` method declared in the module —
+ *  the receiver (`this.NAME(…)`) a bare-name scan cannot see. The range is the
+ *  enclosing class/object-literal body, so a `this.NAME(…)` is tied to the very
+ *  declaration that owns it: a same-named method on a *different* receiver is
+ *  not matched (it may be synchronous). Pure. */
+function asyncMethodBodyRanges(masked: string): { name: string; start: number; end: number }[] {
+  const out: { name: string; start: number; end: number }[] = [];
+  for (const m of masked.matchAll(/^\s*(?:static\s+)?async\s*\*?\s*(?!function\b)([A-Za-z_$][\w$]*)\s*\(/gm)) {
+    const idx = m.index ?? 0;
+    let depth = 0;
+    let open = -1;
+    for (let i = idx - 1; i >= 0; i--) {
+      const c = masked[i];
+      if (c === "}") depth += 1;
+      else if (c === "{") {
+        if (depth === 0) {
+          open = i;
+          break;
+        }
+        depth -= 1;
+      }
+    }
+    if (open < 0) continue;
+    const end = matchBraceClose(masked, open);
+    if (end < 0) continue;
+    out.push({ name: m[1]!, start: open, end });
+  }
+  return out;
+}
+
+/** One call site whose result a Promise could be read off. */
+type AsyncCallSite = { name: string; calleeStart: number; openParen: number };
+
 /**
  * W46/332-1 (P1): the value-position uses of an un-awaited async call. `asyncNames`
  * are the callable names known to return a Promise (a sibling chunk's async export
  * or the module's own `async function`). A call that is NOT preceded by `await` is
  * refused when its result is consumed as a value:
  *   • `getProperty(id).ok` / `?.ok`   → property-read (a Promise has no `.ok`)
- *   • `getProperty(id)["ok"]`         → computed-read (same, through a key)
+ *   • `getProperty(id)["ok"]`         → computed-read (same, through a key; a key
+ *     bound to a const string that resolves to `then`/`catch`/`finally` is a legal
+ *     consumer and stays accepted)
  *   • `const { ok } = getProperty(id)`→ destructure (same, off the Promise)
  *   • `const p = getProperty(id); p.ok` / `p?.ok` / `p["ok"]` → bound-then-read (the
  *     promise stored, a member read off it later — the real `src/jobs/rehab.ts` shape)
+ *   • `this.getProperty(id).ok` inside the declaring class → the same shapes through
+ *     a `this` receiver (a same-named member on another receiver is not matched)
  *   • a var bound to one inside a `Promise.resolve().then(…)` body → floating-in-then
  *     (that callback is not `async`, so the promise can never be awaited later).
  * `await getProperty(id)` and `.then/.catch/.finally` consumers (including via a
  * computed key: `["then"]`) are accepted. `asyncNames` discovery is lexical (see
- * `declaredAsyncFunctionNames`); a Promise-returning callable not spelled `async`
- * and a member call through a receiver (`obj.m()`) stay outside this guard. Pure.
+ * `declaredAsyncFunctionNames`); a Promise-returning callable not spelled `async`,
+ * a named receiver (`obj.m()`) and an unresolvable dynamic computed key stay
+ * outside this guard (their receiver/value cannot be tied to a declaration). Pure.
  */
 export function unawaitedAsyncValueUses(module: string, asyncNames: readonly string[]): AsyncUnawaitedUse[] {
   const src = typeof module === "string" ? module : "";
@@ -2518,38 +2599,55 @@ export function unawaitedAsyncValueUses(module: string, asyncNames: readonly str
       uses.push(u);
     }
   };
-  const bound: { varName: string; name: string; callEnd: number; line: number }[] = [];
-  const readVars = new Set<string>();
+  const literals = constStringLiterals(src);
+  const sites: AsyncCallSite[] = [];
   for (const name of wanted) {
     const re = new RegExp(`(?<![\\w.$])${name}\\s*\\(`, "g");
     let m: RegExpExecArray | null;
     while ((m = re.exec(masked)) !== null) {
-      const nameIdx = m.index;
-      if (/await\s*$/.test(masked.slice(Math.max(0, nameIdx - 12), nameIdx))) continue;
-      const close = matchParenClose(masked, masked.indexOf("(", nameIdx));
-      if (close < 0) continue;
-      const access = memberAccessAfter(masked, src, close + 1);
-      const consumer = access !== null && access.name !== null && PROMISE_CONSUMER_METHODS.has(access.name);
-      if (access !== null && !consumer) {
-        push({ name, line: lineAt(nameIdx), form: access.kind === "computed" ? "computed-read" : "property-read" });
-        continue;
-      }
-      // The text between the statement boundary and the callee: a `const x =`
-      // (bound) or a destructuring declaration head (destructure), else a bare use.
-      const stmtStart = Math.max(
-        masked.lastIndexOf(";", nameIdx),
-        masked.lastIndexOf("{", nameIdx),
-        masked.lastIndexOf("}", nameIdx),
-        masked.lastIndexOf("\n", nameIdx),
-      );
-      const lhs = masked.slice(stmtStart + 1, nameIdx);
-      const boundDecl = /^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(lhs);
-      if (boundDecl !== null) {
-        bound.push({ varName: boundDecl[1]!, name, callEnd: close, line: lineAt(nameIdx) });
-      } else if (/(?:^|[;{}\n])\s*(?:const|let|var)\s*(?:\{[^}]*\}|\[[^\]]*\])\s*=\s*$/.test(masked.slice(0, nameIdx))) {
-        // Destructuring assignment off the call result: `const { ok } = fn(id)`.
-        push({ name, line: lineAt(nameIdx), form: "destructure" });
-      }
+      sites.push({ name, calleeStart: m.index, openParen: m.index + m[0].length - 1 });
+    }
+  }
+  // A `this.NAME(…)` receiver call is matched only inside the body that declares
+  // the async method NAME — a same-named member on another receiver stays out.
+  for (const r of asyncMethodBodyRanges(masked)) {
+    if (!wanted.includes(r.name)) continue;
+    const re = new RegExp(`(?<![\\w$])this\\s*\\.\\s*${r.name}\\s*\\(`, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(masked)) !== null) {
+      if (m.index < r.start || m.index > r.end) continue;
+      sites.push({ name: r.name, calleeStart: m.index, openParen: m.index + m[0].lastIndexOf("(") });
+    }
+  }
+  sites.sort((a, b) => a.calleeStart - b.calleeStart);
+  const bound: { varName: string; name: string; callEnd: number; line: number }[] = [];
+  const readVars = new Set<string>();
+  for (const site of sites) {
+    const { name, calleeStart, openParen } = site;
+    if (/await\s*$/.test(masked.slice(Math.max(0, calleeStart - 12), calleeStart))) continue;
+    const close = matchParenClose(masked, openParen);
+    if (close < 0) continue;
+    const access = memberAccessAfter(masked, src, close + 1, literals);
+    const consumer = access !== null && access.name !== null && PROMISE_CONSUMER_METHODS.has(access.name);
+    if (access !== null && !consumer) {
+      push({ name, line: lineAt(calleeStart), form: access.kind === "computed" ? "computed-read" : "property-read" });
+      continue;
+    }
+    // The text between the statement boundary and the callee: a `const x =`
+    // (bound) or a destructuring declaration head (destructure), else a bare use.
+    const stmtStart = Math.max(
+      masked.lastIndexOf(";", calleeStart),
+      masked.lastIndexOf("{", calleeStart),
+      masked.lastIndexOf("}", calleeStart),
+      masked.lastIndexOf("\n", calleeStart),
+    );
+    const lhs = masked.slice(stmtStart + 1, calleeStart);
+    const boundDecl = /^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(lhs);
+    if (boundDecl !== null) {
+      bound.push({ varName: boundDecl[1]!, name, callEnd: close, line: lineAt(calleeStart) });
+    } else if (/(?:^|[;{}\n])\s*(?:const|let|var)\s*(?:\{[^}]*\}|\[[^\]]*\])\s*=\s*$/.test(masked.slice(0, calleeStart))) {
+      // Destructuring assignment off the call result: `const { ok } = fn(id)`.
+      push({ name, line: lineAt(calleeStart), form: "destructure" });
     }
   }
   for (const b of bound) {
@@ -2557,7 +2655,7 @@ export function unawaitedAsyncValueUses(module: string, asyncNames: readonly str
     let m: RegExpExecArray | null;
     while ((m = re.exec(masked)) !== null) {
       if (m.index <= b.callEnd) continue;
-      const access = memberAccessAfter(masked, src, m.index + b.varName.length);
+      const access = memberAccessAfter(masked, src, m.index + b.varName.length, literals);
       if (access === null) continue;
       if (access.name !== null && PROMISE_CONSUMER_METHODS.has(access.name)) continue;
       readVars.add(b.varName);
@@ -4479,7 +4577,15 @@ function treeUpgraded(
 /** Deterministic evidence summary of a green TreeRunOutcome (rel spec paths +
  *  verdicts + counts only — never the run dir, timings or detail prose, so the
  *  fnv1a evidence hash reproduces across hosts). `executed` is the honesty
- *  gate: at least one spec file actually ran AND executed ≥1 assertion. */
+ *  gate: at least one spec file actually ran AND executed ≥1 assertion.
+ *
+ *  W48/334-1c: the DECLARED-SCRIPT state is decisive evidence too — a green run
+ *  whose emitted `package.json` scripts (`typecheck`/`build`) never executed
+ *  must not mint the same evidence as one whose toolchain really ran (the F-4
+ *  lesson one level deeper: an evidence hash must not conflate a state the
+ *  system takes care to distinguish). Folds booleans + a SORTED name list only
+ *  (never prose), the same doctrine as `treeVerdictHash`; a default run
+ *  (`declaredScriptsVerified:true`, entry ran) keeps its prior bytes. */
 export function treeRunTestedEvidence(o: TreeRunOutcome): {
   executed: boolean;
   specFiles: number;
@@ -4497,12 +4603,24 @@ export function treeRunTestedEvidence(o: TreeRunOutcome): {
     .map((t) => t.file)
     .filter((f): f is string => typeof f === "string" && f.length > 0)
     .sort();
+  // Canonical declared-script factors (booleans + a sorted name list). The
+  // token is emitted only when the state deviates from fully-declared-verified
+  // with the entry actually run, so a default outcome is byte-identical.
+  const unverifiedScripts = [
+    ...new Set((o.unverifiedDeclaredScripts ?? []).filter((s): s is string => typeof s === "string" && s.length > 0)),
+  ].sort();
+  const declaredUnverified = o.declaredScriptsVerified === false || unverifiedScripts.length > 0;
+  const entrySkipped = o.unverifiedEntry !== undefined;
   const run = o.run;
   const summary = [
     `compile ${o.compile.passed}/${o.compile.checked} file(s)`,
     `${specs.length} spec file(s) pass · ${assertions} assertion(s)`,
     ...(specPaths.length > 0 ? [`specs [${specPaths.join(", ")}]`] : []),
     ...(run ? [`entry ${run.kind} ${run.run}`] : []),
+    ...(declaredUnverified
+      ? [`declared-scripts unverified${unverifiedScripts.length > 0 ? ` [${unverifiedScripts.join(", ")}]` : ""}`]
+      : []),
+    ...(entrySkipped ? ["entry-skipped"] : []),
   ].join(" · ");
   return { executed: specs.length > 0 && assertions > 0, specFiles: specs.length, assertions, summary };
 }

@@ -107,7 +107,9 @@ export type UiGenerationRequest = {
 
 export type UiGenerationHook = (request: UiGenerationRequest) => string[] | null;
 
-/** Optional inputs to `scaffoldProject` (additive; omitted ⇒ pre-277 bytes). */
+/** Optional inputs to `scaffoldProject` (additive; an omitted hook keeps the
+ *  default UI name-dump). The README's declared-scripts banner is emitted
+ *  unconditionally — see `declaredScriptsBanner`. */
 export type ScaffoldOptions = {
   /** A3-f07: the emitted-UI generation hook (default = the name-dump). */
   uiGeneration?: UiGenerationHook;
@@ -621,8 +623,9 @@ const PKG_DEV_DEPS: Partial<Record<ProjectKind, Record<string, string>>> = {
 // PKG_SCRIPTS honesty (fixes/149 P1-2 / fixes/150 G3): the dev/build scripts
 // below are DECLARED on every emitted tree of the kind. They are only
 // VERIFIED when the caller runs `emit --verify-kind` (scratch npm install +
-// the declared build, bounded); without that opt-in flag they are unverified
-// scaffold claims — declare-or-strike.
+// the declared build/test, bounded); without that opt-in flag they are
+// unverified scaffold claims — declare-or-strike. W48 / 334-3 (T1a): the
+// emitted README says so up front (declaredScriptsBanner below).
 const PKG_SCRIPTS: Partial<Record<ProjectKind, Record<string, string>>> = {
   webapp: {
     dev: "vite",
@@ -2750,6 +2753,36 @@ type ReadmeJobScope = {
   treeMode?: boolean;
 };
 
+/**
+ * W48 / 334-3 (T1a): the emitted `package.json` DECLARES `typecheck` (and, for
+ * webapp/game, `build`), but the emitter never installs dependencies or runs
+ * them over the tree it writes — a fresh emitted tree's declared toolchain is
+ * UNVERIFIED, and the tree-run's own envelope reports exactly that as
+ * `declaredScriptsVerified: false` + `unverifiedDeclaredScripts: [...]`
+ * (compile-check.server.ts). Rendered unconditionally at the top of the
+ * emitted README, in the same GitHub-alert style as headless's red-tree
+ * banner, so an unverified tree can never present as a complete one.
+ *
+ * Deliberately NOT suppressible from an emit-time signal: `--verify-kind`
+ * installs and builds a SCRATCH COPY and records its verdict only on the CLI
+ * payload (never in the project or the tree), so no byte the scaffold can read
+ * attests that THESE declared scripts ran over THIS tree. The honest default
+ * is therefore to state the limit on the artifact itself.
+ */
+function declaredScriptsBanner(kind: ProjectKind): string {
+  const scripts = PKG_SCRIPTS[kind] ?? {};
+  const names = ["typecheck", "build"].filter((s) => typeof scripts[s] === "string");
+  const isOne = names.length === 1;
+  const label = names.map((s) => `\`${s}\``).join(" and ");
+  const run = names.map((s) => `npm run ${s}`).join(" && ");
+  return [
+    "> [!WARNING]",
+    `> ## DECLARED SCRIPTS NOT RUN — ${label} ${isOne ? "IS" : "ARE"} UNVERIFIED (RapidTool W48 / 334-3)`,
+    ">",
+    `> The emitted \`package.json\` declares ${label}, but this emitter NEVER runs ${isOne ? "it" : "them"} over the tree it writes — no \`npm install\`, no declared-script execution. ${isOne ? "It is a scaffold claim" : "They are scaffold claims"} — NOT verified behavior. Run \`npm install && ${run}\` yourself (or re-emit with \`--verify-kind\`, which installs and builds a scratch copy) before treating this scaffold as build-verified. A fresh tree-run reports the same state as \`declaredScriptsVerified: false\` + \`unverifiedDeclaredScripts: [...]\` in its JSON.`,
+  ].join("\n");
+}
+
 function readmeBody(
   project: Project,
   kind: ProjectKind,
@@ -2845,6 +2878,10 @@ function readmeBody(
     );
   }
   const body = [
+    // W48 / 334-3 (T1a): the declared-scripts-unverified banner leads the README
+    // (see declaredScriptsBanner) — a blank line separates it from the title.
+    declaredScriptsBanner(kind),
+    "",
     `# ${mdLine(project.name, 120)}`,
     "",
     `> ${MACHINE_STAMP(project.id)}`,

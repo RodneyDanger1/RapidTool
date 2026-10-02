@@ -97,6 +97,7 @@ try {
 
   const viewports = {};
   for (const vp of VIEWPORTS) {
+    /** @type {{ consoleErrors: string[], pageErrors: string[] }} */
     const errors = { consoleErrors: [], pageErrors: [] };
     const page = await browser.newPage({
       viewport: { width: vp.width, height: vp.height },

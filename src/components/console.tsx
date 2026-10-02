@@ -36,7 +36,14 @@ import {
 } from "lucide-react";
 import { PHASES, PHASE_BY_ID, phaseDef } from "@/lib/phases";
 import { runCrew } from "@/lib/crew";
-import { persistStorageHealth, staleEmitStep, useRapid } from "@/lib/store";
+import {
+  codedFailureText,
+  keyedRefusalSince,
+  KEY_UNUSABLE_CODES,
+  persistStorageHealth,
+  staleEmitStep,
+  useRapid,
+} from "@/lib/store";
 import { BRIEF_TEMPLATES } from "@/lib/templates";
 import { estimateTokens } from "@/lib/algorithms";
 import { DOD } from "@/lib/dod";
@@ -1265,7 +1272,13 @@ function WildConsole({ project }: { project: Project }) {
         // the strip note instead of holding the buttons busy for the run.
         void useRapid.getState().startWildRun(projectId).then(
           (res) => {
-            if (!res.ok) setNote(res.error && res.error.length > 0 ? res.error : "Could not resume the wild run.");
+            if (!res.ok)
+              setNote(
+                codedFailureText(
+                  res.error && res.error.length > 0 ? res.error : "Could not resume the wild run.",
+                  res.code,
+                ),
+              );
           },
           (errCaught: unknown) => {
             setNote(errCaught instanceof Error ? errCaught.message : String(errCaught));
@@ -2302,8 +2315,21 @@ export function RunScreen({ id }: { id: string }) {
     busyRef.current = true;
     setBusyAction("step");
     try {
+      const startedAt = Date.now();
       const res = await executeAsync(projectId);
-      if (!res.ok) setError(res.error);
+      // C1 (334-5): refresh the validity probe after the run too — a phase
+      // synthesis can touch a keyed path whose refusal the header chip must
+      // show, and this handler used to drop `executeAsync`'s own code. Only a
+      // refusal OBSERVED during this step is attributed to it (a stale pre-run
+      // outcome would let the label out-claim what it measured — 333 F-4).
+      const fresh = await refreshStatuses();
+      const keyedDuringRun = keyedRefusalSince(startedAt, fresh.lastKeyed);
+      if (!res.ok) setError(codedFailureText(res.error, res.code, keyedDuringRun));
+      else if (keyedDuringRun) {
+        setError(
+          `${keyedDuringRun} — the step continued on the deterministic floor; a keyed call during this step was refused.`,
+        );
+      }
     } finally {
       busyRef.current = false;
       setBusyAction(null);
@@ -2331,7 +2357,7 @@ export function RunScreen({ id }: { id: string }) {
     // pre-check + the engine's coded refusal, so the error surfaces here via setError).
     // Passed ONLY when force is set: a normal approval never inherits a stale note.
     const res = approve(projectId, { force, note: force ? note.trim() : undefined });
-    if (!res.ok) setError(res.error);
+    if (!res.ok) setError(codedFailureText(res.error, res.code));
     else setNote(""); // UI-5: clear any stale rejection note after an approval
   }
 
@@ -2354,7 +2380,7 @@ export function RunScreen({ id }: { id: string }) {
     setBusyAction("reject");
     void rejectAsync(projectId, note)
       .then((res) => {
-        if (!res.ok) setError(res.error);
+        if (!res.ok) setError(codedFailureText(res.error, res.code));
         else setNote("");
       })
       .finally(() => {
@@ -2370,9 +2396,26 @@ export function RunScreen({ id }: { id: string }) {
     busyRef.current = true;
     setBusyAction("run");
     try {
+      const startedAt = Date.now();
       const res = await runUntilHitlAsync(projectId);
-      if (!res.ok) setError(res.error);
-      else if (res.note) setNotice(res.note);
+      // C1 (334-5): a multi-phase run can reach the keyed P6 synthesis edge.
+      // Pull the validity probe so the chip reflects it, and name the coded
+      // class on the run surface instead of a generic failure. A keyed refusal
+      // INSIDE a run degrades to the deterministic floor without failing the
+      // run, so the probe is the only witness — but ONLY a refusal observed at
+      // or after this run's start is attributed to it (a stale pre-run outcome
+      // must never be blamed on this run — 333 F-4).
+      const fresh = await refreshStatuses();
+      const keyedDuringRun = keyedRefusalSince(startedAt, fresh.lastKeyed);
+      if (!res.ok) {
+        setError(codedFailureText(res.error, res.code, keyedDuringRun));
+      } else if (keyedDuringRun) {
+        setError(
+          `${keyedDuringRun} — the run continued on the deterministic floor; a keyed call during this run was refused.`,
+        );
+      } else if (res.note) {
+        setNotice(res.note);
+      }
     } finally {
       busyRef.current = false;
       setBusyAction(null);
@@ -2388,7 +2431,7 @@ export function RunScreen({ id }: { id: string }) {
     try {
       const res = await runModuleReal(projectId);
       if (!res.ok) {
-        setError(res.error ?? "bounded runner unavailable");
+        setError(codedFailureText(res.error ?? "bounded runner unavailable", res.code));
         return;
       }
       const r = res.result as { ok?: boolean; exitCode?: number; durationMs?: number };
@@ -2418,7 +2461,7 @@ export function RunScreen({ id }: { id: string }) {
       return;
     }
     const res = ingestReport(projectId, raw);
-    if (!res.ok) setError(res.error ?? "Report rejected.");
+    if (!res.ok) setError(codedFailureText(res.error ?? "Report rejected.", res.code));
     else {
       setNotice("Agent report ingested — artifacts marked “[agent report]”.");
       setReportDraft("");
@@ -2491,7 +2534,7 @@ export function RunScreen({ id }: { id: string }) {
                 } · ${n} artifact${n === 1 ? "" : "s"} ingested as “[agent report]”.`,
           );
         } else {
-          setError(ingested.error ?? "Crew artifacts could not be ingested.");
+          setError(codedFailureText(ingested.error ?? "Crew artifacts could not be ingested.", ingested.code));
         }
         if (messages.length > 0) {
           setCrewRun({ ok: true, ingested: ingested.ok, stopped: res.stopped, messages });
@@ -2504,7 +2547,10 @@ export function RunScreen({ id }: { id: string }) {
             ? "no LLM backend configured — the deterministic engine stands"
             : "a crew call failed mid-run";
         setError(
-          `Crew run did not start (${res.reason}): ${reason}${res.error ? ` — ${res.error}` : ""}`,
+          codedFailureText(
+            `Crew run did not start (${res.reason}): ${reason}${res.error ? ` — ${res.error}` : ""}`,
+            res.code,
+          ),
         );
       }
     } catch (err) {
@@ -2604,7 +2650,7 @@ export function RunScreen({ id }: { id: string }) {
         // UI-2: navigate to the imported project so the screen matches the store's activeId.
         void nav({ to: "/run/$id", params: { id: res.id } });
       } else {
-        setError(res.error);
+        setError(codedFailureText(res.error, res.code));
       }
     };
     reader.onerror = () => setError("Failed to read the selected file.");
@@ -5970,8 +6016,8 @@ type KeyedOutcome = {
 };
 
 /** Codes that mean the key is present but unusable — a validity fault, not
- *  absence (the presence axis stays the server probe's `configured`). */
-const KEY_UNUSABLE_CODES = new Set(["RT_E_LLM_KEY_REJECTED", "RT_E_LLM_KEY_SHADOWED"]);
+ *  absence (the presence axis stays the server probe's `configured`). Shared
+ *  with the store so the chip and the run surface name the same class. */
 
 /** The newest keyed-chat outcome in the persisted thread, or null when the
  *  thread holds no keyed turn. The newest assistant row IS the last outcome. */
@@ -6169,7 +6215,7 @@ function OracleVerifyBlock({ project }: { project: Project }) {
         setVerifyNote(
           res.status === "not-configured"
             ? "No LLM backend configured — machine verify needs a DeepSeek key server-side."
-            : res.error ?? "verify failed",
+            : codedFailureText(res.error ?? "verify failed", res.code),
         );
       } else {
         setVerifyNote(`verify ${res.status} after ${res.iterations} iteration(s) — outcome recorded.`);
@@ -6584,7 +6630,9 @@ function ChatPane({ project }: { project: Project }) {
 type DeepenAction = (
   projectId: string,
   phase: number,
-) => Promise<{ ok?: boolean; error?: string }> | { ok?: boolean; error?: string };
+) =>
+  | Promise<{ ok?: boolean; error?: string; code?: string }>
+  | { ok?: boolean; error?: string; code?: string };
 
 const DEEPEN_ACTION_NAMES = ["deepenResearchAsync", "deepenResearch", "deepenAsync", "runDeepen"] as const;
 
@@ -6621,7 +6669,7 @@ function DeepenResearchButton({ project, phase }: { project: Project; phase: Pha
     setOutcome(null);
     try {
       const res = await action(project.id, phase);
-      if (res && res.ok === false) setOutcome(res.error ?? "deepen failed");
+      if (res && res.ok === false) setOutcome(codedFailureText(res.error ?? "deepen failed", res.code));
       else setOutcome("live research running — the gate re-records when it completes");
     } catch (err) {
       setOutcome(err instanceof Error ? err.message : String(err));

@@ -1277,3 +1277,41 @@ describe("330 Transit — emitted-format integrity (never ship an unloadable mod
     assert.equal(r2.ok, true, !r2.ok ? r2.error : "");
   });
 });
+
+// ---------------------------------------------------------------------------
+// W48 / 334-3 (T1a) — the emitted README must say the DECLARED scripts never
+// ran. A fresh emitted tree's own tree-run reports `declaredScriptsVerified:
+// false` + `unverifiedDeclaredScripts: ["typecheck","build"]`; without a banner
+// the README could present that tree as complete. Same unmissable style as
+// headless's red-tree banner.
+// ---------------------------------------------------------------------------
+describe("W48 / 334-3 (T1a) — declared-scripts-unverified README banner", () => {
+  it("the emitted README LEADS with the banner and names the declared typecheck + build as unverified", () => {
+    const p = fullRun({ kind: "app" });
+    const readme = bodyOf(scaffoldProject(p), "README.md");
+    assert.ok(readme.startsWith("> [!WARNING]\n"), "the banner heads the README (unmissable, like the red-tree banner)");
+    assert.match(readme, /DECLARED SCRIPTS NOT RUN/);
+    assert.match(readme, /`typecheck` and `build`/);
+    assert.match(readme, /UNVERIFIED/);
+    assert.match(readme, /declaredScriptsVerified: false/);
+    // It is the declared-scripts banner, not a red-tree-run banner: distinct signal.
+    assert.equal(readme.includes("RED TREE-RUN"), false);
+    // And it precedes the project title, so a human cannot miss it.
+    assert.ok(
+      readme.indexOf("DECLARED SCRIPTS NOT RUN") < readme.indexOf(`# ${p.name}`),
+      "the banner renders above the title",
+    );
+  });
+
+  it("names only the scripts the kind actually declares (cli-tool has no build)", () => {
+    const p = fullRun({ kind: "tool" });
+    const result = scaffoldProject(p);
+    const readme = bodyOf(result, "README.md");
+    assert.match(readme, /`typecheck` IS UNVERIFIED/);
+    assert.equal(readme.includes("`build`"), false, "no build script is declared for cli-tool, so none is named");
+    // The registry really confirms cli-tool declares no build (pin the premise).
+    const pkg = JSON.parse(bodyOf(result, "package.json")) as { scripts?: Record<string, string> };
+    assert.equal(typeof pkg.scripts?.build, "undefined");
+    assert.equal(typeof pkg.scripts?.typecheck, "string");
+  });
+});

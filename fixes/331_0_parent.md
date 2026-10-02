@@ -136,3 +136,20 @@ above trustworthy on both runtimes.
      (`mintTreeRunTested`), and `lattice` coverage varies run to run — the first keyed run emitted 7
      files (`p6-arch` PASS), the second emitted 5 (`p6-arch` FAIL). Keyed synthesis is not
      deterministic in coverage today.
+
+## CORRECTION — appended 2026-10-02 (W48 · 334-2 "Ledger")
+
+§6 item 2 above is superseded: `scripts/rapidtool-cli.mjs` no longer carries 38 typecheck errors —
+it carries **0**. The 332 wave retired them (register `AW46-c07`; also reported as R-10 in
+`fixes/333_2_registrar.md`), and `npm run typecheck` now runs
+`tsc --noEmit && node --test --test-reporter=tap scripts/typecheck-scripts.test.mjs`, which exits 0
+on a clean tree. Measured today: CLI leg 0 errors, both typecheck legs exit 0.
+
+Also superseded in the same §6 owed list — item 6 ("`budget.spent` still resets per invocation",
+`AW45-c06` / `R12-f02`): the 332 wave's `Project.tokenUsage` fold fixed it
+(`headless.runUntilGate` folds each invocation's session delta into the persisted slice, and
+`summary.budget.spent`/`doctor` read it back). The W48 (334-2) pass extends that fold to the
+non-`gate` verbs `repairTreeDir` and the wild macros.
+
+This block is an append; §6 is left byte-identical above per this log's record convention.
+

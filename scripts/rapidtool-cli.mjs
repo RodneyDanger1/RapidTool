@@ -24,8 +24,8 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs packet  --project build.json [--out packet.md]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs export  --project build.json [--out out.json]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs vault   --project build.json [--out <dir>]      # default: <home>/RapidTool Software/<slug>/vault
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs emit    --project build.json [--out <dir>] [--check] [--run]   # default: <home>/RapidTool Software/<slug>/; --check = per-file compile verdicts; --run = compile + tests + entry smoke (TreeRunOutcome)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir <dir> [--project build.json]                  # fixes/149 P0-1: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits, never clobbers (exit 1 on red with the first not-ok tail); --project adds the hash-checked dirDirty divergence report
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs emit    --project build.json [--out <dir>] [--check] [--run]   # default: <home>/RapidTool Software/<slug>/; --check = per-file compile verdicts; --run = compile + tests + entry smoke (TreeRunOutcome); a green tree whose declared typecheck/build never ran exits 5 (unverified declared scripts)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir <dir> [--project build.json]                  # fixes/149 P0-1: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits, never clobbers (exit 1 on red with the first not-ok tail; exit 5 when green but the declared toolchain is unverified); --project adds the hash-checked dirDirty divergence report
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs repair  --dir <dir> --project build.json [--budget N]        # fixes/149 P0-1: hash-checked dir→ledger re-import + bounded repair cycle against the dir (treeRun → red tail → synthesis w/ deps.treeFailure → apply → re-import → treeRun); green → tested-mint + converged (exit 0); budget exhausted → honest failed (exit 1, RT_E_REPAIR_FAILED)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs edit    --dir <dir> --file <relpath> --find "<old>" --replace "<new>" [--write] [--project build.json]   # 216s (108-T1): in-place str_replace on ONE emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, NOTHING is written); --write (requires --project) applies atomically only after evaluatePolicy("repair.apply", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs search  --project build.json --query "..." [--limit N]
@@ -2012,6 +2012,20 @@ async function main() {
               payload.error = bits.length > 0 ? bits.join("; ") : "tree-run failed";
               payload.code = "RT_E_TREE_RUN_FAILED";
             }
+            // W48 · 334-4 (S2): an `ok` tree whose DECLARED scripts (typecheck /
+            // build) never executed is GREEN BUT UNVERIFIED — nothing ran red,
+            // so `ok` is NOT redefined and the P6 mint below is untouched. The
+            // exit taxonomy (5) and these top-level fields make the unverified
+            // toolchain distinguishable from a fully-verified tree.
+            if (typeof outcome.declaredScriptsVerified === "boolean") {
+              payload.declaredScriptsVerified = outcome.declaredScriptsVerified;
+            }
+            if (Array.isArray(outcome.unverifiedDeclaredScripts) && outcome.unverifiedDeclaredScripts.length > 0) {
+              payload.unverified = true;
+              payload.unverifiedDeclaredScripts = [...outcome.unverifiedDeclaredScripts];
+              payload.unverifiedNote =
+                "declared project script(s) did not execute — the emitted tree is ok (nothing ran red) but its toolchain is UNVERIFIED; install deps and re-run --run to verify";
+            }
             // T9.3 promotion (W44 · G3 · applied from fixes/319_f3_promote §C):
             // a GREEN --run earns the tested stamp onto the emitted artifact
             // ITSELF — the dir's own `.rapidtool/project.json` now carries
@@ -2040,7 +2054,9 @@ async function main() {
               }
             }
           }
-          respond(payload, payload.ok ? 0 : 1);
+          // W48 · 334-4 (S2): exit 5 = green but the declared toolchain is
+          // UNVERIFIED (a separate honest signal; `ok`/`payload.ok` stay true).
+          respond(payload, payload.ok ? (payload.unverified === true ? 5 : 0) : 1);
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
@@ -2399,7 +2415,18 @@ async function main() {
             payload.error = bits.length > 0 ? bits.join("; ") : "tree-run failed";
             payload.code = "RT_E_TREE_RUN_FAILED";
           }
-          respond(payload, payload.ok ? 0 : 1);
+          // W48 · 334-4 (S2): same unverified-toolchain signal as `emit --run` —
+          // a green tree whose declared scripts never ran is exit 5, not 0.
+          if (typeof outcome.declaredScriptsVerified === "boolean") {
+            payload.declaredScriptsVerified = outcome.declaredScriptsVerified;
+          }
+          if (Array.isArray(outcome.unverifiedDeclaredScripts) && outcome.unverifiedDeclaredScripts.length > 0) {
+            payload.unverified = true;
+            payload.unverifiedDeclaredScripts = [...outcome.unverifiedDeclaredScripts];
+            payload.unverifiedNote =
+              "declared project script(s) did not execute — the tree is ok (nothing ran red) but its toolchain is UNVERIFIED; install deps and re-run to verify";
+          }
+          respond(payload, payload.ok ? (payload.unverified === true ? 5 : 0) : 1);
         } catch (err) {
           respond(
             {
@@ -4779,10 +4806,10 @@ const USAGE = {
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",
     packet: "packet --project <file.json> [--out <file.md>] [--knowledge <store.json>]  # --knowledge seeds the Ranked-memory section with cross-project accepted lesson rows (tier-1, advisory)",
     export: "export --project <file.json> [--out <file.json>]",
-    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse)",
+    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok, exit 5 when it is ok but the declared typecheck/build did not run (unverified toolchain); --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse)",
     fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR approve selected/all ids — never auto-approves: --approve routes through the policy seam's human seat (--i-am-human + a TTY re-entry of RT_HUMAN_SEAT_TOKEN; a denied verdict writes nothing and stamps no decidedBy)",
     eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, nothing fabricated — the eval-out documents are never written (like every verb, the exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/); a missing history prints as 'no history', never a fake 0 delta",
-    "tree-run": "tree-run --dir <dir> [--project <file.json>]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0; red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
+    "tree-run": "tree-run --dir <dir> [--project <file.json>]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0 (exit 5 when green but the declared toolchain is unverified: declared typecheck/build did not run); red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
     repair: "repair --dir <dir> --project <file.json> [--budget N]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (path→content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun → red tail → one bounded synthesis repair call with deps.treeFailure → apply repaired files in place → re-import → treeRun again); green → tested-equivalent mint + honest P6 gate + converged (0); budget exhausted → honest failed (1, RT_E_REPAIR_FAILED); the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
     edit: "edit --dir <dir> --file <relpath> --find <old> --replace <new> [--write] [--project <file.json>]  # 216s (108-T1): ONE in-place str_replace on an emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, nothing is written); --write (requires --project) applies atomically only after evaluatePolicy(\"repair.apply\", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes); ambiguous / missing / no-op matches are coded refusals",
     summary: "summary --project <file.json>   # envelope: ok + summary incl. nextAction {kind,cmd,phase,why} — the SAME 7-arm vocabulary the console renders (run/approve/retry/done/running/fix-gate/unknown)",
@@ -4812,7 +4839,8 @@ const USAGE = {
 
 // ---------------------------------------------------------------------------
 // M6-05/M6-06 (B1 · fixes/310): the Node-side global nets. The CLI contract is
-// ONE JSON object on stdout + the exit taxonomy (0/1/2/3/4), but `main()`'s
+// ONE JSON object on stdout + the exit taxonomy (0/1/2/3/4/5; 5 = `emit --run` /
+// `tree-run` green-but-unverified declared scripts), but `main()`'s
 // internal try/catch only wraps the dispatch below its first awaits — a
 // rejection from ensureErrorCodes()/ensureRtAppender() (or any uncaught throw
 // later in the process) used to exit with a bare Node stack and NO envelope

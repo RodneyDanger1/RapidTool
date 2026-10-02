@@ -20,6 +20,7 @@ import {
   HARNESS_APPROVE_ACTOR,
   importTreeDir,
   ingest,
+  keyedTrailOutcome,
   loadProject,
   p6CycleLiveDeps,
   packet,
@@ -2008,8 +2009,26 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
       saveProject(path, drained);
       const out = join(dir, "tree");
       const r = runCli(["emit", "--project", path, "--out", out, "--run"]);
-      assert.equal(r.code, 0, `green tree must exit 0; stderr: ${r.stderr.slice(0, 300)}`);
-      assert.equal(r.json.ok, true);
+      // W48 · 334-4: a fresh tree has no `node_modules`, so the tree-run cannot
+      // execute the tree's DECLARED toolchain (`typecheck`/`build`) — the run is
+      // green (nothing ran red, `ok` stays true) but the toolchain is UNVERIFIED,
+      // which is now its own exit (5), distinguishable from verified 0 and red 1.
+      // Exit 0 therefore requires every declared script to have actually run.
+      assert.equal(
+        r.code,
+        5,
+        `green-but-unverified tree must exit 5; stderr: ${r.stderr.slice(0, 300)}`,
+      );
+      assert.equal(r.json.ok, true, "the tree is green — nothing ran red");
+      assert.equal(r.json.unverified, true, "the envelope names the unverified toolchain");
+      assert.ok(
+        Array.isArray(r.json.unverifiedDeclaredScripts) &&
+          (r.json.unverifiedDeclaredScripts as string[]).includes("typecheck"),
+        `unverifiedDeclaredScripts must name the unrun declared script, saw ${JSON.stringify(
+          r.json.unverifiedDeclaredScripts,
+        )}`,
+      );
+      assert.equal(r.json.code, undefined, "exit 5 is not an error class — no RT_E code rides it");
       const tr = r.json.treeRun as
         | {
             ok: boolean;
@@ -3445,5 +3464,215 @@ describe("W46 · 332-2 (F-5) — doctor key state (presence ≠ validity)", () =
     const transient = await resolveDoctorKeyState(true, { code: "RT_E_LLM_TIMEOUT", at: 1 });
     assert.equal(transient.keyState, "unverified");
     assert.equal(transient.lastKeyed?.code, "RT_E_LLM_TIMEOUT");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W48 · 334-2 — the run's keyed outcome on the project record (L1), the coded
+// failure class on the RunResult (L2), and non-gate-verb spend folding (L3).
+// Deterministic: no key, no network — the keyed path is stubbed.
+// ---------------------------------------------------------------------------
+describe("W48 · 334-2 — persisted keyed outcome, run-result code, verb spend", () => {
+  const log6 = (
+    event: string,
+    detail: string,
+    ts: number,
+  ): { ts: number; phase: PhaseId; level: "warn"; event: string; detail: string } => ({
+    ts,
+    phase: 6 as PhaseId,
+    level: "warn",
+    event,
+    detail,
+  });
+  const greenVerdict = (): TreeRunOutcome => ({
+    ok: true,
+    dir: "",
+    compile: { ok: true, dir: "", checked: 1, passed: 1, failed: 0, skipped: 0, verdicts: [] },
+    tests: [],
+    run: { kind: "library", run: "skip", detail: "no entry to smoke" },
+  });
+  const KEY_REJECTION =
+    'RT_E_LLM_KEY_REJECTED · DeepSeek returned HTTP 401 — requested model: "deepseek-v4-pro" — key source: the process environment (tail …a1b2)';
+
+  it("keyedTrailOutcome: a key-unusable refusal is read; a later success clears it; non-key failures never condemn", () => {
+    const base = createProject({ brief: FIXTURE_BRIEF });
+    assert.deepEqual(keyedTrailOutcome(base), { kind: "none" }, "no keyed evidence");
+    const rejected: Project = { ...base, logs: [log6("p6.synthesis.refused", KEY_REJECTION, 5)] };
+    assert.deepEqual(keyedTrailOutcome(rejected), {
+      kind: "rejected",
+      code: "RT_E_LLM_KEY_REJECTED",
+      at: 5,
+      keySource: "the process environment (tail …a1b2)",
+    });
+    // A later `ok` synthesis attempt means the last keyed call succeeded.
+    const cleared: Project = {
+      ...rejected,
+      logs: [...rejected.logs, log6("p6.synthesis.attempt", "chunk 1/1 · attempt 1 · 90000ms · ok", 6)],
+    };
+    assert.deepEqual(keyedTrailOutcome(cleared), { kind: "success" });
+    // A non-key refusal (the model declined the brief) is not a keyed outcome.
+    const other: Project = {
+      ...base,
+      logs: [log6("p6.synthesis.refused", "RT_E_LLM_REJECTED · model refused the brief", 7)],
+    };
+    assert.deepEqual(keyedTrailOutcome(other), { kind: "none" });
+    // The tail-only source never carries a key shape.
+    assert.ok(!/sk-/.test(JSON.stringify(keyedTrailOutcome(rejected))), "no key material in the trail outcome");
+  });
+
+  it("runUntilGate persists a P6-synthesis 401 on the record and surfaces its code (L1+L2)", async () => {
+    resetSessionBudget();
+    try {
+      const drained = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+      const rewound: Project = {
+        ...drained,
+        status: "running",
+        currentPhase: 6,
+        lastTest: null,
+        phases: drained.phases.map((r) =>
+          r.id === 6 ? ({ ...r, status: "ready" as const, gate: null, startedAt: null } as unknown as typeof r) : r,
+        ),
+      };
+      const synthesize = async (p: Project): Promise<Project> => ({
+        ...p,
+        logs: [...(p.logs ?? []), log6("p6.synthesis.refused", KEY_REJECTION, 1759000000000)].slice(-200),
+      });
+      const res = await runUntilGate(rewound, {
+        live: true,
+        maxSteps: 1,
+        p6Deps: { synthesize, runTree: async () => greenVerdict() },
+      });
+      const persisted = (res.project as Project & { lastKeyedOutcome?: { code: string; at: number; keySource?: string } })
+        .lastKeyedOutcome;
+      assert.ok(persisted, "the run moved the keyed outcome onto the project record");
+      assert.equal(persisted!.code, "RT_E_LLM_KEY_REJECTED");
+      assert.equal(persisted!.at, 1759000000000);
+      assert.match(persisted!.keySource ?? "", /tail …a1b2/);
+      assert.ok(!/sk-/.test(JSON.stringify(persisted)), "no key material persisted");
+      assert.equal(res.code, "RT_E_LLM_KEY_REJECTED", "the RunResult carries the coded failure class");
+      // Persist → re-load → read back with no override: the fresh-process path
+      // a real `doctor` takes after a `gate`.
+      const dir = tempDir();
+      try {
+        const file = join(dir, "run.json");
+        saveProject(file, res.project);
+        const raw = JSON.parse(readFileSync(file, "utf8")) as { lastKeyedOutcome?: { code?: string } };
+        assert.equal(raw.lastKeyedOutcome?.code, "RT_E_LLM_KEY_REJECTED", "the saved record carries the field");
+        assert.deepEqual(await resolveDoctorKeyState(true, undefined, file), {
+          keyState: "rejected",
+          lastKeyed: {
+            code: "RT_E_LLM_KEY_REJECTED",
+            at: 1759000000000,
+            keySource: "the process environment (tail …a1b2)",
+          },
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } finally {
+      resetSessionBudget();
+    }
+  });
+
+  it("resolveDoctorKeyState reads a FRESH project's persisted key rejection (L1)", async () => {
+    const dir = tempDir();
+    try {
+      const file = join(dir, "proj.json");
+      writeFileSync(
+        file,
+        JSON.stringify({
+          lastKeyedOutcome: {
+            code: "RT_E_LLM_KEY_REJECTED",
+            at: 1759000000000,
+            keySource: "the process environment (tail …a1b2)",
+          },
+        }),
+        "utf8",
+      );
+      const state = await resolveDoctorKeyState(true, undefined, file);
+      assert.equal(state.keyState, "rejected", "the record read-back flips the doctor to rejected");
+      assert.equal(state.lastKeyed?.code, "RT_E_LLM_KEY_REJECTED");
+      assert.equal(state.lastKeyed?.keySource, "the process environment (tail …a1b2)");
+      // An explicit override still wins over the record.
+      const override = await resolveDoctorKeyState(true, { code: "RT_E_LLM_KEY_SHADOWED", at: 9 }, file);
+      assert.equal(override.lastKeyed?.code, "RT_E_LLM_KEY_SHADOWED");
+      // A legacy record with no field stays the honest unverified floor.
+      const legacy = join(dir, "legacy.json");
+      writeFileSync(legacy, JSON.stringify({ tokenUsage: { promptTokens: 1, completionTokens: 1 } }), "utf8");
+      assert.deepEqual(await resolveDoctorKeyState(true, undefined, legacy), { keyState: "unverified" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("repairTreeDir folds its synthesis spend into the project slice (L3)", async () => {
+    const dir = tempDir();
+    resetSessionBudget();
+    try {
+      mkdirSync(join(dir, "src", "generated"), { recursive: true });
+      writeFileSync(join(dir, "src", "generated", "hvac.ts"), "export const hvac = () => 1;\n", "utf8");
+      const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+      const ledger: Project = {
+        ...base,
+        generatedTree: [
+          { path: "src/generated/hvac.ts", source: "export const hvac = () => 1;", hash: "f1", attempt: 0 },
+        ],
+      };
+      let calls = 0;
+      const synth = async (p: Project): Promise<Project> => {
+        calls += 1;
+        recordSessionSpend({ promptTokens: 400, completionTokens: 46 });
+        return p;
+      };
+      const red: TreeRunOutcome = {
+        ok: false,
+        dir: "",
+        compile: { ok: false, dir: "", checked: 0, passed: 0, failed: 1, skipped: 0, verdicts: [] },
+        tests: [],
+        run: null,
+        error: "red",
+      };
+      const res = await repairTreeDir(ledger, dir, {
+        budget: 1,
+        deps: { synthesize: synth, runTree: async () => red },
+      });
+      assert.ok(calls >= 1, "the repair synthesis ran");
+      assert.deepEqual(
+        res.project.tokenUsage,
+        { promptTokens: 400 * calls, completionTokens: 46 * calls, calls },
+        "the repair's measured spend persists on the returned ledger",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      resetSessionBudget();
+    }
+  });
+
+  it("wildStartRun folds the macro-run's measured spend into the project slice (L3)", async () => {
+    resetSessionBudget();
+    try {
+      const p = createProject({ brief: FIXTURE_BRIEF, name: "WildSpend" });
+      let recorded = 0;
+      const res = await wildStartRun(p, {
+        maxSteps: 1,
+        onEvent: () => {
+          // Stand in for a keyed step's metered usage without a key: the engine
+          // records real usage into the SAME session ledger this seam folds.
+          if (recorded === 0) {
+            recordSessionSpend({ promptTokens: 500, completionTokens: 60 });
+            recorded = 1;
+          }
+        },
+      });
+      assert.equal(res.ok, true);
+      if (!res.ok) return;
+      assert.deepEqual(
+        res.project.tokenUsage,
+        { promptTokens: 500, completionTokens: 60, calls: 1 },
+        "the wild macro-run's session delta persists on the returned project",
+      );
+    } finally {
+      resetSessionBudget();
+    }
   });
 });

@@ -597,6 +597,23 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       // lastTest.label/evidenceHash are read through a defensive shape so this
       // probe compiles and runs whether or not the types.ts fields have landed
       // yet (E-07 #1 — old payloads simply stay unmet, never throw).
+      //
+      // W48 / 334-3 (T1b) — the honest line, and it is a NAMED LIMIT:
+      // `p6-verified` (like `p6-test`) measures the tree-run's EXECUTED
+      // verdict — a machine run promoted a "tested" verdict whose evidence hash
+      // is over real spec executions. It deliberately does NOT require the
+      // emitted package.json's DECLARED `typecheck`/`build` scripts to have run
+      // (that state rides the tree-run envelope as
+      // `declaredScriptsVerified`/`unverifiedDeclaredScripts`, and the emitted
+      // README now carries it loudly). Requiring it would make the criterion
+      // unsatisfiable on every fresh tree: the P6 journey emits to a temp dir
+      // with no node_modules, so its declared `tsc`/`build` always skip unless
+      // the tree is installed (one `npm install` measured ~47 s), and an
+      // unsatisfiable criterion blocks gate.passed — and therefore the keyed P6
+      // mint — forever. So the probe is TIGHTENED to guarantee the pass is
+      // genuinely EXECUTED-green (ok + detail, the same floor p6-test reads):
+      // a hollow "tested" stamp with ok:false or no recorded detail can never
+      // pass a criterion whose name reads as verification.
       id: "p6-verified",
       criterion:
         'Machine verification promoted a tested verdict (lastTest.label === "tested" with evidenceHash)',
@@ -610,6 +627,9 @@ export const DOD: Record<PhaseId, GateItem[]> = {
         return (
           lt !== null &&
           lt !== undefined &&
+          lt.ok === true &&
+          typeof lt.detail === "string" &&
+          lt.detail.length > 0 &&
           lt.label === "tested" &&
           typeof lt.evidenceHash === "string" &&
           lt.evidenceHash.length > 0

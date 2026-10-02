@@ -18,10 +18,18 @@ test("parsePreviewArgs accepts the two actions", () => {
 });
 
 test("parsePreviewArgs rejects missing, unknown and extra arguments", () => {
-  assert.match(parsePreviewArgs([]).error, /usage:/);
-  assert.match(parsePreviewArgs(["reload"]).error, /unknown action: reload/);
-  assert.match(parsePreviewArgs(["start"]).error, /unknown action: start/);
-  assert.match(parsePreviewArgs(["restart", "--force"]).error, /unexpected argument: --force/);
+  const usage = parsePreviewArgs([]);
+  assert.ok(usage.error, "an empty argv must be a usage error");
+  assert.match(usage.error, /usage:/);
+  const unknown = parsePreviewArgs(["reload"]);
+  assert.ok(unknown.error, "an unknown action must be refused");
+  assert.match(unknown.error, /unknown action: reload/);
+  const start = parsePreviewArgs(["start"]);
+  assert.ok(start.error, "start is not one of the two actions");
+  assert.match(start.error, /unknown action: start/);
+  const extra = parsePreviewArgs(["restart", "--force"]);
+  assert.ok(extra.error, "a trailing argument must be refused");
+  assert.match(extra.error, /unexpected argument: --force/);
 });
 
 test("parsePid reads a pidfile and rejects junk", () => {
@@ -165,6 +173,7 @@ test("stopOutcome fails when a pid survives or the port is still held", () => {
     after: { pids: [] },
   });
   assert.equal(stubbornOnly.ok, false);
+  assert.ok(stubbornOnly.error, "a surviving pid must carry an error");
   assert.match(stubbornOnly.error, /still held by pid\(s\) 50/);
 
   const newOwner = stopOutcome({
@@ -173,6 +182,7 @@ test("stopOutcome fails when a pid survives or the port is still held", () => {
     after: { pids: [77] },
   });
   assert.equal(newOwner.ok, false);
+  assert.ok(newOwner.error, "a new owner must carry an error");
   assert.match(newOwner.error, /still held by pid\(s\) 77/);
 });
 
@@ -183,10 +193,12 @@ test("stopOutcome reports a verified free port", () => {
     after: { pids: [] },
   });
   assert.equal(stopped.ok, true);
+  assert.ok(stopped.message, "a verified stop must carry its message");
   assert.match(stopped.message, /stopped pid\(s\) 50 — port 8081 is free/);
 
   const idle = stopOutcome({ signalled: [], stubborn: [], after: { pids: [] } });
   assert.equal(idle.ok, true);
+  assert.ok(idle.message, "an idle port must carry its message");
   assert.match(idle.message, /nothing was listening on 8081/);
 });
 
@@ -197,9 +209,11 @@ test("stopOutcome fails on a listener whose owner cannot be attributed", () => {
     after: { pids: [], unattributed: true },
   });
   assert.equal(outcome.ok, false);
+  assert.ok(outcome.error, "an unattributable listener must carry an error");
   assert.match(outcome.error, /port 8081 is held by a process this script cannot see/);
 });
 
+/** @param {{ pids: number[], ignoresTerm?: number[] }} opts */
 function fakeProcesses({ pids, ignoresTerm = [] }) {
   const alive = new Set(pids);
   const signals = [];

@@ -24,10 +24,10 @@
   //    breaks discriminated-union narrowing by widening `ok: true | false`,
   //    which floods the transitively-imported `src/lib` files with ~600 false
   //    "property does not exist" errors. Do not set `strict: false` here.
-  // 134 errors remain across 14 files (W46 · 332-4 made `rapidtool-cli.mjs` and
-  // `cli-exit-taxonomy.test.mjs` clean — they carry no budget entry); the budget
-  // records each file's count. Reaching zero is a separate migration — see the
-  // lane log.
+  // W48 · 334-4 retired the last 134 errors across 14 files: the program is
+  // now CLEAN (`npx tsc -p tsconfig.scripts.json --noEmit` exits 0), so the
+  // ratchet budget in `scripts/typecheck-scripts.test.mjs` is empty and any
+  // new error in any scripts file fails it.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noImplicitAny": false,

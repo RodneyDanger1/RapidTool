@@ -119,6 +119,7 @@ test("the copy check reads every auth file and catches an edit", async () => {
 
   writeFileSync(join(root, "migrations", AUTH_MIGRATION), "create table t (x int);\n");
   const drifted = (await authSchemaCopyState(root)).pairs.find((p) => p.name === AUTH_MIGRATION);
+  assert.ok(drifted, "the drifted migration must still appear in the pair list");
   assert.notEqual(drifted.copy, drifted.source);
 });
 

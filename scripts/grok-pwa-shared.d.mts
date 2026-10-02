@@ -75,6 +75,6 @@ export declare function normalizeHeadContext(ctx?: GrokHeadContext): {
 };
 export declare function injectGrokPwaHead(html: string, ctx?: GrokHeadContext): string;
 export declare function createHeadInjector(ctx?: GrokHeadContext): {
-  push(chunk: Uint8Array | string): Uint8Array[];
-  flush(): Uint8Array[];
+  push(chunk: Uint8Array | string): Buffer[];
+  flush(): Buffer[];
 };

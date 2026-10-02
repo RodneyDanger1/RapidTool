@@ -12,6 +12,7 @@ import {
   moduleCoverageGaps,
   partitionGaps,
   resolveSpecifier,
+  staleAllowlistEntries,
 } from "./check-module-coverage.mjs";
 import { projectRoot } from "./with-app-env.mjs";
 
@@ -116,6 +117,16 @@ test("module-coverage: import parsing covers from/import/require and the @ alias
   const root = projectRoot();
   const resolved = resolveSpecifier("@/lib/fixtures.ts", join(root, "scripts", "x.test.mjs"), root);
   assert.ok(resolved && resolved.replace(/\\/g, "/").endsWith("/src/lib/fixtures.ts"), `@/ alias must resolve, saw ${resolved}`);
+});
+
+test("module-coverage: a stale allowlist entry (module now reached) fails the guard", () => {
+  // An entry for a module that IS covered is a hole in the ratchet: it would
+  // silently re-exempt the module if a later change orphaned it again.
+  assert.deepEqual(staleAllowlistEntries(["src/lib/orphan.ts"], { "src/lib/orphan.ts": "x" }), []);
+  assert.deepEqual(staleAllowlistEntries(["src/lib/orphan.ts"], { "src/lib/covered.ts": "x" }), ["src/lib/covered.ts"]);
+  // The live repo carries no stale entry today.
+  const { gaps } = moduleCoverageGaps(projectRoot());
+  assert.deepEqual(staleAllowlistEntries(gaps), [], "remove any allowlist entry whose module is now reached");
 });
 
 test("module-coverage: the CLI runs green on the live repo and exits 0", () => {

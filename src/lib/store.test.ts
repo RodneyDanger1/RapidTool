@@ -39,7 +39,8 @@ class MemoryStorage {
 (globalThis as unknown as { window: unknown }).window = globalThis;
 
 // Dynamic import: must run AFTER the polyfill so persist binds a real storage.
-const { convergeRealRun, readLastKeyed, staleEmitStep, useRapid, persistStorageHealth } = await import("./store.ts");
+const { codedFailureText, convergeRealRun, keyedRefusalSince, KEY_UNUSABLE_CODES, readLastKeyed, staleEmitStep, useRapid, persistStorageHealth } =
+  await import("./store.ts");
 // Let the initial rehydration (which seeds the demo project on empty storage) settle
 // before the first test; beforeEach wipes state for every test regardless.
 await new Promise((r) => setTimeout(r, 10));
@@ -603,7 +604,11 @@ test("runUntilHitl on a missing project returns ok false with a null stop reason
   assert.equal(r.ok, false);
   assert.equal(r.ran, 0);
   assert.equal(r.stoppedReason, null);
-  if (!r.ok) assert.equal(r.error, "Project missing.");
+  // C1 (334-5): the failure arm names the class — the old shape was uncoded.
+  if (!r.ok) {
+    assert.equal(r.error, "Project missing.");
+    assert.equal(r.code, "RT_E_PROJECT_MISSING");
+  }
 });
 
 test("full pipeline: runUntilHitl + approve loops to completion with honest stops, never capping", () => {
@@ -2124,4 +2129,107 @@ test("C1: readLastKeyed validates the server probe's shape (hostile/partial drop
     { code: "RT_E_LLM_KEY_REJECTED", at: 5 },
     "a blank keySource is omitted, never carried",
   );
+});
+
+// ---------------------------------------------------------------------------
+// C1 (334-5): the run surface names the coded class. The run result's own code
+// wins; a keyed refusal the validity probe witnessed is the fallback; a class is
+// NEVER invented (a transient last-keyed failure must not condemn the run — the
+// 333 F-4 lesson: no label may out-claim what it measured).
+// ---------------------------------------------------------------------------
+test("C1-334: codedFailureText leads with a real class, else leaves the error verbatim", () => {
+  assert.equal(
+    codedFailureText("Project missing.", "RT_E_PROJECT_MISSING"),
+    "RT_E_PROJECT_MISSING — Project missing.",
+  );
+  assert.equal(
+    codedFailureText("Run made no progress.", undefined, "RT_E_LLM_KEY_REJECTED"),
+    "RT_E_LLM_KEY_REJECTED — Run made no progress.",
+    "the probe's keyed refusal is the witness when the run result carries no code",
+  );
+  assert.equal(
+    codedFailureText("Run made no progress.", null, "RT_E_LLM_KEY_SHADOWED"),
+    "RT_E_LLM_KEY_SHADOWED — Run made no progress.",
+  );
+  assert.equal(
+    codedFailureText("x", "", "RT_E_LLM_KEY_REJECTED"),
+    "RT_E_LLM_KEY_REJECTED — x",
+    "an empty own code is not a class",
+  );
+  assert.equal(
+    codedFailureText("x", null, "RT_E_LLM_TIMEOUT"),
+    "x",
+    "a non-key transient must never be rendered as a key class",
+  );
+  assert.equal(codedFailureText("Run made no progress."), "Run made no progress.");
+  assert.equal(codedFailureText("x", null, null), "x");
+});
+
+test("C1-334: KEY_UNUSABLE_CODES is exactly the two validity classes", () => {
+  assert.deepEqual(
+    [...KEY_UNUSABLE_CODES].sort(),
+    ["RT_E_LLM_KEY_REJECTED", "RT_E_LLM_KEY_SHADOWED"],
+  );
+});
+
+test("C1-334: keyedRefusalSince attributes a refusal ONLY when stamped during this run", () => {
+  // Observed after the run started → this run's witness.
+  assert.equal(
+    keyedRefusalSince(1000, { code: "RT_E_LLM_KEY_REJECTED", at: 1000 }),
+    "RT_E_LLM_KEY_REJECTED",
+    "a refusal at the run's start edge counts",
+  );
+  assert.equal(
+    keyedRefusalSince(1000, { code: "RT_E_LLM_KEY_SHADOWED", at: 1005 }),
+    "RT_E_LLM_KEY_SHADOWED",
+  );
+  // A stale pre-run refusal must NOT be blamed on this run (F-4 over-claim guard).
+  assert.equal(
+    keyedRefusalSince(1000, { code: "RT_E_LLM_KEY_REJECTED", at: 999 }),
+    null,
+    "a refusal older than the run start is never attributed to it",
+  );
+  // A non-key class is never a validity witness.
+  assert.equal(keyedRefusalSince(1000, { code: "RT_E_LLM_TIMEOUT", at: 2000 }), null);
+  // Absent / malformed outcomes are dropped.
+  assert.equal(keyedRefusalSince(1000, null), null);
+  assert.equal(keyedRefusalSince(1000, undefined), null);
+  assert.equal(
+    keyedRefusalSince(1000, { code: "RT_E_LLM_KEY_REJECTED", at: Number.NaN }),
+    null,
+    "a non-finite stamp cannot be compared — drop it",
+  );
+});
+
+test("C1-334: both run paths carry RT_E_PROJECT_MISSING on a missing project", async () => {
+  const sync = useRapid.getState().runUntilHitl("no-such-id-334");
+  assert.equal(sync.ok, false);
+  if (!sync.ok) assert.equal(sync.code, "RT_E_PROJECT_MISSING");
+  const asyncRun = await useRapid.getState().runUntilHitlAsync("no-such-id-334");
+  assert.equal(asyncRun.ok, false);
+  if (!asyncRun.ok) assert.equal(asyncRun.code, "RT_E_PROJECT_MISSING");
+  // The sibling execute paths already agreed — the run family now matches.
+  assert.equal(useRapid.getState().execute("no-such-id-334").ok, false);
+});
+
+test("C1-334: refreshStatuses returns the fresh LLM surface (so a run handler can read it)", async () => {
+  const s = await useRapid.getState().refreshStatuses();
+  assert.equal(typeof s, "object");
+  assert.equal(typeof s.configured, "boolean");
+  assert.equal(typeof s.label, "string");
+  if (s.lastKeyed !== undefined) {
+    assert.equal(typeof s.lastKeyed.code, "string");
+    assert.equal(typeof s.lastKeyed.at, "number");
+  }
+});
+
+test("C1-334: ingestReport refuses with a class (missing project / malformed report)", () => {
+  const missing = useRapid.getState().ingestReport("no-such-id-334", {});
+  assert.equal(missing.ok, false);
+  if (!missing.ok) assert.equal(missing.code, "RT_E_PROJECT_MISSING");
+
+  const id = useRapid.getState().create(BRIEF, NAME);
+  const malformed = useRapid.getState().ingestReport(id, { phase: 99, status: "bogus" });
+  assert.equal(malformed.ok, false);
+  if (!malformed.ok) assert.equal(malformed.code, "RT_E_VALIDATION");
 });

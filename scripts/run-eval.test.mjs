@@ -120,7 +120,7 @@ test("(a) every corpus case carries a run-side grader outside every emit path", 
   assert.ok(slugs.length >= 6, `expected the six corpus cases, saw ${slugs.length}`);
   for (const slug of slugs) {
     const g = loadGrader(slug);
-    assert.equal(g.ok, true, `${slug}: ${g.ok ? "" : g.error}`);
+    assert.ok(g.ok, `${slug}: ${g.ok ? "" : g.error}`);
     assert.equal(g.grader.slug, slug);
     assert.ok(g.grader.acceptanceBar.length > 0, `${slug}: grader must declare an acceptance bar`);
     assert.ok(g.grader.requiredCapabilities.length > 0, `${slug}: grader must demand capabilities`);
@@ -136,7 +136,7 @@ test("(a) every corpus case carries a run-side grader outside every emit path", 
 
 test("(a) graderLeakScan flags planted grader content and clears a clean tree", () => {
   const g = loadGrader("coffeehouse2home-property-ledger");
-  assert.equal(g.ok, true);
+  assert.ok(g.ok, "the grader must load");
   const grader = g.grader;
 
   const dir = tempDir("leak");
@@ -182,14 +182,18 @@ test("F4 (314): treeRunToEvidence carries the verdict hash — and never invents
     ],
     verdictHash: "deadbeefcafef00d",
   });
+  assert.ok(hashed, "a runnable outcome maps to evidence");
   assert.equal(hashed.ok, true);
   assert.equal(hashed.testsPass, 4);
   assert.equal(hashed.verdictHash, "deadbeefcafef00d");
   // Legacy/no-hash evidence stays legacy-shaped — the key is omitted, never guessed.
   const legacy = treeRunToEvidence({ ok: true, dir: "d", tests: [] });
+  assert.ok(legacy);
   assert.equal(legacy.verdictHash, undefined);
   // Empty-string hash is not a hash.
-  assert.equal(treeRunToEvidence({ ok: true, tests: [], verdictHash: "" }).verdictHash, undefined);
+  const emptyHash = treeRunToEvidence({ ok: true, tests: [], verdictHash: "" });
+  assert.ok(emptyHash);
+  assert.equal(emptyHash.verdictHash, undefined);
   assert.equal(treeRunToEvidence(null), null);
 });
 
@@ -200,6 +204,7 @@ test("T9.3 (W44 · G3/320 · from 319_f3_promote §C): the promotion run-eval wi
     const recordPath = join(dir, ".rapidtool", "project.json");
     const base = createProject({ brief: "T9.3 promotion pin: a deterministic tiny brief for the run-eval seam." });
     writeFileSync(recordPath, JSON.stringify(base, null, 2), "utf8");
+    /** @type {import("../src/lib/compile-check.server.ts").TreeRunOutcome} */
     const greenOutcome = {
       ok: true,
       dir,
@@ -212,6 +217,7 @@ test("T9.3 (W44 · G3/320 · from 319_f3_promote §C): the promotion run-eval wi
     // The wire's own contract: the M2 evidence object accepts the additive
     // `minted` field (nothing frozen), and a green outcome promotes.
     const ev = treeRunToEvidence(greenOutcome);
+    assert.ok(ev, "a green outcome maps to evidence");
     ev.minted = true;
     assert.equal(ev.minted, true, "the M2 evidence object accepts the promotion's additive `minted` field");
     const prom = await promoteEmittedTreeTested(base, dir, greenOutcome);
@@ -235,7 +241,7 @@ test("(a) emitted trees on disk carry no grader content (leak scan over the real
   }
   for (const slug of present) {
     const g = loadGrader(slug);
-    assert.equal(g.ok, true, `${slug}: ${g.ok ? "" : g.error}`);
+    assert.ok(g.ok, `${slug}: ${g.ok ? "" : g.error}`);
     const scan = graderLeakScan(join(OUT_DIR, slug), g.grader);
     assert.equal(
       scan.leaked,
@@ -292,6 +298,7 @@ test("(a) a grader that cannot be trusted never grades (parse guards)", () => {
   // A missing grader file is an honest skip reason, never a throw:
   const missing = loadGrader("definitely-not-a-case", join(tmpdir(), "run-eval-no-such-grader-dir", "graders"));
   assert.equal(missing.ok, false);
+  assert.ok(missing.error, "a missing grader must carry its skip reason");
   assert.match(missing.error, /SKIPPED/);
   assert.ok(missing.error.includes("definitely-not-a-case.grader.json"), "skip reason must name the missing grader");
   assert.equal(graderFileFor("x", GRADER_DIR).endsWith(join("graders", "x.grader.json")), true);
@@ -370,6 +377,7 @@ test("(b) trialsSummary classifies flakiness honestly (strict boolean counting)"
   const oneTrial = trialsSummary([true], { k: 1 });
   assert.equal(oneTrial.flaky, false);
   assert.equal(oneTrial.flakinessMeasurable, false, "1 trial cannot measure flakiness");
+  assert.ok(oneTrial.note, "a 1-trial run must say why flakiness is unmeasurable");
   assert.match(oneTrial.note, /1 trial/);
   assert.equal(oneTrial.passAt1, 1);
 
@@ -413,14 +421,23 @@ test("(b) acceptanceFailReason names the failing clause (mean threshold vs files
   const okAcc = { filesOk: true, contentOk: true, missingFiles: [], failedContent: [] };
   // The exact run-2 shape: files+content green, 6/9 mean → the ONLY false clause is the threshold.
   assert.equal(passesAcceptance({ mean: 0.6667 }, okAcc, grader), false);
-  assert.match(acceptanceFailReason({ mean: 0.6667 }, okAcc, grader), /mean 0\.6667 < 1/);
+  const belowThreshold = acceptanceFailReason({ mean: 0.6667 }, okAcc, grader);
+  assert.ok(belowThreshold, "a below-threshold mean must name its clause");
+  assert.match(belowThreshold, /mean 0\.6667 < 1/);
   assert.equal(acceptanceFailReason({ mean: 1 }, okAcc, grader), null, "green row has no reason");
-  assert.match(acceptanceFailReason(null, okAcc, grader), /mean/, "a crashed trial reports the mean clause");
-  assert.match(acceptanceFailReason({ mean: 1 }, { ...okAcc, filesOk: false, missingFiles: ["index.html"] }, grader), /index\.html/);
-  assert.match(
-    acceptanceFailReason({ mean: 1 }, { ...okAcc, contentOk: false, failedContent: ['package.json: missing "test"'] }, grader),
-    /package\.json/,
+  const crashed = acceptanceFailReason(null, okAcc, grader);
+  assert.ok(crashed, "a crashed trial reports the mean clause");
+  assert.match(crashed, /mean/);
+  const missingFile = acceptanceFailReason({ mean: 1 }, { ...okAcc, filesOk: false, missingFiles: ["index.html"] }, grader);
+  assert.ok(missingFile);
+  assert.match(missingFile, /index\.html/);
+  const missingContent = acceptanceFailReason(
+    { mean: 1 },
+    { ...okAcc, contentOk: false, failedContent: ['package.json: missing "test"'] },
+    grader,
   );
+  assert.ok(missingContent);
+  assert.match(missingContent, /package\.json/);
   // Lenient grader: both assertion clauses are OFF → no reason even when red.
   const lenient = { passWhen: { meanAtLeast: 0.5, requireExpectedFiles: false, requireExpectedContent: false } };
   assert.equal(acceptanceFailReason({ mean: 0.5556 }, { ...okAcc, filesOk: false, contentOk: false, missingFiles: ["x"], failedContent: ["y"] }, lenient), null);
@@ -630,6 +647,7 @@ test("(d) the drain exits on the FIRST dod round with a coded stop (WB-2 → M9)
   assert.equal(rowsBefore, 0, "precondition: no dod.blocked row yet");
 
   const drain = await drainPipeline(sabotaged);
+  assert.ok(drain.res, "the drain must carry its terminal run result");
   assert.equal(drain.res.outcome, "dod", "the round really is the hard-DoD stop");
   assert.equal(drain.position, "dod", "a hard stop parks as its own coded position, never a silent stall");
   assert.equal(drain.onTime, true, "the drain stopped WITH a terminal state (M9's first branch)");
@@ -685,6 +703,7 @@ test("OV-35: the run-start marker is written before the first corpus entry", asy
 });
 
 test("OV-35: preflight maps not-configured/401/402/400 to distinct coded output", () => {
+  /** @type {Array<[{configured?: boolean, wire?: {attempted?: boolean, ok?: boolean, httpStatus?: number|null, code?: string|null, error?: string|null, model?: string|null, requestedModel?: string|null}|null}, string, string]>} */
   const cases = [
     [{ configured: false }, "not-configured", "RT_E_LLM_NOT_CONFIGURED"],
     [
@@ -764,12 +783,14 @@ test("OV-35: a keyless run writes no run-start marker and adds no fields to resu
 test("OV-35: a ≤4/9 outcome is routed to the named branch", () => {
   const low = keyedRunDecision({ mode: "keyed", meanOfNine: 3.5 });
   assert.equal(low.branch, "retrace-first");
+  assert.ok(low.line, "the retrace-first branch must carry its line");
   assert.match(low.line, /re-trace/i);
   assert.match(low.line, /do not re-run/i, "the wording must name re-trace vs re-run");
   const edge = keyedRunDecision({ mode: "keyed", meanOfNine: 4 });
   assert.equal(edge.branch, "retrace-first", "exactly 4/9 is inside the branch");
   const band = keyedRunDecision({ mode: "keyed", meanOfNine: 5.5 });
   assert.equal(band.branch, "band-expected");
+  assert.ok(band.line, "the band-expected branch must carry its line");
   assert.match(band.line, /log/i);
   const high = keyedRunDecision({ mode: "keyed", meanOfNine: 8 });
   assert.equal(high.branch, "above-prediction");
@@ -857,6 +878,7 @@ test("OV-35: the reachability probe loads the P6 separate specifiers and classif
     assert.equal(probe.specifiers.deepseek.isDeepSeekConfigured, true);
     assert.equal(probe.specifiers.codegen.resolved, true);
     assert.equal(probe.specifiers.codegen.liveP6Synthesis, true);
+    assert.ok(probe.wire, "the 401 probe must record its wire attempt");
     assert.equal(probe.wire.attempted, true);
     assert.equal(probe.wire.httpStatus, 401);
     assert.equal(probe.class, "auth-rejected");
@@ -877,6 +899,7 @@ test("OV-35: the reachability probe loads the P6 separate specifiers and classif
     });
     assert.equal(probe2.class, "wire-ok");
     assert.equal(probe2.ok, true);
+    assert.ok(probe2.wire, "the 200 probe must record its wire attempt");
     assert.equal(probe2.wire.httpStatus, 200);
     assert.equal(probe2.wire.model, "deepseek-v4-flash");
     // wire:false → configured but UNPROBED (never a silent pass):
@@ -954,7 +977,7 @@ test("OV-7: the corpus spans ≥2 domains and ≥2 of them carry ≥2 fixtures (
   assert.ok((index["real-estate"] ?? []).length >= 2, `real-estate keeps its fixture set: ${JSON.stringify(index["real-estate"] ?? [])}`);
   // Trap guard (230 §OV-7): a domain's second fixture must not duplicate a brief.
   for (const d of multi) {
-    const briefs = index[d].map((slug) => entries.find((e) => e.slug === slug).brief.trim());
+    const briefs = index[d].map((slug) => entries.find((e) => e.slug === slug)?.brief.trim() ?? "");
     assert.ok(briefs.every((b) => b.length > 0), `${d}: every fixture must carry a brief`);
     assert.equal(new Set(briefs).size, briefs.length, `${d}: fixture briefs must be distinct, not copies`);
   }
@@ -1011,7 +1034,7 @@ test("OV-7: the agent-facing brief carries no grader text (real corpus) and a pl
   // Control: a scan that cannot fail is not a scan — bake the bar into a
   // synthetic brief and it MUST be flagged (the playbook's named trap).
   const g = loadGrader("permit-inspection-tracker");
-  assert.equal(g.ok, true);
+  assert.ok(g.ok, "the control grader must load");
   const planted = briefLeakScan(
     { slug: "x", name: "X", brief: `build it so that ${g.grader.acceptanceBar}` },
     g.grader,
@@ -1187,17 +1210,19 @@ test("W24/B2 — the provider call tap is WIRED: install → window → live rec
     assert.equal(records[0].promptTokens, 11);
     assert.equal(records[0].completionTokens, 3);
     const ev = llmEvidenceFromCallRecords(records);
+    assert.ok(ev, "a one-call window must fold to evidence");
     assert.deepEqual(ev.servedModels, ["deepseek-flash"]);
     assert.equal(ev.usage.totalTokens, 14);
     assert.equal(ev.llmCalls, 1);
     assert.equal(ev.failedCalls, 0);
     assert.equal(typeof ev.estimatedCostUsd, "number");
-    assert.ok(ev.estimatedCostUsd > 0, "a measured call must never price at 0 (the B2-1 fabricated-zero trap)");
+    assert.ok(ev.estimatedCostUsd !== null && ev.estimatedCostUsd > 0, "a measured call must never price at 0 (the B2-1 fabricated-zero trap)");
     // The window is per-trial: nothing leaks into the next one, and an empty
     // window is reported as OBSERVED-nothing (never upgraded into a bill claim).
     beginTrialCallTap();
     assert.deepEqual(endTrialCallTap(), []);
     const none = llmEvidenceFromCallRecords([]);
+    assert.ok(none, "an empty window must still fold (the tap observed nothing — never null)");
     assert.equal(none.llmCalls, 0);
     assert.match(none.costBasis, /OBSERVED no calls/, "an empty window must not claim 'nothing billed'");
   } finally {
@@ -1240,6 +1265,7 @@ test("W43/A5 — the cache fold (M4-09): split tap record → usage.cachedPrompt
     assert.equal(splitRecords[0].cachedPromptTokens, 9, "the tap record carries the measured hit split");
     assert.equal(splitRecords[0].cacheMissTokens, 2);
     const splitEv = llmEvidenceFromCallRecords(splitRecords);
+    assert.ok(splitEv, "the split window must fold to evidence");
     assert.equal(splitEv.usage.promptTokens, 11, "the fold still measures the prompt total");
     assert.equal(splitEv.usage.totalTokens, 14);
     assert.equal(splitEv.usage.cachedPromptTokens, 9, "the read-side fold surfaces cache reads to the row");
@@ -1264,11 +1290,13 @@ test("W43/A5 — the cache fold (M4-09): split tap record → usage.cachedPrompt
     const legacyRecords = endTrialCallTap();
     assert.equal("cachedPromptTokens" in legacyRecords[0], false, "no measured split → no record key");
     const legacyEv = llmEvidenceFromCallRecords(legacyRecords);
+    assert.ok(legacyEv, "the legacy window must fold to evidence");
     assert.equal("cachedPromptTokens" in legacyEv.usage, false, "absent stays absent — never a fabricated 0");
     // (c) a non-number cache field is not a report (hostile-shape fold guard).
     const hostileEv = llmEvidenceFromCallRecords([
       { ok: true, promptTokens: 5, completionTokens: 2, cachedPromptTokens: "9" },
     ]);
+    assert.ok(hostileEv, "a hostile-shape window must still fold to evidence");
     assert.equal("cachedPromptTokens" in hostileEv.usage, false, "a string is not a measurement");
   } finally {
     if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
@@ -1410,8 +1438,10 @@ test("L1-E3(1) — evaluateEntryRunsRow REALLY runs the emitted entry: exit-0 pa
     assert.equal(behavior.pending, 0, "the pre-U1 `pending` never-evaluated status must never come back");
     const okRow = behavior.rows.find((r) => r.id === "e-ok");
     const badRow = behavior.rows.find((r) => r.id === "e-bad");
+    assert.ok(okRow, "the passing row must be present");
     assert.equal(okRow.status, "pass", "an exit-0 entry within budget passes — a REAL bounded spawn, not a structural skip");
     assert.match(okRow.detail, /exit 0 in \d+ms/);
+    assert.ok(badRow, "the failing row must be present");
     assert.equal(badRow.status, "fail", "a broken artifact FAILS the row — never a silent pass");
     assert.match(badRow.detail, /exit 1 ≠ declared exit 0/);
     assert.match(badRow.detail, /exec of broken-entry\.mjs/);
@@ -1424,6 +1454,7 @@ test("L1-E3(1) — evaluateEntryRunsRow REALLY runs the emitted entry: exit-0 pa
     assert.equal(acceptance.behaviorOk, false);
     assert.equal(acceptance.behavior.rows.length, 2);
     const reason = acceptanceFailReason({ mean: 9 }, acceptance, grader);
+    assert.ok(reason, "an expected-behavior failure must carry its reason");
     assert.match(reason, /expected behavior failed: e-bad/);
     assert.match(reason, /exit 1/);
   } finally {
@@ -1450,6 +1481,7 @@ test("L1-E3(2) — acceptanceFailReason carries the failed row's own coded detai
     },
   };
   const reason = acceptanceFailReason({ mean: 5 }, acceptance, grader);
+  assert.ok(reason, "the failed row must carry its reason");
   assert.match(reason, /expected behavior failed: r1/);
   assert.match(reason, /\(cli\.js\)/, "the row's location rides the reason");
   assert.match(reason, /exit 7 ≠ declared exit 0/, "the row's OWN coded detail rides the reason (Q4-b tail)");
@@ -1460,6 +1492,7 @@ test("L1-E3(2) — acceptanceFailReason carries the failed row's own coded detai
     { behaviorOk: false, behavior: { rows: [{ id: "r2", status: "fail", detail: huge }] } },
     grader,
   );
+  assert.ok(noisy, "a capped detail must still produce a reason");
   assert.ok(noisy.includes("X".repeat(120)), "the detail keeps its first 120 chars");
   assert.ok(!noisy.includes("X".repeat(121)), "and is bounded at 120 — a noisy child cannot bloat the record");
 });
@@ -1613,6 +1646,7 @@ test("W44 A5 — the empty-corpus results.json writer is atomic and keeps the le
   const out = join(dir, "out");
   mkdirSync(corpus, { recursive: true });
   try {
+    /** @type {Record<string, string | undefined>} */
     const env = { ...process.env, EVAL_CORPUS_DIR: corpus, EVAL_OUT_DIR: out };
     delete env.DEEPSEEK_API_KEY;
     const res = spawnSync(

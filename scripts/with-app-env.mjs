@@ -138,6 +138,8 @@ export function isMainModule(moduleUrl) {
  * `child.kill(signal)`: a real signal to a directly-spawned child is the
  * correct, graceful path there. Best-effort: never throws; when taskkill
  * itself cannot launch, the direct kill still fires.
+ * @param {string} signal
+ * @param {typeof spawn | ((command: string, args: string[], options: { windowsHide: boolean, stdio: string }) => { on?: (event: string, listener: (...args: unknown[]) => void) => unknown } | null | undefined)} [spawnFn]
  */
 export function reapChildTree(child, signal, spawnFn = spawn) {
   if (process.platform === "win32" && child && Number.isInteger(child.pid) && child.pid > 0) {

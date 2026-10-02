@@ -160,7 +160,8 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs export --project build
 
 # 9. Emit the runnable scaffold (project files + embedded generated module);
 #    --check adds one compile verdict per emitted file; --run executes the emitted
-#    tree in-loop (parse + every emitted tests/*.spec.ts + entry smoke; exit 1 on red);
+#    tree in-loop (parse + every emitted tests/*.spec.ts + entry smoke; exit 1 on red,
+#    exit 5 when green but the declared typecheck/build did not run — unverified);
 #    --red-tree banner admits an uncleared red tree-run WITH the unmissable banner
 #    on the emitted README (default refuse — see the Emit section)
 node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json [--out emitted/] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force]
@@ -439,7 +440,12 @@ compile-check seam over the just-emitted dir (the same `check` below) and
 carries one verdict per file. `--run` executes the emitted tree **in-loop** —
 per-file parse verdicts + every emitted `tests/*.spec.ts` under the bounded
 runner + one kind-entry smoke (`compile-check.server.ts: treeRun`) — and appends
-the `TreeRunOutcome`; a red tree exits 1 (a red tree is never a clean emit).
+the `TreeRunOutcome`; a red tree exits 1 (a red tree is never a clean emit). A
+GREEN tree whose declared `typecheck`/`build` never ran (usually no
+`node_modules/`) is `ok: true` but **unverified**: it exits **5** with
+`unverified: true`, `declaredScriptsVerified: false`, and
+`unverifiedDeclaredScripts: [...]` — not 0 (an unverified toolchain must stay
+distinguishable from a verified one) and not 1 (nothing ran red).
 All files parse → exit 0 with
 `{ "ok": true, "dir": "…", "count": N, "moduleEmbedded": true|false, "summary": "…" }`.
 With `--check`, any failed file flips the envelope to `ok: false` with the
@@ -978,6 +984,9 @@ so the contract is strict and stable:
   parse stdout, branch on the JSON.
 - **Exit 0** = the command executed and produced its payload
   (`ok: true`, or `ok: false` only when the JSON *is* the honest outcome).
+  For `emit --run` / `tree-run`, exit 0 also means every DECLARED project
+  script that could run DID run - a green tree whose own toolchain never
+  executed is exit 5, not 0 (see below).
 - **Exit 1** = the command could not execute (bad/missing args, missing
   project file) — stdout is `{ "ok": false, "error": "…" }`.
   `run`/`gate` also exit 1 (code `RT_E_GATES_FAILED`, `sealedWithFailures:
@@ -990,6 +999,16 @@ so the contract is strict and stable:
 - **Exit 4** = backend or internal runtime failure — including a missing/broken
   optional module in the vault/design/diagram arms (envelope carries the
   `RT_E_*` code).
+- **Exit 5** (`emit --run` / `tree-run` only) = the tree is GREEN but its
+  DECLARED project scripts (e.g. `typecheck`, `build`) never executed - the
+  emitted toolchain is UNVERIFIED, not failed. `ok` stays `true` (nothing ran
+  red, and the tested-mint is unaffected); the envelope carries
+  `unverified: true`, `declaredScriptsVerified: false`, and
+  `unverifiedDeclaredScripts: [...]` naming exactly which scripts did not run
+  (usually because the tree has no `node_modules/`). Install the tree's deps and
+  re-run `--run` to reach a verified exit 0. This is deliberately NOT exit 1
+  (an honest unknown, not a red tree) and deliberately NOT exit 0 (an unverified
+  toolchain must stay distinguishable from a verified one).
 - `summary` carries agent hints: `researchCount` (cited findings across live
   corpus rounds; 0 on deterministic runs), `memoryCount` (atomic memory rows),
   and `vaultReady` (true when `src/lib/vault.ts` exists AND the project already

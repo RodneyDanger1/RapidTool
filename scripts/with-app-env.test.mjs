@@ -96,7 +96,7 @@ test("the wrapped command sees an explicit override, not the file value", async 
 test("the wrapper propagates the command's exit code", async () => {
   await assert.rejects(
     execFileAsync(process.execPath, [WRAPPER, process.execPath, "-e", "process.exit(3)"]),
-    (err) => err.code === 3,
+    (err) => err instanceof Error && "code" in err && err.code === 3,
   );
 });
 
@@ -110,7 +110,8 @@ test("a signal-killed command is never reported as success", async () => {
       "-e",
       "process.kill(process.pid, 'SIGTERM');setTimeout(() => {}, 1000);",
     ]),
-    (err) => err.signal === "SIGTERM" || err.code !== 0,
+    (err) =>
+      err instanceof Error && (("signal" in err && err.signal === "SIGTERM") || ("code" in err && err.code !== 0)),
   );
 });
 

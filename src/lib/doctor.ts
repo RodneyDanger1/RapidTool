@@ -780,6 +780,14 @@ const KEY_UNUSABLE_CODES: ReadonlySet<string> = new Set([
   "RT_E_LLM_KEY_SHADOWED",
 ]);
 
+/** True when `code` is a key-UNUSABLE class — the set that flips the doctor to
+ *  `rejected` (and the same set `console.tsx`'s chip narrows on). Explicitly
+ *  exported so the run-boundary writer (`headless`) shares ONE vocabulary with
+ *  this reader instead of duplicating the list. */
+export function isKeyUnusableCode(code: unknown): boolean {
+  return typeof code === "string" && KEY_UNUSABLE_CODES.has(code);
+}
+
 /** One keyed-call outcome reported by the server probe (C1 · 332-5).
  *  `keySource` is a tail-only path/scope label (`<file> (tail …xxxx)` /
  *  `the process environment (tail …xxxx)`) — NEVER a key value. */
@@ -823,6 +831,6 @@ export function readLastKeyedOutcome(v: unknown): DoctorLastKeyed | undefined {
 export function doctorLlmKey(configured: boolean, lastKeyed?: unknown): DoctorLlmKey {
   if (!configured) return { keyState: "not-configured" };
   const lk = readLastKeyedOutcome(lastKeyed);
-  if (lk && KEY_UNUSABLE_CODES.has(lk.code)) return { keyState: "rejected", lastKeyed: lk };
+  if (lk && isKeyUnusableCode(lk.code)) return { keyState: "rejected", lastKeyed: lk };
   return lk ? { keyState: "unverified", lastKeyed: lk } : { keyState: "unverified" };
 }

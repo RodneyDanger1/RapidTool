@@ -1968,3 +1968,47 @@ describe("treeRun — the tree-declared expectedBehavior contract BITES (W44·A1
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// W48 / 334-3 (T3) — the DECLARED npm `main` is the headless entry for the
+// library/service kinds. npm's convention is "./src/main.ts" (exactly what the
+// scaffold emits), and the traversal guard silently dropped it, so the smoke
+// fell through to a job module: a tree whose declared entry was unloadable kept
+// reading green — the same class as the 332 `index.html ⇒ ui-shell` fix.
+// ---------------------------------------------------------------------------
+describe("W48 / 334-3 (T3) — a './'-prefixed declared main is smoke-loaded, not silently dropped", () => {
+  it("resolves './src/main.ts' and REDs the tree when the declared entry is unloadable", async () => {
+    const dir = tempDir();
+    try {
+      write(
+        dir,
+        "package.json",
+        JSON.stringify({ name: "lib-main", type: "module", main: "./src/main.ts", scripts: { typecheck: "node --version" } }),
+      );
+      write(dir, "src/main.ts", "export const boot = (): string => 'ok';\n");
+      // A decoy job module: pre-fix the dropped main let the smoke resolve THIS
+      // and stay green even when the declared entry was broken.
+      write(dir, "src/jobs/deliver.ts", "export function deliver(): number { return 1; }\n");
+      write(
+        dir,
+        ".rapidtool/project.json",
+        JSON.stringify({ name: "lib-main", specGraph: { nodes: [{ id: "job-0", file: "src/jobs/deliver.ts" }], order: ["job-0"] } }),
+      );
+      write(dir, "tests/oracle.spec.ts", PASSING_SPEC);
+
+      const clean = await treeRunAsConsumer(dir);
+      assert.equal(clean.run!.entry, "src/main.ts", "the DECLARED main is resolved, not silently dropped");
+      assert.equal(clean.ok, true, clean.ok ? "" : clean.error);
+
+      // Corrupt the DECLARED entry: the tree must RED. Pre-fix it resolved the
+      // decoy job module and read ok:true — a false green.
+      write(dir, "src/main.ts", 'throw new Error("W48-334-3: corrupted declared main");\n');
+      const broken = await treeRunAsConsumer(dir);
+      assert.equal(broken.run!.entry, "src/main.ts");
+      assert.equal(broken.run!.run, "fail", "the declared entry is actually smoke-loaded");
+      assert.equal(broken.ok, false, "a broken declared main can never read ok:true");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

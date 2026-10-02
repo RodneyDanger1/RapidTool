@@ -119,6 +119,7 @@ function wrapHtmlResponses(middlewares, cwd) {
       return mode;
     };
 
+    /** @type {(chunk: Buffer | string | Uint8Array, encoding?: BufferEncoding) => Buffer} */
     const toBuffer = (chunk, encoding) => {
       if (Buffer.isBuffer(chunk)) return chunk;
       if (typeof chunk === "string") {

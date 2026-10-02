@@ -20,10 +20,11 @@ import { projectRoot } from "./with-app-env.mjs";
  * SIGSEGV the test worker under qemu-user (amd64 image builds).
  */
 function appEnvFetch(env) {
-  return async () => ({
-    ok: true,
-    text: async () => JSON.stringify(env),
-  });
+  return async () =>
+    new Response(JSON.stringify(env), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
 }
 
 test("the flag predicate matches src/lib/auth", () => {
@@ -73,9 +74,9 @@ test("a dev server that cannot be reached probes as null", async () => {
 });
 
 test("a server without the endpoint probes as null, not as agreement", async () => {
-  const notFound = async () => ({ ok: false, text: async () => "Not Found" });
+  const notFound = async () => new Response("Not Found", { status: 404 });
   assert.equal(await probeDevAuthEnabled("http://127.0.0.1:8081", notFound), null);
-  const html = async () => ({ ok: true, text: async () => "<!doctype html>" });
+  const html = async () => new Response("<!doctype html>", { status: 200 });
   assert.equal(await probeDevAuthEnabled("http://127.0.0.1:8081", html), null);
 });
 

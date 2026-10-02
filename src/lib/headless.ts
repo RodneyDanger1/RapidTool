@@ -83,7 +83,7 @@ import type {
 // RtEventSeed the engine emits and the CLI's cliLogEvent consumes.
 import type { RtEventSeed } from "./rt-events.ts";
 
-import type { DoctorLastKeyed, DoctorLlmKey, DoctorSpend } from "./doctor.ts";
+import { isKeyUnusableCode, type DoctorLastKeyed, type DoctorLlmKey, type DoctorSpend } from "./doctor.ts";
 import type { SpendSlice, TokenLedger, TokenSpend } from "./token-ledger.ts";
 // T5.5 (OV-41 spend half, W43 · H6): the summary envelope's spend half reads
 // the PROCESS session budget — the SAME T-107.6 accessor `recordSessionSpend`
@@ -816,6 +816,13 @@ export type RunResult = {
    *  a red-gate completion that the CLI surfaces as RT_E_GATES_FAILED, never
    *  as a byte-identical clean 0. */
   sealedWithFailures: boolean;
+  /** W48 · 334-2 (L2): the coded class of the newest P6 synthesis refusal THIS
+   *  invocation recorded (`<RT_E code> · <reason>`, codegen's refusal-log
+   *  shape) — absent when the invocation appended no refusal. A P6-synthesis
+   *  401 surfaces as RT_E_LLM_KEY_REJECTED, so a consumer (the console chip,
+   *  334-5) can move on the refusal class instead of parsing prose. Additive +
+   *  conditional: no existing consumer's shape changes. */
+  code?: ErrorCode;
 };
 
 /**
@@ -1051,6 +1058,10 @@ export async function runUntilGate(
   // cap keeps enforcing the process ledger unchanged — persisted spend never
   // feeds the cap.
   const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
+  // W48 · 334-2 (L2): the newest refusal already on the record at entry — a
+  // refusal this invocation appends must be distinguishable from it, so a
+  // stale coded class never attaches to a clean run.
+  const refusalBefore = newestP6Refusal(project);
   let p = project;
   let steps = 0;
   let iterations = 0;
@@ -1216,19 +1227,31 @@ export async function runUntilGate(
   // same one the P12 delivery writer uses — so the CLI gate can branch without
   // re-deriving red gates.
   const sealedWithFailures = outcome === "complete" && !sealHonesty(finalProject).clean;
-  // W46 · 332-2 (L1 / AW45-c06): fold this invocation's measured session spend
-  // into the project's cumulative slice so the saved record and the returned
-  // `summary` carry the RUN's cost, not one process's. A zero-spend invocation
-  // leaves any existing persisted slice untouched (never rewrites a legacy
-  // 2-key record into a fabricated zero); a real delta accumulates additively.
-  const runDelta = spendDelta(sessionTokenBudget().ledger, spendBaseline);
-  if (totalTokens(runDelta) > 0 || runDelta.calls > 0) {
-    finalProject = {
-      ...finalProject,
-      tokenUsage: accumulateSpend(finalProject.tokenUsage, runDelta),
-    };
-  }
-  return { project: finalProject, steps, stopped, events, outcome, sealedWithFailures };
+  // W46 · 332-2 (L1 / AW45-c06) + W48 · 334-2 (L1/L3): fold this invocation's
+  // measured session spend and its newest keyed outcome onto the project record
+  // so the saved record and the returned `summary` carry the RUN's cost, and a
+  // fresh `doctor` can read the last run's key rejection.
+  finalProject = foldInvocationEvidence(finalProject, spendBaseline);
+  // W48 · 334-2 (L2): the coded class of a P6 synthesis refusal THIS invocation
+  // appended (never one already on the record at entry) — a P6 401 surfaces as
+  // RT_E_LLM_KEY_REJECTED for the console chip (334-5). Absent otherwise.
+  const refusalAfter = newestP6Refusal(finalProject);
+  const code =
+    refusalAfter &&
+    (refusalBefore === null ||
+      refusalAfter.ts !== refusalBefore.ts ||
+      refusalAfter.detail !== refusalBefore.detail)
+      ? p6RefusalCode(refusalAfter.detail)
+      : undefined;
+  return {
+    project: finalProject,
+    steps,
+    stopped,
+    events,
+    outcome,
+    sealedWithFailures,
+    ...(code ? { code } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -3511,6 +3534,14 @@ export async function repairTreeDir(
   const budget =
     typeof opts.budget === "number" && opts.budget > 0 ? Math.floor(opts.budget) : P6_JOURNEY_DEFAULT_BUDGET;
   const events: string[] = [];
+  // W48 · 334-2 (L3): snapshot the session ledger at entry and fold this
+  // repair's synthesis spend onto the returned ledger — a repair verb is a
+  // drive verb, and its cost must survive the process like `run`/`gate` spend.
+  const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
+  const finish = (r: RepairTreeResult): RepairTreeResult => ({
+    ...r,
+    project: foldInvocationEvidence(r.project, spendBaseline),
+  });
   // T-107.1 (216r · W7-L1): the dir repair runs its cycles with the patch
   // (str_replace) repair level ON (defaultRepairSynthesize). A custom
   // deps.synthesize seam replaces it verbatim — the caller owns the level then.
@@ -3607,7 +3638,7 @@ export async function repairTreeDir(
     if (green.gate !== null && green.gate.passed === true) {
       p = p6JourneyLog(green.project, "info", "p6.journey.converged", "tree-run ok on the first run — dir green after re-import (no synthesis repair needed)");
       events.push(`cycle 0: tree-run ok over the re-imported dir — converged without synthesis`);
-      return {
+      return finish({
         ok: true,
         outcome: "converged",
         project: p,
@@ -3622,7 +3653,7 @@ export async function repairTreeDir(
         import: imported,
         applied: { ...base },
         events,
-      };
+      });
     }
     p = p6JourneyLog(
       green.project,
@@ -3631,7 +3662,7 @@ export async function repairTreeDir(
       `tree-run ok on first run but ${green.gate === null ? "no P6 DoD gate record" : "P6 gate FAIL"} — repair FAILED, not converged (converged requires treeRun ok AND gate.passed)`,
     );
     events.push(`cycle 0: tree-run ok but P6 gate not green — repair FAILED`);
-    return {
+    return finish({
       ok: false,
       outcome: "failed",
       project: p,
@@ -3646,7 +3677,7 @@ export async function repairTreeDir(
       import: imported,
       applied: { ...base },
       events,
-    };
+    });
   }
   // 3. Red first run → bounded repair cycle against the dir.
   let treeTail = treeRunFailureTail(verdict).slice(0, P6_JOURNEY_TAIL_MAX);
@@ -3749,7 +3780,7 @@ export async function repairTreeDir(
       if (green.gate !== null && green.gate.passed === true) {
         p = p6JourneyLog(green.project, "info", "p6.journey.converged", `tree-run ok after ${cycle}/${budget} repair cycle(s)`);
         events.push(`cycle ${cycle}: tree-run ok — repair converged`);
-        return {
+        return finish({
           ok: true,
           outcome: "converged",
           project: p,
@@ -3764,7 +3795,7 @@ export async function repairTreeDir(
           import: imported,
           applied,
           events,
-        };
+        });
       }
       p = p6JourneyLog(
         green.project,
@@ -3773,7 +3804,7 @@ export async function repairTreeDir(
         `tree-run ok after ${cycle}/${budget} cycle(s) but ${green.gate === null ? "no P6 DoD gate record" : "P6 gate FAIL"} — repair FAILED, not converged`,
       );
       events.push(`cycle ${cycle}: tree-run ok but P6 gate not green — repair FAILED`);
-      return {
+      return finish({
         ok: false,
         outcome: "failed",
         project: p,
@@ -3788,7 +3819,7 @@ export async function repairTreeDir(
         import: imported,
         applied,
         events,
-      };
+      });
     }
     treeTail = treeRunFailureTail(verdict).slice(0, P6_JOURNEY_TAIL_MAX);
     // Re-derive the named file(s) each cycle: the next directive must target
@@ -3804,7 +3835,7 @@ export async function repairTreeDir(
     `${budget} repair cycle(s) without a green tree-run over ${target}${refusal ? ` — last refusal: ${refusal.slice(0, 180)}` : ""} — the edited dir stands as-is (never clobbered)`,
   );
   events.push(`budget exhausted after ${budget} repair cycle(s) — repair FAILED, the edited dir stands as-is`);
-  return {
+  return finish({
     ok: false,
     outcome: "failed",
     project: p,
@@ -3819,7 +3850,7 @@ export async function repairTreeDir(
     import: imported,
     applied,
     events,
-  };
+  });
 }
 
 export async function writeVault(project: Project, dir: string): Promise<WriteVaultResult> {
@@ -4270,6 +4301,129 @@ function persistedTreeSpend(treeDir: string): SpendSlice | null {
   return treeDir ? persistedSpendAt(join(resolve(treeDir), ".rapidtool", "project.json")) : null;
 }
 
+// ---------------------------------------------------------------------------
+// W48 · 334-2 — the run's keyed outcome + coded failure on the project record
+// ---------------------------------------------------------------------------
+
+/** What a project's own P6 log trail says about the LAST keyed model call.
+ *  `rejected` is a credential refusal (RT_E_LLM_KEY_REJECTED /
+ *  RT_E_LLM_KEY_SHADOWED — doctor.ts's `isKeyUnusableCode` set, ONE definition
+ *  for writer and reader); `success` is a recorded `ok` synthesis attempt;
+ *  `none` is no keyed evidence at all. */
+type KeyedTrailOutcome =
+  | { kind: "rejected"; code: string; at: number; keySource?: string }
+  | { kind: "success" }
+  | { kind: "none" };
+
+/** The newest recorded `p6.synthesis.refused` row (ts + detail), or null. Used
+ *  to tell a refusal THIS invocation appended from one already on the record. */
+function newestP6Refusal(project: Project): { ts: number; detail: string } | null {
+  const logs = Array.isArray(project?.logs) ? project.logs : [];
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const l = logs[i] as { event?: unknown; phase?: unknown; ts?: unknown; detail?: unknown } | null | undefined;
+    if (!l || typeof l !== "object") continue;
+    if (l.event !== "p6.synthesis.refused" || l.phase !== 6 || typeof l.detail !== "string") continue;
+    return { ts: typeof l.ts === "number" && Number.isFinite(l.ts) ? l.ts : 0, detail: l.detail };
+  }
+  return null;
+}
+
+/** The `<RT_E code>` a `p6.synthesis.refused` detail names (`<code> · <reason>`),
+ *  or undefined when the detail carries none. Matches engine.refusalClassOf's
+ *  parse of codegen's refusal-log shape. */
+function p6RefusalCode(detail: string | null | undefined): ErrorCode | undefined {
+  if (typeof detail !== "string") return undefined;
+  const m = /^(RT_E_[A-Z0-9_]+)/.exec(detail.trim());
+  return m ? (m[1] as ErrorCode) : undefined;
+}
+
+/**
+ * W48 · 334-2 (L1): read the newest keyed-call outcome from a project's own P6
+ * trail, newest-first:
+ *   - a `p6.synthesis.attempt` ending `· ok` means the last keyed call
+ *     SUCCEEDED ⇒ `success` (clears any persisted rejection);
+ *   - a `p6.synthesis.refused` whose class is key-unusable ⇒ `rejected`, with
+ *     its ts and the tail-only `key source:` label parsed from the reason;
+ *   - any other row is skipped: a transient/non-key failure never condemns a
+ *     key (F-5's posture).
+ * Pure. Never reads a key value; the source label is tail-only by construction
+ * (deepseek.ts `describeKeySource`). Exported so the writer's vocabulary is
+ * pinned by unit tests.
+ */
+export function keyedTrailOutcome(project: Project): KeyedTrailOutcome {
+  const logs = Array.isArray(project?.logs) ? project.logs : [];
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const l = logs[i] as { event?: unknown; phase?: unknown; ts?: unknown; detail?: unknown } | null | undefined;
+    if (!l || typeof l !== "object" || l.phase !== 6) continue;
+    if (typeof l.event !== "string" || typeof l.detail !== "string") continue;
+    if (l.event === "p6.synthesis.attempt") {
+      if (/·\s*ok\s*$/.test(l.detail)) return { kind: "success" };
+      continue;
+    }
+    if (l.event === "p6.synthesis.refused") {
+      const code = p6RefusalCode(l.detail);
+      if (!code || !isKeyUnusableCode(code)) continue;
+      const label = /key source:\s*(.+)$/.exec(l.detail)?.[1]?.trim();
+      return {
+        kind: "rejected",
+        code,
+        at: typeof l.ts === "number" && Number.isFinite(l.ts) ? l.ts : 0,
+        ...(label ? { keySource: label } : {}),
+      };
+    }
+  }
+  return { kind: "none" };
+}
+
+/**
+ * W48 · 334-2 (L1): fold the project's newest keyed outcome onto its own record
+ * (`Project.lastKeyedOutcome` — the types.ts request): a key-unusable rejection
+ * persists (tail-only), a recorded success clears the field, and no keyed
+ * evidence leaves a legacy record untouched. Returns the SAME object when
+ * nothing changed, so a keyless run never churns the record. The field is not
+ * yet on the `Project` type (unowned types.ts) — the local intersection makes
+ * the writer compile today and the exact shape is the requested grant.
+ */
+function foldLastKeyedOutcome(project: Project): Project {
+  const trail = keyedTrailOutcome(project);
+  const withField = project as Project & { lastKeyedOutcome?: DoctorLastKeyed };
+  if (trail.kind === "none") return project;
+  if (trail.kind === "success") {
+    if (withField.lastKeyedOutcome === undefined) return project;
+    const cleared: Project & { lastKeyedOutcome?: DoctorLastKeyed } = { ...withField };
+    delete cleared.lastKeyedOutcome;
+    return cleared;
+  }
+  const next: DoctorLastKeyed = {
+    code: trail.code,
+    at: trail.at,
+    ...(trail.keySource ? { keySource: trail.keySource } : {}),
+  };
+  const prev = withField.lastKeyedOutcome;
+  if (prev && prev.code === next.code && prev.at === next.at && prev.keySource === next.keySource) {
+    return project;
+  }
+  const merged: Project & { lastKeyedOutcome?: DoctorLastKeyed } = { ...withField, lastKeyedOutcome: next };
+  return merged;
+}
+
+/**
+ * W48 · 334-2 (L1/L3): fold THIS invocation's measured session spend and its
+ * newest keyed-call outcome onto the project record. Shared by every drive verb
+ * that can spend and 401 — `runUntilGate` (the `run`/`gate`/`resume` verbs),
+ * `repairTreeDir` and the wild macros. A zero-spend invocation leaves any
+ * existing persisted spend slice untouched (never a fabricated zero); the keyed
+ * fold is idempotent when no keyed evidence exists.
+ */
+function foldInvocationEvidence(project: Project, spendBaseline: TokenLedger): Project {
+  let next = project;
+  const delta = spendDelta(sessionTokenBudget().ledger, spendBaseline);
+  if (totalTokens(delta) > 0 || delta.calls > 0) {
+    next = { ...next, tokenUsage: accumulateSpend(next.tokenUsage, delta) };
+  }
+  return foldLastKeyedOutcome(next);
+}
+
 /**
  * W46 · 332-2 (L1/AW45-c06): resolve the measured-spend source the doctor
  * surfaces report — priority: an explicit caller `spend`, then the
@@ -4310,23 +4464,62 @@ async function readStatusLastKeyed(): Promise<unknown> {
 }
 
 /**
- * F-5 (W46 · 332-2): classify the doctor's key state. `keyedOutcome` is the
- * caller's explicit last keyed outcome (validated by `doctor.doctorLlmKey`, so a
- * hostile/partial payload is dropped); when absent the process status surface is
- * read best-effort (`readStatusLastKeyed`). Pure apart from that read; never
+ * F-5 (W46 · 332-2) + W48 · 334-2 (L1): classify the doctor's key state.
+ * `keyedOutcome` is the caller's explicit last keyed outcome (validated by
+ * `doctor.doctorLlmKey`, so a hostile/partial payload is dropped). When absent,
+ * `recordPath` (the project file or the tree's scaffold-shipped record) is read
+ * for the persisted `Project.lastKeyedOutcome` — this is what lets a FRESH
+ * `doctor` process see a prior `gate`/`run` process's key rejection, since the
+ * provider tap is process-local. Only then is the process status surface read
+ * best-effort (`readStatusLastKeyed`). Pure apart from those reads; never
  * throws — an unavailable doctor module keeps the honest floor.
  */
 export async function resolveDoctorKeyState(
   configured: boolean,
   keyedOutcome?: unknown,
+  recordPath?: string,
 ): Promise<DoctorLlmKey> {
   const fallback: DoctorLlmKey = { keyState: configured ? "unverified" : "not-configured" };
   try {
     const { doctorLlmKey } = await import("./doctor.ts");
-    return doctorLlmKey(configured, keyedOutcome ?? (await readStatusLastKeyed()));
+    const persisted =
+      keyedOutcome !== undefined
+        ? keyedOutcome
+        : recordPath
+          ? persistedKeyedOutcomeAt(recordPath)
+          : undefined;
+    return doctorLlmKey(configured, persisted ?? (await readStatusLastKeyed()));
   } catch {
     return fallback;
   }
+}
+
+/**
+ * W48 · 334-2 (L1): the persisted last keyed outcome a project record carries
+ * (`Project.lastKeyedOutcome`, written at the run boundary), or undefined for
+ * an absent/unreadable/legacy record. The RAW value is handed back — the same
+ * `doctor.readLastKeyedOutcome` validation every keyed payload passes, so a
+ * hostile field can never mint `rejected`. Read-only; never throws; never
+ * surfaces the file body beyond that one field.
+ */
+function persistedKeyedOutcomeAt(recordPath: string): unknown {
+  if (!recordPath) return undefined;
+  try {
+    if (!existsSync(recordPath)) return undefined;
+    const parsed = JSON.parse(readFileSync(recordPath, "utf8")) as { lastKeyedOutcome?: unknown } | null;
+    return parsed?.lastKeyedOutcome;
+  } catch {
+    return undefined;
+  }
+}
+
+/** W48 · 334-2 (L1): the record a doctor reads the persisted keyed outcome
+ *  from — the named project file, else the product tree's scaffold-shipped
+ *  `.rapidtool/project.json`. Undefined when neither is given. */
+function keyedRecordPath(opts?: { treeDir?: string; projectPath?: string }): string | undefined {
+  if (typeof opts?.projectPath === "string" && opts.projectPath) return opts.projectPath;
+  const tree = typeof opts?.treeDir === "string" && opts.treeDir.trim() ? opts.treeDir.trim() : "";
+  return tree ? join(resolve(tree), ".rapidtool", "project.json") : undefined;
 }
 
 /**
@@ -4354,6 +4547,10 @@ export async function resolveDoctorKeyState(
  * outcome was recorded, `rejected` only for a key-unusable coded class, with
  * the tail-only `lastKeyed` when known. Matches the console chip's validity
  * posture (332-5) on the doctor surface.
+ *
+ * W48 · 334-2 (L1): `opts.projectPath` / `opts.treeDir`'s record is also read
+ * for the persisted `Project.lastKeyedOutcome`, so a FRESH `doctor` process can
+ * see a prior run's key rejection (the provider tap is process-local).
  */
 export async function doctorStatus(opts?: {
   treeDir?: string;
@@ -4386,7 +4583,10 @@ export async function doctorStatus(opts?: {
   // from doctor.ts's ONE vocabulary, fed by the caller's explicit override or
   // the server status surface (llm.ts's llmStatus, C1 · 332-5) — never a
   // provider call, never the key value.
-  Object.assign(llm, await resolveDoctorKeyState(llm.configured, opts?.keyedOutcome));
+  Object.assign(
+    llm,
+    await resolveDoctorKeyState(llm.configured, opts?.keyedOutcome, keyedRecordPath(opts)),
+  );
 
   const research = { configured: false, probed: false, label: "unavailable" };
   let runner: DoctorStatus["runner"] = { available: false, sandbox: false };
@@ -4811,6 +5011,9 @@ export async function wildStartHeadless(
   if (!project.wildRun || !project.wildRun.active) {
     return { ok: false, reason: "not-active", error: "No active wild run (project.wildRun.active !== true) — start a wild run first." };
   }
+  // W48 · 334-2 (L3): fold this macro-run's measured spend + keyed outcome onto
+  // the returned project, like every other drive verb.
+  const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
   const { wildStep } = await import("./engine.ts");
   // R14-f01 (W33 lane F1): bind the reviewer once per macro-run — bare Node +
   // key ⇒ the classifier actually verdicts; null ⇒ the engine default (the
@@ -4848,7 +5051,7 @@ export async function wildStartHeadless(
     lastError = `bounded: reached the ${maxSteps}-step cap with the wild run still advancing`;
   }
   // 185-H1: ok:true never carries `error` — pause/cap detail is `note`.
-  return { ok: true, project: current, outcome, steps, ...(lastError ? { note: lastError } : {}) };
+  return { ok: true, project: foldInvocationEvidence(current, spendBaseline), outcome, steps, ...(lastError ? { note: lastError } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -5000,6 +5203,9 @@ export async function wildStartRun(
     };
   }
   const { wildStep, wildLog } = await import("./engine.ts");
+  // W48 · 334-2 (L3): fold this driven run's measured spend + keyed outcome onto
+  // the returned project (the CLI persists it).
+  const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
   // R14-f01 (W33 lane F1): bind the Node-side Auto-Review classifier once for
   // the whole driven run (bare Node + key); null keeps the engine default.
   const reviewer = await createNodeWildReviewer();
@@ -5054,7 +5260,7 @@ export async function wildStartRun(
   }
   return {
     ok: true,
-    project: current,
+    project: foldInvocationEvidence(current, spendBaseline),
     changed: true,
     outcome,
     steps,

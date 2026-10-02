@@ -41,7 +41,13 @@ import type {
 } from "./types";
 import { classifyError, type ErrorCode } from "./errors.ts";
 
-export type ApproveResult = { ok: true } | { ok: false; error: string };
+export type ApproveResult =
+  | { ok: true }
+  // C1 (334-5): the failure arm carries the RT_E class when one is genuinely
+  // known (e.g. `executeAsync`'s RT_E_PROJECT_MISSING) so a call site can name
+  // the class instead of showing prose alone. Optional ⇒ every existing arm and
+  // consumer is byte-compatible.
+  | { ok: false; error: string; code?: ErrorCode };
 
 /** Why a runUntilHitl loop stopped: natural resting points (hitl/complete),
  *  intervention states (blocked), failures (error), the defensive loop cap,
@@ -50,7 +56,56 @@ export type RunStopReason = "hitl" | "complete" | "blocked" | "error" | "cap" | 
 
 export type RunResult =
   | { ok: true; ran: number; stoppedReason: RunStopReason; note?: string }
-  | { ok: false; ran: number; stoppedReason: RunStopReason; error: string };
+  // C1 (334-5): `code` is the run's machine-readable failure class — present
+  // ONLY when genuinely known (never invented for an uncoded stop). The console
+  // run surface renders it; the chip's keyed class comes from the validity
+  // probe instead (a keyed 401 inside a run degrades to the deterministic floor
+  // rather than failing the run, so it is not a `RunResult` failure class).
+  | { ok: false; ran: number; stoppedReason: RunStopReason; error: string; code?: ErrorCode };
+
+/** The key-unusable RT_E classes (C1 · 332-5): a key is PRESENT but the last
+ *  keyed call was refused — a validity fault, not absence. Shared by the console
+ *  chip and the run surface so both name the same class; never prose-matched. */
+export const KEY_UNUSABLE_CODES: ReadonlySet<string> = new Set([
+  "RT_E_LLM_KEY_REJECTED",
+  "RT_E_LLM_KEY_SHADOWED",
+]);
+
+/**
+ * C1 (334-5): the honest coded failure line. The result's OWN code wins; else
+ * the last keyed-call refusal the validity probe saw (a keyed run can degrade to
+ * the deterministic floor without failing, so the probe is the only truthful
+ * witness); with neither, the raw error stands verbatim — no class is ever
+ * invented, so the label can never out-claim what was measured.
+ */
+export function codedFailureText(
+  error: string,
+  ownCode?: string | null,
+  lastKeyedCode?: string | null,
+): string {
+  const coded =
+    (typeof ownCode === "string" && ownCode.length > 0 ? ownCode : null) ??
+    (typeof lastKeyedCode === "string" && KEY_UNUSABLE_CODES.has(lastKeyedCode) ? lastKeyedCode : null);
+  return coded ? `${coded} — ${error}` : error;
+}
+
+/**
+ * C1 (334-5): the keyed-refusal class attributable to a run that started at
+ * `startedAt` (epoch ms). The probe outcome must be key-unusable AND stamped at
+ * or after the run's start — a stale pre-run refusal is NEVER blamed on this run
+ * (333 F-4: the label may not out-claim the measurement). Null otherwise.
+ */
+export function keyedRefusalSince(
+  startedAt: number,
+  lastKeyed: LlmKeyedOutcome | null | undefined,
+): string | null {
+  if (!lastKeyed) return null;
+  if (typeof lastKeyed.code !== "string" || !KEY_UNUSABLE_CODES.has(lastKeyed.code)) return null;
+  if (typeof lastKeyed.at !== "number" || !Number.isFinite(lastKeyed.at) || lastKeyed.at < startedAt) {
+    return null;
+  }
+  return lastKeyed.code;
+}
 
 /**
  * fixes/150 (M4 ms4 — watchdog mirror): structural subset of
@@ -146,7 +201,9 @@ type RapidState = {
   demoSeeded: boolean;
   llmStatus: LlmStatusSurface;
   researchStatus: ResearchStatusSurface;
-  refreshStatuses: () => Promise<void>;
+  /** C1 (334-5): returns the fresh LLM surface so a caller (the run handlers)
+   *  can read the just-observed keyed outcome without a second probe. */
+  refreshStatuses: () => Promise<LlmStatusSurface>;
   executeAsync: (id: string) => Promise<ApproveResult>;
   runUntilHitlAsync: (id: string) => Promise<RunResult>;
   // PB-03 (E-13): deepen a completed research phase (P0/P7/P11) with live/web
@@ -206,6 +263,9 @@ type RapidState = {
     | {
         ok: false;
         error: string;
+        // C1 (334-5): the RT_E class of a refused intake (missing project /
+        // malformed report) so the console can name it, not prose alone.
+        code?: ErrorCode;
         applied?: boolean;
         reason?: ReportApplyReason;
         gate_unmet?: string[];
@@ -1412,7 +1472,7 @@ export const useRapid = create<RapidState>()(
         set((s) => ({ activeId: id !== null && byId(s.projects, id) ? id : null })),
       execute: (id) => {
         const project = byId(get().projects, id);
-        if (!project) return { ok: false, error: "Project missing." };
+        if (!project) return { ok: false, error: "Project missing.", code: "RT_E_PROJECT_MISSING" };
         const next = advanceOnce(project, get().autopilot);
         if (next.error && (next.project === project || next.gateDenied || next.dodBlocked)) {
           // E-20: an autopilot DoD-denial is still a 0-progress stop (ok:false,
@@ -1433,7 +1493,7 @@ export const useRapid = create<RapidState>()(
       },
       runUntilHitl: (id) => {
         const start = byId(get().projects, id);
-        if (!start) return { ok: false, ran: 0, stoppedReason: null, error: "Project missing." };
+        if (!start) return { ok: false, ran: 0, stoppedReason: null, error: "Project missing.", code: "RT_E_PROJECT_MISSING" };
         let current = start;
         let ran = 0;
         let error: string | undefined;
@@ -1540,7 +1600,7 @@ export const useRapid = create<RapidState>()(
       runUntilHitlAsync: (id) =>
         serialized(id, async () => {
           const start = byId(get().projects, id);
-          if (!start) return { ok: false, ran: 0, stoppedReason: null, error: "Project missing." };
+          if (!start) return { ok: false, ran: 0, stoppedReason: null, error: "Project missing.", code: "RT_E_PROJECT_MISSING" };
           const configured = get().llmStatus.configured || get().researchStatus.configured;
           let current = start;
           let ran = 0;
@@ -1664,9 +1724,9 @@ export const useRapid = create<RapidState>()(
       // with approve/execute — this is pure intake.
       ingestReport: (id, raw) => {
         const project = byId(get().projects, id);
-        if (!project) return { ok: false, error: "Project missing." };
+        if (!project) return { ok: false, error: "Project missing.", code: "RT_E_PROJECT_MISSING" };
         const v = validateReport(raw, project.currentPhase);
-        if (!v.ok) return { ok: false, error: v.error };
+        if (!v.ok) return { ok: false, error: v.error, code: "RT_E_VALIDATION" };
         // M-05/E-01: validateReport now forwards tests_run (SWEEP-2 + E-01), so the
         // typed report is authoritative — no raw-payload shim needed anymore.
         const hasTestEvidence = (v.report.tests_run?.length ?? 0) > 0;
@@ -1767,6 +1827,7 @@ export const useRapid = create<RapidState>()(
           research.label = "configured";
         }
         set({ llmStatus: llm, researchStatus: research });
+        return llm;
       },
       approve: (id, opts) => {
         const project = byId(get().projects, id);

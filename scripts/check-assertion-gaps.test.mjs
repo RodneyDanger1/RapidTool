@@ -183,6 +183,57 @@ test("T-17 typeof-only: typeof of an inline literal is flagged, a real value is 
   assert.deepEqual(findTautologies('assert.equal(typeof [1], "function");'), []);
 });
 
+test("T-17 always-true: an `||`/`&&`/ternary construct that cannot fail is flagged", () => {
+  for (const expr of [
+    "x || true",
+    "true || x",
+    "x || 1",
+    'x || "fallback"',
+    "x || {}",
+    "x || []",
+    "x || /re/",
+    "x || typeof y",
+    "true && 1",
+    "c ? true : 1",
+    "!x.includes(\"foo\") || true",
+  ]) {
+    const findings = findTautologies(`assert.ok(${expr});`);
+    assert.equal(findings.length, 1, `expected one finding for assert.ok(${expr}), saw ${JSON.stringify(findings)}`);
+    assert.equal(findings[0].rule, "tautology:always-true-expr");
+    assert.match(findings[0].reason, /cannot fail/);
+  }
+});
+
+test("T-17 always-true: a falsifiable disjunction, nullish, or ternary is never flagged", () => {
+  for (const expr of [
+    "res.status === 0 || res.status === 2",
+    "x ?? true",
+    "x || false",
+    "x || y",
+    "a && b",
+    "c ? true : false",
+    "x || Object.keys(y).length > 0",
+  ]) {
+    assert.deepEqual(findTautologies(`assert.ok(${expr});`), [], `must not flag assert.ok(${expr})`);
+  }
+});
+
+test("T-17 always-true: assert.equal(<always-true>, true) is flagged, a real comparison is not", () => {
+  const hit = findTautologies("assert.equal(x || true, true);");
+  assert.equal(hit.length, 1);
+  assert.equal(hit[0].rule, "tautology:always-true-expr");
+  assert.match(hit[0].reason, /cannot fail/);
+  assert.equal(findTautologies("assert.strictEqual(true, x || true);").length, 1);
+  assert.deepEqual(findTautologies("assert.equal(y, true);"), [], "a real y can be false");
+  assert.deepEqual(findTautologies("assert.equal(x || true, false);"), [], "a mismatch always fails, so it is not a tautology");
+});
+
+test("T-17 always-true: assert.ok(true) stays a single true-literal finding (no double-count)", () => {
+  const findings = findTautologies("assert.ok(true);");
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].rule, "tautology:true-literal");
+});
+
 test("T-17 zero-assertion: a test callback with no assert and no throw is flagged", () => {
   const source = ['import { test } from "node:test";', "", 'test("does nothing", () => {', "  const x = 1;", "});"].join("\n");
   const findings = findZeroAssertionTests(source);
@@ -284,6 +335,24 @@ test("T-17 CLI: presence-only and typeof-only plants trip the run (RED-first)", 
   assert.ok(run.stdout.includes("[tautology:presence-only]"), run.stdout);
   assert.ok(run.stdout.includes("[tautology:typeof-only]"), run.stdout);
   assert.ok(run.stdout.includes("weak.test.mjs:4:"), run.stdout);
+});
+
+test("T-17 CLI: an assert.ok(<expr> || true) plant trips the run (RED-first)", () => {
+  const dir = fixtureDir();
+  writeFileSync(
+    join(dir, "always-true.test.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { test } from "node:test";',
+      "",
+      'test("never fails", () => { assert.ok(!something.includes("x") || true); });',
+      "",
+    ].join("\n"),
+  );
+  const run = runChecker([dir]);
+  assert.equal(run.status, 1, `expected exit 1 for the planted tautology\n${run.stdout}`);
+  assert.ok(run.stdout.includes("[tautology:always-true-expr]"), run.stdout);
+  assert.ok(run.stdout.includes("always-true.test.mjs:4:"), run.stdout);
 });
 
 test("T-17 CLI: a clean fixture tree stays quiet and exits 0", () => {

@@ -22,15 +22,14 @@ import { projectRoot } from "./with-app-env.mjs";
  *      failure. The budget is deliberately explicit and per-file so a reviewer
  *      sees exactly which files are still red and who owns them.
  *
- * Why the budget exists at all: the tree is untyped `.mjs` with almost no
+ * Why the budget existed at all: the tree is untyped `.mjs` with almost no
  * JSDoc. Under full `strict` it reports 1334 errors (621 pure TS7006
  * implicit-any); the config disables `noImplicitAny` (and
  * `useUnknownInCatchVariables`) but KEEPS `strictNullChecks`, because turning
  * that off widens `ok: true | false` and destroys discriminated-union narrowing
- * in the transitively-imported `src/lib` files. 134 errors remain across 14
- * files — the migration is real work, not a switch. `scripts/rapidtool-cli.mjs`
- * and `scripts/cli-exit-taxonomy.test.mjs` were made clean by W46 · 332-4 and
- * carry NO budget entry, so any new error in either fails the ratchet.
+ * in the transitively-imported `src/lib` files. W48 · 334-4 retired the last
+ * 134 errors across 14 files, so `ERROR_BUDGET` is EMPTY: every scripts file is
+ * now unbudgeted and any new error in any of them fails the ratchet.
  *
  * `--test-reporter=tap` is irrelevant here (this spawns `tsc`, not `node
  * --test`); the tsc invocation always prints its own diagnostics and this suite
@@ -47,26 +46,12 @@ const FILE_LINE_RE = /^(.+?\.(?:mjs|mts|cjs|js))\((\d+),(\d+)\): error (TS\d+):/
 
 /**
  * Per-file error budget, measured 2026-10-02 with the checked-in config.
- * `max` is a ceiling: fixing errors is free, adding them is not. Every file
- * with a non-zero count on disk must appear here; a clean file must not.
- * `owner` names the lane that owns the file so a red count can be chased.
+ * EMPTY since W48 · 334-4 retired the last 134 errors across 14 files: no
+ * scripts file is budgeted, so any error in any of them is `unbudgeted` and
+ * fails the ratchet. The mechanism stays (a future red file can be budgeted
+ * deliberately, with an owner), but the debt it recorded is paid.
  */
-export const ERROR_BUDGET = {
-  "scripts/run-eval.test.mjs": { max: 64, owner: "331-6 (mock shapes vs typed src API)" },
-  "scripts/run-eval.mjs": { max: 25, owner: "331-6" },
-  "scripts/preview.test.mjs": { max: 10, owner: "331-6" },
-  "scripts/grok-pwa-shared.mjs": { max: 6, owner: "331-6 (was shadowed out of the program)" },
-  "scripts/write-atomic.test.mjs": { max: 5, owner: "331-6" },
-  "scripts/browser-guard.mjs": { max: 5, owner: "331-6" },
-  "scripts/check-auth-invariant.test.mjs": { max: 4, owner: "331-6" },
-  "scripts/with-app-env.test.mjs": { max: 4, owner: "331-6" },
-  "scripts/next-action-arm-parity.test.mjs": { max: 3, owner: "331-6" },
-  "scripts/browser-smoke.mjs": { max: 2, owner: "331-6" },
-  "scripts/migration-plan.test.mjs": { max: 2, owner: "331-6" },
-  "scripts/brand-check.test.mjs": { max: 2, owner: "331-6" },
-  "scripts/grok-pwa-plugin.mjs": { max: 1, owner: "331-6" },
-  "scripts/grok-pwa-plugin.test.mjs": { max: 1, owner: "331-6" },
-};
+export const ERROR_BUDGET = {};
 
 /** POSIX, repo-relative — the form the budget keys and tsc diagnostics share. */
 function relPosix(abs) {
@@ -208,11 +193,11 @@ test("scripts typecheck: npm run typecheck runs BOTH legs (src + scripts)", () =
   // W46 · 332-4 (S1b): the flip that makes `npm run typecheck` see scripts/**.
   // Pinned at the package.json bytes so a later edit cannot quietly drop the
   // scripts leg (which is what left the CLI invisible to a type checker).
-  // W46 boundary: leg 2 runs THIS test file rather than the raw scripts tsc
-  // program, because the program still carries a reviewed per-file budget
-  // (~134 untyped-.mjs errors across 14 files). The ratchet runs the same
-  // program and fails on ANY new error in ANY file — a clean, honest gate.
-  // The strict (budget-blind) program stays available, explicitly named.
+  // W48 · 334-4: the scripts program is now CLEAN (0 errors, was 134 across
+  // 14 files), so `ERROR_BUDGET` is empty and the ratchet fails on ANY new
+  // error in ANY scripts file. Leg 2 still runs THIS test file — it also pins
+  // program coverage and the budget mechanism; the strict budget-blind program
+  // stays available under its own explicit name.
   const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
   const typecheck = pkg.scripts?.typecheck ?? "";
   assert.match(typecheck, /tsc --noEmit/, "leg 1: the src+server program (tsconfig.json)");
@@ -261,12 +246,14 @@ test("scripts typecheck: the budget parser has teeth (a planted error is flagged
     ["scripts/migration-plan.mjs", "scripts/rapidtool-cli.mjs"],
     "a NEW red file must be reported as unbudgeted — including the now-clean CLI",
   );
-  // An over-budget regression in an existing entry is reported too.
+  // An over-budget regression in an existing entry is reported too. The real
+  // budget is empty now, so pin the ceiling mechanism with a synthetic entry.
+  const floodBudget = { "scripts/grok-pwa-plugin.mjs": { max: 1 } };
   const flood = Array.from(
-    { length: ERROR_BUDGET["scripts/grok-pwa-plugin.mjs"].max + 1 },
+    { length: 2 },
     () => `scripts/grok-pwa-plugin.mjs(1,1): error TS2322: planted`,
   ).join("\n");
-  const floodVerdict = evaluateBudget(parseTscErrors(flood), ERROR_BUDGET);
+  const floodVerdict = evaluateBudget(parseTscErrors(flood), floodBudget);
   assert.equal(floodVerdict.overBudget.length, 1);
   assert.equal(floodVerdict.overBudget[0].file, "scripts/grok-pwa-plugin.mjs");
 });

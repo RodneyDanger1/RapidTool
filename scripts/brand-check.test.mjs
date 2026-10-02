@@ -232,8 +232,12 @@ test("parseBrandCheckArgs takes --game, --placeholder-ok and --root, and rejects
     root: "/tmp/w",
   });
   assert.equal(parseBrandCheckArgs(["--placeholder-ok"]).placeholderOk, true);
-  assert.match(parseBrandCheckArgs(["--root"]).error, /--root needs a directory/);
-  assert.match(parseBrandCheckArgs(["--canvas"]).error, /unexpected argument: --canvas/);
+  const missingRoot = parseBrandCheckArgs(["--root"]);
+  assert.ok(missingRoot.error, "--root needs a value");
+  assert.match(missingRoot.error, /--root needs a directory/);
+  const canvas = parseBrandCheckArgs(["--canvas"]);
+  assert.ok(canvas.error, "--canvas is not a known flag");
+  assert.match(canvas.error, /unexpected argument: --canvas/);
 });
 
 const runCheck = (root, extra = []) =>

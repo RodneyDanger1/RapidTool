@@ -29,6 +29,8 @@ export function checkedUrl(url) {
     parsed = new URL(url);
   } catch {
     fail(`not a valid URL: ${url}`);
+    // Unreachable (fail exits); it proves `parsed` is assigned to the checker.
+    return url;
   }
   // Rules out file:, data:, chrome:, view-source:.
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
@@ -78,6 +80,8 @@ export function checkedOutputPath(target, allowedDirs, label = "screenshot") {
   return abs;
 }
 
+/** Refuse and exit. `@returns {never}` — callers depend on this for definite
+ *  assignment of values set just before the call (e.g. `parsed` in checkedUrl). */
 function fail(message) {
   console.error(JSON.stringify({ ok: false, error: message }, null, 2));
   process.exit(1);

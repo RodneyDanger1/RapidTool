@@ -1271,7 +1271,14 @@ function treeBehaviorOf(dir: string): TreeBehaviorVerdict | null {
  */
 function resolveHeadlessEntry(dir: string): string | null {
   const pkg = readJsonIfAny(dir, "package.json");
-  const main = typeof pkg?.main === "string" ? sanitizeRelPath(pkg.main) : null;
+  const mainRaw = typeof pkg?.main === "string" ? pkg.main.trim() : null;
+  // W48 / 334-3 (T3): npm's `main` is conventionally "./src/main.ts" (exactly
+  // what the scaffold emits for `library`/`service`), but `sanitizeRelPath`
+  // rejects a "." segment as a traversal guard — so the DECLARED entry was
+  // silently dropped and the smoke fell through to an unrelated job module: a
+  // tree whose declared `main` was unloadable still read green (reproduced).
+  // Strip the harmless leading "./" prefix BEFORE sanitizing; ".." still fails.
+  const main = mainRaw !== null ? sanitizeRelPath(mainRaw.replace(/^(?:\.\/)+/, "")) : null;
   const uiShell = existsSync(join(dir, "index.html"));
   if (main && !uiShell) {
     const full = join(dir, main);

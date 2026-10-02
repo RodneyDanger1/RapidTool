@@ -21,6 +21,13 @@
  *        - **typeof-only assertions** — `assert.equal(typeof <literal>, "<the
  *          literal's own type>")` (e.g. `typeof "x"` === `"string"`), which is
  *          true for every run.
+ *        - **always-true boolean constructs** — `assert.ok(<expr> || true)` and
+ *          the equivalents: an `||`/`??` with an always-truthy operand, an `&&`
+ *          whose operands are both always truthy, a ternary with two
+ *          always-truthy branches, and `assert.equal(<always-true>, true)`. The
+ *          asserted value is `true`/truthy no matter what `<expr>` evaluates to,
+ *          so the assertion cannot fail. A *falsifiable* disjunction
+ *          (`assert.ok(a === 1 || a === 2)`) is NOT flagged — it can fail.
  *   2. **zero-assertion test blocks** — an `it(...)`/`test(...)` (incl. `.only`/`.skip`
  *      variants) whose callback contains neither an `assert*` call nor a `throw`/`rejects`
  *      path — nothing in it can fail, so its green light only means it ran.
@@ -235,6 +242,7 @@ const RULE_LITERAL_PAIR = "tautology:literal-pair";
 const RULE_SAME_OPERAND = "tautology:same-operand";
 const RULE_PRESENCE_ONLY = "tautology:presence-only";
 const RULE_TYPEOF_ONLY = "tautology:typeof-only";
+const RULE_ALWAYS_TRUE = "tautology:always-true-expr";
 
 const EQUALITY_FNS = "equal|strictEqual|deepEqual|deepStrictEqual";
 const OPERAND = "[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*";
@@ -385,6 +393,135 @@ function typeofOfLiteral(text) {
   return null;
 }
 
+/**
+ * Strip fully-wrapping parentheses from a masked/raw pair in lockstep. The pair
+ * keeps equal offsets because masking preserves length, so a slice taken from one
+ * is valid for the other. Structure is read from `masked` (string bodies blanked,
+ * so a `)` inside a fixture string cannot unbalance it).
+ */
+function stripOuterParensPair(masked, raw) {
+  let m = masked.trim();
+  let r = raw.trim();
+  while (m.length > 1 && m.startsWith("(") && balancedOnly(m, "(", ")")) {
+    m = m.slice(1, -1).trim();
+    r = r.slice(1, -1).trim();
+  }
+  return [m, r];
+}
+
+/**
+ * Split a masked expression on top-level (depth-0) occurrences of a binary
+ * operator, returning `[start, end)` operand spans, or `null` when the operator
+ * never appears at depth 0. An occurrence that is really part of a longer token
+ * (`||=`/`&&=`/`??=`/`?.`) is ignored, as is anything inside brackets or strings
+ * (masked).
+ */
+function splitBinaryTopLevel(text, op) {
+  const ranges = [];
+  let depth = 0;
+  let start = 0;
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "(" || c === "[" || c === "{") depth += 1;
+    else if (c === ")" || c === "]" || c === "}") depth -= 1;
+    if (depth === 0 && text.startsWith(op, i)) {
+      const before = text[i - 1] ?? "";
+      const after = text[i + op.length] ?? "";
+      const longer =
+        (op === "||" && (before === "|" || after === "|" || after === "=")) ||
+        (op === "&&" && (before === "&" || after === "&" || after === "=")) ||
+        (op === "??" && (before === "?" || after === "?" || after === "." || after === "="));
+      if (!longer) {
+        ranges.push([start, i]);
+        i += op.length;
+        start = i;
+        continue;
+      }
+    }
+    i += 1;
+  }
+  ranges.push([start, text.length]);
+  return ranges.length > 1 ? ranges : null;
+}
+
+/**
+ * The outermost top-level ternary in a masked expression, as three operand
+ * spans, or `null`. `?.` is not a ternary; a nested `?…:` pair is skipped so the
+ * returned `then`/`else` never split a nested ternary in half.
+ */
+function findTopLevelTernary(text) {
+  let depth = 0;
+  let q = -1;
+  let colon = -1;
+  let nested = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === "(" || c === "[" || c === "{") depth += 1;
+    else if (c === ")" || c === "]" || c === "}") depth -= 1;
+    else if (depth === 0 && c === "?" && text[i + 1] !== "." && text[i + 1] !== "?") {
+      if (q === -1) q = i;
+      else nested += 1;
+    } else if (depth === 0 && c === ":") {
+      if (nested > 0) nested -= 1;
+      else if (q !== -1 && colon === -1) colon = i;
+    }
+  }
+  if (q === -1 || colon === -1) return null;
+  return { cond: [0, q], then: [q + 1, colon], else: [colon + 1, text.length] };
+}
+
+/**
+ * Why one operand of a boolean construct can never be falsy, or `null`. Unlike
+ * `alwaysTruthySubject` this also accepts the bare literal `true` (only ever
+ * consulted on an operand, never on the whole asserted subject, so
+ * `assert.ok(true)` stays a single `true-literal` finding).
+ */
+function truthyOperand(masked, raw) {
+  if (raw === "true") return "the literal `true`";
+  return alwaysTruthySubject(masked, raw) ?? alwaysTrueExpression(masked, raw);
+}
+
+/**
+ * Why a whole asserted expression is truthy no matter what its inputs are, or
+ * `null`. This is the `|| true` class: `A || B` is always truthy when either
+ * operand is; `A && B` only when both are; `A ?? B` only when the left is (the
+ * right is reached only when the left is nullish, and a falsy-but-present left,
+ * e.g. `0 ?? true`, still fails); a ternary only when both branches are.
+ */
+export function alwaysTrueExpression(masked, raw) {
+  const [m, r] = stripOuterParensPair(masked, raw);
+  if (!m) return null;
+  const or = splitBinaryTopLevel(m, "||");
+  if (or && or.some(([s, e]) => truthyOperand(m.slice(s, e).trim(), r.slice(s, e).trim()))) {
+    return "a `||` expression with an always-truthy operand";
+  }
+  const and = splitBinaryTopLevel(m, "&&");
+  if (and && and.every(([s, e]) => truthyOperand(m.slice(s, e).trim(), r.slice(s, e).trim()))) {
+    return "a `&&` expression whose operands are all always truthy";
+  }
+  const nullish = splitBinaryTopLevel(m, "??");
+  if (nullish) {
+    const [s, e] = nullish[0];
+    if (truthyOperand(m.slice(s, e).trim(), r.slice(s, e).trim())) {
+      return "a `??` expression whose left operand is always truthy";
+    }
+  }
+  const tern = findTopLevelTernary(m);
+  if (tern) {
+    const thenWhy = truthyOperand(
+      m.slice(tern.then[0], tern.then[1]).trim(),
+      r.slice(tern.then[0], tern.then[1]).trim(),
+    );
+    const elseWhy = truthyOperand(
+      m.slice(tern.else[0], tern.else[1]).trim(),
+      r.slice(tern.else[0], tern.else[1]).trim(),
+    );
+    if (thenWhy && elseWhy) return "a ternary whose branches are both always truthy";
+  }
+  return null;
+}
+
 /** Top-level argument spans of the call whose parens are `open`…`close`. */
 function callArgs(masked, open, close) {
   const args = [];
@@ -461,13 +598,23 @@ export function findTautologies(source) {
     }
   }
 
-  // Presence-only subjects (R9-f06): `assert.ok(<always-truthy>)`. Scanned over the
-  // whole masked source so a wrapped, multi-line call is judged as one expression.
+  // Presence-only subjects (R9-f06) and always-true boolean constructs (W48):
+  // `assert.ok(<always-truthy>)` — whether the subject is a literal that is truthy
+  // by construction, or a boolean expression (`x || true`, `c ? 1 : 2`) that is
+  // truthy for every input. Scanned over the whole masked source so a wrapped,
+  // multi-line call is judged as one expression.
   for (const call of assertCalls(masked)) {
     const [s, e] = call.args[0];
-    const why = alwaysTruthySubject(masked.slice(s, e).trim(), source.slice(s, e).trim());
-    if (why) {
-      push(s, RULE_PRESENCE_ONLY, `asserting ${why} — always truthy, so the assertion cannot fail`);
+    const maskedArg = masked.slice(s, e).trim();
+    const rawArg = source.slice(s, e).trim();
+    const presence = alwaysTruthySubject(maskedArg, rawArg);
+    if (presence) {
+      push(s, RULE_PRESENCE_ONLY, `asserting ${presence} — always truthy, so the assertion cannot fail`);
+      continue;
+    }
+    const unconditional = alwaysTrueExpression(maskedArg, rawArg);
+    if (unconditional) {
+      push(s, RULE_ALWAYS_TRUE, `asserting ${unconditional} — always truthy, so the assertion cannot fail`);
     }
   }
 
@@ -492,6 +639,36 @@ export function findTautologies(source) {
         RULE_TYPEOF_ONLY,
         "`typeof` of an inline literal compared against its own type — the assertion cannot fail",
       );
+    }
+  }
+
+  // `assert.equal(<always-true>, true)` — the comparison to the literal `true`
+  // cannot fail (the assert.equal wrapper is transparent). Only the equality
+  // family, and only when exactly one side is the literal `true`, so a plain
+  // `assert.equal(true, true)` stays a single literal-pair finding.
+  const RE_EQUAL_CALL = /(?<![.\w$])assert\s*\.\s*(?:equal|strictEqual|deepEqual|deepStrictEqual)\s*\(/g;
+  let em;
+  while ((em = RE_EQUAL_CALL.exec(masked)) !== null) {
+    const open = em.index + em[0].length - 1;
+    const close = matchParen(masked, open);
+    if (close === -1) continue;
+    const args = callArgs(masked, open, close);
+    if (args.length !== 2) continue;
+    for (const [idx, other] of [
+      [0, 1],
+      [1, 0],
+    ]) {
+      const rawSide = source.slice(args[idx][0], args[idx][1]).trim();
+      const rawOther = source.slice(args[other][0], args[other][1]).trim();
+      if (rawSide === "true" || rawOther !== "true") continue;
+      const why = alwaysTrueExpression(masked.slice(args[idx][0], args[idx][1]).trim(), rawSide);
+      if (why) {
+        push(
+          args[idx][0],
+          RULE_ALWAYS_TRUE,
+          `assert.equal compares ${why} to the literal true — the comparison cannot fail`,
+        );
+      }
     }
   }
 

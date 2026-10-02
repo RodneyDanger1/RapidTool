@@ -356,8 +356,11 @@ export function graderFileFor(slug, graderDir = GRADER_DIR) {
   return join(graderDir, `${slug}.grader.json`);
 }
 
+/** One run-side grader document. @typedef {{slug: string, graderVersion: number, caseName: string, authority: string, movedFrom: string, acceptanceBar: string, requiredIdentifiers: string[], requiredCapabilities: string[], expectedFiles: string[], expectedContent: Array<{file: string, contains: string}>, expectedKind: string | null, expectedBehavior: object[], passWhen: {meanAtLeast: number, requireExpectedFiles: boolean, requireExpectedContent: boolean, requireExpectedBehavior: boolean, requireExpectedKind: boolean}}} Grader */
+
 /** Parse + validate one grader document text. Returns `{ ok: true, grader }`
- *  or `{ ok: false, error }` — a grader that cannot be trusted never grades. */
+ *  or `{ ok: false, error }` — a grader that cannot be trusted never grades.
+ *  @returns {{ok: true, grader: Grader} | {ok: false, error: string}} */
 export function parseGrader(raw, slug) {
   let doc;
   try {
@@ -465,7 +468,8 @@ export function parseGrader(raw, slug) {
 }
 
 /** Load + validate the run-side grader for one slug. `{ ok:false, error }`
- *  carries the honest skip reason (missing file, bad JSON, undeclared bar). */
+ *  carries the honest skip reason (missing file, bad JSON, undeclared bar).
+ *  @returns {{ok: true, path: string, grader: Grader} | {ok: false, path: string, error: string}} */
 export function loadGrader(slug, graderDir = GRADER_DIR) {
   const path = graderFileFor(slug, graderDir);
   let raw;
@@ -546,7 +550,8 @@ function domainMatch(entry, project) {
  *  check's FNV-1a `treeVerdictHash`, set on every runnable verdict) is carried
  *  through so the persisted scorecard can cite it; absent ⇒ omitted, never
  *  invented. Exported for the test suite (the driver self-executes only as the
- *  CLI entry). */
+ *  CLI entry).
+ *  @returns {{ok: boolean, dir: string, compileOk: boolean, testsPass: number, testsFail: number, verdictHash?: string, detail?: string, minted?: boolean} | null} */
 export function treeRunToEvidence(outcome) {
   if (!outcome || typeof outcome !== "object") return null;
   const specPass = Array.isArray(outcome.tests)
@@ -1265,7 +1270,7 @@ function probeErrorText(e) {
  *  The JSDoc param is load-bearing under `checkJs`: a destructured parameter
  *  with any default infers its type from those defaults alone, so `configured`
  *  (no default) would read as an unknown property at every call site.
- *  @param {{configured?: boolean, wire?: {attempted?: boolean, ok?: boolean, httpStatus?: number|null, code?: string|null, error?: string|null, model?: string|null, requestedModel?: string}|null}} [options] */
+ *  @param {{configured?: boolean, wire?: {attempted?: boolean, ok?: boolean, httpStatus?: number|null, code?: string|null, error?: string|null, model?: string|null, requestedModel?: string|null}|null}} [options] */
 export function classifyLlmPreflight({ configured, wire = null } = {}) {
   if (configured !== true) {
     return {
@@ -1483,8 +1488,10 @@ export function formatPreflightLines(p) {
 
 /** The OV-27 probe. `fetchImpl` is injectable — tests stub it and NEVER hit the
  *  network; the wire step runs only when `configured` is true and `wire !==
- *  false`. The key VALUE never enters the result. */
+ *  false`. The key VALUE never enters the result.
+ *  @param {{fetchImpl?: typeof fetch | null, wire?: boolean, timeoutMs?: number}} [options] */
 export async function probeP6Reachability({ fetchImpl = null, wire = true, timeoutMs = 20_000 } = {}) {
+  /** @type {{probe: string, checkedAt: string, configured: boolean, specifiers: Record<string, {resolved: boolean, liveLayer?: boolean, isDeepSeekConfigured?: boolean, liveP6Synthesis?: boolean, error: string | null}>, wire: {attempted: boolean, ok: boolean, httpStatus: number | null, code: string | null, error: string | null, model: string | null, requestedModel: string | null} | null, class?: string, code?: string | null, ok?: boolean, wireReached?: boolean | null, detail?: string}} */
   const out = {
     probe: "OV-27",
     checkedAt: new Date().toISOString(),
@@ -1537,8 +1544,8 @@ export async function probeP6Reachability({ fetchImpl = null, wire = true, timeo
       : null;
   if (out.configured && wire !== false && ds && typeof ds.completeDeepSeek === "function") {
     const baseFetch = fetchImpl ?? globalThis.fetch;
-    const recordingFetch = async (...args) => {
-      const res = await baseFetch(...args);
+    const recordingFetch = async (input, init) => {
+      const res = await baseFetch(input, init);
       try {
         statuses.push(res && typeof res.status === "number" ? res.status : null);
       } catch {
@@ -1597,8 +1604,10 @@ export async function probeP6Reachability({ fetchImpl = null, wire = true, timeo
 // ---------------------------------------------------------------------------
 
 /** One minimal fundedness call. `fetchImpl` is injectable — tests stub it and
- *  NEVER hit the network. The key value never enters the result. */
+ *  NEVER hit the network. The key value never enters the result.
+ *  @param {{fetchImpl?: typeof fetch | null, timeoutMs?: number}} [options] */
 export async function probeFundedness({ fetchImpl = null, timeoutMs = 20_000 } = {}) {
+  /** @type {{probe: string, checkedAt: string, configured: boolean, attempted: boolean, ok: boolean, funded: boolean | null, class: string | null, code: string | null, httpStatus: number | null, requestedModel: string | null, servedModel: string | null, detail: string | null}} */
   const out = {
     probe: "W23-L1-fundedness",
     checkedAt: new Date().toISOString(),
@@ -1644,8 +1653,8 @@ export async function probeFundedness({ fetchImpl = null, timeoutMs = 20_000 } =
   out.requestedModel = requestedModel;
   const statuses = [];
   const baseFetch = fetchImpl ?? globalThis.fetch;
-  const recordingFetch = async (...args) => {
-    const res = await baseFetch(...args);
+  const recordingFetch = async (input, init) => {
+    const res = await baseFetch(input, init);
     try {
       statuses.push(res && typeof res.status === "number" ? res.status : null);
     } catch {
@@ -1816,7 +1825,8 @@ export function classifyDrainEnding({ outcome = null, position = null, code = nu
   }
 }
 
-/** Build a drain return value with its classified ending attached. */
+/** Build a drain return value with its classified ending attached.
+ *  @param {{p: import("../src/lib/types.ts").Project, res: import("../src/lib/headless.ts").RunResult | null, approved: string[], onTime: boolean, stall: string | null, position: string, code?: string | null}} ctx */
 function endingRecord({ p, res, approved, onTime, stall, position, code = null }) {
   return {
     p,
@@ -2051,6 +2061,7 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     console.log(`      emit-dir: removed the trial's prior workspace at ${cleanReport.dir} (per-trial clean target)`);
   }
   const emitResult = await emitProject(finalProject, emitDir, { redTree: "banner" });
+  /** @type {{emitted: boolean, deployMd: boolean, oracleSpec: boolean, oracleSpecBytes: number, redTreeBanner?: boolean, emitError?: string | null} | null} */
   let handoverEv = null;
   let treeEv = null;
   let runOutcome = null;
@@ -2114,7 +2125,7 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   const acceptance = checkAcceptance(
     grader,
     emitDir,
-    emitResult && Array.isArray(emitResult.files) ? emitResult.files : [],
+    emitResult.ok === true && Array.isArray(emitResult.files) ? emitResult.files : [],
   );
   const graderLeak = graderLeakScan(emitDir, grader);
   if (graderLeak.leaked) {
@@ -2269,6 +2280,8 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
   // row (additive keys). `graderHash` pins the effective bar that graded this
   // trial; `graderLeak` proves the emitted tree never carried the grader.
   const graderHash = String(fnv1a(JSON.stringify(grader)));
+  /** @type {{ pass: boolean | null, passReason: string | null }} */
+  const acceptanceStamp = { pass: false, passReason: null };
   const entryRow = {
     slug,
     name: entry.name,
@@ -2312,7 +2325,7 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       expectedKind: grader.expectedKind ?? null,
       expectedBehaviorRows: grader.expectedBehavior.length,
     },
-    acceptance: { ...acceptance, pass: false }, // `pass` filled per-trial by evaluateEntry
+    acceptance: { ...acceptance, ...acceptanceStamp }, // `pass` filled per-trial by evaluateEntry
     graderLeak: { scanned: graderLeak.scanned, leaked: graderLeak.leaked, hits: graderLeak.hits },
     // OV-7: the agent-facing half of the leak audit (brief + name vs the bar).
     briefLeak: { fields: briefLeak.fields, leaked: briefLeak.leaked, hits: briefLeak.hits },
@@ -2884,6 +2897,7 @@ export function runMarkerState(outDir) {
  *  @param {any[]} selected
  *  @param {{mode?: string, outDir?: string, runner?: (target: any) => any, markerExtra?: Record<string, any>}} [options] */
 export async function runWithMarker(selected, { mode, outDir, runner, markerExtra = {} } = {}) {
+  if (!runner) throw new Error("runWithMarker requires a runner");
   let markerPath = null;
   let previousUnfinished = null;
   if (mode === "keyed") {

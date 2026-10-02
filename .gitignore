@@ -20,6 +20,10 @@ dist/
 .DS_Store
 Thumbs.db
 .probe-tmp/
+# 334-6 (W48): lane scratch belongs OUTSIDE the repo. `.t4scratch/` (192 tracked
+# files, added 2fa3cd9) is a stale duplicate of src/lib; ignored so it cannot be
+# re-tracked once the parent removes it (see fixes/334_6_warden.md G3).
+.t4scratch/
 logs/trajectory.db*
 .rapidtool/logs/
 # Per-project runtime logs at ANY depth: `.rapidtool/logs/` alone is root-anchored (middle separator),

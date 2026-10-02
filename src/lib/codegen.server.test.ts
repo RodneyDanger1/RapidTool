@@ -28,6 +28,7 @@ import {
   liveP6Synthesis,
   localBindingLines,
   materializeImportableTree,
+  mintTreeRunTested,
   neutralizeResidualCjsExports,
   nondeterministicPrimitiveHit,
   parseSynthesisEnvelope,
@@ -53,6 +54,7 @@ import {
   p6SynthesisUserPrompt,
   P6_SYNTH_MAX_TOKENS,
   P6_SYNTH_PRIOR_MAX_FILES,
+  P6_SYNTH_PROMPT_MAX_CHARS,
   P6_SYNTH_TIMEOUT_MS,
   relTsImport,
   signatureFunctionNames,
@@ -64,6 +66,7 @@ import {
   orderTreeChunks,
   treeChunkPlan,
   treeChunkPlanCensus,
+  treeRunTestedEvidence,
   treePathForChunk,
   TREE_CHUNK0_RELOCATED_PATH,
   TREE_ENTRY_PATH,
@@ -89,6 +92,7 @@ import type { ExpandBriefResult } from "./prompt-engine.ts";
 import type { VerifyOutcome } from "./verify.server.ts";
 import type { LlmResult } from "./llm.ts";
 import type { Project } from "./types.ts";
+import type { TreeRunOutcome } from "./compile-check.server.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
 import { exportProjectJson, importProject, type ArtifactProvenance } from "./io.ts";
 
@@ -1083,6 +1087,29 @@ describe("chunked synthesis pure helpers (fixes/144 M2 / S-01 T2)", () => {
     // ≤ the cap file lines are rendered at all (O(chunks²)→O(chunks·cap)).
     const fileLines = prompt.split("\n").filter((l) => /^- src\/generated\/f\d+\.ts exports: /.test(l));
     assert.equal(fileLines.length, P6_SYNTH_PRIOR_MAX_FILES);
+  });
+
+  it("334-1 P3: the prior render also honours the per-chunk byte budget (a visible cut, not only the file cap)", () => {
+    // Under the 12-file cap with huge export lists, so only the byte budget can
+    // cut. 331-4 pinned the file cap; the second cut was untested until now.
+    const big: ChunkPriorFile[] = Array.from({ length: 12 }, (_, i) => ({
+      path: `src/generated/f${i}.ts`,
+      exports: Array.from({ length: 1500 }, (_, j) => `exp${i}_${j}`),
+      reqTrace: {},
+    }));
+    const spec = ledgerSpec(2);
+    const prompt = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures, big, []);
+    const fileLines = prompt.split("\n").filter((l) => /^- src\/generated\/f\d+\.ts exports: /.test(l));
+    assert.ok(fileLines.length >= 1 && fileLines.length < 12, "the byte budget cuts below the file cap");
+    const marker = /\[PRIOR-ELIDED: (\d+) file\(s\) beyond the 60,000-char prompt budget/.exec(prompt);
+    assert.ok(marker, "the byte-budget cut carries its visible marker");
+    assert.equal(Number(marker![1]) + fileLines.length, 12, "every non-rendered file is counted in the marker");
+    assert.ok(prompt.length <= P6_SYNTH_PROMPT_MAX_CHARS + 400, "the rendered prompt honours the budget (plus the marker)");
+    // Legal control: a small prior block renders all and shows no marker.
+    const small: ChunkPriorFile[] = Array.from({ length: 3 }, (_, i) => ({ path: `src/generated/s${i}.ts`, exports: [`s${i}`], reqTrace: {} }));
+    const smallPrompt = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures, small, []);
+    assert.equal(smallPrompt.includes("PRIOR-ELIDED"), false);
+    assert.equal(smallPrompt.split("\n").filter((l) => /^- src\/generated\/s\d/.test(l)).length, 3);
   });
 
   it("p6SynthesisUserPrompt is byte-identical to the chunk builder (full sig list, no prior files)", () => {
@@ -3904,6 +3931,95 @@ describe("W46/332-1 (P1) un-awaited async imports", () => {
     assert.equal(validateSynthesisModule(awaitedArrow, ["f", "getProperty"], ["f", "getProperty"]).ok, true);
   });
 
+  it("334-1 P1: a computed key bound to a const string resolves — a legal `[\"then\"]` chain is not over-refused, a value key still is", () => {
+    // 333-1 named the dynamic-key over-refusal; a `const` key is statically
+    // resolvable, so a legal then/catch chain through it must not be refused.
+    const legalThen = [
+      'const THEN = "then";',
+      "function f(id) { return getProperty(id)[THEN](function (p) { return p.ok; }); }",
+      "module.exports.f = f;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(legalThen, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true, "const-resolved `.then` consumer stays legal");
+    const legalCatch = [
+      'const CATCH = "catch";',
+      "function f(id) { return getProperty(id)[CATCH](function (e) { return e; }); }",
+      "module.exports.f = f;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(legalCatch, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true);
+
+    // A const key that resolves to a value property is still the defect.
+    const valueKey = 'const OK = "ok";\nfunction f(id) { return getProperty(id)[OK]; }\nmodule.exports.f = f;';
+    const valueV = validateSynthesisModule(valueKey, ["f"], ["f"], GET_PROPERTY_PRIOR);
+    assert.equal(valueV.ok, false, "`[OK]` reads a value property off the Promise");
+    if (!valueV.ok) assert.match(valueV.error, /\(computed-read\)/);
+
+    // The bound-then-read shape through a resolved key: legal `[THEN]`, defect `[OK]`.
+    const boundThen = ['const THEN = "then";', "function f(id) { const p = getProperty(id); return p[THEN](function (x) { return x; }); }", "module.exports.f = f;"].join("\n");
+    assert.equal(validateSynthesisModule(boundThen, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true, "`p[THEN](cb)` is a legal chain");
+    const boundOk = ['const OK = "ok";', "function f(id) { const p = getProperty(id); return p[OK]; }", "module.exports.f = f;"].join("\n");
+    const boundOkV = validateSynthesisModule(boundOk, ["f"], ["f"], GET_PROPERTY_PRIOR);
+    assert.equal(boundOkV.ok, false);
+    if (!boundOkV.ok) assert.match(boundOkV.error, /bound-then-read/);
+
+    // An unresolvable dynamic key stays conservative (refused, named computed-read).
+    const dynamic = "function f(id, k) { return getProperty(id)[k]; }\nmodule.exports.f = f;";
+    const dynV = validateSynthesisModule(dynamic, ["f"], ["f"], GET_PROPERTY_PRIOR);
+    assert.equal(dynV.ok, false, "an unresolvable key is still a computed read");
+    if (!dynV.ok) assert.match(dynV.error, /\(computed-read\)/);
+  });
+
+  it("334-1 P1: a `this.m()` receiver call inside the declaring class is refused; legal receivers stay accepted", () => {
+    for (const [form, body] of [["property-read", "read(id) { return this.getProperty(id).ok; }"], ["bound-then-read", "read(id) { const p = this.getProperty(id); return p.ok; }"]] as const) {
+      const mod = ["class PropertyStore {", "  async getProperty(id) { return { ok: true, id: id }; }", `  ${body}`, "}", "module.exports.PropertyStore = PropertyStore;"].join("\n");
+      assert.ok(asyncNamesInScope(mod).includes("getProperty"), "the async method is discovered");
+      const v = validateSynthesisModule(mod, ["PropertyStore"], ["PropertyStore"]);
+      assert.equal(v.ok, false, `${form}: this.getProperty(...) is refused`);
+      if (!v.ok) assert.match(v.error, /un-awaited async call used as a value/);
+    }
+    // Legal controls: awaited, .then, ["then"] and a synchronously-declared member.
+    const legal = [
+      "class PropertyStore {",
+      "  async getProperty(id) { return { ok: true, id: id }; }",
+      "  async read(id) { const p = await this.getProperty(id); return p.ok; }",
+      "  chain(id) { return this.getProperty(id).then(function (p) { return p.ok; }); }",
+      "  computed(id) { return this.getProperty(id)['then'](function (p) { return p.ok; }); }",
+      "}",
+      "module.exports.PropertyStore = PropertyStore;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(legal, ["PropertyStore"], ["PropertyStore"]).ok, true, "await/.then/['then'] receivers stay legal");
+    const syncMember = [
+      "class PropertyStore {",
+      "  getProperty(id) { return { ok: true, id: id }; }",
+      "  read(id) { return this.getProperty(id).ok; }",
+      "}",
+      "module.exports.PropertyStore = PropertyStore;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(syncMember, ["PropertyStore"], ["PropertyStore"]).ok, true, "a sync member is never refused");
+    // An async `save` on class A must not refuse class B's synchronous `this.save()`.
+    const twoClasses = [
+      "class A {",
+      "  async save() { return 1; }",
+      "}",
+      "class B {",
+      "  save() { return { ok: true }; }",
+      "  run() { return this.save().ok; }",
+      "}",
+      "module.exports.A = A;",
+      "module.exports.B = B;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(twoClasses, ["A", "B"], ["A", "B"]).ok, true, "another receiver's same-named sync member is not over-refused");
+    // A named receiver (`store.m()`) stays outside the guard (needs type resolution).
+    const namedReceiver = [
+      "class PropertyStore {",
+      "  async getProperty(id) { return { ok: true, id: id }; }",
+      "}",
+      "function f(store, id) { return store.getProperty(id).ok; }",
+      "module.exports.f = f;",
+      "module.exports.PropertyStore = PropertyStore;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(namedReceiver, ["f", "PropertyStore"], ["f", "PropertyStore"]).ok, true, "a named receiver is not matched (documented limit)");
+  });
+
   it("refuses a module's OWN async function used as a value without await (single-module path, no prior chunks)", () => {
     const mod = [
       "async function load(id) { return { ok: true }; }",
@@ -4134,6 +4250,91 @@ describe("W46/332-1 (P2) plan-coverage determinism", () => {
     const row = (q.logs ?? []).find((l) => l.event === "p6.tree.shortfall");
     assert.ok(row, "the shortfall row is persisted");
     assert.match(row!.detail, /declared 4, planned 1, unbound 3/);
+  });
+
+  it("334-1 P2: the surviving unbound-declared-job shortfall row fires; the deleted reconcile row left no debris", async () => {
+    // The 333-1 F-2 deletion removed the unreachable "does not reconcile" row.
+    // This proves the LIVE row (an unbound declared job) survived on a real shape,
+    // and that no reconcile-row debris is emitted.
+    const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), chunkedDeps().deps);
+    const rows = (q.logs ?? []).filter((l) => l.event === "p6.tree.shortfall");
+    assert.equal(rows.length, 1, "exactly the unbound path's one row");
+    assert.match(rows[0]!.detail, /declared 4, planned 1, unbound 3/);
+    assert.match(rows[0]!.detail, /\btrack\b/, "a declared job with no bound signature is named");
+    assert.equal(
+      (q.logs ?? []).some((l) => /does not reconcile/i.test(String(l.detail ?? ""))),
+      false,
+      "the deleted reconcile row emits nothing",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W48/334-1c — the minted tree-run evidence must distinguish the DECLARED
+// toolchain state. Siblings 334-3 and 334-4 flagged the conflation: a tree
+// whose declared typecheck/build RAN and one whose toolchain NEVER ran minted
+// the same evidence hash (2834449053), defeating the just-landed first-class
+// `declaredScriptsVerified` / `unverifiedDeclaredScripts` / `unverifiedEntry`
+// state. The fix folds booleans + a sorted name list only (no prose) into
+// `treeRunTestedEvidence`'s summary — the exact input of the mint's fnv1a.
+// ---------------------------------------------------------------------------
+describe("W48/334-1c tree-run mint evidence folds the declared-script state", () => {
+  /** Green + executed tree-run; only the declared-script fields vary. */
+  const outcome = (over: Partial<TreeRunOutcome> = {}): TreeRunOutcome =>
+    ({
+      ok: true,
+      dir: "C:/scratch/rt-334-1c",
+      compile: { ok: true, dir: "C:/scratch/rt-334-1c", checked: 2, passed: 2, failed: 0, skipped: 0, verdicts: [] },
+      tests: [
+        {
+          file: "tests/oracle.spec.ts",
+          compile: { file: "tests/oracle.spec.ts", ok: true, verdict: null },
+          tests: { pass: 3, fail: 0 },
+          run: "pass",
+        },
+      ],
+      run: { kind: "ui-shell", run: "skip", detail: "UI shell - not executable headless" },
+      ...over,
+    }) as unknown as TreeRunOutcome;
+  const hashOf = (o: TreeRunOutcome): string => String(fnv1a(treeRunTestedEvidence(o).summary));
+
+  it("a verified and an unverified toolchain no longer mint the same evidence hash", () => {
+    const verified = outcome({ declaredScriptsVerified: true, unverifiedDeclaredScripts: [] });
+    const unverified = outcome({ declaredScriptsVerified: false, unverifiedDeclaredScripts: ["typecheck", "build"] });
+    assert.equal(treeRunTestedEvidence(verified).executed, true, "both are genuinely executed runs");
+    assert.equal(treeRunTestedEvidence(unverified).executed, true);
+    assert.notEqual(hashOf(verified), hashOf(unverified), "the two toolchain states mint DIFFERENT hashes");
+    // The sorted name list is in the evidence, canonical regardless of input order.
+    assert.match(treeRunTestedEvidence(unverified).summary, /declared-scripts unverified \[build, typecheck\]/);
+    assert.equal(
+      hashOf(outcome({ declaredScriptsVerified: false, unverifiedDeclaredScripts: ["build", "typecheck"] })),
+      hashOf(unverified),
+      "a reordered name list hashes identically (canonical order)",
+    );
+  });
+
+  it("an entry skip is its own decisive factor; the default state keeps its prior bytes", () => {
+    const dflt = outcome();
+    // Pre-334-1c hash for this exact green executed shape (reproduced, not cited).
+    assert.equal(hashOf(dflt), "2834449053", "a run with no declared-script signal keeps the pre-change hash");
+    assert.equal(
+      hashOf(outcome({ declaredScriptsVerified: true, unverifiedDeclaredScripts: [] })),
+      "2834449053",
+      "fully declared-verified hashes like the default (no token)",
+    );
+    assert.notEqual(hashOf(outcome({ unverifiedEntry: "UI shell - not executable headless" })), hashOf(dflt), "the entry skip is decisive");
+    assert.match(treeRunTestedEvidence(outcome({ unverifiedEntry: "why" })).summary, /entry-skipped/);
+    assert.equal(hashOf(dflt), hashOf(outcome()), "deterministic across invocations");
+  });
+
+  it("the real mint seam writes the distinct evidence hashes onto lastTest", () => {
+    const base = (): Project => emptyProject({ name: "Mint334", brief: "A dispatch board for field service." });
+    const verified = mintTreeRunTested(base(), outcome({ declaredScriptsVerified: true, unverifiedDeclaredScripts: [] }));
+    const unverified = mintTreeRunTested(base(), outcome({ declaredScriptsVerified: false, unverifiedDeclaredScripts: ["typecheck", "build"] }));
+    const vh = (verified.lastTest as { evidenceHash?: string } | null)?.evidenceHash;
+    const uh = (unverified.lastTest as { evidenceHash?: string } | null)?.evidenceHash;
+    assert.ok(vh && uh, "both states still mint a tested verdict");
+    assert.notEqual(vh, uh, "the P6 DoD's proof artifact distinguishes the toolchain states");
   });
 });
 
