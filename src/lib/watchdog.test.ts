@@ -10,6 +10,7 @@ import {
   shouldAutopause,
   watchdogDecision,
 } from "./watchdog.ts";
+import { P6_PHASE_MAX_MS, WILD_STEP_BUDGET_MS } from "./rt-events.ts";
 
 test("watchdogDecision tiers at 0.99×/1×/1.99×/2× of the budget", () => {
   const B = 90_000;
@@ -26,6 +27,29 @@ test("watchdogDecision tiers at 0.99×/1×/1.99×/2× of the budget", () => {
 test("shouldAutopause fires only at ≥ 2× budget (pause-on-resolve trigger)", () => {
   assert.equal(shouldAutopause(179_999, 90_000), false);
   assert.equal(shouldAutopause(180_000, 90_000), true);
+});
+
+test("R12-f04: the live step budget clears a legal P6 synthesis step yet still latches a frozen one", () => {
+  // A legal keyed P6 step may run up to P6_PHASE_MAX_MS (240 s). The register
+  // defect was WILD_STEP_BUDGET_MS = 90 s: a full legal step tiered at 2× and
+  // auto-paused on resolve. Pin the derivation at the pure-decision seam.
+  assert.ok(
+    WILD_STEP_BUDGET_MS > P6_PHASE_MAX_MS,
+    `step budget ${WILD_STEP_BUDGET_MS} must exceed the P6 phase max ${P6_PHASE_MAX_MS}`,
+  );
+  assert.equal(watchdogDecision(P6_PHASE_MAX_MS, WILD_STEP_BUDGET_MS), 0, "a full legal P6 step is healthy");
+  assert.equal(shouldAutopause(P6_PHASE_MAX_MS, WILD_STEP_BUDGET_MS), false, "no auto-pause on a legal step");
+  // The brief's done-when: a step LONGER than the old 90 s budget and SHORTER
+  // than the phase max is healthy now, but latched under the old budget.
+  assert.equal(watchdogDecision(200_000, WILD_STEP_BUDGET_MS), 0, "200 s legal step is healthy");
+  assert.equal(watchdogDecision(200_000, 90_000), 2, "200 s step was a false 'frozen' at 90 s");
+  // The old too-small budget DID trip the full legal step — the register repro.
+  assert.equal(watchdogDecision(P6_PHASE_MAX_MS, 90_000), 2, "90 s budget latches a legal 240 s step");
+  assert.equal(shouldAutopause(P6_PHASE_MAX_MS, 90_000), true);
+  // A genuinely frozen run (past budget, then past 2×) is still detectable.
+  assert.equal(watchdogDecision(WILD_STEP_BUDGET_MS, WILD_STEP_BUDGET_MS), 1, "past 1× = overdue");
+  assert.equal(watchdogDecision(WILD_STEP_BUDGET_MS * 2, WILD_STEP_BUDGET_MS), 2, "past 2× = timeout latch");
+  assert.equal(shouldAutopause(WILD_STEP_BUDGET_MS * 2, WILD_STEP_BUDGET_MS), true);
 });
 
 test("heartbeat lag thresholds: <3s ok, 3-10s warn, ≥10s critical", () => {

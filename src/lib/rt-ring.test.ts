@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRtRing, rtHydrate, rtPush, rtRowBytes, rtSerialize, rtStats, rtTail, type RtRing } from "./rt-ring.ts";
-import { RING_CAP } from "./rt-events.ts";
+import { RING_CAP, messageHash } from "./rt-events.ts";
 import type { RtEvent } from "./rt-events.ts";
 
 let seq = 0;
@@ -70,6 +70,26 @@ test("coalescing: same fingerprint within the window counts up instead of append
   ring = rtPush(ring, mk(9_001), { now: 9_001 }).ring;
   assert.equal(ring.rows.length, 2);
   assert.equal(ring.rows[1].count, undefined);
+});
+
+test("R12-f05: a stable stale message + changing payload.staleSeconds coalesces (payload is not in the fingerprint)", () => {
+  let ring = createRtRing();
+  const stale = (ts: number, secs: number) =>
+    row({
+      ts,
+      level: "error",
+      scope: "wild-step",
+      event: "wild.step_timeout",
+      code: "RT_E_LLM_TIMEOUT",
+      message: "Wild run P6 stale past budget",
+      payload: { staleSeconds: secs, budgetMs: 255_000 },
+    });
+  ring = rtPush(ring, stale(1_000_000, 256), { now: 1_000_000 }).ring;
+  ring = rtPush(ring, stale(1_001_000, 257), { now: 1_001_000 }).ring;
+  ring = rtPush(ring, stale(1_002_000, 258), { now: 1_002_000 }).ring;
+  assert.equal(ring.rows.length, 1, "stable message + varying seconds is ONE ring slot (was one per tick)");
+  assert.equal(ring.rows[0].count, 3, "the dedupe counter records the three ticks");
+  assert.equal(messageHash("Wild run P6 stale past budget"), messageHash(ring.rows[0].message), "fingerprint stable");
 });
 
 test("redaction on push: message ≤300, ctx ≤8 keys × ≤160 chars, stack bounded", () => {

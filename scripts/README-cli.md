@@ -119,6 +119,16 @@ plain `process.env` read, so a bare Node / unit-test process is unchanged.
 # 1. Create a new project (writes <file>.json atomically; no --out → <slug>.json in the CWD — the intermediate file stays where the shell chains the verbs)
 node --experimental-strip-types scripts/rapidtool-cli.mjs create \
   --brief "Build a field-service dispatch board for HVAC." --name "HVAC Dispatch" --out build.json
+#    --brief takes PROSE, or --brief @<path> reads the file (the same `@file`
+#    convention as `ingest --report`). A YAML-front-matter corpus fixture
+#    (research/eval-corpus/*.md, e.g. house-flip-manager.md) carries its prose
+#    in the `brief:` scalar — `@file` unwraps that instead of feeding the front
+#    matter to the lattice. A bare value that names an EXISTING, readable file
+#    is REFUSED (exit 1, RT_E_VALIDATION) naming both forms: a file path is
+#    never silently used as the brief prose (AW45-c07 — the pre-fix bug named
+#    the project after the path and mined nouns from the filename).
+node --experimental-strip-types scripts/rapidtool-cli.mjs create \
+  --brief @research/eval-corpus/house-flip-manager.md --out build.json
 
 # 2. Advance one phase (deterministic; add --live for real keyless research + optional DeepSeek narrative)
 node --experimental-strip-types scripts/rapidtool-cli.mjs run --project build.json [--live]
@@ -984,6 +994,13 @@ so the contract is strict and stable:
   corpus rounds; 0 on deterministic runs), `memoryCount` (atomic memory rows),
   and `vaultReady` (true when `src/lib/vault.ts` exists AND the project already
   holds note-able content — i.e. `vault` will succeed).
+- **A value-taking flag is never silently ignored.** A value flag passed with
+  no value (`--limit`, `--phase`, `--name`, `--steps`, `--budget`, `--dir`, …)
+  parses as a bare `true`; the CLI refuses it before dispatch with exit 1 +
+  `RT_E_VALIDATION`, naming the flag and the two spellings. Boolean flags
+  (`--live`, `--apply`, `--force`, `--start`, the `lesson`/`wild` action flags)
+  are unaffected. This closes the valueless-flag asymmetry of the 330/331 waves
+  one class at a time (S3 · W46 · 332-4).
 
 ## Error codes (RT_E_*)
 

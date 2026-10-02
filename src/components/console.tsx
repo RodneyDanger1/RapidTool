@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { PHASES, PHASE_BY_ID, phaseDef } from "@/lib/phases";
 import { runCrew } from "@/lib/crew";
-import { persistStorageHealth, useRapid } from "@/lib/store";
+import { persistStorageHealth, staleEmitStep, useRapid } from "@/lib/store";
 import { BRIEF_TEMPLATES } from "@/lib/templates";
 import { estimateTokens } from "@/lib/algorithms";
 import { DOD } from "@/lib/dod";
@@ -499,8 +499,9 @@ function FixturesPanel() {
   return (
     <div className="scroll-thin max-h-[65vh] overflow-y-auto px-5 py-4">
       <p className="text-xs text-muted">{data.label}</p>
-      {/* The loader's label says "approving here records a decision"; this
-          console has no such control yet, so the scope is stated, not implied. */}
+      {/* The loader's label says approval is a CLI action and this view records
+          no decision; this console has no such control, so the scope is stated
+          here too, not implied. */}
       <p className="mt-1 text-xs text-faint">
         This console shows the review rows only — no approve/reject control is wired yet, so nothing
         here can record a decision. Approving a fixture is a CLI action
@@ -1048,6 +1049,8 @@ function WildConsole({ project }: { project: Project }) {
   const decisionsAt = useRef(-1);
   const logsAt = useRef(-1);
   const autoLogsAt = useRef(-1);
+  // R12-f05 (332-5): latch for the edge-triggered stale-run emit (see staleEmitStep).
+  const staleReported = useRef(false);
 
   // PB-04: register the LIVE busy probe so the rt-client heartbeat chain
   // (sys.heartbeat_lag → sys.mainthread_stall) sees a console-driven wild run.
@@ -1196,28 +1199,36 @@ function WildConsole({ project }: { project: Project }) {
         });
         const live = useRapid.getState().projects.find((p) => p.id === projectId);
         const run = live ? wildStateOf(live).run : null;
-        if (run && run.active && !wildPaused(run) && typeof run.lastAutoAt === "number") {
-          if (Date.now() - run.lastAutoAt > WILD_STEP_BUDGET_MS) {
-            reportRt({
-              level: "error",
-              scope: "wild-step",
-              event: "wild.step_timeout",
-              // R12-f05: the message must be COALESCER-STABLE — the changing
-              // "stale Ns" used to ride the messageHash, so the dedupe window
-              // never matched and every ~11s tick wrote a fresh row (localStorage
-              // churn). Seconds (and the budget) ride the payload instead; the
-              // message varies only per-phase, which is a bounded key set.
-              message: `Wild run P${run.phase ?? "?"} stale past budget`,
-              payload: {
-                staleSeconds: Math.round((Date.now() - run.lastAutoAt) / 1000),
-                budgetMs: WILD_STEP_BUDGET_MS,
-              },
-              capture: "src/components/console.tsx:WildFeed watchdog",
-              code: "RT_E_LLM_TIMEOUT",
-              phase: run.phase ?? null,
-              projectId,
-            });
-          }
+        const lastAutoAt =
+          run && run.active && !wildPaused(run) && typeof run.lastAutoAt === "number"
+            ? run.lastAutoAt
+            : null;
+        const staleNow = lastAutoAt !== null && Date.now() - lastAutoAt > WILD_STEP_BUDGET_MS;
+        // R12-f05 (332-5): EDGE-triggered. The tick cadence (~11 s = WILD_POLL_MS
+        // × 10) exceeds the §2.5 coalescing window (5 s), so a repeating emit could
+        // never merge — measured at the real cadence, three ticks wrote three rows.
+        // Report once when the run ENTERS the stale state; a healthy tick resets
+        // the latch so the next episode reports again. Do NOT widen the window.
+        const staleStep = staleEmitStep(staleReported.current, staleNow);
+        staleReported.current = staleStep.next;
+        if (staleStep.emit && run && lastAutoAt !== null) {
+          reportRt({
+            level: "error",
+            scope: "wild-step",
+            event: "wild.step_timeout",
+            // R12-f05: the message stays COALESCER-STABLE — the changing
+            // "stale Ns" rides the payload, so the messageHash is stable per
+            // phase and a (rare) adjacent episode still cannot double-count.
+            message: `Wild run P${run.phase ?? "?"} stale past budget`,
+            payload: {
+              staleSeconds: Math.round((Date.now() - lastAutoAt) / 1000),
+              budgetMs: WILD_STEP_BUDGET_MS,
+            },
+            capture: "src/components/console.tsx:WildFeed watchdog",
+            code: "RT_E_LLM_TIMEOUT",
+            phase: run.phase ?? null,
+            projectId,
+          });
         }
       } catch {
         /* watchdog must never take the feed down */
@@ -1964,6 +1975,10 @@ export function RunScreen({ id }: { id: string }) {
   >(null);
   const busyRef = useRef(false);
   const copyTs = useRef(0);
+  // C1 (332-5): the last keyed-call outcome this screen ran (crew). The chat
+  // half lives in the persisted thread, so it survives a reload; this covers
+  // the keyed action the RunScreen itself dispatches.
+  const [keyedOutcome, setKeyedOutcome] = useState<KeyedOutcome | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const noteRef = useRef<HTMLTextAreaElement | null>(null);
   // UI-01: focus target for the HITL override checkbox. The `a` shortcut never
@@ -2219,6 +2234,47 @@ export function RunScreen({ id }: { id: string }) {
   // (phases.ts F3-20: look ids up in PHASE_BY_ID, never index PHASES by position).
   const currentDef = PHASE_BY_ID.get(project.currentPhase) ?? null;
   const currentCode = currentDef?.code ?? `P${project.currentPhase}`;
+  // C1 (332-5): the header LLM chip shows key VALIDITY, not presence. The
+  // newest keyed outcome decides whether "configured" is honest: the server
+  // probe's last-call record (refreshed by a server fn — never on render, and
+  // it spends nothing), the persisted chat thread, or this screen's crew run.
+  // Narrowed to a key-unusable class so a transient non-key failure never
+  // mislabels a working key.
+  const serverKeyed: KeyedOutcome | null = llmStatus.lastKeyed
+    ? {
+        ok: false,
+        code: llmStatus.lastKeyed.code,
+        note: llmStatus.lastKeyed.keySource ?? "",
+        at: llmStatus.lastKeyed.at,
+        noteKind: "source",
+      }
+    : null;
+  const lastKeyed = laterKeyedOutcome(
+    laterKeyedOutcome(lastChatKeyedOutcome(project.chatLog), keyedOutcome),
+    serverKeyed,
+  );
+  const keyUnusableCode =
+    lastKeyed && !lastKeyed.ok && lastKeyed.code !== null && KEY_UNUSABLE_CODES.has(lastKeyed.code)
+      ? lastKeyed.code
+      : null;
+  const keyDoc = keyUnusableCode ? codeDocOf(keyUnusableCode) : null;
+  const llmChipLabel = !llmStatus.configured ? llmStatus.label : (keyUnusableCode ?? llmStatus.label);
+  const llmChipTone: "ok" | "faint" | "danger" = !llmStatus.configured
+    ? "faint"
+    : keyUnusableCode
+      ? "danger"
+      : "ok";
+  const llmChipTitle = keyUnusableCode
+    ? `${keyUnusableCode}: ${
+        keyDoc
+          ? `${keyDoc.meaning} ${keyDoc.agentAction}`
+          : "a key is present but the last keyed call was refused."
+      }${
+        lastKeyed && lastKeyed.note
+          ? `${lastKeyed.noteKind === "source" ? " Key source: " : " Last error: "}${lastKeyed.note}`
+          : ""
+      }`
+    : "LLM backend status";
   // 111 TASK-02: one derived next action and its single primary handler. The
   // handler is the SAME function the action bar uses — never a second path to
   // run/approve (the stated risk of TASK-02).
@@ -2384,6 +2440,18 @@ export function RunScreen({ id }: { id: string }) {
     setBusyAction("crew");
     try {
       const res = await runCrew(current);
+      // C1 (332-5): record the outcome class so the header chip reflects key
+      // validity. A crew run reaches the same provider as chat, so its success
+      // clears a stale chat failure and its coded refusal names the fault.
+      setKeyedOutcome(
+        res.ok
+          ? { ok: true, code: null, note: "", at: Date.now(), noteKind: "error" }
+          : { ok: false, code: res.code ?? null, note: res.error ?? "", at: Date.now(), noteKind: "error" },
+      );
+      // C1 (332-5): refresh the server probe so its last-call record (the live
+      // validity signal) reflects this run too. Cheap server fn — no provider
+      // call, never on the render path.
+      void refreshStatuses();
       if (res.ok) {
         const messages = res.messages.map((m, i) => ({
           seq: i,
@@ -2744,11 +2812,7 @@ export function RunScreen({ id }: { id: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-2 font-mono text-xs text-muted">
           <span className="rounded-sm border border-border px-2 py-1">{project.domain}</span>
-          <StatusChip
-            label={llmStatus.label}
-            tone={llmStatus.configured ? "ok" : "faint"}
-            title="LLM backend status"
-          />
+          <StatusChip label={llmChipLabel} tone={llmChipTone} title={llmChipTitle} />
           <StatusChip
             label={`research · ${researchStatus.label}`}
             tone={researchStatus.configured ? "ok" : "faint"}
@@ -4857,14 +4921,15 @@ function VaultPane({ project }: { project: Project }) {
     for (const n of visible) {
       if (n.kind === "index") hub.push(n);
       else {
-        if (!byKind.has(n.kind)) {
-          byKind.set(n.kind, []);
+        const bucket = byKind.get(n.kind);
+        if (bucket) bucket.push(n);
+        else {
+          byKind.set(n.kind, [n]);
           order.push(n.kind);
         }
-        byKind.get(n.kind)!.push(n);
       }
     }
-    return { hub, kinds: order.map((k) => ({ kind: k, notes: byKind.get(k)! })) };
+    return { hub, kinds: order.map((k) => ({ kind: k, notes: byKind.get(k) ?? [] })) };
   }, [results, visible]);
 
   // Obsidian-style panels over vault.ts's frozen `links` field (bare titles):
@@ -5885,6 +5950,56 @@ function normalizeCode(c: unknown): string | null {
 }
 
 /**
+ * C1 (332-5) — key VALIDITY, not presence. The server probe behind the header
+ * chip reports only whether a key EXISTS (`configured`), so a rejected key
+ * still reads "configured" and the operator learns the truth only when a keyed
+ * action fails. The console can see the last keyed-call OUTCOME CLASS from the
+ * sources it owns: the persisted chat thread (`RT_E_*` rows `chatOnce` writes)
+ * and this screen's own crew result. The chip renders that class when it is a
+ * key failure; the provider's note is tail-only by construction, and a full key
+ * is never rendered.
+ */
+type KeyedOutcome = {
+  ok: boolean;
+  code: string | null;
+  note: string;
+  at: number;
+  /** What `note` is: the provider's own error text, or a tail-only key-source
+   *  label (the server probe carries no message, only the source). */
+  noteKind?: "error" | "source";
+};
+
+/** Codes that mean the key is present but unusable — a validity fault, not
+ *  absence (the presence axis stays the server probe's `configured`). */
+const KEY_UNUSABLE_CODES = new Set(["RT_E_LLM_KEY_REJECTED", "RT_E_LLM_KEY_SHADOWED"]);
+
+/** The newest keyed-chat outcome in the persisted thread, or null when the
+ *  thread holds no keyed turn. The newest assistant row IS the last outcome. */
+function lastChatKeyedOutcome(rows: ChatLogRow[] | undefined | null): KeyedOutcome | null {
+  if (!Array.isArray(rows)) return null;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const r = rows[i];
+    if (!r || r.role !== "assistant") continue;
+    const code = typeof r.code === "string" && /^RT_E_[A-Z0-9_]+$/.test(r.code) ? r.code : null;
+    return {
+      ok: r.error !== true && code === null,
+      code: r.error === true ? code : null,
+      note: typeof r.text === "string" ? r.text : "",
+      at: typeof r.ts === "number" && Number.isFinite(r.ts) ? r.ts : 0,
+      noteKind: "error",
+    };
+  }
+  return null;
+}
+
+/** The later of two keyed outcomes (null-safe) — the last one wins. */
+function laterKeyedOutcome(a: KeyedOutcome | null, b: KeyedOutcome | null): KeyedOutcome | null {
+  if (!a) return b;
+  if (!b) return a;
+  return b.at >= a.at ? b : a;
+}
+
+/**
  * ERROR_CODE_DOC is a sibling export — never trust its shape. Landed rows are
  * { meaning, agentAction } (fixes/48); tone is derived locally: actionable
  * state/not-configured families read "warn", hard failures read "danger".
@@ -6135,7 +6250,7 @@ function OracleVerifyBlock({ project }: { project: Project }) {
  * across tab switches; the route key remounts per project (run.$id.tsx UI-1).
  */
 function ChatPane({ project }: { project: Project }) {
-  const { llmStatus, autopilot, appendChatRows } = useRapid();
+  const { llmStatus, autopilot, appendChatRows, refreshStatuses } = useRapid();
   // No-key honesty: `configured` is the live server-boundary probe result.
   // When it is false the composer is disabled (no dead send that can only
   // produce an RT_E_LLM_NOT_CONFIGURED row) and the grounding-context meter
@@ -6253,6 +6368,9 @@ function ChatPane({ project }: { project: Project }) {
       // Re-read the context meter so the next render compares reply stamps
       // against the CURRENT build version, not the send-time one (156 E2).
       setSendSeq((s) => s + 1);
+      // C1 (332-5): refresh the server probe's last-keyed record (live key
+      // validity) — a cheap server fn, no provider call, never on render.
+      void refreshStatuses();
     }
   }
 
@@ -6717,12 +6835,14 @@ function StatusChip({
   title,
 }: {
   label: string;
-  tone: "ok" | "faint";
+  tone: "ok" | "faint" | "danger";
   title?: string;
 }) {
   return (
     <span
-      className={`rounded-sm border border-border px-2 py-1 ${tone === "ok" ? "text-ok" : "text-faint"}`}
+      className={`rounded-sm border border-border px-2 py-1 ${
+        tone === "ok" ? "text-ok" : tone === "danger" ? "text-danger" : "text-faint"
+      }`}
       title={title}
     >
       {label}

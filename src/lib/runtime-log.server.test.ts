@@ -113,6 +113,81 @@ test("readRtTail reads a bounded window of a >256 KB file (W42 L4-G6)", () => {
   }
 });
 
+test("readRtTail reads a sub-256KB file whole (short-file tail, W3)", () => {
+  const dir = tmpDir();
+  try {
+    for (let i = 1; i <= 3; i++) appendRtLine(row(i), { logDir: dir });
+    const file = join(dir, RUNTIME_LOG_FILE);
+    assert.ok(statSync(file).size < 256 * 1024, "fixture stays under the window");
+    const tail = readRtTail(dir, 10);
+    assert.deepEqual(
+      tail.map((r) => r.message),
+      ["invocation 3", "invocation 2", "invocation 1"],
+      "a short file is fully readable, newest-first",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readRtTail: a window boundary that splits a multi-byte char yields only whole rows (W3)", () => {
+  const dir = tmpDir();
+  try {
+    const file = join(dir, RUNTIME_LOG_FILE);
+    const euro = "€"; // E2 82 AC — 3 UTF-8 bytes; a split must not corrupt a row
+    const pad = euro.repeat(150); // ≤300 code points, the per-message budget
+    const lines: string[] = [];
+    for (let i = 1; i <= 700; i++) {
+      lines.push(
+        JSON.stringify(
+          makeCliRow(
+            { level: "info", scope: "cli-command", event: "cli.invocation", message: pad, capture: "t", payload: { i } },
+            "s-utf8",
+            i,
+          ),
+        ),
+      );
+    }
+    const base = `${lines.join("\n")}\n`;
+    const baseBytes = Buffer.from(base, "utf8");
+    assert.ok(baseBytes.length > 256 * 1024, "fixture exceeds the 256 KB window");
+    // ASCII padding after the final newline shifts the window start (size − 256 KB)
+    // one byte at a time; the euro runs are ~2/3 continuation bytes, so one lands
+    // inside a character. The trailing padding is itself a torn line (skipped).
+    const startBase = baseBytes.length - 256 * 1024;
+    let extra = -1;
+    for (let k = 0; k < 5_000; k++) {
+      const b = baseBytes[startBase + k];
+      if (b >= 0x80 && b < 0xc0) {
+        extra = k;
+        break;
+      }
+    }
+    assert.ok(extra >= 0, "found a padding that makes the window start split a multi-byte char");
+    const content = base + "x".repeat(extra);
+    const bytes = Buffer.from(content, "utf8");
+    const start = bytes.length - 256 * 1024;
+    assert.ok(
+      bytes[start] >= 0x80 && bytes[start] < 0xc0,
+      `window start byte 0x${bytes[start].toString(16)} is a UTF-8 continuation byte`,
+    );
+    writeFileSync(file, content, "utf8");
+
+    const tail = readRtTail(dir, 10_000);
+    assert.ok(tail.length > 0, "whole rows after the split boundary come back");
+    assert.ok(tail.length < 700, "the full history is NOT returned — the read stayed window-bounded");
+    for (const r of tail) {
+      assert.equal(r.event, "cli.invocation", "every returned row is a whole, parsed row");
+      assert.equal(typeof r.ts, "number");
+      assert.ok(!String(r.message).includes("\uFFFD"), "a split character never leaks U+FFFD into a row");
+    }
+    assert.equal(tail[0].payload?.i, 700, "newest whole row is first");
+    assert.equal(tail[0].message, pad, "multi-byte message survives intact");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("readRtTail on a missing dir returns [] (never throws)", () => {
   assert.deepEqual(readRtTail(join(tmpDir(), "does-not-exist"), 5), []);
 });

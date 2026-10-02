@@ -12,6 +12,7 @@
 // Run (Node 22, requires --experimental-strip-types to import the .ts driver):
 //
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief "..." --name "..." --out build.json
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief @brief.md --out build.json   # @file = read the file (a corpus fixture's `brief:` front-matter scalar is unwrapped); a bare existing-file path is REFUSED, never fed to the lattice as prose
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs run     --project build.json [--live]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs gate    --project build.json [--autopilot] [--live]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs resume    --project build.json [--autopilot] [--live]   # T-107.7: re-enter from the per-phase checkpoint (prints the snapshot age; never a silent resume)
@@ -71,7 +72,9 @@ let CMD = null;
 // ---------------------------------------------------------------------------
 // Arg parsing (--flag value | --flag=value, plus bare boolean flags).
 // ---------------------------------------------------------------------------
+/** @returns {{ _: string[]; [key: string]: string | boolean | string[] }} */
 function parseArgs(argv) {
+  /** @type {{ _: string[]; [key: string]: string | boolean | string[] }} */
   const args = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -152,6 +155,50 @@ function refuseAgentSeal(cmdName) {
   );
 }
 
+// S3 (W46 · 332-4): the value-taking flags whose valueless spelling was still
+// silently absorbed. parseArgs turns `--x` with no value into `true`; every flag
+// here was then dropped by a `typeof args.x === "string"` read that fell back to
+// a default (--limit 5, --phase null, --steps the seed, …) or by a raw read.
+// The 330/331 waves fixed --knowledge/--agent-seal one at a time; this ONE
+// pre-dispatch refusal covers the rest, so a value flag is never silently
+// ignored. Boolean flags are deliberately absent (--live/--apply/--force/...);
+// the path flags --out/--knowledge/--html keep their own per-site
+// pathFlagRefusalError text, pinned by cli-exit-taxonomy.test.mjs.
+const VALUELESS_VALUE_FLAGS = [
+  "name",
+  "limit",
+  "phase",
+  "steps",
+  "max-steps",
+  "budget",
+  "tags",
+  "title",
+  "kind",
+  "actor",
+  "evidence",
+  "reason",
+  "by",
+  "slug",
+  "dir",
+  "history",
+  "policies",
+  "ids",
+  "tree",
+];
+
+/** Refuse a value flag parsed valueless, before ANY verb dispatch. */
+function refuseValuelessFlag(cmdName, key) {
+  return respond(
+    {
+      ok: false,
+      error: `${cmdName}: --${key} needs a value — it parsed as a flag with no value, so it would have been silently ignored.`,
+      code: "RT_E_VALIDATION",
+      remedy: `Pass the value (--${key} <value> or --${key}=<value>), or drop the flag if you did not mean to set it.`,
+    },
+    1,
+  );
+}
+
 // E-25: single JSON object on stdout + the machine exit code. Every result
 // gains schema_version/cmd/exit_code; the legacy `ok` field is kept. Every
 // {ok:false} envelope additionally gains `code` — a stable RT_E_* id from
@@ -166,6 +213,7 @@ function refuseAgentSeal(cmdName) {
 // crashed with a TypeError (observed 3/3 in 216y §2.3 G1). No caller awaits
 // respond — the synchronous exit is behaviour-identical on the success path,
 // and it is what makes a handled refusal actually END the verb.
+/** @returns {never} the in-tick process.exit below never returns (fixes/217e G1). */
 function respond(result, exitCode) {
   const out = { schema_version: SCHEMA_VERSION, cmd: CMD ?? null, ...result };
   if (out.ok === false && typeof out.code === "undefined") {
@@ -251,7 +299,9 @@ function respond(result, exitCode) {
 // fallback) and `classifyErr(err, fallback)` for the ERROR OBJECT at catch
 // sites — name/errno/.code matching only fires on the object, never on prose.
 // ---------------------------------------------------------------------------
+/** @type {(text: string) => string | null} */
 let classify = () => null; // prose classifier — omit `code` when module absent
+/** @type {(err: unknown, fallback?: string) => string | null} */
 let classifyErr = () => null; // object classifier (same module)
 // fixes/312_c6_ux (U3 · K5/K6): ERROR_CODE_DOC once errors.ts loads — the
 // module-level handle respond() (SYNC by construction, fixes/217e G1) reads
@@ -606,6 +656,81 @@ async function readReportSource(value) {
 }
 
 // ---------------------------------------------------------------------------
+// S2 / AW45-c07 (W46 · 332-4): `create --brief <path>` used to feed the raw
+// PATH to the pipeline as prose — inferName named the project after the path
+// and the lattice extracted nouns from the filename. Three honest shapes:
+//   · `--brief @<path>`  — read the file (the ingest `--report @file.json`
+//     convention). A YAML-front-matter corpus fixture (research/eval-corpus/*)
+//     carries the real prose in its `brief:` scalar; extract that instead of
+//     feeding the front matter to the lattice.
+//   · `--brief "<prose>"` — the text itself.
+//   · a bare value that names an EXISTING, readable file is refused CODED,
+//     naming both forms — never silently used as prose.
+// ---------------------------------------------------------------------------
+/** True when `p` resolves to an existing regular file (unstattable ⇒ false). */
+function isReadableFile(p) {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    /* not a path we can stat — treat as a non-file value, never a crash */
+    return false;
+  }
+}
+
+/**
+ * The `brief:` scalar of a leading YAML front-matter fence, or null. Scoped to
+ * the one shape the corpus fixtures use: a single-line, optionally quoted
+ * scalar (run-eval.mjs parseFrontmatter is the full parser; the CLI needs only
+ * this field).
+ * @param {string} text
+ * @returns {string | null}
+ */
+function briefFromFrontmatter(text) {
+  if (!text.startsWith("---")) return null;
+  const end = text.indexOf("\n---", 3);
+  if (end === -1) return null;
+  const m = text.slice(3, end).match(/^brief:\s*(.+)$/m);
+  if (!m) return null;
+  let v = m[1].trim();
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    v = v.slice(1, -1);
+  }
+  return v.trim() || null;
+}
+
+/**
+ * Resolve `create --brief` to prose.
+ * @param {string} raw
+ * @returns {{ value: string; error?: undefined } | { value?: undefined; error: string }}
+ */
+function readBriefSource(raw) {
+  if (raw.startsWith("@")) {
+    const path = raw.slice(1).trim();
+    if (!path) return { error: "create: --brief @ needs a file path (got a bare @)." };
+    if (!isReadableFile(path)) {
+      return { error: `create: --brief @${path} does not name a readable file.` };
+    }
+    let text;
+    try {
+      text = readFileSync(path, "utf8");
+    } catch (err) {
+      return { error: `create: --brief @${path} could not be read — ${err instanceof Error ? err.message : String(err)}` };
+    }
+    const fm = briefFromFrontmatter(text);
+    return { value: fm ?? text };
+  }
+  if (isReadableFile(raw)) {
+    return {
+      error:
+        `create: --brief ${JSON.stringify(raw)} names an existing file — a file path is never silently ` +
+        `used as the brief prose (it would name the project after the path). Read it with --brief @${raw} ` +
+        `or pass the text itself: --brief "<prose>".`,
+    };
+  }
+  return { value: raw };
+}
+
+// ---------------------------------------------------------------------------
 // G4/fixes/144 (M1): findable output defaults.
 // ---------------------------------------------------------------------------
 // Software deliverables (`emit`) and knowledge vaults (`vault`) default to a
@@ -788,6 +913,11 @@ async function main() {
   // are now redundant).
   if (cmd !== "wild" && flag(args, "agent-seal")) return refuseAgentSeal(cmd);
 
+  // S3 (W46 · 332-4): a value flag with no value never rides through to a
+  // silent default — refuse it coded, naming the flag, before ANY dispatch.
+  const bareValueFlag = VALUELESS_VALUE_FLAGS.find((key) => args[key] === true);
+  if (bareValueFlag !== undefined) return refuseValuelessFlag(cmd, bareValueFlag);
+
   // W45·331-1 (Keywright): resolve DEEPSEEK_API_KEY from <repo>/.env + the
   // process env BEFORE any dispatch, so every keyed verb (and create's
   // enforceDod default) sees the repo's key, and a conflicting ambient key is
@@ -800,7 +930,7 @@ async function main() {
     const proj = requireArg(args, "project", cmdName);
     // fixes/217e (G1): `return` the refusal — respond() exits; without it the
     // verb fell through and ran with `undefined` (audit 216y §2.3 G1).
-    if (proj.error) return respond({ ok: false, error: proj.error, code: "RT_E_VALIDATION" }, 1);
+    if (proj.error !== undefined) return respond({ ok: false, error: proj.error, code: "RT_E_VALIDATION" }, 1);
     try {
       return h.loadProject(proj.value);
     } catch (err) {
@@ -842,8 +972,14 @@ async function main() {
     switch (cmd) {
       case "create": {
         const brief = requireArg(args, "brief", "create");
-        if (brief.error) return respond({ ok: false, error: brief.error, code: "RT_E_VALIDATION" }, 1);
-        let project = h.createProject({ brief: brief.value, name: args.name });
+        if (brief.error !== undefined) return respond({ ok: false, error: brief.error, code: "RT_E_VALIDATION" }, 1);
+        // S2 / AW45-c07: '@<path>' reads the file (front-matter `brief:` unwrapped);
+        // a bare existing-file path is refused rather than fed to the lattice.
+        const briefSource = readBriefSource(brief.value);
+        if (briefSource.error !== undefined) {
+          return respond({ ok: false, error: briefSource.error, code: "RT_E_VALIDATION" }, 1);
+        }
+        let project = h.createProject({ brief: briefSource.value, name: args.name });
         // fixes/132 (C2): keyed runs default enforceDod ON (hard DoD gates);
         // --advisory restores advisory-only behavior. The flip happens before
         // anything observes the project — the saved file carries the flag.
@@ -1029,7 +1165,7 @@ async function main() {
         // a wild-run concept; the pointer refusal rides the ONE pre-dispatch
         // guard in main() (330).
         const target = requireArg(args, "project", "resume");
-        if (target.error) return respond({ ok: false, error: target.error, code: "RT_E_VALIDATION" }, 1);
+        if (target.error !== undefined) return respond({ ok: false, error: target.error, code: "RT_E_VALIDATION" }, 1);
         const t = resolveCheckpointTarget(target.value);
         // Identity guard: when a project FILE was named and exists, admit against ITS
         // id (an id reused by a different brief must fail closed); a directory names
@@ -1111,7 +1247,7 @@ async function main() {
         // a wild-run concept; the pointer refusal rides the ONE pre-dispatch
         // guard in main() (330).
         const target = requireArg(args, "project", "unattended");
-        if (target.error) return respond({ ok: false, error: target.error, code: "RT_E_VALIDATION" }, 1);
+        if (target.error !== undefined) return respond({ ok: false, error: target.error, code: "RT_E_VALIDATION" }, 1);
         const t = resolveCheckpointTarget(target.value);
         const resumed = h.loadResumableCheckpoint(t.dir);
         // fixes/323 FIX-2c (X2b OBS): the named FILE (when it exists) is loaded
@@ -1358,7 +1494,7 @@ async function main() {
         // (cli-exit-taxonomy.test.mjs) counts `flag(args,"i-am-human") ? await
         // humanSeatClaim(` claim sites; `humanClaim` above is the same value.
         const humanSeat = flag(args, "i-am-human") ? await humanSeatClaim("approve") : null;
-        if (humanSeat && humanSeat.error) {
+        if (humanSeat && humanSeat.error !== undefined) {
           return respond({ ok: false, error: humanSeat.error, code: "RT_E_VALIDATION" }, 1);
         }
         const policyVerdict = evaluatePolicy(
@@ -1418,7 +1554,7 @@ async function main() {
           );
         }
         const note = requireArg(args, "note", "reject");
-        if (note.error) return respond({ ok: false, error: note.error, code: "RT_E_VALIDATION" }, 1);
+        if (note.error !== undefined) return respond({ ok: false, error: note.error, code: "RT_E_VALIDATION" }, 1);
         if (note.value.trim().length < 12) {
           return respond(
             {
@@ -1482,7 +1618,7 @@ async function main() {
           );
         }
         const humanSeat = flag(args, "i-am-human") ? await humanSeatClaim("reject") : null;
-        if (humanSeat && humanSeat.error) {
+        if (humanSeat && humanSeat.error !== undefined) {
           return respond({ ok: false, error: humanSeat.error, code: "RT_E_VALIDATION" }, 1);
         }
         const updated = h.reject(project, note.value, humanSeat ? humanSeat.actor : { decidedBy: "autopilot", seat: "harness" });
@@ -1512,7 +1648,7 @@ async function main() {
       case "ingest": {
         const project = loadProjectFor("ingest");
         const reportArg = requireArg(args, "report", "ingest");
-        if (reportArg.error) return respond({ ok: false, error: reportArg.error, code: "RT_E_VALIDATION" }, 1);
+        if (reportArg.error !== undefined) return respond({ ok: false, error: reportArg.error, code: "RT_E_VALIDATION" }, 1);
         let reportText;
         try {
           reportText = await readReportSource(reportArg.value);
@@ -1984,7 +2120,7 @@ async function main() {
             // enforced truth.
             const { evaluatePolicy, seatLabel } = await import("../src/lib/policy.ts");
             const humanSeat = flag(args, "i-am-human") ? await humanSeatClaim("fixtures") : null;
-            if (humanSeat && humanSeat.error) {
+            if (humanSeat && humanSeat.error !== undefined) {
               respond({ ok: false, error: humanSeat.error, code: "RT_E_VALIDATION" }, 1);
               return;
             }
@@ -2213,7 +2349,7 @@ async function main() {
         // (`dirDirty`: which tree files differ from the ledger) — nothing is
         // ever persisted by this verb.
         const dirArg = requireArg(args, "dir", "tree-run");
-        if (dirArg.error) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
+        if (dirArg.error !== undefined) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
         try {
           const dir = resolve(dirArg.value);
           const cc = await checkDriver();
@@ -2294,7 +2430,7 @@ async function main() {
         // is the ledger — the ledger is persisted after every completed run,
         // converged or failed, so the artifact edits are never lost).
         const dirArg = requireArg(args, "dir", "repair");
-        if (dirArg.error) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
+        if (dirArg.error !== undefined) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
         const project = loadProjectFor("repair");
         const path = requireProjectPath(args, "repair");
         const budget =
@@ -2420,7 +2556,7 @@ async function main() {
         // does not have. Existing verb exit codes are untouched:
         // dry-run/applied 0, refusal 1, internal 4.
         const dirArg = requireArg(args, "dir", "edit");
-        if (dirArg.error) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
+        if (dirArg.error !== undefined) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
         const dirPath = resolve(dirArg.value);
         if (!existsSync(dirPath)) {
           return respond(
@@ -2434,7 +2570,7 @@ async function main() {
           );
         }
         const fileArg = requireArg(args, "file", "edit");
-        if (fileArg.error) return respond({ ok: false, error: fileArg.error, code: "RT_E_VALIDATION" }, 1);
+        if (fileArg.error !== undefined) return respond({ ok: false, error: fileArg.error, code: "RT_E_VALIDATION" }, 1);
         // Containment: the target must resolve INSIDE --dir (relative path, no
         // drive/absolute prefix, no `..` segment) — an edit verb must never
         // write outside the tree it names, whatever the caller passes.
@@ -2473,7 +2609,7 @@ async function main() {
           );
         }
         const findArg = requireArg(args, "find", "edit");
-        if (findArg.error) {
+        if (findArg.error !== undefined) {
           return respond(
             {
               ok: false,
@@ -2524,7 +2660,7 @@ async function main() {
         // scripts/cli-exit-taxonomy.test.mjs.
         const { evaluatePolicy, seatLabel } = await import("../src/lib/policy.ts");
         const humanSeat = flag(args, "i-am-human") ? await humanSeatClaim("edit") : null;
-        if (humanSeat && humanSeat.error) {
+        if (humanSeat && humanSeat.error !== undefined) {
           return respond(
             {
               ok: false,
@@ -2635,7 +2771,7 @@ async function main() {
         // applied edit needs the ledger it lands in (108-T1: actor + patch +
         // resulting hash).
         const projArg = requireArg(args, "project", "edit --write");
-        if (projArg.error) {
+        if (projArg.error !== undefined) {
           return respond(
             {
               ok: false,
@@ -2782,7 +2918,7 @@ async function main() {
       case "search": {
         const project = loadProjectFor("search");
         const query = requireArg(args, "query", "search");
-        if (query.error) return respond({ ok: false, error: query.error, code: "RT_E_VALIDATION" }, 1);
+        if (query.error !== undefined) return respond({ ok: false, error: query.error, code: "RT_E_VALIDATION" }, 1);
         try {
           const limit =
             typeof args.limit === "string" && /^\d+$/.test(args.limit) ? parseInt(args.limit, 10) : 10;
@@ -2917,7 +3053,7 @@ async function main() {
         // (compile-check.server.ts). All pass → 0; any fail → 1 (verdicts
         // carried on stdout); missing dir / internal error → 4.
         const dirArg = requireArg(args, "dir", "check");
-        if (dirArg.error) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
+        if (dirArg.error !== undefined) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
         try {
           const cc = await checkDriver();
           const result = cc.compileCheckDir(resolve(dirArg.value));
@@ -2952,7 +3088,7 @@ async function main() {
         // a clean tree → 0; an unreadable dir → 1 + RT_E_VALIDATION. This verb
         // is NEVER wired into a gate and never blocks an emit (218 §3.4/OV-21).
         const scanDir = requireArg(args, "dir", "scan");
-        if (scanDir.error) return respond({ ok: false, error: scanDir.error, code: "RT_E_VALIDATION" }, 1);
+        if (scanDir.error !== undefined) return respond({ ok: false, error: scanDir.error, code: "RT_E_VALIDATION" }, 1);
         try {
           const { scanTreeErrorSignals } = await import("../src/lib/error-scan.server.ts");
           const scan = scanTreeErrorSignals(resolve(scanDir.value));
@@ -3023,7 +3159,7 @@ async function main() {
       case "diagram": {
         const project = loadProjectFor("diagram");
         const kind = requireArg(args, "kind", "diagram");
-        if (kind.error) return respond({ ok: false, error: kind.error, code: "RT_E_VALIDATION" }, 1);
+        if (kind.error !== undefined) return respond({ ok: false, error: kind.error, code: "RT_E_VALIDATION" }, 1);
         // Validate the kind at the CLI seam (headless throws the same guard,
         // but the CLI owns the exit-1 VALIDATION envelope for usage errors).
         if (!h.DIAGRAM_KINDS.includes(kind.value)) {
@@ -3194,7 +3330,7 @@ async function main() {
         // Bounded structural codebase map of a real directory (no project
         // needed). Every skip (non-source, too large, over limit) is reported.
         const dir = requireArg(args, "dir", "mine");
-        if (dir.error) return respond({ ok: false, error: dir.error, code: "RT_E_VALIDATION" }, 1);
+        if (dir.error !== undefined) return respond({ ok: false, error: dir.error, code: "RT_E_VALIDATION" }, 1);
         const opts = {};
         if (typeof args.limit === "string" && /^\d+$/.test(args.limit)) {
           opts.maxFiles = parseInt(args.limit, 10);
@@ -3227,7 +3363,7 @@ async function main() {
         // (idempotent, content-fingerprinted); --find <query> searches. Exactly
         // one of the two is required.
         const store = requireArg(args, "store", "knowledge");
-        if (store.error) return respond({ ok: false, error: store.error, code: "RT_E_VALIDATION" }, 1);
+        if (store.error !== undefined) return respond({ ok: false, error: store.error, code: "RT_E_VALIDATION" }, 1);
         const save = typeof args.save === "string" ? args.save : undefined;
         const find = typeof args.find === "string" ? args.find : undefined;
         if (save !== undefined && find !== undefined) {
@@ -3271,7 +3407,7 @@ async function main() {
             }
             const res = await h.knowledgeSave(resolve(store.value), pattern);
             respond({ ok: true, entry: res.entry, appended: res.appended }, 0);
-          } else {
+          } else if (find !== undefined) {
             const limit =
               typeof args.limit === "string" && /^\d+$/.test(args.limit) ? parseInt(args.limit, 10) : 5;
             const matches = await h.knowledgeFind(resolve(store.value), find, limit);
@@ -3425,8 +3561,11 @@ async function main() {
             // failed/absent keyed turn) → the deterministic keyword draft via
             // knowledge.ts proposeLessonFallback, labeled mode:"keyless".
             const brief = requireArg(args, "brief", "lesson propose");
-            if (brief.error) return respond({ ok: false, error: brief.error, code: "RT_E_VALIDATION" }, 1);
-            const kind = ["fix", "pattern", "note"].includes(args.kind) ? args.kind : "note";
+            if (brief.error !== undefined) return respond({ ok: false, error: brief.error, code: "RT_E_VALIDATION" }, 1);
+            const kind =
+              typeof args.kind === "string" && ["fix", "pattern", "note"].includes(args.kind)
+                ? args.kind
+                : "note";
             const tags =
               typeof args.tags === "string" && args.tags.trim()
                 ? args.tags.split(",").map((s) => s.trim()).filter(Boolean)
@@ -3516,7 +3655,7 @@ async function main() {
             // human act — there is no machine path that appends to the store.
             const project = loadProjectFor("lesson accept");
             const out = requireArg(args, "out", "lesson accept");
-            if (out.error) return respond({ ok: false, error: out.error, code: "RT_E_VALIDATION" }, 1);
+            if (out.error !== undefined) return respond({ ok: false, error: out.error, code: "RT_E_VALIDATION" }, 1);
             const limit =
               typeof args.limit === "string" && /^\d+$/.test(args.limit) ? parseInt(args.limit, 10) : 5;
             const actor =
@@ -3574,9 +3713,9 @@ async function main() {
             // delete (append-only law). The old row stays on disk but is
             // excluded from read-back (findPatterns/injectProven).
             const file = requireArg(args, "knowledge-file", "lesson supersede");
-            if (file.error) return respond({ ok: false, error: file.error, code: "RT_E_VALIDATION" }, 1);
+            if (file.error !== undefined) return respond({ ok: false, error: file.error, code: "RT_E_VALIDATION" }, 1);
             const id = requireArg(args, "id", "lesson supersede");
-            if (id.error) return respond({ ok: false, error: id.error, code: "RT_E_VALIDATION" }, 1);
+            if (id.error !== undefined) return respond({ ok: false, error: id.error, code: "RT_E_VALIDATION" }, 1);
             // --evidence <text> is the human's rationale (the superseding
             // row's body carries it verbatim; the old row keeps its ledger).
             // --reason is accepted as an alias for older invocations. Optional:
@@ -3644,8 +3783,8 @@ async function main() {
               return m ? m[1].toLowerCase() : null;
             };
             const hasProject = typeof args.project === "string" && args.project.trim() !== "";
-            const hasStore =
-              typeof args["knowledge-file"] === "string" && args["knowledge-file"].trim() !== "";
+            const storeFile = typeof args["knowledge-file"] === "string" ? args["knowledge-file"] : "";
+            const hasStore = storeFile.trim() !== "";
             if (hasProject === hasStore) {
               return respond(
                 {
@@ -3743,7 +3882,7 @@ async function main() {
                 1,
               );
             }
-            const storePath = resolve(args["knowledge-file"]);
+            const storePath = resolve(storeFile);
             const store = new k.KnowledgeStore(storePath);
             const found = store.findPatterns(briefText, Math.max(limit * 4, 20));
             const rows = found
@@ -3790,7 +3929,7 @@ async function main() {
             // (content fields untouched, append-only discipline kept) and is
             // refused for project rows, which have no telemetry writer.
             const anchorArg = requireArg(args, "anchor", "lesson verify");
-            if (anchorArg.error) {
+            if (anchorArg.error !== undefined) {
               return respond(
                 {
                   ok: false,
@@ -3801,8 +3940,8 @@ async function main() {
               );
             }
             const hasProject = typeof args.project === "string" && args.project.trim() !== "";
-            const hasStore =
-              typeof args["knowledge-file"] === "string" && args["knowledge-file"].trim() !== "";
+            const storeFile = typeof args["knowledge-file"] === "string" ? args["knowledge-file"] : "";
+            const hasStore = storeFile.trim() !== "";
             if (hasProject === hasStore) {
               return respond(
                 {
@@ -3877,7 +4016,7 @@ async function main() {
             };
             const counts = { ok: 0, stale: 0, "anchor-missing": 0 };
             if (hasStore) {
-              const storePath = resolve(args["knowledge-file"]);
+              const storePath = resolve(storeFile);
               const store = new k.KnowledgeStore(storePath);
               const entries = store
                 .entries()
@@ -3930,7 +4069,7 @@ async function main() {
                   rows,
                   marked,
                   note: markStale
-                    ? `telemetry-only write — counterEvidence bumped on ${marked.filter((m) => m.marked).length} stale store row(s); content fields untouched (append-only discipline kept)`
+                    ? `telemetry-only write — counterEvidence bumped on ${(marked ?? []).filter((m) => m.marked).length} stale store row(s); content fields untouched (append-only discipline kept)`
                     : "read-only report — nothing was written (pass --mark-stale to bump counterEvidence on stale store rows; telemetry only)",
                 },
                 0,
@@ -3982,9 +4121,9 @@ async function main() {
           }
           // action === "refute"
           const file = requireArg(args, "knowledge-file", "lesson refute");
-          if (file.error) return respond({ ok: false, error: file.error, code: "RT_E_VALIDATION" }, 1);
+          if (file.error !== undefined) return respond({ ok: false, error: file.error, code: "RT_E_VALIDATION" }, 1);
           const id = requireArg(args, "id", "lesson refute");
-          if (id.error) return respond({ ok: false, error: id.error, code: "RT_E_VALIDATION" }, 1);
+          if (id.error !== undefined) return respond({ ok: false, error: id.error, code: "RT_E_VALIDATION" }, 1);
           const store = new k.KnowledgeStore(resolve(file.value));
           const updated = store.bumpCounterEvidence(id.value);
           if (!updated) {
@@ -4152,7 +4291,7 @@ async function main() {
         // → 1; provider/backend failure → 4.
         const project = loadProjectFor("chat");
         const ask = requireArg(args, "ask", "chat");
-        if (ask.error) return respond({ ok: false, error: ask.error, code: "RT_E_VALIDATION" }, 1);
+        if (ask.error !== undefined) return respond({ ok: false, error: ask.error, code: "RT_E_VALIDATION" }, 1);
         let history;
         if (typeof args.history === "string") {
           try {
@@ -4327,7 +4466,13 @@ async function main() {
               );
             }
           }
-          const status = await h.doctorStatus(tree ? { treeDir: tree } : undefined);
+          const status = await h.doctorStatus({
+            ...(tree ? { treeDir: tree } : {}),
+            // W46 · 332-2: the project file's persisted run spend is the record
+            // the operator actually asks about; without this the doctor arm
+            // reported the fresh process's empty session ledger (`calls: 0`).
+            ...(CLI_PROJECT ? { projectPath: CLI_PROJECT } : {}),
+          });
           respond({ ok: true, ...status }, 0);
         } catch (err) {
           respond(
@@ -4369,6 +4514,7 @@ async function main() {
           const hbLagRow = heartbeatRow ?? newestRow("sys.heartbeat_lag");
           const longTaskRow = newestRow("sys.longtask");
           const stallRow = newestRow("sys.mainthread_stall");
+          /** @type {{ ok: boolean; lastError: string | null }} */
           let persistHealth = { ok: true, lastError: null };
           let name = null;
           let status = null;
@@ -4534,7 +4680,7 @@ async function main() {
 // The --project path (validated by loadProjectFor before any writer uses it).
 function requireProjectPath(args, cmdName) {
   const proj = requireArg(args, "project", cmdName);
-  if (proj.error) respond({ ok: false, error: proj.error, code: "RT_E_VALIDATION" }, 1);
+  if (proj.error !== undefined) respond({ ok: false, error: proj.error, code: "RT_E_VALIDATION" }, 1);
   return proj.value;
 }
 
@@ -4622,7 +4768,7 @@ async function humanSeatClaim(cmd) {
 const USAGE = {
   description: "File-based headless RapidTool driver (no browser).",
   commands: {
-    create: "create --brief <text> [--name <text>] [--advisory] [--out <file.json>]   # default out: <slug>.json in the CWD (intermediate control file); --advisory: advisory DoD gates even when DEEPSEEK_API_KEY is set (keyed runs default enforceDod ON)",
+    create: "create --brief <text|@file> [--name <text>] [--advisory] [--out <file.json>]   # --brief @<path> reads the file (a YAML-front-matter corpus fixture's `brief:` scalar is unwrapped); a bare value naming an EXISTING readable file is REFUSED (RT_E_VALIDATION) — a path is never silently used as prose; default out: <slug>.json in the CWD (intermediate control file); --advisory: advisory DoD gates even when DEEPSEEK_API_KEY is set (keyed runs default enforceDod ON)",
     run: "run --project <file.json> [--live] [--unattended] [--knowledge <store.json>]   # advance one phase; --unattended = autopilot+live forced until parked (the scheduler-facing twin is the `unattended` verb); --knowledge seeds the P6 expansion with human-accepted cross-project lesson rows (proven), same store->rows resolver as `packet`",
     gate: "gate --project <file.json> [--autopilot] [--live] [--unattended] [--knowledge <store.json>]  # advance until parked; --unattended forces autopilot+live; --knowledge as on run",
     resume: "resume --project <file.json|dir> [--autopilot] [--live]  # T-107.7: read the per-phase checkpoint written beside the project dir by run/gate, admit it (identity + mode + integer phase sanity), hydrate it, and re-enter the drive at the recorded phase; prints the snapshot age — exit taxonomy identical to gate (2 = parked). Never a silent resume",
@@ -4689,7 +4835,9 @@ function exitInternalError(err) {
     try {
       process.stderr.write(`cli: internal error: ${String(err)}\n`);
     } catch {
-      /* ignore */
+      // The process is already past a failed stdout write AND a failed
+      // stderr write — the descriptor pair is gone. Nothing left to report
+      // through; exit non-zero without masking the original error.
     }
     process.exit(4);
   }

@@ -52,6 +52,18 @@
  * the seam, never an unhandled throw an outer catch would classify as
  * RT_E_INTERNAL (226 A3 / D2.3). No default cap is set here — the cap stays
  * caller-supplied (unset env ⇒ unmetered, every helper a no-op).
+ *
+ * W46 · 332-2 (L1 / AW45-c06 / R12-f02): the persisted-run-spend half. The
+ * session ledger/cap semantics above are UNCHANGED — `RAPIDTOOL_TOKEN_CAP`
+ * still binds the PROCESS session (the runaway stop), and the session ledger is
+ * still one per process. What was missing is the operator-facing cost: a fresh
+ * CLI invocation starts with an empty session, so `summary.budget.spent` read
+ * one call, never the run. `SpendSlice` is the persisted slot
+ * (`Project.tokenUsage`), and `normalizeLedger` / `accumulateSpend` /
+ * `spendDelta` are the pure arithmetic the driver uses to fold each
+ * invocation's session delta into it — they never read env, never set a cap,
+ * and never clamp spend away. Persisting spend must NEVER feed the cap: the cap
+ * stays the process ledger's business.
  */
 export class SessionBudgetExceeded extends Error {
   readonly code = "RT_E_BUDGET_EXHAUSTED" as const;
@@ -128,6 +140,125 @@ export function totalTokens(ledger: TokenLedger): number {
 
 function floorNonNeg(n: unknown): number {
   return typeof n === "number" && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+}
+
+/**
+ * W46 · 332-2 (L1 / AW45-c06 / R12-f02): the persisted per-project spend slice.
+ *
+ * `summary.budget.spent` and `doctor` used to read the PROCESS session ledger,
+ * which is empty at every fresh CLI invocation — a run's measured `446 → 0 →
+ * 77654` across three `gate` calls is three process snapshots, never the run's
+ * cost. The run's cumulative spend therefore persists on the project as
+ * `Project.tokenUsage` (types.ts, the existing B3 slice, widened to this shape)
+ * and the driver folds each invocation's session delta into it at the run
+ * boundary. `calls` and the cache fields stay OPTIONAL so a legacy 2-key
+ * record remains type-valid and readable: absence means "not reported", never a
+ * fabricated 0.
+ */
+export type SpendSlice = {
+  promptTokens: number;
+  completionTokens: number;
+  calls?: number;
+  cachedPromptTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+};
+
+/**
+ * True when a value carries the two REQUIRED measured counts (finite and
+ * non-negative). Optional `calls`/cache fields are not required — a legacy
+ * 2-key slice is a valid measured spend — but a missing/foreign/corrupt blob
+ * (a string, `{}`, a negative count) reads false, so a reader falls back to its
+ * own honest floor instead of reporting a fabricated 0. Shared by
+ * `summary`/`doctorStatus` so "usable persisted spend" has ONE definition.
+ */
+export function isMeasuredSpend(x: unknown): x is SpendSlice {
+  if (!x || typeof x !== "object") return false;
+  const { promptTokens, completionTokens } = x as { promptTokens?: unknown; completionTokens?: unknown };
+  return (
+    typeof promptTokens === "number" &&
+    Number.isFinite(promptTokens) &&
+    promptTokens >= 0 &&
+    typeof completionTokens === "number" &&
+    Number.isFinite(completionTokens) &&
+    completionTokens >= 0
+  );
+}
+
+/**
+ * Normalize any spend slice/ledger to a fresh `TokenLedger`: required counts
+ * floored to non-negative integers, `calls` floored (absent ⇒ 0), and each
+ * optional cache field copied ONLY when the source actually carries a number —
+ * so a legacy 2-key slice never gains invented cache keys. Foreign/null input
+ * reads as the empty ledger (the same tolerant guard idiom as `totalTokens`).
+ */
+export function normalizeLedger(source: SpendSlice | TokenLedger | null | undefined): TokenLedger {
+  if (!source || typeof source !== "object") return emptyLedger();
+  const out: TokenLedger = {
+    promptTokens: floorNonNeg(source.promptTokens),
+    completionTokens: floorNonNeg(source.completionTokens),
+    calls: floorNonNeg((source as { calls?: unknown }).calls),
+  };
+  for (const field of CACHE_LEDGER_FIELDS) {
+    const v = (source as Record<string, unknown>)[field];
+    if (typeof v === "number") out[field] = floorNonNeg(v);
+  }
+  return out;
+}
+
+/**
+ * Field-wise SUM of two spend slices — the accumulation primitive for persisted
+ * run spend (a project's stored total plus one invocation's measured delta).
+ * Unlike `recordSpend` this does NOT increment `calls` by one: the inputs are
+ * already aggregate ledgers, so every count (including `calls`) is added as-is.
+ * An optional cache field is carried only when either side reports it, so
+ * legacy 2-key slices stay 2-key unless a new sample actually reported cache
+ * telemetry.
+ */
+export function accumulateSpend(
+  a: SpendSlice | TokenLedger | null | undefined,
+  b: SpendSlice | TokenLedger | null | undefined,
+): TokenLedger {
+  const x = normalizeLedger(a);
+  const y = normalizeLedger(b);
+  const out: TokenLedger = {
+    promptTokens: x.promptTokens + y.promptTokens,
+    completionTokens: x.completionTokens + y.completionTokens,
+    calls: x.calls + y.calls,
+  };
+  for (const field of CACHE_LEDGER_FIELDS) {
+    const xv = x[field];
+    const yv = y[field];
+    if (xv !== undefined || yv !== undefined) out[field] = floorNonNeg(xv) + floorNonNeg(yv);
+  }
+  return out;
+}
+
+/**
+ * The spend ONE invocation added, measured as `current - baseline` field-wise
+ * (each field clamped at 0 — a ledger only grows, and a hostile pair must never
+ * read negative). The driver clones the session ledger at the invocation's
+ * start and passes it as `baseline`; the result is the run delta folded into
+ * the project. Optional cache fields ride only when either snapshot reports
+ * them.
+ */
+export function spendDelta(
+  current: SpendSlice | TokenLedger | null | undefined,
+  baseline: SpendSlice | TokenLedger | null | undefined,
+): TokenLedger {
+  const c = normalizeLedger(current);
+  const b = normalizeLedger(baseline);
+  const out: TokenLedger = {
+    promptTokens: Math.max(0, c.promptTokens - b.promptTokens),
+    completionTokens: Math.max(0, c.completionTokens - b.completionTokens),
+    calls: Math.max(0, c.calls - b.calls),
+  };
+  for (const field of CACHE_LEDGER_FIELDS) {
+    const cv = c[field];
+    const bv = b[field];
+    if (cv !== undefined || bv !== undefined) out[field] = Math.max(0, floorNonNeg(cv) - floorNonNeg(bv));
+  }
+  return out;
 }
 
 /**

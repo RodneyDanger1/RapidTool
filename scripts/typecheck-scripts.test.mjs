@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { test } from "node:test";
@@ -27,8 +27,10 @@ import { projectRoot } from "./with-app-env.mjs";
  * implicit-any); the config disables `noImplicitAny` (and
  * `useUnknownInCatchVariables`) but KEEPS `strictNullChecks`, because turning
  * that off widens `ok: true | false` and destroys discriminated-union narrowing
- * in the transitively-imported `src/lib` files. 173 errors remain — the
- * migration is real work, not a switch.
+ * in the transitively-imported `src/lib` files. 134 errors remain across 14
+ * files — the migration is real work, not a switch. `scripts/rapidtool-cli.mjs`
+ * and `scripts/cli-exit-taxonomy.test.mjs` were made clean by W46 · 332-4 and
+ * carry NO budget entry, so any new error in either fails the ratchet.
  *
  * `--test-reporter=tap` is irrelevant here (this spawns `tsc`, not `node
  * --test`); the tsc invocation always prints its own diagnostics and this suite
@@ -50,22 +52,20 @@ const FILE_LINE_RE = /^(.+?\.(?:mjs|mts|cjs|js))\((\d+),(\d+)\): error (TS\d+):/
  * `owner` names the lane that owns the file so a red count can be chased.
  */
 export const ERROR_BUDGET = {
-  "scripts/rapidtool-cli.mjs": { max: 38, owner: "331-1 Keywright (not 331-6's file)" },
   "scripts/run-eval.test.mjs": { max: 64, owner: "331-6 (mock shapes vs typed src API)" },
   "scripts/run-eval.mjs": { max: 25, owner: "331-6" },
   "scripts/preview.test.mjs": { max: 10, owner: "331-6" },
   "scripts/grok-pwa-shared.mjs": { max: 6, owner: "331-6 (was shadowed out of the program)" },
   "scripts/write-atomic.test.mjs": { max: 5, owner: "331-6" },
   "scripts/browser-guard.mjs": { max: 5, owner: "331-6" },
-  "scripts/with-app-env.test.mjs": { max: 4, owner: "331-6" },
   "scripts/check-auth-invariant.test.mjs": { max: 4, owner: "331-6" },
+  "scripts/with-app-env.test.mjs": { max: 4, owner: "331-6" },
   "scripts/next-action-arm-parity.test.mjs": { max: 3, owner: "331-6" },
   "scripts/browser-smoke.mjs": { max: 2, owner: "331-6" },
-  "scripts/brand-check.test.mjs": { max: 2, owner: "331-6" },
   "scripts/migration-plan.test.mjs": { max: 2, owner: "331-6" },
+  "scripts/brand-check.test.mjs": { max: 2, owner: "331-6" },
   "scripts/grok-pwa-plugin.mjs": { max: 1, owner: "331-6" },
   "scripts/grok-pwa-plugin.test.mjs": { max: 1, owner: "331-6" },
-  "scripts/cli-exit-taxonomy.test.mjs": { max: 1, owner: "331-1 Keywright (not 331-6's file)" },
 };
 
 /** POSIX, repo-relative — the form the budget keys and tsc diagnostics share. */
@@ -204,6 +204,43 @@ test("scripts typecheck: no NEW errors beyond the recorded per-file budget", () 
   assert.deepEqual(stale, [], `budget names file(s) that are gone: ${stale.join(", ")}`);
 });
 
+test("scripts typecheck: npm run typecheck runs BOTH legs (src + scripts)", () => {
+  // W46 · 332-4 (S1b): the flip that makes `npm run typecheck` see scripts/**.
+  // Pinned at the package.json bytes so a later edit cannot quietly drop the
+  // scripts leg (which is what left the CLI invisible to a type checker).
+  // W46 boundary: leg 2 runs THIS test file rather than the raw scripts tsc
+  // program, because the program still carries a reviewed per-file budget
+  // (~134 untyped-.mjs errors across 14 files). The ratchet runs the same
+  // program and fails on ANY new error in ANY file — a clean, honest gate.
+  // The strict (budget-blind) program stays available, explicitly named.
+  const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+  const typecheck = pkg.scripts?.typecheck ?? "";
+  assert.match(typecheck, /tsc --noEmit/, "leg 1: the src+server program (tsconfig.json)");
+  assert.match(
+    typecheck,
+    /scripts\/typecheck-scripts\.test\.mjs/,
+    "leg 2: the scripts ratchet — the CLI must be inside the typecheck it guards",
+  );
+  assert.match(
+    pkg.scripts?.["typecheck:scripts:strict"] ?? "",
+    /tsc -p tsconfig\.scripts\.json --noEmit/,
+    "the strict scripts program stays available under its own explicit name",
+  );
+});
+
+test("scripts typecheck: rapidtool-cli.mjs and its taxonomy test are clean and unbudgeted", () => {
+  // W46 · 332-4: the CLI carried 38 of the 173 errors and its test 1; both are
+  // now clean and deliberately have NO budget entry, so the generic ratchet
+  // above fails on the first new error in either (a clean file is unbudgeted).
+  const errors = parseTscErrors(scriptsTypecheckRun().output);
+  const cliErrors = errors
+    .filter((e) => e.file === "scripts/rapidtool-cli.mjs" || e.file === "scripts/cli-exit-taxonomy.test.mjs")
+    .map((e) => e.message);
+  assert.deepEqual(cliErrors, [], "the CLI and its taxonomy test must typecheck clean");
+  assert.equal(ERROR_BUDGET["scripts/rapidtool-cli.mjs"], undefined, "a clean file must carry no ratchet budget");
+  assert.equal(ERROR_BUDGET["scripts/cli-exit-taxonomy.test.mjs"], undefined, "a clean file must carry no ratchet budget");
+});
+
 test("scripts typecheck: the budget parser has teeth (a planted error is flagged)", () => {
   // Real tsc diagnostic shape, not a hand-rolled string the parser was written to.
   const planted = [
@@ -219,8 +256,10 @@ test("scripts typecheck: the budget parser has teeth (a planted error is flagged
   const verdict = evaluateBudget(errors, ERROR_BUDGET);
   assert.deepEqual(
     verdict.unbudgeted.map((u) => u.file),
-    ["scripts/migration-plan.mjs"],
-    "a NEW red file must be reported as unbudgeted",
+    // rapidtool-cli.mjs is clean and unbudgeted since W46 · 332-4, so its
+    // planted error must be reported even though the file once had a budget.
+    ["scripts/migration-plan.mjs", "scripts/rapidtool-cli.mjs"],
+    "a NEW red file must be reported as unbudgeted — including the now-clean CLI",
   );
   // An over-budget regression in an existing entry is reported too.
   const flood = Array.from(

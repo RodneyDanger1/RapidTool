@@ -561,7 +561,11 @@ export type Project = {
   /** B5: single-writer terminal run stamp (accepted|failed|aborted). Absence = no stamp. */
   acceptance?: "accepted" | "failed" | "aborted";
   /** B3: accumulated DeepSeek token usage for this run. Absence = unmetered. */
-  tokenUsage?: { promptTokens: number; completionTokens: number };
+  /** W46 · 332-2: the persisted run spend. `SpendSlice` (token-ledger.ts) is
+   *  the writer's own shape — widening it here stops the type under-describing
+   *  what `accumulateSpend` actually stores (`calls` / cache keys). Optional
+   *  keys stay optional: a legacy 2-key slice is a valid measured spend. */
+  tokenUsage?: import("./token-ledger.ts").SpendSlice;
   /** Persisted-shape version marker (B-25/R9): 2 = post-repair shape. */
   _v?: number;
 };

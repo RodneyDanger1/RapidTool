@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   NoMoneyException,
   SessionBudgetExceeded,
+  accumulateSpend,
   assertBudgetHeadroom,
   assertWithinBudget,
   billableInputTokens,
@@ -13,11 +14,15 @@ import {
   estimateCostUsd,
   isBudgetExhausted,
   isBudgetStopRefusal,
+  isMeasuredSpend,
   isUnmetered,
+  normalizeLedger,
   recordBudgetSpend,
   recordSpend,
   recordSpendWithinCap,
+  resetSessionBudget,
   runBudgetedCall,
+  spendDelta,
   tokenCapFromEnv,
   totalTokens,
   wouldExceed,
@@ -464,5 +469,98 @@ describe("token-ledger A3 catch wrapper", () => {
         }),
       /boom/,
     );
+  });
+});
+
+describe("W46 · 332-2 (L1/AW45-c06) — persisted run-spend arithmetic", () => {
+  it("isMeasuredSpend: the two required counts decide; calls/cache are optional; junk is false", () => {
+    assert.equal(isMeasuredSpend({ promptTokens: 60000, completionTokens: 17654 }), true, "legacy 2-key is measured");
+    assert.equal(isMeasuredSpend({ promptTokens: 1, completionTokens: 2, calls: 3 }), true);
+    assert.equal(isMeasuredSpend({ promptTokens: 0, completionTokens: 0 }), true, "a measured zero is measured");
+    for (const junk of [null, undefined, "x", 5, {}, { promptTokens: 1 }, { promptTokens: -1, completionTokens: 1 }, { promptTokens: Number.NaN, completionTokens: 1 }]) {
+      assert.equal(isMeasuredSpend(junk), false, `junk ${JSON.stringify(junk)} reads false`);
+    }
+  });
+
+  it("normalizeLedger: numeric slice → ledger; foreign/null → empty; negatives floor to 0", () => {
+    assert.deepEqual(normalizeLedger({ promptTokens: 10, completionTokens: 5 }), {
+      promptTokens: 10,
+      completionTokens: 5,
+      calls: 0,
+    });
+    assert.deepEqual(normalizeLedger({ promptTokens: 10, completionTokens: 5, calls: 3 }), {
+      promptTokens: 10,
+      completionTokens: 5,
+      calls: 3,
+    });
+    assert.deepEqual(normalizeLedger(null), emptyLedger());
+    assert.deepEqual(normalizeLedger(undefined), emptyLedger());
+    assert.deepEqual(normalizeLedger({ promptTokens: -7, completionTokens: 2.9, calls: -1 }), {
+      promptTokens: 0,
+      completionTokens: 2,
+      calls: 0,
+    });
+  });
+
+  it("normalizeLedger invents no cache keys for a legacy 2-key slice, copies reported ones", () => {
+    const legacy = normalizeLedger({ promptTokens: 1, completionTokens: 2 });
+    assert.equal("cachedPromptTokens" in legacy, false, "absent cache key stays absent");
+    const cached = normalizeLedger({ promptTokens: 1, completionTokens: 2, cachedPromptTokens: 1, reasoningTokens: 0 });
+    assert.equal(cached.cachedPromptTokens, 1);
+    assert.equal(cached.reasoningTokens, 0, "a reported 0 is kept (reported ≠ absent)");
+  });
+
+  it("accumulateSpend sums counts as-is (no +1 per call) and stays additive across runs", () => {
+    const prior = { promptTokens: 60000, completionTokens: 17654, calls: 12 };
+    const delta = { promptTokens: 300, completionTokens: 146, calls: 1 };
+    const total = accumulateSpend(prior, delta);
+    assert.deepEqual(total, { promptTokens: 60300, completionTokens: 17800, calls: 13 });
+    assert.equal(totalTokens(total), 78100);
+  });
+
+  it("accumulateSpend: legacy 2-key persisted slice + reported delta sums both", () => {
+    const total = accumulateSpend({ promptTokens: 100, completionTokens: 50 }, { promptTokens: 1, completionTokens: 2, calls: 1 });
+    assert.deepEqual(total, { promptTokens: 101, completionTokens: 52, calls: 1 });
+  });
+
+  it("accumulateSpend carries a cache field only when either side reports it", () => {
+    const withCache = accumulateSpend(
+      { promptTokens: 10, completionTokens: 1, cachedPromptTokens: 4 },
+      { promptTokens: 1, completionTokens: 1, reasoningTokens: 2, calls: 1 },
+    );
+    assert.equal(withCache.cachedPromptTokens, 4);
+    assert.equal(withCache.reasoningTokens, 2);
+    const noCache = accumulateSpend({ promptTokens: 1, completionTokens: 1 }, { promptTokens: 1, completionTokens: 1 });
+    assert.equal("cachedPromptTokens" in noCache, false);
+    assert.equal("cacheWriteTokens" in noCache, false);
+  });
+
+  it("spendDelta measures the invocation delta field-wise and clamps a hostile pair at 0", () => {
+    const delta = spendDelta(
+      { promptTokens: 500, completionTokens: 46, calls: 2, cachedPromptTokens: 5 },
+      { promptTokens: 100, completionTokens: 0, calls: 1, cachedPromptTokens: 5 },
+    );
+    assert.deepEqual(delta, { promptTokens: 400, completionTokens: 46, calls: 1, cachedPromptTokens: 0 });
+    // A baseline larger than current (foreign/hostile) never reads negative.
+    assert.deepEqual(spendDelta({ promptTokens: 1, completionTokens: 1, calls: 0 }, { promptTokens: 9, completionTokens: 9, calls: 9 }), {
+      promptTokens: 0,
+      completionTokens: 0,
+      calls: 0,
+    });
+    assert.deepEqual(spendDelta(undefined, undefined), emptyLedger());
+  });
+
+  it("the persisted-spend helpers are pure — they never touch the session budget or its cap", () => {
+    const budget = resetSessionBudget();
+    try {
+      const before = { ...budget.ledger };
+      // Counts far past any plausible cap: the helpers must not throw, clamp the
+      // session, or mutate it — the cap is the process ledger's business alone.
+      accumulateSpend({ promptTokens: 1_000_000, completionTokens: 0 }, { promptTokens: 1, completionTokens: 0 });
+      spendDelta({ promptTokens: 1_000_000, completionTokens: 0 }, { promptTokens: 0, completionTokens: 0 });
+      assert.deepEqual(budget.ledger, before, "the session ledger is untouched");
+    } finally {
+      resetSessionBudget();
+    }
   });
 });

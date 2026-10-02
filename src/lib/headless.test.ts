@@ -28,6 +28,7 @@ import {
   reject,
   repairCycleLiveDeps,
   repairTreeDir,
+  resolveDoctorSpendSource,
   retry,
   runAcceptance,
   runPhase,
@@ -47,7 +48,7 @@ import type { RankableLessonRow } from "./knowledge.ts";
 import { runGate } from "./dod.ts";
 import { importProject } from "./io.ts";
 import { evaluatePolicy } from "./policy.ts";
-import { recordSessionSpend, resetSessionBudget } from "./token-ledger.ts";
+import { recordSessionSpend, resetSessionBudget, sessionTokenBudget } from "./token-ledger.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
 import { fnv1a } from "./algorithms.ts";
 import type { PhaseId, Project } from "./types.ts";
@@ -3260,6 +3261,155 @@ describe("209 — CLI lesson --accept (human-gated store write)", () => {
       assert.equal(rows[0]!.appended, false, "re-accept same actor is idempotent");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("W46 · 332-2 (L1/AW45-c06) — per-project persisted run spend", () => {
+  const greenVerdict = (): TreeRunOutcome => ({
+    ok: true,
+    dir: "",
+    compile: { ok: true, dir: "", checked: 1, passed: 1, failed: 0, skipped: 0, verdicts: [] },
+    tests: [],
+    run: { kind: "library", run: "skip", detail: "no entry to smoke" },
+  });
+
+  it("summary.budget.spent reports the project's persisted cumulative spend, not the empty session", () => {
+    const savedCap = process.env.RAPIDTOOL_TOKEN_CAP;
+    delete process.env.RAPIDTOOL_TOKEN_CAP;
+    resetSessionBudget();
+    try {
+      // A variable (not a fresh literal) carries `calls` until types.ts widens
+      // `Project.tokenUsage` to token-ledger's `SpendSlice` (W46 C2 request).
+      const persisted = { promptTokens: 60000, completionTokens: 17654, calls: 12 };
+      const p: Project = { ...createProject({ brief: FIXTURE_BRIEF }), tokenUsage: persisted };
+      // BEFORE the fix this read the fresh process's empty session ledger: 0.
+      assert.deepEqual(summary(p).budget, { spent: 77654, cap: null, stop_reason: null });
+    } finally {
+      if (savedCap !== undefined) process.env.RAPIDTOOL_TOKEN_CAP = savedCap;
+      resetSessionBudget();
+    }
+  });
+
+  it("the session cap still crosses on the session ledger; spent stays the run total", () => {
+    const savedCap = process.env.RAPIDTOOL_TOKEN_CAP;
+    process.env.RAPIDTOOL_TOKEN_CAP = "100";
+    try {
+      resetSessionBudget(); // re-reads env: cap=100, empty ledger
+      const persisted = { promptTokens: 150, completionTokens: 0, calls: 1 };
+      const p: Project = { ...createProject({ brief: FIXTURE_BRIEF }), tokenUsage: persisted };
+      recordSessionSpend({ promptTokens: 100, completionTokens: 0 }); // lands exactly on the cap: ok
+      assert.deepEqual(summary(p).budget, { spent: 150, cap: 100, stop_reason: null });
+      recordSessionSpend({ promptTokens: 0, completionTokens: 1 }); // strict crossing
+      assert.deepEqual(summary(p).budget, { spent: 150, cap: 100, stop_reason: "budget_exhausted" });
+    } finally {
+      if (savedCap === undefined) delete process.env.RAPIDTOOL_TOKEN_CAP;
+      else process.env.RAPIDTOOL_TOKEN_CAP = savedCap;
+      resetSessionBudget();
+    }
+  });
+
+  it("runUntilGate folds THIS invocation's measured spend into project.tokenUsage (persisted run cost)", async () => {
+    const savedCap = process.env.RAPIDTOOL_TOKEN_CAP;
+    delete process.env.RAPIDTOOL_TOKEN_CAP;
+    resetSessionBudget();
+    try {
+      const drained = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+      const rewound: Project = {
+        ...drained,
+        status: "running",
+        currentPhase: 6,
+        lastTest: null,
+        phases: drained.phases.map((r) =>
+          r.id === 6 ? ({ ...r, status: "ready" as const, gate: null, startedAt: null } as unknown as typeof r) : r,
+        ),
+      };
+      // The injected synthesize owns the key policy (driveP6Journey runs it
+      // regardless of DEEPSEEK_API_KEY) and records one metered call per cycle.
+      let synthCalls = 0;
+      const synthesize = async (p: Project): Promise<Project> => {
+        synthCalls += 1;
+        recordSessionSpend({ promptTokens: 400, completionTokens: 46 });
+        const t = {
+          ...p,
+          generatedTree: [{ path: "src/generated.ts", source: "export const hvac = () => 1;", hash: "f1", attempt: 0 }],
+        };
+        return {
+          ...t,
+          phases: t.phases.map((ph) => (ph.id === 6 ? { ...ph, status: "complete" as const } : ph)),
+        };
+      };
+      const res = await runUntilGate(rewound, {
+        live: true,
+        maxSteps: 1,
+        p6Deps: { synthesize, runTree: async () => greenVerdict() },
+      });
+      assert.ok(synthCalls >= 1, "the injected P6 synthesis actually ran");
+      assert.deepEqual(
+        res.project.tokenUsage,
+        { promptTokens: 400 * synthCalls, completionTokens: 46 * synthCalls, calls: synthCalls },
+        "the invocation's session delta persists on the project record",
+      );
+      assert.equal(
+        summary(res.project).budget.spent,
+        446 * synthCalls,
+        "summary now reports the run's measured cost (every metered cycle summed)",
+      );
+    } finally {
+      if (savedCap !== undefined) process.env.RAPIDTOOL_TOKEN_CAP = savedCap;
+      resetSessionBudget();
+    }
+  });
+
+  it("a spent invocation round-trips through save/load, so the NEXT process still sees the cost", async () => {
+    const dir = tempDir();
+    try {
+      const file = join(dir, "proj.json");
+      const persisted = { promptTokens: 446, completionTokens: 0, calls: 1 };
+      const p: Project = { ...createProject({ brief: FIXTURE_BRIEF }), tokenUsage: persisted };
+      saveProject(file, p);
+      const reloaded = loadProject(file);
+      assert.deepEqual(reloaded.tokenUsage, { promptTokens: 446, completionTokens: 0, calls: 1 });
+      assert.equal(summary(reloaded).budget.spent, 446);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveDoctorSpendSource: explicit spend wins, else the project file, else the tree record, else the session", () => {
+    const dir = tempDir();
+    try {
+      const projectFile = join(dir, "proj.json");
+      const persisted = { promptTokens: 60000, completionTokens: 17654, calls: 12 };
+      saveProject(projectFile, { ...createProject({ brief: FIXTURE_BRIEF }), tokenUsage: persisted });
+      const explicit = { promptTokens: 1, completionTokens: 2, calls: 3 };
+      assert.deepEqual(resolveDoctorSpendSource({ projectPath: projectFile, spend: explicit }), explicit);
+      assert.deepEqual(resolveDoctorSpendSource({ projectPath: projectFile }), {
+        promptTokens: 60000,
+        completionTokens: 17654,
+        calls: 12,
+      });
+      // The tree record lives at <dir>/.rapidtool/project.json.
+      const treeDir = join(dir, "tree");
+      mkdirSync(join(treeDir, ".rapidtool"), { recursive: true });
+      writeFileSync(
+        join(treeDir, ".rapidtool", "project.json"),
+        JSON.stringify({ tokenUsage: { promptTokens: 7, completionTokens: 8, calls: 1 } }),
+        "utf8",
+      );
+      assert.deepEqual(resolveDoctorSpendSource({ treeDir }), { promptTokens: 7, completionTokens: 8, calls: 1 });
+      // No project anywhere ⇒ the process session ledger (never a fabricated spend).
+      resetSessionBudget();
+      const session = resolveDoctorSpendSource({ treeDir: join(dir, "empty-no-record") });
+      assert.equal(session, sessionTokenBudget().ledger);
+      // A legacy record without tokenUsage loses its rung honestly, too.
+      const legacyFile = join(dir, "legacy.json");
+      saveProject(legacyFile, createProject({ brief: FIXTURE_BRIEF }));
+      resetSessionBudget();
+      assert.equal(resolveDoctorSpendSource({ projectPath: legacyFile }), sessionTokenBudget().ledger);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      resetSessionBudget();
     }
   });
 });

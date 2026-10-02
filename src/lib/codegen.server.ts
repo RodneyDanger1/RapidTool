@@ -94,6 +94,14 @@
 //      event) carrying RT_E_LLM_REJECTED + a bounded received-text excerpt —
 //      fixes/217k (216y G6: the silent-null sink; absent/blank replies stay
 //      unlogged, so "no output" and "unreadable output" are distinguishable).
+//      W46/332-1 (P1): `validateSynthesisModule` also refuses an un-awaited
+//      async call whose result is used as a value (property read, destructure,
+//      or stored-then-read; a `Promise.resolve().then` body binding one), with
+//      ONE bounded await re-prompt — the real keyed tree's `src/jobs/rehab.ts`
+//      read `.ok` off the un-awaited async `getProperty` and reded its spec.
+//      W46/332-1 (P2): the plan census partitions by label and the persisted
+//      shortfall row carries declared/planned/unbound counts, so a coverage
+//      gap is deterministic and legible, never random.
 //      A forceHuman P6
 //      gate (failed template sandbox, R3/B-03) is never machine-cleared.
 //
@@ -568,6 +576,12 @@ export function p6SynthesisSystemPrompt(): string {
     // 23-line deliberation (F-04) shipped because nothing told the model that
     // planning prose in the module body is a refusal, not a style choice.
     "8. Write CODE only — never emit planning prose, deliberation, or \"I'll write the code now\" into the module (validator-enforced): every line must be a real JavaScript statement.",
+    // W46/332-1 (P1): the async-await rule, advertised because the validator
+    // enforces it (215b drift-proof principle). The real keyed tree's
+    // `src/jobs/rehab.ts` called an earlier file's async `getProperty` without
+    // `await` and read `.ok` off the returned Promise (undefined), floating the
+    // rejection past the test and reding the whole spec file.
+    "9. When you call a function that is ASYNCHRONOUS (declared `async` / returns a Promise — whether an earlier file exports it or this module declares it), you MUST `await` the call before reading any property off its result or destructuring it: `const x = await getProperty(id); x.ok` — never `const x = getProperty(id); x.ok` (validator-enforced: an un-awaited async call reads `undefined` off a Promise and leaks an unhandled rejection).",
   ].join("\n");
 }
 
@@ -1287,6 +1301,31 @@ export function p6SynthesisDuplicateDeclRepairPrompt(
   ].join("\n") + repairTreeFailureTail(treeFailure);
 }
 
+/**
+ * W46/332-1 (P1): repair re-prompt for the un-awaited-async-value class. Names
+ * the async callable, its line, and how the promise was consumed (property read /
+ * destructure / stored-then-read / floating inside a `Promise.resolve().then`),
+ * and instructs the model to `await` the call. ONE bounded attempt; a repeat is
+ * refused. Pure.
+ */
+export function p6SynthesisAsyncAwaitRepairPrompt(
+  uses: readonly AsyncUnawaitedUse[],
+  treeFailure?: string,
+): string {
+  const rows = (Array.isArray(uses) ? uses : []).filter((u) => u && typeof u.name === "string" && Number.isFinite(u.line));
+  const detail = rows.map((u) => `- "${u.name}" at line ${u.line} — the call result is used as a value (${u.form}) without await`).join("\n");
+  const names = [...new Set(rows.map((u) => u.name))];
+  return [
+    "Your previous module calls an ASYNCHRONOUS function without `await` and then uses the returned Promise as if it were the resolved value:",
+    detail || "(none listed)",
+    "The named function(s) return a Promise. Reading a property off that Promise yields `undefined`, and the call's real rejection floats past every caller (an unhandled rejection that reds the whole spec file).",
+    `Fix: mark the ENCLOSING function \`async\` (if it is not already) and \`await\` each call before reading or destructuring its result: \`const x = await ${names[0] ?? "fn"}(...); x.ok\` or \`const { ok } = await ${names[0] ?? "fn"}(...)\`.${names.length > 1 ? ` Apply this to: ${names.join(", ")}.` : ""}`,
+    "Do NOT delete the call, do NOT store the un-awaited Promise in a variable, and do NOT change the function's exported name or signature.",
+    'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
+    "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no prose, no markdown fences.",
+  ].join("\n") + repairTreeFailureTail(treeFailure);
+}
+
 /** fixes/121 last-mile: deterministic CJS export-injection repair.
  *  For every claimed export the module declares at top level (`function NAME`,
  *  `const NAME =`, `let NAME =`, `var NAME =`) but never assigns to
@@ -1448,6 +1487,10 @@ export type ChunkPriorFile = {
   exports: readonly string[];
   /** The earlier file's envelope reqTrace (req-N → exported name). */
   reqTrace: Readonly<Record<string, string>>;
+  /** W46/332-1 (P1): the subset of `exports` the earlier file declares `async`.
+   *  A later chunk must `await` these before reading a property off the result;
+   *  absent ⇒ the export is treated as synchronous (legacy byte-identity). */
+  asyncExports?: readonly string[];
 };
 
 /**
@@ -1555,6 +1598,7 @@ export function p6SynthesisChunkUserPrompt(
       "exports below are bound as plain parameters of THIS file's scope in the assembled module — call them directly",
       "by name when this file needs their behavior. Do NOT redeclare them, do NOT import/require them, do NOT",
       "re-implement what they already cover, and give this file's own non-exported helpers names no earlier file used.",
+      "An earlier export marked asynchronous (`async function`) returns a Promise: you MUST `await` it before reading any property off the result (`const x = await getProperty(id); x.ok`) or destructuring it (`const { ok } = await getProperty(id)`) — a non-awaited async call reads `undefined` off a Promise and leaks an unhandled rejection the validator refuses.",
       "Implement ONLY the type signatures listed above in THIS file.):",
     );
     // R12-f01: cap the prior render (last N files) + enforce the byte budget
@@ -1579,7 +1623,11 @@ export function p6SynthesisChunkUserPrompt(
         .map(([req]) => req)
         .sort();
       const reqPart = covered.length > 0 ? ` · covers ${covered.join(", ")}` : "";
-      const line = `- ${f.path} exports: ${(f.exports ?? []).join(", ") || "(none)"}${reqPart}`;
+      const asyncNamed = (Array.isArray(f.asyncExports) ? f.asyncExports : []).filter(
+        (n: string) => typeof n === "string" && (f.exports ?? []).includes(n),
+      );
+      const asyncPart = asyncNamed.length > 0 ? ` · asynchronous (must await): ${asyncNamed.join(", ")}` : "";
+      const line = `- ${f.path} exports: ${(f.exports ?? []).join(", ") || "(none)"}${reqPart}${asyncPart}`;
       if (line.length + 1 > budgetLeft) {
         lines.push(
           `- …[PRIOR-ELIDED: ${shown.length - rendered} file(s) beyond the ${P6_SYNTH_PROMPT_MAX_CHARS.toLocaleString("en-US")}-char prompt budget — their exports remain bound in the assembled module]`,
@@ -1965,7 +2013,11 @@ export function treeChunkPlanCensus(
       plannedLabels.add(c.label);
     }
   }
-  const declared = targets.map((t) => t.label).filter((l) => l !== CORE_SENTINEL_JOB);
+  const declaredAll = targets.map((t) => t.label).filter((l) => l !== CORE_SENTINEL_JOB);
+  // Dedupe by label: specGraphJobTargets de-dupes by FILE, so two nodes may share
+  // a label (flip.ts + flip-2.ts). A doubled label would double-count the
+  // partition and read as two shortfalls; the label is the coverage unit.
+  const declared = [...new Set(declaredAll)];
   return {
     declared,
     planned: declared.filter((l) => plannedLabels.has(l)),
@@ -1973,6 +2025,24 @@ export function treeChunkPlanCensus(
     paths: plan.map((c) => c.path),
     legacy: plan.every((c) => typeof c.nodeId !== "string" || c.nodeId.length === 0),
   };
+}
+
+/**
+ * W46/332-1 (P2): the determinism guard for the plan census — every declared
+ * spec-graph job is accounted for by exactly ONE of {planned file, counted
+ * unbound}. `silent` lists any declared job that is neither (or both) — the
+ * class that would make a coverage shortfall invisible rather than random.
+ * Empty by construction today; pinned so a future plan change can never drop a
+ * declared job silently. Pure.
+ */
+export function treePlanCensusReconciles(census: TreePlanCensus): { ok: boolean; silent: string[] } {
+  const planned = new Set(Array.isArray(census?.planned) ? census.planned : []);
+  const unbound = new Set(Array.isArray(census?.unbound) ? census.unbound : []);
+  const silent: string[] = [];
+  for (const label of Array.isArray(census?.declared) ? census.declared : []) {
+    if (planned.has(label) === unbound.has(label)) silent.push(label);
+  }
+  return { ok: silent.length === 0, silent };
 }
 
 /**
@@ -2291,6 +2361,166 @@ export function crossChunkDuplicateDeclarations(
     }
   }
   return out;
+}
+
+/** Top-level `async function NAME` declarations a module carries (masked per
+ *  line, so a comment/string mentioning one never reports). Deterministic. */
+function declaredAsyncFunctionNames(module: string): string[] {
+  const out: string[] = [];
+  const lines = String(module ?? "").split("\n");
+  const state = { block: false, template: false };
+  for (const line of lines) {
+    const code = maskCodeLine(line, state);
+    for (const m of code.matchAll(/^(?:export\s+)?async\s+function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/gm)) out.push(m[1]!);
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * W46/332-1 (P1): the declared names of `exports` that an earlier file declares
+ * `async` — the set a later chunk must `await` before reading any property off
+ * the resolved value. The materializer imports every earlier chunk's exports as
+ * plain ESM bindings, so an async export is callable by bare name; the real
+ * keyed tree's `src/jobs/rehab.ts` called the async `getProperty(propertyId)`
+ * without `await` and read `.ok` off the returned Promise. Pure, deterministic.
+ */
+export function asyncExportNames(source: string, exports: readonly string[]): string[] {
+  const declared = new Set(declaredAsyncFunctionNames(source));
+  if (declared.size === 0) return [];
+  const want = (Array.isArray(exports) ? exports : []).filter((n): n is string => typeof n === "string" && isIdent(n));
+  return [...new Set(want.filter((n) => declared.has(n)))];
+}
+
+/** The async callable names in a chunk module's scope: its own top-level
+ *  `async function` declarations unioned with the named exports of every
+ *  earlier chunk that carry an `asyncExports` mark. Order-stable. */
+export function asyncNamesInScope(
+  module: string,
+  priorChunks?: readonly { path: string; exports: readonly string[]; asyncExports?: readonly string[] }[] | null,
+): string[] {
+  const out = new Set(declaredAsyncFunctionNames(module));
+  for (const chunk of Array.isArray(priorChunks) ? priorChunks : []) {
+    if (chunk === null || typeof chunk !== "object") continue;
+    const exported = new Set((Array.isArray(chunk.exports) ? chunk.exports : []).filter((n: unknown): n is string => typeof n === "string" && isIdent(n)));
+    for (const raw of Array.isArray(chunk.asyncExports) ? chunk.asyncExports : []) {
+      if (typeof raw === "string" && isIdent(raw) && exported.has(raw)) out.add(raw);
+    }
+  }
+  return [...out];
+}
+
+/** One un-awaited async call whose result is consumed as a VALUE (not a promise). */
+export type AsyncUnawaitedUse = {
+  name: string;
+  line: number;
+  form: "property-read" | "destructure" | "bound-then-read" | "floating-in-then";
+};
+
+/** `Promise.then/catch/finally` ARE the legal way to consume a promise — reading
+ *  one off an un-awaited call is not the defect this detector refuses. */
+const PROMISE_CONSUMER_METHODS = new Set(["then", "catch", "finally"]);
+
+/** Index of the `)` matching the `(` at `open`, or -1. Masked text only, so a
+ *  paren inside a literal/comment was already blanked and cannot miscount. */
+function matchParenClose(text: string, open: number): number {
+  if (open < 0 || text[open] !== "(") return -1;
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    const c = text[i]!;
+    if (c === "(") depth += 1;
+    else if (c === ")") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * W46/332-1 (P1): the value-position uses of an un-awaited async call. `asyncNames`
+ * are the callable names known to return a Promise (a sibling chunk's async export
+ * or the module's own `async function`). A call that is NOT preceded by `await` is
+ * refused when its result is consumed as a value:
+ *   • `getProperty(id).ok`              → property-read (a Promise has no `.ok`)
+ *   • `const { ok } = getProperty(id)`  → destructure (same, off the Promise)
+ *   • `const p = getProperty(id); p.ok` → bound-then-read (the promise stored, a
+ *     property read off it later — the real `src/jobs/rehab.ts` shape)
+ *   • a var bound to one inside a `Promise.resolve().then(…)` body → floating-in-then
+ *     (that callback is not `async`, so the promise can never be awaited later).
+ * `await getProperty(id)` and `.then/.catch/.finally` consumers are accepted. Pure.
+ */
+export function unawaitedAsyncValueUses(module: string, asyncNames: readonly string[]): AsyncUnawaitedUse[] {
+  const src = typeof module === "string" ? module : "";
+  const wanted = [...new Set((asyncNames ?? []).filter((n): n is string => typeof n === "string" && isIdent(n)))];
+  if (!src || wanted.length === 0) return [];
+  const state = { block: false, template: false };
+  const masked = src.split("\n").map((l) => maskCodeLine(l, state)).join("\n");
+  const lineAt = (idx: number): number => {
+    let n = 1;
+    for (let i = 0; i < idx && i < masked.length; i++) if (masked.charCodeAt(i) === 10) n += 1;
+    return n;
+  };
+  const uses: AsyncUnawaitedUse[] = [];
+  const seen = new Set<string>();
+  const push = (u: AsyncUnawaitedUse): void => {
+    const key = `${u.line}|${u.name}|${u.form}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uses.push(u);
+    }
+  };
+  const bound: { varName: string; name: string; callEnd: number; line: number }[] = [];
+  const readVars = new Set<string>();
+  for (const name of wanted) {
+    const re = new RegExp(`(?<![\\w.$])${name}\\s*\\(`, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(masked)) !== null) {
+      const nameIdx = m.index;
+      if (/await\s*$/.test(masked.slice(Math.max(0, nameIdx - 12), nameIdx))) continue;
+      const close = matchParenClose(masked, masked.indexOf("(", nameIdx));
+      if (close < 0) continue;
+      const prop = /^\s*\.\s*([A-Za-z_$][\w$]*)/.exec(masked.slice(close + 1));
+      if (prop !== null && !PROMISE_CONSUMER_METHODS.has(prop[1]!)) {
+        push({ name, line: lineAt(nameIdx), form: "property-read" });
+        continue;
+      }
+      // The text between the statement boundary and the callee: a `const x =`
+      // (bound) or a destructuring declaration head (destructure), else a bare use.
+      const stmtStart = Math.max(
+        masked.lastIndexOf(";", nameIdx),
+        masked.lastIndexOf("{", nameIdx),
+        masked.lastIndexOf("}", nameIdx),
+        masked.lastIndexOf("\n", nameIdx),
+      );
+      const lhs = masked.slice(stmtStart + 1, nameIdx);
+      const boundDecl = /^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(lhs);
+      if (boundDecl !== null) {
+        bound.push({ varName: boundDecl[1]!, name, callEnd: close, line: lineAt(nameIdx) });
+      } else if (/(?:^|[;{}\n])\s*(?:const|let|var)\s*(?:\{[^}]*\}|\[[^\]]*\])\s*=\s*$/.test(masked.slice(0, nameIdx))) {
+        // Destructuring assignment off the call result: `const { ok } = fn(id)`.
+        push({ name, line: lineAt(nameIdx), form: "destructure" });
+      }
+    }
+  }
+  for (const b of bound) {
+    const re = new RegExp(`\\b${b.varName}\\s*\\.\\s*([A-Za-z_$][\\w$]*)`, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(masked)) !== null) {
+      if (m.index <= b.callEnd) continue;
+      if (PROMISE_CONSUMER_METHODS.has(m[1]!)) continue;
+      readVars.add(b.varName);
+      push({ name: b.name, line: lineAt(m.index), form: "bound-then-read" });
+      break;
+    }
+  }
+  // A `Promise.resolve().then(…)` body is not an `async` callback, so a promise
+  // bound to a var there can never be awaited later — it is consumed as a value.
+  if (/Promise\s*\.\s*resolve\s*\(\s*\)\s*\.\s*then\s*\(/.test(masked)) {
+    for (const b of bound) {
+      if (!readVars.has(b.varName)) push({ name: b.name, line: b.line, form: "floating-in-then" });
+    }
+  }
+  return uses.sort((a, b) => a.line - b.line);
 }
 
 /**
@@ -2642,8 +2872,10 @@ export function validateSynthesisModule(
   /** W45/331-4 (Finding B): the earlier chunks of this tree (path + exports). When
    *  present, a top-level declaration of a name an earlier chunk already exports is
    *  refused — the materialized ESM imports that export, so the duplicate is a
-   *  load-time SyntaxError. Absent/null ⇒ the single-module path, byte-identical. */
-  priorChunks?: readonly { path: string; exports: readonly string[] }[] | null,
+   *  load-time SyntaxError. W46/332-1 (P1): a chunk's `asyncExports` mark also lets
+   *  the validator refuse an un-awaited async sibling call used as a value.
+   *  Absent/null ⇒ the single-module path, byte-identical. */
+  priorChunks?: readonly { path: string; exports: readonly string[]; asyncExports?: readonly string[] }[] | null,
 ): ModuleValidation {
   if (typeof module !== "string" || !module.trim()) {
     return { ok: false, code: "RT_E_VALIDATION", error: "synthesis envelope carried an empty module" };
@@ -2725,6 +2957,22 @@ export function validateSynthesisModule(
         error: `cross-chunk duplicate declaration: ${named} — the materialized ESM imports each earlier chunk's exports, so a same-named top-level declaration fails to load (SyntaxError: Identifier '${dup[0]!.name}' has already been declared)`,
       };
     }
+  }
+  // W46/332-1 (P1): an async callable (a sibling's async export, or the module's
+  // own `async function`) whose result is consumed as a value without `await` —
+  // property read, destructure, or stored-then-read. The real keyed tree's
+  // `src/jobs/rehab.ts` did exactly this off the async `getProperty`, so the
+  // returned Promise's rejection floated past the spec and reded the file. Checked
+  // LAST (after the export-surface and duplicate repairs) so those keep priority.
+  const asyncUses = unawaitedAsyncValueUses(module, asyncNamesInScope(module, priorChunks));
+  if (asyncUses.length > 0) {
+    const first = asyncUses[0]!;
+    const extra = asyncUses.length > 1 ? ` (+${asyncUses.length - 1} more)` : "";
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error: `un-awaited async call used as a value: "${first.name}" at line ${first.line} (${first.form})${extra} — the call returns a Promise, so any property read off it is undefined and its rejection floats past the caller; await it before reading or destructuring the result`,
+    };
   }
   return { ok: true, exports: claimed };
 }
@@ -3510,6 +3758,9 @@ async function synthesizeSingleModule(
     // is refused. A HARD forbidden primitive still refuses with no repair.
     const nondet = nondeterministicPrimitiveHit(masked);
     const prose = proseLineHits(envelope.module);
+    // W46/332-1 (P1): the un-awaited-async-value class for the single-module
+    // path (its own `async function` used as a value without await).
+    const asyncUses = unawaitedAsyncValueUses(envelope.module, asyncNamesInScope(envelope.module));
     // T-107.1 (216r · W7-L1): the patch-first delta repair, ONLY when the
     // caller opted in and the defect is a LOCALIZED text edit (soft forbidden
     // token / non-deterministic primitive / prose). A landed delta is applied
@@ -3556,7 +3807,7 @@ async function synthesizeSingleModule(
         }
       }
     }
-    if (!patchLanded && (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0)) {
+    if (!patchLanded && (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || asyncUses.length > 0)) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
         : repairableForbidden
@@ -3565,7 +3816,9 @@ async function synthesizeSingleModule(
             ? p6SynthesisSignatureRepairPrompt(missingSig, treeFailure)
             : nondet !== null
               ? p6SynthesisNondeterministicRepairPrompt(nondet, treeFailure)
-              : p6SynthesisProseRepairPrompt(prose, treeFailure);
+              : prose.length > 0
+                ? p6SynthesisProseRepairPrompt(prose, treeFailure)
+                : p6SynthesisAsyncAwaitRepairPrompt(asyncUses, treeFailure);
       const repair = await completeCall(repairPrompt, opts);
       // FM-03 (W37 Y1): metered like every bounded repair call.
       const repairStop = accountRepairUsage(repair);
@@ -3764,8 +4017,19 @@ async function synthesizeChunkedTree(
   // appended when every declared job is planned (byte-identity for the pipelines).
   {
     const census = treeChunkPlanCensus(project, specRecord.typeSignatures);
+    const reconcile = treePlanCensusReconciles(census);
     if (census.unbound.length > 0) {
-      const detail = `declared job node(s) with no bound signature — no src/jobs module will be synthesized: ${census.unbound.join(", ")} (their typeSignatures, if any, stay in the src/generated family)`;
+      // W46/332-1 (P2): the full partition rides the row, so the coverage
+      // shortfall is legible (and deterministic) instead of a bare name list.
+      const detail = `declared job node(s) with no bound signature — no src/jobs module will be synthesized: ${census.unbound.join(", ")} (declared ${census.declared.length}, planned ${census.planned.length}, unbound ${census.unbound.length}; their typeSignatures, if any, stay in the src/generated family)`;
+      if (!attemptLogs.some((l) => l.event === "p6.tree.shortfall" && l.detail === detail)) {
+        attemptLogs.push({ ts: Date.now(), phase: 6, level: "warn", event: "p6.tree.shortfall", detail });
+      }
+    }
+    // A declared job that is neither planned nor counted would be a SILENT drop —
+    // the one shape the census must never produce. Surface it as its own row.
+    if (!reconcile.ok) {
+      const detail = `plan census does not reconcile — declared job(s) neither planned nor counted as shortfall: ${reconcile.silent.join(", ")}`;
       if (!attemptLogs.some((l) => l.event === "p6.tree.shortfall" && l.detail === detail)) {
         attemptLogs.push({ ts: Date.now(), phase: 6, level: "warn", event: "p6.tree.shortfall", detail });
       }
@@ -3827,7 +4091,14 @@ async function synthesizeChunkedTree(
     const path = chunk.path;
     accepted.push({ path, source: synth.envelope.module, exports: [...synth.envelope.exports], reqTrace: { ...synth.envelope.reqTrace } });
     if (servedModel === null) servedModel = synth.servedModel;
-    prior.push({ path, exports: [...synth.envelope.exports], reqTrace: { ...synth.envelope.reqTrace } });
+    prior.push({
+      path,
+      exports: [...synth.envelope.exports],
+      reqTrace: { ...synth.envelope.reqTrace },
+      // W46/332-1 (P1): a later chunk must `await` this file's async exports —
+      // the validator and prompt both read this mark.
+      asyncExports: asyncExportNames(synth.envelope.module, synth.envelope.exports),
+    });
   }
 
   // All chunks accepted → assemble the entry and run the TREE-LEVEL brief-fit
@@ -3882,8 +4153,10 @@ async function synthesizeChunkEnvelope(
   readSink?: EnvelopeReadSink,
   /** W45/331-4 (Finding B): the earlier chunks of THIS tree (path + exports). The
    *  module must not redeclare any of their exported names — the materializer imports
-   *  them. Absent ⇒ the legacy validation (single-module path), byte-identical. */
-  priorChunks?: readonly { path: string; exports: readonly string[] }[],
+   *  them. W46/332-1 (P1): an `asyncExports` mark lets the validator refuse an
+   *  un-awaited async sibling call used as a value. Absent ⇒ the legacy validation
+   *  (single-module path), byte-identical. */
+  priorChunks?: readonly { path: string; exports: readonly string[]; asyncExports?: readonly string[] }[],
 ): Promise<{ ok: true; envelope: SynthesisEnvelope; servedModel: string } | { ok: false; code: ErrorCode; error: string }> {
   // fixes/153 (P1): sequential attempt numbering per chunk — one event per
   // model call (synthWithBackoff retries + each bounded repair re-prompt); an
@@ -3919,6 +4192,9 @@ async function synthesizeChunkEnvelope(
     const missingSig = missingSignatureNames(envelope.exports, signatureNames);
     // W45/331-4 (Finding B): the cross-chunk duplicate-declaration class.
     const dup = crossChunkDuplicateDeclarations(envelope.module, priorChunks);
+    // W46/332-1 (P1): the un-awaited-async-value class (a sibling's async export
+    // used without `await`), the same detector the validator applies.
+    const asyncUses = unawaitedAsyncValueUses(envelope.module, asyncNamesInScope(envelope.module, priorChunks));
     // 216f (T-09/T-15): same two new bounded repair classes as the single-module
     // path — prose-in-code and Math.random each get ONE re-prompt naming the
     // exact defect; a repeat is refused. This is the LLM CHUNK gate: the only
@@ -3970,7 +4246,7 @@ async function synthesizeChunkEnvelope(
     }
     if (
       !patchLanded &&
-      (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || dup.length > 0)
+      (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || dup.length > 0 || asyncUses.length > 0)
     ) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
@@ -3982,7 +4258,9 @@ async function synthesizeChunkEnvelope(
               ? p6SynthesisNondeterministicRepairPrompt(nondet, treeFailure)
               : prose.length > 0
                 ? p6SynthesisProseRepairPrompt(prose, treeFailure)
-                : p6SynthesisDuplicateDeclRepairPrompt(dup, treeFailure);
+                : dup.length > 0
+                  ? p6SynthesisDuplicateDeclRepairPrompt(dup, treeFailure)
+                  : p6SynthesisAsyncAwaitRepairPrompt(asyncUses, treeFailure);
       const repair = await completeCall(repairPrompt, opts);
       // FM-03 (W37 Y1): metered like every bounded repair call.
       const repairStop = accountRepairUsage(repair);

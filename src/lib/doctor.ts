@@ -702,9 +702,12 @@ function numOrNull(v: number | undefined): number | null {
 /**
  * Read one measured ledger into the doctor's honest spend summary (OV-41).
  * `source` is a T-107.6 `TokenLedger` / `TokenSpend` — or the persisted
- * `Project.tokenUsage` slice (`types.ts:435`). `prices` is CALLER-supplied
- * (token-ledger ships no catalog); omitted ⇒ tokens only, cost null.
- * Pure; never throws (hostile input ⇒ the honest `measured:false` envelope).
+ * `Project.tokenUsage` slice (the run's cumulative spend; `headless.doctorStatus`
+ * reads it from the product tree's `.rapidtool/project.json`, W46 · 332-2). A
+ * legacy 2-key slice carries no `calls`/cache keys, so those read honestly as
+ * `null` (never a fabricated 0). `prices` is CALLER-supplied (token-ledger ships
+ * no catalog); omitted ⇒ tokens only, cost null. Pure; never throws (hostile
+ * input ⇒ the honest `measured:false` envelope).
  */
 export function doctorSpend(
   source: TokenSpend | TokenLedger | null | undefined,

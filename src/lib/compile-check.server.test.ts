@@ -642,6 +642,80 @@ describe("treeRun — execute the emitted tree in-loop (fixes/144 M3/B3)", () =>
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // -------------------------------------------------------------------------
+  // T1 (332-3) — a GAME tree's package.json "main" is the BROWSER boot vite
+  // loads from index.html: it imports the UI shell extensionless and touches
+  // the DOM, so bare node cannot load it. It must never be resolved as the
+  // headless core, or a perfectly clean game tree reds; the tree's GENERATED
+  // core is what the smoke must judge, and a broken one must still red.
+  // -------------------------------------------------------------------------
+  const GAME_RECORD = (file: string): string =>
+    JSON.stringify({ kind: "game", specGraph: { nodes: [{ id: "job-level", file }], order: ["job-level"] } });
+  const GAME_BOOT = [
+    `import { bootGame } from "./ui/console";`,
+    `const el = document.getElementById("root");`,
+    `if (!el) throw new Error("missing #root element");`,
+    `bootGame(el as HTMLElement);`,
+    ``,
+  ].join("\n");
+
+  it("T1 (332-3): a clean game tree skips its browser boot and smokes the generated core — green", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "game-clean", type: "module", main: "src/main.ts" }));
+      write(dir, "index.html", '<!doctype html><html><body><div id="root"></div><script type="module" src="/src/main.ts"></script></body></html>\n');
+      write(dir, "src/main.ts", GAME_BOOT);
+      write(dir, "src/jobs/level.ts", "export function play(n: number): number { return n + 1; }\n");
+      write(dir, ".rapidtool/project.json", GAME_RECORD("src/jobs/level.ts"));
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.run!.run, "skip", "the UI shell itself stays an honest skip");
+      assert.equal(r.run!.kind, "ui-shell");
+      assert.ok(r.core, "the generated core was resolved and smoke-loaded");
+      assert.equal(r.core!.entry, "src/jobs/level.ts", "the generated core is smoked, not the browser boot");
+      assert.notEqual(r.core!.entry, "src/main.ts", "the browser boot is never the headless core");
+      assert.equal(r.core!.run, "pass");
+      assert.equal(r.ok, true, "a clean game tree is green (before T1 it reds on src/main.ts)");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("T1 (332-3): a game tree whose generated core is broken STILL reds (control)", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "game-broken-core", type: "module", main: "src/main.ts" }));
+      write(dir, "index.html", '<!doctype html><html><body><div id="root"></div><script type="module" src="/src/main.ts"></script></body></html>\n');
+      write(dir, "src/main.ts", GAME_BOOT);
+      // The generated core is unloadable — the browser-boot skip must not hide it.
+      write(dir, "src/jobs/level.ts", "function x( { broken syntax\n");
+      write(dir, ".rapidtool/project.json", GAME_RECORD("src/jobs/level.ts"));
+      const r = await treeRunAsConsumer(dir);
+      assert.ok(r.core, "the broken generated core was resolved");
+      assert.equal(r.core!.entry, "src/jobs/level.ts");
+      assert.equal(r.core!.run, "fail");
+      assert.equal(r.ok, false, "a broken generated core is never ok:true");
+      assert.ok((r.error ?? "").includes("generated core module failed to LOAD"), r.error);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("T1 (332-3): a UI shell with a browser main and NO generated core keeps the honest skip", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "game-no-core", type: "module", main: "src/main.ts" }));
+      write(dir, "index.html", '<!doctype html><html><body><div id="root"></div><script type="module" src="/src/main.ts"></script></body></html>\n');
+      write(dir, "src/main.ts", GAME_BOOT);
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.core, undefined, "no generated core resolves ⇒ no core verdict");
+      assert.equal(r.run!.kind, "ui-shell");
+      assert.equal(r.run!.run, "skip");
+      assert.equal(r.ok, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -893,6 +967,174 @@ describe("217d T-18 — the emitted project's own build script", () => {
       assert.match(r.error ?? "", /npm run build/, "the top-level error names the red build");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T2 (332-3) — `ok` is "nothing ran red"; `verified` is "the declared checks
+// actually ran". A tree whose declared `typecheck`/`build` could not execute
+// (no node_modules) is ok-but-UNVERIFIED: it carries `verified:false` and
+// names the unrun legs, so no consumer can read the green as a verification.
+// ---------------------------------------------------------------------------
+describe("T2 (332-3) — a declared-but-unverified project tool is never a pass", () => {
+  const writeProjectTree = (root: string, scripts: Record<string, string>): void => {
+    write(root, "package.json", JSON.stringify({ name: "t2", type: "module", main: "src/main.ts", scripts }));
+    write(root, "src/main.ts", "export const boot = (): string => 'ok';\n");
+    write(root, "tests/oracle.spec.ts", PASSING_SPEC);
+  };
+  const emptyCompile = (dir: string) =>
+    ({ ok: true, dir, checked: 0, passed: 0, failed: 0, skipped: 0, verdicts: [] });
+
+  it("a declared-but-uninstalled typecheck → ok:true but verified:false, the leg named", async () => {
+    const dir = tempDir();
+    try {
+      writeProjectTree(dir, { typecheck: "tsc --noEmit", test: "node --version" });
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true, "nothing ran red — the tree is not red");
+      assert.equal(r.project!.typecheck.run, "skip");
+      assert.equal(r.project!.typecheck.verified, false, "a skip is not verified");
+      assert.equal(r.project!.test.verified, true, "an executed script IS verified");
+      assert.deepEqual(r.unverified, ["typecheck"], "the unrun DECLARED leg is named at the top level");
+      assert.deepEqual(r.project!.unverified, ["typecheck"]);
+      assert.equal(r.project!.verified, false);
+      assert.equal(r.verified, false, "an ok-but-unverified tree must never read as verified");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("every declared script ran → verified:true and no unverified rows", async () => {
+    const dir = tempDir();
+    try {
+      writeProjectTree(dir, { typecheck: "node --version", test: "node --version" });
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true);
+      assert.equal(r.project!.typecheck.verified, true);
+      assert.equal(r.project!.test.verified, true);
+      assert.equal(r.project!.verified, true);
+      assert.equal(r.verified, true, "every declared check ran");
+      assert.equal(r.unverified, undefined, "nothing unverified");
+      assert.equal(r.project!.unverified, undefined);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("absent scripts are ABSENT, not unverified (verified stays true)", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC); // package.json declares no scripts block
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true);
+      assert.equal(r.project!.typecheck.run, "skip");
+      assert.equal(r.project!.typecheck.verified, undefined, "an undeclared script is neither verified nor unverified");
+      assert.equal(r.verified, true);
+      assert.equal(r.unverified, undefined);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the declared-verification state is decisive in treeVerdictHash", () => {
+    const base = {
+      ok: true,
+      dir: "d",
+      compile: emptyCompile("d"),
+      tests: [],
+      run: null,
+      verified: true,
+    };
+    const unverified = { ...base, verified: false, unverified: ["typecheck"] };
+    assert.notEqual(
+      treeVerdictHash(base),
+      treeVerdictHash(unverified),
+      "a verified and an ok-but-unverified verdict must not hash the same",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T3 (R11-f02) / T4 (R12-f03) — the hardening landed in earlier waves; these
+// pin it so a regression is caught. R11-f02: a declared script runs argv-only
+// (no shell) when its first token resolves to a real executable, the lifecycle
+// denial is recorded on the verdict, and the install leg carries
+// `--ignore-scripts` (installToolFor, pinned elsewhere in this file). R12-f03:
+// treeRun never deep-copies node_modules — the subject's deps are reachable in
+// the run copy through a directory junction, and the subject stays read-only.
+// ---------------------------------------------------------------------------
+describe("T3/T4 (332-3) — script-execution and temp-copy hardening stay pinned", () => {
+  it("R11-f02: a resolved declared script runs argv-only and records the lifecycle denial", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "t3", type: "module", main: "src/main.ts", scripts: { typecheck: "node --version" } }));
+      write(dir, "src/main.ts", "export const boot = (): string => 'ok';\n");
+      write(dir, "tests/oracle.spec.ts", PASSING_SPEC);
+      const r = await treeRunAsConsumer(dir);
+      const tc = r.project!.typecheck;
+      assert.equal(tc.run, "pass");
+      assert.ok(tc.scriptPolicy, "the execution route is recorded on the verdict");
+      assert.match(tc.scriptPolicy!, /argv-only/);
+      assert.match(tc.scriptPolicy!, /no shell/);
+      assert.match(tc.scriptPolicy!, /lifecycle scripts denied/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("R11-f02: a command that NEEDS a shell takes the constant --ignore-scripts fallback and says so", async () => {
+    const dir = tempDir();
+    try {
+      // An unquoted shell operator means the declared text can only mean what it
+      // says through a shell, so the plan refuses to argv-split it and falls back
+      // to the CONSTANT `npm run <script> --ignore-scripts` (no tree text to a shell).
+      write(dir, "package.json", JSON.stringify({ name: "t3b", type: "module", main: "src/main.ts", scripts: { typecheck: "node --version && node --version" } }));
+      write(dir, "src/main.ts", "export const boot = (): string => 'ok';\n");
+      write(dir, "tests/oracle.spec.ts", PASSING_SPEC);
+      const r = await treeRunAsConsumer(dir);
+      const tc = r.project!.typecheck;
+      assert.equal(tc.run, "pass", `the fallback ran the declared script: ${tc.detail ?? ""}`);
+      assert.match(tc.scriptPolicy!, /shell form/);
+      assert.match(tc.scriptPolicy!, /--ignore-scripts/);
+      assert.match(tc.scriptPolicy!, /lifecycle scripts denied/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("R12-f03: node_modules is not deep-copied — deps reachable via the seam, subject read-only", async () => {
+    const dir = tempDir();
+    const sentinelDir = tempDir();
+    const sentinel = join(sentinelDir, "seen.json");
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "t4", type: "module", main: "src/main.ts", scripts: { build: "node seam-marker.mjs" } }));
+      write(dir, "src/main.ts", "export const boot = (): string => 'ok';\n");
+      write(dir, "tests/oracle.spec.ts", PASSING_SPEC);
+      mkdirSync(join(dir, "node_modules"), { recursive: true });
+      write(dir, "node_modules/marker.txt", "seam-marker\n");
+      write(
+        dir,
+        "seam-marker.mjs",
+        [
+          `import { readFileSync, writeFileSync } from "node:fs";`,
+          `import { join } from "node:path";`,
+          `writeFileSync(${JSON.stringify(sentinel)}, JSON.stringify({`,
+          `  cwd: process.cwd(),`,
+          `  nm: readFileSync(join(process.cwd(), "node_modules", "marker.txt"), "utf8").trim(),`,
+          `}));`,
+          ``,
+        ].join("\n"),
+      );
+      const before = snapshotListing(dir);
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.project!.build!.run, "pass", "the declared build ran in the copy");
+      const seen = JSON.parse(readFileSync(sentinel, "utf8")) as { cwd: string; nm: string };
+      assert.ok(seen.cwd.includes("rt-treerun-"), `the build ran in the temp copy: ${seen.cwd}`);
+      assert.equal(seen.nm, "seam-marker", "the subject's node_modules is reachable via the seam");
+      assert.deepEqual(snapshotListing(dir), before, "the subject dir is read-only (no deep copy written back)");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(sentinelDir, { recursive: true, force: true });
     }
   });
 });

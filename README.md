@@ -266,8 +266,13 @@ landed) · human-seat console surface.
 
 **Blocked / known limits** (honest, not bugs to paper over): no isolation boundary — the bounded
 node-runner is **NOT a sandbox** (R13-f04 = honest refusal; needs a host isolator that does not
-exist here) · keyed evidence runs blocked by funding (DeepSeek account unfunded → 402; O-1) ·
-the emitted product is still ONE module wearing several filenames (TA-15) · P7–P12 phases often
+exist here) · **CORRECTED 2026-10-02: keyed runs are NOT funding-blocked** — the account is funded and
+the repo `.env` key works; the earlier 401/402 reports came from a stale Windows User-scope
+`DEEPSEEK_API_KEY` shadowing it while nothing loaded `.env` (see `START-HERE.md` §CORRECTION and
+`wave_plans/W45/parent-keyed-findings.md`). A keyed run now emits a **real multi-job product**
+(`treeRun.substance {stubs:0, reexports:0, real:3}`, `p6-arch` PASS); the remaining gap is a
+generated-code async defect recorded in `fixes/331_0_parent.md` §6.8 ·
+the emitted product is still ONE module wearing several filenames on the KEYLESS floor (TA-15) · P7–P12 phases often
 produce no artifacts · no git landing / no cross-machine reproducibility · Chat = grounded tools +
 one-shot text, no shell/agents.
 

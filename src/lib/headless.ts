@@ -84,14 +84,25 @@ import type {
 import type { RtEventSeed } from "./rt-events.ts";
 
 import type { DoctorSpend } from "./doctor.ts";
-import type { TokenLedger, TokenSpend } from "./token-ledger.ts";
+import type { SpendSlice, TokenLedger, TokenSpend } from "./token-ledger.ts";
 // T5.5 (OV-41 spend half, W43 · H6): the summary envelope's spend half reads
 // the PROCESS session budget — the SAME T-107.6 accessor `recordSessionSpend`
 // records into — through the SAME boundary reader the packet envelope carries
 // (`packetBudgetBoundary`, F2-04), so the two surfaces can never drift.
+// W46 · 332-2 (AW45-c06): the run's cumulative spend PERSISTS on the project
+// (`tokenUsage`); `accumulateSpend` / `spendDelta` / `normalizeLedger` fold
+// each invocation's session delta into it, and `summary`/`doctor` read it back.
 // token-ledger.ts / packet.ts are client-safe pure modules (no node:fs);
 // static import is safe in this backend module.
-import { recordSessionSpend, sessionTokenBudget } from "./token-ledger.ts";
+import {
+  accumulateSpend,
+  isMeasuredSpend,
+  normalizeLedger,
+  recordSessionSpend,
+  sessionTokenBudget,
+  spendDelta,
+  totalTokens,
+} from "./token-ledger.ts";
 import { packetBudgetBoundary, type PacketBudget } from "./packet.ts";
 
 // ---------------------------------------------------------------------------
@@ -1033,6 +1044,13 @@ export async function runUntilGate(
   const live = Boolean(opts.live);
   const maxSteps =
     typeof opts.maxSteps === "number" && opts.maxSteps > 0 ? Math.floor(opts.maxSteps) : 40;
+  // W46 · 332-2 (L1 / AW45-c06): the run's cost must survive the process. Each
+  // CLI verb is a fresh process, so the session ledger is a per-invocation
+  // number; snapshot it here and fold THIS invocation's delta into the
+  // project's cumulative `tokenUsage` at the run boundary (below). The session
+  // cap keeps enforcing the process ledger unchanged — persisted spend never
+  // feeds the cap.
+  const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
   let p = project;
   let steps = 0;
   let iterations = 0;
@@ -1198,6 +1216,18 @@ export async function runUntilGate(
   // same one the P12 delivery writer uses — so the CLI gate can branch without
   // re-deriving red gates.
   const sealedWithFailures = outcome === "complete" && !sealHonesty(finalProject).clean;
+  // W46 · 332-2 (L1 / AW45-c06): fold this invocation's measured session spend
+  // into the project's cumulative slice so the saved record and the returned
+  // `summary` carry the RUN's cost, not one process's. A zero-spend invocation
+  // leaves any existing persisted slice untouched (never rewrites a legacy
+  // 2-key record into a fabricated zero); a real delta accumulates additively.
+  const runDelta = spendDelta(sessionTokenBudget().ledger, spendBaseline);
+  if (totalTokens(runDelta) > 0 || runDelta.calls > 0) {
+    finalProject = {
+      ...finalProject,
+      tokenUsage: accumulateSpend(finalProject.tokenUsage, runDelta),
+    };
+  }
   return { project: finalProject, steps, stopped, events, outcome, sealedWithFailures };
 }
 
@@ -1597,14 +1627,16 @@ export type ProjectSummary = {
    *  `scripts/next-action-arm-parity.test.mjs`. A caller never guesses the
    *  next step; `unknown` when nothing specific is knowable. */
   nextAction: NextAction;
-  /** T5.5 (OV-41 spend half, W43 · H6): the process session ledger's boundary
-   *  at summary time — `{spent, cap, stop_reason}` read from the SAME T-107.6
-   *  session accessor (`sessionTokenBudget()`) that `recordSessionSpend`
-   *  records into, through the SAME reader the packet envelope carries
-   *  (`packetBudgetBoundary`, F2-04) — one semantics, no drift. Always
-   *  present: the session budget always exists; `cap: null` states the
-   *  unmetered default explicitly (never collapsed into an absent case —
-   *  CF-SE2-3a). Read-only — summary() never spends, records, or throws. */
+  /** T5.5 (OV-41 spend half, W43 · H6) + W46 · 332-2 (L1 / AW45-c06): the
+   *  spend boundary at summary time. `spent` is the RUN's cumulative cost —
+   *  the project's persisted `tokenUsage` slice when it carries one (written by
+   *  runUntilGate across invocations), else the process session ledger, which a
+   *  fresh CLI process starts empty. `cap`/`stop_reason` stay the process
+   *  session's (the `RAPIDTOOL_TOKEN_CAP` runaway stop) — persisted spend never
+   *  feeds the cap. Always present: the session budget always exists; `cap:
+   *  null` states the unmetered default explicitly (never collapsed into an
+   *  absent case — CF-SE2-3a). Read-only — summary() never spends, records, or
+   *  throws. */
   budget: PacketBudget;
 };
 
@@ -1636,13 +1668,26 @@ export function summary(project: Project): ProjectSummary {
   // reader (F2-04) over the process session accessor. The accessor always
   // returns a budget object (lazily created), so the reader's null arm (no
   // budget at all) is unreachable; the explicit unmetered floor keeps the
-  // envelope key ALWAYS PRESENT instead of absent — same key, same triple,
-  // same semantics as packet.ts's `budget:` block.
-  const budget: PacketBudget = packetBudgetBoundary(sessionTokenBudget()) ?? {
+  // envelope key ALWAYS PRESENT instead of absent — same key, same triple.
+  const sessionBudget: PacketBudget = packetBudgetBoundary(sessionTokenBudget()) ?? {
     spent: 0,
     cap: null,
     stop_reason: null,
   };
+  // W46 · 332-2 (L1 / AW45-c06): `spent` is the RUN's cumulative cost. Every
+  // CLI invocation is a fresh process whose session ledger starts empty, so a
+  // bare session read reported the last call (measured `446 → 0 → 77654`);
+  // when the project carries a persisted `tokenUsage` slice (written by
+  // runUntilGate), it is the run total. `cap`/`stop_reason` stay the PROCESS
+  // session's — the session cap is what stops a runaway — so a project with no
+  // persisted slice keeps the byte-identical session triple.
+  const budget: PacketBudget = isMeasuredSpend(project.tokenUsage)
+    ? {
+        spent: totalTokens(normalizeLedger(project.tokenUsage)),
+        cap: sessionBudget.cap,
+        stop_reason: sessionBudget.stop_reason,
+      }
+    : sessionBudget;
   return {
     name: project.name,
     currentPhase: project.currentPhase,
@@ -4196,6 +4241,52 @@ const DOCTOR_SPEND_FLOOR: DoctorSpend = {
 };
 
 /**
+ * W46 · 332-2 (L1/AW45-c06): the persisted run spend a project record carries.
+ * Returns its `tokenUsage` slice ONLY when it is a usable measured spend (both
+ * base counts finite and non-negative); anything else — absent file, unreadable,
+ * unparsable, a legacy record without the field — returns null so the caller
+ * keeps its own honest floor. Read-only; never throws; the file body is never
+ * surfaced beyond its token counters.
+ */
+function persistedSpendAt(recordPath: string): SpendSlice | null {
+  if (!recordPath) return null;
+  try {
+    if (!existsSync(recordPath)) return null;
+    const parsed = JSON.parse(readFileSync(recordPath, "utf8")) as { tokenUsage?: unknown } | null;
+    return isMeasuredSpend(parsed?.tokenUsage) ? parsed.tokenUsage : null;
+  } catch {
+    return null; // unreadable/corrupt record → the caller's honest floor, never a throw
+  }
+}
+
+/** The product tree's scaffold-shipped record: `<treeDir>/.rapidtool/project.json`
+ *  (the CLI gate's save target — "the project JSON is the LEDGER"). */
+function persistedTreeSpend(treeDir: string): SpendSlice | null {
+  return treeDir ? persistedSpendAt(join(resolve(treeDir), ".rapidtool", "project.json")) : null;
+}
+
+/**
+ * W46 · 332-2 (L1/AW45-c06): resolve the measured-spend source the doctor
+ * surfaces report — priority: an explicit caller `spend`, then the
+ * `projectPath` file's persisted `tokenUsage`, then the product tree's
+ * `.rapidtool/project.json` record, then the process session ledger (empty at
+ * fresh-process start, hence the old `calls: 0`). Never throws; a missing or
+ * unusable record simply loses its rung.
+ */
+export function resolveDoctorSpendSource(opts?: {
+  treeDir?: string;
+  projectPath?: string;
+  spend?: TokenSpend | TokenLedger | null;
+}): TokenSpend | TokenLedger | SpendSlice {
+  if (opts?.spend) return opts.spend;
+  const byPath = opts?.projectPath ? persistedSpendAt(opts.projectPath) : null;
+  if (byPath) return byPath;
+  const byTree = persistedTreeSpend(typeof opts?.treeDir === "string" ? opts.treeDir : "");
+  if (byTree) return byTree;
+  return sessionTokenBudget().ledger;
+}
+
+/**
  * E-25: capability pre-flight for agent drivers — what CAN this host do right
  * now? Reads process.env through the server modules (never the server-fn
  * status surfaces, which need a Start runtime). The research probe is a real
@@ -4206,9 +4297,20 @@ const DOCTOR_SPEND_FLOOR: DoctorSpend = {
  * 214: `opts.treeDir` scans `src/jobs/*.ts` (and `jobs/*.ts`) and feeds the
  * leftover-job census into factoryClaim. Absent tree → RAPIDTOOL_FACTORY_EVIDENCE
  * (inventory null). Never invents job bodies.
+ *
+ * W46 · 332-2 (L1/AW45-c06): the spend block used to read the PROCESS session
+ * ledger, which a fresh `doctor` process starts empty (`calls: 0` after a keyed
+ * run). `opts.projectPath` (the CLI's `--project`) or `opts.treeDir`'s
+ * scaffold-shipped record resolves the run's persisted `Project.tokenUsage`,
+ * read read-only and never fabricated. Priority: explicit `opts.spend` →
+ * `opts.projectPath` → `treeDir` record → the process session ledger (or the
+ * honest `measured:false` floor).
  */
 export async function doctorStatus(opts?: {
   treeDir?: string;
+  /** W46 · 332-2: the project file whose persisted `tokenUsage` is the run's
+   *  recorded spend (wins over the `treeDir` record). */
+  projectPath?: string;
   /** OPS-8 (W42 · L4/G9): caller-measured spend; defaults to the process
    *  session budget's ledger (`sessionTokenBudget().ledger`). */
   spend?: TokenSpend | TokenLedger | null;
@@ -4283,16 +4385,22 @@ export async function doctorStatus(opts?: {
   };
   try {
     const doctor = await import("./doctor.ts");
-    // OPS-8 (W42 · L4/G9): the session budget's ledger is the measured-spend
-    // source; an explicit `opts.spend` overrides it. Shape lives in doctorSpend.
-    const { sessionTokenBudget } = await import("./token-ledger.ts");
     const treeDir = typeof opts?.treeDir === "string" && opts.treeDir.trim() ? opts.treeDir.trim() : "";
-    let claim = doctor.doctorFactory(process.env, opts?.spend ?? sessionTokenBudget().ledger);
+    // OPS-8 (W42 · L4/G9) + W46 · 332-2 (L1/AW45-c06): the measured-spend
+    // source — an explicit `opts.spend` wins, then the product tree's persisted
+    // `Project.tokenUsage` (the run's recorded cost), then the process session
+    // ledger (empty at fresh-process start, hence the old `calls: 0`). Shape
+    // lives in doctorSpend.
+    const spendSource = resolveDoctorSpendSource({ treeDir, projectPath: opts?.projectPath, spend: opts?.spend });
+    let claim = doctor.doctorFactory(process.env, spendSource);
     if (treeDir) {
       const files = collectJobSources(treeDir);
       const inv = doctor.inventoryFromJobSources(files, resolve(treeDir));
       const evidence = doctor.evidenceFromJobInventory(inv);
-      claim = doctor.factoryClaim(evidence, process.env);
+      // The tree scan replaces the factory EVIDENCE, never the measured spend —
+      // before this, the `factoryClaim` here dropped the spend block entirely
+      // (measured:false) even when the tree carried a persisted run record.
+      claim = doctor.factoryClaim(evidence, process.env, spendSource);
     }
     factory = {
       autonomousSoftwareFactory: claim.autonomousSoftwareFactory,

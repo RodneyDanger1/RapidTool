@@ -8,12 +8,14 @@
 // ---------------------------------------------------------------------------
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import {
   assembleTreeEntry,
+  asyncExportNames,
   briefFitSatisfied,
   chunkTypeSignatures,
   crossChunkDuplicateDeclarations,
@@ -37,6 +39,7 @@ import {
   p6SynthesisBriefFitRepairPrompt,
   p6SynthesisChunkUserPrompt,
   p6SynthesisContractsLines,
+  p6SynthesisAsyncAwaitRepairPrompt,
   p6SynthesisDuplicateDeclRepairPrompt,
   p6SynthesisExportRepairPrompt,
   p6SynthesisForbiddenRepairPrompt,
@@ -60,19 +63,22 @@ import {
   orderTreeChunks,
   treeChunkPlan,
   treeChunkPlanCensus,
+  treePlanCensusReconciles,
   treePathForChunk,
   TREE_CHUNK0_RELOCATED_PATH,
   TREE_ENTRY_PATH,
   validateSynthesisModule,
+  unawaitedAsyncValueUses,
   REPAIR_TREE_FAILURE_TAIL_MAX,
   synthWithBackoff,
   proseLineHits,
+  type AsyncUnawaitedUse,
   type ChunkPriorFile,
   type EnvelopeReadFailure,
   type P6SynthesisDeps,
 } from "./codegen.server.ts";
 import { applyPhaseResult, emptyProject } from "./engine.ts";
-import { runGate } from "./dod.ts";
+import { runGate, archTrace } from "./dod.ts";
 import { buildPhase6Module } from "./sandbox.ts";
 import { briefNounHits, maskLiteralsAndComments } from "./sandbox.ts";
 import { fnv1a } from "./algorithms.ts";
@@ -3700,6 +3706,350 @@ describe("T5.4 artifact provenance (real emit data)", () => {
       JSON.stringify(res.project.artifacts),
       JSON.stringify(q.artifacts),
       "the artifact rows round-trip byte-identically",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W46/332-1 (P1) — un-awaited async imports. The real keyed tree's
+// `src/jobs/rehab.ts` called the async `getProperty(propertyId)` without
+// `await` and read `.ok` off the returned Promise, so the rejection floated past
+// the spec and redded the whole file. The validator must refuse the detectable
+// value-position forms before the tree is emitted.
+// ---------------------------------------------------------------------------
+
+/** The recorded keyed-tree shape: a `Promise.resolve().then(…)` body whose var
+ *  is read with `.ok` off the un-awaited async `getProperty` (bytes from
+ *  `wave_plans/W46/lane-1-prompter.md`). */
+const REHAB_ASYNC_MODULE = [
+  "/**",
+  " * req-4: rehab timeline for a property.",
+  " * @param {string} propertyId",
+  " * @returns {Promise<object>}",
+  " */",
+  "function getRehabTimeline(propertyId) {",
+  "  return Promise.resolve().then(function () {",
+  "    var property = getProperty(propertyId);",
+  "    if (property && property.ok === false) {",
+  "      return { ok: false, error: property.error };",
+  "    }",
+  "    return { ok: true, timeline: [] };",
+  "  });",
+  "}",
+  "module.exports.getRehabTimeline = getRehabTimeline;",
+].join("\n");
+
+const GET_PROPERTY_PRIOR = [
+  { path: "src/generated/get-property.ts", exports: ["getProperty"], asyncExports: ["getProperty"] },
+];
+
+describe("W46/332-1 (P1) un-awaited async imports", () => {
+  it("the recorded rehab.ts shape is REFUSED when the sibling async mark is present, accepted without it (the pre-fix hole)", () => {
+    // Negative control first: the same bytes with the async mark absent are the
+    // exact pre-fix validator behaviour — a model slip sailed straight through.
+    const withoutMark = validateSynthesisModule(REHAB_ASYNC_MODULE, ["getRehabTimeline"], ["getRehabTimeline"], [
+      { path: "src/generated/get-property.ts", exports: ["getProperty"] },
+    ]);
+    assert.equal(withoutMark.ok, true, "without the async mark the validator cannot know getProperty returns a Promise");
+    // Same bytes, same prior chunk, now marked async: the value-position read is refused.
+    const refused = validateSynthesisModule(REHAB_ASYNC_MODULE, ["getRehabTimeline"], ["getRehabTimeline"], GET_PROPERTY_PRIOR);
+    assert.equal(refused.ok, false);
+    if (!refused.ok) {
+      assert.equal(refused.code, "RT_E_VALIDATION");
+      assert.match(refused.error, /un-awaited async call used as a value/);
+      assert.match(refused.error, /"getProperty" at line 9 \(bound-then-read\)/);
+      assert.match(refused.error, /Promise/);
+    }
+  });
+
+  it("refuses the direct property-read and destructure forms; accepts an awaited call and a .then consumer", () => {
+    const direct = [
+      "function f(id) { return getProperty(id).ok; }",
+      "module.exports.f = f;",
+    ].join("\n");
+    const directV = validateSynthesisModule(direct, ["f"], ["f"], GET_PROPERTY_PRIOR);
+    assert.equal(directV.ok, false);
+    if (!directV.ok) assert.match(directV.error, /\(property-read\)/);
+
+    const destructure = [
+      "function f(id) {",
+      "  const { ok, value } = getProperty(id);",
+      "  return { ok: ok, value: value };",
+      "}",
+      "module.exports.f = f;",
+    ].join("\n");
+    const destructureV = validateSynthesisModule(destructure, ["f"], ["f"], GET_PROPERTY_PRIOR);
+    assert.equal(destructureV.ok, false);
+    if (!destructureV.ok) assert.match(destructureV.error, /\(destructure\)/);
+
+    const awaited = [
+      "async function f(id) {",
+      "  const property = await getProperty(id);",
+      "  return { ok: property.ok };",
+      "}",
+      "module.exports.f = f;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(awaited, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true, "await is the fix");
+
+    const thenConsumer = [
+      "function f(id) {",
+      "  return getProperty(id).then(function (p) { return p.ok; });",
+      "}",
+      "module.exports.f = f;",
+    ].join("\n");
+    assert.equal(
+      validateSynthesisModule(thenConsumer, ["f"], ["f"], GET_PROPERTY_PRIOR).ok,
+      true,
+      ".then is a legal promise consumer, never the value-position defect",
+    );
+
+    // A synchronously-declared name that merely shares the vocabulary is not refused.
+    const syncRead = [
+      "function f(input) {",
+      "  const r = validateLineItemInput(input);",
+      "  return r.ok;",
+      "}",
+      "module.exports.f = f;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(syncRead, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true);
+  });
+
+  it("refuses a module's OWN async function used as a value without await (single-module path, no prior chunks)", () => {
+    const mod = [
+      "async function load(id) { return { ok: true }; }",
+      "function f(id) {",
+      "  const x = load(id);",
+      "  return x.ok;",
+      "}",
+      "module.exports.f = f;",
+      "module.exports.load = load;",
+    ].join("\n");
+    const v = validateSynthesisModule(mod, ["f", "load"], ["f", "load"]);
+    assert.equal(v.ok, false);
+    if (!v.ok) assert.match(v.error, /"load" at line 4 \(bound-then-read\)/);
+    const awaited = mod.replace("const x = load(id);", "const x = await load(id);").replace("function f(id)", "async function f(id)");
+    assert.equal(validateSynthesisModule(awaited, ["f", "load"], ["f", "load"]).ok, true);
+  });
+
+  it("asyncExportNames / unawaitedAsyncValueUses: deterministic, comments and strings never report", () => {
+    const src = [
+      "// async function ghost(a) {}",
+      'const s = "async function other(a) {}";',
+      "async function getProperty(id) { return { ok: true, id: id }; }",
+      "function sync() { return 1; }",
+      "module.exports.getProperty = getProperty;",
+      "module.exports.sync = sync;",
+    ].join("\n");
+    assert.deepEqual(asyncExportNames(src, ["getProperty", "sync", "ghost", "other"]), ["getProperty"]);
+
+    const uses = unawaitedAsyncValueUses(
+      ["async function getProperty(id) { return { ok: true }; }", "function f(id) {", "  const property = getProperty(id);", "  return property.ok;", "}"].join("\n"),
+      ["getProperty"],
+    );
+    assert.deepEqual(uses, [{ name: "getProperty", line: 4, form: "bound-then-read" }]);
+    assert.deepEqual(unawaitedAsyncValueUses("async function g() {}\nfunction f() { return g(); }", ["g"]), []);
+    assert.deepEqual(unawaitedAsyncValueUses("function f() {}", []), []);
+  });
+
+  it("the async-await repair prompt names the callable, its line and form, and the await fix", () => {
+    const uses: AsyncUnawaitedUse[] = [{ name: "getProperty", line: 9, form: "bound-then-read" }];
+    const prompt = p6SynthesisAsyncAwaitRepairPrompt(uses);
+    assert.match(prompt, /"getProperty" at line 9/);
+    assert.match(prompt, /bound-then-read/);
+    assert.match(prompt, /`await`/);
+    assert.match(prompt, /unhandled rejection/);
+    assert.match(prompt, /Return JSON ONLY/);
+    assert.equal(p6SynthesisAsyncAwaitRepairPrompt([]).includes("(none listed)"), true);
+  });
+
+  it("the system prompt advertises the await rule the validator enforces (drift-proof)", () => {
+    const s = p6SynthesisSystemPrompt();
+    assert.match(s, /ASYNCHRONOUS/);
+    assert.match(s, /MUST `await`/);
+    assert.match(s, /reads `undefined` off a Promise/);
+  });
+
+  it("the chunk prompt marks an async earlier export and states the await rule (absent mark keeps legacy bytes)", () => {
+    const spec = ledgerSpec(2);
+    const prior: ChunkPriorFile[] = [
+      { path: "src/generated/get-property.ts", exports: ["getProperty"], reqTrace: {}, asyncExports: ["getProperty"] },
+    ];
+    const withAsync = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures, prior);
+    assert.ok(withAsync.includes("asynchronous (must await): getProperty"), "the async export is marked in the earlier-files block");
+    assert.ok(withAsync.includes("you MUST `await` it before reading any property off the result"));
+    const legacy: ChunkPriorFile[] = [
+      { path: "src/generated/get-property.ts", exports: ["getProperty"], reqTrace: {} },
+    ];
+    const withoutAsync = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures, legacy);
+    assert.ok(!withoutAsync.includes("asynchronous (must await)"), "no mark ⇒ no per-file async tag");
+  });
+
+  it("e2e single-module: an un-awaited local async value is repaired by ONE async re-prompt, then accepted", async () => {
+    const bad = [
+      "/** req-1: create a board. */",
+      "async function loadBoard(name) { return { id: name, name: name, columns: [] }; }",
+      "function createBoard(name) {",
+      "  const board = loadBoard(name);",
+      "  return { id: board.id, name: name, columns: [] };",
+      "}",
+      "/** req-2: add a column. */",
+      "function addColumn(board, columns) { board.columns = columns || []; return board; }",
+      "function kanbanBoard(columns) { return { columns: columns }; }",
+      "module.exports.loadBoard = loadBoard;",
+      "module.exports.createBoard = createBoard;",
+      "module.exports.addColumn = addColumn;",
+      "module.exports.kanbanBoard = kanbanBoard;",
+    ].join("\n");
+    const repaired = bad
+      .replace("function createBoard(name) {", "async function createBoard(name) {")
+      .replace("const board = loadBoard(name);", "const board = await loadBoard(name);");
+    const prompts: string[] = [];
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      prompts.push(prompt);
+      const isAsyncRepair = prompt.includes("ASYNCHRONOUS function without");
+      const module = isAsyncRepair ? repaired : bad;
+      const exports = ["loadBoard", "createBoard", "addColumn", "kanbanBoard"];
+      const reqTrace: Record<string, string> = {};
+      exports.forEach((n, i) => (reqTrace[`req-${i}`] = n));
+      return { ok: true, text: JSON.stringify({ module, exports, reqTrace }), model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(p6Base(), {
+      complete,
+      expand: async () => ({ ok: true, spec: KANBAN_SPEC }),
+      verify: async () => ({
+        status: "passed" as const,
+        iterations: 1,
+        evidence: "repaired",
+        finalSource: repaired,
+        cases: [],
+      }),
+    });
+    assert.equal(prompts.filter((p) => p.includes("ASYNCHRONOUS function without")).length, 1, "exactly one async re-prompt");
+    assert.match(prompts[1]!, /"loadBoard" at line 5/);
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "the repair converged — never a refused cycle");
+    const chunk = (q.generatedTree ?? []).find((f) => f.path === TREE_CHUNK0_RELOCATED_PATH);
+    assert.ok(chunk, "the accepted module is materialized on the tree");
+    assert.ok(chunk!.source.includes("await loadBoard("), "the emitted bytes carry the awaited call");
+    assert.ok(!chunk!.source.includes("const board = loadBoard("), "the un-awaited form is gone");
+  });
+
+  it("e2e chunked: a later chunk reading .ok off an async SIBLING export is refused, repaired, then accepted", async () => {
+    const base = p6Base(LEDGER_BRIEF);
+    const spec = ledgerSpec(20);
+    const chunkNames = chunkTypeSignatures(spec.typeSignatures).map((g) => signatureFunctionNames(g));
+    const withAsyncExport = (names: readonly string[]): string =>
+      `${chunkModule(names)}\nasync function getProperty(id) { return { ok: true, id: id }; }\nmodule.exports.getProperty = getProperty;\n`;
+    const asyncCall = (names: readonly string[], awaited: boolean): string => {
+      const fn = names[0]!;
+      const body = awaited
+        ? `async function ${fn}(input) { const property = await getProperty(input); return { ok: property.ok, value: input }; }`
+        : `function ${fn}(input) { const property = getProperty(input); return { ok: property.ok, value: input }; }`;
+      return chunkModule(names).replace(`function ${fn}(input) { return input; }`, body);
+    };
+    const envelopeOf = (module: string, names: readonly string[], idx: number): string => {
+      const reqTrace: Record<string, string> = {};
+      names.forEach((n, i) => (reqTrace[`req-${idx}-${i}`] = n));
+      return JSON.stringify({ module, exports: [...names], reqTrace });
+    };
+    const prompts: string[] = [];
+    let synthIndex = 0;
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      prompts.push(prompt);
+      if (prompt.includes("ASYNCHRONOUS function without")) {
+        return { ok: true, text: envelopeOf(asyncCall(chunkNames[1]!, true), chunkNames[1]!, 1), model: "deepseek-v4-flash" };
+      }
+      if (!prompt.includes("TYPE SIGNATURES (must export")) {
+        return { ok: true, text: "noop", model: "deepseek-v4-flash" };
+      }
+      const idx = synthIndex++;
+      if (idx === 0) {
+        return { ok: true, text: envelopeOf(withAsyncExport(chunkNames[0]!), [...chunkNames[0]!, "getProperty"], 0), model: "deepseek-v4-flash" };
+      }
+      if (idx === 1) {
+        return { ok: true, text: envelopeOf(asyncCall(chunkNames[1]!, false), chunkNames[1]!, 1), model: "deepseek-v4-flash" };
+      }
+      return { ok: true, text: envelopeOf(chunkModule(chunkNames[idx] ?? []), chunkNames[idx] ?? [], idx), model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(base, {
+      complete,
+      expand: async () => ({ ok: true, spec }),
+      verify: async () => ({ status: "passed" as const, iterations: 0, evidence: "unused", finalSource: "", cases: [] }),
+    });
+    assert.equal(prompts.filter((p) => p.includes("ASYNCHRONOUS function without")).length, 1, "exactly one async sibling re-prompt");
+    assert.match(prompts.find((p) => p.includes("ASYNCHRONOUS function without"))!, /"getProperty"/);
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "the sibling-async repair converged");
+    const second = (q.generatedTree ?? []).find((f) => f.path === "src/jobs/rent-2.ts");
+    assert.ok(second, "the repaired second chunk landed on the tree");
+    assert.ok(second!.source.includes("await getProperty("), "the emitted chunk awaits the async sibling");
+    assert.ok(second!.source.includes("import {"), "the materialized chunk imports the sibling export");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W46/332-1 (P2) — deterministic, legible plan coverage. Run A emitted 7 files
+// (p6-arch PASS); run B emitted 5 (p6-arch FAIL). The recorded café projects
+// are the real bytes both shapes are pinned against.
+// ---------------------------------------------------------------------------
+
+describe("W46/332-1 (P2) plan-coverage determinism", () => {
+  const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  const readProject = (app: string): Project =>
+    JSON.parse(readFileSync(join(REPO_ROOT, "research", "eval-out", app, ".rapidtool", "project.json"), "utf8")) as Project;
+
+  it("run-B recorded bytes (coffeehouse2home-property-ledger): the census counts the unbound job; p6-arch names the uncovered capabilities", () => {
+    const p = readProject("coffeehouse2home-property-ledger");
+    const sigs = p.implementationSpec?.typeSignatures ?? [];
+    assert.equal(sigs.length, 36, "precondition: the recorded run-B spec carries 36 signatures");
+    const census = treeChunkPlanCensus(p, sigs);
+    assert.deepEqual(census.declared, ["track", "record", "flip", "show", "lease"]);
+    assert.deepEqual(census.planned, ["record", "flip", "show", "lease"]);
+    assert.deepEqual(census.unbound, ["track"], "the declared job no signature names is COUNTED, never silent");
+    assert.equal(census.paths.includes("src/jobs/track.ts"), false, "an unbound job has no planned file");
+    assert.equal(census.paths.filter((x) => x.startsWith("src/jobs/")).length, 4, "the four bound jobs get files");
+    assert.deepEqual(treePlanCensusReconciles(census), { ok: true, silent: [] });
+    const trace = archTrace(p);
+    assert.equal(trace.present, true);
+    assert.ok(trace.missing.length > 0, "the recorded run-B tree does not carry every capability — p6-arch FAILs");
+    assert.equal(trace.note, "tree (1 file)", "the surviving tree is the partial/floor shape the refusal left behind");
+  });
+
+  it("run-A recorded bytes (…run-2026-09-10): every capability maps (p6-arch PASS) while the census still counts its two unbound jobs", () => {
+    const p = readProject("coffeehouse2home-property-ledger.run-2026-09-10");
+    const sigs = p.implementationSpec?.typeSignatures ?? [];
+    assert.equal(sigs.length, 25, "precondition: the recorded run-A spec carries 25 signatures");
+    const census = treeChunkPlanCensus(p, sigs);
+    assert.deepEqual(census.unbound, ["track", "publish"]);
+    assert.deepEqual(treePlanCensusReconciles(census), { ok: true, silent: [] });
+    const trace = archTrace(p);
+    assert.equal(trace.missing.length, 0, "run A's five-file tree carries every typeSignature capability");
+    assert.ok(trace.rows.length > 0);
+  });
+
+  it("the census partitions by LABEL, so a duplicated spec-graph label cannot double-count", () => {
+    const project = {
+      specGraph: {
+        nodes: [
+          { id: "job-0", file: "src/jobs/flip.ts", purpose: "Implement job “flip” against the contract" },
+          { id: "job-1", file: "src/jobs/flip-2.ts", purpose: "Implement job “flip” against the contract" },
+        ],
+      },
+    };
+    const census = treeChunkPlanCensus(project, ["runFlip(cmd: Flip): Promise<Flip>"]);
+    assert.deepEqual(census.declared, ["flip"]);
+    assert.deepEqual(census.planned, ["flip"]);
+    assert.deepEqual(census.unbound, []);
+    assert.deepEqual(treePlanCensusReconciles(census), { ok: true, silent: [] });
+  });
+
+  it("the persisted shortfall row carries the full declared/planned/unbound partition", async () => {
+    const f = chunkedDeps();
+    const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), f.deps);
+    const row = (q.logs ?? []).find((l) => l.event === "p6.tree.shortfall");
+    assert.ok(row, "the shortfall row is persisted");
+    assert.match(row!.detail, /declared 4, planned 1, unbound 3/);
+    assert.ok(
+      !(q.logs ?? []).some((l) => l.event === "p6.tree.shortfall" && /does not reconcile/.test(l.detail)),
+      "a well-formed census never emits the reconcile-violation row",
     );
   });
 });

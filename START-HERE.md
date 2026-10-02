@@ -116,4 +116,41 @@ cross-machine reproducibility · Chat = grounded tools + one-shot text, no shell
 5. **No commits, no fabrication, no silent mutations.** Deletions only when untracked + zero-references + not in any live lane log. Logs are append-only. The boundary owner commits.
 6. **Don't touch another lane's files.** Ownership is disjoint per wave; cross-lane needs go in the final report, not in the tree.
 
+---
+
+## CORRECTION — 2026-10-02 (the 331 wave): the keyed path is NOT funding-blocked
+
+This supersedes three lines above and one hard rule. **The DeepSeek account is funded, and the key in
+this repo's `.env` works.**
+
+**Measured (2026-10-02):** `GET https://api.deepseek.com/models` and `POST /chat/completions` with the
+repo `.env` key both return **200** for `deepseek-v4-flash` and `deepseek-v4-pro`, with real completions
+and billed usage.
+
+**Why every earlier wave saw 401/402 and wrote "account unfunded":** the machine had a stale
+`DEEPSEEK_API_KEY` set at **Windows User scope** (an invalid value) and **nothing in the repo loaded
+`.env`** — `grep -rn 'loadEnvFile|dotenv' src scripts .grok` returned zero hits, and
+`scripts/with-app-env.mjs` merges only `.grok/app-env.json` and only `VITE_*` keys. So the CLI sent the
+stale key and every keyed call failed. The funding diagnosis was wrong; the credential plumbing was
+broken.
+
+**Fixed** on all three surfaces — CLI, provider read, and the Vite dev server — with a documented
+precedence matrix (present-but-blank ⇒ keyless; absent ⇒ `.env`; a differing non-blank ambient value
+loses to `.env` behind the coded `RT_E_LLM_KEY_SHADOWED` signal, tails only), a 401 now classified as
+`RT_E_LLM_KEY_REJECTED` with its source named, and no more libuv abort on the red path. A real browser
+keyed action from the console returns real model text.
+
+- Supersedes line 71 (`npm run eval` comment: "account unfunded → keyed calls 402"). The reason not to
+  run `npm run eval` remains that it **rewrites tracked** `research/eval-out/**`.
+- Supersedes line 104 ("keyed evidence runs blocked by funding … O-1"). Keyed runs work; the emitted
+  multi-job product is real (`treeRun.substance {stubs:0, reexports:0, real:3}` on a keyed run). The
+  remaining gap is the last mile recorded in `fixes/331_0_parent.md` §6.8.
+- Supersedes **hard rule 3**. Replacement: **"Never fake model text, and never run keyed calls in a
+  loop — bounded calls only, each reported with its measured usage. Keyless = honest floors."** The
+  key is funded; spend is real money.
+- Owner action, not code: clearing the stale User-scope `DEEPSEEK_API_KEY` silences the shadow signal.
+  It was left in place because other tools on this host may read it.
+
+Evidence: `wave_plans/W45/parent-keyed-findings.md`, `fixes/331_0_parent.md`, register `AW45-c01…c08`.
+
 <!-- END START-HERE · maintained by organizers · append corrections, never rewrite history -->

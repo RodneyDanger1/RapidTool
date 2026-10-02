@@ -24,9 +24,10 @@
   //    breaks discriminated-union narrowing by widening `ok: true | false`,
   //    which floods the transitively-imported `src/lib` files with ~600 false
   //    "property does not exist" errors. Do not set `strict: false` here.
-  // 189 errors remain across 15 files (38 of them in `scripts/rapidtool-cli.mjs`,
-  // owned by lane 331-1); the budget records each file's count. Reaching zero is
-  // a separate migration — see the lane log.
+  // 134 errors remain across 14 files (W46 · 332-4 made `rapidtool-cli.mjs` and
+  // `cli-exit-taxonomy.test.mjs` clean — they carry no budget entry); the budget
+  // records each file's count. Reaching zero is a separate migration — see the
+  // lane log.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noImplicitAny": false,

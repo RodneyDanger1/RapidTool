@@ -1898,7 +1898,7 @@ test("330 Switchboard (T4) — `run`/`gate`/`unattended --knowledge`: accepted s
         ["--experimental-strip-types", CLI_PATH, verb, "--project", proj, "--knowledge", store],
         { cwd, env, encoding: "utf8", timeout: 180_000 },
       );
-      assert.ok([0, 2].includes(res.status), `${verb} --knowledge <store> must be accepted: exit ${res.status}\n${res.stdout}`);
+      assert.ok(res.status === 0 || res.status === 2, `${verb} --knowledge <store> must be accepted: exit ${res.status}\n${res.stdout}`);
       const json = JSON.parse(res.stdout);
       assert.ok(
         !String(json.error).includes("cannot seed proven lessons"),
@@ -2051,6 +2051,116 @@ test("W45 331-1 — a blank process DEEPSEEK_API_KEY disables .env (keyless floo
       !/RT_E_LLM_KEY_SHADOWED/.test(stderr),
       `a blank key must not consult .env at all (no shadow signal):\n${stderr}`,
     );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("W46 332-4 (S2) — `create --brief` refuses a bare path CODED and reads `@file` (AW45-c07)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-brief-"));
+  try {
+    // A corpus-shaped front-matter fixture (research/eval-corpus/*.md shape) and
+    // a plain file. The fixture is the AW45-c07 reproduction: pre-fix, the PATH
+    // was fed to the lattice and the project named after it.
+    writeFileSync(
+      join(cwd, "house-flip.md"),
+      [
+        "---",
+        'name: "House-Flipping Manager"',
+        'brief: "a house-flipping project manager: budgets, bids, ARV"',
+        'expectedNouns: ["flip", "arv"]',
+        "---",
+        "",
+        "## Body",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(cwd, "plain.txt"), "A plain brief with no front matter.");
+    const run = (argv) =>
+      spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...argv], {
+        cwd,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+
+    // 1. Bare existing-file path → CODED refusal, exit 1, nothing written.
+    const bareOut = join(cwd, "bare.json");
+    const bare = run(["create", "--brief", "house-flip.md", "--out", bareOut]);
+    assert.equal(bare.status, 1, `a bare file path must be refused.\nstdout: ${bare.stdout}\nstderr: ${bare.stderr}`);
+    const bareJson = JSON.parse(bare.stdout);
+    assert.equal(bareJson.ok, false);
+    assert.equal(bareJson.code, "RT_E_VALIDATION");
+    assert.match(String(bareJson.error), /names an existing file/);
+    assert.match(String(bareJson.error), /--brief @house-flip\.md/, "the refusal names the @file form");
+    assert.ok(!existsSync(bareOut), "the refusal must write nothing");
+
+    // 2. `@fixture` → the front-matter `brief:` scalar; the YAML never reaches
+    //    the lattice and the project is not named after the path.
+    const atOut = join(cwd, "at.json");
+    const at = run(["create", "--brief", "@house-flip.md", "--out", atOut]);
+    assert.equal(at.status, 0, `@file must read the fixture.\nstdout: ${at.stdout}\nstderr: ${at.stderr}`);
+    const atProj = JSON.parse(readFileSync(atOut, "utf8"));
+    assert.equal(atProj.brief, "a house-flipping project manager: budgets, bids, ARV");
+    assert.ok(!atProj.brief.includes("---"), "front matter must not be fed to the lattice");
+    assert.ok(!String(atProj.name).includes("house-flip.md"), "the project is never named after the path");
+
+    // 3. `@plain` → verbatim bytes.
+    const plainOut = join(cwd, "plain.json");
+    const plain = run(["create", "--brief", "@plain.txt", "--out", plainOut]);
+    assert.equal(plain.status, 0, `@file must read a plain file.\nstdout: ${plain.stdout}\nstderr: ${plain.stderr}`);
+    assert.equal(JSON.parse(readFileSync(plainOut, "utf8")).brief, "A plain brief with no front matter.");
+
+    // 4. `@missing` → CODED refusal.
+    const missing = run(["create", "--brief", "@nope.md", "--out", join(cwd, "nope.json")]);
+    assert.equal(missing.status, 1);
+    const missingJson = JSON.parse(missing.stdout);
+    assert.equal(missingJson.code, "RT_E_VALIDATION");
+    assert.match(String(missingJson.error), /does not name a readable file/);
+
+    // 5. The README documents both forms (the doc is part of the contract).
+    assert.match(readmeText, /--brief @<path>/, "README-cli.md must document the @file form");
+    assert.match(readmeText, /names an existing file|EXISTING, readable file/, "README documents the refusal");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("W46 332-4 (S3) — a valueless value flag is REFUSED coded before dispatch (never a silent default)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-bareflag-"));
+  try {
+    // Each argv would otherwise succeed (or default) with the flag silently
+    // dropped: --limit 5, --steps the seed, --name from the brief, --slug all.
+    const cases = [
+      { argv: ["search", "--project", "x.json", "--query", "hi", "--limit"], flag: "--limit" },
+      { argv: ["wild", "--project", "x.json", "--start", "--steps"], flag: "--steps" },
+      { argv: ["create", "--brief", "prose", "--name", "--out", "x.json"], flag: "--name" },
+      { argv: ["eval", "--slug"], flag: "--slug" },
+    ];
+    for (const { argv, flag } of cases) {
+      const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...argv], {
+        cwd,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      assert.equal(
+        res.status,
+        1,
+        `${argv.join(" ")} must refuse a valueless ${flag}.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`,
+      );
+      const json = JSON.parse(res.stdout);
+      assert.equal(json.ok, false);
+      assert.equal(json.code, "RT_E_VALIDATION");
+      assert.match(String(json.error), new RegExp(`${flag} needs a value`));
+      assert.ok(String(json.remedy).includes(`--${flag.slice(2)}`), "the remedy names the flag's value form");
+    }
+    // The guard is scoped: a Boolean flag stays bare-legal (a bare --help route
+    // is asserted elsewhere; here a bare --advisory must not trip the guard).
+    const advisory = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "create", "--brief", "An advisory bare-flag probe project.", "--advisory", "--out", join(cwd, "adv.json")],
+      { cwd, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(advisory.status, 0, `a bare boolean flag must stay legal.\nstdout: ${advisory.stdout}\nstderr: ${advisory.stderr}`);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

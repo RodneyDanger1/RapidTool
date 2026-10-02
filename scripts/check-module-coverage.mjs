@@ -41,9 +41,12 @@ const UNCOVERED_NO_OWNER =
  * blanket exemption. Entries may only be REMOVED by adding a real test.
  */
 export const COVERAGE_ALLOWLIST = {
-  // --- R9-f05: the T5.2-A honesty surface (reported, do not edit) ---
-  "src/lib/fixtures.review.ts": `T5.2-A fixtures-review surface (client wrapper). ${UNCOVERED_NO_OWNER}`,
-  "src/lib/fixtures.server.ts": `T5.2-A fixtures-review surface (server loader). ${UNCOVERED_NO_OWNER}`,
+  // --- R9-f05 T5.2-A honesty surface: CLOSED by W46 · 332-5 ---
+  // `fixtures.review.ts` + `fixtures.server.ts` are now reached by
+  // `src/lib/fixtures.review.test.ts`. Their allowlist entries were removed
+  // (the entries may only be removed by adding a real test) so a regression
+  // that orphans them again FAILS this guard instead of falling back to a
+  // recorded exemption.
   // --- auth surface (14 modules; the R9-f05 "auth/* (8)" has grown) ---
   "src/lib/auth/client.ts": `better-auth client. ${UNCOVERED_NO_OWNER}`,
   "src/lib/auth/email-password.ts": `auth email/password flow. ${UNCOVERED_NO_OWNER}`,

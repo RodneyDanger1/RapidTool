@@ -83,8 +83,38 @@ export type ImportProjectResult =
   // 319_f1: the refusal arm threads io.ImportResult.code end-to-end.
   | { ok: false; error: string; code?: ErrorCode };
 
+/** One keyed-call outcome the server probe reports (C1 · 332-5). Never a key. */
+export type LlmKeyedOutcome = { code: string; at: number; keySource?: string };
+
+/**
+ * C1 (332-5): validate the server probe's `lastKeyed` shape — a hostile or
+ * partial payload is DROPPED, never trusted (the console's defensive posture
+ * for every sibling result shape). Absent ⇒ undefined: the last keyed call
+ * succeeded (or none was seen), so the chip stays `configured`.
+ */
+export function readLastKeyed(v: unknown): LlmKeyedOutcome | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as { code?: unknown; at?: unknown; keySource?: unknown };
+  if (typeof o.code !== "string" || o.code.length === 0) return undefined;
+  if (typeof o.at !== "number" || !Number.isFinite(o.at)) return undefined;
+  return {
+    code: o.code,
+    at: o.at,
+    ...(typeof o.keySource === "string" && o.keySource.length > 0 ? { keySource: o.keySource } : {}),
+  };
+}
+
 /** In-memory surface for LLM wiring (never persisted — derived from llmStatus()). */
-export type LlmStatusSurface = { configured: boolean; label: string; model?: string };
+export type LlmStatusSurface = {
+  configured: boolean;
+  label: string;
+  model?: string;
+  /** C1 (332-5): the server probe's last keyed-call outcome — key VALIDITY,
+   *  not presence. Absent when the last keyed call succeeded (or none was seen),
+   *  so the chip honestly returns to `configured`. Never carries the key;
+   *  `keySource` is a tail-only label. */
+  lastKeyed?: LlmKeyedOutcome;
+};
 /** In-memory surface for the research backend (never persisted). */
 export type ResearchStatusSurface = { configured: boolean; label: string };
 
@@ -300,6 +330,25 @@ function rebaseUserFields(committed: Project, live: Project | undefined): Projec
  */
 function keepLiveWildRun(committed: Project, live: Project | undefined): Project {
   return live?.wildRun?.active === true ? { ...committed, wildRun: live.wildRun } : committed;
+}
+
+/**
+ * R12-f05 (332-5) — edge-trigger state for the stale-run watchdog.
+ *
+ * The console's WildFeed watchdog evaluates the stale-run condition on every
+ * heartbeat tick, and the real cadence (~11 s = WILD_POLL_MS × 10) is LARGER
+ * than the §2.5 coalescing window (RT_COALESCE_MS = 5 000 ms). A repeating emit
+ * therefore never merges — measured at the real cadence, three ticks wrote
+ * three rows (the defect the coalescer could not absorb). The emitter must fire
+ * ONCE when the run ENTERS the stale state and stay quiet for the episode; a
+ * healthy tick resets the latch so the next episode reports again.
+ *
+ * Pure: `prev` is the caller's latch. Returns the next latch and whether to
+ * emit this tick. The message itself stays coalescer-stable (seconds ride the
+ * payload), so even two episodes cannot merge into a misleading count.
+ */
+export function staleEmitStep(prev: boolean, staleNow: boolean): { emit: boolean; next: boolean } {
+  return { emit: staleNow && !prev, next: staleNow };
 }
 
 /**
@@ -1679,7 +1728,7 @@ export const useRapid = create<RapidState>()(
           if (typeof fn === "function") {
             const s = await (fn as () => Promise<unknown> | unknown)();
             if (s && typeof s === "object") {
-              const anyS = s as { configured?: unknown; model?: unknown; label?: unknown };
+              const anyS = s as { configured?: unknown; model?: unknown; label?: unknown; lastKeyed?: unknown };
               llm.configured = Boolean(anyS.configured);
               if (typeof anyS.model === "string" && anyS.model) llm.model = anyS.model;
               llm.label = anyS.configured
@@ -1687,6 +1736,11 @@ export const useRapid = create<RapidState>()(
                 : typeof anyS.label === "string" && anyS.label
                   ? anyS.label
                   : "deterministic engine";
+              // C1 (332-5): carry the server probe's last keyed-call outcome
+              // (validity). Validated — a hostile/partial shape is dropped, never
+              // trusted; absent means "last keyed call succeeded / none seen".
+              const lk = readLastKeyed(anyS.lastKeyed);
+              if (lk) llm.lastKeyed = lk;
             }
           }
         } catch {

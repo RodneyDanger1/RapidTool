@@ -103,11 +103,66 @@ const completeServer = createServerFn({ method: "POST" })
     return completeDeepSeek(data.prompt, data.opts);
   });
 
+/**
+ * C1 (332-5) — the status probe reports key VALIDITY, not just presence.
+ *
+ * `configured` answers "is a key present"; it stays true when the key is
+ * rejected, so the console chip read "configured" while every keyed call 401'd.
+ * The provider tap (`deepseek.ts`'s `LlmCallTapRecord`) observes EVERY keyed
+ * call and carries the coded failure class — never a prompt, never a key. This
+ * server-side capture keeps the LAST outcome so `statusServer` can return it.
+ *
+ * NO provider call is made to produce this: the tap is installed once, lazily,
+ * and the probe only READS the captured record — the chip's status check can
+ * never spend money. `keySource` is a tail-only label (`getActiveKeySource()`),
+ * never the key value.
+ */
+type LastKeyedOutcome = { code: string; at: number; keySource?: string };
+let lastKeyedOutcome: LastKeyedOutcome | null = null;
+let keyedTapInstalled = false;
+
+/** Install the last-outcome tap once (server-side). Best-effort, never throws. */
+async function captureKeyedOutcomes(): Promise<void> {
+  if (keyedTapInstalled) return;
+  keyedTapInstalled = true;
+  try {
+    const [{ setLlmCallTap }, { getActiveKeySource }] = await Promise.all([
+      import("./deepseek.server.ts"),
+      import("./llm/providers/key-resolution.ts"),
+    ]);
+    setLlmCallTap((record) => {
+      const code = typeof record.code === "string" && record.code ? record.code : null;
+      if (!code) {
+        // A genuine success CLEARS the failure, so the chip returns to configured.
+        lastKeyedOutcome = null;
+        return;
+      }
+      const src = getActiveKeySource();
+      const keySource =
+        src && typeof src.tail === "string" && src.tail.length > 0
+          ? src.kind === "repo-env-file" && typeof src.path === "string" && src.path
+            ? `${src.path} (tail …${src.tail})`
+            : `the process environment (tail …${src.tail})`
+          : undefined;
+      lastKeyedOutcome = { code, at: record.at, ...(keySource ? { keySource } : {}) };
+    });
+  } catch {
+    keyedTapInstalled = false; // let a later probe retry
+  }
+}
+
 const statusServer = createServerFn({ method: "GET" }).handler(async () => {
   const { isDeepSeekConfigured, deepSeekModelIds } = await import(
     "./deepseek.server.ts"
   );
-  return { configured: isDeepSeekConfigured(), models: deepSeekModelIds() };
+  await captureKeyedOutcomes();
+  return {
+    configured: isDeepSeekConfigured(),
+    models: deepSeekModelIds(),
+    // ADDITIVE + CONDITIONAL (absent until a keyed failure is seen, and cleared
+    // by a success) so every existing shape pin stays byte-identical.
+    ...(lastKeyedOutcome ? { lastKeyed: lastKeyedOutcome } : {}),
+  };
 });
 
 export async function complete(
@@ -193,6 +248,9 @@ export async function callModel(
 export async function llmStatus(): Promise<{
   configured: boolean;
   models: string[];
+  /** C1 (332-5): the last keyed-call FAILURE class the server saw, tail-only
+   *  source. Absent when the last keyed call succeeded or none was seen. */
+  lastKeyed?: LastKeyedOutcome;
 }> {
   try {
     return await statusServer();

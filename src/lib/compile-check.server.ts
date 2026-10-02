@@ -365,6 +365,12 @@ export type TreeProjectScriptVerdict = {
    *  fallback; and the standing refusal: model-authored lifecycle scripts
    *  (pre/post hooks, install scripts) are NEVER run by this leg. */
   scriptPolicy?: string;
+  /** 332-3 (T2): true iff this declared script actually executed (pass/fail/
+   *  timeout/error carry a real signal). false on every `skip` — the tree's
+   *  own toolchain for this script is UNVERIFIED, and `run:"skip"` is never a
+   *  pass. Absent scripts (no declaration at all) are neither verified nor
+   *  unverified: `verified` is set only when a command was declared. */
+  verified?: boolean;
 };
 
 /** 216 (T-18): the emitted project's OWN toolchain verdict — the scripts it
@@ -383,6 +389,16 @@ export type TreeProjectScriptsVerdict = {
    *  always sets it, and a red build makes the tree NOT ok (same rule as a
    *  red typecheck/test). */
   build?: TreeProjectScriptVerdict;
+  /** 332-3 (T2): the DECLARED script names that did NOT execute — each one's
+   *  toolchain is UNVERIFIED. Present only when non-empty; empty/absent means
+   *  every declared script ran. A script that was never declared is absent,
+   *  not unverified. This is what makes the unverified state machine-readable:
+   *  `ok` is "nothing ran red", `verified`/`unverified` is "the declared checks
+   *  actually ran" — a consumer must not read `ok:true` as a verification. */
+  unverified?: string[];
+  /** 332-3 (T2): true iff every DECLARED script ran (no unverified leg). A
+   *  tree with no declared scripts trivially has nothing unverified. */
+  verified?: boolean;
 };
 
 export type TreeRunOutcome = {
@@ -428,6 +444,18 @@ export type TreeRunOutcome = {
    *  deps), so an ok verdict can never be SILENT about unverified project
    *  tools. A note'd skip is still never a pass. */
   note?: string;
+  /** 332-3 (T2): the DECLARED project scripts that did NOT execute, so the
+   *  tree's own toolchain is UNVERIFIED for them. Present only when non-empty.
+   *  `ok:true` + a non-empty list is an ok-but-UNVERIFIED verdict: nothing ran
+   *  red, but the declared checks did not run either — never a verification
+   *  pass. Rides every consumer that serializes the outcome (the CLI `emit
+   *  --run` / `tree-run` envelopes carry it verbatim). */
+  unverified?: string[];
+  /** 332-3 (T2): true iff the verdict is BOTH ok and fully declared-verified
+   *  (`ok` and no `unverified` rows). `ok` alone is "nothing red"; `verified`
+   *  is what a consumer may read as a verification. A red verdict is never
+   *  verified. */
+  verified?: boolean;
   /** Always false when present. Copy-to-temp + bounded runner is emit-tree
    *  isolation, NOT a security sandbox. Optional so fixture objects in other
    *  lanes stay assignable; treeRun() always sets it. */
@@ -687,6 +715,10 @@ export function treeVerdictHash(outcome: TreeRunOutcome): string {
   });
   const canonical = JSON.stringify({
     ok: outcome.ok === true,
+    // 332-3 (T2): the declared-verification state is decisive — an ok-but-
+    // unverified tree must not hash the same as a fully verified one.
+    verified: outcome.verified === true,
+    unverified: [...(outcome.unverified ?? [])].sort(),
     compile: [
       outcome.compile?.ok === true,
       outcome.compile?.checked ?? 0,
@@ -1214,11 +1246,22 @@ function treeBehaviorOf(dir: string): TreeBehaviorVerdict | null {
  * when it exists on disk; null when the tree owns no headless entry. Shared by
  * resolveEntry (every non-UI-shell kind) and the 330 Transit UI-shell core
  * smoke — one resolution, so the two can never disagree.
+ *
+ * 332-3 (T1): a tree with a root index.html is a UI shell (resolveEntry's own
+ * structural rule). Its package.json "main" is the BROWSER boot vite loads
+ * from index.html — `game` emits `main: "src/main.ts"`, which imports the
+ * UI shell extensionless + touches the DOM, so bare node cannot load it. It is
+ * therefore NEVER a headless core: smoke-loading it reddened a perfectly clean
+ * game tree. Skip the `main` branch for a UI shell and resolve the tree's
+ * GENERATED core below instead; a genuinely broken generated core still
+ * resolves and still reds the tree. No generated core ⇒ null, so a UI shell
+ * with no substance keeps its byte-identical pre-330 skip.
  */
 function resolveHeadlessEntry(dir: string): string | null {
   const pkg = readJsonIfAny(dir, "package.json");
   const main = typeof pkg?.main === "string" ? sanitizeRelPath(pkg.main) : null;
-  if (main) {
+  const uiShell = existsSync(join(dir, "index.html"));
+  if (main && !uiShell) {
     const full = join(dir, main);
     if (existsSync(full) && statSync(full).isFile()) return main;
   }
@@ -1333,6 +1376,7 @@ async function runProjectScript(
     return {
       ...base,
       command: raw,
+      verified: false,
       note:
         `the declared "${script}" tool \`${tool}\` has no node_modules/.bin entry in this tree (and is not the node/npm runtime) — ` +
         `"npm run ${script}" was NOT executed; the tree's own ${script} is UNVERIFIED (npm install, then re-run to verify) — not a fabricated pass`,
@@ -1343,33 +1387,34 @@ async function runProjectScript(
   const run = await runNodeBounded(projectScriptRunnerCode(plan, root, innerTimeout), { timeoutMs });
   if (!run.ok) {
     if (run.reason === "timeout") {
-      return { ...base, command: raw, scriptPolicy: plan.via, run: "timeout", detail: `${script} script killed after ${timeoutMs / 1000}s`, durationMs: duration() };
+      return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "timeout", detail: `${script} script killed after ${timeoutMs / 1000}s`, durationMs: duration() };
     }
     if (run.reason === "not-configured") {
-      return { ...base, command: raw, scriptPolicy: plan.via, run: "error", detail: `${run.code}: local bounded runner unavailable`, durationMs: duration() };
+      return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "error", detail: `${run.code}: local bounded runner unavailable`, durationMs: duration() };
     }
-    return { ...base, command: raw, scriptPolicy: plan.via, run: "error", detail: run.error ?? run.reason, durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "error", detail: run.error ?? run.reason, durationMs: duration() };
   }
   const env = parseWrapperEnvelope(run.stdout);
   if (!env) {
-    return { ...base, command: raw, scriptPolicy: plan.via, run: "error", detail: "runner produced no parseable envelope", durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "error", detail: "runner produced no parseable envelope", durationMs: duration() };
   }
   if (env.kind === "error") {
-    return { ...base, command: raw, scriptPolicy: plan.via, run: "error", detail: (env.error ?? "npm script runner failed").slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "error", detail: (env.error ?? "npm script runner failed").slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
   }
   const tail = (env.tail ?? "").trim();
   if (env.spawnErr) {
-    return { ...base, command: raw, scriptPolicy: plan.via, run: "error", detail: `spawn failed: ${env.spawnErr}`.slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "error", detail: `spawn failed: ${env.spawnErr}`.slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
   }
   if (env.timedOut) {
-    return { ...base, command: raw, scriptPolicy: plan.via, run: "timeout", detail: `${script} script killed after ${innerTimeout / 1000}s (inner timeout)`, durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "timeout", detail: `${script} script killed after ${innerTimeout / 1000}s (inner timeout)`, durationMs: duration() };
   }
   const exitCode = typeof env.status === "number" ? env.status : 1;
-  if (exitCode === 0) return { ...base, command: raw, scriptPolicy: plan.via, run: "pass", exitCode: 0, durationMs: duration() };
+  if (exitCode === 0) return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "pass", exitCode: 0, durationMs: duration() };
   return {
     ...base,
     command: raw,
     scriptPolicy: plan.via,
+    verified: true,
     run: "fail",
     exitCode,
     detail: (tail || `the declared "${script}" script exited ${exitCode}`).slice(0, VERDICT_TAIL_MAX),
@@ -1411,6 +1456,7 @@ async function runProjectScripts(
           script: "build",
           run: "skip",
           command: buildRaw,
+          verified: false,
           durationMs: 0,
           note:
             `no node_modules/ present in the tree — "npm run build" was NOT executed; ` +
@@ -1419,7 +1465,14 @@ async function runProjectScripts(
   const all = [typecheck, test, build];
   const red = all.filter((v) => v.run === "fail" || v.run === "timeout" || v.run === "error");
   const skippedDeclared = all.filter((v) => v.run === "skip" && typeof v.command === "string");
-  return { verdict: { ok: red.length === 0, typecheck, test, build }, red, skippedDeclared };
+  // 332-3 (T2): a DECLARED script that did not execute is an UNVERIFIED leg —
+  // never folded into `ok` (nothing ran red) but never a silent pass either.
+  const unverified = skippedDeclared.map((v) => v.script);
+  return {
+    verdict: { ok: red.length === 0, typecheck, test, build, ...(unverified.length > 0 ? { unverified, verified: false } : { verified: true }) },
+    red,
+    skippedDeclared,
+  };
 }
 
 /**
@@ -1487,11 +1540,13 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
     }
     if (copy) work = copy;
   } catch (err) {
+    let leaked = false;
     if (copy) {
       try {
         rmSync(copy, { recursive: true, force: true });
+        copy = null;
       } catch {
-        /* ignore */
+        leaked = true; // Windows locks: the failed copy may outlive this call
       }
     }
     return {
@@ -1510,7 +1565,9 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
       },
       tests: [],
       run: null,
-      error: "treeRun copy-to-temp failed — live emit dir was not used as the subject",
+      error:
+        "treeRun copy-to-temp failed — live emit dir was not used as the subject" +
+        (leaked ? " · the failed scratch copy could not be removed — a process may still hold a file in it; delete it once that process exits" : ""),
     };
   }
   try {
@@ -1612,6 +1669,15 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
     }
     outcome.ok =
       compile.ok && specsGreen && entryGreen && coreGreen && projectLeg.verdict.ok && (outcome.behavior?.ok ?? true);
+    // 332-3 (T2): `ok` is "nothing ran red"; `verified` is "every DECLARED
+    // check actually ran". A green tree whose declared typecheck/build could
+    // not execute keeps `ok:true` (nothing failed) but is NOT verified — the
+    // top-level `unverified` names the legs, so no consumer can read the
+    // green as a verification pass. A red verdict is never verified.
+    if (projectLeg.verdict.unverified && projectLeg.verdict.unverified.length > 0) {
+      outcome.unverified = [...projectLeg.verdict.unverified];
+    }
+    outcome.verified = outcome.ok && (outcome.unverified?.length ?? 0) === 0;
     // W43 · C6 (fixes/312_c6_ux · 311_sd_product K3/K4): the substance census
     // rides every runnable verdict, and a non-clean census over an EXISTING
     // job-file set joins the top-level note — so a green tree-run whose job
@@ -2049,6 +2115,26 @@ export async function verifyKindDir(
     };
   }
   let copy: string | null = null;
+  let scratchCleanupFailed = false;
+  // 332-3 (T4): a leaked scratch dir is never silent — the same contract as
+  // treeRun's finish(): a failed rmSync (a Windows lock) adds the honest note
+  // to whatever verdict is returned instead of being swallowed.
+  const cleanScratch = (): void => {
+    if (!copy) return;
+    try {
+      rmSync(copy, { recursive: true, force: true });
+      copy = null;
+    } catch {
+      scratchCleanupFailed = true;
+    }
+  };
+  const finish = (result: VerifyKindResult): VerifyKindResult => {
+    cleanScratch();
+    if (scratchCleanupFailed) {
+      result.note = `${result.note ? `${result.note} · ` : ""}the verify-kind scratch copy could not be removed (a process may still hold a file in ${copy ?? root}) — the dir is safe to delete once that process exits`;
+    }
+    return result;
+  };
   try {
     copy = mkdtempSync(join(tmpdir(), "rt-verifykind-"));
     // The tree's own top-level node_modules/.git are intentionally NOT copied
@@ -2056,14 +2142,7 @@ export async function verifyKindDir(
     const skip = new Set([join(root, "node_modules"), join(root, ".git")]);
     cpSync(root, copy, { recursive: true, filter: (src) => !skip.has(src) });
   } catch (err) {
-    if (copy) {
-      try {
-        rmSync(copy, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
-    }
-    return {
+    return finish({
       ok: false,
       dir: root,
       sandbox: false,
@@ -2071,7 +2150,7 @@ export async function verifyKindDir(
       code: "RT_E_VERIFY_KIND_FAILED",
       detail: `scratch copy failed — the subject dir was NOT used as npm's cwd: ${err instanceof Error ? err.message : String(err)}`,
       durationMs: duration(),
-    };
+    });
   }
   try {
     const scriptTimeout =
@@ -2087,7 +2166,7 @@ export async function verifyKindDir(
       });
       const build = notRun("build");
       const test = notRun("test");
-      return {
+      return finish({
         ok: false,
         dir: root,
         sandbox: false,
@@ -2102,7 +2181,7 @@ export async function verifyKindDir(
           (install.detail ? ` — ${install.detail.slice(0, 300)}` : "") +
           "; the declared build/test scripts were NOT executed",
         durationMs: duration(),
-      };
+      });
     }
     const buildV = await runProjectScript(copy, "build", scripts, scriptTimeout);
     const build: VerifyKindStepVerdict = {
@@ -2155,14 +2234,10 @@ export async function verifyKindDir(
         unrun.map((v) => v.note ?? "un-runnable").join(" · ");
       result.note = result.note.slice(0, 1800);
     }
-    return result;
+    return finish(result);
   } finally {
-    if (copy) {
-      try {
-        rmSync(copy, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
-    }
+    // Safety net for a throw out of the work block — finish() already cleaned
+    // on every normal return path.
+    cleanScratch();
   }
 }

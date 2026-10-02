@@ -11,6 +11,7 @@ import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { dedupeMemoryIds, emptyProject, hydrateProject } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
+import { RT_COALESCE_MS, shouldCoalesce, type RtEvent } from "./rt-events.ts";
 import type { Artifact, ChatLogRow, HitlRequest, JsonLog, PhaseId, Project, WildParkInfo } from "./types.ts";
 
 class MemoryStorage {
@@ -38,7 +39,7 @@ class MemoryStorage {
 (globalThis as unknown as { window: unknown }).window = globalThis;
 
 // Dynamic import: must run AFTER the polyfill so persist binds a real storage.
-const { convergeRealRun, useRapid, persistStorageHealth } = await import("./store.ts");
+const { convergeRealRun, readLastKeyed, staleEmitStep, useRapid, persistStorageHealth } = await import("./store.ts");
 // Let the initial rehydration (which seeds the demo project on empty storage) settle
 // before the first test; beforeEach wipes state for every test regardless.
 await new Promise((r) => setTimeout(r, 10));
@@ -2037,4 +2038,90 @@ test("F6/M3-18 tail (314 residue): convergeRealRun junk base with NO phases key 
   assert.deepEqual(out.phases, [], "junk phases bound to [] (was: TypeError at recordGate find)");
   assert.equal(out.logs.length, 1, "foreign log row still lands (bounded collections append, not drop)");
   assert.equal(out.artifacts.length, 1, "foreign artifact row still lands");
+});
+
+// ---------------------------------------------------------------------------
+// R12-f05 (332-5): the stale-run watchdog emitter is EDGE-triggered.
+//
+// The console's WildFeed heartbeat tick is ~11 s (WILD_POLL_MS 1100 × 10),
+// which is LARGER than the §2.5 coalescing window (RT_COALESCE_MS = 5 000 ms),
+// so a repeating emit could never merge — measured at the real cadence, three
+// ticks wrote three rows. `staleEmitStep` makes the emitter fire once per stale
+// EPISODE (the window itself is NOT touched).
+// ---------------------------------------------------------------------------
+const STALE_TICK_MS = 1100 * 10; // console.tsx WILD_POLL_MS × 10
+
+function staleRow(ts: number): RtEvent {
+  return {
+    schema_version: 1,
+    ts,
+    level: "error",
+    host: "client",
+    sessionId: "r12f05",
+    scope: "wild-step",
+    event: "wild.step_timeout",
+    code: "RT_E_LLM_TIMEOUT",
+    message: "Wild run P0 stale past budget",
+    capture: "src/components/console.tsx:WildFeed watchdog",
+  };
+}
+
+test("R12-f05: the real ~11 s tick exceeds the 5 s coalescing window (why a repeating emit could not merge)", () => {
+  assert.ok(
+    STALE_TICK_MS > RT_COALESCE_MS,
+    `tick ${STALE_TICK_MS}ms must exceed the ${RT_COALESCE_MS}ms window — otherwise the defect would have hidden`,
+  );
+  const first = staleRow(0);
+  const second = staleRow(STALE_TICK_MS);
+  assert.equal(
+    shouldCoalesce(first, second, second.ts),
+    false,
+    "an identical stale row 11 s later never coalesces — the emitted rows stack",
+  );
+  // Pre-fix: three repeating stale emits at the real cadence stayed three rows.
+  const rows = [staleRow(0), staleRow(STALE_TICK_MS), staleRow(2 * STALE_TICK_MS)];
+  let distinct = 1;
+  for (let i = 1; i < rows.length; i += 1) {
+    if (!shouldCoalesce(rows[i - 1], rows[i], rows[i].ts)) distinct += 1;
+  }
+  assert.equal(distinct, 3, "the measured defect: three repeating ticks wrote three rows");
+});
+
+test("R12-f05: edge-triggered stale emit writes ONE row per episode (not three)", () => {
+  // Post-fix: staleEmitStep fires once on the stale EDGE and stays quiet.
+  let latch = false;
+  let emits = 0;
+  for (const _ of [0, 1, 2]) {
+    const step = staleEmitStep(latch, true);
+    if (step.emit) emits += 1;
+    latch = step.next;
+  }
+  assert.equal(emits, 1, "three stale ticks now write exactly one row");
+
+  // A healthy tick resets the latch, so a NEW stale episode reports once again.
+  latch = staleEmitStep(latch, false).next;
+  assert.equal(staleEmitStep(latch, true).emit, true, "a fresh episode reports");
+  assert.equal(staleEmitStep(true, true).emit, false, "a still-stale tick does not re-report");
+});
+
+// ---------------------------------------------------------------------------
+// C1 (332-5): the server probe's last-keyed outcome is validated, never trusted.
+// ---------------------------------------------------------------------------
+test("C1: readLastKeyed validates the server probe's shape (hostile/partial dropped)", () => {
+  assert.equal(readLastKeyed(undefined), undefined);
+  assert.equal(readLastKeyed(null), undefined);
+  assert.equal(readLastKeyed("RT_E_LLM_KEY_REJECTED"), undefined);
+  assert.equal(readLastKeyed({ code: "RT_E_LLM_KEY_REJECTED" }), undefined, "at is required");
+  assert.equal(readLastKeyed({ code: 7, at: 1 }), undefined, "code must be a string");
+  assert.equal(readLastKeyed({ code: "", at: 1 }), undefined, "empty code dropped");
+  assert.equal(readLastKeyed({ code: "RT_E_LLM_KEY_REJECTED", at: Number.NaN }), undefined, "non-finite at dropped");
+  assert.deepEqual(
+    readLastKeyed({ code: "RT_E_LLM_KEY_REJECTED", at: 5, keySource: ".env (tail …19b3)" }),
+    { code: "RT_E_LLM_KEY_REJECTED", at: 5, keySource: ".env (tail …19b3)" },
+  );
+  assert.deepEqual(
+    readLastKeyed({ code: "RT_E_LLM_KEY_REJECTED", at: 5, keySource: "" }),
+    { code: "RT_E_LLM_KEY_REJECTED", at: 5 },
+    "a blank keySource is omitted, never carried",
+  );
 });

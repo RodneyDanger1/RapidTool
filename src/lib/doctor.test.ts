@@ -12,6 +12,7 @@ import {
   coerceFactoryClaim,
   doctorFactory,
   doctorIsolation,
+  doctorSpend,
   evidenceFromJobInventory,
   factoryClaim,
   FACTORY_GAP,
@@ -580,5 +581,33 @@ describe("OV-9 — productComplete derives from real project state", () => {
     assert.equal(ev.productComplete, false, "no loosening: the scan's leftovers still refuse the bar");
     assert.equal(ev.leftoverJobsAreReexportsOrStubs, true);
     assert.equal(ev.realMultiJobProduct, false);
+  });
+});
+
+describe("W46 · 332-2 (L1/AW45-c06) — doctor spend reads a persisted run slice", () => {
+  it("a persisted run slice reports its real tokens + calls, cost stays null (no catalog)", () => {
+    const spend = doctorSpend({ promptTokens: 60000, completionTokens: 17654, calls: 12 });
+    assert.equal(spend.measured, true);
+    assert.equal(spend.totalTokens, 77654);
+    assert.equal(spend.calls, 12);
+    assert.equal(spend.estimatedCostUsd, null, "no caller prices ⇒ no dollar figure, ever");
+    assert.equal(spend.pricesSupplied, false);
+    assert.ok(spend.line.includes("no caller prices"), "the honest no-catalog line rides");
+    assert.ok(spend.line.includes("12 call(s)"), "the recorded call count is surfaced");
+  });
+
+  it("a legacy 2-key slice reads calls/cache as null — never a fabricated 0", () => {
+    const spend = doctorSpend({ promptTokens: 10, completionTokens: 5 });
+    assert.equal(spend.measured, true);
+    assert.equal(spend.totalTokens, 15);
+    assert.equal(spend.calls, null, "absence is honest null, not 0");
+    assert.equal(spend.cachedPromptTokens, null);
+  });
+
+  it("an empty session ledger is a measured zero (not the same as no ledger)", () => {
+    const zero = doctorSpend({ promptTokens: 0, completionTokens: 0, calls: 0 });
+    assert.equal(zero.measured, true);
+    assert.equal(zero.totalTokens, 0);
+    assert.equal(zero.calls, 0);
   });
 });
