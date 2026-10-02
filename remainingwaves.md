@@ -11,6 +11,16 @@ lint 0, assertion-gap lint 0, tests 235 scripts + 1811 src, build 0; second gree
 honest but incomplete: `doctor` → `autonomousSoftwareFactory: false`; emitted tree census on the
 reference corpus: `{stubs: 0, reexports: 5, real: 0}` (THE blocker, TA-15 → W6-L1).
 
+> **CORRECTION — 2026-10-02 (W47 record audit).** This state line and the whole W6→W12 catalogue below
+> are from 2026-09-16; the repo is now in the **W47** era (HEAD `6575669`). The "THE blocker" is closed:
+> **TA-15 landed (W8, `{stubs: 0, reexports: 0, real: 3}`)** and a **keyed run now emits a real
+> multi-job product** (`inventory {stubs:0, reexports:0, real:2}`, `leftoverJobsAreReexportsOrStubs:false`
+> in `fixes/332_0_parent.md` §4; 7 real job modules in `fixes/331_0_parent.md` §2). The
+> `{stubs:0, reexports:5, real:0}` census and the "Never claim multi-job emission before TA-15 lands"
+> standing rule (§Cross-cutting #1) are **historical**. Tests today (2026-10-02, HEAD `6575669`):
+> scripts **398/398** · src **2736 tests / 2726 pass / 10 skipped**. For the live plan read
+> `finalsprint.md`, the register appends, and the newest `fixes/3xx` logs — not the W6→W12 sketches here.
+
 **Wave conventions (from RESUME §3 / board §6).** ≤5 lanes; `deepseek-v4-flash` only (never
 Pro); disjoint file ownership; §3.0 guardrail block verbatim in every brief; skeleton-first
 landing logs (`fixes/…`); every lane reads its own `wave_plans/W<N>/lane-<K>.md`; boundary =

@@ -153,4 +153,23 @@ keyed action from the console returns real model text.
 
 Evidence: `wave_plans/W45/parent-keyed-findings.md`, `fixes/331_0_parent.md`, register `AW45-c01…c08`.
 
+## CORRECTION — 2026-10-02 (W47 record audit): the "ONE module" qualifier + drifted snapshot counts
+
+Completes the funding correction above and supersedes the snapshot values in "The 10-line tour" and
+"Honest state (2026-09-26)".
+
+- **The emitted product is no longer "still ONE module wearing several filenames" on a keyed run.** Line
+  105's flat claim now holds only on the **keyless floor**. A keyed run emits a real multi-job product:
+  the 331 wave's run emitted **7 real job modules** (`fixes/331_0_parent.md` §2) and the 332 wave's run
+  reached `inventory {stubs:0, reexports:0, real:2}`, `leftoverJobsAreReexportsOrStubs:false`
+  (`fixes/332_0_parent.md` §4). (The previous CORRECTION superseded line 104's funding half only; this
+  supersedes line 105.)
+- **Drifted snapshot counts (measured 2026-10-02, HEAD `6575669`):** `src/lib/` is now **222** tracked
+  files (was 213) · `scripts/` **49** (was 46) · `fixes/` **654** (was 587) · `wave_plans/` **123** (was
+  108). `npm test` is now **scripts 398/398 · src 2736 tests / 2726 pass / 10 skipped**, exit 0 (line 67's
+  "261/261 + 1957/1957" is the several-waves-old W12 gate of record). `npm run lint` is **exit 0, 0
+  warnings** (line 62's "1 warning" is gone). `npm run typecheck` now covers `scripts/**` as a per-file
+  ratchet (both legs exit 0); the older "'scripts/rapidtool-cli.mjs' carries typecheck errors" note is
+  retired — the CLI reads **0**.
+
 <!-- END START-HERE · maintained by organizers · append corrections, never rewrite history -->

@@ -47,10 +47,11 @@ contract in full) lives in **`AGENT_GUIDE.md`**; the CLI machine contract is
   (runtime telemetry + the `diagnose` verb).
 - `src/routes/` + `src/components/console.tsx` — the TanStack Start UI (9+ tabs incl.
   Runtime log).
-- `scripts/` — CLI + build tooling: `rapidtool-cli.mjs` (35 verbs dispatched today —
+- `scripts/` — CLI + build tooling: `rapidtool-cli.mjs` (**39** verbs dispatched today —
   `grep -c 'case "'` is the count source of truth — incl. the `lesson` family +
   `diagnose` + the fixes/150 G1 continuation verbs `tree-run`/`repair`),
   `with-app-env.mjs`, `gate.sh` (the four-gate stability script), plus `*.test.mjs` suites.
+  *(Corrected 2026-10-02 by the W47 record audit: this line said 35; `grep -c 'case "'` re-derived = 39.)*
 - `migrations/` — deploy-time migrations (`migrate.mjs` runs inside `npm run build`;
   PGLite fallback locally when `DATABASE_URL` is unset).
 
@@ -59,7 +60,8 @@ contract in full) lives in **`AGENT_GUIDE.md`**; the CLI machine contract is
 - `npm run dev` (port 8080) · `npm run build` (+ `db:migrate`) · `npm run preview` (port 8081)
 - `npm run typecheck` / `npm run lint` — the day-to-day gates. Keep them at 0.
 - `npm test` — runs BOTH legs (scripts first, then the full src/lib suite); both are green
-  (scripts 261/261; src ~1957 tests — the W12 boundary gate of record, `fixes/218` §5). A red suite is yours to fix unless it is the known
+  (re-measured 2026-10-02 on `6575669`: **scripts 398/398; src 2736 tests / 2726 pass / 10 skipped**, exit 0;
+  the older W12 gate-of-record numbers were 261/261 + ~1957). A red suite is yours to fix unless it is the known
   runner-timing flake (`exec.test.ts` grandchild test) which passes standalone.
 - Full gate: `bash scripts/gate.sh` (typecheck → lint → scripts → src suite → build;
   `--double` catches flakes).

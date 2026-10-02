@@ -181,3 +181,98 @@ Both restored → all 10 green. The T1/T3/T4 tests exercise the REAL bounded run
   default suite on the network (the verifyKindDir leg's own doctrine keeps it off).
 - Did **not** run the full gate / `npm test` / `npm run eval` — five siblings mid-edit; targeted suites only.
 - Did **not** edit any file outside my four owned files + this log; no probe file was written inside the repo.
+
+---
+
+# W46 follow-up 332-3b - F-4 (the 333-1 adversarial audit) - 2026-10-02
+
+**HEAD:** `6575669`. **Scratch (outside the repo):** `%TEMP%\rt332_3b\` (probe-f4.ts; the repo gained no probe file).
+Keyless; no full gate; no `npm run eval`; no secret. Files changed this round: `src/lib/compile-check.server.ts`
+and `src/lib/compile-check.server.test.ts` only.
+
+## 12. F-4 - `verified:true` on a tree whose kind entry is a deliberate skip - FIXED
+
+`fixes/333_1_verifier.md` F-4: the broad `TreeRunOutcome.verified` meant "no DECLARED project script was left
+unrun", so a clean UI-shell tree whose entry was **deliberately skipped** could still read `verified:true` - a
+consumer reading the name as "this tree's behaviour was verified" is misled exactly where the entry did not run.
+The real scaffold game tree declares `tsc`/`vite`, so its own `verified` was already `false`; the audit's own
+minimal game tree (index.html + a generated job, **no declared scripts**) is the shape that showed `verified:true`.
+
+**Decision (F-4, as owner).** Do both halves the brief allowed: rename the field so its name says exactly what it
+measures, AND represent the deliberate skip first-class. `outcome.ok` / the DoD mint are untouched (the audit's own
+note and `fixes/332_0_parent.md` §5 item 1 record that no consumer reads the field for a verdict yet).
+
+- `TreeRunOutcome.verified` -> **`declaredScriptsVerified`** (scoped: declared project scripts only, NOT behaviour).
+- `TreeRunOutcome.unverified` -> **`unverifiedDeclaredScripts`**.
+- Add **`TreeRunOutcome.unverifiedEntry`** - the kind entry's skip reason, present iff the entry run was a deliberate
+  `skip` (UI shell not executable headless, or no headless entry resolved); absent when the entry actually ran.
+- `TreeProjectScriptsVerdict.verified/unverified` -> `declaredScriptsVerified` / `unverifiedDeclaredScripts`.
+- Per-script `TreeProjectScriptVerdict.verified` -> **`executed`** (execution, never correctness).
+- `treeVerdictHash` folds `declaredScriptsVerified` + sorted `unverifiedDeclaredScripts` + a boolean `entrySkipped`
+  (prose stays out of the hash, per that function's doctrine; `run` already carries the entry label).
+
+A consumer that wants "behaviour verified" must now read `ok` AND `declaredScriptsVerified` AND the absence of
+`unverifiedEntry`; no single field named `verified` can be over-read.
+
+## 13. F-4 reproduce - before/after field values (scratch, real `treeRun`)
+
+The audit's minimal game tree (index.html + `src/jobs/level.ts`, no declared scripts). **BEFORE** (the old
+computation, emulated in place for capture only, then removed):
+
+```
+"ok": true, "runLabel": {"kind":"ui-shell","run":"skip"}, "coreLabel": {"entry":"src/jobs/level.ts","run":"pass"},
+"OVER_BROAD_verified": true, "OVER_BROAD_unverified": undefined      <- the over-claim F-4 names
+```
+
+**AFTER** (Node 22 and host Node 24, identical):
+
+```
+"ok": true, "runLabel": {"kind":"ui-shell","run":"skip"}, "coreLabel": {"entry":"src/jobs/level.ts","run":"pass"},
+"declaredScriptsVerified": true,                    <- nothing was DECLARED, so this is honestly true ...
+"unverifiedEntry": "UI shell - not executable headless"   <- ... and the deliberate entry skip is named here
+(no `verified`, no bare `unverified` fields exist at all)
+```
+
+The real scaffold game tree (declares `tsc`/`vite`/`node --test`), AFTER:
+
+```
+"ok": true, "runLabel": {"kind":"ui-shell","run":"skip"}, "coreLabel": {"entry":"src/jobs/dispatch.ts","run":"pass"},
+"declaredScriptsVerified": false, "unverifiedDeclaredScripts": ["typecheck","build"],
+"unverifiedEntry": "UI shell - not executable headless"
+```
+
+**Corrupted-core control (T1 intact), AFTER:** `ok:false`, `coreLabel.run:"fail"`, plus `unverifiedEntry` still
+carries the (honest) UI-shell skip - a deliberate skip never hides a broken generated core. Both clean and corrupt
+reproduced on Node 22.23.2 and host Node 24.15.0.
+
+**Consumer-visible effect:** every consumer that serializes the outcome (CLI `emit --run`, CLI `tree-run`, `repair`)
+now sees `declaredScriptsVerified` + `unverifiedEntry` and no `verified`; a UI-shell skip is impossible to read as a
+behaviour verification, while the tree-run verdict itself is unchanged (`ok:true` still green, `ok:false` on a broken
+core). `treeVerdictHash` distinguishes an entry-skipped verdict from an entry-executed one (`entrySkipped`).
+
+## 14. RED-first + tests + real results
+
+**RED-first:** the new `F-4 (332-3b)` tests were added before the change and run against HEAD -> `3 tests / 2 fail`:
+the clean-game test failed on `hasKey(r,"verified") === false`/`r.declaredScriptsVerified === false`, and the
+entry-ran control failed on `r.declaredScriptsVerified === true`. After the rename both pass. (One first-run RED was
+my test helper's fault - it declared no scripts, so `declaredScriptsVerified` was legitimately `true`; the helper now
+mirrors the real scaffold's declared `typecheck`/`build`/`test`.)
+
+3 tests added in `src/lib/compile-check.server.test.ts` (F-4 describe): clean game tree green + skip represented;
+an executed entry is not an `unverifiedEntry`; corrupted core still reds.
+
+| Command | Result |
+|---|---|
+| Node 22 `--test compile-check + scaffold` (this round's baseline 123 / 122 / 1) | **126 tests / 125 pass / 0 fail / 1 skip** |
+| Node 24 `--test compile-check + scaffold` | **126 / 125 pass / 0 fail / 1 skip** |
+| Node 22 dependents `emitted-honesty + sweep73-fuzz + honesty-guards + maker-score + wild-step + patch-preservation` | **180 / 180 pass / 0 fail** |
+| Node 24 dependents (same six) | **180 / 180 pass / 0 fail** |
+| `npx eslint` on the four owned files | **exit 0** |
+| `npx tsc --noEmit` | **exit 0, zero diagnostics** |
+
+## 15. What I did NOT do (F-4 round)
+
+- Did **not** flip `outcome.ok`, the CLI exit code or the DoD mint: the audit and `fixes/332_0_parent.md` §5 item 1
+  both record that the consumer flip is owed and needs unowned files; the point here is the field's name, not a gate.
+- Did **not** touch the working-tree doc edits from the other watchdog (`AGENTS.md`/`README.md`/... left alone).
+- Did **not** run the full gate / `npm test` / `npm run eval`; targeted suites only; no keyed call; no probe file in the repo.

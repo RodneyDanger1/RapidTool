@@ -764,3 +764,65 @@ export function doctorSpend(
     line: `spend: ${total} tokens measured (prompt ${promptTokens} + completion ${completionTokens}${callSegment}) · ${costSegment}`,
   };
 }
+
+// ---------------------------------------------------------------------------
+// W46 · 332-2 (F-5, fixes/333_1_verifier.md) — key PRESENCE is not key VALIDITY
+// ---------------------------------------------------------------------------
+
+/**
+ * The coded classes that mean the KEY itself was refused (mirrors
+ * `console.tsx`'s `KEY_UNUSABLE_CODES`). Only these flip the doctor to
+ * `rejected`; a transient class (timeout, insufficient funds, provider 5xx)
+ * never condemns a working key.
+ */
+const KEY_UNUSABLE_CODES: ReadonlySet<string> = new Set([
+  "RT_E_LLM_KEY_REJECTED",
+  "RT_E_LLM_KEY_SHADOWED",
+]);
+
+/** One keyed-call outcome reported by the server probe (C1 · 332-5).
+ *  `keySource` is a tail-only path/scope label (`<file> (tail …xxxx)` /
+ *  `the process environment (tail …xxxx)`) — NEVER a key value. */
+export type DoctorLastKeyed = { code: string; at: number; keySource?: string };
+
+/** Doctor's explicit key-VALIDITY state. `configured` alone means only that a
+ *  key is PRESENT; this states whether presence has been validated. */
+export type DoctorLlmKeyState = "not-configured" | "unverified" | "rejected";
+
+export type DoctorLlmKey = {
+  keyState: DoctorLlmKeyState;
+  /** The last keyed failure the process saw, when one is known (tail-only). */
+  lastKeyed?: DoctorLastKeyed;
+};
+
+/** Validate a server probe's `lastKeyed` shape — a hostile or partial payload is
+ *  DROPPED, never trusted (mirrors `store.readLastKeyed`). */
+export function readLastKeyedOutcome(v: unknown): DoctorLastKeyed | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as { code?: unknown; at?: unknown; keySource?: unknown };
+  if (typeof o.code !== "string" || o.code.length === 0) return undefined;
+  if (typeof o.at !== "number" || !Number.isFinite(o.at)) return undefined;
+  return {
+    code: o.code,
+    at: o.at,
+    ...(typeof o.keySource === "string" && o.keySource.length > 0 ? { keySource: o.keySource } : {}),
+  };
+}
+
+/**
+ * F-5: derive the doctor's key-validity state. Presence alone NEVER implies a
+ * validated key:
+ *   - no key                    ⇒ `not-configured` (no `lastKeyed` — nothing to attribute)
+ *   - key, no recorded outcome  ⇒ `unverified`     (the honest presence-only floor)
+ *   - key + a key-unusable code ⇒ `rejected`       (+ the coded class, tail-only source)
+ *   - key + any other failure   ⇒ `unverified`     (+ the outcome, never a key condemnation)
+ * `llm.ts`'s tap CLEARS its record on success, so "last call succeeded" and
+ * "none seen" are indistinguishable here — `unverified` is therefore the only
+ * honest non-`rejected` state, never an invented green.
+ */
+export function doctorLlmKey(configured: boolean, lastKeyed?: unknown): DoctorLlmKey {
+  if (!configured) return { keyState: "not-configured" };
+  const lk = readLastKeyedOutcome(lastKeyed);
+  if (lk && KEY_UNUSABLE_CODES.has(lk.code)) return { keyState: "rejected", lastKeyed: lk };
+  return lk ? { keyState: "unverified", lastKeyed: lk } : { keyState: "unverified" };
+}

@@ -7,6 +7,26 @@ dossier's tasks, statuses, and the next-wave plan) and
 
 ---
 
+## CORRECTION — 2026-10-02 (W47 record audit) — §1 below is a 2026-09-16 snapshot; the disk wins
+
+The gate table and "Current state" in §1 are several waves stale. What a resuming session needs:
+
+- **The P0-04 "single-module product" claim (§1.0, ~line 62-72) now holds only on the KEYLESS floor.** A
+  keyed run emits a real multi-job product: the 331 wave's run emitted **7 real job modules**
+  (`fixes/331_0_parent.md` §2); the 332 wave's run reached `inventory {stubs:0, reexports:0, real:2}`,
+  `leftoverJobsAreReexportsOrStubs:false` (`fixes/332_0_parent.md` §4).
+- **The gate table ("scripts 195/195 + src 1662/1662") is stale.** Measured 2026-10-02 (HEAD `6575669`):
+  `npm test` → **scripts 398/398 · src 2736 tests / 2726 pass / 10 skipped / 0 fail**; `npm run typecheck`
+  exit 0 (both legs, `scripts/**` now covered); `npm run lint` exit 0, **0 warnings**.
+- **The DeepSeek account is funded and the repo `.env` key works.** The "user has said they will update it"
+  note (~line 283) is superseded: the earlier 401/402s came from a stale Windows User-scope
+  `DEEPSEEK_API_KEY` shadowing `.env` while nothing loaded it (register `AW45-c01`; `START-HERE.md`
+  §CORRECTION). `T0.10` (~§4 line 382) is now a bounded keyed readiness run, not a funding block; the 331
+  and 332 waves both ran keyed. The register body's "account unfunded → 402" premise is **false** — read
+  the `AW45`/`AW46`/`AW47` appends in `research/multiagent/thoroughanalysis.md`.
+
+---
+
 ## 0. How to use this file
 
 > **⚠️ MANDATORY READ ORDER every session: `AGENTS.md` → this file (`RESUME.md`) →

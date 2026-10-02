@@ -5,6 +5,11 @@
 > `fixes/` and `src/lib/`) — re-count with `git ls-files <dir> | wc -l` when precision matters.
 > Read `START-HERE.md` first; this is the map, not the manual.
 
+> **Re-counted 2026-10-02 (W47 record audit, HEAD `6575669`; `git ls-files`):** tracked files have grown
+> — `src/` **233** (was 211) · `src/lib/` **222** (was 201) · `scripts/` **49** (was 45) · `fixes/`
+> **654** (was 460) · `wave_plans/` **123** (was 106) · `research/multiagent/` 103 (unchanged) ·
+> `research/eval-corpus/` 23 (unchanged). The per-node numbers below are the 2026-09-26 snapshot.
+
 ```
 RapidTool Main/
 │

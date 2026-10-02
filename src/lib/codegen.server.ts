@@ -2019,30 +2019,15 @@ export function treeChunkPlanCensus(
   // partition and read as two shortfalls; the label is the coverage unit.
   const declared = [...new Set(declaredAll)];
   return {
+    // `planned`/`unbound` are complementary filters of `declared`, so the
+    // partition holds BY CONSTRUCTION — no runtime "does not reconcile" guard is
+    // kept (it could never fire; 333-1 F-2). `paths` is the plan's own file list.
     declared,
     planned: declared.filter((l) => plannedLabels.has(l)),
     unbound: declared.filter((l) => !plannedLabels.has(l)),
     paths: plan.map((c) => c.path),
     legacy: plan.every((c) => typeof c.nodeId !== "string" || c.nodeId.length === 0),
   };
-}
-
-/**
- * W46/332-1 (P2): the determinism guard for the plan census — every declared
- * spec-graph job is accounted for by exactly ONE of {planned file, counted
- * unbound}. `silent` lists any declared job that is neither (or both) — the
- * class that would make a coverage shortfall invisible rather than random.
- * Empty by construction today; pinned so a future plan change can never drop a
- * declared job silently. Pure.
- */
-export function treePlanCensusReconciles(census: TreePlanCensus): { ok: boolean; silent: string[] } {
-  const planned = new Set(Array.isArray(census?.planned) ? census.planned : []);
-  const unbound = new Set(Array.isArray(census?.unbound) ? census.unbound : []);
-  const silent: string[] = [];
-  for (const label of Array.isArray(census?.declared) ? census.declared : []) {
-    if (planned.has(label) === unbound.has(label)) silent.push(label);
-  }
-  return { ok: silent.length === 0, silent };
 }
 
 /**
@@ -2363,15 +2348,43 @@ export function crossChunkDuplicateDeclarations(
   return out;
 }
 
-/** Top-level `async function NAME` declarations a module carries (masked per
- *  line, so a comment/string mentioning one never reports). Deterministic. */
+/**
+ * Top-level `async` callable names a module declares (masked per line, so a
+ * comment/string mentioning one never reports). Covers the lexical shapes an
+ * emitted module actually uses:
+ *   • `async function NAME(...)`
+ *   • `const|let|var NAME = async (...) =>` / `= async function (...)` / `= async x =>`
+ *   • `(module.)?exports.NAME = async (...) =>` / `= async function (...)`
+ *   • `async NAME(...)` / `async *NAME(...)` class (or object-literal) methods
+ * LIMIT (stated, not implied): discovery is LEXICAL, not a parser. A callable
+ * whose Promise-returning nature is not spelled `async` (e.g. `function f() {
+ * return new Promise(...) }`, a re-export, or a method invoked through a
+ * receiver `obj.m()` rather than by bare name) is NOT discovered here — those
+ * shapes are undecidable from the bare name alone.
+ */
 function declaredAsyncFunctionNames(module: string): string[] {
   const out: string[] = [];
   const lines = String(module ?? "").split("\n");
   const state = { block: false, template: false };
   for (const line of lines) {
     const code = maskCodeLine(line, state);
+    // async function NAME(...)
     for (const m of code.matchAll(/^(?:export\s+)?async\s+function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/gm)) out.push(m[1]!);
+    // const/let/var NAME = async (...) => | = async function (...) | = async x =>
+    for (const m of code.matchAll(
+      /^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*async\s*(?:\(|function\b|[A-Za-z_$][\w$]*\s*=>)/gm,
+    )) {
+      out.push(m[1]!);
+    }
+    // (module.)?exports.NAME = async ... (a CJS-surface async function)
+    for (const m of code.matchAll(
+      /^(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=\s*async\s*(?:\(|function\b|[A-Za-z_$][\w$]*\s*=>)/gm,
+    )) {
+      out.push(m[1]!);
+    }
+    // async NAME(...) / async *NAME(...) — a class/object method (the `(?!function)`
+    // guard keeps the anonymous `async function (...)` expression out of this arm).
+    for (const m of code.matchAll(/^\s*(?:static\s+)?async\s*\*?\s*(?!function\b)([A-Za-z_$][\w$]*)\s*\(/gm)) out.push(m[1]!);
   }
   return [...new Set(out)];
 }
@@ -2409,11 +2422,12 @@ export function asyncNamesInScope(
   return [...out];
 }
 
-/** One un-awaited async call whose result is consumed as a VALUE (not a promise). */
+/** One un-awaited async call whose result is consumed as a VALUE (not a promise).
+ *  `computed-read` is `fn(id)["ok"]`; `property-read` covers `.ok` and `?.ok`. */
 export type AsyncUnawaitedUse = {
   name: string;
   line: number;
-  form: "property-read" | "destructure" | "bound-then-read" | "floating-in-then";
+  form: "property-read" | "computed-read" | "destructure" | "bound-then-read" | "floating-in-then";
 };
 
 /** `Promise.then/catch/finally` ARE the legal way to consume a promise — reading
@@ -2437,17 +2451,52 @@ function matchParenClose(text: string, open: number): number {
 }
 
 /**
+ * The member access starting at `start`, if any — the tail a Promise would be
+ * read through. Accepts the four lexical forms an emitted module uses:
+ * `.name`, `?.name`, `["name"]`, `?.["name"]`. `masked` and `raw` are the
+ * same-length views of the source (masking preserves offsets), so a computed
+ * key's literal text is read from `raw` while the structure is read from
+ * `masked`. Returns null when the next token is not a member access. Pure.
+ */
+function memberAccessAfter(masked: string, raw: string, start: number): { kind: "member" | "computed"; name: string | null } | null {
+  let i = start;
+  while (i < masked.length && (masked[i] === " " || masked[i] === "\t" || masked[i] === "\n" || masked[i] === "\r")) i++;
+  let chained = false;
+  if (masked[i] === "?" && masked[i + 1] === ".") {
+    chained = true;
+    i += 2;
+  } else if (masked[i] === ".") {
+    chained = true;
+    i += 1;
+  }
+  while (i < masked.length && (masked[i] === " " || masked[i] === "\t")) i++;
+  if (masked[i] === "[") {
+    const rawKey = /^\s*(?:\?\.\s*)?\[\s*(['"])([^'"]*)\1\s*\]/.exec(raw.slice(start));
+    return { kind: "computed", name: rawKey !== null ? rawKey[2]! : null };
+  }
+  if (chained) {
+    const m = /^([A-Za-z_$][\w$]*)/.exec(masked.slice(i));
+    if (m !== null) return { kind: "member", name: m[1]! };
+  }
+  return null;
+}
+
+/**
  * W46/332-1 (P1): the value-position uses of an un-awaited async call. `asyncNames`
  * are the callable names known to return a Promise (a sibling chunk's async export
  * or the module's own `async function`). A call that is NOT preceded by `await` is
  * refused when its result is consumed as a value:
- *   • `getProperty(id).ok`              → property-read (a Promise has no `.ok`)
- *   • `const { ok } = getProperty(id)`  → destructure (same, off the Promise)
- *   • `const p = getProperty(id); p.ok` → bound-then-read (the promise stored, a
- *     property read off it later — the real `src/jobs/rehab.ts` shape)
+ *   • `getProperty(id).ok` / `?.ok`   → property-read (a Promise has no `.ok`)
+ *   • `getProperty(id)["ok"]`         → computed-read (same, through a key)
+ *   • `const { ok } = getProperty(id)`→ destructure (same, off the Promise)
+ *   • `const p = getProperty(id); p.ok` / `p?.ok` / `p["ok"]` → bound-then-read (the
+ *     promise stored, a member read off it later — the real `src/jobs/rehab.ts` shape)
  *   • a var bound to one inside a `Promise.resolve().then(…)` body → floating-in-then
  *     (that callback is not `async`, so the promise can never be awaited later).
- * `await getProperty(id)` and `.then/.catch/.finally` consumers are accepted. Pure.
+ * `await getProperty(id)` and `.then/.catch/.finally` consumers (including via a
+ * computed key: `["then"]`) are accepted. `asyncNames` discovery is lexical (see
+ * `declaredAsyncFunctionNames`); a Promise-returning callable not spelled `async`
+ * and a member call through a receiver (`obj.m()`) stay outside this guard. Pure.
  */
 export function unawaitedAsyncValueUses(module: string, asyncNames: readonly string[]): AsyncUnawaitedUse[] {
   const src = typeof module === "string" ? module : "";
@@ -2479,9 +2528,10 @@ export function unawaitedAsyncValueUses(module: string, asyncNames: readonly str
       if (/await\s*$/.test(masked.slice(Math.max(0, nameIdx - 12), nameIdx))) continue;
       const close = matchParenClose(masked, masked.indexOf("(", nameIdx));
       if (close < 0) continue;
-      const prop = /^\s*\.\s*([A-Za-z_$][\w$]*)/.exec(masked.slice(close + 1));
-      if (prop !== null && !PROMISE_CONSUMER_METHODS.has(prop[1]!)) {
-        push({ name, line: lineAt(nameIdx), form: "property-read" });
+      const access = memberAccessAfter(masked, src, close + 1);
+      const consumer = access !== null && access.name !== null && PROMISE_CONSUMER_METHODS.has(access.name);
+      if (access !== null && !consumer) {
+        push({ name, line: lineAt(nameIdx), form: access.kind === "computed" ? "computed-read" : "property-read" });
         continue;
       }
       // The text between the statement boundary and the callee: a `const x =`
@@ -2503,11 +2553,13 @@ export function unawaitedAsyncValueUses(module: string, asyncNames: readonly str
     }
   }
   for (const b of bound) {
-    const re = new RegExp(`\\b${b.varName}\\s*\\.\\s*([A-Za-z_$][\\w$]*)`, "g");
+    const re = new RegExp(`(?<![\\w$])${b.varName}(?![\\w$])`, "g");
     let m: RegExpExecArray | null;
     while ((m = re.exec(masked)) !== null) {
       if (m.index <= b.callEnd) continue;
-      if (PROMISE_CONSUMER_METHODS.has(m[1]!)) continue;
+      const access = memberAccessAfter(masked, src, m.index + b.varName.length);
+      if (access === null) continue;
+      if (access.name !== null && PROMISE_CONSUMER_METHODS.has(access.name)) continue;
       readVars.add(b.varName);
       push({ name: b.name, line: lineAt(m.index), form: "bound-then-read" });
       break;
@@ -4017,19 +4069,10 @@ async function synthesizeChunkedTree(
   // appended when every declared job is planned (byte-identity for the pipelines).
   {
     const census = treeChunkPlanCensus(project, specRecord.typeSignatures);
-    const reconcile = treePlanCensusReconciles(census);
     if (census.unbound.length > 0) {
       // W46/332-1 (P2): the full partition rides the row, so the coverage
       // shortfall is legible (and deterministic) instead of a bare name list.
       const detail = `declared job node(s) with no bound signature — no src/jobs module will be synthesized: ${census.unbound.join(", ")} (declared ${census.declared.length}, planned ${census.planned.length}, unbound ${census.unbound.length}; their typeSignatures, if any, stay in the src/generated family)`;
-      if (!attemptLogs.some((l) => l.event === "p6.tree.shortfall" && l.detail === detail)) {
-        attemptLogs.push({ ts: Date.now(), phase: 6, level: "warn", event: "p6.tree.shortfall", detail });
-      }
-    }
-    // A declared job that is neither planned nor counted would be a SILENT drop —
-    // the one shape the census must never produce. Surface it as its own row.
-    if (!reconcile.ok) {
-      const detail = `plan census does not reconcile — declared job(s) neither planned nor counted as shortfall: ${reconcile.silent.join(", ")}`;
       if (!attemptLogs.some((l) => l.event === "p6.tree.shortfall" && l.detail === detail)) {
         attemptLogs.push({ ts: Date.now(), phase: 6, level: "warn", event: "p6.tree.shortfall", detail });
       }

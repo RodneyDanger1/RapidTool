@@ -218,3 +218,65 @@ bring it to **88**, all passing on both runtimes.
   all showed modified during this lane).
 - **Did not run the CLI against tracked `research/eval-out/**`** — W2's repro used a `%TEMP%`
   copy so no tracked eval artifact was appended to.
+
+
+---
+
+## F-3 follow-up (W47 - head `6575669`) - `exec.test.ts` leak scan made load-robust
+
+**Finding (audit `fixes/333_1_verifier.md` F-3).** The gate of record's only flake is the
+scratch-dir leak test at `src/lib/exec.test.ts:138`: under load it attributes a *sibling's*
+in-flight `rapidtool-run-*` dir to itself.
+
+**Reproduced (real).** Load-sim `%TEMP%\rt332_6\load-sim.mjs` (creates a fresh
+`rapidtool-run-SIM<pid>-<n>` in `os.tmpdir()` every 50 ms, stands in for a concurrent
+tree-run suite) running beside the **unfixed** test:
+
+```
+$ node --experimental-strip-types --test --test-reporter=tap src/lib/exec.test.ts
+not ok 3 - leaves no rapidtool-run-* scratch dir behind after a real run
+  error: 'scratch dir rapidtool-run-SIM8852-1063 was not cleaned up'
+# tests 19   # pass 18   # fail 1
+```
+Same file in isolation (no load-sim): `# tests 19 # pass 19 # fail 0` - the flake is
+load-dependent, exactly as the auditor described.
+
+**Root cause (measured, not inferred).** The test diffed **all** `tmpdir()/rapidtool-run-*`
+dirs created after its own `before` snapshot, so any concurrent process's dir is blamed. The
+45 s grace only makes the false positive slower - it never removes the cross-run attribution.
+
+**Fix chosen - option (b) + short settle, inside the granted file.** Scope the scan to a
+private temp root by pointing `os.tmpdir()` at it for the duration, then a bounded settle.
+Verified on Node 22/Windows: `os.tmpdir()` follows `TEMP` but ignores `TMPDIR`/`TMP`
+(it stayed at the default when only `TMPDIR`/`TMP` were set; it moved when `TEMP` was set),
+so all three are set to the private root - `TEMP` wins on win32, `TMPDIR`/`TMP` cover POSIX.
+The runner then mkdtemps its scratch dir **inside that root**, so the leak scan can only ever
+see dirs this run created; a leftover after a 5 s (`LEAK_SETTLE_MS`) settle is by construction
+a real leak. No change to `node-runner.server.ts` was needed (the 45 s constant was local to
+this test).
+
+**After - same load-sim running:**
+```
+ok 3 - leaves no rapidtool-run-* scratch dir behind after a real run
+# tests 19   # pass 19   # fail 0
+```
+
+**Teeth proven (planted a real leak).** Temporarily made `node-runner.server.ts`'s `finish()`
+skip `removeScratchDir` (proof-only edit, `void dir;`), then ran the scoped test:
+```
+not ok 3 - leaves no rapidtool-run-* scratch dir behind after a real run
+  error: 'scratch dir rapidtool-run-FI3sR8 was not cleaned up'
+# tests 19   # pass 18   # fail 1     (failed in ~5 s, not 45 s)
+```
+Reverted with `git checkout -- src/lib/node-runner.server.ts` (`git status` empty for it);
+re-ran -> `ok 3`, `# tests 19 # pass 19 # fail 0`. The assertion still fails on a genuine leak.
+
+**Done-when (real).** `exec.test.ts` 19/19 on Node 22.23.2 **and** Node 24.15.0; the six
+lane-332-6 suites 88/88 on both; `npx eslint` on the touched files exit 0; `npx tsc --noEmit`
+0 diagnostics. No full gate, no `npm run eval`, no keyed call, no secret.
+
+**Deliberately avoided.** Did not bump the 45 s grace to a larger magic number and did not
+touch the shared runner: a longer wait leaves the attribution bug intact (only slower), and a
+runner edit is outside this task's scope. Option (b) is the honest fix - the assertion tests
+*this run's* cleanup, which is what it always meant; option (a)'s settle is kept as a 5 s
+bounded guard for a deferred Windows cleanup, not as the primary defence.

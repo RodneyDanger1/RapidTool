@@ -20,6 +20,16 @@ green**. The `scripts` leg grew because the wave added 6 tests to `cli-exit-taxo
 `typecheck-scripts.test.mjs`, 6 to `check-module-coverage.test.mjs`, and the lib leg from the six
 lanes' suites.
 
+> **CORRECTION (watchdog `333-2`, finding R-4).** The per-suite attribution above is wrong and the
+> totals need their measurement context named. Measured deltas: `cli-exit-taxonomy.test.mjs`
+> **28 → 30 (+2)**, `typecheck-scripts.test.mjs` **4 → 6 (+2)**, `check-module-coverage.test.mjs`
+> **unchanged** (created in the 331 wave) — so the scripts leg grew by **+4**, matching 394 → 398. The
+> lib figures are **environment-dependent**: `gate.sh` under git-bash reports **2734 / 2 skipped**
+> (the figure quoted above), while a plain `npm test` from PowerShell reports **2736 tests / 2726 pass
+> / 10 skipped**, because eight suites `skip` when `git-bash` is absent and run when it is present.
+> Neither is wrong; both are real, and the difference is the bash-availability gate, not a defect.
+> This correction is appended rather than rewritten into the table, per the append-only rule.
+
 ## 2. What landed
 
 **The last mile to a verified product (the wave's headline).** The keyed run's single remaining spec

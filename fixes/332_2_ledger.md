@@ -246,3 +246,126 @@ the pre-fix code returned 0.
 4. **`packet.ts`'s disk envelope** still carries the process-snapshot
    `budget.spent` with its `PACKET_BUDGET_SCOPE` label (packet.ts is unowned).
    It is honest by its own label; not changed here.
+
+---
+
+# W46 / 332-2 — follow-up: F-5 `doctor`'s `llm.configured` is presence-only
+
+Head `6575669`. `fixes/333_1_verifier.md` F-5 (P3). Owned files only
+(`token-ledger.ts` unchanged this round). `types.ts` / `engine.ts` / `llm.ts` /
+`store.ts` / `console.tsx` untouched.
+
+## Verdict — FIXED (presence split from validity; no implied green)
+
+`doctorStatus`'s `llm` block now carries:
+
+- `keyState: "not-configured" | "unverified" | "rejected"` — ALWAYS present.
+- `lastKeyed?: { code; at; keySource? }` — the last keyed failure the process
+  saw, tail-only source, present only when a valid outcome exists.
+
+`configured` keeps its exact prior meaning (**a key is PRESENT**). Presence no
+longer stands alone: a present key with no recorded outcome reads
+`unverified`, never a validated/implied-working key. Only the key-unusable
+classes (`RT_E_LLM_KEY_REJECTED`, `RT_E_LLM_KEY_SHADOWED` — the same set the
+console chip narrows on) flip to `rejected`; a transient class (timeout,
+insufficient funds, provider 5xx) stays `unverified` and carries its code.
+
+Implemented:
+- `doctor.ts` — new pure vocabulary `DoctorLastKeyed` / `DoctorLlmKeyState` /
+  `DoctorLlmKey`, the validator `readLastKeyedOutcome` (mirrors
+  `store.readLastKeyed`: hostile/partial dropped), and `doctorLlmKey(configured,
+  lastKeyed?)`. `llm.ts`'s tap CLEARS on success, so "last succeeded" and "none
+  seen" are indistinguishable — `unverified` is the only honest non-`rejected`
+  state.
+- `headless.ts` — `DoctorStatus.llm` becomes `{configured, label} & DoctorLlmKey`;
+  new testable resolver `resolveDoctorKeyState(configured, keyedOutcome?)` reads
+  an explicit caller override or `readStatusLastKeyed()` (best-effort
+  `llmStatus()`); `doctorStatus` opts gain `keyedOutcome?`.
+- `keySource` stays tail-only: doctor never reads a key value and never
+  constructs a source label; the only producer (`llm.ts`) emits
+  `"<file> (tail …xxxx)"` / `"the process environment (tail …xxxx)"`.
+
+## Before / after — real commands
+
+```
+node --experimental-strip-types scripts/rapidtool-cli.mjs doctor --project <tmp>/.rapidtool/project.json
+node --experimental-strip-types scripts/rapidtool-cli.mjs doctor
+```
+
+BEFORE (HEAD bytes): `"llm": { "configured": true, "label": "deepseek
+(deepseek-v4-flash | deepseek-v4-pro)" }` — presence only, no validity field.
+
+AFTER (both `doctor --project` and plain `doctor`; no keyed call happened):
+```json
+"llm": {
+  "configured": true,
+  "label": "deepseek (deepseek-v4-flash | deepseek-v4-pro)",
+  "keyState": "unverified"
+}
+```
+
+AFTER with a STUBBED keyed outcome (scratch `node` script calling
+`doctorStatus({ keyedOutcome })` — no keyed call made, tail-only source):
+```json
+"llm": {
+  "configured": true,
+  "label": "deepseek (deepseek-v4-flash | deepseek-v4-pro)",
+  "keyState": "rejected",
+  "lastKeyed": {
+    "code": "RT_E_LLM_KEY_REJECTED",
+    "at": 1759000000000,
+    "keySource": "the process environment (tail …a1b2)"
+  }
+}
+```
+Same stub with a transient code (`RT_E_LLM_TIMEOUT`) → `keyState: "unverified"`
+with `lastKeyed.code` kept (a transient class never condemns a working key);
+`keyedOutcome: null` → `unverified`.
+
+Honest floor, no keyed call: the "no keyed call recorded" state is
+`keyState: "unverified"` — never an invented green, and never a fabricated
+`lastKeyed`.
+
+## Why no `llm.ts` change is requested
+
+The audit's suggested source is `llmStatus()`, and it is consumed — but the
+`lastKeyed` capture is **process-local**: `llm.ts` installs the provider tap
+lazily inside its server fn, so on a bare-Node CLI host the TanStack server fn
+cannot run and `llmStatus()` returns its catch floor (`{configured:false,
+models:[]}` — verified with a scratch probe: `deepseek.server` reports
+`configured:true, models:[3]` in the same process while `llmStatus()` returns
+unconfigured/empty). Doctor therefore reads the status surface best-effort and
+correctly degrades to `unverified`. A bare-Node accessor in `llm.ts` would NOT
+help a fresh `doctor` process (the tap observes only calls made after it is
+installed, and `doctor` makes none). Seeing a *prior* `gate` process's rejection
+would require persisting the outcome on the project (the same class of change as
+the `tokenUsage` spend fix) — out of F-5's stated scope and a lane-crossing
+engine/llm decision, so not reached for. No change is needed in 332-5's files;
+the console/store/llm surfaces were consumed as-is.
+
+## Tests added — real results, both runtimes
+
+RED-first proven by mutation: with `doctorLlmKey`'s key-unusable branch
+temporarily disabled, the F-5 suite fails `1/31` (`not ok 5 - key presence is not
+key validity`); restored → `31 pass / 0 fail`.
+
+| suite | previous | after | Node 22.23.2 | Node 24.15.0 |
+|---|---|---|---|---|
+| `src/lib/doctor.test.ts` | 26 | **31** (+5) | 31 pass / 0 fail / 5 suites | 31 pass / 0 fail / 5 suites |
+| `src/lib/headless.test.ts` | 126 | **129** (+3) | 129 pass / 0 fail / 38 suites | 129 pass / 0 fail / 38 suites |
+| `src/lib/token-ledger.test.ts` | 39 | 39 (unchanged) | 39 pass / 0 fail / 5 suites | 39 pass / 0 fail / 5 suites |
+
+Added:
+- doctor: key-unusable → `rejected` + tail-only `lastKeyed`; key with no outcome
+  → `unverified`; no key → `not-configured` (stale outcome dropped); a transient
+  failure stays `unverified`; hostile/partial outcomes dropped (never mint
+  `rejected`; empty `keySource` dropped).
+- headless: `resolveDoctorKeyState` — stubbed rejection surfaces `rejected` +
+  tail-only source (asserts no `sk-` shape can ride through); no override on a
+  bare-Node host → `unverified` with no `lastKeyed`; explicit `{}` dropped →
+  `unverified`; no key → `not-configured`; transient → `unverified`.
+
+`npx eslint` on all six owned files exit 0; `npx tsc --noEmit` exit 0. No full
+gate, no `npm run eval`, no keyed calls, no secrets printed (only
+`Boolean(env)`/`configured` was inspected).
+

@@ -12,6 +12,17 @@ size, where it lives, and what the next wave should pick up.
 2026-09-16 snapshot where not annotated.
 **⚠️ STATUSES BELOW ARE SNAPSHOT VALUES — THE DISK IS TRUTH. VERIFY BEFORE TRUSTING.**
 
+> **CORRECTION — 2026-10-02 (W47 record audit).** The snapshot below is from 2026-09-16; the repo is now
+> in the **W47** era (HEAD `6575669`). The §0.2 expected baseline ("scripts 195/195 + src 1662/1662") is
+> superseded — measured 2026-10-02: `npm test` → **scripts 398/398 · src 2736 tests / 2726 pass / 10
+> skipped / 0 fail**; `npm run typecheck` exit 0 (both legs, `scripts/**` now covered); `npm run lint`
+> exit 0 / 0 warnings. The "Doctor truth at snapshot … `{stubs: 0, reexports: 5, real: 0}`" note and the
+> "two finish lines" arithmetic are historical: the emitted tree is now a **real multi-job product**
+> (TA-15 landed W8) and a **keyed run succeeds** — the account is funded; the earlier 401/402s were a
+> stale Windows User-scope `DEEPSEEK_API_KEY` shadowing `.env` while nothing loaded it (register
+> `AW45-c01`; `START-HERE.md` §CORRECTION). Read the newest `fixes/3xx` logs and `finalsprint.md` for the
+> live plan; this board's per-task rows are a 2026-09-16 snapshot.
+
 ---
 
 ## 0. How a new AI session MUST use this file

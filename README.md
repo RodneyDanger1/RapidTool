@@ -207,7 +207,9 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
 
 ## What it does **not** do yet — the honest limits
 
-1. **The emitted product is still ONE module wearing several filenames.**
+1. **The emitted product is still ONE module wearing several filenames — on the KEYLESS floor.**
+   *(Qualifier added 2026-10-02 by the W47 record audit: the flat claim is superseded — a keyed run emits a
+   real multi-job product, see "Corrections in force" below.)*
    The headline open item (TA-15). On the reference corpus trials (2026-09-16):
    `doctor --tree research/eval-out/coffeehouse2home-property-ledger--trial-1` →
    `{stubs: 0, reexports: 4, real: 1}` — of the 5 declared job paths ONE hosts the P6 module
@@ -279,6 +281,15 @@ one-shot text, no shell/agents.
 **Corrections in force:** `finalsprint.md`'s §S1 board over-claimed (3 of 4 items not in the
 bytes — CF-1) and its `§MASTER-CORRECTIONS` self-append is still owed; the RS-01…RS-04 audited
 corrections live in `fixes/274_wdx2.md`. Where any doc and the bytes disagree, the bytes win.
+
+**Corrections in force — appended 2026-10-02 (W47 record audit; HEAD `6575669`):** the status banner
+and "Current state" block above are dated 2026-09-26 and their counts have drifted — the current tree
+measures **scripts 398/398 · src 2736 tests / 2726 pass / 10 skipped**, `npm run typecheck` exit 0
+(both legs, `scripts/**` now covered as a per-file ratchet), `npm run lint` exit 0 / **0 warnings**,
+CLI **39** verbs (`grep -c 'case "'`). W29–W46 are **committed** (no longer "uncommitted working
+tree"), and limit #1 above holds only on the **keyless floor**: a keyed run emits a real multi-job
+product (`treeRun.substance {stubs:0, reexports:0, real:3}` in `fixes/331_0_parent.md` §2;
+`{stubs:0, reexports:0, real:2}` in `fixes/332_0_parent.md` §4).
 
 ## Progress so far (the paper trail)
 

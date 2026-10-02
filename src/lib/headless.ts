@@ -83,7 +83,7 @@ import type {
 // RtEventSeed the engine emits and the CLI's cliLogEvent consumes.
 import type { RtEventSeed } from "./rt-events.ts";
 
-import type { DoctorSpend } from "./doctor.ts";
+import type { DoctorLastKeyed, DoctorLlmKey, DoctorSpend } from "./doctor.ts";
 import type { SpendSlice, TokenLedger, TokenSpend } from "./token-ledger.ts";
 // T5.5 (OV-41 spend half, W43 · H6): the summary envelope's spend half reads
 // the PROCESS session budget — the SAME T-107.6 accessor `recordSessionSpend`
@@ -4122,7 +4122,12 @@ export function listArtifacts(project: Project): ArtifactLite[] {
 // ---------------------------------------------------------------------------
 
 export type DoctorStatus = {
-  llm: { configured: boolean; label: string };
+  /** F-5 (W46 · 332-2): `configured` is key PRESENCE only; `keyState` states
+   *  whether that presence has been validated (`unverified` is the honest floor
+   *  — llm.ts's tap clears on success, so "valid" is never inventable here), and
+   *  `lastKeyed` carries the last keyed failure class + tail-only source when
+   *  one is known. Never a key value. */
+  llm: { configured: boolean; label: string } & DoctorLlmKey;
   research: { configured: boolean; probed: boolean; label: string };
   runner: { available: boolean; sandbox: false };
   node: string;
@@ -4287,6 +4292,44 @@ export function resolveDoctorSpendSource(opts?: {
 }
 
 /**
+ * F-5 (W46 · 332-2): best-effort read of the last keyed outcome from the ONE
+ * server status surface (`llm.ts`'s `llmStatus`, C1 · 332-5). Installs nothing,
+ * makes no provider call. The TanStack server fn cannot run outside a Start
+ * context (the same reason `engine.liveLayer` degrades under bare Node), so on
+ * a CLI host this resolves to the honest `undefined` — doctor then reports
+ * `unverified`, never an implied green.
+ */
+async function readStatusLastKeyed(): Promise<unknown> {
+  try {
+    const { llmStatus } = await import("./llm.ts");
+    const status = await llmStatus();
+    return (status as { lastKeyed?: unknown }).lastKeyed;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * F-5 (W46 · 332-2): classify the doctor's key state. `keyedOutcome` is the
+ * caller's explicit last keyed outcome (validated by `doctor.doctorLlmKey`, so a
+ * hostile/partial payload is dropped); when absent the process status surface is
+ * read best-effort (`readStatusLastKeyed`). Pure apart from that read; never
+ * throws — an unavailable doctor module keeps the honest floor.
+ */
+export async function resolveDoctorKeyState(
+  configured: boolean,
+  keyedOutcome?: unknown,
+): Promise<DoctorLlmKey> {
+  const fallback: DoctorLlmKey = { keyState: configured ? "unverified" : "not-configured" };
+  try {
+    const { doctorLlmKey } = await import("./doctor.ts");
+    return doctorLlmKey(configured, keyedOutcome ?? (await readStatusLastKeyed()));
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * E-25: capability pre-flight for agent drivers — what CAN this host do right
  * now? Reads process.env through the server modules (never the server-fn
  * status surfaces, which need a Start runtime). The research probe is a real
@@ -4305,6 +4348,12 @@ export function resolveDoctorSpendSource(opts?: {
  * read read-only and never fabricated. Priority: explicit `opts.spend` →
  * `opts.projectPath` → `treeDir` record → the process session ledger (or the
  * honest `measured:false` floor).
+ *
+ * F-5 (fixes/333_1_verifier.md): the `llm` block carries `keyState` so a
+ * present key never reads as a validated one — `unverified` unless a keyed
+ * outcome was recorded, `rejected` only for a key-unusable coded class, with
+ * the tail-only `lastKeyed` when known. Matches the console chip's validity
+ * posture (332-5) on the doctor surface.
  */
 export async function doctorStatus(opts?: {
   treeDir?: string;
@@ -4314,8 +4363,16 @@ export async function doctorStatus(opts?: {
   /** OPS-8 (W42 · L4/G9): caller-measured spend; defaults to the process
    *  session budget's ledger (`sessionTokenBudget().ledger`). */
   spend?: TokenSpend | TokenLedger | null;
+  /** F-5 (W46 · 332-2): an explicit last keyed outcome, validated by
+   *  `doctor.doctorLlmKey` (a hostile/partial payload is dropped). When omitted
+   *  the process status surface (`llmStatus`) is read best-effort. */
+  keyedOutcome?: DoctorLastKeyed | null;
 }): Promise<DoctorStatus> {
-  const llm = { configured: false, label: "not configured (set DEEPSEEK_API_KEY)" };
+  const llm: DoctorStatus["llm"] = {
+    configured: false,
+    label: "not configured (set DEEPSEEK_API_KEY)",
+    keyState: "not-configured",
+  };
   try {
     const { isDeepSeekConfigured, DEEPSEEK_MODEL_IDS } = await import("./deepseek.server.ts");
     if (isDeepSeekConfigured()) {
@@ -4325,6 +4382,11 @@ export async function doctorStatus(opts?: {
   } catch {
     /* deepseek module unavailable → honest not-configured */
   }
+  // F-5 (fixes/333_1_verifier.md): presence ≠ validity. The key state comes
+  // from doctor.ts's ONE vocabulary, fed by the caller's explicit override or
+  // the server status surface (llm.ts's llmStatus, C1 · 332-5) — never a
+  // provider call, never the key value.
+  Object.assign(llm, await resolveDoctorKeyState(llm.configured, opts?.keyedOutcome));
 
   const research = { configured: false, probed: false, label: "unavailable" };
   let runner: DoctorStatus["runner"] = { available: false, sandbox: false };

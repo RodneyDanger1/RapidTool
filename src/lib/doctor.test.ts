@@ -12,6 +12,7 @@ import {
   coerceFactoryClaim,
   doctorFactory,
   doctorIsolation,
+  doctorLlmKey,
   doctorSpend,
   evidenceFromJobInventory,
   factoryClaim,
@@ -20,6 +21,7 @@ import {
   jobScopeShortfall,
   productCompleteFromProject,
   RAPIDTOOL_FACTORY_EVIDENCE,
+  readLastKeyedOutcome,
   treeEmissionCensus,
 } from "./doctor.ts";
 import { RUNNER_IS_NOT_A_SANDBOX } from "./sandbox-policy.ts";
@@ -609,5 +611,50 @@ describe("W46 · 332-2 (L1/AW45-c06) — doctor spend reads a persisted run slic
     assert.equal(zero.measured, true);
     assert.equal(zero.totalTokens, 0);
     assert.equal(zero.calls, 0);
+  });
+});
+
+describe("W46 · 332-2 (F-5) — key presence is not key validity", () => {
+  it("a key-unusable class flips to rejected and carries the tail-only outcome", () => {
+    const keyed = doctorLlmKey(true, {
+      code: "RT_E_LLM_KEY_REJECTED",
+      at: 1759000000000,
+      keySource: "the process environment (tail …a1b2)",
+    });
+    assert.equal(keyed.keyState, "rejected");
+    assert.deepEqual(keyed.lastKeyed, {
+      code: "RT_E_LLM_KEY_REJECTED",
+      at: 1759000000000,
+      keySource: "the process environment (tail …a1b2)",
+    });
+  });
+
+  it("presence with no recorded outcome is unverified — never an implied green", () => {
+    assert.deepEqual(doctorLlmKey(true), { keyState: "unverified" });
+  });
+
+  it("no key is not-configured (and drops a stale outcome — nothing to attribute)", () => {
+    assert.deepEqual(doctorLlmKey(false, { code: "RT_E_LLM_KEY_REJECTED", at: 1 }), {
+      keyState: "not-configured",
+    });
+    assert.deepEqual(doctorLlmKey(false), { keyState: "not-configured" });
+  });
+
+  it("a transient failure never condemns a working key (stays unverified, keeps the class)", () => {
+    const keyed = doctorLlmKey(true, { code: "RT_E_LLM_TIMEOUT", at: 5 });
+    assert.equal(keyed.keyState, "unverified");
+    assert.equal(keyed.lastKeyed?.code, "RT_E_LLM_TIMEOUT");
+  });
+
+  it("a hostile/partial outcome is dropped, not trusted", () => {
+    for (const junk of [null, undefined, "RT_E_LLM_KEY_REJECTED", 7, {}, { code: "", at: 1 }, { code: "x" }, { code: "x", at: Number.NaN }, { code: 7, at: 1 }]) {
+      assert.equal(readLastKeyedOutcome(junk), undefined, `junk ${JSON.stringify(junk)} dropped`);
+      assert.deepEqual(doctorLlmKey(true, junk), { keyState: "unverified" }, "junk never mints rejected");
+    }
+    assert.deepEqual(
+      readLastKeyedOutcome({ code: "RT_E_LLM_KEY_SHADOWED", at: 5, keySource: "" }),
+      { code: "RT_E_LLM_KEY_SHADOWED", at: 5 },
+      "an empty keySource is dropped, the class is kept",
+    );
   });
 });

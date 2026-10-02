@@ -600,4 +600,19 @@ Wires on disk = **WIRE-1** (wild-step.test.ts normalize fix; E1b's 13/14 → **1
 
 Appended 2026-09-29 by C5 (312) · sources: `fixes/311_se2_surfaces.md` CF-SE2-2 + C5 re-verification on the live bytes.
 
+## §W47-RECORD-AUDIT — appended 2026-10-02 (333-2 Registrar) — the "keyed run owed / owner-gated" rows are now historical
+
+- **RS-01** (W-01/02/03 "keyed boundary run still owed, O-1/O-4") and **RS-02** ("owner-gated on OV-1/key"):
+  a keyed run has since landed and **completes P6**. The 331 wave's keyed run emitted **7 real job
+  modules** (`fixes/331_0_parent.md` §2); the 332 wave's addendum records the first keyed run in the record
+  to clear P6 — `P6 DoD: PASS`, `lastTest.label:"tested"`, `emit --run ok:true`,
+  `leftoverJobsAreReexportsOrStubs:false` (`fixes/332_0_parent.md` §4). The account is **funded**; the
+  earlier 401/402s were a stale Windows User-scope `DEEPSEEK_API_KEY` shadowing `.env` while nothing loaded
+  it (register `AW45-c01`; `START-HERE.md` §CORRECTION). The **remaining** honest gap is the keyed run's
+  generated-code async defect (fixed by 332-1) plus `no human-approved fixtures` / partial job coverage.
+- **Counts:** the W31 snapshots ("verb count 37" at line ~521, etc.) are historical. Today (HEAD `6575669`)
+  the CLI reads **39** verbs (`grep -c 'case "'`), `npm test` = **scripts 398/398 · src 2736 tests / 2726
+  pass / 10 skipped**, `npm run typecheck` exit 0 (both legs), `npm run lint` exit 0 / 0 warnings. The master
+  table above is left in place per the append-only doctrine; trust this section over it where they differ.
+
 <!-- END-OF-FILE-MARKER-SPRINT · every lane appends ABOVE this line · never edit or delete this line -->

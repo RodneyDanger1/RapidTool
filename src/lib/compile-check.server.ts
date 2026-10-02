@@ -366,11 +366,11 @@ export type TreeProjectScriptVerdict = {
    *  (pre/post hooks, install scripts) are NEVER run by this leg. */
   scriptPolicy?: string;
   /** 332-3 (T2): true iff this declared script actually executed (pass/fail/
-   *  timeout/error carry a real signal). false on every `skip` — the tree's
-   *  own toolchain for this script is UNVERIFIED, and `run:"skip"` is never a
-   *  pass. Absent scripts (no declaration at all) are neither verified nor
-   *  unverified: `verified` is set only when a command was declared. */
-  verified?: boolean;
+   *  timeout/error carry a real signal). false on every `skip`. Measures
+   *  EXECUTION of the script, never the correctness of the product — the
+   *  scoped name is deliberately not `verified` (fixes/333_1_verifier.md F-4:
+   *  a script that never ran must not be read as a verified behaviour). */
+  executed?: boolean;
 };
 
 /** 216 (T-18): the emitted project's OWN toolchain verdict — the scripts it
@@ -392,13 +392,13 @@ export type TreeProjectScriptsVerdict = {
   /** 332-3 (T2): the DECLARED script names that did NOT execute — each one's
    *  toolchain is UNVERIFIED. Present only when non-empty; empty/absent means
    *  every declared script ran. A script that was never declared is absent,
-   *  not unverified. This is what makes the unverified state machine-readable:
-   *  `ok` is "nothing ran red", `verified`/`unverified` is "the declared checks
-   *  actually ran" — a consumer must not read `ok:true` as a verification. */
-  unverified?: string[];
-  /** 332-3 (T2): true iff every DECLARED script ran (no unverified leg). A
-   *  tree with no declared scripts trivially has nothing unverified. */
-  verified?: boolean;
+   *  not unverified. Scoped on purpose: this is about the emitted package.json's
+   *  declared scripts, never the tree's behaviour (see `TreeRunOutcome`). */
+  unverifiedDeclaredScripts?: string[];
+  /** 332-3 (T2): true iff every DECLARED project script ran. Scoped name: it
+   *  measures declared-script EXECUTION only — a deliberate UI-shell/headless
+   *  entry skip is NOT covered here (see `TreeRunOutcome.unverifiedEntry`). */
+  declaredScriptsVerified?: boolean;
 };
 
 export type TreeRunOutcome = {
@@ -446,16 +446,25 @@ export type TreeRunOutcome = {
   note?: string;
   /** 332-3 (T2): the DECLARED project scripts that did NOT execute, so the
    *  tree's own toolchain is UNVERIFIED for them. Present only when non-empty.
-   *  `ok:true` + a non-empty list is an ok-but-UNVERIFIED verdict: nothing ran
-   *  red, but the declared checks did not run either — never a verification
-   *  pass. Rides every consumer that serializes the outcome (the CLI `emit
-   *  --run` / `tree-run` envelopes carry it verbatim). */
-  unverified?: string[];
-  /** 332-3 (T2): true iff the verdict is BOTH ok and fully declared-verified
-   *  (`ok` and no `unverified` rows). `ok` alone is "nothing red"; `verified`
-   *  is what a consumer may read as a verification. A red verdict is never
-   *  verified. */
-  verified?: boolean;
+   *  Scoped name (fixes/333_1_verifier.md F-4): this is about the emitted
+   *  package.json's declared scripts, NOT the tree's behaviour. Rides every
+   *  consumer that serializes the outcome (the CLI `emit --run` / `tree-run`
+   *  envelopes carry it verbatim). */
+  unverifiedDeclaredScripts?: string[];
+  /** 332-3 (T2, renamed by F-4): true iff `ok` and every DECLARED project
+   *  script actually executed. It measures ONLY declared-script execution —
+   *  it is NOT "the tree's behaviour was verified". A deliberate UI-shell (or
+   *  headless) kind-entry skip leaves this `true` while the entry never ran,
+   *  which is why the skip is named separately in `unverifiedEntry`; a
+   *  consumer that wants "behaviour verified" must read `ok`, this field AND
+   *  `unverifiedEntry` together. Renamed from the over-broad `verified`. */
+  declaredScriptsVerified?: boolean;
+  /** 333-3b (F-4): the reason the kind entry was NOT executed, present iff the
+   *  entry run was a deliberate `skip` (a UI shell is not executable headless,
+   *  or no headless entry resolved) — mirrors `run.detail`. Its presence is the
+   *  signal that the tree's ENTRY is unverified; absence means the entry
+   *  actually ran. Absent on the copy-failure early return (no entry leg). */
+  unverifiedEntry?: string;
   /** Always false when present. Copy-to-temp + bounded runner is emit-tree
    *  isolation, NOT a security sandbox. Optional so fixture objects in other
    *  lanes stay assignable; treeRun() always sets it. */
@@ -715,10 +724,13 @@ export function treeVerdictHash(outcome: TreeRunOutcome): string {
   });
   const canonical = JSON.stringify({
     ok: outcome.ok === true,
-    // 332-3 (T2): the declared-verification state is decisive — an ok-but-
-    // unverified tree must not hash the same as a fully verified one.
-    verified: outcome.verified === true,
-    unverified: [...(outcome.unverified ?? [])].sort(),
+    // 332-3 (T2): the declared-script state is decisive — an ok-but-unverified
+    // tree must not hash the same as a fully declared-verified one. F-4: the
+    // deliberate-skip marker is a boolean factor (prose stays out of the hash,
+    // per this function's doctrine — `run` already carries the entry label).
+    declaredScriptsVerified: outcome.declaredScriptsVerified === true,
+    unverifiedDeclaredScripts: [...(outcome.unverifiedDeclaredScripts ?? [])].sort(),
+    entrySkipped: outcome.unverifiedEntry !== undefined,
     compile: [
       outcome.compile?.ok === true,
       outcome.compile?.checked ?? 0,
@@ -1376,7 +1388,7 @@ async function runProjectScript(
     return {
       ...base,
       command: raw,
-      verified: false,
+      executed: false,
       note:
         `the declared "${script}" tool \`${tool}\` has no node_modules/.bin entry in this tree (and is not the node/npm runtime) — ` +
         `"npm run ${script}" was NOT executed; the tree's own ${script} is UNVERIFIED (npm install, then re-run to verify) — not a fabricated pass`,
@@ -1387,34 +1399,34 @@ async function runProjectScript(
   const run = await runNodeBounded(projectScriptRunnerCode(plan, root, innerTimeout), { timeoutMs });
   if (!run.ok) {
     if (run.reason === "timeout") {
-      return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "timeout", detail: `${script} script killed after ${timeoutMs / 1000}s`, durationMs: duration() };
+      return { ...base, command: raw, scriptPolicy: plan.via, executed: true, run: "timeout", detail: `${script} script killed after ${timeoutMs / 1000}s`, durationMs: duration() };
     }
     if (run.reason === "not-configured") {
-      return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "error", detail: `${run.code}: local bounded runner unavailable`, durationMs: duration() };
+      return { ...base, command: raw, scriptPolicy: plan.via, executed: true, run: "error", detail: `${run.code}: local bounded runner unavailable`, durationMs: duration() };
     }
-    return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "error", detail: run.error ?? run.reason, durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, executed: true, run: "error", detail: run.error ?? run.reason, durationMs: duration() };
   }
   const env = parseWrapperEnvelope(run.stdout);
   if (!env) {
-    return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "error", detail: "runner produced no parseable envelope", durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, executed: true, run: "error", detail: "runner produced no parseable envelope", durationMs: duration() };
   }
   if (env.kind === "error") {
-    return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "error", detail: (env.error ?? "npm script runner failed").slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, executed: true, run: "error", detail: (env.error ?? "npm script runner failed").slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
   }
   const tail = (env.tail ?? "").trim();
   if (env.spawnErr) {
-    return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "error", detail: `spawn failed: ${env.spawnErr}`.slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, executed: true, run: "error", detail: `spawn failed: ${env.spawnErr}`.slice(0, VERDICT_TAIL_MAX), durationMs: duration() };
   }
   if (env.timedOut) {
-    return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "timeout", detail: `${script} script killed after ${innerTimeout / 1000}s (inner timeout)`, durationMs: duration() };
+    return { ...base, command: raw, scriptPolicy: plan.via, executed: true, run: "timeout", detail: `${script} script killed after ${innerTimeout / 1000}s (inner timeout)`, durationMs: duration() };
   }
   const exitCode = typeof env.status === "number" ? env.status : 1;
-  if (exitCode === 0) return { ...base, command: raw, scriptPolicy: plan.via, verified: true, run: "pass", exitCode: 0, durationMs: duration() };
+  if (exitCode === 0) return { ...base, command: raw, scriptPolicy: plan.via, executed: true, run: "pass", exitCode: 0, durationMs: duration() };
   return {
     ...base,
     command: raw,
     scriptPolicy: plan.via,
-    verified: true,
+    executed: true,
     run: "fail",
     exitCode,
     detail: (tail || `the declared "${script}" script exited ${exitCode}`).slice(0, VERDICT_TAIL_MAX),
@@ -1456,7 +1468,7 @@ async function runProjectScripts(
           script: "build",
           run: "skip",
           command: buildRaw,
-          verified: false,
+          executed: false,
           durationMs: 0,
           note:
             `no node_modules/ present in the tree — "npm run build" was NOT executed; ` +
@@ -1467,9 +1479,19 @@ async function runProjectScripts(
   const skippedDeclared = all.filter((v) => v.run === "skip" && typeof v.command === "string");
   // 332-3 (T2): a DECLARED script that did not execute is an UNVERIFIED leg —
   // never folded into `ok` (nothing ran red) but never a silent pass either.
-  const unverified = skippedDeclared.map((v) => v.script);
+  // F-4: the field is scoped to DECLARED SCRIPTS; it says nothing about the
+  // tree's kind entry (carried at the top level as `unverifiedEntry`).
+  const unverifiedDeclaredScripts = skippedDeclared.map((v) => v.script);
   return {
-    verdict: { ok: red.length === 0, typecheck, test, build, ...(unverified.length > 0 ? { unverified, verified: false } : { verified: true }) },
+    verdict: {
+      ok: red.length === 0,
+      typecheck,
+      test,
+      build,
+      ...(unverifiedDeclaredScripts.length > 0
+        ? { unverifiedDeclaredScripts, declaredScriptsVerified: false }
+        : { declaredScriptsVerified: true }),
+    },
     red,
     skippedDeclared,
   };
@@ -1669,15 +1691,22 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
     }
     outcome.ok =
       compile.ok && specsGreen && entryGreen && coreGreen && projectLeg.verdict.ok && (outcome.behavior?.ok ?? true);
-    // 332-3 (T2): `ok` is "nothing ran red"; `verified` is "every DECLARED
-    // check actually ran". A green tree whose declared typecheck/build could
-    // not execute keeps `ok:true` (nothing failed) but is NOT verified — the
-    // top-level `unverified` names the legs, so no consumer can read the
-    // green as a verification pass. A red verdict is never verified.
-    if (projectLeg.verdict.unverified && projectLeg.verdict.unverified.length > 0) {
-      outcome.unverified = [...projectLeg.verdict.unverified];
+    // 332-3 (T2) + F-4: `ok` is "nothing ran red"; the declared-script state is
+    // a SCOPED claim — a green tree whose declared typecheck/build could not
+    // execute keeps `ok:true` but is not `declaredScriptsVerified`. A
+    // deliberate entry skip is named separately in `unverifiedEntry`, so
+    // neither field can be read as "the tree's behaviour was verified".
+    if (projectLeg.verdict.unverifiedDeclaredScripts && projectLeg.verdict.unverifiedDeclaredScripts.length > 0) {
+      outcome.unverifiedDeclaredScripts = [...projectLeg.verdict.unverifiedDeclaredScripts];
     }
-    outcome.verified = outcome.ok && (outcome.unverified?.length ?? 0) === 0;
+    outcome.declaredScriptsVerified = outcome.ok && (outcome.unverifiedDeclaredScripts?.length ?? 0) === 0;
+    // F-4: represent the deliberate entry skip explicitly (with its reason), so
+    // a consumer composing a "behaviour verified" claim cannot omit it. The
+    // entry leg always sets `run` on the normal path (pass or skip); the
+    // copy-failure/compile-error early returns never reach here.
+    if (outcome.run && outcome.run.run === "skip") {
+      outcome.unverifiedEntry = outcome.run.detail ?? "kind entry not executed";
+    }
     // W43 · C6 (fixes/312_c6_ux · 311_sd_product K3/K4): the substance census
     // rides every runnable verdict, and a non-clean census over an EXISTING
     // job-file set joins the top-level note — so a green tree-run whose job

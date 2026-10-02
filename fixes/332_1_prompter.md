@@ -210,3 +210,114 @@ silent drop impossible. Both recorded run shapes are pinned with their real cens
 verdicts.
 
 **Not done:** the live keyed 24/1 reproduction (scratch bytes gone; no keyed calls run).
+
+---
+
+# Follow-up — 333-1 adversarial audit: F-1 (guard bypassable) + F-2 (unreachable branch)
+
+**Scope:** only `src/lib/codegen.server.ts` + `src/lib/codegen.server.test.ts` (plus this log).
+Audited HEAD `6575669`; scratch `%TEMP%\rt332_1b\`. No keyed calls, no full gate, no `npm run eval`,
+no secrets. The working tree's doc edits (another writer, 333-2) were left untouched.
+
+## F-1 — the async-await refusal was bypassable (RED first, then GREEN)
+
+Ran the audit's harness shape (`probe-f1b.ts`, exported functions called directly) against the
+**pre-fix** source. Verbatim:
+
+```
+=== direct sibling tails (prior async mark present) ===
+baseline .ok            :: uses=["property-read"] validate={"ok":false,"form":"property-read","error":"un-awaited async call used as a value: \"getProperty\" at line 1 (proper"}
+optional ?.ok           :: uses=[] validate={"ok":true}
+computed ["ok"]         :: uses=[] validate={"ok":true}
+optional computed ?.[ ] :: uses=[] validate={"ok":true}
+legal await .ok         :: uses=[] validate={"ok":true}
+legal .then             :: uses=[] validate={"ok":true}
+legal ["then"]          :: uses=[] validate={"ok":true}
+=== local async declarations (no prior) ===
+asyncNamesInScope(arrow)  : []  validate: {"ok":true}
+asyncNamesInScope(fexpr)  : []  validate: {"ok":true}
+asyncNamesInScope(method) : []  validate: {"ok":true}
+```
+
+That reproduces F-1 exactly: `?.ok`, `["ok"]`, `?.["ok"]` escape; and `const N = async (…) =>`,
+`const N = async function`, `async N(` methods are never discovered, so the bound-then-read shape
+escapes for those emissions. **After the fix**, the same probe:
+
+```
+=== direct sibling tails (prior async mark present) ===
+baseline .ok            :: uses=["property-read"] validate={"ok":false,"form":"property-read","error":"un-awaited async call used as a value: \"getProperty\" at line 1 (proper"}
+optional ?.ok           :: uses=["property-read"] validate={"ok":false,"form":"property-read","error":"un-awaited async call used as a value: \"getProperty\" at line 1 (proper"}
+computed ["ok"]         :: uses=["computed-read"] validate={"ok":false,"form":"computed-read","error":"un-awaited async call used as a value: \"getProperty\" at line 1 (comput"}
+optional computed ?.[ ] :: uses=["computed-read"] validate={"ok":false,"form":"computed-read","error":"un-awaited async call used as a value: \"getProperty\" at line 1 (comput"}
+legal await .ok         :: uses=[] validate={"ok":true}
+legal .then             :: uses=[] validate={"ok":true}
+legal ["then"]          :: uses=[] validate={"ok":true}
+=== local async declarations (no prior) ===
+asyncNamesInScope(arrow)  : ["getProperty"]  validate: {"ok":false,"form":"bound-then-read","error":"un-awaited async call used as a value: \"getProperty\" at line 2 (bound-"}
+asyncNamesInScope(fexpr)  : ["getProperty"]  validate: {"ok":false,"form":"bound-then-read","error":"un-awaited async call used as a value: \"getProperty\" at line 2 (bound-"}
+asyncNamesInScope(method) : ["getProperty"]  validate: {"ok":true}
+```
+
+(For the class-method row, discovery now yields `["getProperty"]`; `validate` stays `ok:true` because
+that module never calls the method **by bare name** — a receiver call `obj.m()` is outside the guard,
+stated below.)
+
+**What landed:**
+- `memberAccessAfter(masked, raw, start)` — accepts `.name`, `?.name`, `["name"]`, `?.["name"]`; the
+  computed key's literal text is read from the raw view (masking blanks literal bodies but preserves
+  offsets, so `masked.length === src.length`).
+- Call-tail and bound-then-read both use it; a computed read is the new `computed-read` form; the
+  `computed-read`/`property-read` split keeps the refusal legible.
+- `declaredAsyncFunctionNames` now also discovers `const|let|var NAME = async (…) =>`,
+  `= async function (…)`, `= async x =>`, `(module.)?exports.NAME = async …`, and `async NAME(` /
+  `async *NAME(` methods (with `(?!function\b)` so the anonymous `async function (…)` arm is not
+  misread as a method named `function`).
+- `.then/.catch/.finally` stay legal through **every** tail form (`.then`, `?.then`, `["then"]`,
+  `?.["then"]`); awaited calls stay legal in every declaration form.
+
+**Documented lexical limits (stated in the code comments, not implied):**
+- A callable whose Promise-returning nature is not spelled `async` (`function f() { return new
+  Promise(...) }`, a re-export) is not discovered.
+- `memberAccessAfter` requires a literal computed key to classify it; a dynamic key
+  (`fn(id)[k]`) is treated as a read (conservative — could over-refuse the exotic
+  `fn(id)[someVar]` where the value happens to be `.then`).
+- A method invoked through a **receiver** (`obj.m()`, `this.m()`) is not matched, because the guard
+  keys on bare-name calls only; class/object async methods are now *discovered* (so `asyncNamesInScope`
+  is truthful) but a receiver call remains outside the refusal by design.
+
+## F-2 — the "does not reconcile" branch was unreachable (chosen: DELETE it)
+
+I chose deletion, not a synthetic-census reachability shim. `treeChunkPlanCensus` derives
+`planned`/`unbound` as complementary `.filter`s of `declared`, so `ok:false` is impossible from the
+producer; a runtime branch that can never fire is dishonest theater, and the three
+`deepEqual(treePlanCensusReconciles(census), {ok:true,…})` assertions tested the derivation's own
+invariant, so no production change could fail them. A synthetic-overlap test would have given the
+**predicate** a falsifiable test but still left the **production branch** dead. Removed:
+`treePlanCensusReconciles` (export), its import, the three census assertions, the "does not
+reconcile" `p6.tree.shortfall` row, and the stray reconcile assertion in the partition test. The
+census now carries a one-line comment stating the partition holds by construction. Verified nothing
+else imports the removed export (`grep treePlanCensusReconciles` → only docs/audit references).
+
+## Tests + gates
+
+`src/lib/codegen.server.test.ts`: **161 → 163** (+2 — one per F-1 shape class):
+
+```
+Node 22.23.2 : # tests 163 · # pass 163 · # fail 0
+Node 24.15.0 : # tests 163 · # pass 163 · # fail 0
+```
+
+New: `333-1 F-1: optional-chaining and computed member reads … are refused` (with the
+awaited/`.then`/`["then"]` legal controls and the bound-then-read line check) and
+`333-1 F-1: async-arrow / function-expression / method / CJS-export declarations are discovered and
+refused` (arrow / single-param arrow / function-expression / `exports.NAME = async` / class method,
+plus the `asyncThing` negative control). Regression: `gates.test.ts` **88/88** (Node 22).
+`npx tsc --noEmit` → zero diagnostics in my two files; `npx eslint` on them → exit 0.
+
+## Verdict / not closed
+
+**F-1 — closed** for the audited bypasses; legal shapes unchanged; residual lexical limits stated
+above and in the code. **F-2 — closed by deletion** (unreachable branch + unfalsifiable tests gone).
+Not closed: class/object async methods called through a receiver (`obj.m()`) and Promise-returning
+callables not spelled `async` remain outside the guard — genuinely undecidable from a bare name, and
+now documented rather than implied.

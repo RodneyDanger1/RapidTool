@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import {
   assembleTreeEntry,
   asyncExportNames,
+  asyncNamesInScope,
   briefFitSatisfied,
   chunkTypeSignatures,
   crossChunkDuplicateDeclarations,
@@ -63,7 +64,6 @@ import {
   orderTreeChunks,
   treeChunkPlan,
   treeChunkPlanCensus,
-  treePlanCensusReconciles,
   treePathForChunk,
   TREE_CHUNK0_RELOCATED_PATH,
   TREE_ENTRY_PATH,
@@ -3814,6 +3814,96 @@ describe("W46/332-1 (P1) un-awaited async imports", () => {
     assert.equal(validateSynthesisModule(syncRead, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true);
   });
 
+  it("333-1 F-1: optional-chaining and computed member reads off an un-awaited async call are refused", () => {
+    const optional = "function f(id) { return getProperty(id)?.ok; }\nmodule.exports.f = f;";
+    const optionalV = validateSynthesisModule(optional, ["f"], ["f"], GET_PROPERTY_PRIOR);
+    assert.equal(optionalV.ok, false, "`?.ok` reads off the Promise exactly like `.ok`");
+    if (!optionalV.ok) assert.match(optionalV.error, /"getProperty" at line 1 \(property-read\)/);
+
+    const computed = 'function f(id) { return getProperty(id)["ok"]; }\nmodule.exports.f = f;';
+    const computedV = validateSynthesisModule(computed, ["f"], ["f"], GET_PROPERTY_PRIOR);
+    assert.equal(computedV.ok, false, "`[\"ok\"]` reads off the Promise exactly like `.ok`");
+    if (!computedV.ok) assert.match(computedV.error, /\(computed-read\)/);
+
+    const optionalComputed = 'function f(id) { return getProperty(id)?.["ok"]; }\nmodule.exports.f = f;';
+    assert.equal(validateSynthesisModule(optionalComputed, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, false);
+
+    // The bound-then-read shape through the same tails.
+    const boundOptional = [
+      "function f(id) {",
+      "  const property = getProperty(id);",
+      "  return property?.ok;",
+      "}",
+      "module.exports.f = f;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(boundOptional, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, false);
+    const boundComputed = [
+      "function f(id) {",
+      "  const property = getProperty(id);",
+      '  return property["ok"];',
+      "}",
+      "module.exports.f = f;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(boundComputed, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, false);
+    // The reported line is the member READ, not the call binding.
+    const boundComputedV = validateSynthesisModule(boundComputed, ["f"], ["f"], GET_PROPERTY_PRIOR);
+    if (!boundComputedV.ok) assert.match(boundComputedV.error, /"getProperty" at line 3 \(bound-then-read\)/);
+
+    // Legal shapes through the same tails stay accepted.
+    const awaitedOptional = [
+      "async function f(id) {",
+      "  const property = await getProperty(id);",
+      "  return property?.ok;",
+      "}",
+      "module.exports.f = f;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(awaitedOptional, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true, "await is the fix");
+    const computedThen = 'function f(id) { return getProperty(id)["then"](function (p) { return p.ok; }); }\nmodule.exports.f = f;';
+    assert.equal(validateSynthesisModule(computedThen, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true, "computed `.then` is a legal consumer");
+    const optionalThen = "function f(id) { return getProperty(id)?.then(function (p) { return p.ok; }); }\nmodule.exports.f = f;";
+    assert.equal(validateSynthesisModule(optionalThen, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true);
+  });
+
+  it("333-1 F-1: async-arrow / function-expression / method / CJS-export declarations are discovered and refused", () => {
+    const boundRead = "function f(id) { const p = getProperty(id); return p.ok; }\nmodule.exports.f = f;";
+    const forms: [string, string][] = [
+      ["arrow const", `const getProperty = async (id) => { return { ok: true, id: id }; };\n${boundRead}\nmodule.exports.getProperty = getProperty;`],
+      ["single-param arrow", `const getProperty = async id => { return { ok: true, id: id }; };\n${boundRead}\nmodule.exports.getProperty = getProperty;`],
+      ["function expression", `const getProperty = async function (id) { return { ok: true, id: id }; };\n${boundRead}\nmodule.exports.getProperty = getProperty;`],
+    ];
+    for (const [label, mod] of forms) {
+      assert.ok(asyncNamesInScope(mod).includes("getProperty"), `${label}: the async declaration is discovered`);
+      const v = validateSynthesisModule(mod, ["f", "getProperty"], ["f", "getProperty"]);
+      assert.equal(v.ok, false, `${label}: the un-awaited bound read is refused`);
+      if (!v.ok) assert.match(v.error, /bound-then-read/);
+    }
+
+    // A CJS-surface async export is discovered too (the module may not use `const`).
+    const cjs = `module.exports.getProperty = async (id) => { return { ok: true, id: id }; };\n${boundRead}`;
+    assert.ok(asyncNamesInScope(cjs).includes("getProperty"), "an `exports.NAME = async` assignment is discovered");
+    assert.equal(validateSynthesisModule(cjs, ["f", "getProperty"], ["f", "getProperty"]).ok, false);
+
+    // A class async method is discovered lexically (bare calls only — see the guard's limit).
+    const klass = [
+      "class PropertyStore {",
+      "  async getProperty(id) {",
+      "    return { ok: true, id: id };",
+      "  }",
+      "}",
+      "module.exports.PropertyStore = PropertyStore;",
+    ].join("\n");
+    assert.ok(asyncNamesInScope(klass).includes("getProperty"), "an `async NAME(` method is discovered");
+
+    // A non-async callable that merely starts with `async` is NOT discovered.
+    const asyncThing = "const x = asyncThing();\nfunction f(id) { const p = x; return p.ok; }\nmodule.exports.f = f;";
+    assert.equal(asyncNamesInScope(asyncThing).includes("asyncThing"), false);
+    assert.deepEqual(asyncNamesInScope("const y = asyncValue;"), []);
+
+    // The awaited arrow is accepted (await is the fix, regardless of declaration form).
+    const awaitedArrow = `const getProperty = async (id) => { return { ok: true, id: id }; };\nasync function f(id) { const p = await getProperty(id); return p.ok; }\nmodule.exports.f = f;\nmodule.exports.getProperty = getProperty;`;
+    assert.equal(validateSynthesisModule(awaitedArrow, ["f", "getProperty"], ["f", "getProperty"]).ok, true);
+  });
+
   it("refuses a module's OWN async function used as a value without await (single-module path, no prior chunks)", () => {
     const mod = [
       "async function load(id) { return { ok: true }; }",
@@ -4006,7 +4096,6 @@ describe("W46/332-1 (P2) plan-coverage determinism", () => {
     assert.deepEqual(census.unbound, ["track"], "the declared job no signature names is COUNTED, never silent");
     assert.equal(census.paths.includes("src/jobs/track.ts"), false, "an unbound job has no planned file");
     assert.equal(census.paths.filter((x) => x.startsWith("src/jobs/")).length, 4, "the four bound jobs get files");
-    assert.deepEqual(treePlanCensusReconciles(census), { ok: true, silent: [] });
     const trace = archTrace(p);
     assert.equal(trace.present, true);
     assert.ok(trace.missing.length > 0, "the recorded run-B tree does not carry every capability — p6-arch FAILs");
@@ -4019,7 +4108,6 @@ describe("W46/332-1 (P2) plan-coverage determinism", () => {
     assert.equal(sigs.length, 25, "precondition: the recorded run-A spec carries 25 signatures");
     const census = treeChunkPlanCensus(p, sigs);
     assert.deepEqual(census.unbound, ["track", "publish"]);
-    assert.deepEqual(treePlanCensusReconciles(census), { ok: true, silent: [] });
     const trace = archTrace(p);
     assert.equal(trace.missing.length, 0, "run A's five-file tree carries every typeSignature capability");
     assert.ok(trace.rows.length > 0);
@@ -4038,7 +4126,6 @@ describe("W46/332-1 (P2) plan-coverage determinism", () => {
     assert.deepEqual(census.declared, ["flip"]);
     assert.deepEqual(census.planned, ["flip"]);
     assert.deepEqual(census.unbound, []);
-    assert.deepEqual(treePlanCensusReconciles(census), { ok: true, silent: [] });
   });
 
   it("the persisted shortfall row carries the full declared/planned/unbound partition", async () => {
@@ -4047,10 +4134,6 @@ describe("W46/332-1 (P2) plan-coverage determinism", () => {
     const row = (q.logs ?? []).find((l) => l.event === "p6.tree.shortfall");
     assert.ok(row, "the shortfall row is persisted");
     assert.match(row!.detail, /declared 4, planned 1, unbound 3/);
-    assert.ok(
-      !(q.logs ?? []).some((l) => l.event === "p6.tree.shortfall" && /does not reconcile/.test(l.detail)),
-      "a well-formed census never emits the reconcile-violation row",
-    );
   });
 });
 

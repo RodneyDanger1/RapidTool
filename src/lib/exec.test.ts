@@ -17,6 +17,9 @@ import { mkdtempSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/** F-3: how long a scoped leftover may settle before it counts as a real leak. */
+const LEAK_SETTLE_MS = 5_000;
+
 const okRunner: RunnerFn = async (code) => ({
   ok: true,
   stdout: `echo:${code}`,
@@ -136,39 +139,51 @@ describe("scratch-dir cleanup (node-runner)", () => {
   });
 
   it("leaves no rapidtool-run-* scratch dir behind after a real run", { skip: !runnerAvailable() }, async () => {
-    const list = () =>
-      new Set(readdirSync(tmpdir()).filter((n: string) => n.startsWith("rapidtool-run-")));
-    const before = list();
-    const res = await runNodeBounded("console.log('cleanup-ok')");
-    assert.equal(res.ok, true);
-    // The node:test runner executes FILES in parallel, and sibling files
-    // (tree-run, driver suites) legitimately hold short-lived scratch dirs
-    // while their own children are mid-flight — a single instant scan would
-    // false-positive on them. Every runNodeBounded cleans its own dir at
-    // finish, so poll briefly for the diff to clear; a dir that persists
-    // ~2s past its run IS a genuine leak and still fails the test.
-    let after = list();
-    let waited = 0;
-    const leftover = [...after].filter((n) => !before.has(n));
-    // Sibling files (tree-run, journey-driver suites) legitimately hold
-    // short-lived scratch dirs while their own children are mid-flight — a
-    // single instant scan would false-positive on them. Every runNodeBounded
-    // cleans its own dir at finish, so poll for the diff to clear.
-    // 45s (boundary fix, 216l era): T-18's tree-run suites spawn real
-    // `npm run typecheck` / `npm test` children on emitted micro-trees and
-    // legitimately hold their own rapidtool-run-* scratch dirs for tens of
-    // seconds under full-suite parallelism (gate.sh's first real run exposed
-    // this with the old 10s grace — run 4 of 4 failed there, passed in the
-    // lighter sweeps). A dir that survives a full 45s IS a genuine leak.
-    while (leftover.length > 0 && waited < 45_000) {
-      await new Promise((r) => setTimeout(r, 250));
-      waited += 250;
-      after = list();
-      leftover.length = 0;
-      leftover.push(...[...after].filter((n) => !before.has(n)));
-    }
-    for (const dir of leftover) {
-      assert.fail(`scratch dir ${dir} was not cleaned up`);
+    // F-3 (fixes/333_1_verifier.md): scan only the dirs THIS run created.
+    // node:test runs files as parallel child processes, and sibling tree-run
+    // suites legitimately hold their own rapidtool-run-* dirs in the shared OS
+    // temp for tens of seconds — a global tmpdir diff attributes a sibling's
+    // in-flight dir to this test and reds the suite under load (reproduced:
+    // "scratch dir rapidtool-run-SIM… was not cleaned up"). Point os.tmpdir()
+    // (TEMP on win32; TMPDIR/TMP elsewhere) at a private root for the duration,
+    // so a dir that appears here is by construction this run's own — the leak
+    // assertion keeps its full teeth.
+    const root = mkdtempSync(join(tmpdir(), "rapidtool-exec-scope-"));
+    const saved = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+    try {
+      process.env.TMPDIR = root;
+      process.env.TMP = root;
+      process.env.TEMP = root;
+      const list = () =>
+        new Set(readdirSync(root).filter((n: string) => n.startsWith("rapidtool-run-")));
+      const before = list();
+      const res = await runNodeBounded("console.log('cleanup-ok')");
+      assert.equal(res.ok, true);
+      // runNodeBounded removes its own dir in finish() before it resolves, so a
+      // clean run leaves nothing; poll briefly for a deferred cleanup (Windows
+      // lock / setImmediate retry) to settle, then a surviving dir is a genuine
+      // leak and still fails the test.
+      let after = list();
+      let waited = 0;
+      const leftover = [...after].filter((n) => !before.has(n));
+      while (leftover.length > 0 && waited < LEAK_SETTLE_MS) {
+        await new Promise((r) => setTimeout(r, 100));
+        waited += 100;
+        after = list();
+        leftover.length = 0;
+        leftover.push(...[...after].filter((n) => !before.has(n)));
+      }
+      for (const dir of leftover) {
+        assert.fail(`scratch dir ${dir} was not cleaned up`);
+      }
+    } finally {
+      if (saved.TMPDIR === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved.TMPDIR;
+      if (saved.TMP === undefined) delete process.env.TMP;
+      else process.env.TMP = saved.TMP;
+      if (saved.TEMP === undefined) delete process.env.TEMP;
+      else process.env.TEMP = saved.TEMP;
+      removeScratchDir(root, true);
     }
   });
 });

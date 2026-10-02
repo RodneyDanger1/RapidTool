@@ -972,10 +972,11 @@ describe("217d T-18 — the emitted project's own build script", () => {
 });
 
 // ---------------------------------------------------------------------------
-// T2 (332-3) — `ok` is "nothing ran red"; `verified` is "the declared checks
-// actually ran". A tree whose declared `typecheck`/`build` could not execute
-// (no node_modules) is ok-but-UNVERIFIED: it carries `verified:false` and
-// names the unrun legs, so no consumer can read the green as a verification.
+// T2 (332-3) — `ok` is "nothing ran red"; `declaredScriptsVerified` is "every
+// DECLARED project script actually ran". A tree whose declared
+// `typecheck`/`build` could not execute (no node_modules) is ok-but-UNVERIFIED:
+// it carries `declaredScriptsVerified:false` and names the unrun legs, so no
+// consumer can read the green as a declared-script verification.
 // ---------------------------------------------------------------------------
 describe("T2 (332-3) — a declared-but-unverified project tool is never a pass", () => {
   const writeProjectTree = (root: string, scripts: Record<string, string>): void => {
@@ -986,51 +987,51 @@ describe("T2 (332-3) — a declared-but-unverified project tool is never a pass"
   const emptyCompile = (dir: string) =>
     ({ ok: true, dir, checked: 0, passed: 0, failed: 0, skipped: 0, verdicts: [] });
 
-  it("a declared-but-uninstalled typecheck → ok:true but verified:false, the leg named", async () => {
+  it("a declared-but-uninstalled typecheck → ok:true but declaredScriptsVerified:false, the leg named", async () => {
     const dir = tempDir();
     try {
       writeProjectTree(dir, { typecheck: "tsc --noEmit", test: "node --version" });
       const r = await treeRunAsConsumer(dir);
       assert.equal(r.ok, true, "nothing ran red — the tree is not red");
       assert.equal(r.project!.typecheck.run, "skip");
-      assert.equal(r.project!.typecheck.verified, false, "a skip is not verified");
-      assert.equal(r.project!.test.verified, true, "an executed script IS verified");
-      assert.deepEqual(r.unverified, ["typecheck"], "the unrun DECLARED leg is named at the top level");
-      assert.deepEqual(r.project!.unverified, ["typecheck"]);
-      assert.equal(r.project!.verified, false);
-      assert.equal(r.verified, false, "an ok-but-unverified tree must never read as verified");
+      assert.equal(r.project!.typecheck.executed, false, "a skip did not execute");
+      assert.equal(r.project!.test.executed, true, "an executed script");
+      assert.deepEqual(r.unverifiedDeclaredScripts, ["typecheck"], "the unrun DECLARED leg is named at the top level");
+      assert.deepEqual(r.project!.unverifiedDeclaredScripts, ["typecheck"]);
+      assert.equal(r.project!.declaredScriptsVerified, false);
+      assert.equal(r.declaredScriptsVerified, false, "an ok-but-unverified tree must never read as declared-verified");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("every declared script ran → verified:true and no unverified rows", async () => {
+  it("every declared script ran → declaredScriptsVerified:true and no unverified rows", async () => {
     const dir = tempDir();
     try {
       writeProjectTree(dir, { typecheck: "node --version", test: "node --version" });
       const r = await treeRunAsConsumer(dir);
       assert.equal(r.ok, true);
-      assert.equal(r.project!.typecheck.verified, true);
-      assert.equal(r.project!.test.verified, true);
-      assert.equal(r.project!.verified, true);
-      assert.equal(r.verified, true, "every declared check ran");
-      assert.equal(r.unverified, undefined, "nothing unverified");
-      assert.equal(r.project!.unverified, undefined);
+      assert.equal(r.project!.typecheck.executed, true);
+      assert.equal(r.project!.test.executed, true);
+      assert.equal(r.project!.declaredScriptsVerified, true);
+      assert.equal(r.declaredScriptsVerified, true, "every declared script ran");
+      assert.equal(r.unverifiedDeclaredScripts, undefined, "nothing unverified");
+      assert.equal(r.project!.unverifiedDeclaredScripts, undefined);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("absent scripts are ABSENT, not unverified (verified stays true)", async () => {
+  it("absent scripts are ABSENT, not unverified (declaredScriptsVerified stays true)", async () => {
     const dir = tempDir();
     try {
       writeEmittedTree(dir, PASSING_SPEC); // package.json declares no scripts block
       const r = await treeRunAsConsumer(dir);
       assert.equal(r.ok, true);
       assert.equal(r.project!.typecheck.run, "skip");
-      assert.equal(r.project!.typecheck.verified, undefined, "an undeclared script is neither verified nor unverified");
-      assert.equal(r.verified, true);
-      assert.equal(r.unverified, undefined);
+      assert.equal(r.project!.typecheck.executed, undefined, "an undeclared script was neither declared nor executed");
+      assert.equal(r.declaredScriptsVerified, true);
+      assert.equal(r.unverifiedDeclaredScripts, undefined);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1043,14 +1044,111 @@ describe("T2 (332-3) — a declared-but-unverified project tool is never a pass"
       compile: emptyCompile("d"),
       tests: [],
       run: null,
-      verified: true,
+      declaredScriptsVerified: true,
     };
-    const unverified = { ...base, verified: false, unverified: ["typecheck"] };
+    const unverified = { ...base, declaredScriptsVerified: false, unverifiedDeclaredScripts: ["typecheck"] };
     assert.notEqual(
       treeVerdictHash(base),
       treeVerdictHash(unverified),
-      "a verified and an ok-but-unverified verdict must not hash the same",
+      "a declared-verified and an ok-but-unverified verdict must not hash the same",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-4 (332-3b) — the 333-1 audit found `verified:true` on a clean game tree
+// whose kind entry was a DELIBERATE UI-shell skip. The field is renamed to say
+// exactly what it measures (the emitted package.json's declared scripts) and
+// the skip is represented as `unverifiedEntry` with its reason, so a consumer
+// can never read a deliberate UI-shell skip as a verified behaviour. T1
+// semantics are unchanged: a clean UI-shell tree is still green, a corrupted
+// generated core still reds.
+// ---------------------------------------------------------------------------
+describe("F-4 (332-3b) — a deliberate UI-shell skip is never 'behaviour verified'", () => {
+  const GAME_BOOT = [
+    `import { bootGame } from "./ui/console";`,
+    `const el = document.getElementById("root");`,
+    `if (!el) throw new Error("missing #root element");`,
+    `bootGame(el as HTMLElement);`,
+    ``,
+  ].join("\n");
+  const GAME_RECORD = (file: string): string =>
+    JSON.stringify({ kind: "game", specGraph: { nodes: [{ id: "job-level", file }], order: ["job-level"] } });
+  const writeGame = (root: string, coreBody: string): void => {
+    write(
+      root,
+      "package.json",
+      JSON.stringify({
+        name: "game-f4",
+        type: "module",
+        main: "src/main.ts",
+        // The real scaffold's game scripts: tsc/vite are unresolvable without
+        // node_modules, so they are the declared-but-unverified legs.
+        scripts: {
+          typecheck: "tsc --noEmit",
+          build: "vite build",
+          test: "node --experimental-strip-types --test tests/oracle.spec.ts",
+        },
+      }),
+    );
+    write(root, "index.html", '<!doctype html><html><body><div id="root"></div><script type="module" src="/src/main.ts"></script></body></html>\n');
+    write(root, "src/main.ts", GAME_BOOT);
+    write(root, "src/jobs/level.ts", coreBody);
+    write(root, "tests/oracle.spec.ts", PASSING_SPEC);
+    write(root, ".rapidtool/project.json", GAME_RECORD("src/jobs/level.ts"));
+  };
+  const hasKey = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+
+  it("clean game tree: green, but the UI-shell skip is an UNVERIFIED entry (not 'verified')", async () => {
+    const dir = tempDir();
+    try {
+      writeGame(dir, "export function play(n: number): number { return n + 1; }\n");
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true, "T1 semantics intact — the clean UI-shell tree is green");
+      assert.equal(r.run!.run, "skip");
+      assert.equal(r.run!.kind, "ui-shell");
+      assert.equal(r.core!.run, "pass", "the generated core loaded");
+      // The over-broad names are GONE: nothing named `verified` may over-claim.
+      assert.equal(hasKey(r, "verified"), false, "no `verified` field may be read as behaviour-verified");
+      assert.equal(hasKey(r, "unverified"), false, "no bare `unverified` field");
+      // The precise field measures DECLARED SCRIPTS ONLY — and says so.
+      assert.equal(r.declaredScriptsVerified, false, "the fresh tree's declared tsc/vite did not run");
+      assert.deepEqual(r.unverifiedDeclaredScripts, ["typecheck", "build"]);
+      // The deliberate entry skip IS represented, with its reason.
+      assert.ok(r.unverifiedEntry, "the UI-shell skip is carried as an unverified entry");
+      assert.match(r.unverifiedEntry!, /UI shell/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("an entry that EXECUTED is not an unverified entry (no under-claim)", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "headless-f4", type: "module", main: "src/main.ts", scripts: { typecheck: "node --version" } }));
+      write(dir, "src/main.ts", "export const boot = (): string => 'ok';\n");
+      write(dir, "tests/oracle.spec.ts", PASSING_SPEC);
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.run!.run, "pass", "the package.json main executed headless");
+      assert.equal(r.unverifiedEntry, undefined, "an executed entry is never an unverified entry");
+      assert.equal(r.declaredScriptsVerified, true, "the declared typecheck ran");
+      assert.deepEqual(r.unverifiedDeclaredScripts, undefined);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("corrupted generated core still reds — the skip is not a blanket pass (T1 control)", async () => {
+    const dir = tempDir();
+    try {
+      writeGame(dir, "function x( { broken syntax\n");
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, false, "a corrupted generated core is never ok:true");
+      assert.equal(r.core!.run, "fail");
+      assert.ok((r.error ?? "").includes("generated core module failed to LOAD"), r.error);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -28,6 +28,7 @@ import {
   reject,
   repairCycleLiveDeps,
   repairTreeDir,
+  resolveDoctorKeyState,
   resolveDoctorSpendSource,
   retry,
   runAcceptance,
@@ -3411,5 +3412,38 @@ describe("W46 · 332-2 (L1/AW45-c06) — per-project persisted run spend", () =>
       rmSync(dir, { recursive: true, force: true });
       resetSessionBudget();
     }
+  });
+});
+
+describe("W46 · 332-2 (F-5) — doctor key state (presence ≠ validity)", () => {
+  it("a stubbed keyed rejection surfaces as rejected with the tail-only source", async () => {
+    const state = await resolveDoctorKeyState(true, {
+      code: "RT_E_LLM_KEY_REJECTED",
+      at: 1759000000000,
+      keySource: "the process environment (tail …a1b2)",
+    });
+    assert.equal(state.keyState, "rejected");
+    assert.equal(state.lastKeyed?.code, "RT_E_LLM_KEY_REJECTED");
+    assert.equal(state.lastKeyed?.keySource, "the process environment (tail …a1b2)");
+    // The source label is tail-only — no full-key shape can ride through.
+    assert.ok(!/sk-/.test(state.lastKeyed?.keySource ?? ""), "no key material in the source label");
+  });
+
+  it("no keyed call recorded (key present) is the honest unverified floor", async () => {
+    // No override: reads the process status surface best-effort. On a bare-Node
+    // host the TanStack server fn cannot run, so nothing was captured — the
+    // state must be `unverified`, never an implied green.
+    const state = await resolveDoctorKeyState(true);
+    assert.equal(state.keyState, "unverified");
+    assert.equal(state.lastKeyed, undefined);
+    // A hostile explicit payload is dropped the same way.
+    assert.deepEqual(await resolveDoctorKeyState(true, {}), { keyState: "unverified" });
+  });
+
+  it("no key is not-configured; a transient failure stays unverified", async () => {
+    assert.deepEqual(await resolveDoctorKeyState(false), { keyState: "not-configured" });
+    const transient = await resolveDoctorKeyState(true, { code: "RT_E_LLM_TIMEOUT", at: 1 });
+    assert.equal(transient.keyState, "unverified");
+    assert.equal(transient.lastKeyed?.code, "RT_E_LLM_TIMEOUT");
   });
 });
