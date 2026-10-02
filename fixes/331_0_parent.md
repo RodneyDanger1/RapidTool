@@ -115,3 +115,24 @@ above trustworthy on both runtimes.
 7. 331-3's earlier report of a **game-kind false-red** in `resolveHeadlessEntry` (a browser boot
    importing an extensionless `./ui/console`) is real and un-owned; the wave's product kinds are
    unaffected.
+8. **The last mile to a green keyed tree is a generated-code async defect** (found by the parent on a
+   second bounded keyed run, after the wave's fixes). That run's tree **compiles 13/13**, its
+   **generated core loads and runs** (`core.entry src/jobs/invoice.ts → run:"pass"`), and its spec is
+   **24 pass / 1 fail** — where the earlier run died at load with the duplicate declaration. The single
+   remaining failure is an **unhandled rejection**: the generated `src/jobs/rehab.ts` calls the async
+   `getProperty(propertyId)` **without `await`** and then reads `property.ok === false` on the returned
+   Promise, so the promise rejects after the test ends
+   (`ValidationError: propertyId is required and must be a non-empty string`) and node:test reds the
+   whole spec file.
+   - The parent landed the necessary half in `scaffold.ts`: the emitted tree-job guard now **awaits**
+     the probe call (plus a pinning test), so a returned rejection is caught instead of floating.
+     Regenerating the tree confirms the emitted bytes changed — the rejection that remains is created
+     **inside** the generated module by a fire-and-forget call, which no probe-side guard can catch.
+   - Remaining honest work (next wave, `codegen.server.ts`): teach the synthesis prompt/validator that
+     an imported async function must be awaited, or make `validateSynthesisModule` refuse a
+     `Promise.resolve().then(...)` body that reads a property off a non-awaited async callee. Until
+     then a keyed run can still produce a tree that loads and then fails its own spec.
+   - Also still true and un-fixed: `p6-test`/`p6-verified` require a **green tree-run** to mint
+     (`mintTreeRunTested`), and `lattice` coverage varies run to run — the first keyed run emitted 7
+     files (`p6-arch` PASS), the second emitted 5 (`p6-arch` FAIL). Keyed synthesis is not
+     deterministic in coverage today.

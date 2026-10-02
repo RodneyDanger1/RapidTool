@@ -382,6 +382,36 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
     }
   });
 
+  it("331: the tree-job oracle probe AWAITS the call (an async rejection must not float past the test)", () => {
+    // The "guarded probe" row calls a REAL job function. Those functions are
+    // async, so a synchronous try/catch alone lets the rejection outlive the
+    // test: node:test then reports "generated asynchronous activity after the
+    // test ended" as an unhandledRejection and the whole spec FILE fails,
+    // reddening the tree for a reason unrelated to product quality. Awaiting
+    // keeps the rejection inside the guard.
+    const result = scaffoldProject({
+      ...fullRun(),
+      generatedTree: [
+        {
+          path: "src/jobs/dispatch.ts",
+          source: "export async function dispatchOrder() { throw new Error(\"ValidationError: propertyId is required\"); }\n",
+          hash: "h-dispatch",
+          attempt: 0,
+        },
+      ],
+    });
+    const spec = bodyOf(result, "tests/oracle.spec.ts");
+    assert.match(
+      spec,
+      /await \(jm_\w+\[first\] as \(\.\.\.a: unknown\[\]\) => unknown\)\(/,
+      "the job probe awaits the call so a rejection is caught, not floated",
+    );
+    assert.ok(
+      !/^\s+\(jm_\w+\[first\][^\n]*\);\s*$/m.test(spec),
+      "no bare, un-awaited probe call survives",
+    );
+  });
+
   it("keeps the exported project record byte-identical to io.exportProjectJson", () => {
     const p = fullRun();
     const result = scaffoldProject(p);
