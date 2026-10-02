@@ -143,7 +143,10 @@ function scanFile(file: MineSourceFile): MineFileEntry {
     for (const raw of names.split(",")) {
       const item = raw.trim().replace(/^type\s+/, "");
       if (!item) continue;
-      const name = item.split(/\s+as\s+/)[0].trim();
+      // `local as public` exports the ALIAS (`public`), not the local binding:
+      // take the last `as` segment; a plain specifier is its own exported name.
+      const asParts = item.split(/\s+as\s+/);
+      const name = (asParts.length > 1 ? asParts[asParts.length - 1]! : asParts[0]!).trim();
       if (name) addExport(name);
     }
     if (withFrom) {

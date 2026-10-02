@@ -156,7 +156,7 @@ function expansionPrompt(
     trimmedBrief.length > EXPAND_BRIEF_MAX_CHARS
       ? `${trimmedBrief.slice(0, EXPAND_BRIEF_MAX_CHARS).trimEnd()}${TRUNCATION_MARK}`
       : trimmedBrief;
-  const policyLines = (Array.isArray(policies) ? policies : [])
+  const policyAll = (Array.isArray(policies) ? policies : [])
     .filter((p): p is string => typeof p === "string")
     .map((p) => p.trim())
     .filter(Boolean)
@@ -164,21 +164,39 @@ function expansionPrompt(
       p.length > EXPAND_POLICY_MAX_CHARS
         ? `${p.slice(0, EXPAND_POLICY_MAX_CHARS).trimEnd()} …[TRUNCATED]`
         : p,
-    )
-    .slice(0, EXPAND_POLICY_MAX_COUNT)
-    .map((p) => `- ${p}`);
-  const lessonLines = (Array.isArray(lessons) ? lessons : [])
+    );
+  const policyShown = policyAll.slice(0, EXPAND_POLICY_MAX_COUNT);
+  const policyDropped = policyAll.length - policyShown.length;
+  const policyLines = [
+    ...policyShown.map((p) => `- ${p}`),
+    // W49/335-1: the COUNT cap cut is marked exactly like the char cap — the
+    // module's own contract is "a silent slice would hide evidence from the model".
+    ...(policyDropped > 0
+      ? [
+          `…[POLICIES-ELIDED: ${policyDropped} policy row(s) beyond the ${EXPAND_POLICY_MAX_COUNT} cap — not sent to the model]`,
+        ]
+      : []),
+  ];
+  const lessonAll = (Array.isArray(lessons) ? lessons : [])
     .filter((l): l is string => typeof l === "string")
     .map((l) => l.trim())
     .filter(Boolean)
     .filter((l, i, a) => a.indexOf(l) === i) // dedupe, first occurrence wins
-    .slice(0, EXPAND_LESSON_MAX_COUNT)
     .map((l) =>
       l.length > EXPAND_LESSON_MAX_CHARS
         ? `${l.slice(0, EXPAND_LESSON_MAX_CHARS).trimEnd()} …[TRUNCATED]`
         : l,
-    )
-    .map((l) => `- ${l}`);
+    );
+  const lessonShown = lessonAll.slice(0, EXPAND_LESSON_MAX_COUNT);
+  const lessonDropped = lessonAll.length - lessonShown.length;
+  const lessonLines = [
+    ...lessonShown.map((l) => `- ${l}`),
+    ...(lessonDropped > 0
+      ? [
+          `…[LESSONS-ELIDED: ${lessonDropped} lesson row(s) beyond the ${EXPAND_LESSON_MAX_COUNT} cap — not sent to the model]`,
+        ]
+      : []),
+  ];
   const lines = [
     "Expand the brief below into an EXHAUSTIVE, BUILD-READY implementation spec. The spec is consumed by a builder agent that must produce WORKING code with tests and docs — phrase every requirement and edge case so a test can observe and verify it.",
     "Reply with ONE JSON object with EXACTLY these six keys:",

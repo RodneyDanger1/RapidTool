@@ -1896,17 +1896,17 @@ export function HomeScreen() {
                       select(p.id);
                       void nav({ to: "/run/$id", params: { id: p.id } });
                     }}
-                    className="flex w-full items-center justify-between rounded-md border border-border bg-raised px-3 py-3 text-left hover:border-accent/40"
+                    className="flex w-full items-center justify-between gap-2 rounded-md border border-border bg-raised px-3 py-3 text-left hover:border-accent/40"
                   >
-                    <span>
-                      <span className="block text-sm font-medium">{p.name}</span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium [overflow-wrap:anywhere]">{p.name}</span>
                       <span className="mt-0.5 block font-mono text-xs text-muted">
                         {p.domain} ·{" "}
                         <span title={`P${p.currentPhase}`}>Phase {p.currentPhase + 1} of 13</span> ·{" "}
                         {PROJECT_STATUS_LABEL[p.status]}
                       </span>
                     </span>
-                    <ChevronRight className="h-4 w-4 text-faint" />
+                    <ChevronRight className="h-4 w-4 shrink-0 text-faint" />
                   </button>
                 </li>
               ))
@@ -2800,6 +2800,16 @@ export function RunScreen({ id }: { id: string }) {
 
   return (
     <div className="flex min-h-dvh flex-col bg-bg">
+      {/* 335-5 a11y: the Run screen is the one screen with a 13-item phase nav
+          ahead of the content, so give keyboard/AT users a first-stop skip
+          link (the audit found the screen had header/nav/aside landmarks but
+          no `main`, unlike Home). */}
+      <a
+        href="#run-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-[60] focus:rounded-md focus:border focus:border-accent focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-fg focus:shadow-lg"
+      >
+        Skip to main content
+      </a>
       {/* R6-f12 (330_6): the Run header (name/rename, status chips, Autopilot,
           Wild, Guide/Settings/Shortcuts) was the last unwrapped Run surface —
           a render throw there unmounted the WHOLE Run screen via the router's
@@ -2809,7 +2819,7 @@ export function RunScreen({ id }: { id: string }) {
           `ui.pane_crash` row lands. */}
       <PaneBoundary label="Run header">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 sm:px-5">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Link to="/" className="flex items-center gap-3">
             <Mark />
             <span className="font-medium tracking-tight">RapidTool</span>
@@ -2835,7 +2845,13 @@ export function RunScreen({ id }: { id: string }) {
           ) : (
             <button
               type="button"
-              className="hidden text-sm text-muted sm:inline"
+              // 335-5: a hand-built or no-whitespace brief can make `inferName`
+              // (engine.ts) return a very long single token; without a cap the
+              // header grew the PAGE to 2404px (probe). Cap + ellipsize here so
+              // the name can never blow out the layout (the full name stays in
+              // the title and the rename input).
+              title={project.name}
+              className="hidden max-w-[46vw] min-w-0 truncate text-sm text-muted sm:inline-block"
               onClick={() => {
                 setDraftName(project.name);
                 setEditingName(true);
@@ -2949,7 +2965,8 @@ export function RunScreen({ id }: { id: string }) {
             throw here keeps the Run header + phase rail + diagnostics mounted
             and lands one `ui.pane_crash` row. */}
         <PaneBoundary label="Run screen">
-        <section
+        <main
+          id="run-main"
           className="min-w-0 border-b border-line lg:border-b-0 lg:border-r"
           aria-busy={running || undefined}
         >
@@ -3316,7 +3333,7 @@ export function RunScreen({ id }: { id: string }) {
               <AlertDialog.Portal>
                 <AlertDialog.Overlay className="fixed inset-0 z-40 bg-bg/80" />
                 <AlertDialog.Content className="fixed top-1/2 left-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-surface p-5">
-                  <AlertDialog.Title className="text-base font-medium tracking-tight">
+                  <AlertDialog.Title className="text-base font-medium tracking-tight [overflow-wrap:anywhere]">
                     Archive {project.name}?
                   </AlertDialog.Title>
                   <AlertDialog.Description className="mt-2 text-sm leading-relaxed text-muted">
@@ -3755,7 +3772,7 @@ export function RunScreen({ id }: { id: string }) {
           </Tabs.Root>
             </>
           )}
-        </section>
+        </main>
         </PaneBoundary>
 
         {/* W312 C4 · 311 §6 #1 + §3: the right sidebar. On `lg`+ this is the
@@ -3945,7 +3962,7 @@ function PhaseProgressRail({
     return [];
   });
   return (
-    <div className="border-b border-line px-5 py-3" aria-label="Phase progress">
+    <section aria-label="Phase progress" className="border-b border-line px-5 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-mono text-xs font-medium tracking-widest text-faint uppercase">
           Phase graph
@@ -4036,7 +4053,7 @@ function PhaseProgressRail({
           );
         })}
       </ol>
-    </div>
+    </section>
   );
 }
 
@@ -5073,6 +5090,7 @@ function VaultPane({ project }: { project: Project }) {
 
       {tagCounts.length > 0 ? (
         <div
+          role="group"
           className="flex flex-wrap items-center gap-1.5 px-5 pt-2"
           aria-label="Filter vault notes by tag"
         >
@@ -5910,6 +5928,7 @@ function DiagramPane({ project }: { project: Project }) {
       <div className="px-5 py-4">
         {svgText ? (
           <div
+            role="group"
             className="overflow-auto rounded-md border border-border bg-surface"
             aria-label={`${active.label} diagram`}
           >
@@ -6099,6 +6118,7 @@ function ChatMsgRow({ msg, onRetry }: { msg: ChatMsgView; onRetry?: () => void }
             {msg.code ? (
               <span className="mt-2 flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
                 <span
+                  role="img"
                   title={doc ? doc.agentAction : "Uncatalogued error code"}
                   aria-label={
                     doc
@@ -7251,8 +7271,7 @@ function ShellSurfacesCard({ project }: { project: Project }) {
             className="mt-0.5 font-mono text-xs text-faint"
             title="N2/T-107.7: readCheckpoint / checkpointAdmits live in checkpoint.server.ts (.rapidtool/checkpoint.json) — server-only, so the console has no read seam yet (TODO(N2)); cross-session resume stays a CLI verb until one lands."
           >
-            cross-session resume: checkpoint reads are server-side — no console read seam yet
-            (TODO(N2)).
+            cross-session resume: checkpoint reads are server-side — no console read seam yet.
           </p>
         </li>
         <li>
@@ -7297,7 +7316,7 @@ function ShellSurfacesCard({ project }: { project: Project }) {
             className="mt-0.5 text-xs text-muted"
             title="R8-f09: console approvals record decidedBy 'human' with no seat token; the planned seat seam (S4 seat.ts / a delivery code) is not on disk (TODO S4). Today's real seat path is the CLI's out-of-band token; the approval dock names the policy fallback."
           >
-            no console delivery seam yet — the CLI carries the out-of-band token; TODO(seat)
+            no console delivery seam yet — the CLI carries the out-of-band token.
           </p>
         </li>
         <li>
@@ -7308,7 +7327,7 @@ function ShellSurfacesCard({ project }: { project: Project }) {
             className="mt-0.5 text-xs text-muted"
             title="R13-f04: no isolator is shipped (isolation.server.ts is not on disk) — generated code runs in the bounded local runner, which is NOT an OS sandbox. Never labelled sandboxed; a fake sandbox label is forbidden."
           >
-            none — runs are bounded local, not OS-sandboxed; TODO(R13-f04)
+            none — runs are bounded local, not OS-sandboxed.
           </p>
         </li>
       </ul>

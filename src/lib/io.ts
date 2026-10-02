@@ -43,6 +43,10 @@ export const PHASE_COUNT = 13;
  * 319_f1: `ImportResult.code` now threads end-to-end for the parse/hydration
  * refusals (both catches + store.importProject forward it); THIS too-large arm
  * still returns a message only — the TODO above stays open.
+ *
+ * W49 · 335-2: the cap is the hostile-PASTE bound. `loadProject` (which already
+ * read the whole file) lifts it via `importProject(…, { maxChars })` so a
+ * record `saveProject` wrote is never unreadable by its own reader.
  */
 export const IMPORT_MAX_CHARS = 5_000_000;
 
@@ -450,18 +454,36 @@ function stampImportRepairLog(p: Record<string, unknown>, notes: string[]): void
  *
  * Then the payload runs through engine.hydrateProject so the imported project
  * carries the same repair guarantees as rehydrated localStorage state.
+ *
+ * W49 · 335-2: `opts.maxChars` overrides the paste-size cap for callers that
+ * already hold the bytes (the file loader); see the note at the check below.
  */
-export function importProject(json: string, opts?: { preserveWildRun?: boolean }): ImportResult {
+export function importProject(
+  json: string,
+  opts?: { preserveWildRun?: boolean; maxChars?: number },
+): ImportResult {
   // H4: refuse non-string / oversized inputs before any parse work. JSON.parse
   // coerces its argument (numbers/objects/arrays become their toString), which
   // both mislabels junk input and lets a giant payload through to the parser.
   if (typeof json !== "string") {
     return { ok: false, error: "Import payload must be a JSON string." };
   }
-  if (json.length > IMPORT_MAX_CHARS) {
+  // W49 · 335-2: the 5 MB cap defends the hostile-PASTE path (a giant string
+  // handed to the console). A caller that already holds the bytes — the file
+  // loader, whose `readFileSync` precedes this call — may raise it via
+  // `opts.maxChars`, so a record the tool's own writer produced is never
+  // unreadable by its own reader (the "no work is lost" law). `undefined` keeps
+  // the historical cap byte-for-byte; `Infinity` means "no cap".
+  const requested = opts?.maxChars;
+  const maxChars =
+    typeof requested === "number" &&
+    (requested === Number.POSITIVE_INFINITY || (Number.isFinite(requested) && requested >= 0))
+      ? requested
+      : IMPORT_MAX_CHARS;
+  if (json.length > maxChars) {
     return {
       ok: false,
-      error: `Import payload too large (${json.length.toLocaleString("en-US")} chars; cap ${IMPORT_MAX_CHARS.toLocaleString("en-US")}).`,
+      error: `Import payload too large (${json.length.toLocaleString("en-US")} chars; cap ${maxChars.toLocaleString("en-US")}).`,
     };
   }
   let raw: unknown;

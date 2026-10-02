@@ -430,8 +430,10 @@ export type TreeRunOutcome = {
    *  entry already covers the core, or when no core resolves — so a UI shell
    *  with no generated substance keeps its byte-identical skip verdict. */
   core?: TreeEntryVerdict;
-  /** Set when the dir is unreadable, holds no code files, or (216 · T-18) a
-   *  declared project script ran red — the top-level reason the tree is not ok. */
+  /** Set when the dir is unreadable, holds no code files, a declared project
+   *  script ran red (216 · T-18), the kind entry failed to run (335-3), a
+   *  declared `expectedBehavior` row failed (J1), or a UI-shell generated core
+   *  failed to LOAD — the top-level reason the tree is not ok. */
   error?: string;
   /** 216 (T-18) + 217d: the emitted project's OWN declared `typecheck`,
    *  `test` + `build` scripts, run under the same bounded runner (real exit
@@ -1694,6 +1696,17 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
       const why =
         `the emitted product's generated core module failed to LOAD (${outcome.core.entry}): ` +
         `${(outcome.core.detail ?? outcome.core.run).slice(0, 300)}`;
+      outcome.error = (outcome.error ? `${outcome.error} · ${why}` : why).slice(0, 1800);
+    }
+    // 335-3 (Transit): a RED kind entry (run `fail`/`error`/`timeout`) is a
+    // top-level failure reason — `ok` is false here, so the machine field
+    // `error` must name it exactly as the compile/project/behavior/core legs
+    // do (before this it was unset and only `run.detail` carried the reason).
+    // A deliberate `skip` is not red: its honest reason rides `run.detail`.
+    if (outcome.run && (outcome.run.run === "fail" || outcome.run.run === "error" || outcome.run.run === "timeout")) {
+      const verb =
+        outcome.run.run === "timeout" ? "timed out" : outcome.run.run === "fail" ? "failed to LOAD" : "errored";
+      const why = `the emitted product's kind entry ${verb} (${outcome.run.entry ?? "?"}): ${(outcome.run.detail ?? outcome.run.run).slice(0, 300)}`;
       outcome.error = (outcome.error ? `${outcome.error} · ${why}` : why).slice(0, 1800);
     }
     outcome.ok =

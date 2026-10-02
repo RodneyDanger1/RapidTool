@@ -337,7 +337,9 @@ export function complexityScore(project: BenchProject): ComplexityEstimate {
   const catchCount = countMatches(text, /\bcatch\b/g);
   let ternaryCount = 0;
   for (let i = 0; i < text.length; i++) {
-    if (text[i] === "?" && text[i - 1] !== "?" && text[i - 1] !== "." && text[i + 1] !== "?") {
+    // A real ternary is `? :`; `??` (nullish) and `?.` (optional chaining) are
+    // NOT ternaries — exclude both by looking at the char AFTER the `?`.
+    if (text[i] === "?" && text[i - 1] !== "?" && text[i - 1] !== "." && text[i + 1] !== "?" && text[i + 1] !== ".") {
       ternaryCount++;
     }
   }

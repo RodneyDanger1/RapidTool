@@ -11,6 +11,7 @@
 //
 // Run (Node 22, requires --experimental-strip-types to import the .ts driver):
 //
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs --help        # the synopsis as a SUCCESS (ok:true, exit 0); `--help <verb>` narrows to one verb; `help` / `-h` are the same
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief "..." --name "..." --out build.json
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief @brief.md --out build.json   # @file = read the file (a corpus fixture's `brief:` front-matter scalar is unwrapped); a bare existing-file path is REFUSED, never fed to the lattice as prose
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs run     --project build.json [--live]
@@ -24,8 +25,8 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs packet  --project build.json [--out packet.md]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs export  --project build.json [--out out.json]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs vault   --project build.json [--out <dir>]      # default: <home>/RapidTool Software/<slug>/vault
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs emit    --project build.json [--out <dir>] [--check] [--run]   # default: <home>/RapidTool Software/<slug>/; --check = per-file compile verdicts; --run = compile + tests + entry smoke (TreeRunOutcome); a green tree whose declared typecheck/build never ran exits 5 (unverified declared scripts)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir <dir> [--project build.json]                  # fixes/149 P0-1: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits, never clobbers (exit 1 on red with the first not-ok tail; exit 5 when green but the declared toolchain is unverified); --project adds the hash-checked dirDirty divergence report
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs emit    --project build.json [--out <dir>] [--check] [--run] [--require-verified]   # default: <home>/RapidTool Software/<slug>/; --check = per-file compile verdicts; --run = compile + tests + entry smoke (TreeRunOutcome); a green tree whose declared typecheck/build never ran still exits 0 and echoes `unverified` — --require-verified makes that state exit 5
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs tree-run --dir <dir> [--project build.json] [--require-verified]                  # fixes/149 P0-1: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits, never clobbers (exit 1 on red with the first not-ok tail; --require-verified makes a green-but-unverified toolchain exit 5); --project adds the hash-checked dirDirty divergence report
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs repair  --dir <dir> --project build.json [--budget N]        # fixes/149 P0-1: hash-checked dir→ledger re-import + bounded repair cycle against the dir (treeRun → red tail → synthesis w/ deps.treeFailure → apply → re-import → treeRun); green → tested-mint + converged (exit 0); budget exhausted → honest failed (exit 1, RT_E_REPAIR_FAILED)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs edit    --dir <dir> --file <relpath> --find "<old>" --replace "<new>" [--write] [--project build.json]   # 216s (108-T1): in-place str_replace on ONE emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, NOTHING is written); --write (requires --project) applies atomically only after evaluatePolicy("repair.apply", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs search  --project build.json --query "..." [--limit N]
@@ -199,6 +200,63 @@ function refuseValuelessFlag(cmdName, key) {
   );
 }
 
+// W49 · 335-4 (Switchboard): the documented NUMERIC flags, whose non-numeric
+// value was still silently DROPPED (the class the valueless guard above leaves
+// open). Probed live before the fix: `search --limit abc` exited 0 with the
+// default limit, and `deepen --phase abc` fell back to the LIVE phase, so the
+// refusal that came back read "P0 is not complete" — the caller's actual
+// mistake (a non-numeric --phase) was never named. Refused pre-dispatch, like
+// the valueless spelling.
+const NUMERIC_VALUE_FLAGS = ["limit", "phase", "steps", "max-steps", "budget"];
+
+/** Refuse a documented numeric flag whose value is not a non-negative integer. */
+function refuseNonNumericFlag(cmdName, key, value) {
+  return respond(
+    {
+      ok: false,
+      error: `${cmdName}: --${key} expects a non-negative integer (got ${JSON.stringify(value)}).`,
+      code: "RT_E_VALIDATION",
+      remedy: `Pass an integer (--${key} <n>), or drop the flag if you did not mean to set it.`,
+    },
+    1,
+  );
+}
+
+// W49 · 335-4 (Switchboard): an agent driving the CLI blind branches on
+// `remedy`, so a self-inflicted USAGE error must carry the concrete fix. The
+// registry's RT_E_VALIDATION agentAction is written for the ENGINE validating
+// model output ("Reject the payload … ask for corrected input"), the wrong
+// voice for a mistyped flag. Every shape below is constructed by THIS file's
+// own argument guards, so the translation is deterministic — non-usage
+// validation prose returns null and keeps the registry action. The flag-naming
+// fallback covers the per-verb value guards (--red-tree / --kind / --tree / …)
+// whose `error` already states the accepted values.
+function usageRemedy(error) {
+  if (typeof error !== "string") return null;
+  let m;
+  m = /^([\w-]+(?: [\w-]+)*): missing required --([\w-]+)$/.exec(error);
+  if (m) {
+    const verb = m[1].split(" ")[0];
+    return `Re-run with --${m[2]}: \`${m[1]} --${m[2]} <value>\`. Run \`--help ${verb}\` for the verb's synopsis.`;
+  }
+  m = /^([\w-]+) --([\w-]+) requires a path /.exec(error);
+  if (m) return `Pass a non-empty path: --${m[2]} <path> (an empty value would resolve to the CWD).`;
+  m = /^Unknown subcommand: (.+)$/.exec(error);
+  if (m) return `"${m[1]}" is not a verb — run \`--help\` for the 39-verb synopsis, then check the spelling.`;
+  if (/^Missing subcommand\./.test(error)) {
+    return "Pass a verb, e.g. `create --brief <text> --out build.json`; run `--help` for the full synopsis or `--help <verb>` for one verb.";
+  }
+  m = /^([\w-]+(?: [\w-]+)*): pass exactly one of /.exec(error);
+  if (m) return `Pass exactly ONE action flag (the message lists them); e.g. \`${m[1].split(" ")[0]} --list\`.`;
+  if (/^([\w-]+(?: [\w-]+)*): pass at most one of /.test(error)) {
+    return "Pass at most ONE flag from the list (or none for the default action).";
+  }
+  if (/--[a-z]/.test(error)) {
+    return `Fix the value named in \`error\` and re-run; \`--help ${CMD ?? "<verb>"}\` lists the accepted flags.`;
+  }
+  return null;
+}
+
 // E-25: single JSON object on stdout + the machine exit code. Every result
 // gains schema_version/cmd/exit_code; the legacy `ok` field is kept. Every
 // {ok:false} envelope additionally gains `code` — a stable RT_E_* id from
@@ -236,7 +294,10 @@ function respond(result, exitCode) {
   // registry's own agentAction as `remedy` (a call site's own remedy passes
   // through untouched). Omitted exactly when `code` is (doc absent / unknown).
   if (out.ok === false && typeof out.remedy === "undefined") {
-    const remedy = remedyFor(out.code);
+    // W49 · 335-4: a CLI usage refusal gets the CLI's own fix, not the
+    // registry's engine-voiced RT_E_VALIDATION action; every other code keeps
+    // the registry action (usageRemedy returns null for non-usage prose).
+    const remedy = (out.code === "RT_E_VALIDATION" ? usageRemedy(out.error) : null) ?? remedyFor(out.code);
     if (remedy) out.remedy = remedy;
   }
   out.exit_code = exitCode;
@@ -839,7 +900,23 @@ function respondDriveOutcome(h, res, { path, extras = {} }) {
   }
   const parked = res.project.status === "awaiting_hitl" || res.project.status === "blocked";
   respond(
-    { ok: true, path, ...extras, summary: sealed, steps: res.steps, stopped: res.stopped, events: res.events },
+    {
+      ok: true,
+      path,
+      ...extras,
+      // W49 boundary: `RunResult.code` names the coded class of the newest P6
+      // synthesis refusal THIS invocation recorded (a keyed 401 surfaces as
+      // RT_E_LLM_KEY_REJECTED) while the run still advanced on the deterministic
+      // floor. It is surfaced under its OWN name — never as `code`, which the
+      // taxonomy reserves for a failed command — so an agent driving blind sees
+      // the refusal without mistaking ok:true for a failure. Absent when the
+      // invocation recorded no refusal (additive + conditional).
+      ...(typeof res.code === "string" && res.code ? { refusalCode: res.code } : {}),
+      summary: sealed,
+      steps: res.steps,
+      stopped: res.stopped,
+      events: res.events,
+    },
     parked ? 2 : 0,
   );
 }
@@ -897,6 +974,30 @@ async function main() {
   await ensureErrorCodes(); // failures carry `code` (RT_E_*) on every envelope
   await ensureRtAppender(); // G: NDJSON event log under logs/ for every command
 
+  // W49 · 335-4 (Switchboard): an agent (or a human) must be able to ASK for the
+  // synopsis and get a SUCCESS. Before this, `--help` / `-h` / `help` were just
+  // an empty or unknown subcommand — the bytes were a coded REFUSAL (exit 1,
+  // ok:false), so an agent that branches on the exit code read discovery as a
+  // failure. A help request is not an error: ok:true + exit 0, carrying the same
+  // USAGE the refusal paths carry, narrowed to one verb's line when a known verb
+  // is named (`--help emit` / `help emit`).
+  // NB: parseArgs absorbs `--help emit` as `args.help === "emit"` (a value, not
+  // a boolean) — that string is the verb candidate, not a stray value.
+  if (args.help === true || typeof args.help === "string" || args._.includes("-h") || args._.includes("help")) {
+    const candidates = typeof args.help === "string" ? [args.help, ...args._] : [...args._];
+    const verb = candidates.find((a) => a !== "-h" && a !== "help" && USAGE.commands[a] !== undefined);
+    respond(
+      verb !== undefined
+        ? {
+            ok: true,
+            verb,
+            usage: { description: USAGE.description, help: USAGE.help, commands: { [verb]: USAGE.commands[verb] } },
+          }
+        : { ok: true, usage: USAGE },
+      0,
+    );
+  }
+
   if (!cmd) {
     respond({ ok: false, error: "Missing subcommand.", usage: USAGE, code: "RT_E_VALIDATION" }, 1);
     return;
@@ -917,6 +1018,14 @@ async function main() {
   // silent default — refuse it coded, naming the flag, before ANY dispatch.
   const bareValueFlag = VALUELESS_VALUE_FLAGS.find((key) => args[key] === true);
   if (bareValueFlag !== undefined) return refuseValuelessFlag(cmd, bareValueFlag);
+
+  // W49 · 335-4: the same refusal for a documented NUMERIC flag whose value is
+  // present but not a non-negative integer (silently dropped before — see
+  // NUMERIC_VALUE_FLAGS above).
+  const badNumericFlag = NUMERIC_VALUE_FLAGS.find(
+    (key) => typeof args[key] === "string" && !/^\d+$/.test(args[key]),
+  );
+  if (badNumericFlag !== undefined) return refuseNonNumericFlag(cmd, badNumericFlag, args[badNumericFlag]);
 
   // W45·331-1 (Keywright): resolve DEEPSEEK_API_KEY from <repo>/.env + the
   // process env BEFORE any dispatch, so every keyed verb (and create's
@@ -2054,9 +2163,18 @@ async function main() {
               }
             }
           }
-          // W48 · 334-4 (S2): exit 5 = green but the declared toolchain is
-          // UNVERIFIED (a separate honest signal; `ok`/`payload.ok` stay true).
-          respond(payload, payload.ok ? (payload.unverified === true ? 5 : 0) : 1);
+          // W48 · 334-4 (S2) introduced exit 5 for a green-but-unverified tree;
+          // W49 · 335-4 flipped it to OPT-IN (`--require-verified`). A fresh
+          // scaffold has no `node_modules`, so its declared toolchain is ALWAYS
+          // unverified — a default that never exits 0 is not a usable pass/fail
+          // for an agent or a human. The DEFAULT is now 0 for a green tree; the
+          // envelope still carries `unverified` / `declaredScriptsVerified` /
+          // `unverifiedDeclaredScripts`, so the honest signal is preserved and a
+          // hard gate passes --require-verified to get exit 5.
+          respond(
+            payload,
+            payload.ok ? (payload.unverified === true && flag(args, "require-verified") ? 5 : 0) : 1,
+          );
         } catch (err) {
           respond(
             { ok: false, error: err instanceof Error ? err.message : String(err), ...errCode(err, "RT_E_INTERNAL") },
@@ -2416,7 +2534,8 @@ async function main() {
             payload.code = "RT_E_TREE_RUN_FAILED";
           }
           // W48 · 334-4 (S2): same unverified-toolchain signal as `emit --run` —
-          // a green tree whose declared scripts never ran is exit 5, not 0.
+          // the envelope fields below are always present; W49 · 335-4 made the
+          // exit for that state OPT-IN (`--require-verified`), default 0.
           if (typeof outcome.declaredScriptsVerified === "boolean") {
             payload.declaredScriptsVerified = outcome.declaredScriptsVerified;
           }
@@ -2426,7 +2545,10 @@ async function main() {
             payload.unverifiedNote =
               "declared project script(s) did not execute — the tree is ok (nothing ran red) but its toolchain is UNVERIFIED; install deps and re-run to verify";
           }
-          respond(payload, payload.ok ? (payload.unverified === true ? 5 : 0) : 1);
+          respond(
+            payload,
+            payload.ok ? (payload.unverified === true && flag(args, "require-verified") ? 5 : 0) : 1,
+          );
         } catch (err) {
           respond(
             {
@@ -4794,6 +4916,7 @@ async function humanSeatClaim(cmd) {
 
 const USAGE = {
   description: "File-based headless RapidTool driver (no browser).",
+  help: "help | --help | -h [<verb>]   # print this synopsis as a SUCCESS envelope (ok:true, exit 0); name a verb (`--help emit`) to narrow `usage.commands` to that verb's line — a help request is never a coded failure",
   commands: {
     create: "create --brief <text|@file> [--name <text>] [--advisory] [--out <file.json>]   # --brief @<path> reads the file (a YAML-front-matter corpus fixture's `brief:` scalar is unwrapped); a bare value naming an EXISTING readable file is REFUSED (RT_E_VALIDATION) — a path is never silently used as prose; default out: <slug>.json in the CWD (intermediate control file); --advisory: advisory DoD gates even when DEEPSEEK_API_KEY is set (keyed runs default enforceDod ON)",
     run: "run --project <file.json> [--live] [--unattended] [--knowledge <store.json>]   # advance one phase; --unattended = autopilot+live forced until parked (the scheduler-facing twin is the `unattended` verb); --knowledge seeds the P6 expansion with human-accepted cross-project lesson rows (proven), same store->rows resolver as `packet`",
@@ -4806,10 +4929,10 @@ const USAGE = {
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",
     packet: "packet --project <file.json> [--out <file.md>] [--knowledge <store.json>]  # --knowledge seeds the Ranked-memory section with cross-project accepted lesson rows (tier-1, advisory)",
     export: "export --project <file.json> [--out <file.json>]",
-    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok, exit 5 when it is ok but the declared typecheck/build did not run (unverified toolchain); --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse)",
+    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok, exit 0 when it is ok (the envelope always carries declaredScriptsVerified/unverifiedDeclaredScripts when a declared script did not run); --require-verified opts into exit 5 for that green-but-unverified state; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse)",
     fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR approve selected/all ids — never auto-approves: --approve routes through the policy seam's human seat (--i-am-human + a TTY re-entry of RT_HUMAN_SEAT_TOKEN; a denied verdict writes nothing and stamps no decidedBy)",
     eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, nothing fabricated — the eval-out documents are never written (like every verb, the exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/); a missing history prints as 'no history', never a fake 0 delta",
-    "tree-run": "tree-run --dir <dir> [--project <file.json>]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0 (exit 5 when green but the declared toolchain is unverified: declared typecheck/build did not run); red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
+    "tree-run": "tree-run --dir <dir> [--project <file.json>] [--require-verified]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0 (the envelope still names an unverified declared toolchain; --require-verified turns that state into exit 5); red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
     repair: "repair --dir <dir> --project <file.json> [--budget N]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (path→content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun → red tail → one bounded synthesis repair call with deps.treeFailure → apply repaired files in place → re-import → treeRun again); green → tested-equivalent mint + honest P6 gate + converged (0); budget exhausted → honest failed (1, RT_E_REPAIR_FAILED); the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
     edit: "edit --dir <dir> --file <relpath> --find <old> --replace <new> [--write] [--project <file.json>]  # 216s (108-T1): ONE in-place str_replace on an emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, nothing is written); --write (requires --project) applies atomically only after evaluatePolicy(\"repair.apply\", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes); ambiguous / missing / no-op matches are coded refusals",
     summary: "summary --project <file.json>   # envelope: ok + summary incl. nextAction {kind,cmd,phase,why} — the SAME 7-arm vocabulary the console renders (run/approve/retry/done/running/fix-gate/unknown)",

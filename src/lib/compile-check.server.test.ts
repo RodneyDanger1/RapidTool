@@ -2012,3 +2012,57 @@ describe("W48 / 334-3 (T3) — a './'-prefixed declared main is smoke-loaded, no
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// W49 / 335-3 — a RED kind entry is a NAMED top-level error, and a cli-tool-
+// shaped tree (bin launcher + declared main) smokes the program it declares.
+// Pre-fix a `run:"fail"` entry left `outcome.error` unset: `ok:false` carried
+// no machine reason, only `run.detail`. Pre-fix the cli-tool scaffold declared
+// no `main`, so the resolver fell through to an unrelated job module and a
+// corrupted cli entry stayed green (the scaffold pin lives in scaffold.test.ts).
+// ---------------------------------------------------------------------------
+describe("W49 / 335-3 — a RED kind entry carries a top-level error and the declared cli entry is smoked", () => {
+  it("a throwing kind entry sets outcome.error naming the entry (was unset)", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "red-entry", type: "module", main: "src/main.ts" }));
+      write(dir, "src/main.ts", 'throw new Error("RT_E_VALIDATION: boom on import");\n');
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.run!.run, "fail");
+      assert.equal(r.ok, false, "a throwing entry is never green");
+      assert.match(r.error ?? "", /kind entry failed to LOAD/, "the top-level error names the entry leg");
+      assert.match(r.error ?? "", /src\/main\.ts/, "and names the entry path");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a cli-tool-shaped tree resolves the DECLARED main, not the decoy job module; corrupting it REDs", async () => {
+    const dir = tempDir();
+    try {
+      write(
+        dir,
+        "package.json",
+        JSON.stringify({ name: "cli", type: "module", main: "./src/main.ts", bin: { cli: "bin/cli.mjs" } }),
+      );
+      write(dir, "src/main.ts", "export const boot = (): string => 'ok';\n");
+      // A decoy job module: the pre-fix cli-tool (bin only) resolved THIS.
+      write(dir, "src/jobs/decoy.ts", "export function d(): number { return 1; }\n");
+      write(
+        dir,
+        ".rapidtool/project.json",
+        JSON.stringify({ kind: "tool", specGraph: { nodes: [{ id: "job-0", file: "src/jobs/decoy.ts" }], order: ["job-0"] } }),
+      );
+      write(dir, "tests/oracle.spec.ts", PASSING_SPEC);
+      const clean = await treeRunAsConsumer(dir);
+      assert.equal(clean.run!.entry, "src/main.ts", "the declared cli entry is smoked, not the decoy job");
+      assert.equal(clean.ok, true, clean.ok ? "" : clean.error);
+      write(dir, "src/main.ts", 'throw new Error("335-3: corrupted cli entry");\n');
+      const broken = await treeRunAsConsumer(dir);
+      assert.equal(broken.run!.entry, "src/main.ts");
+      assert.equal(broken.ok, false, "a corrupted cli entry can never read ok:true");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

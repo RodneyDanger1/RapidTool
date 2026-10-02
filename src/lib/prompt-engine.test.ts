@@ -195,8 +195,13 @@ describe("expansionPrompt fidelity + build-ready framing (fixes/95)", () => {
     assert.equal(bullets.length, EXPAND_POLICY_MAX_COUNT, "policy count capped at 12");
     assert.ok(content.includes("…[TRUNCATED]"), "over-long policy is cut WITH a marker");
     assert.ok(!content.includes("LONGTAIL_MUST_NOT_APPEAR"), "policy tail never reaches the model");
-    // The 13th distinct policy (shortOnes[11]) is dropped by the count cap.
+    // The 13th distinct policy (shortOnes[11]) is dropped by the count cap —
+    // and the drop is MARKED, never silent (W49/335-1: the module contract).
     assert.ok(!content.includes("DO NOT add policy 11 unless"), "beyond-count policy dropped");
+    assert.ok(
+      content.includes("POLICIES-ELIDED: 1 policy row(s)"),
+      "the beyond-count drop is marked with its count, never a silent slice",
+    );
   });
 });
 
@@ -378,6 +383,10 @@ describe("expandBrief — prior-run lesson injection (fixes/98 §5 Tier 3)", () 
     assert.equal(bullets.filter((b) => b === "- dup row").length, 1, "deduped to one bullet");
     assert.ok(!content.includes("lesson 10"), "beyond-count lesson dropped");
     assert.ok(content.includes("- lesson 9"), "the 12th slot still fits");
+    assert.ok(
+      content.includes("LESSONS-ELIDED: 2 lesson row(s)"),
+      "the beyond-count lesson drop is marked with its count, never a silent slice (W49/335-1)",
+    );
   });
 
   it("325 BUG E: a 500-char row (legal in-record at the 600 cap) is still cut at the prompt cap, WITH the marker", async () => {

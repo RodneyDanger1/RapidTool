@@ -2,6 +2,11 @@ import { PHASES, phaseCoverage, phaseCoverageLine } from "./phases.ts";
 import type { PhaseCoverage } from "./phases.ts";
 import { fnv1a, fusionRank } from "./algorithms.ts";
 import { sandboxClaim } from "./sandbox.ts";
+// 335-3 (Transit): the current edge's machine-checkable exit criteria join the
+// packet (same registry + probe the DoD gate and handoff.ts use — one source,
+// so the packet can never state a different "done" than the gate measures).
+// dod.ts is client-safe: handoff.ts already imports it into the console graph.
+import { DOD, runGate } from "./dod.ts";
 import type { MemoryEntry, PhaseDef, Project } from "./types.ts";
 // OV-41 (W23 · L4, fixes/262): the T-107.6 token ledger — client-safe (its
 // graph is pure arithmetic; no node:fs). Consumed for measured spend ONLY:
@@ -117,12 +122,12 @@ function countIdCollisions(rows: MemoryEntry[]): number {
 /** E-11: the machine AgentReport schema the ingest seam (report-intake.ts)
  *  validates — stated here so the packet and the validator can never drift. */
 const REPORT_SCHEMA = {
-  phase: "integer 0..12",
+  phase: "integer 0..12 (must equal current_phase.id)",
   status: '"complete" | "blocked" | "partial"',
   summary: "string (non-empty)",
   files: "string[] (optional)",
   tests_run: '{command: string, pass: boolean, evidence?: string}[] (optional)',
-  artifacts: '{title: string, body: string, language?: string}[] (optional)',
+  artifacts: '{title: string, body: string, language?: string}[] (optional; max 12, each body ≤ 50000 chars)',
 };
 
 /**
@@ -845,6 +850,16 @@ export function compileAgentPacket(
   const oracleRows = rows(project.oracle)
     .slice(0, 8)
     .map((t) => `- ${str(t?.name)}: ${str(t?.given)} ⇒ ${str(t?.expect)}`);
+  // 335-3 (Transit): the current edge's exit criteria — the SAME registry +
+  // probe the DoD gate runs (runGate/`DOD`), rendered [x]/[ ] exactly as
+  // handoff.ts:126-159 does. Without this the packet stated the rules and the
+  // report schema but never what "done" means for the edge the agent may work.
+  // Defensive probe throws are already caught inside runGate's evaluate().
+  const gate = runGate(project, phase.id);
+  const unmetDoD = new Set(gate.unmet.map((g) => g.id));
+  const dodRows = (DOD[phase.id] ?? []).map(
+    (item) => `- [${unmetDoD.has(item.id) ? " " : "x"}] ${item.criterion}`,
+  );
   const full = [
     `# RapidTool Agent Packet v${PACKET_VERSION} — ${project.name}`,
     ``,
@@ -937,6 +952,11 @@ export function compileAgentPacket(
         }`
       : "",
     project.scorecard ? `Verdict: ${project.scorecard.verdict}` : "",
+    ``,
+    `## Exit criteria (DoD)`,
+    `Gate ${phase.code}: ${gate.pass ? "PASS" : "FAIL"} (${gate.unmet.length} unmet) — the criteria below are machine-checked against this project's state; satisfy them, do not restate them.`,
+    ...dodRows,
+    ``,
     ...(ledgerRows.length
       ? [`## Decision ledger (HITL)`, ledgerRows.join("\n")]
       : []),
@@ -1004,7 +1024,7 @@ export function compileAgentPacket(
           `Bottlenecks: ${(Array.isArray(project.scorecard.bottlenecks) ? project.scorecard.bottlenecks : []).join("; ")}`,
           `Attack vectors: ${(Array.isArray(project.scorecard.attackVectors) ? project.scorecard.attackVectors : []).join("; ")}`,
         ].join("\n")
-      : "Not written — run Phase 0 first.",
+      : "Not written — the scorecard is a Phase 0 output.",
     ...(spend ? packetSpendSection(spend) : []),
     ``,
     `## Artifacts (trimmed)`,

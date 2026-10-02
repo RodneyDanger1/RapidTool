@@ -47,8 +47,11 @@
 //  10. (316 · H3/I2, behavioral spawn) the `--agent-seal` pointer refusals:
 //      `approve`/`gate` refuse CODED (exit 1) naming the wild door.
 //  11. (316 · H7's gap; I3 finisher, behavioral spawn) the fresh-command
-//      floor: bare / `--help` / unknown verb → exit 1 + one
-//      `RT_E_VALIDATION` envelope, no stack.
+//      floor: bare / unknown verb → exit 1 + one `RT_E_VALIDATION` envelope,
+//      no stack. (W49 · 335-4 moved `--help` out of the floor — a help request
+//      is a SUCCESS now; legs 11b/11c/11d pin the W49 CLI-UX contract:
+//      help → exit 0; a usage refusal's remedy names the fix; a non-numeric
+//      value on a documented numeric flag is refused.)
 //  12. (T8.2 · 314 F5 K2/K5; 311_sd_product §1, behavioral spawn + source) the
 //      approve seat discipline: the seat is NEVER guessed — a bare approve
 //      (non-TTY) and a non-`autopilot` `--seat` value both refuse CODED
@@ -660,13 +663,15 @@ test("316 H3 — `approve`/`gate --agent-seal` refuse CODED with the wild-door p
 
 // ---------------------------------------------------------------------------
 // Leg 11 (316 · H7's survivability gap; I3 finisher — BEHAVIORAL spawn). H7's
-// sweep verified the fresh-command floor (bare / `--help` / unknown verb all
-// refuse cleanly: exit 1, one JSON envelope, RT_E_VALIDATION, no stack) but
-// nothing pinned it. One guard, three shapes: a fresh command must never
-// answer with a Node stack, a non-canonical exit, or stderr output — and its
-// refusal must carry the ERROR_CODE_DOC remedy (the K5/K6 coded-refusal seam).
+// sweep verified the fresh-command floor (bare / unknown verb all refuse
+// cleanly: exit 1, one JSON envelope, RT_E_VALIDATION, no stack) but nothing
+// pinned it. One guard, three shapes: a fresh command must never answer with a
+// Node stack, a non-canonical exit, or stderr output — and its refusal must
+// carry the ERROR_CODE_DOC remedy (the K5/K6 coded-refusal seam).
+// (`--help` moved OUT of this floor in W49 · 335-4: a help request is a
+// SUCCESS now — see the help leg below.)
 // ---------------------------------------------------------------------------
-test("316 I3 — the fresh-command floor: bare / --help / unknown verb refuse CODED (exit 1, RT_E_VALIDATION), never STACK", () => {
+test("316 I3 — the fresh-command floor: bare / unknown verb refuse CODED (exit 1, RT_E_VALIDATION), never STACK", () => {
   const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-floor-"));
   const env = { ...process.env };
   for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
@@ -674,7 +679,6 @@ test("316 I3 — the fresh-command floor: bare / --help / unknown verb refuse CO
   }
   const shapes = [
     { argv: [], label: "(bare)", errorMatch: "Missing subcommand.", cmd: null },
-    { argv: ["--help"], label: "--help", errorMatch: "Missing subcommand.", cmd: null },
     { argv: ["noverb-316"], label: "unknown verb", errorMatch: "Unknown subcommand: noverb-316", cmd: "noverb-316" },
   ];
   try {
@@ -717,6 +721,138 @@ test("316 I3 — the fresh-command floor: bare / --help / unknown verb refuse CO
       );
       assert.equal(json.exit_code, res.status, `[${shape.label}] the envelope's exit_code must equal the process exit`);
     }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Leg 11b (W49 · 335-4, BEHAVIORAL spawn). Asking for help is a SUCCESS, not a
+// coded refusal. Before this leg `--help` / `-h` / `help` were an empty or
+// unknown subcommand (exit 1, ok:false) — an agent branching on the exit code
+// read discovery as a failure. Now: ok:true, exit 0, `usage` present; naming a
+// verb narrows `usage.commands` to that verb's one line.
+// ---------------------------------------------------------------------------
+test("W49 · 335-4: --help / -h / help are a SUCCESS (ok:true, exit 0); --help <verb> narrows to one verb", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-help-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  const runHelp = (argv) =>
+    spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...argv], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+  try {
+    for (const argv of [["--help"], ["-h"], ["help"]]) {
+      const res = runHelp(argv);
+      assert.equal(res.status, 0, `[${argv.join(" ")}] help must exit 0.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+      const json = JSON.parse(res.stdout);
+      assert.equal(json.ok, true, `[${argv.join(" ")}] help is a success envelope`);
+      assert.equal(json.exit_code, 0);
+      assert.equal(json.code, undefined, "help carries no error code");
+      assert.ok(
+        json.usage && json.usage.commands && Object.keys(json.usage.commands).length > 0,
+        `[${argv.join(" ")}] the synopsis rides \`usage\``,
+      );
+      assert.ok(json.usage.commands.emit !== undefined, "every verb is listed (emit present)");
+      assert.ok(typeof json.usage.help === "string" && json.usage.help.includes("exit 0"), "the help row is documented");
+    }
+    const narrowed = runHelp(["--help", "emit"]);
+    assert.equal(
+      narrowed.status,
+      0,
+      `--help emit must exit 0.\nstdout: ${narrowed.stdout}\nstderr: ${narrowed.stderr}`,
+    );
+    const nj = JSON.parse(narrowed.stdout);
+    assert.equal(nj.verb, "emit");
+    assert.deepEqual(Object.keys(nj.usage.commands), ["emit"], "naming a verb narrows usage.commands to it");
+    assert.match(String(nj.usage.commands.emit), /--require-verified/, "the narrowed emit line carries the W49 flag");
+    // README documents the behaviour.
+    assert.match(readmeText, /Asking for help/, "README-cli.md must document the help request");
+    assert.match(readmeText, /--help/, "README-cli.md must name the help flag");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Leg 11c (W49 · 335-4, BEHAVIORAL spawn). An agent branches on `remedy`; the
+// registry's RT_E_VALIDATION agentAction is engine-voiced ("Reject the payload…
+// ask for corrected input"), wrong for a mistyped CLI flag. Every CLI usage
+// refusal must carry the concrete fix instead.
+// ---------------------------------------------------------------------------
+test("W49 · 335-4: a CLI usage refusal's remedy names the fix, not the engine-voiced registry action", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-remedy-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  const registry = "Reject the payload, state the concrete validation rule that failed";
+  const cases = [
+    { argv: ["create"], must: /--brief/ },
+    { argv: ["emit"], must: /--project/ },
+    { argv: ["edit"], must: /--dir/ },
+    { argv: ["noverb-335"], must: /--help/ },
+    { argv: ["knowledge", "--store", "k.json"], must: /--(save|find|help)/ },
+  ];
+  try {
+    for (const c of cases) {
+      const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...c.argv], {
+        cwd,
+        env,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      assert.equal(res.status, 1, `[${c.argv.join(" ")}] usage refusal exits 1.\nstdout: ${res.stdout}`);
+      const json = JSON.parse(res.stdout);
+      assert.equal(json.code, "RT_E_VALIDATION", `[${c.argv.join(" ")}] refusal class`);
+      assert.match(String(json.remedy), c.must, `[${c.argv.join(" ")}] remedy must name the fix`);
+      assert.ok(
+        !String(json.remedy).includes(registry),
+        `[${c.argv.join(" ")}] remedy must not be the engine-voiced registry action`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Leg 11d (W49 · 335-4, BEHAVIORAL spawn). A documented NUMERIC flag with a
+// non-numeric value was silently dropped (the class the valueless guard left
+// open): `search --limit abc` exited 0 on the default, `deepen --phase abc`
+// fell back to the LIVE phase. Refused pre-dispatch now, naming the flag.
+// ---------------------------------------------------------------------------
+test("W49 · 335-4: a non-numeric value on a documented numeric flag is refused (exit 1, names the flag)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-numeric-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
+    delete env[key];
+  }
+  try {
+    for (const flag of ["--limit", "--phase", "--steps", "--max-steps", "--budget"]) {
+      const res = spawnSync(
+        process.execPath,
+        ["--experimental-strip-types", CLI_PATH, "mine", "--dir", ".", flag, "abc"],
+        { cwd, env, encoding: "utf8", timeout: 120_000 },
+      );
+      assert.equal(res.status, 1, `[${flag} abc] must refuse.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+      const json = JSON.parse(res.stdout);
+      assert.equal(json.code, "RT_E_VALIDATION");
+      assert.match(String(json.error), new RegExp(`${flag} expects a non-negative integer`));
+      assert.ok(String(json.remedy).includes(flag), `[${flag}] the remedy names the flag`);
+    }
+    // A valid integer still dispatches (mine is keyless + read-only).
+    const okRun = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "mine", "--dir", ".", "--limit", "1"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(okRun.status, 0, `a numeric --limit must stay legal.\nstdout: ${okRun.stdout}\nstderr: ${okRun.stderr}`);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -2167,14 +2303,15 @@ test("W46 332-4 (S3) — a valueless value flag is REFUSED coded before dispatch
 });
 
 /**
- * W48 · 334-4 (S2). A fresh emitted tree declares `typecheck`/`build`, but with
- * no `node_modules/` they never execute: the tree is `ok:true` (nothing ran
- * red) YET its toolchain is UNVERIFIED. Before this pin `emit --run` exited 0
- * on that tree, indistinguishable from a fully-verified run. The landed
- * signal is a SEPARATE honest one — `ok` is not redefined (the P6 tested-mint
- * still fires) and the new exit class is 5, not 1. `tree-run` carries it too.
+ * W48 · 334-4 (S2) introduced exit 5 for a green tree whose declared scripts
+ * never ran; W49 · 335-4 made that strict exit OPT-IN (`--require-verified`).
+ * A fresh tree has no `node_modules/`, so its toolchain is ALWAYS unverified —
+ * a default that never exits 0 is not a usable pass/fail. The DEFAULT is now
+ * exit 0 and the honest signal rides the envelope (`unverified`,
+ * `declaredScriptsVerified`, `unverifiedDeclaredScripts`); `--require-verified`
+ * restores the strict exit 5. `tree-run` carries the same contract.
  */
-test("W48 · 334-4 (S2): emit --run on an unverified tree exits 5 (green, declared scripts unrun)", () => {
+test("W49 · 335-4: emit --run / tree-run default to exit 0 on a green-but-unverified tree; --require-verified opts into exit 5", () => {
   const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-unverified-"));
   const env = { ...process.env };
   for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
@@ -2199,12 +2336,12 @@ test("W48 · 334-4 (S2): emit --run on an unverified tree exits 5 (green, declar
     );
     assert.equal(
       ran.status,
-      5,
-      `a green tree whose declared scripts never ran must exit 5 (distinguishable from verified 0 and from red 1).\nstdout: ${ran.stdout}\nstderr: ${ran.stderr}`,
+      0,
+      `a green tree defaults to exit 0 (the envelope names the unverified toolchain); red is 1.\nstdout: ${ran.stdout}\nstderr: ${ran.stderr}`,
     );
     const envelope = JSON.parse(ran.stdout);
     assert.equal(envelope.ok, true, "`ok` is NOT redefined — nothing ran red");
-    assert.equal(envelope.code, undefined, "exit 5 is not an error class — no RT_E code rides it");
+    assert.equal(envelope.code, undefined, "an unverified-but-green tree is not an error class");
     assert.equal(envelope.declaredScriptsVerified, false, "the envelope names the unverified toolchain");
     assert.equal(envelope.unverified, true);
     assert.ok(
@@ -2221,8 +2358,47 @@ test("W48 · 334-4 (S2): emit --run on an unverified tree exits 5 (green, declar
     assert.equal(envelope.treeRun.ok, true);
     assert.deepEqual(envelope.treeRun.unverifiedDeclaredScripts, envelope.unverifiedDeclaredScripts);
 
-    // README-cli.md documents the new class and the envelope contract.
+    // --require-verified opts INTO the strict exit 5 for the same state.
+    const strict = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "emit", "--project", proj, "--out", tree, "--run", "--require-verified"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(
+      strict.status,
+      5,
+      `--require-verified must turn the green-but-unverified state into exit 5.\nstdout: ${strict.stdout}\nstderr: ${strict.stderr}`,
+    );
+    const strictEnv = JSON.parse(strict.stdout);
+    assert.equal(strictEnv.ok, true, "the strict exit is not an error class — `ok` stays true");
+    assert.equal(strictEnv.code, undefined, "no RT_E code rides the strict exit");
+    assert.equal(strictEnv.unverified, true);
+
+    // tree-run carries the same default + opt-in strict contract.
+    const trDefault = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "tree-run", "--dir", tree],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(
+      trDefault.status,
+      0,
+      `tree-run on the same unverified tree must default to exit 0.\nstdout: ${trDefault.stdout}\nstderr: ${trDefault.stderr}`,
+    );
+    const trStrict = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "tree-run", "--dir", tree, "--require-verified"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(
+      trStrict.status,
+      5,
+      `tree-run --require-verified must exit 5 on the green-but-unverified tree.\nstdout: ${trStrict.stdout}\nstderr: ${trStrict.stderr}`,
+    );
+
+    // README-cli.md documents the class and the envelope contract.
     assert.match(readmeText, /Exit 5/, "README-cli.md must document exit 5");
+    assert.match(readmeText, /--require-verified/, "README-cli.md must document the opt-in strict flag");
     assert.match(readmeText, /unverifiedDeclaredScripts/, "README-cli.md must name the envelope field");
     assert.match(readmeText, /declaredScriptsVerified: false/, "README-cli.md must name the verified flag");
   } finally {

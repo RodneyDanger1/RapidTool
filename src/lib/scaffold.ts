@@ -694,8 +694,13 @@ function packageJson(kind: ProjectKind, project: Project, hasTests: boolean): st
     pkg.main = "src/main.ts";
   } else if (kind === "cli-tool") {
     // the runnable launcher emitBinLauncher writes; it delegates to
-    // src/main.ts (emitKindEntry) with argv passed straight through.
+    // src/main.ts (emitKindEntry) with argv passed straight through. W49 /
+    // 335-3: `main` DECLARES that entry module too, so a consumer that
+    // resolves the package's program (the tree-run entry smoke) finds the
+    // file the launcher actually runs rather than an unrelated job module.
+    // Importing it runs nothing — the entry carries the direct-run guard.
     pkg.bin = { [slug]: `bin/${slug}.mjs` };
+    pkg.main = "./src/main.ts";
   } else if (kind === "library") {
     // the entry emitKindEntry writes, as the package's public module.
     pkg.main = "./src/main.ts";
@@ -3563,9 +3568,10 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   }
 
   // --- fixes/277 (R3-f06): per-kind runnable entries ------------------------
-  // packageJson DECLARES these paths (cli-tool `bin`; library `main`/`exports`;
-  // service `main` + the start script) — emit exactly what it declares so no
-  // emitted package field points at a file that was never written.
+  // packageJson DECLARES these paths (cli-tool `bin` + `main`; library
+  // `main`/`exports`; service `main` + the start script) — emit exactly what
+  // it declares so no emitted package field points at a file that was never
+  // written.
   // cli-tool: the bin launcher (spawns src/main.ts, argv passthrough) + the
   // entry; library: the importable module entry; service: the `npm start`
   // entry with the real PORT wiring; each entry's structured refusal keeps

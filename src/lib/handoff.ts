@@ -182,6 +182,11 @@ export function phaseHandoff(project: Project, phase: PhaseId): string {
   out.push(
     `Return your work as ONE JSON report matching the packet's report_schema — {phase, status: "complete"|"blocked"|"partial", summary, files?: string[], tests_run?: [{command, pass, evidence?}], artifacts?: [{title, body, language?}]} — the ingest seam validates this exact shape.`,
   );
+  // 335-3 (Transit): state the seam's ACTUAL acceptance rules, not just the
+  // field shape — a report for another phase, or over the caps, is rejected.
+  out.push(
+    `The report's \`phase\` must be ${phase} (this edge); the seam accepts at most 12 artifacts, each body ≤ 50000 chars.`,
+  );
   out.push(
     `The five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.`,
   );

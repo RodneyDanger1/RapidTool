@@ -8,16 +8,25 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { PhaseId } from "./types.ts";
+import type { PhaseId, Project } from "./types.ts";
 import {
   HITL_PHASES,
   PHASES,
   PHASE_BY_ID,
+  PHASE_TAIL_START,
   STOCK_HITL,
   canEnter,
+  phaseCoverage,
+  phaseCoverageLine,
   phaseDef,
   priorsSealed,
 } from "./phases.ts";
+import { approve, createProject, runUntilGate } from "./headless.ts";
+
+// W49/335-1: a driven run must be keyless. This file is a separate node --test
+// child; clear the key so the create default is advisory (enforceDod off) and
+// the deterministic floor reaches P12 instead of parking on the keyed regime.
+delete process.env.DEEPSEEK_API_KEY;
 
 describe("PHASES table integrity", () => {
   it("declares every id 0..12 exactly once, in order, with matching codes", () => {
@@ -39,6 +48,19 @@ describe("PHASES table integrity", () => {
     for (const id of STOCK_HITL) {
       assert.equal(phaseDef(id).hitl, true);
     }
+  });
+
+  it("335-1: P8/P9/P12 summaries declare the deliverables no producer emits (no silent nothing)", () => {
+    // Each phase names a deliverable in its summary; where the deterministic
+    // floor and the live path produce no such artifact, the summary must say so
+    // (the P2/P3 convention), never let the promise read as produced.
+    assert.match(phaseDef(8).summary, /No component code is generated/, "P8: component code has no producer");
+    assert.match(phaseDef(9).summary, /not a generated script/, "P9: GPU allocation has no producer");
+    assert.match(
+      phaseDef(12).summary,
+      /roadmap declarations, not generated artifacts/,
+      "P12: DB schemas / frontend-backend parity have no producer",
+    );
   });
 });
 
@@ -108,5 +130,75 @@ describe("priorsSealed edge math", () => {
     ];
     assert.equal(priorsSealed(parked, 3), false);
     assert.equal(priorsSealed(parked, 2), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W49/335-1 — the register finding F-11 ("P7–P12 produced 0 artifacts") is a
+// property of a run that STOPPED at a red P6, not of the phases themselves.
+// A real driven advisory run reaches P12 and every tail phase writes its own
+// artifact. These pins drive the actual headless loop (not the floor by hand)
+// and assert the census the packet reports.
+// ---------------------------------------------------------------------------
+describe("W49/335-1 driven-run tail coverage (F-11)", () => {
+  const BRIEF =
+    "A coffeehouse and home property ledger: track shops, record rent payments, flip houses, " +
+    "show deal pipeline, and lease maintenance requests. Operators manage properties and tenants.";
+
+  /** Phase → the artifact kind(s) its deterministic producer writes. */
+  const TAIL_KIND: Readonly<Record<number, string>> = {
+    7: "research",
+    8: "ui",
+    9: "cicd",
+    10: "edge",
+    11: "tools",
+    12: "docs",
+  };
+
+  async function drain(project: Project): Promise<Project> {
+    let p = project;
+    for (let i = 0; i < 40; i++) {
+      if (p.status === "complete" || p.status === "blocked") return p;
+      p = (await runUntilGate(p, { maxSteps: 1 })).project;
+      if (p.status === "awaiting_hitl") p = approve(p);
+    }
+    return p;
+  }
+
+  it("a driven run reaches P12 and P7–P12 each write their artifact (the F-11 count is not 0)", async () => {
+    const done = await drain(createProject({ brief: BRIEF, name: "RentLedger" }));
+    assert.equal(done.status, "complete", "keyless advisory run drains to complete");
+    assert.equal(done.currentPhase, 12);
+    assert.equal(done.phases.filter((r) => r.status === "complete").length, 13);
+
+    for (const id of Object.keys(TAIL_KIND).map(Number)) {
+      const rows = (done.artifacts ?? []).filter((a) => a.phase === id && a.kind !== "packet");
+      assert.ok(
+        rows.length >= 1,
+        `P${id} produced no artifact — its producer (engine.synthesizePhase case ${id}) is not wired`,
+      );
+      assert.ok(
+        rows.some((a) => a.kind === TAIL_KIND[id]),
+        `P${id} artifact kind should include "${TAIL_KIND[id]}" (got ${rows.map((a) => a.kind).join(",")})`,
+      );
+    }
+
+    const cov = phaseCoverage(done.phases, done.artifacts ?? []);
+    assert.equal(cov.executed, 13);
+    assert.equal(cov.tailStart, PHASE_TAIL_START);
+    assert.ok(cov.tailArtifacts >= 6, `the tail wrote ${cov.tailArtifacts} artifacts, expected ≥6`);
+    assert.match(phaseCoverageLine(cov), /^13 of 13 phases executed \/ \d+ artifacts from P7–P12$/);
+
+    // P12 legally owns ADRs + OpenAPI (F-11 saw both as empty strings).
+    assert.ok((done.openapi ?? "").length > 0, "P12 wrote the OpenAPI document");
+    assert.ok((done.adr ?? "").length > 0, "P12 wrote the ADRs");
+  });
+
+  it("a run stopped before the tail reports its emptiness as the honest census line (never silent)", () => {
+    const fresh = createProject({ brief: BRIEF, name: "RentLedger" });
+    const cov = phaseCoverage(fresh.phases, fresh.artifacts ?? []);
+    assert.equal(cov.executed, 0);
+    assert.equal(cov.tailArtifacts, 0);
+    assert.equal(phaseCoverageLine(cov), "0 of 13 phases executed / 0 artifacts from P7–P12");
   });
 });

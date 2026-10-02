@@ -145,6 +145,14 @@ describe("complexityScore (branch/loop heuristics + artifact weight)", () => {
     assert.equal(r.level, "medium");
   });
 
+  it("counts only real `? :` ternaries — optional chaining (`?.`) and nullish (`??`) never count", () => {
+    const r = complexityScore({
+      generatedSource: "const v = a?.b?.c?.d;\nconst w = a ?? b;\nconst t = a ? b : c;",
+    });
+    // 3 optional-chain `?` + 1 nullish `?` are not ternaries; only `a ? b : c` is.
+    assert.equal(r.detail.ternaryCount, 1);
+  });
+
   it("records function/arrow count and reaches high at score 20", () => {
     const fns = "function run() { return 1; }\nconst cb = (x) => x;";
     const fr = complexityScore({ generatedSource: fns });

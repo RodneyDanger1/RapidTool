@@ -109,10 +109,14 @@ import { packetBudgetBoundary, type PacketBudget } from "./packet.ts";
 // File persistence (atomic write via write-then-rename).
 // ---------------------------------------------------------------------------
 
-/** Load a project from a JSON file (parse + validate + hydrate via io.importProject). */
-export function loadProject(path: string, opts?: { preserveWildRun?: boolean }): Project {
+/** Load a project from a JSON file (parse + validate + hydrate via io.importProject).
+ *  W49 · 335-2: the byte source is a local file `readFileSync` already loaded in
+ *  full, so the hostile-PASTE size cap protects nothing here — it only stranded
+ *  a legitimate record `saveProject` wrote. The cap is lifted for this path
+ *  (a caller may still pin one via `opts.maxChars`). */
+export function loadProject(path: string, opts?: { preserveWildRun?: boolean; maxChars?: number }): Project {
   const raw = readFileSync(path, "utf8");
-  const res = importProject(raw, opts);
+  const res = importProject(raw, { maxChars: Number.POSITIVE_INFINITY, ...opts });
   if (!res.ok) throw new Error(`loadProject(${path}): ${res.error}`);
   return res.project;
 }

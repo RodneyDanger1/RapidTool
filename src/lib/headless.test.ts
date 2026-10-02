@@ -6,7 +6,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -48,7 +48,7 @@ import {
 import type { ApproveActor, P6JourneyCycleContext } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
 import { runGate } from "./dod.ts";
-import { importProject } from "./io.ts";
+import { IMPORT_MAX_CHARS, importProject } from "./io.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { recordSessionSpend, resetSessionBudget, sessionTokenBudget } from "./token-ledger.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
@@ -2009,15 +2009,18 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
       saveProject(path, drained);
       const out = join(dir, "tree");
       const r = runCli(["emit", "--project", path, "--out", out, "--run"]);
-      // W48 · 334-4: a fresh tree has no `node_modules`, so the tree-run cannot
-      // execute the tree's DECLARED toolchain (`typecheck`/`build`) — the run is
-      // green (nothing ran red, `ok` stays true) but the toolchain is UNVERIFIED,
-      // which is now its own exit (5), distinguishable from verified 0 and red 1.
-      // Exit 0 therefore requires every declared script to have actually run.
+      // W49 · 335-4 (Switchboard) made the W48 exit-5 "green but the declared
+      // toolchain never ran" state OPT-IN (`--require-verified`): a fresh tree
+      // has no `node_modules`, so its declared toolchain is ALWAYS unverified,
+      // and a default that never exits 0 is not a usable pass/fail. The DEFAULT
+      // for a green tree is 0; the envelope still carries the honest unverified
+      // signal, and `--require-verified` restores exit 5 (pinned below). This
+      // lane (335-2) owns this consumer test and reconciled it to the new
+      // contract — the CLI change is 335-4's, frozen in its log.
       assert.equal(
         r.code,
-        5,
-        `green-but-unverified tree must exit 5; stderr: ${r.stderr.slice(0, 300)}`,
+        0,
+        `a green tree is a default pass (unverified toolchain is opt-in strict); stderr: ${r.stderr.slice(0, 300)}`,
       );
       assert.equal(r.json.ok, true, "the tree is green — nothing ran red");
       assert.equal(r.json.unverified, true, "the envelope names the unverified toolchain");
@@ -2028,7 +2031,7 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
           r.json.unverifiedDeclaredScripts,
         )}`,
       );
-      assert.equal(r.json.code, undefined, "exit 5 is not an error class — no RT_E code rides it");
+      assert.equal(r.json.code, undefined, "a green tree exit is not an error class — no RT_E code rides it");
       const tr = r.json.treeRun as
         | {
             ok: boolean;
@@ -2049,6 +2052,27 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
       assert.ok(tr!.run, "kind-entry verdict present");
       assert.equal(tr!.run!.run, "skip", "webapp UI shell is an honest skip, never a fake pass");
       assert.match(String(tr!.run!.detail ?? ""), /UI shell/);
+
+      // W49 · 335-4: `--require-verified` opts back into the strict exit 5 for
+      // a green-but-unverified tree. Pin both arms so the opt-in cannot silently
+      // become a no-op (the exact failure mode the wave exists to catch).
+      const strict = runCli([
+        "emit",
+        "--project",
+        path,
+        "--out",
+        `${out}-strict`,
+        "--run",
+        "--require-verified",
+      ]);
+      assert.equal(
+        strict.code,
+        5,
+        `--require-verified must make the green-but-unverified tree exit 5; stderr: ${strict.stderr.slice(0, 300)}`,
+      );
+      assert.equal(strict.json.ok, true, "the strict arm is still a green tree");
+      assert.equal(strict.json.unverified, true, "the strict arm still names the unverified toolchain");
+      assert.equal(strict.json.code, undefined, "exit 5 is not an error class — no RT_E code rides it");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -3673,6 +3697,132 @@ describe("W48 · 334-2 — persisted keyed outcome, run-result code, verb spend"
       );
     } finally {
       resetSessionBudget();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W49 · 335-2 — the journey driver + state integrity (the wave's "no work is
+// lost" theme). (a) every phase advances and records through headless.ts;
+// (b) a real record round-trips save→load losslessly INCLUDING the W46/W48
+// fields (`tokenUsage`, `lastKeyedOutcome`); a record LACKING them still loads
+// and migrates in place; and the file loader reads back what its own writer
+// wrote. (c) the atomic-write + doctor/spend truth live in their own blocks.
+// ---------------------------------------------------------------------------
+describe("W49 · 335-2 — journey drive + save/load integrity", () => {
+  /** Drive a fresh project through ALL 13 phases, approving each stock HITL park. */
+  async function driveAllPhases(): Promise<Project> {
+    let p = createProject({ brief: FIXTURE_BRIEF });
+    for (let i = 0; i < 80; i++) {
+      if (p.status === "complete" || p.status === "blocked") break;
+      const res = await runUntilGate(p, { maxSteps: 1 });
+      p = res.project;
+      if (p.status === "awaiting_hitl") p = approve(p);
+    }
+    return p;
+  }
+
+  it("(a) every one of the 13 phases runs, records a gate artifact + verdict, and advances", async () => {
+    const p = await driveAllPhases();
+    assert.equal(p.status, "complete", "the 13-phase journey seals complete");
+    assert.equal(p.currentPhase, 12);
+    assert.equal(p.phases.filter((r) => r.status === "complete").length, 13);
+    for (let id = 0; id <= 12; id++) {
+      const rec = p.phases.find((r) => r.id === id);
+      assert.equal(rec?.status, "complete", `P${id} is complete`);
+      assert.ok(rec?.startedAt != null, `P${id} recorded a start`);
+      assert.ok(rec?.gate, `P${id} recorded its DoD gate verdict`);
+      assert.ok(
+        p.artifacts.some((a) => a.phase === id && a.kind === "gate"),
+        `P${id} recorded its gate artifact`,
+      );
+      assert.ok(
+        p.logs.some((l) => l.phase === id && l.event === "gate.verdict"),
+        `P${id} recorded its gate.verdict log`,
+      );
+      assert.ok(
+        p.logs.some((l) => l.phase === id && l.event === "phase.enter"),
+        `P${id} recorded its phase.enter log`,
+      );
+    }
+  });
+
+  it("(b) a driven record + the W46/W48 fields round-trips save→load losslessly", async () => {
+    const dir = tempDir();
+    try {
+      let partial = createProject({ brief: FIXTURE_BRIEF });
+      for (let i = 0; i < 6; i++) {
+        const r = await runUntilGate(partial, { maxSteps: 1 });
+        partial = r.project;
+        if (partial.status === "awaiting_hitl") partial = approve(partial);
+      }
+      const spend = { promptTokens: 60000, completionTokens: 17654, calls: 12, cachedPromptTokens: 5 };
+      const keyed = {
+        code: "RT_E_LLM_KEY_REJECTED",
+        at: 1759000000000,
+        keySource: "the process environment (tail …a1b2)",
+      };
+      const record: Project = { ...partial, tokenUsage: spend, lastKeyedOutcome: keyed };
+      const file = join(dir, "run.json");
+      saveProject(file, record);
+      const loaded = loadProject(file);
+      assert.deepEqual(loaded.tokenUsage, spend, "the persisted run spend survives the file round-trip");
+      assert.deepEqual(
+        loaded.lastKeyedOutcome,
+        keyed,
+        "the persisted keyed outcome survives the file round-trip",
+      );
+      // Whole-record losslessness: the loaded record re-serializes byte-identically.
+      assert.equal(exportJson(loaded), exportJson(record), "no field is lost or reordered by save→load");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("(b) a legacy record lacking tokenUsage/lastKeyedOutcome still loads and migrates in place", async () => {
+    const dir = tempDir();
+    try {
+      const p = await driveAllPhases();
+      const raw = JSON.parse(exportJson(p)) as Record<string, unknown>;
+      delete raw.tokenUsage;
+      delete raw.lastKeyedOutcome;
+      raw._v = 1; // an older marker
+      const file = join(dir, "legacy.json");
+      writeFileSync(file, JSON.stringify(raw), "utf8");
+      const loaded = loadProject(file);
+      assert.equal(loaded.id, p.id);
+      assert.equal("tokenUsage" in loaded, false, "absent spend stays absent — never fabricated");
+      assert.equal("lastKeyedOutcome" in loaded, false, "absent keyed outcome stays absent");
+      assert.equal((loaded as { _v?: number })._v, 2, "the record migrates in place to the current marker");
+      // It still loads its REAL state, not an empty shell.
+      assert.equal(loaded.phases.filter((r) => r.status === "complete").length, 13);
+      assert.ok((loaded.artifacts?.length ?? 0) > 0, "the real artifacts survived the migration");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("(b) the file loader reads back a record its own writer produced — even past the paste-import cap", () => {
+    const dir = tempDir();
+    try {
+      const file = join(dir, "big.json");
+      // A legitimate record can exceed the hostile-PASTE cap; the file path must
+      // read back exactly what saveProject wrote (pre-fix this threw "Import
+      // payload too large" — a record unreadable by its own reader).
+      const padding = "x".repeat(IMPORT_MAX_CHARS + 100);
+      const record = {
+        ...createProject({ brief: FIXTURE_BRIEF }),
+        futureLargeField: padding,
+      } as unknown as Project;
+      saveProject(file, record);
+      assert.ok(statSync(file).size > IMPORT_MAX_CHARS, "the saved record exceeds the paste cap");
+      const loaded = loadProject(file);
+      assert.equal(loaded.id, record.id, "the loader reads its own writer's record");
+      // The browser/console PASTE defense is untouched: the same oversized string is refused.
+      const pasted = importProject(readFileSync(file, "utf8"));
+      assert.equal(pasted.ok, false, "an oversized PASTE is still refused (hostile-input cap preserved)");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

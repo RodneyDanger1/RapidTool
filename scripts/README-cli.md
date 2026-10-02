@@ -47,6 +47,15 @@ codes (RT_E_*)** below). This file
 is the agent-facing contract: an AI driver (Hermes-style loop) can run a whole
 project end-to-end by reading only the JSON below.
 
+## Asking for help (W49 · 335-4)
+
+`--help` / `-h` / `help` print the synopsis as a **SUCCESS**: `ok: true`, exit
+0, with `usage` (the same object the refusal paths carry). A help request is not
+an error, so an agent that branches on the exit code never reads discovery as a
+failure. Name a verb (`--help emit`, `help emit`) to narrow `usage.commands` to
+that verb's single line. Before W49 these three spellings were an empty/unknown
+subcommand — a coded `RT_E_VALIDATION` refusal at exit 1.
+
 ## Requirements
 
 - **Node 22** (verified on v22.23.2). The CLI dynamic-imports a `.ts` file, so it
@@ -160,11 +169,12 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs export --project build
 
 # 9. Emit the runnable scaffold (project files + embedded generated module);
 #    --check adds one compile verdict per emitted file; --run executes the emitted
-#    tree in-loop (parse + every emitted tests/*.spec.ts + entry smoke; exit 1 on red,
-#    exit 5 when green but the declared typecheck/build did not run — unverified);
+#    tree in-loop (parse + every emitted *.spec.ts + entry smoke; exit 1 on red,
+#    exit 0 when green — the envelope still names an unverified declared toolchain);
+#    --require-verified opts into exit 5 for that green-but-unverified state;
 #    --red-tree banner admits an uncleared red tree-run WITH the unmissable banner
 #    on the emitted README (default refuse — see the Emit section)
-node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json [--out emitted/] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force]
+node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json [--out emitted/] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified]
 
 # 10. Compact JSON-safe snapshot (name, currentPhase, status, phaseCounts, lastGate,
 #     researchCount, memoryCount, vaultReady)
@@ -306,6 +316,15 @@ loop:
   approve --project build.json        # human decision on the parked stock gate
 ```
 
+**`refusalCode` (W49 boundary).** A drive verb's envelope carries `refusalCode`
+when the invocation recorded a coded P6-synthesis refusal and still advanced on
+the deterministic floor — most importantly a keyed 401, which surfaces as
+`RT_E_LLM_KEY_REJECTED`. It rides under its own name because `code` is reserved
+for a failed command: `ok:true` + `refusalCode` means *the step succeeded and a
+refusal was recorded during it*. The field is absent when no refusal happened.
+An agent that drives RapidTool blind should read `ok` for the command's fate and
+`refusalCode` (when present) for what to fix.
+
 ## Live mode (`--live`)
 
 Off by default. When on, research phases (P0/P7/P11) attempt:
@@ -442,10 +461,13 @@ per-file parse verdicts + every emitted `tests/*.spec.ts` under the bounded
 runner + one kind-entry smoke (`compile-check.server.ts: treeRun`) — and appends
 the `TreeRunOutcome`; a red tree exits 1 (a red tree is never a clean emit). A
 GREEN tree whose declared `typecheck`/`build` never ran (usually no
-`node_modules/`) is `ok: true` but **unverified**: it exits **5** with
+`node_modules/`) is `ok: true` but **unverified**: it exits **0** and carries
 `unverified: true`, `declaredScriptsVerified: false`, and
-`unverifiedDeclaredScripts: [...]` — not 0 (an unverified toolchain must stay
-distinguishable from a verified one) and not 1 (nothing ran red).
+`unverifiedDeclaredScripts: [...]`. Because a fresh scaffold has no
+`node_modules`, *every* fresh `emit --run` is unverified, so the strict exit **5**
+is **opt-in**: pass `--require-verified` to make that state exit 5 instead of 0
+(not 1 — nothing ran red). Install the tree's deps and re-run `--run` to reach
+`declaredScriptsVerified: true` at exit 0.
 All files parse → exit 0 with
 `{ "ok": true, "dir": "…", "count": N, "moduleEmbedded": true|false, "summary": "…" }`.
 With `--check`, any failed file flips the envelope to `ok: false` with the
@@ -558,9 +580,12 @@ nothing** — the rules are heuristics, so every finding carries `advisory: true
   verb over **an arbitrary emitted directory, without re-emitting** — the oracle
   an agent uses after hand-editing an emitted tree. Green tree → exit 0
   (`{ ok: true, dir, treeRun: { ok: true, … } }`); red → exit 1 with `ok: false`,
-  the first not-ok tail in `error` and `code: "RT_E_TREE_RUN_FAILED"`. `--project
-  <file.json>` adds the read-only, hash-checked `dirDirty` divergence report
-  (ledger tree vs dir bytes — never persisted).
+  the first not-ok tail in `error` and `code: "RT_E_TREE_RUN_FAILED"`. A green
+  tree whose declared `typecheck`/`build` did not run still exits 0 and names the
+  state on the envelope (`unverified` / `declaredScriptsVerified` /
+  `unverifiedDeclaredScripts`); `--require-verified` opts into the strict exit 5.
+  `--project <file.json>` adds the read-only, hash-checked `dirDirty` divergence
+  report (ledger tree vs dir bytes — never persisted).
 - **`repair --dir <dir> --project <file.json> [--budget N]`** (keyed repair loop;
   default budget = `P6_JOURNEY_DEFAULT_BUDGET`) — the emit→edit→re-emit
   continuation seam (`headless.ts: repairTreeDir`): hash-checked re-import of the
@@ -984,9 +1009,9 @@ so the contract is strict and stable:
   parse stdout, branch on the JSON.
 - **Exit 0** = the command executed and produced its payload
   (`ok: true`, or `ok: false` only when the JSON *is* the honest outcome).
-  For `emit --run` / `tree-run`, exit 0 also means every DECLARED project
-  script that could run DID run - a green tree whose own toolchain never
-  executed is exit 5, not 0 (see below).
+  For `emit --run` / `tree-run`, exit 0 means the tree is not red; the envelope
+  still distinguishes a fully verified toolchain from an unverified one via
+  `unverified` / `declaredScriptsVerified` / `unverifiedDeclaredScripts`.
 - **Exit 1** = the command could not execute (bad/missing args, missing
   project file) — stdout is `{ "ok": false, "error": "…" }`.
   `run`/`gate` also exit 1 (code `RT_E_GATES_FAILED`, `sealedWithFailures:
@@ -999,16 +1024,19 @@ so the contract is strict and stable:
 - **Exit 4** = backend or internal runtime failure — including a missing/broken
   optional module in the vault/design/diagram arms (envelope carries the
   `RT_E_*` code).
-- **Exit 5** (`emit --run` / `tree-run` only) = the tree is GREEN but its
-  DECLARED project scripts (e.g. `typecheck`, `build`) never executed - the
+- **Exit 5** (`emit --run` / `tree-run` only, **opt-in**) = the tree is GREEN but
+  its DECLARED project scripts (e.g. `typecheck`, `build`) never executed — the
   emitted toolchain is UNVERIFIED, not failed. `ok` stays `true` (nothing ran
-  red, and the tested-mint is unaffected); the envelope carries
+  red, and the tested-mint is unaffected) and the envelope carries
   `unverified: true`, `declaredScriptsVerified: false`, and
   `unverifiedDeclaredScripts: [...]` naming exactly which scripts did not run
-  (usually because the tree has no `node_modules/`). Install the tree's deps and
-  re-run `--run` to reach a verified exit 0. This is deliberately NOT exit 1
-  (an honest unknown, not a red tree) and deliberately NOT exit 0 (an unverified
-  toolchain must stay distinguishable from a verified one).
+  (usually because the tree has no `node_modules/`). **The default is exit 0**
+  for that state: a freshly scaffolded tree has no `node_modules`, so *every*
+  fresh `emit --run` is unverified — a default that never exits 0 is not a
+  usable pass/fail. Pass `--require-verified` to opt INTO the strict exit 5 for
+  your gate; install the tree's deps and re-run `--run` to reach a verified
+  state (exit 0 with `declaredScriptsVerified: true`). Exit 5 is deliberately
+  NOT exit 1 (an honest unknown, not a red tree).
 - `summary` carries agent hints: `researchCount` (cited findings across live
   corpus rounds; 0 on deterministic runs), `memoryCount` (atomic memory rows),
   and `vaultReady` (true when `src/lib/vault.ts` exists AND the project already
@@ -1016,10 +1044,20 @@ so the contract is strict and stable:
 - **A value-taking flag is never silently ignored.** A value flag passed with
   no value (`--limit`, `--phase`, `--name`, `--steps`, `--budget`, `--dir`, …)
   parses as a bare `true`; the CLI refuses it before dispatch with exit 1 +
-  `RT_E_VALIDATION`, naming the flag and the two spellings. Boolean flags
-  (`--live`, `--apply`, `--force`, `--start`, the `lesson`/`wild` action flags)
-  are unaffected. This closes the valueless-flag asymmetry of the 330/331 waves
-  one class at a time (S3 · W46 · 332-4).
+  `RT_E_VALIDATION`, naming the flag and the two spellings. A **documented
+  numeric** flag (`--limit`, `--phase`, `--steps`, `--max-steps`, `--budget`)
+  whose value is present but not a non-negative integer is refused the same way
+  — before W49 it was silently dropped (live: `search --limit abc` exited 0 on
+  the default, `deepen --phase abc` fell back to the live phase and reported a
+  misleading phase error). Boolean flags (`--live`, `--apply`, `--force`,
+  `--start`, `--require-verified`, the `lesson`/`wild` action flags) are
+  unaffected. This closes the valueless-flag asymmetry of the 330/331 waves one
+  class at a time (S3 · W46 · 332-4; numeric class W49 · 335-4).
+- **A usage refusal names its own fix.** `remedy` rides every coded refusal;
+  for a CLI usage error (`missing required --flag`, an unknown verb, a bad
+  `--red-tree`/`--kind`/`--tree` value, …) it is the CLI's own concrete fix, not
+  the registry's `RT_E_VALIDATION` action (which speaks to the engine validating
+  model output). `--help <verb>` lists the verb's accepted flags (W49 · 335-4).
 
 ## Error codes (RT_E_*)
 

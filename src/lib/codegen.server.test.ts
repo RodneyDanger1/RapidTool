@@ -2917,6 +2917,27 @@ describe("216f T-10 — prompt contract: signature ceiling vs requirement duty",
       "the advertised token is the one the validator matches",
     );
   });
+
+  it("335-1: rule 2 scopes its validator-enforced claim to Math.random (no over-claim over Date.now)", () => {
+    const s = p6SynthesisSystemPrompt();
+    // The old parenthetical read as if EVERY non-deterministic primitive were
+    // validator-enforced. It is not: NONDETERMINISTIC_PRIMITIVE matches only
+    // `Math.random`, so the prompt must not imply `Date.now()` is refused.
+    assert.ok(
+      !/Math\.random\(\) or any other non-deterministic primitive/.test(s),
+      "the over-claim (all non-determinism validator-enforced) is gone",
+    );
+    assert.match(
+      s,
+      /Never use Math\.random\(\) \(validator-enforced\), and avoid any other non-deterministic primitive/,
+      "the enforcement parenthetical names exactly the matched token",
+    );
+    assert.equal(
+      nondeterministicPrimitiveHit(maskLiteralsAndComments("const t = Date.now();")),
+      null,
+      "the validator does NOT refuse Date.now() — which is why the prompt may not claim it does",
+    );
+  });
 });
 
 // --- 216r T-107.1 (W8-L5): the patch (str_replace) repair level ----------------
@@ -3889,6 +3910,57 @@ describe("W46/332-1 (P1) un-awaited async imports", () => {
     assert.equal(validateSynthesisModule(computedThen, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true, "computed `.then` is a legal consumer");
     const optionalThen = "function f(id) { return getProperty(id)?.then(function (p) { return p.ok; }); }\nmodule.exports.f = f;";
     assert.equal(validateSynthesisModule(optionalThen, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true);
+  });
+
+  it("335-1: an optional CALL `?.(` is the same un-awaited async use (property/computed/bound/destructure), not a bypass", () => {
+    // The optional call only guards a null/undefined callee — it returns the same
+    // Promise, so every value-position tail must be refused exactly as `.ok` is.
+    const direct = "function f(id) { return getProperty?.(id).ok; }\nmodule.exports.f = f;";
+    const directV = validateSynthesisModule(direct, ["f"], ["f"], GET_PROPERTY_PRIOR);
+    assert.equal(directV.ok, false, "`getProperty?.(id).ok` reads a property off the Promise");
+    if (!directV.ok) assert.match(directV.error, /"getProperty" at line 1 \(property-read\)/);
+
+    const bound = [
+      "function f(id) {",
+      "  const property = getProperty?.(id);",
+      "  return property.ok;",
+      "}",
+      "module.exports.f = f;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(bound, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, false, "bound-then-read through `?.(`");
+
+    const destructure = [
+      "function f(id) {",
+      "  const { ok } = getProperty?.(id);",
+      "  return ok;",
+      "}",
+      "module.exports.f = f;",
+    ].join("\n");
+    assert.equal(validateSynthesisModule(destructure, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, false, "destructure through `?.(`");
+
+    const computed = 'function f(id) { return getProperty?.(id)["ok"]; }\nmodule.exports.f = f;';
+    assert.equal(validateSynthesisModule(computed, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, false, "computed-read through `?.(`");
+
+    // The legal consumers through the optional call stay accepted.
+    const thenConsumer = "function f(id) { return getProperty?.(id).then(function (p) { return p.ok; }); }\nmodule.exports.f = f;";
+    assert.equal(validateSynthesisModule(thenConsumer, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true, "`?.(` + `.then` is legal");
+    const awaited = "async function f(id) { return (await getProperty?.(id)).ok; }\nmodule.exports.f = f;";
+    assert.equal(validateSynthesisModule(awaited, ["f"], ["f"], GET_PROPERTY_PRIOR).ok, true, "`await` around the optional call is legal");
+
+    // A `this.NAME?.(…)` receiver inside the declaring async-method body is refused.
+    const thisOptional = [
+      "class C {",
+      "  async getProperty(id) { return { ok: true, id: id }; }",
+      "  f(id) {",
+      "    return this.getProperty?.(id).ok;",
+      "  }",
+      "}",
+      "module.exports.C = C;",
+    ].join("\n");
+    const thisV = validateSynthesisModule(thisOptional, ["C"], ["C"]);
+    assert.equal(thisV.ok, false, "`this.getProperty?.(id).ok` is the same defect through a receiver");
+    const thisV2 = validateSynthesisModule(thisOptional, ["C"], ["C"]);
+    if (!thisV2.ok) assert.match(thisV2.error, /"getProperty" at line 4 \(property-read\)/);
   });
 
   it("333-1 F-1: async-arrow / function-expression / method / CJS-export declarations are discovered and refused", () => {

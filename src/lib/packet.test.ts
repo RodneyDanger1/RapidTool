@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { compileAgentPacket, exportProfiles, packetBudgetBoundary, packetInputHash, PACKET_VERSION } from "./packet.ts";
+import { DOD } from "./dod.ts";
 import { PHASES } from "./phases.ts";
 import { createTokenBudget, emptyLedger, recordSpend } from "./token-ledger.ts";
 import type { CrewSeat, HitlDecision, Project } from "./types.ts";
@@ -1271,5 +1272,38 @@ test("R2-f05: lastTest.ok must be the boolean TRUE to render pass (declare-or-st
     compileAgentPacket(truthy).includes("(last run): pass"),
     "ok === true still renders pass (the fix tightens, never weakens)",
   );
+});
+
+// ---------------------------------------------------------------------------
+// W49 / 335-3 — the agent packet must carry what the agent needs to WORK the
+// edge: the machine-checkable DoD exit criteria (the packet stated the rules
+// and the report schema but never "done"), the ingest seam's ACTUAL acceptance
+// rules, and no instruction that contradicts the current-edge-only governance.
+// ---------------------------------------------------------------------------
+test("W49/335-3: the packet carries the current edge's DoD exit criteria (gate verdict + checklist)", () => {
+  const p = makeProject();
+  const out = compileAgentPacket(p);
+  assert.ok(out.includes("## Exit criteria (DoD)"), "the DoD section is present");
+  assert.ok(out.includes(`Gate ${PHASES[p.currentPhase].code}:`), "the gate line names the current edge");
+  assert.ok(DOD[0].length > 0, "premise: P0 registers DoD criteria");
+  for (const item of DOD[0]) {
+    assert.ok(out.includes(item.criterion), `criterion renders verbatim: ${item.id}`);
+  }
+  assert.match(out, /\n- \[[ x]\] /, "criteria render as a [x]/[ ] checklist");
+});
+
+test("W49/335-3: report_schema states the ingest seam's phase-match rule and artifact caps", () => {
+  const out = compileAgentPacket(makeProject());
+  assert.ok(out.includes("must equal current_phase.id"), "a report for another phase is rejected by the seam");
+  assert.ok(out.includes("max 12"), "the artifact-count cap the seam enforces");
+  assert.ok(out.includes("50000 chars"), "the per-body cap the seam enforces");
+});
+
+test("W49/335-3: the Scorecard fallback never instructs an out-of-scope Phase 0 run", () => {
+  const p = makeProject();
+  assert.equal(p.scorecard, null, "premise: the fresh project has no scorecard");
+  const out = compileAgentPacket(p);
+  assert.equal(out.includes("run Phase 0 first"), false, "no instruction to run a different phase");
+  assert.ok(out.includes("the scorecard is a Phase 0 output"), "it names the source honestly instead");
 });
 

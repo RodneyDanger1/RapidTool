@@ -96,6 +96,20 @@ export class Store {
     assert.deepEqual(names, ["get"]);
     assert.equal(f.functions[0].kind, "method");
   });
+
+  it("records the EXPORTED name for `export { local as public }` (the alias, not the local binding)", () => {
+    const body = [
+      "const localA = 1;",
+      "function helper() {}",
+      'export { localA as publicA, helper as runHelper };',
+      'export { thing as renamed } from "./thing.ts";',
+    ].join("\n");
+    const map = mineCodebase([{ path: "src/reexport.ts", body }]);
+    const f = map.files[0];
+    // The names a consumer can import are the aliases, never the local bindings.
+    assert.deepEqual(f.exports, ["publicA", "runHelper", "renamed"]);
+    assert.deepEqual(f.imports, ["./thing.ts"]);
+  });
 });
 
 describe("mineCodebase — dependency graph", () => {

@@ -566,7 +566,12 @@ export function p6SynthesisSystemPrompt(): string {
     "1. Export EXACTLY the functions the spec's typeSignatures name — nothing more, nothing less. When the project is generated as several files, each file exports ONLY its own listed signatures: implement every requirement those listed signatures cover, never hide a requirement's logic behind non-exported helpers, and never add functions the list does not name.",
     // 216f (T-15): the validator refuses Math.random — the prompt must advertise
     // it (215b drift-proof principle: never enforce a rule the model was not told).
-    "2. Zero imports, zero requires, zero external deps. Plain functions only. Assign module.exports. Never use Math.random() or any other non-deterministic primitive (validator-enforced): ids and values must derive deterministically from the inputs so two identical runs produce identical results.",
+    // W49/335-1: the enforcement claim is scoped to the token the validator
+    // actually matches (`Math.random`, NONDETERMINISTIC_PRIMITIVE). The broader
+    // determinism duty stays a model instruction, not an over-claim: the
+    // validator never refuses `Date.now()`/`new Date()` (a legitimate timestamp
+    // use the product may need), so the prompt must not imply it does.
+    "2. Zero imports, zero requires, zero external deps. Plain functions only. Assign module.exports. Never use Math.random() (validator-enforced), and avoid any other non-deterministic primitive: ids and values must derive deterministically from the inputs so two identical runs produce identical results.",
     "3. Full JSDoc on every exported function.",
     `4. Never reference these forbidden primitives anywhere in the module (validator-enforced): ${FORBIDDEN_PRIMITIVE_NAMES.join(", ")}.`,
     "5. Mark each requirement you implement with a \"// req-N\" comment on the implementing function.",
@@ -2573,11 +2578,16 @@ type AsyncCallSite = { name: string; calleeStart: number; openParen: number };
  *     a `this` receiver (a same-named member on another receiver is not matched)
  *   • a var bound to one inside a `Promise.resolve().then(…)` body → floating-in-then
  *     (that callback is not `async`, so the promise can never be awaited later).
+ * The optional call `getProperty?.(id)` (and `this.getProperty?.(id)`) is the SAME
+ * call — it only guards a null/undefined callee, never the returned Promise — so its
+ * result is classified through the identical value-position tails (W49/335-1).
  * `await getProperty(id)` and `.then/.catch/.finally` consumers (including via a
  * computed key: `["then"]`) are accepted. `asyncNames` discovery is lexical (see
  * `declaredAsyncFunctionNames`); a Promise-returning callable not spelled `async`,
- * a named receiver (`obj.m()`) and an unresolvable dynamic computed key stay
- * outside this guard (their receiver/value cannot be tied to a declaration). Pure.
+ * a named receiver (`obj.m()`), an indirect invocation (`fn.call(…)`/`fn.apply(…)`,
+ * or a parenthesized/comma-discarded callee `(fn)(id)` / `(0, fn)(id)`), and an
+ * unresolvable dynamic computed key stay outside this guard (their receiver/value
+ * cannot be tied to a bare declaration). Pure.
  */
 export function unawaitedAsyncValueUses(module: string, asyncNames: readonly string[]): AsyncUnawaitedUse[] {
   const src = typeof module === "string" ? module : "";
@@ -2602,17 +2612,21 @@ export function unawaitedAsyncValueUses(module: string, asyncNames: readonly str
   const literals = constStringLiterals(src);
   const sites: AsyncCallSite[] = [];
   for (const name of wanted) {
-    const re = new RegExp(`(?<![\\w.$])${name}\\s*\\(`, "g");
+    // W49/335-1: the optional-call tail `?.(` calls the same async function and
+    // returns the same Promise — a plausible defensive emission that must not
+    // bypass the guard (the property-read/computed-read/`?.(` forms are one class).
+    const re = new RegExp(`(?<![\\w.$])${name}\\s*(?:\\?\\.\\s*)?\\(`, "g");
     let m: RegExpExecArray | null;
     while ((m = re.exec(masked)) !== null) {
-      sites.push({ name, calleeStart: m.index, openParen: m.index + m[0].length - 1 });
+      sites.push({ name, calleeStart: m.index, openParen: m.index + m[0].lastIndexOf("(") });
     }
   }
-  // A `this.NAME(…)` receiver call is matched only inside the body that declares
-  // the async method NAME — a same-named member on another receiver stays out.
+  // A `this.NAME(…)`/`this.NAME?.(…)` receiver call is matched only inside the
+  // body that declares the async method NAME — a same-named member on another
+  // receiver stays out.
   for (const r of asyncMethodBodyRanges(masked)) {
     if (!wanted.includes(r.name)) continue;
-    const re = new RegExp(`(?<![\\w$])this\\s*\\.\\s*${r.name}\\s*\\(`, "g");
+    const re = new RegExp(`(?<![\\w$])this\\s*\\.\\s*${r.name}\\s*(?:\\?\\.\\s*)?\\(`, "g");
     let m: RegExpExecArray | null;
     while ((m = re.exec(masked)) !== null) {
       if (m.index < r.start || m.index > r.end) continue;

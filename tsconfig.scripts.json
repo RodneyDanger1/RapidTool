@@ -10,7 +10,7 @@
   //
   // Pinned by `scripts/typecheck-scripts.test.mjs`: it proves (a) every
   // `scripts/**/*.mjs` is in the program, and (b) no NEW error appears beyond
-  // the checked-in ratchet budget (`scripts/scripts-typecheck-budget.json`).
+  // the ratchet budget checked into that test (`ERROR_BUDGET` — empty today).
   // A new error in any script fails the suite; fixing one only shrinks the
   // budget.
   //

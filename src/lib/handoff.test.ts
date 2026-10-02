@@ -45,6 +45,13 @@ describe("phaseHandoff", () => {
     assert.match(text, /- \[[ x]\] P0 verdict resolved to proceed/);
   });
 
+  it("states the ingest seam's phase-match rule and artifact caps (W49/335-3)", () => {
+    const text = phaseHandoff(seedProject(), 4);
+    assert.match(text, /`phase` must be 4 \(this edge\)/, "the report must describe this edge, not another");
+    assert.match(text, /at most 12 artifacts/, "the artifact-count cap the seam enforces");
+    assert.match(text, /50000 chars/, "the per-body cap the seam enforces");
+  });
+
   it("pulls prior-phase artifact context for a later phase", () => {
     const g = runToGate(seedProject(), 4); // P0..P3 sealed, parked at P4
     const text = phaseHandoff(g, 4);

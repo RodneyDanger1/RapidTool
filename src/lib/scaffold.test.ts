@@ -1315,3 +1315,27 @@ describe("W48 / 334-3 (T1a) — declared-scripts-unverified README banner", () =
     assert.equal(typeof pkg.scripts?.typecheck, "string");
   });
 });
+
+// ---------------------------------------------------------------------------
+// W49 / 335-3 — the cli-tool declares its runnable entry. Pre-fix its
+// package.json carried only `bin`; the headless entry resolver therefore fell
+// through to an unrelated job module, so corrupting the program the bin
+// launcher actually runs (src/main.ts) kept the tree GREEN (a false green of
+// the same class the W48 T3 fix closed for library/service).
+// ---------------------------------------------------------------------------
+describe("W49 / 335-3 — cli-tool declares its runnable entry (main)", () => {
+  it("package.json declares `main: './src/main.ts'`, the file the bin launcher delegates to", () => {
+    const p = fullRun({ kind: "tool" });
+    const result = scaffoldProject(p);
+    const slug = slugName(p.name);
+    const pkg = JSON.parse(bodyOf(result, "package.json")) as {
+      main?: string;
+      bin?: Record<string, string>;
+    };
+    assert.equal(pkg.main, "./src/main.ts", "the runnable entry is DECLARED, not only the launcher");
+    assert.deepEqual(pkg.bin, { [slug]: `bin/${slug}.mjs` }, "the launcher stays declared too");
+    const paths = okFiles(result).map((f) => f.path);
+    assert.ok(paths.includes("src/main.ts"), "the declared main is an emitted file");
+    assert.ok(paths.includes(`bin/${slug}.mjs`), "the bin launcher is an emitted file");
+  });
+});

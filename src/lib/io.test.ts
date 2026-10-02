@@ -141,6 +141,25 @@ describe("importProject", () => {
     if (!res.ok) assert.match(res.error, /Invalid JSON/);
   });
 
+  // W49 · 335-2: `maxChars` lets a byte-source that ALREADY holds the payload
+  // (the file loader — its readFileSync precedes this call) lift the hostile-
+  // PASTE cap, so a record the tool's own writer produced is never unreadable
+  // by its own reader. The default cap stays byte-identical.
+  it("W49 · 335-2: maxChars lifts the paste cap only for the caller that asks", () => {
+    const p = fullRun();
+    const raw = JSON.parse(exportProjectJson(p)) as Record<string, unknown>;
+    raw.padding = "x".repeat(IMPORT_MAX_CHARS + 50); // over the default cap, shape still valid
+    const json = JSON.stringify(raw);
+    assert.ok(json.length > IMPORT_MAX_CHARS, "fixture is genuinely over the cap");
+    assert.equal(importProject(json).ok, false, "the default hostile-paste cap is unchanged");
+    assert.equal(
+      importProject(json, { maxChars: Number.POSITIVE_INFINITY }).ok,
+      true,
+      "an explicit maxChars lifts the cap for a trusted byte source",
+    );
+    assert.equal(importProject(json, { maxChars: 10 }).ok, false, "a caller-pinned cap still refuses");
+  });
+
   it("319_f1: a malformed import refuses with the declared RT_E_VALIDATION code", () => {
     // The catch-level code must ride the envelope, not just the message:
     // classifyError maps a JSON.parse SyntaxError to RT_E_VALIDATION
