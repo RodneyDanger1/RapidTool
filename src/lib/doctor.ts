@@ -47,6 +47,9 @@ import type { TokenLedger, TokenPrices, TokenSpend } from "./token-ledger.ts";
 import { archProductComplete, archTrace } from "./dod.ts";
 import { fnv1a } from "./algorithms.ts";
 import { fixtureAcceptanceState, type FixtureAcceptanceState } from "./fixtures.ts";
+// 345 L2-X1: the acceptance gate's placeholder rule, shared so the doctor's
+// fixtures bar and maker-score's M1/M2 cannot disagree about one bar.
+import { fixturesHavePlaceholder } from "./brief-fixtures.ts";
 import type { Project } from "./types.ts";
 // W6-L3 provider surfacing: TYPE-ONLY import — erased at compile, so the
 // client-safe runtime surface (sandbox-policy + token-ledger) is unchanged.
@@ -353,14 +356,16 @@ function liveAcceptanceState(project: unknown): FixtureAcceptanceState | undefin
 /**
  * W52 · 338-3: the ONE producer of the factory's `humanFixtures` evidence —
  * DERIVED from the project's own acceptance record, never a caller's flag. The
- * bar is the acceptance gate's own (`brief-fixtures.fixtureApprovalGate`): at
- * least one case, EVERY case `approval:"approved"`, and at least one approved
- * row carrying the out-of-band human stamp `decidedBy:"human"` (a machine seat
- * never mints that stamp — 338-4 owns the machine-door question, not this
- * reader). A recorded `acceptanceBriefHash` that does not match the live
- * `brief` (fnv1a) refuses — the same stale-set pending-ify rule io/hydrate
- * apply, so a set drafted for a different brief can never close the gap.
- * Absent/garbled state ⇒ false (fail-closed: the gap stands, never hidden).
+ * bar applies the acceptance gate's rules: at least one case, EVERY case
+ * `approval:"approved"`, at least one approved row carrying the out-of-band
+ * human stamp `decidedBy:"human"` (a machine seat never mints that stamp —
+ * 338-4 owns the machine-door question, not this reader), and no approved row a
+ * draft sentinel (345 L2-X1: `fixturesHavePlaceholder`, the SAME predicate
+ * maker-score's M1/M2 read, so the doctor and the scorer agree on one bar). A
+ * recorded `acceptanceBriefHash` that does not match the live `brief` (fnv1a)
+ * refuses — the same stale-set pending-ify rule io/hydrate apply, so a set
+ * drafted for a different brief can never close the gap. Absent/garbled state ⇒
+ * false (fail-closed: the gap stands, never hidden).
  */
 export function humanFixturesFromProject(project: unknown): boolean {
   if (!project || typeof project !== "object" || Array.isArray(project)) return false;
@@ -375,6 +380,10 @@ export function humanFixturesFromProject(project: unknown): boolean {
     if (r.approval !== "approved") return false;
     if (r.decidedBy === "human") humanApproved = true;
   }
+  // 345 L2-X1: every row is approved here, so any draft sentinel is an approved
+  // sentinel — a bar that asserts nothing real and must not clear the gap. The
+  // shared predicate keeps this in lockstep with maker-score's M1/M2.
+  if (fixturesHavePlaceholder(rows)) return false;
   return humanApproved;
 }
 

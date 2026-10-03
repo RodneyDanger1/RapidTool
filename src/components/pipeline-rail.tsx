@@ -8,11 +8,13 @@
 //                  (`PhaseRecord.status` ∈ locked/ready/running/awaiting_hitl/
 //                  complete/rejected) + `project.currentPhase` + the blocked
 //                  project state (`project.status`).
-//   2. Now-line  — the newest REAL event, in honest fallback order:
-//                  `rtSnapshot().tail[0]` (client ring, newest-first, this page
-//                  session) → `project.logs.at(-1)` (the persisted ledger) →
-//                  `project.wildRun.lastAutoLog` + `lastAutoAt` (the wild loop's
-//                  own line) → an explicit idle state. It never invents a row.
+//   2. Now-line  — the newest RUN-relevant event, in honest fallback order
+//                  (`pickNowLine`, src/lib/rt-client.ts): the ring's newest
+//                  non-diagnostic row → `project.logs.at(-1)` (persisted ledger)
+//                  → `project.wildRun.lastAutoLog` + `lastAutoAt` → the newest
+//                  diagnostic-only client row (`sys.*`/`boot`/`ui-render`, e.g.
+//                  the Long Tasks jank row — LAST resort, never first) → an
+//                  explicit idle state. It never invents a row.
 //   3. Detail    — click any phase: the store's PhaseRecord truth
 //                  (status · startedAt/completedAt · gate{passed,unmet,
 //                  evidenceHash,checkedAt} · rejectionNote/rejectionHistory ·
@@ -48,8 +50,7 @@
 
 import { useEffect, useState } from "react";
 import { PHASES, PHASE_BY_ID } from "@/lib/phases";
-import { rtSnapshot } from "@/lib/rt-client";
-import type { RtEvent } from "@/lib/rt-events";
+import { pickNowLine, rtSnapshot } from "@/lib/rt-client";
 import type { PhaseId, PhaseStatus, Project } from "@/lib/types";
 
 /** Same cadence as the sibling runtime panes (ring is tiny; cost negligible). */
@@ -90,97 +91,6 @@ function agoLabel(ts: number): string {
 
 function clip(note: string, n = 90): string {
   return note.length > n ? `${note.slice(0, n)}…` : note;
-}
-
-/** Ring-row tone — the RuntimeLogPane mapping (console.tsx:4546), reused. */
-function ringLevelTone(level: RtEvent["level"]): string {
-  if (level === "critical") return "text-danger";
-  if (level === "error") return "text-warn";
-  if (level === "warn") return "text-warn";
-  return "text-muted";
-}
-
-/** Ledger tone — JsonLog levels are info|warn|error (no critical tier). */
-function ledgerLevelTone(level: "info" | "warn" | "error"): string {
-  if (level === "error") return "text-danger";
-  if (level === "warn") return "text-warn";
-  return "text-muted";
-}
-
-type NowLine = {
-  source: "ring" | "ledger" | "wild" | "idle";
-  ts: number | null;
-  tone: string;
-  event: string | null;
-  text: string;
-  code: string | null;
-  phase: number | null;
-  count: number | null;
-  note: string;
-};
-
-/**
- * Pick the newest REAL event for the now-line. Pure over its inputs; the
- * fallback chain is explicit and each branch labels its own provenance.
- */
-function pickNowLine(project: Project, tail: RtEvent[], ringRows: number): NowLine {
-  const newest = tail.length > 0 ? tail[0] : null;
-  if (newest) {
-    return {
-      source: "ring",
-      ts: newest.ts,
-      tone: ringLevelTone(newest.level),
-      event: newest.event,
-      text: newest.message,
-      code: newest.code ?? null,
-      phase: typeof newest.phase === "number" ? newest.phase : null,
-      count: newest.count !== undefined && newest.count > 1 ? newest.count : null,
-      note: `newest row of the client telemetry ring · ${ringRows} row${ringRows === 1 ? "" : "s"} this page session`,
-    };
-  }
-  const last = project.logs.length > 0 ? project.logs[project.logs.length - 1] : null;
-  if (last) {
-    return {
-      source: "ledger",
-      ts: last.ts,
-      tone: ledgerLevelTone(last.level),
-      event: last.event,
-      text: last.detail,
-      code: null,
-      phase: last.phase,
-      count: null,
-      note: "ring empty this session — newest entry of the project ledger",
-    };
-  }
-  const wr = project.wildRun ?? null;
-  if (wr && wr.lastAutoLog.length > 0) {
-    return {
-      source: "wild",
-      ts: wr.lastAutoAt,
-      tone: "text-wild",
-      // Display-only provenance label, NOT a telemetry event: nothing passes
-      // "wild.auto" to reportRt and it is deliberately absent from
-      // RT_EVENT_NAMES (308_bugmap NOTE-308-03 / 309 A6; the N6 census
-      // conflated this display row with real emitters).
-      event: "wild.auto",
-      text: wr.lastAutoLog,
-      code: null,
-      phase: wr.phase,
-      count: null,
-      note: "no telemetry rows and no ledger entries — the wild loop's own newest activity line",
-    };
-  }
-  return {
-    source: "idle",
-    ts: null,
-    tone: "text-faint",
-    event: null,
-    text: "No telemetry rows, no ledger entries, no wild activity — nothing has stepped yet.",
-    code: null,
-    phase: null,
-    count: null,
-    note: "honest idle — the ring and the ledger are both empty",
-  };
 }
 
 /**

@@ -121,6 +121,15 @@ describe("importProject", () => {
     if (!res.ok) assert.match(res.error, /too large/i);
   });
 
+  it("345 L2 (A1-07): the oversized-payload refusal carries RT_E_IMPORT_TOO_LARGE", () => {
+    // 319_f1 threaded a code through the parse/hydration refusals; this arm was
+    // the last uncoded return. A machine caller must branch on the code, never
+    // on prose (AGENTS.md honesty contract #4).
+    const res = importProject(`{"pad":"${"x".repeat(IMPORT_MAX_CHARS + 1)}"}`);
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.equal(res.code, "RT_E_IMPORT_TOO_LARGE");
+  });
+
   it("accepts a payload at the size cap boundary (no off-by-one refusal)", () => {
     // A project exactly AT the cap parses and shape-validates like any other
     // (padding sits inside an unknown field the engine carries through).

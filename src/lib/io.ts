@@ -35,14 +35,13 @@ export const PHASE_COUNT = 13;
  * reload is refused AT IMPORT with a human-readable reason the store can
  * forward instead of reporting a persistence failure later.
  *
- * A1-25: this comment used to promise a machine-readable `tooLargeToPersist`
- * code; no such code exists and the store forwards only `error`. TODO(A1-25):
- * mint `RT_E_IMPORT_TOO_LARGE` (+ ERROR_CODE_DOC entry) and thread it through
- * `ImportResult` when the errors-registry pass lands — until then the message
- * is the contract.
- * 319_f1: `ImportResult.code` now threads end-to-end for the parse/hydration
- * refusals (both catches + store.importProject forward it); THIS too-large arm
- * still returns a message only — the TODO above stays open.
+ * A1-25 (closed by 345 L2): the too-large arm used to return a message only;
+ * it now carries `RT_E_IMPORT_TOO_LARGE` (errors.ts registry + ERROR_CODE_DOC),
+ * so a machine caller branches on the code, never on prose. The message keeps
+ * the observed size and the effective cap.
+ * 319_f1: `ImportResult.code` threads end-to-end for the parse/hydration
+ * refusals (both catches + store.importProject forward it) and for this
+ * too-large arm too.
  *
  * W49 · 335-2: the cap is the hostile-PASTE bound. `loadProject` (which already
  * read the whole file) lifts it via `importProject(…, { maxChars })` so a
@@ -484,6 +483,7 @@ export function importProject(
     return {
       ok: false,
       error: `Import payload too large (${json.length.toLocaleString("en-US")} chars; cap ${maxChars.toLocaleString("en-US")}).`,
+      code: "RT_E_IMPORT_TOO_LARGE",
     };
   }
   let raw: unknown;

@@ -14,6 +14,12 @@
 > **235** · `scripts/` **49** · `fixes/` **719** · `wave_plans/` **139** · `research/` 476 · total tracked
 > **2,096** (includes the 192 tracked `.t4scratch/` files).
 
+> **Re-counted again 2026-10-03 (345-F1 docs-truth fix; HEAD `06cb089`; `git ls-files`):** the 2,096
+> above is stale — `.t4scratch/` is **untracked/removed** (`git ls-files .t4scratch` = 0), so the live
+> total is **1,933**: `src/` **250** · `src/lib/` **239** (123 modules + 112 tests) · `scripts/` **49**
+> (25 tools + 24 tests) · `fixes/` **744** · `wave_plans/` **139** · `research/` 476. Re-derive with
+> `git ls-files <dir> | wc -l`.
+
 ```
 RapidTool Main/
 │

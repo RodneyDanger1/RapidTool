@@ -58,7 +58,9 @@ jobs:
       - name: Set up Node (pinned to the dev host)
         uses: actions/setup-node@v4
         with:
-          # Pin == the dev host (`node -v` → v22.23.2; nodejs.org/dist/v22.23.2/ → HTTP 200).
+          # Pin = the Hermes-bundled Node the CLI test legs were pinned to (nodejs.org/dist/v22.23.2/
+          # → HTTP 200). It is NOT the dev host: `node -v` on the dev box is v24.15.0
+          # (corrected 2026-10-03 by the 345-F1 docs-truth fix — the old comment claimed "== the dev host").
           # Floor is Node 22 anyway: the test legs use --experimental-strip-types.
           node-version: "22.23.2"
           cache: npm

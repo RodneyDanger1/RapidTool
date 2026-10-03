@@ -9,6 +9,8 @@
 
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { dedupeMemoryIds, emptyProject, hydrateProject } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
 import { RT_COALESCE_MS, shouldCoalesce, type RtEvent } from "./rt-events.ts";
@@ -922,6 +924,39 @@ test("CORE sweep: junk artifact rows in persisted state are dropped on hydrate, 
   assert.equal(stored.artifacts.length, 1, "junk rows dropped, the well-formed row survives");
   assert.equal(stored.artifacts[0].id, "a-1");
   assert.equal(useRapid.getState().execute(withJunk.id).ok, true, "execute survives the repaired state");
+});
+
+// ---------------------------------------------------------------------------
+// L3-03 (fixes/345 · looker-3): a persisted `running` phase is a SESSION artifact
+// — the driver that marked it running died with the previous page. Left as-is it
+// wedges the build: the rail renders `Pn RUNNING`, `canExecute` disables Execute /
+// Run-to-gate forever, and no control clears it. Hydrate must reset it to `ready`
+// and trail a `run.interrupted` ledger row.
+// ---------------------------------------------------------------------------
+test("L3-03: hydrate resets a persisted running phase to ready with a run.interrupted row", () => {
+  // The real repro: create a build, execute P0 (its record flips to `running`),
+  // reload mid-run. P0 is the frontier, so the wedge is directly observable.
+  const base = seedProject();
+  const stuck: Project = {
+    ...base,
+    status: "running",
+    currentPhase: 0,
+    phases: base.phases.map((r) => (r.id === 0 ? { ...r, status: "running" as const, startedAt: 1 } : r)),
+  };
+  useRapid.setState({ projects: [stuck], activeId: stuck.id, hydrated: true, autopilot: false });
+  useRapid.getState().seedIfEmpty(); // store rehydration pass → hydrateProject + interrupted-reset
+
+  const stored = current(stuck.id);
+  assert.equal(stored.phases.find((r) => r.id === 0)?.status, "ready", "the running record is reset to ready");
+  assert.equal(stored.phases.some((r) => r.status === "running"), false, "no phase is left running");
+  const row = stored.logs.find((l) => l.event === "run.interrupted");
+  assert.ok(row, "a run.interrupted ledger row is written");
+  assert.match(String(row?.detail ?? ""), /P0/, "the row names the reset phase");
+  // The exact `canExecute` conditions (console.tsx:356-363), busy=false: not running,
+  // not blocked/complete, no open HITL — i.e. the run controls are live again.
+  const cur = stored.phases[stored.currentPhase];
+  assert.equal(cur?.status !== "running" && stored.status !== "blocked" && stored.status !== "complete" && !stored.hitl, true);
+  assert.equal(useRapid.getState().execute(stuck.id).ok, true, "the build is runnable again (the wedge is gone)");
 });
 
 // ---------------------------------------------------------------------------
@@ -2267,4 +2302,141 @@ test("C1-334: ingestReport refuses with a class (missing project / malformed rep
   const malformed = useRapid.getState().ingestReport(id, { phase: 99, status: "bogus" });
   assert.equal(malformed.ok, false);
   if (!malformed.ok) assert.equal(malformed.code, "RT_E_VALIDATION");
+});
+
+// ---------------------------------------------------------------------------
+// 345 F2 · A1-03 — E-19 regression-drift is wired into the real ingest path.
+// A report that names a file in a prior COMPLETE phase's file space must emit a
+// `regression.drift` ledger row when that phase's recorded evidence hash no
+// longer matches a fresh gate evaluation. Before this wiring the scanner
+// (`engine.verifyPriorPhases`) had no production caller at all.
+// ---------------------------------------------------------------------------
+test("345 F2 (A1-03): an ingest touching a prior phase's file space emits regression.drift", () => {
+  const p = seedProject();
+  const now = Date.now();
+  p.currentPhase = 1;
+  p.status = "running";
+  p.phases = p.phases.map((r) =>
+    r.id === 0
+      ? {
+          ...r,
+          status: "complete" as const,
+          completedAt: now,
+          gate: { passed: true, unmet: [], evidenceHash: "stale-p0-hash-f2", checkedAt: now },
+        }
+      : r.id === 1
+        ? { ...r, status: "ready" as const }
+        : r,
+  );
+  p.specGraph = {
+    nodes: [{ id: "n1", file: "src/x.ts", purpose: "job", dependsOn: [], owner: "implementer" }],
+    order: ["n1"],
+  };
+  install(p);
+  const res = useRapid.getState().ingestReport(p.id, {
+    phase: 1,
+    status: "complete",
+    summary: "Touches the P0 file space".padEnd(28, "."),
+    files: ["src/x.ts"],
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.applied, true);
+  const drift = current(p.id).logs.filter((l) => l.event === "regression.drift");
+  assert.equal(drift.length, 1, "exactly one drifting prior phase is recorded");
+  assert.equal(drift[0].phase, 0, "the drifting phase is named");
+  assert.match(drift[0].detail, /src\/x\.ts/, "the touching file is named");
+  assert.equal(drift[0].level, "warn");
+});
+
+test("345 F2 (A1-03): an ingest with no files (or no prior gate) emits no drift row", () => {
+  const p = install(seedProject());
+  useRapid.getState().execute(p.id); // P0 → P1
+  const res = useRapid.getState().ingestReport(p.id, {
+    phase: 1,
+    status: "complete",
+    summary: "No files named here".padEnd(28, "."),
+  });
+  assert.equal(res.ok, true);
+  assert.equal(current(p.id).logs.filter((l) => l.event === "regression.drift").length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// 345 F2 · A1-05 — the store's forceHuman autopilot exclusion, pinned with a
+// PASSING DoD gate (the existing pin used a failing gate, so the DoD guard
+// masked the policy guard under mutation).
+// ---------------------------------------------------------------------------
+test("345 F2 (A1-05): autopilot may not approve a forceHuman gate even when its DoD PASSES", () => {
+  const source =
+    "function dispatchJobs(){ } function listTechs(){ } function orderParts(){ } function planReroutes(){ } function warehouseScan(){ } function regionalBoard(){ } function hvacShopDispatch(){ } function sameDaySla(){ } function offlineScan(){ }";
+  const base = projectAtGate(6, {
+    forceHuman: true,
+    schedule: { tightness: 3.5, securityDelta: 0, apiDelta: 0, extraHitl: [6], notes: [] },
+    lastTest: { ok: true, detail: "fixture self-test pass", label: "tested", evidenceHash: "fixture-evidence-hash" },
+  });
+  const p: Project = {
+    ...base,
+    generatedSource: source,
+    artifacts: [
+      ...base.artifacts,
+      { id: "p6-code-f2", phase: 6, kind: "code", title: "Generated module", body: source },
+    ],
+  };
+  useRapid.setState({ projects: [p], activeId: p.id, hydrated: true, autopilot: true });
+  const res = useRapid.getState().execute(p.id);
+  assert.equal(res.ok, false, "the human-only gate stays parked");
+  const after = current(p.id);
+  assert.equal(after.status, "awaiting_hitl");
+  assert.equal(after.phases[6].status, "awaiting_hitl");
+  assert.equal(after.decisions.length, 0, "no autopilot decision slipped through a PASSING forceHuman gate");
+});
+
+// ---------------------------------------------------------------------------
+// 345 F2 · A1-06 — a console wild start with no planner plan must not silently
+// execute unreviewed: it attaches a plan when a planner is configured, else
+// records `wild.plan_absent` before the loop.
+// ---------------------------------------------------------------------------
+test("345 F2 (A1-06): a console wild start with no plan records wild.plan_absent (never silent)", async () => {
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "";
+  try {
+    const p = install(seedProject());
+    useRapid.getState().setWildMode(p.id, true);
+    const res = await useRapid.getState().startWildRun(p.id);
+    assert.equal(res.ok, true);
+    const after = current(p.id);
+    assert.ok(
+      after.logs.some((l) => l.event === "wild.plan_absent"),
+      "the un-reviewed plan state is recorded, not silent",
+    );
+  } finally {
+    process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// L3 UI source guards (fixes/345, looker-3). The repo's test glob is
+// `src/lib/**/*.test.ts` and mounts no component, so the Console JSX invariants
+// below are pinned as SOURCE assertions (the same instrument ui-shell-guards /
+// ui-surface-guards use on console.tsx). Each has a browser-observed scenario in
+// fixes/345_f3_fixer.md section 4. `RT345_CONSOLE_TX` points a guard at a copy to
+// reproduce the red run without touching the working tree.
+// ---------------------------------------------------------------------------
+const CONSOLE_TSX = readFileSync(
+  process.env.RT345_CONSOLE_TX ?? fileURLToPath(new URL("../components/console.tsx", import.meta.url)),
+  "utf8",
+);
+
+test("L3-01: the run screen renders a skeleton (not not-found) until the store is hydrated", () => {
+  assert.match(CONSOLE_TSX, /if \(!project\) \{[\s\S]{0,900}?if \(!hydrated\) \{/, "the !project branch must be gated on hydrated");
+  assert.match(CONSOLE_TSX, /Loading build/, "the pre-hydration state is a neutral skeleton");
+  assert.match(CONSOLE_TSX, /This build doesn't exist or was archived\./, "the genuine not-found state still exists");
+});
+
+test("L3-08: launch() has a synchronous ref latch (queued clicks create ONE build)", () => {
+  assert.match(CONSOLE_TSX, /const launchRef = useRef\(false\)/, "launchRef must exist");
+  assert.match(CONSOLE_TSX, /function launch\(\) \{[\s\S]{0,160}?if \(launchRef\.current\) return;/, "launch() must check the ref first");
+});
+
+test("A3-14: the rail button clips its overflowing badge", () => {
+  assert.match(CONSOLE_TSX, /rt-phase flex min-w-\[148px\] items-center gap-2 overflow-hidden/, "the phase button must carry overflow-hidden");
 });

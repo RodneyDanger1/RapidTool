@@ -212,3 +212,27 @@ describe("runNodeBounded verdict channel (344 A2-F1)", () => {
     assert.match(res.stdout, /detail-on-stdout/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// W40·K4 finite-timeout guard: `Infinity` once slipped through `> 0` and
+// `setTimeout(fn, Infinity)` fired on the first tick, so the run was killed
+// immediately. The guard maps any non-finite / <=0 timeout to the default.
+// ---------------------------------------------------------------------------
+describe("runNodeBounded timeout guard (W40 K4)", () => {
+  it("non-finite / <=0 timeouts fall back to the default — never an immediate kill", async () => {
+    if (!runnerAvailable()) return;
+    for (const t of [Infinity, -Infinity, Number.NaN, 0, -5]) {
+      const res = await runNodeBounded("setTimeout(() => console.log('alive'), 120)", { timeoutMs: t });
+      assert.equal(res.ok, true, `timeoutMs=${String(t)} must not kill a 120 ms child`);
+    }
+  });
+
+  it("a finite timeout is the one enforced — the envelope names its seconds", async () => {
+    if (!runnerAvailable()) return;
+    const res = await runNodeBounded("setTimeout(() => {}, 3000)", { timeoutMs: 1 });
+    assert.equal(res.ok, false, "a 1 ms timeout must kill a 3 s child");
+    if (res.ok) return;
+    assert.equal(res.reason, "timeout");
+    assert.match(String(res.error), /killed after 0\.001s/);
+  });
+});

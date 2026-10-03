@@ -257,3 +257,22 @@ LLM-shape swallows), T-21 (TASK-05 tab tiering), and every T5.x that L3's spec t
    file+mtime before believing it's a defect; never run gates while lanes are mid-edit.
 8. **Doc-truth drift** — any count/verb claim in README/AGENTS/README-cli must be re-verified
    in the wave that changes it (the README-cli doc-contract test is the model to copy).
+
+---
+
+## CORRECTION — 2026-10-03 (345-F1 docs-truth fix; HEAD `06cb089`)
+
+Everything in the W6→W12 catalogue above is the 2026-09-16 sketch. Current byte-derived values:
+
+- **Gate of record (343 wave, `fixes/343_0_parent.md` §1/§7):** scripts **427 pass / 0 fail** · lib
+  **3261 pass / 0 fail / 2 skipped**; `gate.sh` `ok:true`. The `235/1811` and `398/2736` pairs quoted
+  above are historical.
+- **Tracked counts:** total **1,933** · `src` 250 · `src/lib` 239 · `scripts` 49 · `fixes` 744 ·
+  `wave_plans` 139. `.t4scratch/` is no longer tracked.
+- **Delivered since this catalogue was written:** TA-15 multi-job emission (keyed), `unattended`
+  (341-6), checkpoint+`resume` (W36), MCP transport + doctor surface (340-1/342-5), cassette (340-4),
+  kind emitters (341-1), `emit --git` landing (343-3). The residual constraint is **keyed synthesis
+  quality**, not the W6→W12 lane list here.
+- **CLI truths corrected:** exit taxonomy 0/1/2/3/4/5; headless CLI reads `<cwd>/.env`; a fresh
+  `emit --run` is verified when its declared scripts resolve from the repo's own `node_modules/`.
+  `tsconfig.scripts.json` is CLEAN (`tsc -p tsconfig.scripts.json --noEmit` exits 0).

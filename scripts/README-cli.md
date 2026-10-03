@@ -29,7 +29,7 @@ continuation verbs `tree-run` + `repair` (rows #31–32 below).
 > below and the [Tree-run and repair (landed); emit verify-kind (landed)](#tree-run-and-repair-landed-emit-verify-kind-landed)
 > section describe their real envelopes (`edit`'s own section: [Edit (`edit`)](#edit-edit)). `emit --verify-kind` is a **flag of
 > `emit`**, not its own case arm: `grep -c 'case "'` reads 39 and none of the 39 case arms is
-> `verify-kind` — the flag rides inside `emit` (`rapidtool-cli.mjs:1184`, calling
+> `verify-kind` — the flag rides inside `emit` (`rapidtool-cli.mjs:2076`, calling
 > `verifyKindDir` at `compile-check.server.ts:1566`; a failed leg flips the envelope to
 > `ok:false` + `RT_E_VERIFY_KIND_FAILED`, exit 1).
 
@@ -347,8 +347,12 @@ Off by default. When on, research phases (P0/P7/P11) attempt:
    present in `process.env`.
 
 Every failure degrades gracefully to the deterministic result; no output is ever
-fabricated. Keys are read from `process.env` only (the CLI does **not** load
-`.env` — export them in the shell, or use `.env`-loading tooling around the CLI).
+fabricated. `DEEPSEEK_API_KEY` (and the other knobs) are resolved from
+**`<working directory>/.env` first, then the process environment** — the `.env` value WINS when
+both are non-blank (the ambient key loses behind the coded `RT_E_LLM_KEY_SHADOWED` signal, tails
+only), and a present-but-blank process value is an intentional keyless disable. The full rule and
+provenance rule are in "API key resolution" above; run the CLI from the repo root to use the repo's
+own `.env`.
 
 ## Vault (`vault`)
 
@@ -472,14 +476,14 @@ carries one verdict per file. `--run` executes the emitted tree **in-loop** —
 per-file parse verdicts + every emitted `tests/*.spec.ts` under the bounded
 runner + one kind-entry smoke (`compile-check.server.ts: treeRun`) — and appends
 the `TreeRunOutcome`; a red tree exits 1 (a red tree is never a clean emit). A
-GREEN tree whose declared `typecheck`/`build` never ran (usually no
-`node_modules/`) is `ok: true` but **unverified**: it exits **0** and carries
-`unverified: true`, `declaredScriptsVerified: false`, and
-`unverifiedDeclaredScripts: [...]`. Because a fresh scaffold has no
-`node_modules`, *every* fresh `emit --run` is unverified, so the strict exit **5**
-is **opt-in**: pass `--require-verified` to make that state exit 5 instead of 0
-(not 1 — nothing ran red). Install the tree's deps and re-run `--run` to reach
-`declaredScriptsVerified: true` at exit 0.
+GREEN tree whose declared `typecheck`/`build` could not be resolved/run is `ok: true` but
+**unverified**: it exits **0** and carries `unverified: true`, `declaredScriptsVerified: false`,
+and `unverifiedDeclaredScripts: [...]`. This is NOT the usual fresh-emit state: when the declared
+scripts resolve from the RapidTool repo's own `node_modules/` (the normal case), `treeRun` runs
+them and reports `declaredScriptsVerified: true` at exit 0. The unverified state appears only when
+those scripts genuinely cannot be resolved/run; pass `--require-verified` to make that state exit 5
+instead of 0 (not 1 — nothing ran red). Install/link the tree's deps and re-run `--run` to reach a
+verified `declaredScriptsVerified: true`.
 All files parse → exit 0 with
 `{ "ok": true, "dir": "…", "count": N, "moduleEmbedded": true|false, "summary": "…" }`.
 With `--check`, any failed file flips the envelope to `ok: false` with the
@@ -513,7 +517,7 @@ move is loud: `ok:false` + `RT_E_FOREIGN_FILES` with `quarantineFailed` (R11-f08
 > not its own case arm (none of the 39 case arms is `verify-kind` —
 > `grep -c 'case "' scripts/rapidtool-cli.mjs` reads 39); the seam is
 > `verifyKindDir` (`compile-check.server.ts:1566`), called from
-> `rapidtool-cli.mjs:1184-1195`; a failed leg flips the envelope to `ok:false` +
+> `rapidtool-cli.mjs:2076-2090`; a failed leg flips the envelope to `ok:false` +
 > `RT_E_VERIFY_KIND_FAILED`. See the
 > [Tree-run and repair (landed); emit verify-kind (landed)](#tree-run-and-repair-landed-emit-verify-kind-landed)
 > section before relying on it.
@@ -1041,16 +1045,16 @@ so the contract is strict and stable:
   optional module in the vault/design/diagram arms (envelope carries the
   `RT_E_*` code).
 - **Exit 5** (`emit --run` / `tree-run` only, **opt-in**) = the tree is GREEN but
-  its DECLARED project scripts (e.g. `typecheck`, `build`) never executed — the
+  its DECLARED project scripts (e.g. `typecheck`, `build`) could not be resolved/run — the
   emitted toolchain is UNVERIFIED, not failed. `ok` stays `true` (nothing ran
   red, and the tested-mint is unaffected) and the envelope carries
   `unverified: true`, `declaredScriptsVerified: false`, and
-  `unverifiedDeclaredScripts: [...]` naming exactly which scripts did not run
-  (usually because the tree has no `node_modules/`). **The default is exit 0**
-  for that state: a freshly scaffolded tree has no `node_modules`, so *every*
-  fresh `emit --run` is unverified — a default that never exits 0 is not a
-  usable pass/fail. Pass `--require-verified` to opt INTO the strict exit 5 for
-  your gate; install the tree's deps and re-run `--run` to reach a verified
+  `unverifiedDeclaredScripts: [...]` naming exactly which scripts did not run.
+  **The default is exit 0** for that state. Note (corrected 2026-10-03 by the 345-F1 docs-truth
+  fix): a fresh emit whose declared scripts resolve from the RapidTool repo's own `node_modules/`
+  is **verified** (`declaredScriptsVerified: true`, exit 0) — the unverified state is the residual
+  case, not the fresh-emit default. Pass `--require-verified` to opt INTO the strict exit 5 for
+  your gate; resolve/link the tree's deps and re-run `--run` to reach a verified
   state (exit 0 with `declaredScriptsVerified: true`). Exit 5 is deliberately
   NOT exit 1 (an honest unknown, not a red tree).
 - `summary` carries agent hints: `researchCount` (cited findings across live
@@ -1140,11 +1144,11 @@ The emit→edit→re-emit verbs (`tree-run`/`repair`, fixes/150 wave G1) set the
 | `RT_E_DISK_FULL` | A write failed because the filesystem has no space left (ENOSPC). | Free space or point the output at another volume before retrying; never report the write as done. | 1–4 (classified in place) |
 | `RT_E_PORT_IN_USE` | A server could not bind because the address/port is already in use (EADDRINUSE). | Stop the process holding the port or bind a different port; do not kill processes blindly. | 1–4 (classified in place) |
 | `RT_E_NETWORK_UNREACHABLE` | A network call never reached its target — DNS miss, refused or reset connection, unreachable host (includes undici's bare "fetch failed"). | Check the target host/port and connectivity; retry once if the failure may be transient, then report the unreachable endpoint honestly instead of fabricating the remote result. | 1–4 (classified in place) |
-| `RT_E_GIT_UNAVAILABLE` | The git binary is not available in this environment, so the git landing tail cannot run. | Report the absence honestly and leave the tree uninitialized — install git, or run where git exists; never fake a landing or hand-roll repository metadata. | — (no live emitter today; landing tail unwired) |
+| `RT_E_GIT_UNAVAILABLE` | The git binary is not available in this environment, so the git landing tail cannot run. | Report the absence honestly and leave the tree uninitialized — install git, or run where git exists; never fake a landing or hand-roll repository metadata. | 1 (`emit --git` delivery tail; live emitter in `src/lib/git.server.ts`) |
 | `RT_E_CHECKPOINT_MISSING` | T-107.7: `resume`/`unattended` found no checkpoint at <projectDir>/.rapidtool/checkpoint.json — the run never committed a phase with a known project dir, or a COMPLETE seal cleared it (there is no successor state to re-enter). | Continue with the normal run verbs — `gate`/`run --project` writes a fresh checkpoint on every committed phase (`unattended` starts from the project file when no checkpoint exists); re-run `resume` only after a run has committed a phase beside that dir. Never invent a resumption. | 1 (resume/unattended re-entry) |
 | `RT_E_NOT_IMPLEMENTED` | The requested capability is a coded SHELL: its seam exists (types/parsing/refusal paths in place) but the full logic is not wired yet — the message names the owning TODO row. | Treat the refusal as the honest state of the build: read the named TODO(<row-id>) / lane log, implement that row, and re-run; never work around it by fabricating the missing behavior. | — (no live emitter today) |
 | `RT_E_AUTH_SCHEMA_MISSING` | Sign-in is enabled (VITE_AUTH_ENABLED is not "false") but no migration creates the Better Auth "user" table — migrations/auth/*.sql is never applied (neither the deploy migrator nor the PGLite fallback descends into it). | Copy the auth schema into the migrated directory (`cp migrations/auth/0001_auth.sql migrations/0001_auth.sql`, plus any later migrations/auth/*.sql in name order), restart, and re-run; or set VITE_AUTH_ENABLED=false to run without sign-in. Never let the app serve sign-in against a schema-less database. | 1 (migrate/build preflight) |
-| `RT_E_MCP_DISABLED` | F1 (R8-f11 / R13-f06): the MCP runtime client is owner-gated and DISABLED by default — no child process was spawned and zero network I/O was performed (the shell is discovery-first and inert until the owner's trust decision). | Do not simulate MCP discovery or fabricate tool lists: wait for the owner's trust decision, then set RAPIDTOOL_MCP_ENABLED=1 (once the JSON-RPC 2.0 stdio transport lands, TODO(R8-f11)) and re-run the read-only tools/list discovery. | — (owner-gated; no live emitter until the transport lands) |
+| `RT_E_MCP_DISABLED` | F1 (R8-f11 / R13-f06): the MCP runtime client is owner-gated and DISABLED by default — no child process is spawned and zero network I/O is performed until the owner sets RAPIDTOOL_MCP_ENABLED=1. The JSON-RPC 2.0 stdio transport itself IS implemented (`src/lib/mcp.server.ts`, 340-1); the trust gate, not a missing transport, is why nothing runs. | Do not simulate MCP discovery or fabricate tool lists: wait for the owner's trust decision, then set RAPIDTOOL_MCP_ENABLED=1 and re-run the read-only tools/list discovery (the stdio transport is implemented — `src/lib/mcp.server.ts`). | 1 (`doctor --mcp-call` / `doctorMcp`; live emitter) |
 
 ## Full agent loop (Hermes-style)
 
@@ -1238,7 +1242,7 @@ This file is pinned by **two legs** — the `npm test` pair (`ls scripts/*.test.
 
 ```bash
 npm test                                                 # both legs, in order
-# leg 1 — the scripts suite (21 contract suites), incl. THIS file's doc-contract pins:
+# leg 1 — the scripts suite (24 contract suites), incl. THIS file's doc-contract pins:
 node --test "scripts/**/*.test.mjs"
 # leg 2 — the engine suite (`headless.test.ts` + `harvest.test.ts` are part of it):
 node --experimental-strip-types --test "src/lib/**/*.test.ts"

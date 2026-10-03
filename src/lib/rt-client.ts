@@ -18,8 +18,8 @@
 // EXPORT SURFACE (compile against these — do not rename):
 //   installRtClient · disposeRtClient · reportRt · markBoundaryError · getRtRing
 //   rtSnapshot · setStallLatch · peekStall · clearStall · setBusyProbe
-//   tryStartWild · releaseWildStart · buildClientDiagnosis
-//   type RtBusyState · type ClientDiagnosisInput · __rtResetForTests
+//   tryStartWild · releaseWildStart · buildClientDiagnosis · pickNowLine
+//   type RtBusyState · type ClientDiagnosisInput · type NowLine · __rtResetForTests
 // ---------------------------------------------------------------------------
 
 import {
@@ -509,7 +509,25 @@ export function installRtClient(): void {
         const expected = lastTickAt + HEARTBEAT_MS;
         lastTickAt = now;
         const lagMs = Math.max(0, now - expected);
+        const hasProbe = busyProbe !== null;
         const busy = busyProbe ? busyProbe() : null;
+        // A3-02 (344 audit, fixes/345): the stall sidecar must be able to CLEAR.
+        // Before this, `clearStall` had no production caller, so one >=10 s lag
+        // pinned a `<Stalled>` row into localStorage across runs and reloads.
+        //   · a REGISTERED probe reporting no active run (null), a stopped run,
+        //     or a paused run -> no stall to report; drop ANY latch. (The console
+        //     probe returns null once the project is gone / the wild run is not
+        //     active, so this is the "run stopped" path.)
+        //   · healthy active tick -> drop the `mainthread-stall` latch THIS
+        //     heartbeat owns (a driver-owned step-overdue/step-timeout latch is
+        //     left for its driver).
+        //   · NO probe registered -> the host has no run signal at all; leave the
+        //     latch untouched rather than guess.
+        // Written only when a latch is actually present, so a healthy 1 s tick
+        // does not churn localStorage.
+        if (hasProbe && (!busy || !busy.active || busy.pause)) {
+          if (peekStall() !== null) clearStall();
+        }
         if (busy && busy.active && !busy.pause) {
           lastKnownWildRun = busy;
           const r = getRtRing();
@@ -561,6 +579,14 @@ export function installRtClient(): void {
               phase: busy.phase,
               payload: { lagMs: Math.round(lagMs) },
             });
+          } else {
+            // A3-02: lagClass === "ok" — the main thread is responsive again.
+            // Clear the mainthread-stall latch THIS heartbeat owns; a
+            // driver-owned step-overdue/step-timeout latch is never touched here
+            // (only the stop/pause branch above clears those, and only because a
+            // run that is not advancing has no stall to report).
+            const latch = peekStall();
+            if (latch !== null && latch.class === "mainthread-stall") clearStall();
           }
         }
       } catch {
@@ -616,6 +642,122 @@ export function rtSnapshot(): {
     stats: rtStats(r),
     tail: rtTail(r, RT_ERROR_TAIL),
     crashSnapshot,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Now-line view model (A3-01 · 344 audit). `pickNowLine` is the console's single
+// "what is the machine doing" line: the newest RUN-relevant event in honest
+// fallback order. Diagnostic-only client telemetry (`sys.*`, `boot`, `ui-render`
+// — e.g. the Long Tasks jank row) must never preempt the run narrative, so the
+// ring is scanned for its newest non-diagnostic row and a diagnostic row is only
+// a last resort before idle. Pure over its inputs; the component renders it.
+// ---------------------------------------------------------------------------
+
+/** Client-ring scopes that describe the CONSOLE, not the run. */
+const DIAGNOSTIC_RING_SCOPES: ReadonlySet<string> = new Set(["sys", "boot", "ui-render"]);
+
+/** One resolved now-line row (display fields the PipelineRail renders). */
+export type NowLine = {
+  source: "ring" | "ledger" | "wild" | "idle";
+  ts: number | null;
+  tone: string;
+  event: string | null;
+  text: string;
+  code: string | null;
+  phase: number | null;
+  count: number | null;
+  note: string;
+};
+
+/** Ring-row tone — the RuntimeLogPane mapping (console.tsx:4546), reused. */
+function ringLevelTone(level: RtEvent["level"]): string {
+  if (level === "critical") return "text-danger";
+  if (level === "error") return "text-warn";
+  if (level === "warn") return "text-warn";
+  return "text-muted";
+}
+
+/** Ledger tone — JsonLog levels are info|warn|error (no critical tier). */
+function ledgerLevelTone(level: "info" | "warn" | "error"): string {
+  if (level === "error") return "text-danger";
+  if (level === "warn") return "text-warn";
+  return "text-muted";
+}
+
+function ringNowLine(row: RtEvent, ringRows: number, diagnosticOnly = false): NowLine {
+  return {
+    source: "ring",
+    ts: row.ts,
+    tone: ringLevelTone(row.level),
+    event: row.event,
+    text: row.message,
+    code: row.code ?? null,
+    phase: typeof row.phase === "number" ? row.phase : null,
+    count: row.count !== undefined && row.count > 1 ? row.count : null,
+    note: diagnosticOnly
+      ? `client telemetry only — no run rows or ledger entries · ${ringRows} row${ringRows === 1 ? "" : "s"} this page session`
+      : `newest run row of the client telemetry ring · ${ringRows} row${ringRows === 1 ? "" : "s"} this page session`,
+  };
+}
+
+/**
+ * Pick the newest REAL run event for the now-line. Pure over its inputs; the
+ * fallback chain is explicit and each branch labels its own provenance:
+ * newest non-diagnostic ring row → project ledger → wild loop → newest
+ * diagnostic-only ring row (last resort) → honest idle.
+ */
+export function pickNowLine(project: Project, tail: RtEvent[], ringRows: number): NowLine {
+  const runRow = tail.find((row) => !DIAGNOSTIC_RING_SCOPES.has(row.scope)) ?? null;
+  if (runRow) return ringNowLine(runRow, ringRows);
+
+  const last = project.logs.length > 0 ? project.logs[project.logs.length - 1] : null;
+  if (last) {
+    return {
+      source: "ledger",
+      ts: last.ts,
+      tone: ledgerLevelTone(last.level),
+      event: last.event,
+      text: last.detail,
+      code: null,
+      phase: last.phase,
+      count: null,
+      note: "newest entry of the project ledger (no run rows in the client ring)",
+    };
+  }
+
+  const wr = project.wildRun ?? null;
+  if (wr && wr.lastAutoLog.length > 0) {
+    return {
+      source: "wild",
+      ts: wr.lastAutoAt,
+      tone: "text-wild",
+      // Display-only provenance label, NOT a telemetry event: nothing passes
+      // "wild.auto" to reportRt and it is deliberately absent from
+      // RT_EVENT_NAMES (308_bugmap NOTE-308-03 / 309 A6).
+      event: "wild.auto",
+      text: wr.lastAutoLog,
+      code: null,
+      phase: wr.phase,
+      count: null,
+      note: "no run rows and no ledger entries — the wild loop's own newest activity line",
+    };
+  }
+
+  // Last resort: real client telemetry that describes the console, not the run.
+  const diagRow = tail.length > 0 ? tail[0] : null;
+  if (diagRow) return ringNowLine(diagRow, ringRows, true);
+
+  return {
+    source: "idle",
+    ts: null,
+    tone: "text-faint",
+    event: null,
+    text: "No telemetry rows, no ledger entries, no wild activity — nothing has stepped yet.",
+    code: null,
+    phase: null,
+    count: null,
+    note: "honest idle — the ring and the ledger are both empty",
   };
 }
 

@@ -30,7 +30,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, databaseSchemaSql, deliveryKindOf, hydrateProject, liveLayer, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
+import { approveHitl, emptyProject, databaseSchemaSql, deliveryKindOf, hydrateProject, liveLayer, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
 import { wildResumeRun } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
 import type { Project, WildParkInfo } from "./types.ts";
@@ -398,5 +398,61 @@ describe("342-4 — the stored delivery kind is the single source of truth", () 
     const stamped = withDeliveryKind(p);
     assert.equal(stamped.kind, "library");
     assert.equal(withDeliveryKind(stamped), stamped, "an already-decided project is returned unchanged");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 345 F2 · A1-05 — the mutation-invisible engine guards, pinned.
+// Each test below fails if its guard is made inert (the V1 mutation probe found
+// no suite failed on removal). They pin HEAD behavior; the source is unchanged.
+// ---------------------------------------------------------------------------
+describe("345 F2 (A1-05) — wildStep/approveHitl guards are fail-able", () => {
+  /** An active, unpaused wild run whose cursor sits on `phase`. */
+  function activeWildAt(phase: number, recordStatus: "ready" | "running"): Project {
+    const p = emptyProject({ name: "Guarded", brief: "A governed field-service dispatch brief with enough vocabulary." });
+    p.wildMode = true;
+    p.currentPhase = phase as Project["currentPhase"];
+    p.status = "running";
+    p.wildRun = {
+      active: true,
+      phase,
+      startedAt: Date.now(),
+      lastAutoLog: "Wild run started",
+      lastAutoAt: Date.now(),
+      stoppedAt: null,
+      pause: false,
+    };
+    p.phases = p.phases.map((r) => (r.id === phase ? { ...r, status: recordStatus } : r));
+    return p;
+  }
+
+  it("pause guard: an active+PAUSED run is a noop (no phase may execute)", async () => {
+    const p = activeWildAt(0, "ready");
+    p.wildRun = { ...p.wildRun!, pause: true };
+    const res = await wildStep(p, { reviewer: notConfigured });
+    assert.equal(res.outcome, "noop");
+    assert.equal(res.ran, false);
+    assert.equal(res.project, p, "a paused step returns the input untouched");
+  });
+
+  it("priors-sealed guard: a READY edge with unsealed priors pauses (never executes over a gap)", async () => {
+    const p = activeWildAt(2, "ready"); // P0/P1 stay locked from emptyProject
+    const res = await wildStep(p, { reviewer: notConfigured });
+    assert.equal(res.outcome, "paused");
+    assert.equal(res.code, "RT_E_PHASE_ILLEGAL");
+    assert.ok(res.project.logs.some((l) => l.event === "wild.paused_guard"), "the guard pause is ledgered");
+  });
+
+  it("approveHitl: an autopilot approval of a forceHuman gate throws (never a machine pass)", () => {
+    const p = emptyProject({ name: "HumanOnly", brief: "A brief that parks on a human-only gate." });
+    p.currentPhase = 0;
+    p.status = "awaiting_hitl";
+    p.phases[0] = { ...p.phases[0], status: "awaiting_hitl" };
+    p.hitl = { phase: 0, title: "Reframe the brief", prompt: "Tighten the brief.", stakes: "high", forceHuman: true };
+    assert.throws(
+      () => approveHitl(p, { decidedBy: "autopilot" }),
+      /Autopilot may not approve a forceHuman gate/,
+      "no autopilot path may clear a human-only gate",
+    );
   });
 });

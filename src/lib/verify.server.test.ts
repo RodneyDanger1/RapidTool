@@ -27,6 +27,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  behaviouralOracleExpression,
   buildOracleCasesPrompt,
   droppedPinnedOracleIds,
   ESM_MODULE_UNSUPPORTED_REASON,
@@ -34,10 +35,12 @@ import {
   NO_CALLABLE_EXPORTS_REASON,
   NO_EXPORT_REFERENCE_REASON,
   oracleBriefGrounded,
+  oracleHasBehaviouralCase,
   parseOracleCases,
   parseOracleJson,
   runCases,
   sanitizeOracleExpression,
+  shapeOnlyOracleCaseIds,
   verifyAndFixServer,
 } from "./verify.server.ts";
 import type { VerifyCase } from "./verify.server.ts";
@@ -119,6 +122,13 @@ const LEGACY_PROMPT = [
   "contract function names and/or the brief's domain nouns as identifiers. A case that merely",
   "re-asserts the source's own placeholder self-test helpers (e.g. a phase-graph `synthesize`",
   "or its `test_happy`/`test_no_skip`/`test_rejection_addressed` booleans) is VACUOUS and forbidden.",
+  "BEHAVIOURAL ASSERTION REQUIRED: at least one case MUST constrain an exported result beyond its",
+  "presence or type — compare a call/return (or a property of it) to a concrete expected value",
+  "(e.g. add(2,3) === 5, mean([]) === 0, plan().length === 3, result.ok === true) or a numeric/boolean",
+  "predicate (e.g. median([1,2,3]) >= 2). A set made ONLY of `typeof x === 'function'` and",
+  "`f(1) !== null` / `!== undefined` presence checks is REJECTED as self-certifying — shape proves",
+  "nothing about behavior. If the brief defines no observable result for a name, say so explicitly",
+  "in that case's expression so the gap is recorded — never certify a shape-only set.",
   "BRIEF/CONTRACT GROUNDING: the brief supplies no nouns and no contract signatures — test the source's exported behavior directly.",
   "Brief: ",
   "Source:",
@@ -319,7 +329,10 @@ describe("generateCases E-08 wiring (real path, fetch-stubbed)", () => {
 
   it("a no-oracle project produces the legacy prompt (no seed block, byte-parity)", async () => {
     const restoreKey = withFakeKey();
-    const mock = mockChat([{ cases: [{ id: "c1", expression: "1 === 1" }] }]);
+    // 345 L1-F2: the payload must be BEHAVIOURAL (a literal-only `1 === 1` is now
+    // refused by the shape-only floor); the assertion under test is the prompt
+    // bytes, not the payload.
+    const mock = mockChat([{ cases: [{ id: "c1", expression: "x === 1" }] }]);
     try {
       const res = await generateCases(SOURCE, "", [], "", []);
       assert.equal(res.ok, true);
@@ -1636,5 +1649,168 @@ describe("344 A2-F1 — the verdict channel is unforgeable by the module", () =>
       mock.restore();
       restoreKey();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 345 L1-F2 (Med) — a SHAPE-ONLY case set can no longer certify behaviour.
+//
+// The oracle is authored by the SAME model that wrote the module, so a case
+// set that checks only presence/type (`typeof add === "function"`,
+// `add(1) !== null`, `!== undefined`) certifies nothing. Reproduced: a module
+// whose only export returns NaN earned `status:"passed"` → lastTest
+// {label:"tested"} from the single case `boardAdd(1) !== null`.
+//
+// The fix requires at least one case that constrains an exported result
+// beyond presence/type — a comparison to a concrete expected value or a
+// numeric/boolean predicate. A shape-only set takes ONE bounded repair
+// re-prompt and is then REFUSED with a coded reason; it can never pass.
+// (RED before the fix: the refusal tests below returned ok:true / passed.)
+// ---------------------------------------------------------------------------
+describe("345 L1-F2 — shape-only case sets cannot certify behaviour", () => {
+  const BROKEN = "exports.boardAdd = function () { return NaN; };";
+  const SHAPE_ONLY = [{ id: "c1", expression: "boardAdd(1) !== null" }];
+
+  it("refuses a shape-only set after one bounded repair (RT_E_VALIDATION, never a pass)", async () => {
+    const restoreKey = withFakeKey();
+    const payload = { cases: SHAPE_ONLY };
+    const mock = mockChat([payload, payload]);
+    try {
+      const res = await generateCases(BROKEN, "build a board", [], "", []);
+      assert.equal(res.ok, false, "a shape-only set must not commit");
+      if (!res.ok) {
+        assert.equal(res.reason, "error");
+        assert.equal(res.code, "RT_E_VALIDATION");
+        assert.match(res.error ?? "", /shape-only/i);
+        assert.match(res.error ?? "", /c1/, "the offending case id is named");
+      }
+      assert.equal(mock.calls.length, 2, "one bounded repair retry, then an honest refusal");
+      assert.match(mock.calls[1]!.prompt, /presence or type/i, "the repair demands a behavioural assertion");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("repairs a shape-only set into a behavioural one and commits it", async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([{ cases: SHAPE_ONLY }, { cases: [{ id: "c1", expression: "boardAdd(1) === NaN || boardAdd(1) !== 0" }] }]);
+    try {
+      const res = await generateCases(BROKEN, "build a board", [], "", []);
+      assert.equal(res.ok, true, JSON.stringify(res));
+      assert.equal(mock.calls.length, 2, "exactly one bounded repair retry");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("control: a genuinely behavioural set commits with NO retry", async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([{ cases: [{ id: "c1", expression: "add(2,3) === 5" }] }]);
+    try {
+      const res = await generateCases("exports.add = (a, b) => a + b;", "", [], "", []);
+      assert.equal(res.ok, true, JSON.stringify(res));
+      assert.equal(mock.calls.length, 1, "a behavioural set needs no repair");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("control: a mixed set with one behavioural case commits (typeof cases alone are not enough)", async () => {
+    const restoreKey = withFakeKey();
+    const mixed = {
+      cases: [
+        { id: "c1", expression: "typeof add === 'function'" },
+        { id: "c2", expression: "add(2,3) === 5" },
+      ],
+    };
+    const mock = mockChat([mixed]);
+    try {
+      const res = await generateCases("exports.add = (a, b) => a + b;", "", [], "", []);
+      assert.equal(res.ok, true, JSON.stringify(res));
+      assert.equal(mock.calls.length, 1, "one behavioural case grounds the set");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("(end-to-end) the () => NaN stub with a shape-only oracle is refused and mints no tested label", { skip: !available }, async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([{ cases: SHAPE_ONLY }]);
+    try {
+      const outcome = await verifyAndFixServer(BROKEN, "build a board", { maxIterations: 1 });
+      assert.notEqual(outcome.status, "passed", `a shape-only oracle must not pass: ${JSON.stringify(outcome)}`);
+      assert.equal(outcome.status, "error");
+      const applied = applyVerifyOutcome(seedProject(), outcome);
+      const label = (applied.lastTest as { label?: string } | null)?.label ?? null;
+      assert.notEqual(label, "tested", "no machine-proof stamp for a module certified only by shape");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 345 L1-F2 — the pure classifier behind the floor. Behavioural iff a module
+// read is tied to a concrete expected value (strict comparison) or carries a
+// relational predicate; shape-only for typeof/presence/tautology/bare-call.
+// ---------------------------------------------------------------------------
+describe("345 L1-F2 — behaviouralOracleExpression classifier", () => {
+  const behavioural = [
+    "add(2,3) === 5",
+    'dispatch({ job: "dispatch" }) === true',
+    "median([1,2,3]) >= 2",
+    "Math.abs(mean([1,2])) > 0",
+    "plan().length === 3",
+    "result.ok === true",
+    'VERSION === "1.0.0"',
+    "E.A === 0",
+    "x !== 'bad'",
+    "missing === 2 && mean([1,2,3]) === 2",
+    "const nums = [1,2,3]; mean(nums) === 2",
+  ];
+  const shapeOnly = [
+    "typeof add === 'function'",
+    "typeof plan() === 'object'",
+    "boardAdd(1) !== null",
+    "boardAdd(1) !== undefined",
+    "boardAdd(1) === void 0",
+    "1 === 1",
+    "true",
+    "f(1)",
+    "x === null",
+  ];
+  for (const e of behavioural) {
+    it(`behavioural: ${e}`, () => assert.equal(behaviouralOracleExpression(e), true, e));
+  }
+  for (const e of shapeOnly) {
+    it(`shape-only: ${e}`, () => assert.equal(behaviouralOracleExpression(e), false, e));
+  }
+  it("hostile input is shape-only, never a crash", () => {
+    for (const junk of [null, undefined, 42, "", "   ", {}]) {
+      assert.equal(behaviouralOracleExpression(junk), false, JSON.stringify(junk));
+    }
+  });
+  it("shapeOnlyOracleCaseIds lists only the non-behavioural ids, in order; oracleHasBehaviouralCase agrees", () => {
+    assert.deepEqual(
+      shapeOnlyOracleCaseIds([
+        { id: "a", expression: "typeof f === 'function'" },
+        { id: "b", expression: "f(2) === 4" },
+        { id: "c", expression: "f(1) !== null" },
+      ]),
+      ["a", "c"],
+    );
+    assert.equal(
+      oracleHasBehaviouralCase([
+        { id: "a", expression: "typeof f === 'function'" },
+        { id: "b", expression: "f(2) === 4" },
+      ]),
+      true,
+    );
+    assert.equal(oracleHasBehaviouralCase([{ id: "a", expression: "typeof f === 'function'" }]), false);
   });
 });

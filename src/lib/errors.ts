@@ -109,6 +109,12 @@ export const ERROR_CODES = [
   // consumers match string literals, never array position.
   "RT_E_LLM_KEY_REJECTED",
   "RT_E_LLM_KEY_SHADOWED",
+  // 345 L2 (A1-07): the import paste-cap refusal. `io.importProject` refused an
+  // oversized payload with a message only (the open A1-25 TODO), so a machine
+  // caller could not branch on it. The code names the cap class; the message
+  // keeps the observed size and the effective cap. Append-only; consumers match
+  // string literals, never array position.
+  "RT_E_IMPORT_TOO_LARGE",
 ] as const;
 
 /**
@@ -583,5 +589,11 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
       "The path is the wrong KIND of filesystem entry for the operation — a directory where a file was required (EISDIR) or a non-directory where a directory was required (ENOTDIR).",
     agentAction:
       "Point the operation at the right kind of path (a file for a file read, a directory for a dir-scoped write) or move the blocking entry aside; do not retry the same path unchanged and never report it as missing.",
+  },
+  RT_E_IMPORT_TOO_LARGE: {
+    meaning:
+      "An import payload exceeded the paste-size cap (in characters) before any parse work — a hostile or corrupt paste the tool refuses to allocate.",
+    agentAction:
+      "Shrink the payload, or — only for a byte source that already holds it (the file loader) — raise the cap via importProject(…, { maxChars }); never parse an unbounded paste.",
   },
 };

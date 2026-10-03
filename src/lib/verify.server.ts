@@ -1327,6 +1327,196 @@ export function oracleBriefGrounded(
   return { ok: true };
 }
 
+// ---------------------------------------------------------------------------
+// 345 L1-F2 (Med) — the BEHAVIOURAL-ASSERTION floor (anti self-certification).
+//
+// The oracle is authored by the SAME model that wrote the module, so a case
+// set that checks only an export's PRESENCE or TYPE certifies nothing about
+// behaviour. Reproduced: a module whose only export returns `NaN` earned
+// `status:"passed"` → `lastTest {label:"tested", evidenceHash}` from the single
+// case `boardAdd(1) !== null` (a call that cannot fail). T-02 required a CALL,
+// not a behavioural constraint.
+//
+// This floor requires at least one case that CONSTRAINS a module value beyond
+// presence/type: a strict comparison of a read/call result to a concrete
+// expected value (number, string, boolean), or a relational/numeric predicate
+// over one. A shape-only set takes ONE bounded repair re-prompt and is then
+// REFUSED with a coded reason — never a pass.
+//
+// A pass certifies "machine-verified", so there is no reachable state where a
+// shape-only set is the honest certificate: even a side-effect-only or
+// data-only export supports a concrete assertion (`X.prop === v`,
+// `plan().length === 3`). When the brief defines no observable result, the
+// refusal message says so explicitly and records it — it is never certified by
+// shape.
+//
+// The classifier is deliberately conservative toward ACCEPTING: exactly the
+// enumerated shape forms are rejected (a `typeof` comparison, a presence
+// comparison to `null`/`undefined`/`void 0`, a literal-only tautology, a bare
+// call). Any comparison tying a module read to a concrete value — even an
+// unusual spelling — counts as behavioural, so a genuine set is never refused.
+// ---------------------------------------------------------------------------
+
+/** Non-identifier marker that replaces each string literal in a masked
+ *  expression, so a concrete string expectation is detectable while prose and
+ *  quoted content can never look like a comparison operand. */
+const ORACLE_STRING_LEAF = "\u0001";
+
+/** Keywords/literals that are never a MODULE read (they name the language, not
+ *  the module under test). */
+const ORACLE_NON_MODULE_WORDS: ReadonlySet<string> = new Set([
+  "true", "false", "null", "undefined", "void", "typeof", "this", "new",
+  "in", "of", "instanceof", "delete", "NaN", "Infinity",
+]);
+
+/** Mask string literals to a single non-identifier marker and comments to
+ *  spaces, then collapse whitespace. Pure; never throws. */
+function maskOracleComparable(code: string): string {
+  let out = "";
+  let i = 0;
+  const n = code.length;
+  let state: "normal" | "sq" | "dq" | "tick" | "line" | "block" = "normal";
+  while (i < n) {
+    const ch = code[i]!;
+    const next = code[i + 1];
+    if (state === "line") {
+      if (ch === "\n" || ch === "\r") {
+        state = "normal";
+        out += " ";
+      }
+      i++;
+      continue;
+    }
+    if (state === "block") {
+      if (ch === "*" && next === "/") {
+        state = "normal";
+        out += " ";
+        i += 2;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (state === "sq" || state === "dq" || state === "tick") {
+      if (ch === "\\" && next !== undefined) {
+        i += 2;
+        continue;
+      }
+      const closer = state === "sq" ? "'" : state === "dq" ? '"' : "`";
+      if (ch === closer) {
+        state = "normal";
+        i++;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      state = "line";
+      out += " ";
+      i += 2;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      state = "block";
+      out += " ";
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") {
+      state = ch === "'" ? "sq" : ch === '"' ? "dq" : "tick";
+      out += ORACLE_STRING_LEAF;
+      i++;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out.replace(/\s+/g, " ").trim();
+}
+
+/** True when an operand is a concrete expected value: a string literal
+ *  (masked to the marker), a number, or a boolean. `null`/`undefined`/`void 0`
+ *  are deliberately NOT concrete — a presence check against them is the exact
+ *  shape-only form this floor rejects. Parentheses around the operand are
+ *  stripped first. Pure. */
+function isConcreteExpectedToken(raw: string): boolean {
+  const t = raw.trim().replace(/^\(+/, "").replace(/\)+$/, "").trim();
+  if (t === ORACLE_STRING_LEAF) return true;
+  if (/^[-+]?\d+(?:\.\d+)?$/.test(t)) return true;
+  return t === "true" || t === "false";
+}
+
+/** True when `side` reads a name that could be the module under test (an
+ *  identifier that is not a language keyword/literal). Property names and
+ *  calls both count — `mean([1,2,3])` and `result.ok` are both module reads. */
+function hasOracleModuleRead(side: string): boolean {
+  for (const m of side.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
+    if (!ORACLE_NON_MODULE_WORDS.has(m[0])) return true;
+  }
+  return false;
+}
+
+/** One `&&`/`||`-free fragment: behavioural iff it ties a module read to a
+ *  concrete value via a strict comparison, or applies a relational predicate
+ *  to one. A `typeof` fragment is a type check — never behavioural. Pure. */
+function isBehaviouralOracleAtom(atom: string): boolean {
+  const a = atom.trim();
+  if (!a) return false;
+  // `typeof x === 'function'` — a TYPE check, never behavioural.
+  if (/\btypeof\b/.test(a)) return false;
+  // A relational/numeric predicate over a module value: `median([1,2,3]) >= 2`.
+  if (/(?:>=|<=|>|<)/.test(a) && hasOracleModuleRead(a)) return true;
+  // A strict comparison tying a module read to a concrete expected value.
+  const m = /^(.*?)\s*(===|!==)\s*(.*)$/.exec(a);
+  if (m) {
+    const lhs = m[1] ?? "";
+    const rhs = m[3] ?? "";
+    if (hasOracleModuleRead(lhs) && isConcreteExpectedToken(rhs)) return true;
+    if (hasOracleModuleRead(rhs) && isConcreteExpectedToken(lhs)) return true;
+  }
+  return false;
+}
+
+/**
+ * 345 L1-F2: does this case expression constrain a module value BEYOND its
+ * presence/type? True for a concrete-value comparison (`add(2,3) === 5`,
+ * `E.VERSION === "1.0.0"`, `plan().length === 3`, `result.ok === true`) or a
+ * numeric/relational predicate (`median([1,2,3]) >= 2`). False for shape-only
+ * forms: a `typeof` comparison, a presence comparison to `null`/`undefined`/
+ * `void 0` (`boardAdd(1) !== null`), a bare call, and a literal-only tautology
+ * (`1 === 1`). A tolerated `declaration(s); final` repair is classified at its
+ * FINAL statement only (the prefix is discarded by the sanitizer). Pure.
+ */
+export function behaviouralOracleExpression(expression: unknown): boolean {
+  if (typeof expression !== "string" || !expression.trim()) return false;
+  const withoutTerminator = expression.replace(/;\s*$/, "");
+  const split = splitDeclarationPrefix(withoutTerminator);
+  const final = split ? split.final : withoutTerminator;
+  const masked = maskOracleComparable(final);
+  if (!masked) return false;
+  for (const atom of masked.split(/\s*(?:&&|\|\|)\s*/)) {
+    if (isBehaviouralOracleAtom(atom)) return true;
+  }
+  return false;
+}
+
+/** 345 L1-F2: the ids of cases that are NOT behavioural (a shape-only set when
+ *  every case is listed). Pure; case-order preserved. */
+export function shapeOnlyOracleCaseIds(cases: readonly VerifyCase[]): string[] {
+  const out: string[] = [];
+  for (const c of Array.isArray(cases) ? cases : []) {
+    if (behaviouralOracleExpression(c?.expression)) continue;
+    out.push(c && typeof c.id === "string" && c.id ? c.id : "(no id)");
+  }
+  return out;
+}
+
+/** 345 L1-F2: does the set carry at least one behavioural case? Pure. */
+export function oracleHasBehaviouralCase(cases: readonly VerifyCase[]): boolean {
+  return Array.isArray(cases) && cases.some((c) => behaviouralOracleExpression(c?.expression));
+}
+
 export type OracleCasesPromptInput = {
   source: string;
   brief: string;
@@ -1391,6 +1581,15 @@ export function buildOracleCasesPrompt(input: OracleCasesPromptInput): string {
     "contract function names and/or the brief's domain nouns as identifiers. A case that merely",
     "re-asserts the source's own placeholder self-test helpers (e.g. a phase-graph `synthesize`",
     "or its `test_happy`/`test_no_skip`/`test_rejection_addressed` booleans) is VACUOUS and forbidden.",
+    // 345 L1-F2: a shape-only set (typeof/presence) certifies nothing — ask for
+    // a behavioural constraint up front so the model does not have to be repaired.
+    "BEHAVIOURAL ASSERTION REQUIRED: at least one case MUST constrain an exported result beyond its",
+    "presence or type — compare a call/return (or a property of it) to a concrete expected value",
+    "(e.g. add(2,3) === 5, mean([]) === 0, plan().length === 3, result.ok === true) or a numeric/boolean",
+    "predicate (e.g. median([1,2,3]) >= 2). A set made ONLY of `typeof x === 'function'` and",
+    "`f(1) !== null` / `!== undefined` presence checks is REJECTED as self-certifying — shape proves",
+    "nothing about behavior. If the brief defines no observable result for a name, say so explicitly",
+    "in that case's expression so the gap is recorded — never certify a shape-only set.",
     groundingLine,
     `Brief: ${brief.slice(0, 800)}`,
     "Source:",
@@ -1604,6 +1803,55 @@ export async function generateCases(
           code: "RT_E_VALIDATION",
         };
       }
+    }
+  }
+  // 345 L1-F2 (Med): a SHAPE-ONLY case set certifies nothing about behaviour —
+  // the same model writes the module and the cases, so `typeof add ===
+  // "function"` / `add(1) !== null` / `!== undefined` let a stub (e.g. a lone
+  // export returning NaN) earn a machine pass. Require at least one case that
+  // constrains an exported result beyond presence/type: ONE bounded repair
+  // re-prompt naming the shape-only ids, then an honest coded refusal — never a
+  // pass on a self-certifying oracle. Runs after the name-binding gate (so a
+  // name repair keeps priority) and before the brief-grounding gate.
+  if (!oracleHasBehaviouralCase(cases)) {
+    const shapeOnly = shapeOnlyOracleCaseIds(cases);
+    const retry = await runBudgetedCall(budget, () =>
+      callModel(
+        "weak",
+        [
+          "Your previous reply's cases only check an export's presence or type — that certifies nothing about behavior.",
+          `Shape-only case id(s): ${shapeOnly.join(", ")}. Rewrite the case list so at least ONE case constrains an exported result beyond presence/type, e.g.:`,
+          "  add(2,3) === 5  ·  mean([]) === 0  ·  plan().length === 3  ·  result.ok === true  ·  median([1,2,3]) >= 2.",
+          "A `typeof x === 'function'` or `f(1) !== null` / `!== undefined` check alone is INSUFFICIENT.",
+          'Return JSON ONLY: {"cases": [{"id": "case-1", "expression": "<boolean expression>"}]}.',
+          "Same rules as before: single boolean expressions, no semicolons/declarations/assignments.",
+        ].join("\n"),
+        { json: true },
+      ),
+    );
+    if (isBudgetStopRefusal(retry)) return retry;
+    if (retry.ok) {
+      const repaired = parseOracleJson(retry.text);
+      if (repaired !== null) {
+        const byId = new Map<string, VerifyCase>(cases.map((c) => [c.id, c]));
+        for (const r of repaired) byId.set(r.id, r);
+        cases = [...byId.values()];
+      }
+    }
+    if (!oracleHasBehaviouralCase(cases)) {
+      const stillShapeOnly = shapeOnlyOracleCaseIds(cases);
+      return {
+        ok: false,
+        reason: "error",
+        code: "RT_E_VALIDATION",
+        error:
+          `oracle case set is SHAPE-ONLY: no case constrains an exported result beyond presence/type ` +
+          `(case id(s): ${stillShapeOnly.join(", ")}). A presence/type check (typeof x === "function", ` +
+          `f() !== null, f() !== undefined) cannot certify behavior, so the set is refused — never a machine ` +
+          `pass on a self-certifying oracle. Add at least one case that compares a return value (or a property ` +
+          `of it) to a concrete expected value or a numeric/boolean predicate. If the brief specifies no ` +
+          `observable result for this surface, that gap must be recorded explicitly, not certified by shape.`,
+      };
     }
   }
   // fixes/116: reject a vacuous oracle (cases referencing only the source's own

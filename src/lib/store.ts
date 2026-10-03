@@ -12,6 +12,7 @@ import {
   stageWildPlan,
   stampPacket,
   unlockRetry,
+  verifyPriorPhases,
   wildLog,
   wildOperatorPark,
   wildPause,
@@ -1005,6 +1006,41 @@ function recoverFromCorruptPersistence(): void {
   useRapid.getState().seedIfEmpty();
 }
 
+/**
+ * L3-03 (fixes/345 · looker-3): a persisted `running` phase record is a SESSION
+ * artifact — the driver that marked it running (store.execute / runUntilHitl)
+ * died with the previous page. Left as-is it wedges the build: the rail renders
+ * `Pn RUNNING`, `canExecute` disables Execute / Run-to-gate forever, and no
+ * control can clear it (only Archive-and-reimport or the CLI `repair`).
+ *
+ * On hydrate, reset every `running` record to `ready` and trail ONE
+ * `run.interrupted` ledger row, so the graph can run again and the UI never
+ * claims a live run with no driver. `project.status` is left as the engine
+ * leaves it for a ready frontier ("running" = build in progress); the wedge is
+ * the per-phase record, which is what `canExecute` reads.
+ */
+function markInterruptedRuns(project: Project): Project {
+  const phases = Array.isArray(project.phases) ? project.phases : [];
+  const interrupted = phases.filter((r) => r.status === "running");
+  if (interrupted.length === 0) return project;
+  const codes = interrupted.map((r) => `P${r.id}`).join(", ");
+  const logs = Array.isArray(project.logs) ? project.logs : [];
+  return {
+    ...project,
+    phases: phases.map((r) => (r.status === "running" ? { ...r, status: "ready" as const } : r)),
+    logs: [
+      ...logs,
+      {
+        ts: Date.now(),
+        phase: project.currentPhase,
+        level: "warn" as const,
+        event: "run.interrupted",
+        detail: `${codes} was marked running in the persisted build, but the driver that started it did not survive the reload — reset to ready; run it again when you are ready.`,
+      },
+    ].slice(-200),
+  };
+}
+
 const PERSIST_NAME = "rapidtool.v4";
 /** K2: the one-slot rescue copy of a blob this build could not read. */
 const PERSIST_RESCUE_NAME = `${PERSIST_NAME}.rescue`;
@@ -1350,10 +1386,56 @@ export const useRapid = create<RapidState>()(
           // keyless ⇒ null ⇒ wildStep's existing default path, byte-identical.
           const reviewer = await createNodeWildReviewer();
           let cur = withStartLog;
+          // 344 A1-06 / 345 F2: the console driver owns the SAME attach step
+          // the headless driver performs (headless.attachWildPlan). Without it
+          // the loop executed with NO plan review at all — R13-f02's pin was
+          // silently vacuous on this path. Attach via the exported
+          // headless.generateWildPlan when the server reports a key; otherwise
+          // record the absence loudly (a console run is then honestly the
+          // deterministic floor, never presented as plan-reviewed).
+          if (cur.wildPlan?.source !== "planner") {
+            let attached: Project | null = null;
+            if (get().llmStatus.configured) {
+              try {
+                const headlessSpec = clientSafeServerSpecifier("headless", "ts");
+                const hl = (await import(headlessSpec)) as {
+                  generateWildPlan?: (p: Project) => Promise<WildPlan>;
+                };
+                if (typeof hl.generateWildPlan === "function") {
+                  const plan = await hl.generateWildPlan(cur);
+                  if (plan.source === "planner" && plan.steps.length > 0) {
+                    attached = wildLog(
+                      { ...cur, wildPlan: plan },
+                      cur.currentPhase,
+                      "info",
+                      "wild.plan",
+                      `wild.plan (planner): ${plan.steps.length} step(s) — attached by the console driver (R13-f02)`,
+                    );
+                  }
+                }
+              } catch {
+                /* browser / server module unavailable — the honest absent path below */
+              }
+            }
+            const planHandled =
+              attached ??
+              wildLog(
+                cur,
+                cur.currentPhase,
+                "warn",
+                "wild.plan_absent",
+                "console wild start has no planner plan to review (planner not configured or unreachable) — the run executes the deterministic floor, not a plan-reviewed run (R13-f02)",
+              );
+            // Commit the plan change (preserving concurrent rows in the STORE)
+            // but keep `cur` free of adopted rows: the loop's own commitWild
+            // re-adopts concurrent appends (H-06). Folding them into `cur` here
+            // would mask the next step's legitimate phase artifact replacement.
+            commitWild(planHandled, cur);
+            cur = planHandled;
+          }
           // R13-f02 (341-6): the console driver stages the plan review too —
           // a stored planner plan is judged (reviewer) and the run parks
           // BEFORE the first mutation, exactly as headless's wild drivers do.
-          // No planner plan ⇒ byte-identical (staged:false, no write).
           const staged = await stageWildPlan(cur, reviewer);
           if (staged.staged) {
             commitWild(staged.project, null);
@@ -1755,6 +1837,27 @@ export const useRapid = create<RapidState>()(
           const live = byId(s.projects, id);
           if (!live) return s; // removed between read and apply — drop the intake
           let updated = applyReportResult(live, v.report).project;
+          // E-19 (344 A1-03 / 345 F2): a report that names files in a prior
+          // COMPLETE phase's file space re-checks that phase's RECORDED gate
+          // against a fresh evaluation — a hash mismatch is real regression
+          // drift and is surfaced (warn) on the ledger. Advisory: prior records
+          // are never mutated (engine.verifyPriorPhases is pure).
+          const touchingFiles = Array.isArray(v.report.files) ? v.report.files : [];
+          if (result.applied && touchingFiles.length > 0) {
+            const drifting = verifyPriorPhases(live, v.report.phase, touchingFiles).filter((d) => d.drift);
+            if (drifting.length > 0) {
+              const driftRows: JsonLog[] = drifting.map((d) => ({
+                ts: Date.now(),
+                phase: d.phase as PhaseId,
+                level: "warn" as const,
+                event: "regression.drift",
+                detail:
+                  `P${d.phase} exit evidence drifted after an agent report touched its file space (${touchingFiles.join(", ")}) — ` +
+                  `fresh gate ${d.unmetNow.length === 0 ? "passes" : `unmet: ${d.unmetNow.join(", ")}`} (recorded ${d.wasPassed ? "passed" : "failed"})`,
+              }));
+              updated = { ...updated, logs: [...(updated.logs ?? []), ...driftRows].slice(-200) };
+            }
+          }
           if (warnNoEvidence) {
             const warnEntry: JsonLog = {
               ts: Date.now(),
@@ -2104,7 +2207,7 @@ export const useRapid = create<RapidState>()(
           set((s) => ({
             projects: (Array.isArray(s.projects) ? s.projects : [])
               .filter(isRepairableProjectEntry)
-              .map((p) => hydrateProject(p)),
+              .map((p) => markInterruptedRuns(hydrateProject(p))),
           }));
           return;
         }

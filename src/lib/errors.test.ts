@@ -493,6 +493,18 @@ describe("ERROR_CODE_DOC", () => {
     assert.ok(ERROR_CODE_DOC.RT_E_PATH_KIND_MISMATCH.agentAction.trim().length > 0);
     assert.match(ERROR_CODE_DOC.RT_E_PATH_KIND_MISMATCH.meaning, /EISDIR|ENOTDIR/);
   });
+
+  it("345 L2 (A1-07): RT_E_IMPORT_TOO_LARGE is registered with an honest doc", () => {
+    assert.ok(
+      (ERROR_CODES as readonly string[]).includes("RT_E_IMPORT_TOO_LARGE"),
+      "RT_E_IMPORT_TOO_LARGE missing from ERROR_CODES",
+    );
+    assert.ok(ERROR_CODE_DOC.RT_E_IMPORT_TOO_LARGE.meaning.trim().length > 0);
+    assert.ok(ERROR_CODE_DOC.RT_E_IMPORT_TOO_LARGE.agentAction.trim().length > 0);
+    assert.match(ERROR_CODE_DOC.RT_E_IMPORT_TOO_LARGE.meaning, /cap|too large/i);
+    // The action must name the real escape hatch (maxChars) an agent can use.
+    assert.match(ERROR_CODE_DOC.RT_E_IMPORT_TOO_LARGE.agentAction, /maxChars/);
+  });
 });
 
 // ---- W15-L2 (fixes/241) — registry boundary: the C-2 open item (`RT_EVAL_STALL`

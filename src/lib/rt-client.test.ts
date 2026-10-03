@@ -19,6 +19,7 @@ import {
   installRtClient,
   markBoundaryError,
   peekStall,
+  pickNowLine,
   releaseWildStart,
   reportRt,
   rtSnapshot,
@@ -27,6 +28,24 @@ import {
   tryStartWild,
 } from "./rt-client.ts";
 import { P6_PHASE_MAX_MS, WILD_STEP_BUDGET_MS } from "./rt-events.ts";
+import type { RtEvent } from "./rt-events.ts";
+import type { Project } from "./types.ts";
+
+/** Minimal RtEvent for the now-line selector (only the read fields matter). */
+function nowRow(over: Partial<RtEvent>): RtEvent {
+  return {
+    schema_version: 1,
+    ts: 1,
+    level: "info",
+    host: "test",
+    sessionId: "s",
+    scope: "sys",
+    event: "test.row",
+    message: "row",
+    capture: "rt-client.test.ts:1",
+    ...over,
+  } as RtEvent;
+}
 
 test("installRtClient is a strict no-op without a window", () => {
   __rtResetForTests();
@@ -336,12 +355,25 @@ function fakeBrowserSurface() {
     for (const fn of listeners.get(type) ?? []) fn(e);
   };
   FakePerformanceObserver.instances.length = 0;
+  // A3-02: capture the heartbeat interval callback so a test can drive a tick
+  // (the real callback is a closure over module state; `setInterval: () => 1`
+  // could never exercise it). Ids increment from 1 so the existing teardown pin
+  // (`clearedIntervals.includes(1)`) still holds.
+  const intervalFns = new Map<number, () => void>();
+  let nextIntervalId = 0;
   const win = {
     addEventListener: addListener,
     removeEventListener: removeListener,
     PerformanceObserver: FakePerformanceObserver,
-    setInterval: () => 1, // never fires; torn down by disposeRtClient
-    clearInterval: (id: number) => void clearedIntervals.push(id),
+    setInterval: (fn: () => void) => {
+      const id = ++nextIntervalId;
+      intervalFns.set(id, fn);
+      return id;
+    },
+    clearInterval: (id: number) => {
+      clearedIntervals.push(id);
+      intervalFns.delete(id);
+    },
     setTimeout: () => 1,
     clearTimeout: () => {},
     location: { href: "https://rt.test/proj" },
@@ -361,6 +393,13 @@ function fakeBrowserSurface() {
     store,
     clearedIntervals,
     observers: () => FakePerformanceObserver.instances,
+    /** Fire the most recently registered heartbeat callback (install registers one). */
+    tick() {
+      const fns = [...intervalFns.values()];
+      const fn = fns[fns.length - 1];
+      assert.ok(fn, "a heartbeat interval is registered");
+      fn();
+    },
     install() {
       const prev = {
         window: globalThis.window,
@@ -488,4 +527,140 @@ test("M6-08: disposeRtClient is a strict no-op without a window (node-safe)", ()
   disposeRtClient(); // idempotent
   installRtClient(); // and the latch still installs as before
   assert.equal(getRtRing().rows.length, 0, "no rows from a Node install");
+});
+
+// ---------------------------------------------------------------------------
+// A3-01 (344 audit): the pipeline now-line must answer "what is the machine
+// doing" — a diagnostic-only client row (sys.longtask jank telemetry) must not
+// preempt a real run row or the persisted ledger.
+// ---------------------------------------------------------------------------
+test("A3-01: pickNowLine prefers run rows / the ledger over diagnostic client telemetry", () => {
+  const ledger = { logs: [{ ts: 50, phase: 4, level: "info", event: "gate.awaiting", detail: "P4 gate awaiting approval" }] };
+  const project = ledger as unknown as Project;
+  const empty = { logs: [], wildRun: null } as unknown as Project;
+
+  const jank = nowRow({ scope: "sys", event: "sys.longtask", message: "Main thread blocked 281ms (Long Tasks API).", ts: 99 });
+  const runRow = nowRow({ scope: "wild-step", event: "wild.step_ok", message: "sealed P3", ts: 40 });
+
+  // Diagnostic-only ring ⇒ the ledger narrates the run (the 344 A3-01 shape).
+  const fromLedger = pickNowLine(project, [jank], 1);
+  assert.equal(fromLedger.source, "ledger");
+  assert.match(String(fromLedger.text), /awaiting approval/);
+
+  // A real run ring row still wins over the ledger (ring-first for RUN telemetry).
+  const fromRun = pickNowLine(project, [jank, runRow], 2);
+  assert.equal(fromRun.source, "ring");
+  assert.equal(fromRun.event, "wild.step_ok");
+
+  // Every diagnostic scope is skipped, not just sys: ui-render and boot too.
+  const uiJank = nowRow({ scope: "ui-render", event: "ui.pane_crash", message: "pane crashed", ts: 100 });
+  const bootRow = nowRow({ scope: "boot", event: "boot.ready", message: "booted", ts: 101 });
+  assert.equal(pickNowLine(project, [uiJank], 1).source, "ledger");
+  assert.equal(pickNowLine(project, [bootRow], 1).source, "ledger");
+
+  // No run row / ledger / wild ⇒ the diagnostic row is the honest LAST resort (never idle).
+  const diagOnly = pickNowLine(empty, [jank], 1);
+  assert.equal(diagOnly.source, "ring");
+  assert.equal(diagOnly.event, "sys.longtask");
+  assert.match(diagOnly.note, /client telemetry only/);
+
+  // Nothing at all ⇒ idle.
+  assert.equal(pickNowLine(empty, [], 0).source, "idle");
+});
+
+// ---------------------------------------------------------------------------
+// A3-02 (344 audit): the stall latch must clear. `clearStall` had 0 production
+// callers, so one >=10 s lag pinned a `<Stalled>` row across runs + reloads.
+// The heartbeat now clears it: stopped/paused drops any latch, a healthy active
+// tick drops the mainthread-stall latch the heartbeat owns, and an unknown
+// (probe null) tick leaves the latch alone.
+// ---------------------------------------------------------------------------
+const busy = (over: Partial<{ active: boolean; pause: boolean }> = {}) => ({
+  projectId: "p1",
+  phase: 3,
+  active: true,
+  pause: false,
+  startedAt: 1,
+  lastAutoAt: 1,
+  ...over,
+});
+
+test("A3-02: the heartbeat clears the stall latch on a healthy tick and on stop/pause", () => {
+  __rtResetForTests();
+  const fb = fakeBrowserSurface();
+  const prev = fb.install();
+  try {
+    installRtClient();
+
+    // 1. healthy active tick clears the mainthread-stall latch (real lag ~0).
+    setBusyProbe(() => busy());
+    setStallLatch({ projectId: "p1", since: 1, stepElapsedMs: 11_000, class: "mainthread-stall" });
+    assert.notEqual(peekStall(), null, "latch set");
+    fb.tick();
+    assert.equal(peekStall(), null, "a healthy heartbeat clears the mainthread-stall latch");
+
+    // 2. a driver-owned latch is NOT cleared by a healthy ACTIVE tick (owner-scoped).
+    setStallLatch({ projectId: "p1", since: 1, stepElapsedMs: 60_000, class: "step-timeout" });
+    fb.tick();
+    assert.equal(peekStall()?.class, "step-timeout", "a driver latch survives a healthy active heartbeat");
+
+    // 3. paused and stopped runs clear ANY latch (a run that is not advancing has no stall).
+    setBusyProbe(() => busy({ pause: true }));
+    fb.tick();
+    assert.equal(peekStall(), null, "a paused run clears the latch");
+    setStallLatch({ projectId: "p1", since: 1, stepElapsedMs: 60_000, class: "step-timeout" });
+    setBusyProbe(() => busy({ active: false }));
+    fb.tick();
+    assert.equal(peekStall(), null, "a stopped run clears the latch");
+
+    // 3b. the console probe returns null once the wild run is not active — that
+    // is the reload/stop path, so a REGISTERED probe's null must clear too.
+    setStallLatch({ projectId: "p1", since: 1, stepElapsedMs: 60_000, class: "step-timeout" });
+    setBusyProbe(() => null);
+    fb.tick();
+    assert.equal(peekStall(), null, "a registered probe reporting no active run clears the latch");
+
+    // 4. with NO probe registered the host has no run signal at all — silence
+    // must not erase a real driver latch.
+    setStallLatch({ projectId: "p1", since: 1, stepElapsedMs: 60_000, class: "step-timeout" });
+    setBusyProbe(null);
+    fb.tick();
+    assert.equal(peekStall()?.class, "step-timeout", "no probe ⇒ the latch is left alone");
+  } finally {
+    (globalThis as Record<string, unknown>).window = prev.window;
+    (globalThis as Record<string, unknown>).document = prev.document;
+    (globalThis as Record<string, unknown>).performance = prev.performance;
+    __rtResetForTests();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// A3-11 (344 audit): the Long-Tasks floor (>= 250 ms) and the RT_COALESCE_MS
+// gate are the mechanism that keeps the ring from filling with jank rows — both
+// were unpinned (a `250 -> 0` mutation survived).
+// ---------------------------------------------------------------------------
+test("A3-11: the Long-Tasks floor (250 ms) and the 5 s coalesce gate the sys.longtask row", () => {
+  __rtResetForTests();
+  const fb = fakeBrowserSurface();
+  const prev = fb.install();
+  try {
+    installRtClient();
+    const observer = fb.observers().at(-1);
+    assert.ok(observer, "Long Tasks observer constructed at install");
+    const fire = (durationMs: number) =>
+      observer.cb({ getEntries: () => [{ duration: durationMs }] });
+    const longtaskRows = () => getRtRing().rows.filter((r) => r.event === "sys.longtask").length;
+
+    fire(249); // just under the floor
+    assert.equal(longtaskRows(), 0, "a 249 ms block is below the report floor");
+    fire(250); // exactly at the floor
+    assert.equal(longtaskRows(), 1, "a 250 ms block is reported");
+    fire(400); // a second block inside RT_COALESCE_MS
+    assert.equal(longtaskRows(), 1, "a second block within RT_COALESCE_MS coalesces (still one row)");
+  } finally {
+    (globalThis as Record<string, unknown>).window = prev.window;
+    (globalThis as Record<string, unknown>).document = prev.document;
+    (globalThis as Record<string, unknown>).performance = prev.performance;
+    __rtResetForTests();
+  }
 });

@@ -552,3 +552,22 @@ Deferred to W3+: 105 standalones (TA-1/TA-3/TA-21/TA-23), 112 T5/T9/T11/T12, Wav
   **Newly registered (not fixed):** **F2** — `clampRunnerOutput`'s elision marker can truncate for
   custom caps ≈64–118 chars (no production impact at the real 48 000 cap) · G3–G7 confirmed **still
   present** by L2's re-probe → G3/G6 in W12 lanes A/B, G7 in lane A, G4/G5 → W13.
+
+---
+
+## CORRECTION — 2026-10-03 (345-F1 docs-truth fix; HEAD `06cb089`)
+
+This board's per-task rows are the 2026-09-16 snapshot (see the W47 correction at the top). Current
+byte-derived state:
+
+- **Gate of record (343 wave, `fixes/343_0_parent.md` §1/§7):** `gate.sh` `ok:true`, `hardFails:[]`,
+  `flakes:[]` — scripts **427 pass / 0 fail** · lib **3261 pass / 0 fail / 2 skipped**. The
+  "scripts 195/195 + src 1662/1662" and "398/2736" baselines above are historical.
+- **Tracked counts:** total **1,933** · `src` 250 · `src/lib` 239 · `scripts` 49 (25 tools + 24 tests)
+  · `fixes` 744 · `wave_plans` 139; `.t4scratch/` untracked/removed.
+- **Delivered since this board:** TA-15 multi-job emission (keyed), `unattended`/`resume` (W36/341-6),
+  MCP transport + doctor surface (340-1/342-5), cassette (340-4), `emit --git` (343-3). The residual
+  is **keyed synthesis quality**.
+- **CLI truths corrected:** exit taxonomy 0/1/2/3/4/5; the headless CLI reads `<cwd>/.env` (wins over
+  the process env); a fresh `emit --run` is verified when its declared scripts resolve from the repo's
+  own `node_modules/`. `tsconfig.scripts.json` is CLEAN.

@@ -1126,6 +1126,13 @@ describe("342-3 per-run-kind corpus bar", () => {
     assert.equal(criteriaMeanExcluding(eight, FIRST_RUN_UNSCOREABLE_CRITERIA), 1);
   });
 
+  test("criteriaMeanExcluding: excluding EVERY criterion returns 0, never NaN (nothing to score is no pass)", () => {
+    const all = barCard({ m1: 1, m2: 1, m3: 1, m4: 1, m5: 1, m6: 1, m7: 1, m8: 1, m9: 1 });
+    const mean = criteriaMeanExcluding(all, ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"]);
+    assert.equal(mean, 0, "an all-excluded set is 0, not NaN");
+    assert.equal(Number.isNaN(mean), false);
+  });
+
   test("(a) a first run that meets its real criteria clears the bar", () => {
     const first = barCard({ m1: 1, m2: 1, m3: 1, m4: 1, m5: 1, m6: 1, m7: 0, m8: 1, m9: 1 });
     const r = meetsRunKindBar(first, CORPUS_BAR, runKindOf(null));

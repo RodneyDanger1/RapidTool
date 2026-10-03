@@ -167,6 +167,37 @@ describe("checkpoint.server — the §A1 hardening pins (W36 N2)", () => {
     }
   });
 
+  it("A1-07 savedAt boundary: a stored non-finite/absent savedAt is refused at READ time", () => {
+    const dir = tempDir();
+    try {
+      const path = checkpointPath(dir);
+      mkdirSync(join(dir, ".rapidtool"), { recursive: true });
+      const shape = (savedAt: unknown) => ({
+        version: CHECKPOINT_VERSION,
+        savedAt,
+        run: { phase: 1, step: 0, mode: "keyless" },
+        project: { id: "p", phases: [{ id: 0 }] },
+      });
+      // "x" / null / NaN (→ JSON null) / absent (undefined is dropped by
+      // JSON.stringify) — every non-finite shape must be a coded refusal, so a
+      // hand-edited snapshot cannot surface a NaN age to the resume arm.
+      for (const bad of ["x", null, undefined, Number.NaN] as unknown[]) {
+        writeFileSync(path, JSON.stringify(shape(bad)), "utf8");
+        const read = readCheckpoint(dir);
+        assert.equal(read.ok, false, `savedAt=${String(bad)} must be refused at read time`);
+        if (!read.ok) assert.equal(read.code, "RT_E_VALIDATION");
+        const resumed = loadResumableCheckpoint(dir, { projectId: "p", mode: "keyless" });
+        assert.equal(resumed.ok, false, `resume must refuse savedAt=${String(bad)}`);
+        if (!resumed.ok) assert.equal(resumed.code, "RT_E_VALIDATION");
+      }
+      // Control: a finite savedAt is admitted (the guard must not over-refuse).
+      writeFileSync(path, JSON.stringify(shape(12_345)), "utf8");
+      assert.equal(readCheckpoint(dir).ok, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("A1-07: checkpointAdmits fails closed on phase 99 / 1.5, mismatch; surfaces savedAt on success", () => {
     const base: RunCheckpoint = {
       version: CHECKPOINT_VERSION,

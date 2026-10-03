@@ -1766,6 +1766,10 @@ export function HomeScreen() {
   const [brief, setBrief] = useState("");
   const [busy, setBusy] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  // L3-08 (fixes/345 · looker-3): `busy` state is async, so queued clicks in one
+  // tick all pass the guard and create duplicate builds. A ref flips
+  // synchronously — the same latch the run actions use (busyRef).
+  const launchRef = useRef(false);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -1777,11 +1781,16 @@ export function HomeScreen() {
   }, []);
 
   function launch() {
+    if (launchRef.current) return; // L3-08: queued/rapid clicks must create ONE build
     if (brief.trim().length < 12) return;
+    launchRef.current = true;
     setBusy(true);
     const id = create(brief.trim());
     setBusy(false);
-    void nav({ to: "/run/$id", params: { id } });
+    void nav({ to: "/run/$id", params: { id } }).finally(() => {
+      // A failed/aborted navigation must not strand the latch.
+      launchRef.current = false;
+    });
   }
 
   return (
@@ -1996,6 +2005,7 @@ export function RunScreen({ id }: { id: string }) {
     ingestReport,
     refreshStatuses,
     hasProject,
+    hydrated,
     llmStatus,
     researchStatus,
   } = useRapid();
@@ -2263,6 +2273,26 @@ export function RunScreen({ id }: { id: string }) {
   );
 
   if (!project) {
+    // L3-01 (fixes/345 · looker-3): the store hydrates from localStorage after
+    // first paint, so a hard load of a REAL build briefly has no `project`. The
+    // old branch rendered the not-found screen for that whole window (~1 s on the
+    // dev server) — a user could click "Back to intake" and abandon a live build.
+    // The route head already guards on `hydrated`; render a neutral skeleton here
+    // until the store reports hydrated, and only then the genuine not-found state.
+    if (!hydrated) {
+      return (
+        <main
+          id="main-content"
+          role="status"
+          aria-live="polite"
+          aria-label="Loading build"
+          className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg px-5"
+        >
+          <span className="h-4 w-48 animate-pulse rounded bg-raised" aria-hidden="true" />
+          <p className="text-sm text-muted">Loading build…</p>
+        </main>
+      );
+    }
     return (
       <main id="main-content" className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-bg px-5">
         <p className="text-sm text-muted">This build doesn't exist or was archived.</p>
@@ -4206,7 +4236,7 @@ function PhaseRail({
               aria-current={isCurrent ? "true" : undefined}
               aria-pressed={isViewed ? true : undefined}
               title={isCurrent ? `${p.code} · live phase` : `${p.code} · view record`}
-              className={`rt-phase flex min-w-[148px] items-center gap-2 rounded-md px-2 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/40 lg:min-w-0 ${
+              className={`rt-phase flex min-w-[148px] items-center gap-2 overflow-hidden rounded-md px-2 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/40 lg:min-w-0 ${
                 highlighted ? "bg-raised" : ""
               }`}
             >
@@ -4227,7 +4257,7 @@ function PhaseRail({
                 </span>
                 <span className="block truncate text-xs text-fg">{p.title}</span>
               </span>
-              <span className="ml-auto hidden shrink-0 lg:inline-flex" aria-hidden="false">
+              <span className="ml-auto hidden min-w-0 shrink-0 lg:inline-flex" aria-hidden="false">
                 <StatusBadge project={project} phase={p.id} />
               </span>
             </button>

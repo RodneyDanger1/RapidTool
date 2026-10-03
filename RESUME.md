@@ -788,3 +788,24 @@ Rules:
   test-tails + landing-log bodies · policy integration (T-107.3) · provider registry (T-107.2) ·
   run-side eval fixtures (T-107.5).** Maker-test path: TA-15 rewire → fresh keyed run.
   User-owned: **T0.10** (fresh keyed eval).
+
+---
+
+## CORRECTION — 2026-10-03 (345-F1 docs-truth fix; HEAD `06cb089`)
+
+The §1 snapshot and the W47 correction above are dated; these are the current byte-derived values.
+Do not re-derive them by hand — copy this block's commands.
+
+- **Gate of record (343 wave, `fixes/343_0_parent.md` §1/§7):** `gate.sh` `ok:true`, `hardFails:[]`,
+  `flakes:[]` — scripts **427 pass / 0 fail** · lib **3261 pass / 0 fail / 2 skipped**. The
+  2026-10-02 values quoted above (398/2736) are the previous record, not the current one.
+- **Tracked counts (`git ls-files`):** total **1,933** · `src` 250 · `src/lib` 239 (123 modules +
+  112 tests) · `scripts` 49 (25 tools + 24 tests) · `fixes` 744 · `wave_plans` 139. `.t4scratch/`
+  is untracked/removed (the "192 tracked · owes a git rm" note above is closed).
+- **Keyed funding:** superseded — the account is funded and the repo `.env` key works (W45); keyed
+  runs are bounded and real. The "unfunded → 402" premise above is historical.
+- **CLI truths corrected:** exit taxonomy 0/1/2/3/4/5; the headless CLI reads `<cwd>/.env` (wins over
+  the process env); a fresh `emit --run` whose declared scripts resolve from the repo's own
+  `node_modules/` is **verified** (`declaredScriptsVerified: true`, exit 0) — not automatically
+  unverified.
+- **`tsconfig.scripts.json` is CLEAN** (`tsc -p tsconfig.scripts.json --noEmit` exits 0).

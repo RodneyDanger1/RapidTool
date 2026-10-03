@@ -29,6 +29,8 @@ import {
 import { RUNNER_IS_NOT_A_SANDBOX } from "./sandbox-policy.ts";
 import { archTrace } from "./dod.ts";
 import { fnv1a } from "./algorithms.ts";
+import { m1Substance } from "./maker-score.ts";
+import { fixtureAcceptanceState } from "./fixtures.ts";
 import type { Project } from "./types.ts";
 
 describe("doctor factory — field-truth latch", () => {
@@ -682,6 +684,66 @@ describe("W52 · 338-3 — the factory claim is wired to REAL signals", () => {
     const claim = factoryClaim(ev, {});
     assert.equal(claim.autonomousSoftwareFactory, true);
     assert.deepEqual(claim.gaps, [], "no gap stands while the signals are genuinely met");
+  });
+
+  it("345 L2-X1: a placeholder-only approved set does NOT close the fixtures gap", () => {
+    // The drafter's sentinel ("<draft>") asserts nothing real; the scorer
+    // (maker-score M1/M2) refuses it, so the doctor's fixtures bar must too.
+    const placeholder = {
+      ...fixture(),
+      id: "fx-ph",
+      requirementId: "fx-ph",
+      capability: "record",
+      name: "job.record.happy",
+      given: {},
+      expect: { kind: "shape", value: { id: "<draft>" } },
+      kind: "pure",
+      source: "a7",
+    };
+    assert.equal(
+      humanFixturesFromProject({ acceptanceFixtures: [placeholder] }),
+      false,
+      "a draft-sentinel bar is not an approved acceptance bar",
+    );
+    const real = { ...placeholder, expect: { kind: "shape", value: { id: "p-1" } } };
+    assert.equal(
+      humanFixturesFromProject({ acceptanceFixtures: [real] }),
+      true,
+      "a real typed-literal set still closes the gap",
+    );
+  });
+
+  it("345 L2-X1: the doctor latch and maker-score agree on a placeholder bar (same project)", () => {
+    const inv = inventoryFromJobSources([
+      { path: "src/jobs/a.ts", source: "export function a() { return 1; }" },
+      { path: "src/jobs/b.ts", source: "export function b() { return 2; }" },
+    ]);
+    const placeholder = {
+      id: "fx-ph",
+      requirementId: "fx-ph",
+      capability: "record",
+      name: "job.record.happy",
+      given: {},
+      expect: { kind: "shape", value: { id: "<draft>" } },
+      kind: "pure",
+      source: "a7",
+      approval: "approved",
+      decidedBy: "human",
+    };
+    const project = { ...ov9Project(), acceptanceFixtures: [placeholder] };
+    // Doctor surface: the fixtures gap stands, so the factory latch cannot fire.
+    const ev = evidenceFromJobInventory(inv, { project });
+    assert.equal(ev.humanFixtures, false, "a placeholder bar keeps the fixtures gap");
+    const claim = factoryClaim(ev, {});
+    assert.equal(claim.autonomousSoftwareFactory, false);
+    assert.ok(claim.gaps.includes(FACTORY_GAP.fixtures), "the fixtures gap is named");
+    // Scorer surface: M1/M2 are 0 for the SAME bar.
+    const m1 = m1Substance({
+      project: project as unknown as Project,
+      corpus: {},
+      behavioral: { pass: 3, fail: 0, acceptance: fixtureAcceptanceState([placeholder]) },
+    } as never);
+    assert.equal(m1.score, 0, "the scorer refuses the same placeholder bar");
   });
 });
 

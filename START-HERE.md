@@ -23,12 +23,12 @@ W25–W28 deep audit, IDs `A*`/`C*`/`W-*`/`R*`/`T*`; append-only protocol in its
 
 | # | Where | What lives there |
 |---|---|---|
-| 1 | `src/lib/` (213 files) | The pure engine + logic. Start with `engine.ts` (phase state machine), `headless.ts` (journey driver), `codegen.server.ts` (P6 synthesis), `store.ts`, then `phases.ts` · `packet.ts` · `dod.ts` · `io.ts` · `errors.ts` (the `RT_E_*` registry). Tests are colocated `*.test.ts`. |
+| 1 | `src/lib/` (239 files) | The pure engine + logic. Start with `engine.ts` (phase state machine), `headless.ts` (journey driver), `codegen.server.ts` (P6 synthesis), `store.ts`, then `phases.ts` · `packet.ts` · `dod.ts` · `io.ts` · `errors.ts` (the `RT_E_*` registry). Tests are colocated `*.test.ts`. |
 | 2 | `src/components/` + `src/routes/` | The UI: `console.tsx` (main console) + TanStack routes. |
 | 3 | `scripts/rapidtool-cli.mjs` | The headless CLI — **39 verbs** (`grep -c 'case "'` is the count source of truth), single JSON object per call; contract = `scripts/README-cli.md`. |
-| 4 | `scripts/` (46) | `gate.sh` (the stability gate) · `run-eval.mjs` (eval harness) · guards/tooling + `*.test.mjs` suites. |
-| 5 | `fixes/` (587) | The **append-only landing logs** — one per lane per wave. The newest number = the current wave. Read the last few to know what just landed. |
-| 6 | `wave_plans/` (108) | Per-lane dispatch plans (`W4`→`W43`, one file per lane) + the convention note in `wave_plans/README.md`. |
+| 4 | `scripts/` (49) | `gate.sh` (the stability gate) · `run-eval.mjs` (eval harness) · guards/tooling + `*.test.mjs` suites. |
+| 5 | `fixes/` (744) | The **append-only landing logs** — one per lane per wave. The newest number = the current wave. Read the last few to know what just landed. |
+| 6 | `wave_plans/` (139) | Per-lane dispatch plans (`W4`→`W52`, one file per lane) + the convention note in `wave_plans/README.md`. |
 | 7 | `research/multiagent/` (103) | The analysis program: dossiers, readiness plans (`94`, `104`), defect ledgers (`93`), and the register **`thoroughanalysis.md`**. |
 | 8 | `research/eval-corpus/` (23) | The acceptance corpus: 11 brief fixtures + `graders/`. `research/eval-out/` = **tracked** trial outputs (`results.json`, `history.json`, emitted trees). |
 | 9 | Root docs | `README.md` (quickstart + honest limits) · `AGENTS.md` (working contract) · `RESUME.md` · `taskuniverselog.md` · `remainingwaves.md` · `finalsprint.md`. Full depth-2 map: **`docs-FOLDER-MAP.md`**. |
@@ -75,7 +75,8 @@ bash scripts/gate.sh   # --double adds a flake detector. NEVER while agents are 
 ```
 
 `npm run dev` serves the console at `http://localhost:8080` (host/port are a fixed contract in
-`vite.config.ts`). CLI verbs and the exit-code taxonomy (0/1/2/3/4; 2 = parked at a HITL gate or `blocked`)
+`vite.config.ts`). CLI verbs and the exit-code taxonomy (0/1/2/3/4/**5**; 2 = parked at a HITL gate or
+`blocked`; 5 = the opt-in `--require-verified` state)
 are documented in `scripts/README-cli.md` §Agent contract.
 
 ---
@@ -91,19 +92,25 @@ emission (redTree refuse/banner) · HITL two-channel seats (no machine path mint
 CLI 39 verbs incl. `doctor`/`diagnose`/read-only `eval` scorecard · the console UI (9+ tabs, ⌘K palette,
 runtime log) · `gate.sh` with flake detection (first green run 2026-09-16).
 
-**Shelled / in progress** (per `finalsprint.md`; shells only — no fake behavior, each has
-`TODO(<row-id>)` at its gap): the autonomy spine (wild keyed seam W-01 · mint reachability W-02 · emit
-materialization W-03, landing) · wild supervisor completer (R14-f01) · unattended run (W-47) ·
-plan-before-execute (R13-f02) · checkpoint+`resume` (T-107.7) · 4 kind emitters + real graders + emitted
-UI seam (S2) · cassette replay (T5.7) · streaming surface (T5.1) · MCP client (F1) · second provider
-(F2) · per-action allow-lists (F4) · per-run token ledger · dev-server bind hardening (R11-f01) ·
-`--force` quarantine (R11-f08 — CLI wire landed W42; in-engine lift owed) · pane error boundary (R6-f12) · human-seat console surface.
+**Shelled / in progress** — REFRESHED 2026-10-03 by the 345-F1 docs-truth fix (the 2026-09-26 list
+below had drifted; the delivered items are named). **Delivered since that snapshot:** the `unattended`
+verb is REAL and self-sufficient (341-6: stock HITL gates whose DoD passes clear through the ledgered
+machine actor; only `forceHuman`/red-DoD parks) · checkpoint+`resume` REAL (W36) · MCP stdio transport
++ doctor surface landed (340-1 / 342-5; owner-gated OFF by default) · cassette replay wired at the
+provider seam (340-4) · 4 kind emitters (341-1) · git landing `emit --git` (343-3) · dev-server bind
+hardening (R11-f01: loopback default). **Still open / residual:** keyed synthesis quality (the binding
+constraint — `pass@1` is measured per wave, not yet stable run-to-run) · real graders + emitted-UI
+acceptance seam · streaming surface (T5.1) · per-action allow-lists (F4) · `--force` quarantine
+in-engine lift (R11-f08 — CLI wire landed W42) · pane error boundary (R6-f12, partial) · human-seat
+console surface · no in-product scheduler/daemon (an external host hook drives `unattended`).
 
 **Blocked / known limits** (honest, not bugs to paper over): no isolation boundary — the bounded
-node-runner is **NOT a sandbox** (R13-f04 = honest refusal; needs a host isolator) · keyed evidence runs
-blocked by funding (DeepSeek account unfunded → 402; O-1) · the emitted product is still ONE module
-wearing several filenames (TA-15) · P7–P12 phases often produce no artifacts · no git landing / no
-cross-machine reproducibility · Chat = grounded tools + one-shot text, no shell/agents.
+node-runner is **NOT a sandbox** (R13-f04 = honest refusal; needs a host isolator) · ~~keyed evidence
+runs blocked by funding~~ **SUPERSEDED — see the 2026-10-02 CORRECTION below: the account is funded and
+the repo `.env` key works; keyed runs are bounded and real** · the emitted product is still ONE module
+wearing several filenames on the **keyless floor** (TA-15; a keyed run emits a real multi-job product) ·
+P7–P12 phases often produce no artifacts · git landing + checkpoint/resume LANDED (residual: no remote /
+push / PR flow) · Chat = grounded tools + one-shot text, no shell/agents.
 
 ---
 
@@ -179,5 +186,22 @@ stale at HEAD `686d7b6`. Live `git ls-files`: **src 246 · src/lib 235 · script
 wave_plans 139 · total 2,096**. Also: the `unattended` verb is now self-sufficient (341-6) — a stock HITL
 gate whose DoD passes is cleared through the ledgered machine actor; only a `forceHuman` gate, or any red
 DoD gate, still parks (`scripts/README-cli.md` §Resume and unattended).
+
+## CORRECTION — 2026-10-03 (345-F1 docs-truth fix; HEAD `06cb089`)
+
+Supersedes the snapshot counts and status lines above (the 10-line tour numbers were updated in place;
+the rest of this block is the record).
+
+- **Gate of record (343 wave, `fixes/343_0_parent.md` §1/§7):** `gate.sh` `ok:true`, `hardFails:[]`,
+  `flakes:[]` — scripts **427 pass / 0 fail** · lib **3261 pass / 0 fail / 2 skipped**. The
+  398/2736 values in the W47 correction above are the 2026-10-02 record.
+- **Tracked counts (re-derived `git ls-files`):** total **1,933** · `src` 250 · `src/lib` 239 ·
+  `scripts` 49 · `fixes` 744 · `wave_plans` 139 · `research/multiagent` 103 · `.t4scratch` **0**
+  (untracked/removed). The 342-6 correction's "total 2,096 · .t4scratch 192 tracked" is stale.
+- **`tsconfig.scripts.json` is CLEAN:** `tsc -p tsconfig.scripts.json --noEmit` exits 0; the
+  "1030 pre-existing" note in `README.md` is retired.
+- **Exit taxonomy is 0/1/2/3/4/5**; the headless CLI **does** read `<cwd>/.env` (it wins over the
+  process env); a fresh `emit --run` is verified when its declared scripts resolve from the repo's own
+  `node_modules/`.
 
 <!-- END START-HERE · maintained by organizers · append corrections, never rewrite history -->

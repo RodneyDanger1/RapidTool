@@ -55,6 +55,41 @@ describe("validateReport", () => {
     assert.equal(noBody.ok, false);
   });
 
+  it("enforces the artifact caps at the boundary: 12 ok / 13 refused; 50 000 ok / 50 001 refused (A3-10)", () => {
+    const art = (n: number, body = "b") => ({ title: `t${n}`, body });
+    const at12 = validateReport({
+      phase: 3,
+      status: "complete",
+      summary: "x",
+      artifacts: Array.from({ length: 12 }, (_, i) => art(i)),
+    });
+    assert.equal(at12.ok, true, "12 artifacts is exactly the cap and must pass");
+    const at13 = validateReport({
+      phase: 3,
+      status: "complete",
+      summary: "x",
+      artifacts: Array.from({ length: 13 }, (_, i) => art(i)),
+    });
+    assert.equal(at13.ok, false, "13 artifacts exceeds the cap");
+    if (!at13.ok) assert.match(at13.error, /at most 12/);
+
+    const atBodyCap = validateReport({
+      phase: 3,
+      status: "complete",
+      summary: "x",
+      artifacts: [art(0, "y".repeat(50_000))],
+    });
+    assert.equal(atBodyCap.ok, true, "a 50 000-char body is exactly the cap and must pass");
+    const overBodyCap = validateReport({
+      phase: 3,
+      status: "complete",
+      summary: "x",
+      artifacts: [art(0, "y".repeat(50_001))],
+    });
+    assert.equal(overBodyCap.ok, false, "a 50 001-char body exceeds the cap");
+    if (!overBodyCap.ok) assert.match(overBodyCap.error, /50000-char cap/);
+  });
+
   it("rejects malformed files", () => {
     const empty = validateReport({ phase: 3, status: "complete", summary: "x", files: [""] });
     assert.equal(empty.ok, false);
@@ -129,6 +164,23 @@ describe("validateReport", () => {
     const second = applyReportResult(first.project, v2.report);
     assert.equal(second.applied, false, "whitespace variant must fingerprint identically");
     assert.equal(second.reason, "duplicate");
+  });
+
+  it("fingerprints tests_run: a report differing ONLY by tests_run is not a duplicate (A3-12)", () => {
+    const base = { phase: 3, status: "complete" as const, summary: "shipped the module" };
+    const a = validateReport({ ...base, tests_run: [{ command: "npm test", pass: true }] });
+    const b = validateReport({ ...base, tests_run: [{ command: "npm run build", pass: true }] });
+    assert.equal(a.ok, true);
+    assert.equal(b.ok, true);
+    if (!a.ok || !b.ok) return;
+    // No artifacts ⇒ the semantic memory id (`report-semantic-<phase>-<fp8>`)
+    // is the only duplicate anchor, so the fingerprint is what separates them.
+    const first = applyReportResult(seedProject(), a.report);
+    assert.equal(first.applied, true);
+    const second = applyReportResult(first.project, b.report);
+    assert.equal(second.applied, true, "a tests_run-only difference must NOT fingerprint as a duplicate");
+    // Control: the identical report is still E-09 idempotent.
+    assert.equal(applyReportResult(first.project, a.report).applied, false);
   });
 
   it("records each no-artifact blocked attempt truthfully (documented E-09 edge)", () => {

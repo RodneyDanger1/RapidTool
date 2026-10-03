@@ -870,6 +870,10 @@ export function runGate(
         {
           id: `unregistered-${phase}`,
           criterion: `No DoD criteria registered for phase ${phase}`,
+          // V1-M2 (345 F2): the refusal is self-describing, never a bare
+          // TypeError — `evaluate(project, undefined)` is unreachable and the
+          // reason names why the phase cannot pass vacuously.
+          reason: `phase ${phase} is outside the registered gate graph — runGate refuses rather than passing vacuously`,
           probe: () => false,
         },
       ],
@@ -1102,9 +1106,18 @@ export function b18Tail(): string {
 // --- E-08 oracle-pinning seam (pure core) -----------------------------------
 // The deterministic A7 oracle rows (Project.oracle) anchor every machine
 // verify run: generateCases must keep every seeded row as a case with its
-// exact id. These two pure helpers are the seam the verify loop consumes —
-// prepend oracleToCaseSeeds() to the generation prompt, then reject/retry
-// whenever missingOracleCaseIds() is non-empty (no blind pass).
+// exact id. These two pure helpers render the seed lines and detect dropped
+// ids; the wired half is verify.server.ts (`droppedPinnedOracleIds` guards
+// `generateCases`'s pinnedOracleIds, refusing a reduced oracle).
+//
+// 344 A1-04 / 345 F2 (declare-or-strike): the pinning is DORMANT at runtime —
+// the production keyed verify callers pass neither `seeds` nor
+// `pinnedOracleIds` (headless.ts `verifyGeneratedSource` and the
+// codegen.server.ts `defaultDeps.verify` binding), so a reduced oracle is not
+// actually refused today. Wiring those call sites to forward
+// `oracleToCaseSeeds(project.oracle)` + `project.oracle.map((o) => o.id)` is
+// the owed change (see fixes/345_f2_fixer.md STOP-and-REPORT). These helpers
+// remain pure; nothing here claims a live consumer.
 
 /** Render each A7 oracle row as a `# orc-<id> <name> — <given> ⇒ <expect>` seed line. */
 export function oracleToCaseSeeds(oracle: OracleTest[]): string {

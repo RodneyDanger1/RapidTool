@@ -20,6 +20,7 @@ import {
   runGate,
 } from "./dod.ts";
 import { applyPhaseResult, emptyProject, rejectHitl, stampP6ReqTrace } from "./engine.ts";
+import { fnv1a } from "./algorithms.ts";
 import { buildPhase6Module } from "./sandbox.ts";
 import { ALL_PHASES, runHeadless, runToGate, seedProject } from "./testing/fixtures.ts";
 import { exportProjectJson } from "./io.ts";
@@ -1327,5 +1328,25 @@ describe("W16 L4 — OV-14 skip≠complete observability via the reqTrace artifa
       archProductComplete(archTrace(tree)),
       "…while the predicate itself DOES differ: the fact exists, only the surface is missing (proposal in fixes/244)",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 345 F2 · V1-M2 (A22) — the unregistered-phase refusal, pinned + self-describing.
+// Before this pin, making the guard inert (`if (!items)` → `if (false)`) left
+// both gates.test.ts and dod.test.ts green; the removal would surface as a bare
+// `TypeError` from `evaluate(project, undefined)` instead of the coded refusal.
+// ---------------------------------------------------------------------------
+describe("345 F2 (V1-M2) — runGate refuses an unregistered phase with a coded refusal", () => {
+  it("returns pass:false with the coded id, a self-describing reason, and the unregistered hash", () => {
+    const p = seedProject();
+    for (const phase of [13, -1, 99]) {
+      const r = runGate(p, phase);
+      assert.equal(r.pass, false, `phase ${phase} must never pass vacuously`);
+      assert.equal(r.unmet.length, 1);
+      assert.equal(r.unmet[0].id, `unregistered-${phase}`, "the refusal is coded by phase id");
+      assert.match(r.unmet[0].reason ?? "", /outside the registered gate graph/);
+      assert.equal(r.evidenceHash, String(fnv1a(`unregistered:${phase}`)));
+    }
   });
 });

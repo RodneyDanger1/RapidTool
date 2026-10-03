@@ -130,7 +130,7 @@ Read what comes back truthfully:
   tail on the envelope, and `treeRun.verdictHash` (FNV-1a over the decisive verdict fields —
   integrity, not cryptography) lets a re-run prove whether the machine verdict changed: same hash,
   same verdict.
-The CLI's full verb reference — all **39 verbs**, the exit-code taxonomy (0/1/2/3/4), the `RT_E_*`
+The CLI's full verb reference — all **39 verbs**, the exit-code taxonomy (0/1/2/3/4/**5**), the `RT_E_*`
 registry, and the Hermes-style agent loop — lives in **`scripts/README-cli.md`** (doc-contract
 tested by `scripts/README-cli.test.mjs`: the count, the verb list, and the `edit`/`emit` sections
 are pinned to the dispatcher's bytes). Read it there; it is not duplicated here.
@@ -139,12 +139,15 @@ are pinned to the dispatcher's bytes). Read it there; it is not duplicated here.
 
 **Browser app:** `DEEPSEEK_API_KEY` in `.env` enables LLM-backed phases (P6
 synthesis, Chat, expansion); the app's dev/build tooling loads `.env` for you. **Headless CLI:**
-it does **not** read `.env` — export the variable in the shell
-(`DEEPSEEK_API_KEY=… node --experimental-strip-types scripts/rapidtool-cli.mjs …`, see
-`scripts/README-cli.md` §Live mode). Without a key the engine still runs and is honest about
-skips. Research probes use free keyless sources (duckduckgo/searxng/wikipedia) and report what
-they could not reach. `.env.example` documents every knob (model pins, `RAPIDTOOL_TOKEN_CAP`,
-`RT_HUMAN_SEAT_TOKEN`, pricing, log dirs, eval dirs, timeouts) — `.env` itself is gitignored and
+it resolves `DEEPSEEK_API_KEY` from **`<working directory>/.env` first, then the process
+environment** — the `.env` value WINS when both are non-blank (a stale ambient key loses behind
+the coded `RT_E_LLM_KEY_SHADOWED` signal, tails only), and a present-but-blank process value is an
+intentional keyless disable. Run it from the repo root to use the repo's own `.env`
+(`scripts/README-cli.md` §API key resolution owns the rule). Without a key the engine still runs
+and is honest about skips. Research probes use free keyless sources (duckduckgo/searxng/wikipedia)
+and report what they could not reach. `.env.example` documents the common knobs (keys, model pins,
+`RAPIDTOOL_TOKEN_CAP`, `RT_HUMAN_SEAT_TOKEN`, pricing, log dirs, eval dirs, timeouts, MCP gate,
+provider selection, best-of-N, cassette, dev LAN bind) — `.env` itself is gitignored and
 **never printed**.
 
 ---
@@ -223,9 +226,13 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
 3. **No real isolation.** The bounded runner executes with timeouts + scrubbed env but it is
    **not** a sandbox — no Docker/bwrap. Doctor says `sandbox: false`, and nothing may claim
    otherwise.
-4. **No git landing / checkpoint-resume yet** (T4.x, T-107.7): the factory emits trees; it
-   does not commit them or snapshot/resume mid-run. (Checkpoint code now exists in the working
-   tree — see §7 — but is not yet a shipped, pinned capability.)
+4. **Git landing and checkpoint+resume are now REAL** (updated 2026-10-03 by the 345-F1 docs-truth
+   fix — this limit was written before `emit --git` landed in the 343-3 wave and before
+   `resume`/`unattended` landed in W36). `emit --git` lands the emitted tree as one
+   Conventional-Commits commit (`src/lib/git.server.ts: gitLandEmitted`), idempotently and with the
+   host repo structurally un-landable; `resume`/`unattended` re-enter from the per-phase checkpoint
+   under `<dir>/.rapidtool/`. What is still roadmap: no in-product scheduler/daemon (an external
+   Windows Task Scheduler / cron hook invokes `unattended`) and no branch/remote/push/PR delivery.
 5. **LLM work needs a key.** Without `DEEPSEEK_API_KEY` the phases that call a model skip
    honestly; a *keyed* full run also costs tokens — budgets/ledger unification is roadmap
    (T-107.6).
@@ -277,7 +284,8 @@ the repo `.env` key works; the earlier 401/402 reports came from a stale Windows
 (`treeRun.substance {stubs:0, reexports:0, real:3}`, `p6-arch` PASS); the remaining gap is a
 generated-code async defect recorded in `fixes/331_0_parent.md` §6.8 ·
 the emitted product is still ONE module wearing several filenames on the KEYLESS floor (TA-15) · P7–P12 phases often
-produce no artifacts · no git landing / no cross-machine reproducibility · Chat = grounded tools +
+produce no artifacts · git landing + checkpoint-resume landed (the residual gap is the missing
+in-product scheduler/host-hook and remote/PR delivery, not local landing) · Chat = grounded tools +
 one-shot text, no shell/agents.
 
 **Corrections in force:** `finalsprint.md`'s §S1 board over-claimed (3 of 4 items not in the
@@ -298,6 +306,25 @@ product (`treeRun.substance {stubs:0, reexports:0, real:3}` in `fixes/331_0_pare
 fixes 719 · wave_plans 139 · total 2,096**. `.t4scratch/` is still **192 tracked files** and still owes a
 parent-signed `git rm` (it fails its own cleanup precondition — tracked, and named in live lane logs; see
 `fixes/342_6_sweep.md`).
+
+**Corrections in force — appended 2026-10-03 (345-F1 docs-truth fix; HEAD `06cb089`):** this block
+supersedes the counts in the two corrections above and in every dated status block of this file. All
+values re-derived from the bytes today:
+
+- `git ls-files | wc -l` = **1,933** (was 1,908 / 2,096 in the snapshots); `.t4scratch/` is now
+  **untracked/absent** (`git ls-files .t4scratch` = 0 — it was removed in the 342 wave, `73f660a`), so
+  the "192 tracked files still owes a git rm" note above is closed.
+- **scripts 49** tracked = 25 tools + 24 `*.test.mjs`; **src 250**; **src/lib 239** = 123 modules
+  (90 direct + 33 subdirectory) + 112 colocated tests; **fixes 744**; **wave_plans 139**;
+  **research/multiagent 103**; **research/eval-corpus 23**; **research/eval-out 345**.
+- `tsc -p tsconfig.scripts.json --noEmit` exits **0** (the scripts program is clean; `ERROR_BUDGET`
+  is empty) — the "1030 pre-existing" note is retired.
+- The exit-code taxonomy is **0/1/2/3/4/5** (2 = park, 5 = the opt-in `--require-verified` state).
+- The headless CLI **does** read `<cwd>/.env` (it wins over the process env by documented
+  precedence); the older "does not read `.env`" lines are retired.
+- Latest gate of record (the 343 wave, `fixes/343_0_parent.md` §1/§7): **scripts 427 pass / 0 fail ·
+  lib 3261 pass / 0 fail / 2 skipped**, `gate.sh` `ok:true`, `hardFails:[]`, `flakes:[]` — the
+  398/2736 values above are the 2026-10-02 record, not the current one.
 
 ## Progress so far (the paper trail)
 
@@ -346,10 +373,12 @@ re-run. Where reality is behind, the docs say so, the packets say so, and `docto
 
 ---
 
-# THE CATALOG — every tracked file (1,908 today)
+# THE CATALOG — every tracked file (1,933 today)
 
 **What this is:** the literal catalog of the repository's tracked universe. Counts re-derived
-2026-09-30: `git ls-files | wc -l` = **1,908**. Every **root file, every script, every route,
+2026-10-03 by the 345-F1 docs-truth fix (HEAD `06cb089`): `git ls-files | wc -l` = **1,933** (the
+prior 2026-09-30 value, 1,908, and the 342-6 correction's 2,096, are superseded — `.t4scratch/` is
+no longer tracked). Every **root file, every script, every route,
 every migration, every config** is named below; mass-produced classes (tests, wave plans, fix
 logs, vault notes, eval trees, vault/E2E outputs) are described **by convention with their full
 membership derivable from one command** — stated inline — because each member's purpose is its
@@ -360,18 +389,18 @@ staged changes (re-derived 2026-09-30 by the W44 wave — the W44 commit moved `
 `wave_plans/`, `scripts/` and root + Total together: 7 lane logs, 5 probe relocations, and the
 eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth).
 
-## 10.1 Census (tracked, re-derived 2026-09-30 at `091b389` + the W44 wave)
+## 10.1 Census (tracked, re-derived 2026-10-03 at `06cb089` by the 345-F1 docs-truth fix)
 
 | Area | Files | What it is |
 |---|---:|---|
 | `research/` | 476 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 23 · `eval-out/` 345 · 5 top-level research docs) |
-| `fixes/` | 587 | Append-only per-lane landing logs (§10.9) |
-| `src/` | 224 | The product: engine + UI (§10.6) |
-| `wave_plans/` | 108 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 · W42 · W43 + the convention README (§10.10) |
+| `fixes/` | 744 | Append-only per-lane landing logs (§10.9) |
+| `src/` | 250 | The product: engine + UI (§10.6) |
+| `wave_plans/` | 139 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 · W42 · W43 + the convention README (§10.10) |
 | `.grok/` | 89 | Legacy platform chrome — **do not build on it** (§10.12) |
 | `builds/` | 50 | Legacy sample build outputs (vault export + sample project) (§10.11) |
 | `vault-e2e/` | 47 | Vault export of the HVAC Dispatch E2E project (§10.11) |
-| `scripts/` | 46 | CLI + gates + guards + tooling + their tests (§10.7) |
+| `scripts/` | 49 | CLI + gates + guards + tooling + their tests (§10.7) |
 | root | 41 | Every root file named in §10.2 |
 | `screenshots/` | 16 | QA/app screenshots (§10.11) |
 | `public/` | 10 | Static assets served as-is (§10.4) |
@@ -381,8 +410,8 @@ eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth
 | `migrations/` | 2 | Deploy SQL (§10.3) |
 | `.github/` | 1 | CI workflow (§10.3) |
 | `attachments/` · `artifacts/` · `.audit-g2/` | 1 + 1 + 1 | Historical artifact + stored image + G2 probe (§10.12) |
-| `.t4scratch/` | 192 | Committed lane-scratch tree (was working-tree scratch; tracked at `ac6b151`) |
-| **Total** | **1,908** | `git ls-files \| wc -l` |
+| `.t4scratch/` | 0 | Untracked/removed (was 192 tracked at `ac6b151`; stripped in the 342 wave, `73f660a`) |
+| **Total** | **1,933** | `git ls-files \| wc -l` |
 
 ## 10.2 Root files (all 41 tracked — named)
 
@@ -409,7 +438,7 @@ eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth
 | `.node_modules.lock` | An **empty** marker file (0 bytes) — platform tooling sentinel. |
 | `eslint.config.mjs` | ESLint flat config (js + prettier + react-hooks plugins). |
 | `tsconfig.json` | TS config: strict, ES2022, bundler resolution, `allowJs`/`checkJs` for the migration-plan import. |
-| `tsconfig.scripts.json` | Scripts-program TS config (R15-f04 staged; its error census = 1030 pre-existing, see `finalsprint.md`). |
+| `tsconfig.scripts.json` | Scripts-program TS config (R15-f04); puts the whole `scripts/**` tree inside a real `tsc` program. It is **CLEAN as of 2026-10-03** — `tsc -p tsconfig.scripts.json --noEmit` exits **0** and `scripts/typecheck-scripts.test.mjs`'s `ERROR_BUDGET` is empty (the old "1030 pre-existing" note was retired by W48 · 334-4). |
 | `vite.config.ts` | Vite + TanStack Start + Nitro + Tailwind config: port 8080 + `strictPort` fixed contract; dev bind loopback by default (R11-f01), `RAPIDTOOL_BIND_ALL=1` opts out; PGLite bootstrap; serverDir `./server`. |
 | `build.json` | Sample project file: "HVAC Dispatch" (the CLI quickstart's output, tracked as a fixture). |
 | `w1-source-project.json` | Sample project file: "W1 Boot Probe" (used by W1-era probes). |
@@ -467,9 +496,9 @@ eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth
 - `src/routes/` (3): `__root.tsx` (root layout + auth provider), `index.tsx` (HomeScreen from
   `console.tsx`), `run.$id.tsx` (RunScreen from `console.tsx`).
 
-## 10.6 `src/lib/` — the engine (213 files = 120 modules + 93 colocated tests; the tracked stray temp was removed in the W40 era — re-derived live 2026-09-30)
+## 10.6 `src/lib/` — the engine (239 files = 123 modules + 112 colocated tests; re-derived 2026-10-03 at `06cb089`)
 
-**88 direct modules** (one line each; the module's comments read 2026-09-26/27; re-counted 2026-09-30):
+**90 direct `.ts` modules** (one line each; the module's comments read 2026-09-26/27; re-counted 2026-10-03):
 
 - **Core:** `engine.ts` (13-phase state machine: applies phase results, gates, repairs, sealing) ·
   `phases.ts` (phase graph defs + coverage/transition helpers) · `store.ts` (zustand store — the
@@ -522,7 +551,7 @@ eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth
   migrations) · `error-component.tsx` (route error UI) · `preview-embedder-origin.ts` +
   `preview-host-bridge.ts` (preview postMessage trust model + guest side).
 
-**32 subdirectory modules** (the flagged `auth/.hermes-tmp.*` stray temp is no longer tracked —
+**35 subdirectory modules** (33 `.ts` + 2 `.tsx`; re-derived 2026-10-03 — `app-data/` 6 · `auth/` 17 · `llm/providers/` 8 · `mcp/` 1 · `multiplayer/` 2 · `testing/` 1; the flagged `auth/.hermes-tmp.*` stray temp is no longer tracked —
 `git ls-files src/lib | grep -i tmp` is empty): `app-data/` (6: `index.ts` barrel, `server-only.ts` guard,
 `client.server.ts` connector client, `errors.ts`, `login.ts`, `types.ts` — platform app-data
 bridge) · `auth/` (17: `client.ts`, `server.ts` (self-hosted Better Auth), `gates.tsx`,
@@ -530,13 +559,15 @@ bridge) · `auth/` (17: `client.ts`, `server.ts` (self-hosted Better Auth), `gat
 `gate-identity.server.ts` + `gate-session.server.ts` + `gate-session-marker.ts`,
 `isolation.server.ts`, `pglite-dialect.ts`, `popup.server.ts`, `preview.ts`, `sign-in-gate.ts`,
 `use-current-user.ts`, `verify.server.ts` — the whole sign-in/gate stack) · `llm/providers/`
-(5: `registry.ts` — provider registry + role tiers; `deepseek.ts`; `openai-compatible.ts`;
-`probe.ts`; `mock.ts` — deterministic zero-network mock) · `multiplayer/` (`index.ts`, `p2p.ts` —
-WebRTC full-mesh room client; staged, no live coturn) · `og/site.json` (OG metadata) ·
+(8: `registry.ts` — provider registry + role tiers; `deepseek.ts`; `openai-compatible.ts`;
+`probe.ts`; `mock.ts` — deterministic zero-network mock; `key-resolution.ts` + `key-source.server.ts`
+— the W45 `.env`-wins key precedence; `one-shot-fetch.server.ts`) · `mcp/` (`stub-server.ts` —
+spawned stdio test fixture for the MCP client, not production code) · `multiplayer/` (`index.ts`,
+`p2p.ts` — WebRTC full-mesh room client; staged, no live coturn) · `og/site.json` (OG metadata) ·
 `testing/fixtures.ts` (shared deterministic engine fixtures for tests).
 
-**93 colocated test suites** (the "how it's verified" map — each test file pins its
-subject-named contract; count today: `git ls-files src/lib | grep -c '\.test\.'` = 93 — 87 top-level + 6 subdir):
+**112 colocated test suites** (the "how it's verified" map — each test file pins its
+subject-named contract; count re-derived 2026-10-03: `git ls-files src/lib | grep -c '\.test\.'` = 112 — 99 top-level + 13 subdir):
 `algo-tools` · `algorithms` · `arch-tools` · `ast-mine` · `bench` · `bounded-int` · `brief-fixtures` ·
 `cassette` · `chat` · `checkpoint.server` · `codegen.server` · `compaction` · `compile-check.server` ·
 `crew` · `deepseek.server` ·
@@ -555,12 +586,13 @@ suites: `app-data/app-data.test.ts`, `auth/gate-identity.test.ts`, `auth/sign-in
 `llm/providers/registry-failover.test.ts`. Note: a few modules are pinned
 from sibling suites rather than a same-named file (e.g. there is **no** `engine.test.ts` — the
 engine's contracts are pinned from `headless.test.ts`, `gates.test.ts`, `judgment.test.ts` and
-others).
+others). (The enumerated names above are the last full hand-list; the count of record is the live
+`git ls-files src/lib | grep -c '\.test\.'` = 112 — re-derive rather than trusting this list.)
 
-## 10.7 `scripts/` — CLI, gates, guards, tooling (46 tracked = 24 tools + 22 tests)
+## 10.7 `scripts/` — CLI, gates, guards, tooling (49 tracked = 25 tools + 24 tests; re-derived 2026-10-03)
 
 - **CLI:** `rapidtool-cli.mjs` — the headless driver, **39 verbs** (count source of truth:
-  `grep -c 'case "'`), one JSON object per call, exit taxonomy 0/1/2/3/4.
+  `grep -c 'case "'`), one JSON object per call, exit taxonomy 0/1/2/3/4/**5**.
   `README-cli.md` — its agent-facing machine contract (verbs, exits, `RT_E_*`, the `edit`/`emit`
   sections; doc-contract tested). `README-cli.test.mjs` — that doc-contract test: binds the
   README-cli headline count + verb list + USAGE parity + edit/emit sections to the dispatcher's
@@ -588,13 +620,15 @@ others).
   · `install-page.html` (the Home-Screen install tutorial page).
 - **Guards:** `check-assertion-gaps.mjs` (T-17 tautology/zero-assertion lint, wired into
   gate.sh) · `check-auth-invariant.mjs` (dev-vs-build `VITE_AUTH_ENABLED` agreement: fail loudly).
-- **Test suites (22):** `README-cli.test.mjs` (CLI doc-contract) · `rapidtool-cli-edit.test.mjs` +
+- **Test suites (24):** `README-cli.test.mjs` (CLI doc-contract) · `rapidtool-cli-edit.test.mjs` +
   `rapidtool-cli-lesson.test.mjs` (verb contracts) · `rapidtool-cli-fixtures.test.mjs` (fixtures
   verb contract) · `cli-exit-taxonomy.test.mjs` (exit-code class guard, OPS-3) ·
   `cli-run-busy.test.mjs` (busy-flag exits + the crew `--max-steps` key leg, H7/317) ·
   `gate-verdict.test.mjs` (a red leg can never produce a green verdict) · `chat-stream.test.mjs`
   (chat streaming) · `next-action-arm-parity.test.mjs` (next-action ↔ dispatcher parity) ·
   `test-name-pattern-guard.test.mjs` (the `--test-name-pattern` no-op trap) ·
+  `check-module-coverage.test.mjs` (the R9-f05 reachability ratchet) ·
+  `typecheck-scripts.test.mjs` (the scripts-tree tsc coverage + per-file budget ratchet) ·
   `run-eval.test.mjs` · `migration-plan.test.mjs` · `brand-check.test.mjs` ·
   `browser-guard.test.mjs` · `browser-smoke-verdict.test.mjs` · `check-assertion-gaps.test.mjs` ·
   `check-auth-invariant.test.mjs` · `grok-pwa-plugin.test.mjs` · `preview.test.mjs` ·
@@ -651,7 +685,7 @@ others).
   `03_tech_deep_dives_research.md` (the origin research set, 2026-09-04) · `deepseek-api.md`
   (live-verified API spec) · `runtime-integration.md` (runtime/hosting research).
 
-## 10.9 `fixes/` — the append-only landing-log ledger (587 tracked)
+## 10.9 `fixes/` — the append-only landing-log ledger (744 tracked; re-derived 2026-10-03)
 
 **Convention:** one `fixes/NN_<lane>.md` per lane per wave; append-only; each log carries
 what/why + `file:line` evidence + before/after. The numbering is chronological: the newest number
@@ -667,12 +701,12 @@ the `305_*` round-3 lane logs arrive untracked from the live W42 tail).
 **How to search them:** `git ls-files fixes | sort | tail -30` (newest); `grep -l "<term>"
 fixes/*.md`; or grep the register's fix references (`R*`/`A*` IDs cite their fix logs).
 
-## 10.10 `wave_plans/` — dispatch plans (108 tracked; W4–W24 · W26–W38 · W40 · W42 · W43)
+## 10.10 `wave_plans/` — dispatch plans (139 tracked; W4–W24 · W26–W38 · W40 · W42 · W43; re-derived 2026-10-03)
 
 **Convention:** `wave_plans/README.md` owns it — every wave dispatch ships ONE notes file per lane
 (`wave_plans/W<N>/lane-<K>.md` or a named lane doc), ordered for speed: mission → owned files →
 numbered mini-task plan → parent findings/traps → verification commands → logging rules. Tracked
-waves: **W4–W24 + W26–W38 + W40 + W42 + W43** (108 files incl. `README.md`; W4–W10 five lane files each, W11 7,
+waves: **W4–W24 + W26–W38 + W40 + W42 + W43** (139 files incl. `README.md`; W4–W10 five lane files each, W11 7,
 W12 8, **W13 25** (its audit/design/eng/guard/improver/playbook/wd/x lanes), W14 3, W15 2, W16–W28
 one file each; then the former working-tree set, now tracked): `W29/coders.md`,
 `W30/shell-sprint.md`, `W31/gap-finshers.md`, `W32/organizer.md`, `W33/unlanded-block.md`,
