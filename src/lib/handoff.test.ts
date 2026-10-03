@@ -52,6 +52,19 @@ describe("phaseHandoff", () => {
     assert.match(text, /50000 chars/, "the per-body cap the seam enforces");
   });
 
+  it("names the runnable acceptance command + oracle spec path (W52/338-5)", () => {
+    const text = phaseHandoff(seedProject(), 0);
+    assert.match(text, /npm test/, "the tree's declared test script is named");
+    assert.match(text, /tests\/oracle\.spec\.ts/, "the oracle spec path is named");
+    assert.match(text, /tests_run/, "the agent is told to record the command it ran");
+  });
+
+  it("states there is no runnable acceptance spec when no oracle rows are recorded (W52/338-5)", () => {
+    const text = phaseHandoff(seedProject({ oracle: [] }), 0);
+    assert.equal(text.includes("npm test"), false, "no command points at a script the tree does not declare");
+    assert.match(text, /machine-checked DoD gate/, "the DoD gate is named as the exit signal instead");
+  });
+
   it("pulls prior-phase artifact context for a later phase", () => {
     const g = runToGate(seedProject(), 4); // P0..P3 sealed, parked at P4
     const text = phaseHandoff(g, 4);

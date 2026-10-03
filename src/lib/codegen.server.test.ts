@@ -76,6 +76,8 @@ import {
   REPAIR_TREE_FAILURE_TAIL_MAX,
   synthWithBackoff,
   proseLineHits,
+  reconcilePlanTypeSignatures,
+  bindSignaturesToJobTargets,
   type AsyncUnawaitedUse,
   type ChunkPriorFile,
   type EnvelopeReadFailure,
@@ -651,6 +653,81 @@ describe("liveP6Synthesis (T4/T5 — fixes/97 P0-01 Part B)", () => {
     assert.notEqual(hashOf(a), hashOf(b), "two different verified modules must not share one tested evidence hash");
   });
 
+  // W52/338-1 follow-up (spine 2): the codegen evidence-hash twins must adopt
+  // verify.ts applyVerifyOutcome's full formula — source \u0002 evidence \u0002
+  // caseCommitment. Before this, two outcomes differing ONLY in the oracle
+  // case set minted the SAME tested evidence hash.
+  it("the tested stamp's hash commits the oracle case set (source+evidence only is a collision)", async () => {
+    const hashFor = async (cases: { id: string; expression: string }[]): Promise<string> => {
+      const q = await liveP6Synthesis(
+        p6Base(),
+        fakeDeps({
+          verifyOutcome: {
+            status: "passed",
+            iterations: 1,
+            evidence: "1/1 machine-run cases passed on iteration 1",
+            finalSource: KANBAN_MODULE,
+            cases,
+          },
+        }).deps,
+      );
+      return String((q.lastTest as { evidenceHash?: string } | null)?.evidenceHash ?? "");
+    };
+    const one = await hashFor([{ id: "c1", expression: "typeof createBoard === 'function'" }]);
+    const two = await hashFor([{ id: "c2", expression: "typeof addColumn === 'function'" }]);
+    assert.ok(one.length > 0 && two.length > 0, "both outcomes minted a tested stamp");
+    assert.notEqual(one, two, "a different oracle case set must mint a different evidence hash");
+    assert.equal(
+      await hashFor([{ id: "c1", expression: "typeof createBoard === 'function'" }]),
+      one,
+      "the same outcome hashes identically (deterministic)",
+    );
+  });
+
+  // W52/338-1 follow-up (spine 1): the L4 verified-procedure row verify.server
+  // mints on a PASSED outcome must reach project memory; it was silently
+  // dropped by upgraded(). Idempotent by row id.
+  it("the passed verify outcome's L4 lesson row is folded into memory (idempotent by id)", async () => {
+    const lesson = {
+      id: "lesson-verify-passed-abc123",
+      kind: "procedural" as const,
+      phase: 6 as const,
+      text: "L4 verified procedure: annotate parameters (W52/338-1)",
+      score: 0.8,
+      source: "engine" as const,
+      tags: ["lesson", "verify-passed", "L4"],
+    };
+    const q = await liveP6Synthesis(
+      p6Base(),
+      fakeDeps({
+        verifyOutcome: {
+          status: "passed",
+          iterations: 1,
+          evidence: "1/1 machine-run cases passed on iteration 1",
+          finalSource: KANBAN_MODULE,
+          cases: [{ id: "c1", expression: "typeof createBoard === 'function'" }],
+          lesson,
+        },
+      }).deps,
+    );
+    assert.ok((q.memory ?? []).some((m) => m.id === lesson.id), "the L4 lesson row is persisted");
+    // idempotent: a project already carrying the row lands ONE copy, not two.
+    const again = await liveP6Synthesis(
+      { ...q, lastTest: null },
+      fakeDeps({
+        verifyOutcome: {
+          status: "passed",
+          iterations: 1,
+          evidence: "1/1 machine-run cases passed on iteration 1",
+          finalSource: KANBAN_MODULE,
+          cases: [{ id: "c1", expression: "typeof createBoard === 'function'" }],
+          lesson,
+        },
+      }).deps,
+    );
+    assert.equal((again.memory ?? []).filter((m) => m.id === lesson.id).length, 1, "no twin is minted");
+  });
+
   it("read-back: captured lesson rows in project memory reach the P6 expansion (fixes/124 A3-03)", async () => {
     const base = p6Base();
     const lessonRow = {
@@ -914,8 +991,25 @@ function chunkEnvelope(names: readonly string[], chunkIndex: number, priorFirst?
   return { module: chunkModule(names, priorFirst), exports: [...names], reqTrace };
 }
 
+/** W52/338-1: the DEMANDED signatures of one synthesis prompt — the `- <sig>`
+ *  lines under the "TYPE SIGNATURES (must export" marker. The plan is now
+ *  spec-driven, so a fixture must serve whatever chunk the plan asks for
+ *  instead of a fixed index table. */
+function demandedSignatureLines(prompt: string): string[] {
+  const lines = prompt.split("\n");
+  const start = lines.findIndex((l) => l.includes("TYPE SIGNATURES (must export"));
+  if (start < 0) return [];
+  const out: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (line.trim() === "") break;
+    if (line.startsWith("- ")) out.push(line.slice(2).trim());
+  }
+  return out;
+}
+
 /** Injected pro-tier fake for the chunked driver: one synthesis reply per
- *  chunk (canned envelope exporting that chunk's signature names), garbage for
+ *  chunk (a module exporting exactly the prompt's demanded names), garbage for
  *  the failing chunk + its one bounded envelope repair (then honest refusal). */
 function chunkedDeps(opts: { failChunk?: number } = {}) {
   const prompts: string[] = [];
@@ -923,7 +1017,7 @@ function chunkedDeps(opts: { failChunk?: number } = {}) {
   const synthOpts: DeepSeekCompleteOptions[] = []; // fixes/154: opts per synthesis call
   const spec = ledgerSpec(20);
   const groups = chunkTypeSignatures(spec.typeSignatures);
-  const chunkNames = groups.map((g) => signatureFunctionNames(g));
+  const emitted: string[][] = [];
   const complete = async (prompt: string, completeOpts?: DeepSeekCompleteOptions): Promise<LlmResult> => {
     calls.push("complete");
     prompts.push(prompt);
@@ -934,8 +1028,11 @@ function chunkedDeps(opts: { failChunk?: number } = {}) {
       if (opts.failChunk === chunkIndex) {
         return { ok: true, text: "the model babbled prose, no json at all", model: "deepseek-v4-flash" };
       }
-      const names = chunkNames[chunkIndex] ?? [];
-      const priorFirst = chunkIndex > 0 ? (chunkNames[chunkIndex - 1] ?? [])[0] : undefined;
+      const names = demandedSignatureLines(prompt)
+        .map((s) => signatureFunctionNames([s])[0])
+        .filter((n): n is string => typeof n === "string");
+      const priorFirst = chunkIndex > 0 ? emitted[chunkIndex - 1]?.[0] : undefined;
+      emitted[chunkIndex] = names;
       return { ok: true, text: JSON.stringify(chunkEnvelope(names, chunkIndex, priorFirst)), model: "deepseek-v4-flash" };
     }
     // bounded envelope repair of the failing chunk keeps failing → chunk refusal
@@ -1561,10 +1658,13 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     const base = p6Base(LEDGER_BRIEF);
     const f = chunkedDeps();
     const q = await liveP6Synthesis(base, f.deps);
-    assert.equal(q.generatedTree?.length, 4, "A0: barrel + one file per chunk");
+    // W52/338-1: the plan is spec-driven — the 20 model signatures all bind to
+    // `rent` (3 chunks), and the deterministic floor adds track/record/lease
+    // (one chunk each) → 6 chunks, barrel + 6 files.
+    assert.equal(q.generatedTree?.length, 7, "A0: barrel + one file per chunk");
     assert.deepEqual(f.groups.map((g) => g.length), [8, 8, 4]);
     const synthPrompts = f.prompts.filter((p) => p.includes("TYPE SIGNATURES (must export"));
-    assert.equal(synthPrompts.length, 3, "one pro-tier synthesis call per chunk");
+    assert.equal(synthPrompts.length, 6, "one pro-tier synthesis call per chunk");
     assert.ok(synthPrompts[1]!.includes("collectRent0"), "chunk-1 prompt carries chunk-0 exports");
     assert.ok(!synthPrompts[1]!.includes("collectRent16"), "chunk-1 prompt never leaks chunk-2 exports");
     assert.ok(synthPrompts[2]!.includes("collectRent8"), "chunk-2 prompt carries chunk-1 exports");
@@ -1582,25 +1682,32 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
       assert.ok(p.includes(LEDGER_BRIEF), "shared brief in every chunk prompt");
       assert.ok(p.includes("Track rent collection per tenant."), "full requirement list in every chunk prompt");
     }
-    assert.deepEqual(f.calls, ["expand", "complete", "complete", "complete"]);
+    assert.deepEqual(f.calls, ["expand", "complete", "complete", "complete", "complete", "complete", "complete"]);
   });
 
-  it("W45/331-4: the chunked driver persists ONE p6.tree.shortfall warn naming the unbound declared jobs", async () => {
+  it("W52/338-1: every declared job is planned by rule; the reconciliation row names what the model did not", async () => {
     // The LEDGER brief declares 4 capabilities (track/record/lease/rent) whose
     // spec graph materialises 4 job nodes; every `collectRent<i>` signature names
-    // only `rent`, so the other three get no chunk and no file — silently, until
-    // this census. (The existing fixture never noticed: it only asserts rent.ts.)
+    // only `rent`. Before W52 the other three got no chunk and no file (the
+    // p6.tree.shortfall row named them). Now the deterministic floor plans them.
     const f = chunkedDeps();
     const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), f.deps);
-    const rows = q.logs.filter((l) => l.event === "p6.tree.shortfall");
-    assert.equal(rows.length, 1, "one persisted row, not one per chunk");
-    assert.equal(rows[0]!.level, "warn");
-    assert.match(rows[0]!.detail, /no src\/jobs module will be synthesized/);
+    assert.equal(q.logs.some((l) => l.event === "p6.tree.shortfall"), false, "no declared job is dropped");
+    const rows = q.logs.filter((l) => l.event === "p6.tree.plan.reconciled");
+    assert.equal(rows.length, 1, "one reconciliation row, not one per chunk");
     for (const label of ["track", "record", "lease"]) {
-      assert.match(rows[0]!.detail, new RegExp(`\\b${label}\\b`), `${label} is a declared job with no bound signature`);
+      assert.match(rows[0]!.detail, new RegExp(`\\b${label}\\b`), `${label} is planned from the deterministic floor`);
     }
-    assert.equal(/\brent\b/.test(rows[0]!.detail), false, "the bound job is not named");
-    // Negative control: a base whose only job node IS named logs nothing.
+    // Every declared job now has a planned + emitted src/jobs file.
+    const paths = (q.generatedTree ?? []).map((f2) => f2.path);
+    for (const label of ["track", "record", "lease", "rent"]) {
+      assert.ok(paths.includes(`src/jobs/${label}.ts`), `${label}.ts is materialized by rule`);
+    }
+    // p6-arch judges coverage against the SAME reconciled rule the plan used.
+    const trace = archTrace(q);
+    assert.deepEqual(trace.missing, [], "p6-arch demands exactly the reconciled capability set, all carried");
+    assert.deepEqual(trace.stubFiles, [], "no stub file on the synthesized tree");
+    // Negative control: a base whose only job node the model named logs no reconciliation.
     const onlyRent = p6Base(LEDGER_BRIEF);
     onlyRent.specGraph = {
       nodes: (onlyRent.specGraph?.nodes ?? []).filter(
@@ -1608,30 +1715,35 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
       ),
     } as Project["specGraph"];
     const clean = await liveP6Synthesis(onlyRent, chunkedDeps().deps);
-    assert.equal(clean.logs.some((l) => l.event === "p6.tree.shortfall"), false);
+    assert.equal(clean.logs.some((l) => l.event === "p6.tree.plan.reconciled"), false);
   });
 
   it("W45/331-4 (Finding B) e2e: a later chunk redeclaring an earlier export is refused, repaired, then accepted", async () => {
     const base = p6Base(LEDGER_BRIEF);
     const spec = ledgerSpec(20);
-    const groups = chunkTypeSignatures(spec.typeSignatures);
-    const chunkNames = groups.map((g) => signatureFunctionNames(g));
     const prompts: string[] = [];
-    let synthIndex = 0;
+    const demanded: string[][] = [];
+    let currentIdx = -1;
     // Chunk 1's first reply ALSO redeclares chunk 0's first export — the recorded
     // real shape (flip.ts importing estimateARV AND declaring it). The bounded
     // duplicate-declaration repair must then return the corrected chunk.
+    // W52/338-1: the plan is spec-driven, so the fake serves the prompt's own
+    // demanded names per chunk (the old fixed index table no longer matches).
     const complete = async (prompt: string): Promise<LlmResult> => {
       prompts.push(prompt);
-      if (!prompt.includes("TYPE SIGNATURES (must export")) {
-        const names = chunkNames[1] ?? [];
-        return { ok: true, text: JSON.stringify(chunkEnvelope(names, 1, names[0])), model: "deepseek-v4-flash" };
+      const isSynthesis = prompt.includes("TYPE SIGNATURES (must export");
+      if (isSynthesis) {
+        currentIdx += 1;
+        demanded[currentIdx] = demandedSignatureLines(prompt)
+          .map((s) => signatureFunctionNames([s])[0])
+          .filter((n): n is string => typeof n === "string");
       }
-      const idx = synthIndex++;
-      let names = chunkNames[idx] ?? [];
-      if (idx === 1) names = [...names, chunkNames[0]![0]!];
-      const priorFirst = idx > 0 ? chunkNames[idx - 1]?.[0] : undefined;
-      return { ok: true, text: JSON.stringify(chunkEnvelope(names, idx, priorFirst)), model: "deepseek-v4-flash" };
+      const names = demanded[currentIdx] ?? [];
+      const priorFirst = currentIdx > 0 ? demanded[currentIdx - 1]?.[0] : undefined;
+      // Chunk 1's first reply redeclares chunk 0's first export; the repair
+      // returns the demanded names without it.
+      const emit = isSynthesis && currentIdx === 1 ? [...names, demanded[0]![0]!] : names;
+      return { ok: true, text: JSON.stringify(chunkEnvelope(emit, currentIdx, priorFirst)), model: "deepseek-v4-flash" };
     };
     const expand = async () => ({ ok: true as const, spec });
     const verify = async () => ({ status: "passed" as const, iterations: 0, evidence: "unused", finalSource: "", cases: [] });
@@ -1641,7 +1753,7 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     assert.match(dupRepairs[0]!, /already exported by src\/jobs\/rent\.ts/);
     assert.match(dupRepairs[0]!, /"collectRent0"/);
     assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "the repair converged — no chunk refused");
-    assert.equal(q.generatedTree?.length, 4, "barrel + 3 chunks (the repaired chunk accepted)");
+    assert.equal(q.generatedTree?.length, 7, "barrel + 6 chunks (the repaired chunk accepted)");
     // The repaired, materialized chunk imports the earlier chunk's exports but no
     // longer declares them — the duplicate-import SyntaxError cannot ship.
     const rent2 = (q.generatedTree ?? []).find((f) => f.path === "src/jobs/rent-2.ts");
@@ -1655,10 +1767,18 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     const f = chunkedDeps();
     const q = await liveP6Synthesis(base, f.deps);
     const tree = q.generatedTree ?? [];
-    assert.equal(tree.length, 4, "barrel + 3 chunks");
+    assert.equal(tree.length, 7, "barrel + 6 chunks");
     assert.deepEqual(
       tree.map((t) => t.path),
-      [TREE_ENTRY_PATH, "src/jobs/rent.ts", "src/jobs/rent-2.ts", "src/jobs/rent-3.ts"],
+      [
+        TREE_ENTRY_PATH,
+        "src/jobs/rent.ts",
+        "src/jobs/rent-2.ts",
+        "src/jobs/rent-3.ts",
+        "src/jobs/lease.ts",
+        "src/jobs/record.ts",
+        "src/jobs/track.ts",
+      ],
     );
     for (const t of tree) {
       assert.equal(t.hash, String(fnv1a(t.source)), "content-addressed hash");
@@ -1670,6 +1790,9 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     assert.ok(barrel.source.includes(`export * from "./jobs/rent.ts";`));
     assert.ok(barrel.source.includes(`export * from "./jobs/rent-2.ts";`));
     assert.ok(barrel.source.includes(`export * from "./jobs/rent-3.ts";`));
+    assert.ok(barrel.source.includes(`export * from "./jobs/lease.ts";`));
+    assert.ok(barrel.source.includes(`export * from "./jobs/record.ts";`));
+    assert.ok(barrel.source.includes(`export * from "./jobs/track.ts";`));
     assert.ok(!barrel.source.includes("module.exports"), "entry is ESM, not IIFE-concat");
     const later = tree[2]!;
     assert.ok(later.source.includes("import {"), "later chunk imports prior exports");
@@ -1701,8 +1824,8 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     assert.ok(q.artifacts.some((a) => a.title.startsWith("Generated source tree (LLM")));
     assert.equal(q.modelRoute, "deepseek-flash", "flash tier really synthesized the chunks");
     assert.equal(q.implementationSpec?.source, "p6");
-    assert.equal(q.implementationSpec?.typeSignatures.length, 20);
-    assert.ok(q.logs.some((l) => l.event === "p6.synthesis" && l.detail.includes("4 file(s) in 3 chunk(s)")));
+    assert.equal(q.implementationSpec?.typeSignatures.length, 26, "20 model + 6 floor signatures (track/record/lease)");
+    assert.ok(q.logs.some((l) => l.event === "p6.synthesis" && l.detail.includes("7 file(s) in 6 chunk(s)")));
     assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"));
   });
 
@@ -1741,7 +1864,7 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     );
     const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
     assert.ok(refusal, "refusal is logged");
-    assert.match(refusal.detail, /chunk 3\/3 refused/, "log names the refused chunk index");
+    assert.match(refusal.detail, /chunk 3\/6 refused/, "log names the refused chunk index");
     assert.match(refusal.detail, /RT_E_LLM_REJECTED/);
     assert.ok(
       !q.logs.some((l) => l.event === "p6.synthesis" && l.detail.includes("Chunked synthesis:")),
@@ -1758,7 +1881,7 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     assert.equal(q.generatedSource, base.generatedSource, "floor stands byte-identical");
     const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
     assert.ok(refusal);
-    assert.match(refusal.detail, /chunk 1\/3 refused/);
+    assert.match(refusal.detail, /chunk 1\/6 refused/);
     assert.equal(f.calls.filter((c) => c === "complete").length, 2, "chunk 0 = synth + 1 bounded repair, then stop");
   });
 
@@ -1896,7 +2019,7 @@ describe("liveP6Synthesis deps.treeFailure threads into repair re-prompts (fixes
     assert.ok(repair, "chunk 2's bounded envelope repair fired");
     assert.ok(repair!.includes(TREE_FAILURE), "tree-failure context reached the chunk repair prompt");
     const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
-    assert.ok(refusal && /chunk 3\/3 refused/.test(refusal.detail));
+    assert.ok(refusal && /chunk 3\/6 refused/.test(refusal.detail));
   });
 });
 
@@ -2250,6 +2373,10 @@ describe("liveP6Synthesis kind-scoped tree trigger (fixes/148 F1)", () => {
 
   it("a declared webapp kind with ≤8 signatures now emits a generatedTree (entry file), never the single module", async () => {
     const base = { ...p6Base(), kind: "app" as const }; // KANBAN brief, 2 signatures ≤8
+    // W52/338-1: this pin is KIND ROUTING + ESM materialization, not declared-job
+    // coverage (pinned separately). A declared job now always gets its own
+    // src/jobs file by rule, so isolate routing by dropping the job nodes.
+    base.specGraph = { nodes: (base.specGraph?.nodes ?? []).filter((n) => !String(n.id).startsWith("job-")) } as Project["specGraph"];
     const { calls, deps } = fakeDeps();
     const q = await liveP6Synthesis(base, deps);
     const tree = q.generatedTree ?? [];
@@ -2296,7 +2423,10 @@ describe("liveP6Synthesis kind-scoped tree trigger (fixes/148 F1)", () => {
   it("declared tool/game kinds with ≤8 signatures also tree; >8 signatures still chunks under any kind", async () => {
     for (const kind of ["tool", "game"] as const) {
       const { calls, deps } = fakeDeps();
-      const q = await liveP6Synthesis({ ...p6Base(), kind }, deps);
+      const base = { ...p6Base(), kind };
+      // W52/338-1: isolate kind routing from declared-job coverage (pinned separately).
+      base.specGraph = { nodes: (base.specGraph?.nodes ?? []).filter((n) => !String(n.id).startsWith("job-")) } as Project["specGraph"];
+      const q = await liveP6Synthesis(base, deps);
       assert.equal((q.generatedTree ?? []).length, 2, `${kind}: ≤8 sigs → chunked tree (barrel + chunk)`);
       assert.deepEqual(calls, ["expand", "complete"], `${kind}: no single-module verify leg`);
       assert.equal(
@@ -2307,7 +2437,10 @@ describe("liveP6Synthesis kind-scoped tree trigger (fixes/148 F1)", () => {
     }
     // >8 signatures → one pro-tier call per chunk, declared kind or not.
     const f = chunkedDeps();
-    const q = await liveP6Synthesis({ ...p6Base(LEDGER_BRIEF), kind: "app" }, f.deps);
+    const over8 = { ...p6Base(LEDGER_BRIEF), kind: "app" as const };
+    // W52/338-1: isolate the >8 chunking pin from declared-job coverage.
+    over8.specGraph = { nodes: (over8.specGraph?.nodes ?? []).filter((n) => !String(n.id).startsWith("job-")) } as Project["specGraph"];
+    const q = await liveP6Synthesis(over8, f.deps);
     assert.equal(q.generatedTree?.length, 4, "20 signatures → A0 barrel + 3 chunk files under a declared kind");
     assert.deepEqual(f.calls, ["expand", "complete", "complete", "complete"], "no verify leg on the chunked path");
   });
@@ -2367,8 +2500,8 @@ describe("P6 synthesis budget constants reach both call sites (fixes/154)", () =
     const base = p6Base(LEDGER_BRIEF);
     const f = chunkedDeps();
     const q = await liveP6Synthesis(base, f.deps);
-    assert.equal(q.generatedTree?.length, 4, "20 signatures → A0 barrel + 3 chunk files");
-    assert.equal(f.synthOpts.length, 3, "one synthesis call per chunk — opts captured on each");
+    assert.equal(q.generatedTree?.length, 7, "20 signatures → A0 barrel + 3 rent + 3 floor chunks");
+    assert.equal(f.synthOpts.length, 6, "one synthesis call per chunk — opts captured on each");
     for (const opts of f.synthOpts) {
       assert.equal(opts.maxTokens, P6_SYNTH_MAX_TOKENS, "chunk call carries 32k max_tokens");
       assert.equal(opts.maxTokens, 32_000);
@@ -2820,7 +2953,7 @@ describe("216f e2e refusals through liveP6Synthesis (T-09 / T-15)", () => {
     assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "no refusal for legal, deterministic code");
   });
 
-  it("chunk-gate scope: an LLM CHUNK module with prose is refused inside the chunked driver (chunk 1/3, honest partial)", async () => {
+  it("chunk-gate scope: an LLM CHUNK module with prose is refused inside the chunked driver (chunk 1/6, honest partial)", async () => {
     const base = p6Base(LEDGER_BRIEF);
     const spec = ledgerSpec(20);
     const groups = chunkTypeSignatures(spec.typeSignatures);
@@ -2855,7 +2988,7 @@ describe("216f e2e refusals through liveP6Synthesis (T-09 / T-15)", () => {
     assert.equal(q.generatedSource, base.generatedSource, "chunk 0 refused → nothing real exists → floor stands");
     const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
     assert.ok(refusal, "chunk refusal logged");
-    assert.match(refusal.detail, /chunk 1\/3 refused/);
+    assert.match(refusal.detail, /chunk 1\/6 refused/);
     assert.match(refusal.detail, /prose-in-code/);
     assert.ok(
       prompts.some((p) => p.includes("English prose sentences written into the module body")),
@@ -3007,6 +3140,29 @@ describe("216f T-10 — prompt contract: signature ceiling vs requirement duty",
       .map(([n]) => n)
       .sort((a, b) => a - b);
     assert.deepEqual(claiming, [2, 4, 8], "a rule that claims enforcement must be a rule the validator enforces");
+  });
+
+  // W52/338-1 follow-up (typing): the emitted tree is compiled with
+  // `tsc --noEmit` under `strict: true`. The system prompt's worked example
+  // must itself be legal under strict (the model imitates it), and rule 10
+  // must demand annotations without claiming validator enforcement it lacks.
+  it("the worked example is annotated and rule 10 demands strict-mode annotations (no untyped imitation)", () => {
+    const s = p6SynthesisSystemPrompt();
+    assert.ok(
+      s.includes("function add(a: number, b: number): number { return a + b; }"),
+      "the worked example annotates every parameter and the return type",
+    );
+    assert.ok(
+      !s.includes("function add(a, b) { return a + b; }"),
+      "the old untyped example is gone (the model must not imitate it)",
+    );
+    assert.match(s, /^10\. TypeScript STRICT mode is on for the emitted tree/m);
+    assert.ok(s.includes("noImplicitAny"), "rule 10 names the compiler flag it serves");
+    assert.ok(s.includes("TS7006"), "rule 10 names the compile failure an unannotated parameter causes");
+    assert.ok(
+      !/10\.[^\n]*\(validator-enforced\)/.test(s),
+      "rule 10 does not claim a validator check that does not exist (the tree's tsc is the gate)",
+    );
   });
 
   // W50/336-1 (P6 residual — the async guard's stated limits): each documented
@@ -3756,7 +3912,7 @@ describe("217k envelope read-failure signals (G6 silent sinks)", () => {
       "the planned file path attributes the failure to the refused chunk",
     );
     const refusal = (q.logs ?? []).find((l) => l.event === "p6.synthesis.refused");
-    assert.ok(refusal && /chunk 2\/3 refused/.test(refusal.detail), "the terminal honest-partial refusal is unchanged");
+    assert.ok(refusal && /chunk 2\/6 refused/.test(refusal.detail), "the terminal honest-partial refusal is unchanged");
     assert.ok(
       !(q.generatedSource ?? "").includes("collectRent8"),
       "the refused chunk's export is absent from the entry barrel",
@@ -3821,10 +3977,14 @@ describe("T5.4 artifact provenance (real emit data)", () => {
       // FM-01 (W37 Y1): the verify record hashes the verified MODULE bytes (its
       // real derivation input — verifyOutcomeArtifact(finalModule, outcome));
       // generatedSource is now the materialized barrel, so recompute from the module.
-      // 337-3 Trust: the production derivation separates the two fields with
-      // \u0002 — this mirror recomputes the boundary-safe form.
-      String(fnv1a(`${KANBAN_MODULE.trim()}\u0002${evidence}`)),
-      "input hash = fnv1a(verified module + evidence) — the record's real derivation input",
+      // W52/338-1: the production derivation is verify.ts applyVerifyOutcome's
+      // full formula — source \u0002 evidence \u0002 caseCommitment.
+      String(
+        fnv1a(
+          `${KANBAN_MODULE.trim()}\u0002${evidence}\u0002${JSON.stringify([["case-1", "typeof createBoard === 'function'"]])}`,
+        ),
+      ),
+      "input hash = fnv1a(verified module \u0002 evidence \u0002 cases) — the record's real derivation input",
     );
   });
 
@@ -4337,7 +4497,6 @@ describe("W46/332-1 (P1) un-awaited async imports", () => {
   it("e2e chunked: a later chunk reading .ok off an async SIBLING export is refused, repaired, then accepted", async () => {
     const base = p6Base(LEDGER_BRIEF);
     const spec = ledgerSpec(20);
-    const chunkNames = chunkTypeSignatures(spec.typeSignatures).map((g) => signatureFunctionNames(g));
     const withAsyncExport = (names: readonly string[]): string =>
       `${chunkModule(names)}\nasync function getProperty(id) { return { ok: true, id: id }; }\nmodule.exports.getProperty = getProperty;\n`;
     const asyncCall = (names: readonly string[], awaited: boolean): string => {
@@ -4353,23 +4512,31 @@ describe("W46/332-1 (P1) un-awaited async imports", () => {
       return JSON.stringify({ module, exports: [...names], reqTrace });
     };
     const prompts: string[] = [];
+    // W52/338-1: the spec-driven plan is larger; serve each chunk its own
+    // demanded names (parsed from the prompt) instead of a fixed index table.
+    const demanded: string[][] = [];
     let synthIndex = 0;
     const complete = async (prompt: string): Promise<LlmResult> => {
       prompts.push(prompt);
       if (prompt.includes("ASYNCHRONOUS function without")) {
-        return { ok: true, text: envelopeOf(asyncCall(chunkNames[1]!, true), chunkNames[1]!, 1), model: "deepseek-v4-flash" };
+        const names = demanded[1] ?? [];
+        return { ok: true, text: envelopeOf(asyncCall(names, true), names, 1), model: "deepseek-v4-flash" };
       }
       if (!prompt.includes("TYPE SIGNATURES (must export")) {
         return { ok: true, text: "noop", model: "deepseek-v4-flash" };
       }
       const idx = synthIndex++;
+      const names = demandedSignatureLines(prompt)
+        .map((s) => signatureFunctionNames([s])[0])
+        .filter((n): n is string => typeof n === "string");
+      demanded[idx] = names;
       if (idx === 0) {
-        return { ok: true, text: envelopeOf(withAsyncExport(chunkNames[0]!), [...chunkNames[0]!, "getProperty"], 0), model: "deepseek-v4-flash" };
+        return { ok: true, text: envelopeOf(withAsyncExport(names), [...names, "getProperty"], 0), model: "deepseek-v4-flash" };
       }
       if (idx === 1) {
-        return { ok: true, text: envelopeOf(asyncCall(chunkNames[1]!, false), chunkNames[1]!, 1), model: "deepseek-v4-flash" };
+        return { ok: true, text: envelopeOf(asyncCall(names, false), names, 1), model: "deepseek-v4-flash" };
       }
-      return { ok: true, text: envelopeOf(chunkModule(chunkNames[idx] ?? []), chunkNames[idx] ?? [], idx), model: "deepseek-v4-flash" };
+      return { ok: true, text: envelopeOf(chunkModule(names), names, idx), model: "deepseek-v4-flash" };
     };
     const q = await liveP6Synthesis(base, {
       complete,
@@ -4439,28 +4606,92 @@ describe("W46/332-1 (P2) plan-coverage determinism", () => {
     assert.deepEqual(census.unbound, []);
   });
 
-  it("the persisted shortfall row carries the full declared/planned/unbound partition", async () => {
+  it("the persisted plan's declared/planned/unbound partition is complete — no declared job dropped", async () => {
     const f = chunkedDeps();
     const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), f.deps);
-    const row = (q.logs ?? []).find((l) => l.event === "p6.tree.shortfall");
-    assert.ok(row, "the shortfall row is persisted");
-    assert.match(row!.detail, /declared 4, planned 1, unbound 3/);
+    const spec = q.implementationSpec?.typeSignatures ?? [];
+    const census = treeChunkPlanCensus(q, spec);
+    assert.deepEqual(census.declared, ["track", "record", "lease", "rent"]);
+    assert.deepEqual(census.unbound, [], "W52/338-1: the deterministic floor plans every declared job");
+    assert.deepEqual(census.planned, census.declared);
+    assert.equal(q.logs.some((l) => l.event === "p6.tree.shortfall"), false, "nothing is dropped, so no shortfall row");
   });
 
-  it("334-1 P2: the surviving unbound-declared-job shortfall row fires; the deleted reconcile row left no debris", async () => {
-    // The 333-1 F-2 deletion removed the unreachable "does not reconcile" row.
-    // This proves the LIVE row (an unbound declared job) survived on a real shape,
-    // and that no reconcile-row debris is emitted.
+  it("W52/338-1: the reconciliation row names the declared jobs the model did not; no reconcile debris", async () => {
     const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), chunkedDeps().deps);
-    const rows = (q.logs ?? []).filter((l) => l.event === "p6.tree.shortfall");
-    assert.equal(rows.length, 1, "exactly the unbound path's one row");
-    assert.match(rows[0]!.detail, /declared 4, planned 1, unbound 3/);
-    assert.match(rows[0]!.detail, /\btrack\b/, "a declared job with no bound signature is named");
+    const rows = (q.logs ?? []).filter((l) => l.event === "p6.tree.plan.reconciled");
+    assert.equal(rows.length, 1, "one bounded reconciliation row");
+    for (const label of ["track", "record", "lease"]) {
+      assert.match(rows[0]!.detail, new RegExp(`\\b${label}\\b`), `${label} is planned from the deterministic floor`);
+    }
     assert.equal(
       (q.logs ?? []).some((l) => /does not reconcile/i.test(String(l.detail ?? ""))),
       false,
       "the deleted reconcile row emits nothing",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W52/338-1 — the P6 plan/coverage is SPEC-DRIVEN. Before this lane the plan
+// was built from the model's emitted typeSignatures alone, so a declared
+// spec-graph job the model happened not to name got no src/jobs/<label>.ts file
+// (`fixes/337_0_parent.md` §5: 7 modules one run, 5 the next). The rule: every
+// declared job maps to a planned file by rule — the model's bound signatures
+// when present, else the deterministic `deriveTypeSignatures` floor.
+// ---------------------------------------------------------------------------
+describe("W52/338-1 spec-driven plan coverage", () => {
+  const projectFor = (jobs: string[]) => ({
+    specGraph: {
+      nodes: jobs.map((label, i) => ({
+        id: `job-${i}`,
+        file: `src/jobs/${label}.ts`,
+        purpose: `Implement job “${label}” against the contract`,
+      })),
+    },
+    lattice: { jobs, entities: ["record"] },
+  });
+
+  it("a declared job no model signature names is planned anyway, from the deterministic floor", () => {
+    const p = projectFor(["alpha", "beta"]);
+    const out = reconcilePlanTypeSignatures(p, ["collectRent(payment: Payment): Receipt"]);
+    assert.deepEqual(out.addedLabels, ["alpha", "beta"]);
+    assert.ok(out.typeSignatures.includes("runAlpha(command: AlphaCommand): Promise<Record>"));
+    const census = treeChunkPlanCensus(p, out.typeSignatures);
+    assert.deepEqual(census.unbound, [], "no declared job is ever unbound after reconciliation");
+    assert.ok(census.paths.includes("src/jobs/alpha.ts"));
+    assert.ok(census.paths.includes("src/jobs/beta.ts"));
+    // A project with no declared job is returned unchanged (byte-identity).
+    const none = { specGraph: { nodes: [] }, lattice: { jobs: [], entities: [] } };
+    const unchanged = reconcilePlanTypeSignatures(none, ["x(): void"]);
+    assert.deepEqual(unchanged, { typeSignatures: ["x(): void"], added: [], addedLabels: [] });
+  });
+
+  it("a hyphenated declared job label binds its own run<Job> signature (follow-up)", () => {
+    const targets = specGraphJobTargets(projectFor(["follow-up"]));
+    const { bound, leftover } = bindSignaturesToJobTargets(
+      ["runFollowUp(command: FollowUp): Promise<FollowUp>"],
+      targets,
+    );
+    assert.equal(bound[0]!.length, 1, "the label/fn separator is normalized");
+    assert.deepEqual(leftover, []);
+  });
+
+  it("two DIFFERENT model emissions on the same brief plan the same src/jobs/*.ts set", () => {
+    const p = projectFor(["alpha", "beta", "gamma"]);
+    const jobPaths = (sigs: string[]) =>
+      treeChunkPlanCensus(p, reconcilePlanTypeSignatures(p, sigs).typeSignatures)
+        .paths.filter((x) => x.startsWith("src/jobs/"))
+        .sort();
+    const emissionA = ["runAlpha(cmd: AlphaCmd): Promise<Record>"];
+    const emissionB = [
+      "runBeta(cmd: BetaCmd): Promise<Record>",
+      "helperOne(): void",
+      "helperTwo(): void",
+      "runGamma(cmd: GammaCmd): Promise<Record>",
+    ];
+    assert.deepEqual(jobPaths(emissionA), ["src/jobs/alpha.ts", "src/jobs/beta.ts", "src/jobs/gamma.ts"]);
+    assert.deepEqual(jobPaths(emissionB), ["src/jobs/alpha.ts", "src/jobs/beta.ts", "src/jobs/gamma.ts"]);
   });
 });
 

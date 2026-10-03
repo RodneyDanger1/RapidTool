@@ -172,7 +172,24 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
   // every input the verifier produces. (A field that itself contained \u0002
   // stays theoretically ambiguous — a length prefix would be strictly safer —
   // but no verifier output carries one.)
-  const evidenceHash = String(fnv1a(`${outcome.finalSource ?? ""}\u0002${evidence}`));
+  // 338-6: the ORACLE CASE SET is the other runCases() input that decides the
+  // verdict, so it is committed too. Without it, two outcomes with the same
+  // source+evidence but a DIFFERENT case set minted the same hash and the
+  // second genuine verification was silently dropped as a "duplicate". The
+  // commitment is the [id, expression] pairs in order (values only, so no
+  // object-key-order dependence). KNOWN LIMIT: the codegen.server.ts twins
+  // (verifyOutcomeArtifact :3497, upgraded :3586) still hash finalSource+evidence
+  // — aligning them to this form needs codegen.server.ts (not this lane's file).
+  const caseCommitment = JSON.stringify(
+    (Array.isArray(outcome.cases) ? outcome.cases : []).map((c) => {
+      const row = c as { id?: unknown; expression?: unknown } | null | undefined;
+      return [
+        typeof row?.id === "string" ? row.id : "",
+        typeof row?.expression === "string" ? row.expression : "",
+      ];
+    }),
+  );
+  const evidenceHash = String(fnv1a(`${outcome.finalSource ?? ""}\u0002${evidence}\u0002${caseCommitment}`));
   // P0-09 dedupe (23 CAVEAT-2): same-hash re-apply is a no-op (same reference).
   const prior = project.lastTest as { label?: string; evidenceHash?: string } | null;
   if (passed && prior?.label === "tested" && prior.evidenceHash === evidenceHash) {

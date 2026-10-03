@@ -899,7 +899,7 @@ export function buildTestOracle(lattice: IntentLattice): OracleTest[] {
 // deterministic/keyless path that never had capabilities keeps byte-parity.
 // Pure + keyless: no store, no LLM, no time — safe anywhere runAlgorithms is.
 // ---------------------------------------------------------------------------
-export function deriveTypeSignatures(lattice: IntentLattice): string[] {
+export function deriveTypeSignatures(lattice: Pick<IntentLattice, "jobs" | "entities">): string[] {
   const jobs = (Array.isArray(lattice?.jobs) ? lattice.jobs : []).filter(
     (j): j is string => typeof j === "string" && j.trim().length > 0 && j !== "deliver-core-workflow",
   );

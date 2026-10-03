@@ -37,6 +37,7 @@ import type { TokenLedger, TokenPrices, TokenSpend } from "./token-ledger.ts";
 // OV-9 (W18-L1): the product-complete producer's ONE derivation — the same
 // pure p6-arch trace the phase-6 gate reads (dod.ts, no node:fs in its graph).
 import { archProductComplete, archTrace } from "./dod.ts";
+import { fnv1a } from "./algorithms.ts";
 import type { Project } from "./types.ts";
 // W6-L3 provider surfacing: TYPE-ONLY import — erased at compile, so the
 // client-safe runtime surface (sandbox-policy + token-ledger) is unchanged.
@@ -291,6 +292,54 @@ export function productCompleteFromProject(project: unknown): boolean {
 }
 
 /**
+ * W52 · 338-3: the ONE producer of the factory's `humanFixtures` evidence —
+ * DERIVED from the project's own acceptance record, never a caller's flag. The
+ * bar is the acceptance gate's own (`brief-fixtures.fixtureApprovalGate`): at
+ * least one case, EVERY case `approval:"approved"`, and at least one approved
+ * row carrying the out-of-band human stamp `decidedBy:"human"` (a machine seat
+ * never mints that stamp — 338-4 owns the machine-door question, not this
+ * reader). A recorded `acceptanceBriefHash` that does not match the live
+ * `brief` (fnv1a) refuses — the same stale-set pending-ify rule io/hydrate
+ * apply, so a set drafted for a different brief can never close the gap.
+ * Absent/garbled state ⇒ false (fail-closed: the gap stands, never hidden).
+ */
+export function humanFixturesFromProject(project: unknown): boolean {
+  if (!project || typeof project !== "object" || Array.isArray(project)) return false;
+  const p = project as { acceptanceFixtures?: unknown; acceptanceBriefHash?: unknown; brief?: unknown };
+  const rows = Array.isArray(p.acceptanceFixtures) ? p.acceptanceFixtures : [];
+  if (rows.length === 0) return false;
+  if (typeof p.acceptanceBriefHash === "string" && typeof p.brief === "string") {
+    if (p.acceptanceBriefHash !== String(fnv1a(p.brief))) return false;
+  }
+  let humanApproved = false;
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+    const r = row as { approval?: unknown; decidedBy?: unknown };
+    if (r.approval !== "approved") return false;
+    if (r.decidedBy === "human") humanApproved = true;
+  }
+  return humanApproved;
+}
+
+/**
+ * W52 · 338-3: the factory evidence a persisted project RECORD supports WITHOUT
+ * a job-file census (the `--project <record>` path with no emitted tree to
+ * scan). `productComplete` + `humanFixtures` are DERIVED from the record;
+ * the two inventory-derived fields stay FAIL-CLOSED (leftover true / realMulti
+ * false) because no tree was scanned — an unmeasured census is never reported
+ * as a real multi-job product, and the gaps name exactly that.
+ */
+export function evidenceFromProjectRecord(project: unknown): FactoryEvidence {
+  return {
+    leftoverJobsAreReexportsOrStubs: true,
+    realMultiJobProduct: false,
+    humanFixtures: humanFixturesFromProject(project),
+    productComplete: productCompleteFromProject(project),
+    chatHasSlashToolsOnly: true,
+  };
+}
+
+/**
  * 214: leftover-job census → factory evidence.
  * leftover true when any stub/reexport exists OR zero real jobs.
  * realMultiJobProduct true only when ≥2 real jobs and zero leftover stubs/reexports.
@@ -298,8 +347,10 @@ export function productCompleteFromProject(project: unknown): boolean {
  * hands under `project` — never from a boolean extra (a hand-passed
  * `productComplete` key is not in the type and is ignored at runtime). The 214
  * census cross-gate stays: stubs/reexports seen in the scan, or fewer than two
- * real jobs, refuse the bar. humanFixtures stays unminted here — its producer
- * is T5.2-A's UI lane.
+ * real jobs, refuse the bar. W52 · 338-3: `humanFixtures` is DERIVED from the
+ * project record handed under `project` (`humanFixturesFromProject`) — an
+ * explicit `humanFixtures:true` in `extra` is still honored, but the field is
+ * no longer unmintable: a genuinely human-approved fixture set closes the gap.
  */
 export function evidenceFromJobInventory(
   inv: JobInventory,
@@ -310,7 +361,7 @@ export function evidenceFromJobInventory(
   return {
     leftoverJobsAreReexportsOrStubs: leftover,
     realMultiJobProduct: realMulti,
-    humanFixtures: extra?.humanFixtures === true,
+    humanFixtures: extra?.humanFixtures === true || humanFixturesFromProject(extra?.project),
     productComplete: productCompleteFromProject(extra?.project) && realMulti && !leftover,
     chatHasSlashToolsOnly: extra?.chatHasSlashToolsOnly !== false,
     isolation: extra?.isolation,
@@ -411,13 +462,13 @@ export function coerceFactoryClaim(raw?: unknown, project?: unknown): DoctorFact
   const evidence: FactoryEvidence = blob
     ? {
         leftoverJobsAreReexportsOrStubs: blob.leftoverJobsAreReexportsOrStubs === false ? false : true,
-        humanFixtures: blob.humanFixtures === true,
+        humanFixtures: blob.humanFixtures === true || humanFixturesFromProject(project),
         realMultiJobProduct: blob.realMultiJobProduct === true,
         productComplete: productCompleteFromProject(project),
         chatHasSlashToolsOnly: blob.chatHasSlashToolsOnly !== false,
         isolation: blob.isolation,
       }
-    : { ...RAPIDTOOL_FACTORY_EVIDENCE, productComplete: productCompleteFromProject(project) };
+    : { ...RAPIDTOOL_FACTORY_EVIDENCE, productComplete: productCompleteFromProject(project), humanFixtures: humanFixturesFromProject(project) };
   return factoryClaim(evidence);
 }
 

@@ -206,7 +206,13 @@ export function buildPhase6Module(args: Phase6ModuleArgs): string {
   const lines = [
     `const JOBS = [${jobList}];`,
     `const REJECTION = ${note};`,
-    `function synthesize(spec) {`,
+    // 338-2 (W52): the parameter carries an inference-anchoring DEFAULT, not a
+    // TS-only `spec: {…}` annotation. These bytes are ALSO executed as plain JS
+    // — engine.ts runs the template through runGenerated() → `new Function`,
+    // where a type annotation is a SyntaxError. The default object types `spec`
+    // (name:string, phase:number, job:string) under the emitted `strict:true`
+    // tsconfig's noImplicitAny, so a floor tree is type-clean AND still runs.
+    `function synthesize(spec = { name: "", phase: 0, job: "" }) {`,
     `  if (spec.phase < 0 || spec.phase > 12) throw new Error("invalid phase");`,
     `  if (JOBS.indexOf(spec.job) === -1) throw new Error("unknown job");`,
     `  if (REJECTION && spec.phase === 9) throw new Error("deploy blocked until rejection addressed");`,

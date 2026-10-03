@@ -12,8 +12,11 @@
  * therefore shows the bar next to every fixture and labels approval as a
  * RECORDED DECISION, never a bar edit.
  *
- * Zero dependencies. Deterministic: same inputs → same rows, stable order.
+ * No `node:` imports and no IO. Deterministic: same inputs → same rows, stable order.
+ * (One pure sibling import — `brief-fixtures.ts`'s decidedBy vocabulary — so the
+ * acceptance-decision reader below shares ONE seat enum with the writer.)
  */
+import { BRIEF_FIXTURE_DECIDED_BY } from "./brief-fixtures.ts";
 
 /** The one line every review surface must show (T5.2-A honesty label). */
 export const FIXTURE_REVIEW_LABEL =
@@ -268,4 +271,133 @@ export function fixtureDecisionEntry(
     note: note && note.trim().length > 0 ? note.trim() : null,
     at: at.toISOString(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// fixes/338-4 (W52) — the acceptance DECISION as data (the doctor's gap 4).
+//
+// The factory bar's fixture term asks "who accepted the acceptance bar?" — a
+// question no machine run may ANSWER for itself. `policy.ts`'s `fixtures.approve`
+// rule keeps `requiresHumanSeat: true` because the machine DRAFTS those cases
+// (`brief-fixtures.ts:18-22`: every case is born `approval:"pending"`); a machine
+// that also approved them would set the bar it is then graded against —
+// self-certification, and the factory flag would certify a self-graded product.
+// So this module never mints a decision: only the CLI's seat-verified approve
+// path stamps `decidedBy` (`scripts/rapidtool-cli.mjs:2288`).
+//
+// What it DOES do is make the question machine-CHECKABLE without making it
+// machine-ANSWERABLE. Any run can compute which state the decision is in —
+// nothing drafted · drafted and pending a human · decided by the autopilot seat ·
+// approved with no attributable seat · human-approved — and therefore tell
+// "waiting on a human" apart from "broken". `acceptanceDecisionQuestion` returns
+// the ONE honest sentence for each state; the doctor's gap text and the maker
+// scorecard (M1/M2) both read it, so the two surfaces cannot tell two stories
+// about the same run.
+// ---------------------------------------------------------------------------
+
+/** Who decided a project's acceptance fixtures (its `decidedBy` value). */
+export type FixtureAcceptanceSeat = "human" | "autopilot" | "undecided";
+
+export const FIXTURE_ACCEPTANCE_STATES = [
+  "no-fixtures",
+  "unreadable",
+  "pending",
+  "machine-decided",
+  "unattributed",
+  "human-approved",
+] as const;
+export type FixtureAcceptanceStateKind = (typeof FIXTURE_ACCEPTANCE_STATES)[number];
+
+/**
+ * The machine-checkable state of a project's acceptance DECISION
+ * (`project.acceptanceFixtures`), read from the record as-is. Never a verdict:
+ * it reports which of the six states the record is in, so a caller can name the
+ * gap without ever claiming a decision the bytes do not carry.
+ *
+ * `decidedBy` describes the APPROVED rows only, and is `"human"` only when every
+ * approved row was stamped by the verified human seat. A mixed or partly-decided
+ * set therefore reads as its non-human seat (or `"undecided"`), never as human.
+ */
+export type FixtureAcceptanceState = {
+  state: FixtureAcceptanceStateKind;
+  total: number;
+  approved: number;
+  pending: number;
+  decidedBy: FixtureAcceptanceSeat;
+};
+
+const NO_FIXTURES: FixtureAcceptanceState = {
+  state: "no-fixtures",
+  total: 0,
+  approved: 0,
+  pending: 0,
+  decidedBy: "undecided",
+};
+
+/**
+ * Read the acceptance-decision state from a raw `acceptanceFixtures` value.
+ *
+ * Total by construction (hostile input ⇒ a named state, never a throw):
+ * absent/empty ⇒ `no-fixtures`; a present non-list ⇒ `unreadable` (a malformed
+ * record is named, never silently treated as "no fixtures"); any unapproved row
+ * ⇒ `pending` (the machine waits on a human, which is not the same failure as
+ * `no-fixtures`); every row approved ⇒ `machine-decided` when any was stamped by
+ * the autopilot seat, else `unattributed` when any carries no recognizable seat,
+ * else `human-approved`. Only `human-approved` satisfies the doctor's fixture
+ * term; nothing here can move a record into that state.
+ */
+export function fixtureAcceptanceState(raw: unknown): FixtureAcceptanceState {
+  if (raw === undefined || raw === null) return { ...NO_FIXTURES };
+  if (!Array.isArray(raw)) return { ...NO_FIXTURES, state: "unreadable" };
+  if (raw.length === 0) return { ...NO_FIXTURES };
+
+  const seats = new Set<FixtureAcceptanceSeat>();
+  let approved = 0;
+  let pending = 0;
+  for (const row of raw) {
+    const rec = row && typeof row === "object" && !Array.isArray(row) ? (row as Record<string, unknown>) : null;
+    if (rec?.approval !== "approved") {
+      // A row that is not an approved case is still an undecided case — a
+      // malformed row is counted as pending, never dropped.
+      pending += 1;
+      continue;
+    }
+    approved += 1;
+    const decidedBy = rec.decidedBy;
+    if (typeof decidedBy === "string" && (BRIEF_FIXTURE_DECIDED_BY as readonly string[]).includes(decidedBy)) {
+      seats.add(decidedBy as FixtureAcceptanceSeat);
+    } else {
+      seats.add("undecided");
+    }
+  }
+
+  const machine = seats.has("autopilot");
+  const undecided = seats.has("undecided");
+  const decidedBy: FixtureAcceptanceSeat = machine ? "autopilot" : undecided ? "undecided" : approved > 0 ? "human" : "undecided";
+  const state: FixtureAcceptanceStateKind =
+    pending > 0 ? "pending" : machine ? "machine-decided" : undecided ? "unattributed" : "human-approved";
+  return { state, total: raw.length, approved, pending, decidedBy };
+}
+
+/**
+ * The ONE honest sentence for an acceptance-decision state — `null` exactly when
+ * the state is `human-approved` (the only state that satisfies the factory bar).
+ * The doctor's fixture gap and maker-score's M1/M2 evidence both render this
+ * string, so "why is this still false?" has a single answer across surfaces.
+ */
+export function acceptanceDecisionQuestion(state: FixtureAcceptanceState): string | null {
+  switch (state.state) {
+    case "human-approved":
+      return null;
+    case "no-fixtures":
+      return "no acceptance fixtures exist — nothing was drafted, so there is no decision to record (draft with `fixtures --draft`); this is an absent bar, not a human keeping the machine waiting";
+    case "unreadable":
+      return "the acceptance-fixture record is not a list — the decision state cannot be read; fix the record (a malformed record is never an approval)";
+    case "pending":
+      return `${state.pending} of ${state.total} acceptance fixture(s) await a human decision — the machine door (\`--seat autopilot\`) may not approve them (\`policy.fixtures.approve\` requires a verified human seat); a human decides with \`fixtures --approve --ids … --i-am-human\``;
+    case "machine-decided":
+      return `${state.approved} acceptance fixture(s) were approved under the autopilot seat — a machine may not set the bar it is graded against; an attributed machine decision is not an acceptance decision, and \`decidedBy:"human"\` is never minted for it`;
+    case "unattributed":
+      return `${state.approved} acceptance fixture(s) are approved with no recorded decision seat — an approval with no attribution cannot be read as human; re-decide through the seat path so the record names who accepted the bar`;
+  }
 }

@@ -885,6 +885,19 @@ export function compileAgentPacket(
   const dodRows = (DOD[phase.id] ?? []).map(
     (item) => `- [${unmetDoD.has(item.id) ? " " : "x"}] ${item.criterion}`,
   );
+  // W52 / 338-5 (Product): the export profiles all tell the agent to "run the
+  // oracle tests from the packet", but the packet named only the ROWS — never a
+  // runnable command or the spec path. Name both (kept inside the invariant
+  // required-output tail so a truncation can never strip the agent's only
+  // instruction for how to self-check). Path is the spec-graph tests node; the
+  // command is the emitted package.json's declared `test` script (present
+  // exactly when oracle rows exist — packageJson deletes it otherwise).
+  const oracleSpecPath = (() => {
+    const testsNode = rows(project.specGraph?.nodes).find(
+      (n) => str(n?.id) === "tests" || /^tests\//.test(str(n?.file)),
+    );
+    return str(testsNode?.file) || "tests/oracle.spec.ts";
+  })();
   const full = [
     `# RapidTool Agent Packet v${PACKET_VERSION} — ${project.name}`,
     ``,
@@ -1072,6 +1085,9 @@ export function compileAgentPacket(
     ``,
     `## Required output schema`,
     `Return your work as ONE JSON report matching report_schema (see ## System JSON above) — the ingest seam validates this exact shape.`,
+    rows(project.oracle).length > 0
+      ? `Verify before reporting: run the emitted oracle spec (\`${oracleSpecPath}\`) in the project tree with its declared test script (\`npm test\`) and record each command you ran in the report's \`tests_run\`. A red run is not a bypass — patch and re-run.`
+      : `No oracle rows are recorded for this project yet, so this edge has no runnable acceptance spec — the machine-checked DoD gate above is the exit signal.`,
     `The five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.`,
     phase.id >= 12
       ? `Next legal edge: none — pipeline complete.`

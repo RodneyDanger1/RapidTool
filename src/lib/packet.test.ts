@@ -1332,3 +1332,34 @@ test("W50/336-3: the P0 memory-empty placeholder is unchanged (R4/B-05 pins the 
   const out = compileAgentPacket(p);
   assert.ok(out.includes(EMPTY_MEM_LINE), "at P0 the Phase-0 pointer is in scope and stays");
 });
+
+// ---------------------------------------------------------------------------
+// W52 / 338-5 (Product) — the agent-facing sufficiency gap: every export profile
+// says "run the oracle tests from the packet", but the packet named only the
+// rows, never a runnable command or the spec path. A fresh agent could not
+// self-check. The packet now names both (or states there is no spec yet).
+// ---------------------------------------------------------------------------
+test("W52/338-5: an edge with oracle rows names the runnable acceptance command + spec path", () => {
+  const p = makeScopedProject();
+  p.oracle = [
+    { id: "orc-1", name: "job.dispatch.happy", given: "a valid tech", expect: "200 + persisted", job: "dispatch" },
+  ];
+  const out = compileAgentPacket(p);
+  assert.ok(out.includes("npm test"), "the tree's declared test script is named");
+  assert.ok(out.includes("tests/oracle.spec.ts"), "the oracle spec path is named");
+  assert.ok(out.includes("tests_run"), "the agent is told to record the command it ran");
+  // The command lives in the invariant required-output tail, so a truncation
+  // can never strip the agent's only self-check instruction.
+  assert.ok(
+    out.indexOf("npm test") > out.indexOf("## Required output schema"),
+    "the acceptance command rides the required-output tail",
+  );
+});
+
+test("W52/338-5: with no oracle rows the packet states there is no runnable acceptance spec", () => {
+  const p = makeProject();
+  p.oracle = []; // the engine seeds 2 rows; strip them so no test script would be declared
+  const out = compileAgentPacket(p);
+  assert.equal(out.includes("npm test"), false, "no command points at a script the tree does not declare");
+  assert.ok(out.includes("machine-checked DoD gate"), "the DoD gate is named as the exit signal instead");
+});

@@ -304,3 +304,60 @@ describe("applyVerifyOutcome — the evidence hash is boundary-safe", () => {
     assert.equal(second.generatedSource, "abcD", "the second verified source must be applied, not swallowed");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 338-6 — the evidence hash must cover every input that changes the verdict.
+// 337-3 separated the source/evidence boundary; the ORACLE CASE SET is the
+// other runCases() input, and it was not committed: two outcomes with the same
+// source + evidence text but a DIFFERENT case set minted the same hash, so the
+// second (a genuinely different verification) was dropped as a duplicate.
+// ---------------------------------------------------------------------------
+
+describe("applyVerifyOutcome — the case set is part of the verdict commitment (338-6)", () => {
+  const hashOf = (p: ReturnType<typeof applyVerifyOutcome>): string =>
+    String((p.lastTest as { evidenceHash?: string } | null)?.evidenceHash ?? "");
+
+  it("same source + evidence but a different oracle is a different verdict, never a duplicate", () => {
+    const p = seedProject();
+    const src = "exports.add = (a, b) => a + b;";
+    const evidence = "2/2 machine-run cases passed on iteration 1";
+    const first = applyVerifyOutcome(p, {
+      status: "passed",
+      iterations: 1,
+      evidence,
+      finalSource: src,
+      cases: [
+        { id: "c1", expression: "add(2,3) === 5" },
+        { id: "c2", expression: "typeof add === 'function'" },
+      ],
+    });
+    const hash = hashOf(first);
+    assert.ok(hash.length > 0, "the first verdict stamps tested with a hash");
+
+    const second = applyVerifyOutcome(first, {
+      status: "passed",
+      iterations: 1,
+      evidence,
+      finalSource: src,
+      cases: [
+        { id: "c1", expression: "add(2,3) === 5" },
+        { id: "c2", expression: "add(9,1) === 10" },
+      ],
+    });
+    assert.notEqual(second, first, "a different oracle must not be swallowed as the same verdict");
+    assert.notEqual(hashOf(second), hash, "a different oracle must commit to a different evidence hash");
+
+    // Replay control: the IDENTICAL outcome is still deduped (same reference).
+    const replay = applyVerifyOutcome(second, {
+      status: "passed",
+      iterations: 1,
+      evidence,
+      finalSource: src,
+      cases: [
+        { id: "c1", expression: "add(2,3) === 5" },
+        { id: "c2", expression: "add(9,1) === 10" },
+      ],
+    });
+    assert.equal(replay, second, "an exact replay is a no-op (dedupe preserved)");
+  });
+});

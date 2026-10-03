@@ -4645,6 +4645,25 @@ function keyedRecordPath(opts?: { treeDir?: string; projectPath?: string }): str
 }
 
 /**
+ * W52 · 338-3: the persisted project RECORD the doctor derives its factory
+ * evidence from — an explicit `projectPath` (the CLI's `--project`), else the
+ * tree's scaffold record `<treeDir>/.rapidtool/project.json`. Parsed object or
+ * null; never throws (absent/unreadable/non-object ⇒ null), so the caller's
+ * honest floor stands and no fabricated evidence is ever minted.
+ */
+function persistedProjectRecord(opts?: { treeDir?: string; projectPath?: string }): unknown | null {
+  const path = keyedRecordPath(opts);
+  if (!path) return null;
+  try {
+    if (!existsSync(path)) return null;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * E-25: capability pre-flight for agent drivers — what CAN this host do right
  * now? Reads process.env through the server modules (never the server-fn
  * status surfaces, which need a Start runtime). The research probe is a real
@@ -4776,15 +4795,26 @@ export async function doctorStatus(opts?: {
     // ledger (empty at fresh-process start, hence the old `calls: 0`). Shape
     // lives in doctorSpend.
     const spendSource = resolveDoctorSpendSource({ treeDir, projectPath: opts?.projectPath, spend: opts?.spend });
+    // W52 · 338-3: the factory claim is derived from REAL signals — the tree's
+    // job-file census AND the persisted project record (`--project`, else the
+    // tree's `.rapidtool/project.json`). Before this the tree path passed no
+    // project, so `productComplete` was a constant false and `humanFixtures`
+    // had no producer: no real run could ever close those gaps.
+    const record = persistedProjectRecord({ treeDir, projectPath: opts?.projectPath });
     let claim = doctor.doctorFactory(process.env, spendSource);
     if (treeDir) {
       const files = collectJobSources(treeDir);
       const inv = doctor.inventoryFromJobSources(files, resolve(treeDir));
-      const evidence = doctor.evidenceFromJobInventory(inv);
+      const evidence = doctor.evidenceFromJobInventory(inv, record ? { project: record } : undefined);
       // The tree scan replaces the factory EVIDENCE, never the measured spend —
       // before this, the `factoryClaim` here dropped the spend block entirely
       // (measured:false) even when the tree carried a persisted run record.
       claim = doctor.factoryClaim(evidence, process.env, spendSource);
+    } else if (record) {
+      // A named record with no tree to scan: productComplete + humanFixtures
+      // close on the record, the census fields stay fail-closed (see
+      // doctor.evidenceFromProjectRecord) — never a fabricated real product.
+      claim = doctor.factoryClaim(doctor.evidenceFromProjectRecord(record), process.env, spendSource);
     }
     factory = {
       autonomousSoftwareFactory: claim.autonomousSoftwareFactory,

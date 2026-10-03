@@ -165,11 +165,14 @@ describe("scaffoldProject — file-tree shape per kind", () => {
     assert.ok(!ui.includes("<h1>A/B"), "raw name never becomes JSX text");
   });
 
-  it("gives a tool kind a tsx/node:test package.json and a non-React console shell", () => {
+  it("gives a tool kind a node:test package.json (no unused dev tool) and a non-React console shell", () => {
     const p = fullRun({ kind: "tool" });
     const result = scaffoldProject(p);
     const pkg = JSON.parse(bodyOf(result, "package.json")) as Record<string, any>;
-    assert.ok(pkg.devDependencies.tsx, "tsx expected for tool kind");
+    // W52 / 338-5: `tsx` was declared on cli-tool/service but NO emitted script or
+    // import ever used it (the entries run `node --experimental-strip-types`) —
+    // declare-or-strike: a dev tool nothing consumes is not declared.
+    assert.ok(!pkg.devDependencies.tsx, "no unused tsx devDep — the emitted scripts run node --experimental-strip-types");
     assert.ok(!pkg.scripts.dev && !pkg.scripts.build, "no vite scripts for a tool");
     assert.ok(pkg.scripts.test.includes("--test tests/oracle.spec.ts"));
     const ui = bodyOf(result, "src/ui/console.tsx");
@@ -219,6 +222,8 @@ describe("scaffoldProject — file-tree shape per kind", () => {
     // fixes/135 bootability: even an intake-only webapp carries the browser
     // boot shell (index.html + vite.config.ts + src/main.tsx) so npm run
     // build/dev genuinely run; no domain/jobs/api stubs without a spec graph.
+    // W52 / 338-5: src/styles.css joins the webapp boot shell (the entry the
+    // declared tailwind devDeps compile).
     assert.deepEqual(paths, [
       "README.md",
       "DEPLOY.md",
@@ -230,16 +235,17 @@ describe("scaffoldProject — file-tree shape per kind", () => {
       "index.html",
       "vite.config.ts",
       "src/main.tsx",
+      "src/styles.css",
     ]);
     const pkg = JSON.parse(bodyOf(result, "package.json")) as Record<string, any>;
     assert.equal(pkg.scripts.test, undefined, "no test script when there is no oracle spec");
     assert.ok(
-      files.every((f) => !f.path.startsWith("src/") || f.path === "src/main.tsx"),
+      files.every((f) => !f.path.startsWith("src/") || f.path === "src/main.tsx" || f.path === "src/styles.css"),
       "only the boot-shell src entry without a spec graph",
     );
     // fixes/217f (T4.2): the .gitignore joined the emitted file set — the count
-    // moves with it. old → new: "9 files" → "10 files".
-    assert.ok((result as { ok: true; summary: string }).summary.startsWith("10 files"));
+    // moves with it. old → new: "10 files" → "11 files" (338-5 added styles.css).
+    assert.ok((result as { ok: true; summary: string }).summary.startsWith("11 files"));
   });
 
   it("fails honestly for a project with an empty name", () => {
@@ -1279,11 +1285,13 @@ describe("330 Transit — emitted-format integrity (never ship an unloadable mod
 });
 
 // ---------------------------------------------------------------------------
-// W48 / 334-3 (T1a) — the emitted README must say the DECLARED scripts never
-// ran. A fresh emitted tree's own tree-run reports `declaredScriptsVerified:
-// false` + `unverifiedDeclaredScripts: ["typecheck","build"]`; without a banner
-// the README could present that tree as complete. Same unmissable style as
-// headless's red-tree banner.
+// W48 / 334-3 (T1a) — the emitted README must say the EMITTER never ran the
+// declared scripts. 338-2 (W52) changed what a tree-run REPORTS: it now
+// resolves the declared tools (the tree's own node_modules, else the repo's)
+// and runs them, so a type-clean tree reads `declaredScriptsVerified: true`
+// (~`false` + `unverifiedDeclaredScripts` only when a tool cannot resolve).
+// Without a banner the README could present the scaffold as complete. Same
+// unmissable style as headless's red-tree banner.
 // ---------------------------------------------------------------------------
 describe("W48 / 334-3 (T1a) — declared-scripts-unverified README banner", () => {
   it("the emitted README LEADS with the banner and names the declared typecheck + build as unverified", () => {
@@ -1293,7 +1301,11 @@ describe("W48 / 334-3 (T1a) — declared-scripts-unverified README banner", () =
     assert.match(readme, /DECLARED SCRIPTS NOT RUN/);
     assert.match(readme, /`typecheck` and `build`/);
     assert.match(readme, /UNVERIFIED/);
+    // 338-2: the banner now names BOTH tree-run outcomes truthfully — a verified
+    // tree reads true, an unresolvable declared tool reads false + the field.
+    assert.match(readme, /declaredScriptsVerified: true/);
     assert.match(readme, /declaredScriptsVerified: false/);
+    assert.match(readme, /unverifiedDeclaredScripts/);
     // It is the declared-scripts banner, not a red-tree-run banner: distinct signal.
     assert.equal(readme.includes("RED TREE-RUN"), false);
     // And it precedes the project title, so a human cannot miss it.
@@ -1376,5 +1388,130 @@ describe("W50 / 336-3 — DEPLOY.md matches the emitted oracle bytes", () => {
       dep.includes("No oracle rows are recorded yet"),
       "the Test section states the honest reason instead",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W52 / 338-5 (Product) — the emitted tree must wire every declared dependency
+// and its README must name the files it actually writes (the "no fake, properly
+// wired" standard). The webapp declares `@tailwindcss/vite` + `tailwindcss` but
+// the emitted config never loaded them and no emitted byte consumed them.
+// ---------------------------------------------------------------------------
+describe("W52 / 338-5 — emitted webapp wires its declared Tailwind devDeps", () => {
+  it("emits src/styles.css and wires it into main.tsx + vite.config.ts", () => {
+    const result = scaffoldProject(fullRun());
+    const pkg = JSON.parse(bodyOf(result, "package.json")) as {
+      devDependencies: Record<string, string>;
+    };
+    // Precondition: the deps ARE declared (the thing the wiring must match).
+    assert.ok(pkg.devDependencies["@tailwindcss/vite"], "@tailwindcss/vite declared");
+    assert.ok(pkg.devDependencies.tailwindcss, "tailwindcss declared");
+
+    const css = bodyOf(result, "src/styles.css");
+    assert.ok(css.includes('@import "tailwindcss";'), "styles.css is the Tailwind v4 CSS entry");
+    assert.ok(css.includes("@layer base"), "styles.css carries a base layer for the unclassed shell markup");
+
+    const main = bodyOf(result, "src/main.tsx");
+    assert.ok(main.includes('import "./styles.css";'), "the browser entry imports the stylesheet");
+
+    const vite = bodyOf(result, "vite.config.ts");
+    assert.ok(vite.includes('from "@tailwindcss/vite"'), "vite.config imports the tailwind plugin");
+    assert.ok(vite.includes("tailwindcss()"), "vite.config registers tailwindcss()");
+    assert.ok(vite.includes("react()"), "the react plugin stays wired");
+
+    // Declare-or-strike: the shipped README tables every emitted file.
+    assert.ok(bodyOf(result, "README.md").includes("src/styles.css"), "README tables the stylesheet");
+  });
+
+  it("a game tree (no tailwind devDeps) gets no stylesheet and a plugin-free vite config", () => {
+    const result = scaffoldProject(fullRun({ kind: "game" }));
+    const pkg = JSON.parse(bodyOf(result, "package.json")) as {
+      devDependencies: Record<string, string>;
+    };
+    assert.equal(pkg.devDependencies.tailwindcss, undefined, "game declares no tailwind");
+    const paths = okFiles(result).map((f) => f.path);
+    assert.ok(!paths.includes("src/styles.css"), "no stylesheet on a kind that declares no tailwind");
+    const vite = bodyOf(result, "vite.config.ts");
+    assert.ok(!vite.includes("tailwindcss"), "no tailwind plugin where nothing declares it");
+  });
+
+  it("never injects project text into the stylesheet (escaped, deterministic, no secret)", () => {
+    const hostile = scaffoldProject(
+      fullRun({ name: "A/B <script>alert(1)</script>", brief: "x".repeat(400) }),
+    );
+    const css = bodyOf(hostile, "src/styles.css");
+    assert.ok(!css.includes("<script>"), "no project text reaches the CSS");
+    assert.ok(!css.includes("A/B"), "the hostile name never appears in the stylesheet");
+    // Byte-stable + project-independent: two different projects yield identical bytes.
+    assert.equal(bodyOf(scaffoldProject(fullRun()), "src/styles.css"), css, "project-independent bytes");
+    assert.equal(bodyOf(scaffoldProject(fullRun()), "src/styles.css"), bodyOf(scaffoldProject(fullRun()), "src/styles.css"), "same project in ⇒ identical stylesheet out");
+  });
+});
+
+describe("W52 / 338-5 — the emitted README names the files it actually writes", () => {
+  it("webapp tables the real browser entry (src/main.tsx), never the nonexistent `src/main`", () => {
+    const result = scaffoldProject(fullRun());
+    const readme = bodyOf(result, "README.md");
+    assert.ok(readme.includes("`src/main.tsx`"), "the real emitted entry path is tabled");
+    assert.ok(!readme.includes("`src/main`"), "the old stem that names no file is gone");
+  });
+
+  it("game tables src/main.ts and does not describe its vite config as webapp-only", () => {
+    const result = scaffoldProject(fullRun({ kind: "game" }));
+    const readme = bodyOf(result, "README.md");
+    assert.ok(readme.includes("`src/main.ts`"), "the game entry path is tabled");
+    assert.ok(!readme.includes("emitted for webapp"), "a game tree does not call its vite config webapp-only");
+  });
+
+  it("cli-tool tables its declared src/main.ts entry and its bin launcher", () => {
+    const p = fullRun({ kind: "tool" });
+    const result = scaffoldProject(p);
+    const readme = bodyOf(result, "README.md");
+    assert.ok(readme.includes("`src/main.ts`"), "the declared main is tabled");
+    assert.ok(readme.includes(`bin/${slugName(p.name)}.mjs`), "the bin launcher is tabled");
+  });
+
+  it("library and service table their declared src/main.ts entry", () => {
+    const lib = scaffoldProject(primed({ brief: "TypeScript SDK package exposing a typed client" }));
+    assert.ok(bodyOf(lib, "README.md").includes("`src/main.ts`"), "library entry tabled");
+    const svc = scaffoldProject(primed({ brief: "Webhook worker API for billing" }));
+    assert.ok(bodyOf(svc, "README.md").includes("`src/main.ts`"), "service entry tabled");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W52 / 338-5 — the game spec-graph ui node is emitted at `src/ui/console.tsx`
+// (plain-TS canvas shell, no JSX) and the game `src/main.ts` imports it
+// extensionless. With NO `jsx` setting, `tsc --noEmit` refuses to resolve a
+// `.tsx` module (TS6142) and the game's DECLARED `npm run typecheck` fails on a
+// clean emitted tree. Proven with the repo's own tsc over the emitted tree.
+// ---------------------------------------------------------------------------
+describe("W52 / 338-5 — game tsconfig resolves the emitted .tsx ui node", () => {
+  it("sets `jsx` (no React smuggled in) so the declared `tsc --noEmit` passes", () => {
+    const result = scaffoldProject(fullRun({ kind: "game" }));
+    const cfg = JSON.parse(bodyOf(result, "tsconfig.json")) as {
+      compilerOptions: Record<string, unknown>;
+    };
+    assert.equal(
+      typeof cfg.compilerOptions.jsx,
+      "string",
+      "game tsconfig must set jsx or tsc fails to resolve the emitted src/ui/console.tsx (TS6142)",
+    );
+    // The fix must not smuggle React into a kind that declares none.
+    const pkg = JSON.parse(bodyOf(result, "package.json")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    assert.equal(pkg.devDependencies?.react, undefined, "game still declares no react plugin/dep");
+    assert.equal(pkg.dependencies?.react, undefined);
+    assert.ok(
+      okFiles(result).map((f) => f.path).includes("src/ui/console.tsx"),
+      "premise: the game shell really is a .tsx the entry imports",
+    );
+    // webapp keeps its runtime JSX transform.
+    const web = JSON.parse(bodyOf(scaffoldProject(fullRun()), "tsconfig.json")) as {
+      compilerOptions: Record<string, unknown>;
+    };
+    assert.equal(web.compilerOptions.jsx, "react-jsx");
   });
 });

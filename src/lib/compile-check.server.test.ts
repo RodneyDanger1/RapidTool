@@ -815,18 +815,23 @@ describe("216 T-18 — the emitted project's own typecheck/test scripts", () => 
     }
   });
 
-  it("declared but UNINSTALLED toolchain → honest skip + note; never a fabricated pass, never silent", async () => {
+  it("338-2: a declared tool the shared root cannot resolve → honest skip + note; never a fabricated pass, never silent", async () => {
     const dir = tempDir();
     try {
-      // tsc/vite are declared devDependencies of the real scaffold but there is
-      // no node_modules here — the tools are NOT the project's toolchain yet.
-      writeScriptTree(dir, { typecheck: "tsc --noEmit", test: "vite --version" });
+      // 338-2 (W52) narrowed this state: a real scaffold tool (tsc/vite) now
+      // resolves from the repo's shared root and RUNS (see the T2 suite). The
+      // skip survives ONLY for a tool neither the node runtime nor any
+      // node_modules/.bin can resolve — a genuinely un-runnable toolchain.
+      writeScriptTree(dir, {
+        typecheck: "definitely-not-a-tool-338 --noEmit",
+        test: "also-not-a-tool-338 --version",
+      });
       const r = await treeRunAsConsumer(dir);
       assert.equal(r.project!.typecheck.run, "skip");
       assert.equal(r.project!.test.run, "skip");
       assert.notEqual(r.project!.typecheck.run, "pass", "a skip is never a pass");
       assert.match(r.project!.typecheck.note ?? "", /UNVERIFIED/);
-      assert.match(r.project!.typecheck.note ?? "", /tsc/);
+      assert.match(r.project!.typecheck.note ?? "", /definitely-not-a-tool-338/);
       assert.match(r.project!.typecheck.note ?? "", /not a fabricated pass/);
       assert.ok(
         (r.note ?? "").includes("UNVERIFIED"),
@@ -903,24 +908,53 @@ describe("217d T-18 — the emitted project's own build script", () => {
     for (const [rel, body] of extras) write(root, rel, body);
   };
 
-  it("(a) no node_modules → build stays the honest skip + UNVERIFIED note; never a fabricated pass", async () => {
+  it("338-2: a declared build the shared root cannot resolve → honest skip + UNVERIFIED note; never a fabricated pass", async () => {
     const dir = tempDir();
     try {
-      writeBuildTree(dir, "vite build");
+      writeBuildTree(dir, "definitely-not-a-build-tool-338 build");
       const r = await treeRunAsConsumer(dir);
       assert.ok(r.project, "treeRun always sets the project leg");
       const build = r.project!.build;
       assert.ok(build, "the build verdict is always present");
-      assert.equal(build!.run, "skip", "a declared build without installed deps is never executed");
-      assert.equal(build!.command, "vite build", "the command is carried verbatim from the emitted package.json");
-      assert.match(build!.note ?? "", /no node_modules\//);
-      assert.match(build!.note ?? "", /UNVERIFIED \(npm install, then re-run to verify\)/);
+      assert.equal(build!.run, "skip", "a declared build whose tool is unresolvable is never executed");
+      assert.equal(
+        build!.command,
+        "definitely-not-a-build-tool-338 build",
+        "the command is carried verbatim from the emitted package.json",
+      );
+      assert.match(build!.note ?? "", /UNVERIFIED/);
       assert.match(build!.note ?? "", /not a fabricated pass/);
       assert.notEqual(build!.run, "pass", "a skip is never a pass");
       assert.equal(r.project!.ok, true, "a skip is not a red — nothing declared actually failed");
       assert.match(r.note ?? "", /npm run build/, "the skip is loud at the top level");
       assert.match(r.note ?? "", /UNVERIFIED/, "an ok verdict is never silent about the unverified build");
       assert.equal(r.ok, true, "the rest of the tree is green; the unverified build rides the loud note");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("338-2: a declared `vite build` with no in-tree node_modules RUNS from the shared root and passes", async () => {
+    const dir = tempDir();
+    try {
+      writeBuildTree(dir, "vite build", [
+        [
+          "index.html",
+          '<!doctype html><html><body><div id="root"></div><script type="module" src="/src/main.ts"></script></body></html>\n',
+        ],
+        ["vite.config.ts", 'import { defineConfig } from "vite";\nexport default defineConfig({});\n'],
+      ]);
+      const r = await treeRunAsConsumer(dir);
+      assert.ok(r.project?.build, "the build verdict is present");
+      assert.equal(
+        r.project!.build!.run,
+        "pass",
+        `the declared vite build ran and exited 0: ${JSON.stringify(r.project!.build)}`,
+      );
+      assert.equal(r.project!.build!.executed, true, "the declared build actually EXECUTED");
+      assert.equal(r.project!.build!.exitCode, 0);
+      assert.equal(r.declaredScriptsVerified, true, "every declared script ran");
+      assert.match(r.note ?? "", /repo's own node_modules/, "the shared toolchain root is named");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -984,22 +1018,67 @@ describe("T2 (332-3) — a declared-but-unverified project tool is never a pass"
     write(root, "src/main.ts", "export const boot = (): string => 'ok';\n");
     write(root, "tests/oracle.spec.ts", PASSING_SPEC);
   };
+  /** A tree whose DECLARED `tsc --noEmit` can genuinely pass: an emitted-style
+   *  tsconfig + type-clean source (what a real product emits). */
+  const writeTypecheckCleanTree = (root: string, scripts: Record<string, string>): void => {
+    write(root, "package.json", JSON.stringify({ name: "t2", type: "module", main: "src/main.ts", scripts }));
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({
+        compilerOptions: {
+          target: "ES2022",
+          lib: ["ES2022"],
+          module: "ESNext",
+          moduleResolution: "bundler",
+          allowImportingTsExtensions: true,
+          isolatedModules: true,
+          strict: true,
+          noEmit: true,
+          skipLibCheck: true,
+          types: ["node"],
+        },
+        include: ["src", "tests"],
+      }),
+    );
+    write(root, "src/main.ts", "export const boot = (): string => 'ok';\n");
+    write(root, "tests/oracle.spec.ts", PASSING_SPEC);
+  };
   const emptyCompile = (dir: string) =>
     ({ ok: true, dir, checked: 0, passed: 0, failed: 0, skipped: 0, verdicts: [] });
 
-  it("a declared-but-uninstalled typecheck → ok:true but declaredScriptsVerified:false, the leg named", async () => {
+  it("338-2: a declared `tsc --noEmit` with no in-tree node_modules RUNS from the shared root → declaredScriptsVerified:true", async () => {
     const dir = tempDir();
     try {
-      writeProjectTree(dir, { typecheck: "tsc --noEmit", test: "node --version" });
+      writeTypecheckCleanTree(dir, { typecheck: "tsc --noEmit", test: "node --version" });
       const r = await treeRunAsConsumer(dir);
-      assert.equal(r.ok, true, "nothing ran red — the tree is not red");
+      assert.equal(r.ok, true, `nothing ran red — the tree is not red: ${JSON.stringify(r.project)}`);
+      assert.equal(r.project!.typecheck.run, "pass", "the declared tsc ran and passed");
+      assert.equal(r.project!.typecheck.executed, true, "the declared typecheck actually EXECUTED");
+      assert.equal(r.project!.typecheck.exitCode, 0);
+      assert.equal(r.project!.declaredScriptsVerified, true);
+      assert.equal(r.declaredScriptsVerified, true, "every declared script ran and passed");
+      assert.equal(r.unverifiedDeclaredScripts, undefined, "nothing is unverified once the toolchain ran");
+      assert.match(r.note ?? "", /repo's own node_modules/, "the shared toolchain root is named on the verdict");
+      assert.match(r.note ?? "", /declared devDependency versions were NOT installed/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("338-2: a genuinely unresolvable declared tool stays the honest UNVERIFIED skip (never a fabricated pass)", async () => {
+    const dir = tempDir();
+    try {
+      writeProjectTree(dir, { typecheck: "definitely-not-installed-338 --noEmit", test: "node --version" });
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.ok, true, "a skip is not a red — nothing declared actually failed");
       assert.equal(r.project!.typecheck.run, "skip");
       assert.equal(r.project!.typecheck.executed, false, "a skip did not execute");
       assert.equal(r.project!.test.executed, true, "an executed script");
       assert.deepEqual(r.unverifiedDeclaredScripts, ["typecheck"], "the unrun DECLARED leg is named at the top level");
       assert.deepEqual(r.project!.unverifiedDeclaredScripts, ["typecheck"]);
-      assert.equal(r.project!.declaredScriptsVerified, false);
       assert.equal(r.declaredScriptsVerified, false, "an ok-but-unverified tree must never read as declared-verified");
+      assert.match(r.note ?? "", /UNVERIFIED/, "the skip is loud at the top level");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1082,8 +1161,11 @@ describe("F-4 (332-3b) — a deliberate UI-shell skip is never 'behaviour verifi
         name: "game-f4",
         type: "module",
         main: "src/main.ts",
-        // The real scaffold's game scripts: tsc/vite are unresolvable without
-        // node_modules, so they are the declared-but-unverified legs.
+        // The real scaffold's game scripts. 338-2 (W52): these now RESOLVE from
+        // the repo's shared node_modules and genuinely EXECUTE, so the tree is
+        // shaped as a real emitted product (tsconfig + boot surface + vite
+        // config) for them to pass — declaredScriptsVerified is no longer
+        // forced false by an absent install.
         scripts: {
           typecheck: "tsc --noEmit",
           build: "vite build",
@@ -1092,28 +1174,52 @@ describe("F-4 (332-3b) — a deliberate UI-shell skip is never 'behaviour verifi
       }),
     );
     write(root, "index.html", '<!doctype html><html><body><div id="root"></div><script type="module" src="/src/main.ts"></script></body></html>\n');
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({
+        compilerOptions: {
+          target: "ES2022",
+          lib: ["ES2022", "DOM", "DOM.Iterable"],
+          module: "ESNext",
+          moduleResolution: "bundler",
+          allowImportingTsExtensions: true,
+          isolatedModules: true,
+          strict: true,
+          noEmit: true,
+          skipLibCheck: true,
+          types: ["node"],
+        },
+        include: ["src", "tests"],
+      }),
+    );
+    write(root, "vite.config.ts", 'import { defineConfig } from "vite";\nexport default defineConfig({});\n');
     write(root, "src/main.ts", GAME_BOOT);
+    write(root, "src/ui/console.ts", "export function bootGame(_el: HTMLElement): void {}\n");
     write(root, "src/jobs/level.ts", coreBody);
     write(root, "tests/oracle.spec.ts", PASSING_SPEC);
     write(root, ".rapidtool/project.json", GAME_RECORD("src/jobs/level.ts"));
   };
   const hasKey = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
 
-  it("clean game tree: green, but the UI-shell skip is an UNVERIFIED entry (not 'verified')", async () => {
+  it("clean game tree: green with its declared toolchain RUN, and the UI-shell skip is an UNVERIFIED entry (not 'verified')", async () => {
     const dir = tempDir();
     try {
       writeGame(dir, "export function play(n: number): number { return n + 1; }\n");
       const r = await treeRunAsConsumer(dir);
-      assert.equal(r.ok, true, "T1 semantics intact — the clean UI-shell tree is green");
+      assert.equal(r.ok, true, `T1 semantics intact — the clean UI-shell tree is green: ${JSON.stringify(r.project)}`);
       assert.equal(r.run!.run, "skip");
       assert.equal(r.run!.kind, "ui-shell");
       assert.equal(r.core!.run, "pass", "the generated core loaded");
       // The over-broad names are GONE: nothing named `verified` may over-claim.
       assert.equal(hasKey(r, "verified"), false, "no `verified` field may be read as behaviour-verified");
       assert.equal(hasKey(r, "unverified"), false, "no bare `unverified` field");
-      // The precise field measures DECLARED SCRIPTS ONLY — and says so.
-      assert.equal(r.declaredScriptsVerified, false, "the fresh tree's declared tsc/vite did not run");
-      assert.deepEqual(r.unverifiedDeclaredScripts, ["typecheck", "build"]);
+      // The precise field measures DECLARED SCRIPTS ONLY — and they genuinely ran.
+      assert.equal(r.project!.typecheck.run, "pass", "the declared tsc ran from the shared root");
+      assert.equal(r.project!.build!.run, "pass", "the declared vite build ran from the shared root");
+      assert.equal(r.declaredScriptsVerified, true, "every declared script actually executed");
+      assert.equal(r.unverifiedDeclaredScripts, undefined);
+      assert.match(r.note ?? "", /repo's own node_modules/, "the shared toolchain root is named");
       // The deliberate entry skip IS represented, with its reason.
       assert.ok(r.unverifiedEntry, "the UI-shell skip is carried as an unverified entry");
       assert.match(r.unverifiedEntry!, /UI shell/);

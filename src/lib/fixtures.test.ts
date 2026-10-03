@@ -10,6 +10,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ALL_PHASES, runHeadless, runToGate, seedProject } from "./testing/fixtures.ts";
 import { FIXTURE_REVIEW_LABEL, fixtureReviewRows, parseFixtureFrontmatter, parseGrader } from "./fixtures.ts";
+import {
+  FIXTURE_ACCEPTANCE_STATES,
+  acceptanceDecisionQuestion,
+  fixtureAcceptanceState,
+} from "./fixtures.ts";
 
 describe("runToGate determinism", () => {
   it("seals every phase below target 12 and parks exactly at its mouth", () => {
@@ -122,3 +127,111 @@ describe("fixture review rows — parse-failure honesty (W42·L1-E4)", () => {
     assert.equal(row.graderProblem, "no grader file for this slug");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 338-4 (W52) — the acceptance DECISION is machine-CHECKABLE but never
+// machine-ANSWERABLE. `fixtureAcceptanceState` names the state a machine run
+// can compute (nothing drafted / pending a human / machine-decided /
+// unattributed / human-approved) and `acceptanceDecisionQuestion` is the ONE
+// honest sentence per state. No input can move a record into `human-approved`:
+// only the record's own `decidedBy` seat can.
+// ---------------------------------------------------------------------------
+describe("acceptance decision state — reading a decision, never minting one (338-4)", () => {
+  const human = (id: string) => ({ id, approval: "approved", decidedBy: "human" });
+  const auto = (id: string) => ({ id, approval: "approved", decidedBy: "autopilot" });
+  const pending = (id: string) => ({ id, approval: "pending" });
+
+  it("absent / empty are no-fixtures; a present non-list is unreadable — never conflated", () => {
+    assert.equal(fixtureAcceptanceState(undefined).state, "no-fixtures");
+    assert.equal(fixtureAcceptanceState(null).state, "no-fixtures");
+    assert.equal(fixtureAcceptanceState([]).state, "no-fixtures");
+    assert.equal(fixtureAcceptanceState("not-a-list").state, "unreadable");
+    assert.equal(fixtureAcceptanceState({ a: 1 }).state, "unreadable");
+    // "nothing drafted" and "unparseable record" are DIFFERENT failures and
+    // carry different sentences; only the former means "not started yet".
+    assert.notEqual(
+      acceptanceDecisionQuestion(fixtureAcceptanceState(undefined)),
+      acceptanceDecisionQuestion(fixtureAcceptanceState("not-a-list")),
+    );
+  });
+
+  it("pending rows read 'waiting on a human' — and name the machine door that may not approve", () => {
+    const s = fixtureAcceptanceState([pending("a"), pending("b")]);
+    assert.equal(s.state, "pending");
+    assert.equal(s.total, 2);
+    assert.equal(s.approved, 0);
+    assert.equal(s.pending, 2);
+    assert.equal(s.decidedBy, "undecided");
+    const q = acceptanceDecisionQuestion(s) ?? "";
+    assert.match(q, /2 of 2 acceptance fixture\(s\) await a human decision/);
+    assert.match(q, /--seat autopilot/);
+    assert.match(q, /verified human seat/);
+  });
+
+  it("every approved row under the verified human seat is the ONLY satisfying state", () => {
+    const s = fixtureAcceptanceState([human("a"), human("b")]);
+    assert.equal(s.state, "human-approved");
+    assert.equal(s.total, 2);
+    assert.equal(s.approved, 2);
+    assert.equal(s.pending, 0);
+    assert.equal(s.decidedBy, "human");
+    assert.equal(acceptanceDecisionQuestion(s), null, "the satisfied state asks no question");
+  });
+
+  it("autopilot-decided rows are NAMED as machine-decided, never read as human", () => {
+    const s = fixtureAcceptanceState([auto("a")]);
+    assert.equal(s.state, "machine-decided");
+    assert.equal(s.decidedBy, "autopilot");
+    assert.notEqual(s.state, "human-approved");
+    const q = acceptanceDecisionQuestion(s) ?? "";
+    assert.match(q, /autopilot seat/);
+    assert.match(q, /is never minted for it/);
+  });
+
+  it("a mixed human+autopilot set reads machine-decided, never human-approved", () => {
+    const s = fixtureAcceptanceState([human("a"), auto("b")]);
+    assert.equal(s.state, "machine-decided");
+    assert.equal(s.decidedBy, "autopilot");
+    assert.notEqual(s.state, "human-approved");
+  });
+
+  it("approved with no seat (or an unknown seat) is 'unattributed' — never read as human", () => {
+    const bare = fixtureAcceptanceState([{ id: "a", approval: "approved" }]);
+    assert.equal(bare.state, "unattributed");
+    assert.equal(bare.decidedBy, "undecided");
+    const forged = fixtureAcceptanceState([{ id: "a", approval: "approved", decidedBy: "robot" }]);
+    assert.equal(forged.state, "unattributed", "an unrecognized seat is not a human seat");
+    assert.match(acceptanceDecisionQuestion(forged) ?? "", /no recorded decision seat/);
+  });
+
+  it("a partly-approved set is pending, and its approved rows still name their seat", () => {
+    const s = fixtureAcceptanceState([human("a"), pending("b")]);
+    assert.equal(s.state, "pending");
+    assert.equal(s.approved, 1);
+    assert.equal(s.pending, 1);
+    assert.equal(s.decidedBy, "human", "the already-decided rows keep their provenance");
+  });
+
+  it("hostile rows count as pending — total is never dropped and nothing throws", () => {
+    const s = fixtureAcceptanceState([null, 7, "x", human("a")]);
+    assert.equal(s.total, 4);
+    assert.equal(s.approved, 1);
+    assert.equal(s.pending, 3);
+    assert.equal(s.state, "pending");
+    assert.equal(s.decidedBy, "human");
+  });
+
+  it("deterministic: same input → deep-equal state; the state list is stable", () => {
+    const rows = [human("a"), auto("b"), pending("c")];
+    assert.deepEqual(fixtureAcceptanceState(rows), fixtureAcceptanceState(rows));
+    assert.deepEqual([...FIXTURE_ACCEPTANCE_STATES], [
+      "no-fixtures",
+      "unreadable",
+      "pending",
+      "machine-decided",
+      "unattributed",
+      "human-approved",
+    ]);
+  });
+});
+

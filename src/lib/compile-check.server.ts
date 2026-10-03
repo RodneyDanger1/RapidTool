@@ -23,7 +23,8 @@
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { extname, join, relative, resolve, sep } from "node:path";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { fnv1a } from "./algorithms.ts";
 import { inventoryFromJobSources } from "./doctor.ts";
@@ -381,10 +382,11 @@ export type TreeProjectScriptsVerdict = {
   ok: boolean;
   typecheck: TreeProjectScriptVerdict;
   test: TreeProjectScriptVerdict;
-  /** 217d (T-18): the emitted project's OWN declared `build` script — run
-   *  ONLY when the tree's deps are installed (the run copy carries the
-   *  subject's `node_modules/`); without them an honest `skip` + the same
-   *  UNVERIFIED note an un-runnable toolchain gets, never a fabricated pass.
+  /** 217d (T-18) + 338-2 (W52): the emitted project's OWN declared `build`
+   *  script — run whenever the run copy carries a dependency root (the
+   *  subject's own `node_modules/`, else the repo's shared root); without one
+   *  an honest `skip` + the same UNVERIFIED note an un-runnable toolchain
+   *  gets, never a fabricated pass.
    *  Optional so fixture objects in other lanes stay assignable; `treeRun()`
    *  always sets it, and a red build makes the tree NOT ok (same rule as a
    *  red typecheck/test). */
@@ -437,7 +439,8 @@ export type TreeRunOutcome = {
   error?: string;
   /** 216 (T-18) + 217d: the emitted project's OWN declared `typecheck`,
    *  `test` + `build` scripts, run under the same bounded runner (real exit
-   *  codes + bounded output tails; `build` only once deps are installed).
+   *  codes + bounded output tails; `build` once a dependency root is present —
+   *  the subject's own install, else the repo's shared root, 338-2).
    *  Optional so fixture objects in other lanes stay assignable; `treeRun()`
    *  always sets it. */
   project?: TreeProjectScriptsVerdict;
@@ -1507,6 +1510,29 @@ async function runProjectScripts(
 }
 
 /**
+ * 338-2 (W52): the shared dependency root the tree-run falls back to when the
+ * emitted subject carries NO `node_modules/` of its own. A fresh emitted tree
+ * genuinely has none (the scaffold emitter never installs), and a naive
+ * `npm install` was measured at 46,964 ms for one trivial package — far too
+ * slow for the in-loop, per-repair tree-run. The RapidTool repo's OWN installed
+ * root lets the declared `tsc`/`vite` resolve a REAL, offline toolchain instead
+ * of the honest UNVERIFIED skip. Only the TOOLCHAIN + modules the repo already
+ * ships are reachable; the emitted tree's declared devDependency VERSIONS were
+ * not installed, so the caller names this provenance on the verdict rather than
+ * letting the run read as a from-declared-deps install. Null when there is no
+ * usable repo root — a toolchain is never fabricated.
+ */
+function sharedToolchainRoot(): string | null {
+  try {
+    const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+    const deps = join(repoRoot, "node_modules");
+    return existsSync(join(deps, ".bin")) ? deps : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Run the emitted tree in-loop on a TEMP COPY (174-F8 / Phase F): the live
  * emit dir is never the cwd of node --test or the entry smoke. Read-only
  * over the subject `dir`; copy is always deleted. Never fabricates a pass.
@@ -1518,6 +1544,12 @@ async function runProjectScripts(
  * failing its own `npm test` or its own build can never be `ok:true`; a
  * declared script that could not run is a loud `skip` + note, never a
  * fabricated pass.
+ *
+ * 338-2 (W52): when the emitted subject carries no `node_modules/` of its own,
+ * the run copy is linked to the repo's own installed root (sharedToolchainRoot)
+ * so the declared `tsc`/`vite` genuinely EXECUTE offline instead of always
+ * skipping. `toolchainSource` records which root resolved them, and the note
+ * names the shared root so the claim never reads as a from-declared-deps run.
  */
 export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promise<TreeRunOutcome> {
   const timeoutMs =
@@ -1526,6 +1558,8 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
   let work = subject;
   let copy: string | null = null;
   let scratchCleanupFailed = false;
+  /** Which dependency root resolved the declared toolchain (null = none). */
+  let toolchainSource: "tree" | "repo-shared" | null = null;
   const cleanScratch = (): void => {
     if (!copy) return;
     try {
@@ -1551,16 +1585,22 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
       // the same skip-set verifyKindDir already uses. A duplicated
       // node_modules was the #1 disk/IO hog on this box and its locked files
       // are what made the cleanup rmSync silently leave temp dirs behind. The
-      // tree's own toolchain stays available through a JUNCTION to the
-      // subject's node_modules (a directory-level hardlink seam — zero bytes
-      // copied); when the junction cannot be created, the declared scripts
-      // fall back to their existing honest UNVERIFIED skip notes.
+      // tree's toolchain stays available through a JUNCTION to the SUBJECT's
+      // node_modules (a directory-level hardlink seam — zero bytes copied),
+      // else (338-2) to the repo's own shared root; when neither junction can
+      // be created, the declared scripts fall back to their honest UNVERIFIED
+      // skip notes.
       const skip = new Set([join(subject, "node_modules"), join(subject, ".git")]);
       cpSync(subject, copy, { recursive: true, filter: (src) => !skip.has(src) });
       const subjectDeps = join(subject, "node_modules");
-      if (existsSync(subjectDeps)) {
+      // 338-2 (W52): prefer the subject's own install; a fresh emitted tree has
+      // none, so fall back to the repo's shared root to make the declared
+      // toolchain genuinely executable offline.
+      const linkedDeps = existsSync(subjectDeps) ? subjectDeps : sharedToolchainRoot();
+      if (linkedDeps) {
         try {
-          symlinkSync(subjectDeps, join(copy, "node_modules"), "junction");
+          symlinkSync(linkedDeps, join(copy, "node_modules"), "junction");
+          toolchainSource = linkedDeps === subjectDeps ? "tree" : "repo-shared";
         } catch {
           /* honest fallback: no deps in the run copy → declared scripts skip */
         }
@@ -1658,6 +1698,25 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
           .map((v) => v.note ?? "un-runnable")
           .join(" · ")}`
       ).slice(0, 1800);
+    }
+    // 338-2 (W52): name the shared toolchain root whenever a DECLARED script
+    // whose tool is not the node/npm runtime actually executed from it. The
+    // execution is real (a real tsc/vite ran), but the emitted tree's DECLARED
+    // devDependency versions were not installed — the claim stays scoped. A
+    // tree that declared nothing (or only runtime-tool scripts) has nothing to
+    // scope, so the note stays absent for it.
+    const usedSharedToolchain =
+      toolchainSource === "repo-shared" &&
+      [projectLeg.verdict.typecheck, projectLeg.verdict.test, projectLeg.verdict.build].some((v) => {
+        if (!v || v.executed !== true) return false;
+        const first = (v.command ?? "").trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+        return first !== "" && !RUNTIME_TOOLS.has(first);
+      });
+    if (usedSharedToolchain) {
+      const clause =
+        "the declared project scripts were resolved from the RapidTool repo's own node_modules/ " +
+        "(offline, no install) — the emitted tree's declared devDependency versions were NOT installed";
+      outcome.note = outcome.note ? `${outcome.note} · ${clause}` : clause;
     }
     // W43 · J1 (fixes/317_j1_oracle · 316_h5_oracle · T6.3 · 311_sd_product
     // K3/K4): the tree's OWN declared `expectedBehavior` contract — the

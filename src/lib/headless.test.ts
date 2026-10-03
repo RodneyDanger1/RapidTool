@@ -2032,7 +2032,7 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
     }
   });
 
-  it("emit --run: treeRun{compile,tests,run} rides the envelope; a green tree exits 0 (fixes/147 E-15)", async () => {
+  it("emit --run: treeRun{compile,tests,run} rides the envelope; a fresh tree is VERIFIED and exits 0 (fixes/147 E-15 / 338-2)", async () => {
     const dir = tempDir();
     try {
       const path = join(dir, "drained.json");
@@ -2041,28 +2041,23 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
       saveProject(path, drained);
       const out = join(dir, "tree");
       const r = runCli(["emit", "--project", path, "--out", out, "--run"]);
-      // W49 · 335-4 (Switchboard) made the W48 exit-5 "green but the declared
-      // toolchain never ran" state OPT-IN (`--require-verified`): a fresh tree
-      // has no `node_modules`, so its declared toolchain is ALWAYS unverified,
-      // and a default that never exits 0 is not a usable pass/fail. The DEFAULT
-      // for a green tree is 0; the envelope still carries the honest unverified
-      // signal, and `--require-verified` restores exit 5 (pinned below). This
-      // lane (335-2) owns this consumer test and reconciled it to the new
-      // contract — the CLI change is 335-4's, frozen in its log.
+      // 338-2 (W52) SUPERSEDED the W48/W49 "a fresh tree is ALWAYS unverified"
+      // premise. The tree-run now resolves the declared tools (the tree's own
+      // node_modules, else the emitting repo's installed root) and runs them,
+      // and the floor template is type-clean — so a fresh emitted tree is GREEN
+      // and VERIFIED (`declaredScriptsVerified:true`, no `unverified` flag). The
+      // W49 · 335-4 opt-in exit-5 arm still exists for a tree whose declared
+      // tool genuinely cannot resolve; its teeth are re-pinned below by
+      // CONSTRUCTING that condition on the read-only `tree-run` verb.
       assert.equal(
         r.code,
         0,
-        `a green tree is a default pass (unverified toolchain is opt-in strict); stderr: ${r.stderr.slice(0, 300)}`,
+        `a verified green tree is a default pass; stderr: ${r.stderr.slice(0, 300)}`,
       );
       assert.equal(r.json.ok, true, "the tree is green — nothing ran red");
-      assert.equal(r.json.unverified, true, "the envelope names the unverified toolchain");
-      assert.ok(
-        Array.isArray(r.json.unverifiedDeclaredScripts) &&
-          (r.json.unverifiedDeclaredScripts as string[]).includes("typecheck"),
-        `unverifiedDeclaredScripts must name the unrun declared script, saw ${JSON.stringify(
-          r.json.unverifiedDeclaredScripts,
-        )}`,
-      );
+      assert.equal(r.json.declaredScriptsVerified, true, "338-2: the declared typecheck/build genuinely ran and passed");
+      assert.notEqual(r.json.unverified, true, "a verified tree carries no unverified flag");
+      assert.equal(r.json.unverifiedDeclaredScripts, undefined, "nothing declared was left unrun");
       assert.equal(r.json.code, undefined, "a green tree exit is not an error class — no RT_E code rides it");
       const tr = r.json.treeRun as
         | {
@@ -2085,10 +2080,8 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
       assert.equal(tr!.run!.run, "skip", "webapp UI shell is an honest skip, never a fake pass");
       assert.match(String(tr!.run!.detail ?? ""), /UI shell/);
 
-      // W49 · 335-4: `--require-verified` opts back into the strict exit 5 for
-      // a green-but-unverified tree. Pin both arms so the opt-in cannot silently
-      // become a no-op (the exact failure mode the wave exists to catch).
-      const strict = runCli([
+      // A VERIFIED tree stays exit 0 under --require-verified (nothing to gate).
+      const strictVerified = runCli([
         "emit",
         "--project",
         path,
@@ -2098,9 +2091,36 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
         "--require-verified",
       ]);
       assert.equal(
+        strictVerified.code,
+        0,
+        `--require-verified stays 0 on a verified tree; stderr: ${strictVerified.stderr.slice(0, 300)}`,
+      );
+
+      // W49 · 335-4 TEETH: construct the genuine unverified condition — one
+      // DECLARED script points at a tool no node_modules/.bin provides — on the
+      // read-only `tree-run` verb (`emit` re-emits and would overwrite the edit).
+      const pkgPath = join(out, "package.json");
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { scripts?: Record<string, string> };
+      pkg.scripts = { ...pkg.scripts, typecheck: "rapidtool-not-a-real-tool-338 --noEmit" };
+      writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+
+      const unv = runCli(["tree-run", "--dir", out]);
+      assert.equal(unv.code, 0, `a green-but-unverified tree defaults to exit 0; stderr: ${unv.stderr.slice(0, 300)}`);
+      assert.equal(unv.json.declaredScriptsVerified, false, "the declared tool did not resolve/run");
+      assert.equal(unv.json.unverified, true, "the envelope names the unverified toolchain");
+      assert.ok(
+        Array.isArray(unv.json.unverifiedDeclaredScripts) &&
+          (unv.json.unverifiedDeclaredScripts as string[]).includes("typecheck"),
+        `unverifiedDeclaredScripts must name the unrun declared script, saw ${JSON.stringify(
+          unv.json.unverifiedDeclaredScripts,
+        )}`,
+      );
+
+      const strict = runCli(["tree-run", "--dir", out, "--require-verified"]);
+      assert.equal(
         strict.code,
         5,
-        `--require-verified must make the green-but-unverified tree exit 5; stderr: ${strict.stderr.slice(0, 300)}`,
+        `--require-verified must make the genuinely-unverified tree exit 5; stderr: ${strict.stderr.slice(0, 300)}`,
       );
       assert.equal(strict.json.ok, true, "the strict arm is still a green tree");
       assert.equal(strict.json.unverified, true, "the strict arm still names the unverified toolchain");
@@ -2637,6 +2657,122 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
       "flip is a leftover, not real",
     );
     assert.equal("error" in (r.json as object), false);
+  });
+
+  it("W52 · 338-3: doctor --tree derives the factory claim from the real record (product-complete + human fixtures CLOSE)", () => {
+    const dir = tempDir();
+    try {
+      const jobs = join(dir, "src", "jobs");
+      mkdirSync(jobs, { recursive: true });
+      writeFileSync(join(jobs, "board.ts"), "export function createBoard() { return { id: 'b1' }; }\n");
+      writeFileSync(join(jobs, "column.ts"), "export function addColumn() { return { id: 'c1' }; }\n");
+      const recordDir = join(dir, ".rapidtool");
+      mkdirSync(recordDir, { recursive: true });
+      const record = {
+        name: "wired",
+        brief: "a board tool",
+        lattice: { domain: "boards", jobs: ["board", "column"], entities: [], constraints: [], nodes: [], complexity: 2 },
+        phases: [],
+        implementationSpec: {
+          requirements: ["Board shows cards by status"],
+          edgeCases: [],
+          errorHandling: [],
+          typeSignatures: [
+            "export function createBoard(name: string): Board",
+            "export function addColumn(board: Board, title: string): Column",
+          ],
+          dataFlow: [],
+          negativeConstraints: [],
+          source: "p6",
+          briefHash: "wired",
+          createdAt: 1,
+        },
+        generatedTree: [
+          {
+            path: "src/domain/board.ts",
+            source: "export type Board = { id: string };\nexport function createBoard(name: string): Board { return { id: name }; }\n",
+            hash: "h1",
+            attempt: 0,
+          },
+          {
+            path: "src/domain/column.ts",
+            source: "export type Column = { id: string };\nexport function addColumn(board: Board, title: string): Column { return { id: title }; }\n",
+            hash: "h2",
+            attempt: 0,
+          },
+        ],
+        acceptanceFixtures: [{ id: "fx-1", approval: "approved", decidedBy: "human" }],
+      };
+      writeFileSync(join(recordDir, "project.json"), JSON.stringify(record));
+      const r = runCli(["doctor", "--tree", dir]);
+      assert.equal(r.code, 0, JSON.stringify(r.json));
+      const factory = (r.json as { factory: {
+        autonomousSoftwareFactory: boolean;
+        leftoverJobsAreReexportsOrStubs: boolean;
+        gaps: string[];
+        inventory: { real: number } | null;
+      } }).factory;
+      assert.equal(factory.leftoverJobsAreReexportsOrStubs, false);
+      assert.equal(factory.inventory?.real, 2);
+      assert.ok(
+        !factory.gaps.some((g) => g.includes("product-complete")),
+        `the product-complete gap must CLOSE on a real arch-complete record: ${JSON.stringify(factory.gaps)}`,
+      );
+      assert.ok(
+        !factory.gaps.some((g) => g.includes("human-approved fixtures")),
+        `the fixtures gap must CLOSE on a human-approved set: ${JSON.stringify(factory.gaps)}`,
+      );
+      assert.equal(factory.autonomousSoftwareFactory, true, "every signal genuinely met ⇒ the latch reports the truth");
+      assert.deepEqual(factory.gaps, []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("W52 · 338-3: doctor --project derives productComplete/humanFixtures but keeps the census gaps (fail-closed)", () => {
+    const dir = tempDir();
+    try {
+      const path = join(dir, "record.json");
+      writeFileSync(
+        path,
+        JSON.stringify({
+          name: "named",
+          brief: "a board tool",
+          lattice: { domain: "boards", jobs: ["board"], entities: [], constraints: [], nodes: [], complexity: 1 },
+          phases: [],
+          implementationSpec: {
+            requirements: ["Board shows cards"],
+            edgeCases: [],
+            errorHandling: [],
+            typeSignatures: ["export function createBoard(name: string): Board"],
+            dataFlow: [],
+            negativeConstraints: [],
+            source: "p6",
+            briefHash: "named",
+            createdAt: 1,
+          },
+          generatedTree: [
+            {
+              path: "src/domain/board.ts",
+              source: "export type Board = { id: string };\nexport function createBoard(name: string): Board { return { id: name }; }\n",
+              hash: "h1",
+              attempt: 0,
+            },
+          ],
+          acceptanceFixtures: [{ id: "fx-1", approval: "approved", decidedBy: "human" }],
+        }),
+      );
+      const r = runCli(["doctor", "--project", path]);
+      assert.equal(r.code, 0, JSON.stringify(r.json));
+      const factory = (r.json as { factory: { autonomousSoftwareFactory: boolean; gaps: string[] } }).factory;
+      assert.ok(!factory.gaps.some((g) => g.includes("product-complete")), "the record closes the complete gap");
+      assert.ok(!factory.gaps.some((g) => g.includes("human-approved fixtures")), "the set closes the fixtures gap");
+      assert.ok(factory.gaps.some((g) => g.includes("leftover jobs")), "no census scanned ⇒ leftover fail-closed");
+      assert.ok(factory.gaps.some((g) => g.includes("no real multi-job product")), "no census ⇒ product fail-closed");
+      assert.equal(factory.autonomousSoftwareFactory, false, "an unmeasured census never mints the factory");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("chat --ask /help is keyless exit 0 (slash tools, no DeepSeek)", () => {

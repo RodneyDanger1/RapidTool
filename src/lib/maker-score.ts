@@ -39,6 +39,10 @@ import type { TreeRunOutcome } from "./compile-check.server.ts";
 import { canonicalStem } from "./algorithms.ts";
 import { isStubSource } from "./dod.ts";
 import { BRIEF_STOPWORDS, briefNounHits, identifierHits } from "./sandbox.ts";
+// 338-4 (W52): the behavioral fixtures' DECISION state — the SAME pure
+// derivation the doctor's factory bar reads, so the scorecard cannot say
+// "accepted" while the doctor says no decision was recorded.
+import { acceptanceDecisionQuestion, type FixtureAcceptanceState } from "./fixtures.ts";
 
 // ---------------------------------------------------------------------------
 // Evidence types (driver-gathered; the scorer only reads).
@@ -163,6 +167,25 @@ export type MakerPriorEvidence = {
   m3: number;
 } | null;
 
+/**
+ * A4: runner TAP for the behavioral spec (tests/oracle.spec.ts after A2).
+ * When set, M1/M2 re-key on fixture pass/fail. Absent → legacy m1/m2
+ * (no-fixture path stays byte-identical).
+ *
+ * 338-4 (W52): `acceptance` carries the fixtures' DECISION state
+ * (`fixtures.fixtureAcceptanceState`). A behavioral pass is acceptance only
+ * when the bar was human-approved: a pending / machine-decided / unattributed
+ * bar scores 0 with the doctor's own sentence (`acceptanceDecisionQuestion`),
+ * so the card and the factory bar can no longer tell two stories about one
+ * run. Absent ⇒ the legacy A4 line, byte-identical.
+ */
+export type MakerBehavioralEvidence = {
+  pass: number;
+  fail: number;
+  failedIds?: string[];
+  acceptance?: FixtureAcceptanceState;
+};
+
 export type MakerScoreInput = {
   project: Project;
   corpus: MakerCorpusExpectation;
@@ -178,7 +201,7 @@ export type MakerScoreInput = {
    * When set, M1/M2 re-key on fixture pass/fail. Absent → legacy m1/m2
    * (no-fixture path stays byte-identical).
    */
-  behavioral?: { pass: number; fail: number; failedIds?: string[] } | null;
+  behavioral?: MakerBehavioralEvidence | null;
   /**
    * fixes/153 (scorer vacuity): true when the keyed run produced LLM content —
    * at least one synthesis attempt logged ok (P1's p6.synthesis.attempt).
@@ -344,6 +367,12 @@ function lastTestEvidence(project: Project): { label?: string; ok?: boolean; evi
 export function m1Substance(input: MakerScoreInput): MakerCriterion {
   if (input.behavioral) {
     const b = input.behavioral;
+    // 338-4: the behavioral TAP ran against the acceptance bar — a pass is
+    // acceptance only when that bar carries a human-approved decision. The
+    // sentence is the doctor's own (acceptanceDecisionQuestion), so M1 and the
+    // factory gap cannot disagree about the same run.
+    const question = b.acceptance ? acceptanceDecisionQuestion(b.acceptance) : null;
+    if (question !== null) return { score: 0, evidence: `no accepted bar — ${question}` };
     if (b.fail > 0) {
       const ids = Array.isArray(b.failedIds) && b.failedIds.length > 0 ? ` (${b.failedIds.join(", ")})` : "";
       return { score: 0, evidence: `behavioral fail ${b.fail}${ids}` };
@@ -425,6 +454,10 @@ export function m2Runs(input: MakerScoreInput): MakerCriterion {
       : "";
   if (input.behavioral) {
     const b = input.behavioral;
+    // 338-4: same gate as M1 — a green treeRun over a behavioral bar no human
+    // accepted is not a run of the accepted bar (one derivation, one sentence).
+    const question = b.acceptance ? acceptanceDecisionQuestion(b.acceptance) : null;
+    if (question !== null) return { score: 0, evidence: `treeRun ok but no accepted bar — ${question}` };
     if (b.fail > 0 || tr.ok !== true) {
       return {
         score: 0,

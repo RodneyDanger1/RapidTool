@@ -615,9 +615,13 @@ const PKG_DEV_DEPS: Partial<Record<ProjectKind, Record<string, string>>> = {
     vite: "^7.0.0",
   },
   game: { "@types/node": "^22.0.0", typescript: "^5.7.0", vite: "^7.0.0" },
-  "cli-tool": { "@types/node": "^22.0.0", tsx: "^4.19.0", typescript: "^5.7.0" },
+  // W52 / 338-5: `tsx` was declared on cli-tool/service but no emitted script or
+  // import consumed it (the entries run `node --experimental-strip-types`) —
+  // declare-or-strike, so it is not declared. Add it back only with a script
+  // that actually uses it.
+  "cli-tool": { "@types/node": "^22.0.0", typescript: "^5.7.0" },
   library: { "@types/node": "^22.0.0", typescript: "^5.7.0" },
-  service: { "@types/node": "^22.0.0", tsx: "^4.19.0", typescript: "^5.7.0" },
+  service: { "@types/node": "^22.0.0", typescript: "^5.7.0" },
 };
 
 // PKG_SCRIPTS honesty (fixes/149 P1-2 / fixes/150 G3): the dev/build scripts
@@ -728,7 +732,18 @@ function tsconfigJson(kind: ProjectKind, hasTests: boolean): string {
       noEmit: true,
       skipLibCheck: true,
       types: kind === "webapp" ? ["vite/client", "node"] : ["node"],
-      ...(kind === "webapp" ? { jsx: "react-jsx" } : {}),
+      // W52 / 338-5: the game spec-graph ui node is emitted at
+      // `src/ui/console.tsx` (plain-TS canvas shell, no JSX) and `src/main.ts`
+      // imports it extensionless. With no `jsx` setting tsc refuses to resolve
+      // a `.tsx` module (TS6142) and the game's DECLARED `npm run typecheck`
+      // fails on a clean tree. `preserve` admits the extension with no
+      // transform and NO React runtime (the game kind declares no react);
+      // webapp keeps the real `react-jsx` transform.
+      ...(kind === "webapp"
+        ? { jsx: "react-jsx" }
+        : kind === "game"
+          ? { jsx: "preserve" }
+          : {}),
     },
     include: hasTests ? ["src", "tests"] : ["src"],
   };
@@ -2437,15 +2452,71 @@ function emitViteConfig(kind: ProjectKind): string {
   return [
     "// ---------------------------------------------------------------------------",
     "// vite.config.ts — emitted by the RapidTool scaffold (fixes/135 bootability).",
-    "// The webapp package.json declares vite dev/build scripts + the react plugin;",
-    "// this config makes them real: index.html + src/main mount the UI shell.",
+    "// The webapp package.json declares the vite dev/build scripts + the react and",
+    "// tailwindcss plugins (W52 / 338-5: tailwindcss wired so no declared devDep is",
+    "// inert); this config makes them real: index.html + src/main mount the UI shell",
+    "// and src/styles.css is the Tailwind v4 CSS entry the plugin compiles.",
     "// ---------------------------------------------------------------------------",
     'import { defineConfig } from "vite";',
     'import react from "@vitejs/plugin-react";',
+    'import tailwindcss from "@tailwindcss/vite";',
     "",
     "export default defineConfig({",
-    "  plugins: [react()],",
+    "  plugins: [react(), tailwindcss()],",
     "});",
+    "",
+  ].join("\n");
+}
+
+/**
+ * src/styles.css — the webapp tree's Tailwind v4 entry (W52 / 338-5).
+ *
+ * The emitted `package.json` declares `tailwindcss` + `@tailwindcss/vite`;
+ * `vite.config.ts` registers the plugin. Tailwind v4 is CSS-first, so the
+ * plugin only does work when a CSS file imports it — this is that file. Without
+ * it both devDeps were dead weight (the fixes/169 §C-2 drift).
+ *
+ * Deterministic and injection-safe: the bytes are a FIXED token sheet with no
+ * project text, so a hostile name/brief can never reach the CSS. The `@layer
+ * base` rules style the contract-level Console shell's unclassed
+ * `<main>/<h1>/<p>` markup so it renders intentionally, not browser-default.
+ */
+function emitStylesCss(): string {
+  return [
+    "/* ---------------------------------------------------------------------------",
+    " * styles.css — emitted by the RapidTool scaffold (W52 / 338-5).",
+    " * Tailwind v4 CSS-first entry: package.json declares `tailwindcss` +",
+    " * `@tailwindcss/vite`, vite.config.ts registers the plugin, and this import",
+    " * is what the plugin compiles. Base rules style the contract-level Console",
+    " * shell (unclassed markup); no project-derived text ever reaches this CSS.",
+    " * --------------------------------------------------------------------------- */",
+    '@import "tailwindcss";',
+    "",
+    "@layer base {",
+    "  :root {",
+    "    color-scheme: dark;",
+    "  }",
+    "",
+    "  body {",
+    "    margin: 0;",
+    "    min-height: 100vh;",
+    '    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;',
+    "    line-height: 1.5;",
+    "    background: #0b0f14;",
+    "    color: #e6edf3;",
+    "  }",
+    "",
+    "  main {",
+    "    max-width: 48rem;",
+    "    margin: 0 auto;",
+    "    padding: 2rem 1.25rem;",
+    "  }",
+    "",
+    "  h1 {",
+    "    font-size: 1.5rem;",
+    "    font-weight: 600;",
+    "  }",
+    "}",
     "",
   ].join("\n");
 }
@@ -2466,6 +2537,7 @@ function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string 
         "// boundaries).",
       ]),
       'import { createRoot } from "react-dom/client";',
+      'import "./styles.css";',
       "",
     ];
     if (uiSpecifier) {
@@ -2784,7 +2856,7 @@ function declaredScriptsBanner(kind: ProjectKind): string {
     "> [!WARNING]",
     `> ## DECLARED SCRIPTS NOT RUN — ${label} ${isOne ? "IS" : "ARE"} UNVERIFIED (RapidTool W48 / 334-3)`,
     ">",
-    `> The emitted \`package.json\` declares ${label}, but this emitter NEVER runs ${isOne ? "it" : "them"} over the tree it writes — no \`npm install\`, no declared-script execution. ${isOne ? "It is a scaffold claim" : "They are scaffold claims"} — NOT verified behavior. Run \`npm install && ${run}\` yourself (or re-emit with \`--verify-kind\`, which installs and builds a scratch copy) before treating this scaffold as build-verified. A fresh tree-run reports the same state as \`declaredScriptsVerified: false\` + \`unverifiedDeclaredScripts: [...]\` in its JSON.`,
+    `> The emitted \`package.json\` declares ${label}, but this emitter NEVER runs ${isOne ? "it" : "them"} over the tree it writes — no \`npm install\`, no declared-script execution. ${isOne ? "It is a scaffold claim" : "They are scaffold claims"} — NOT verified behavior. Run \`npm install && ${run}\` yourself (or re-emit with \`--verify-kind\`, which installs and builds a scratch copy) before treating this scaffold as build-verified. A tree-run executes these declared tools when it can resolve them (the emitted tree's own \`node_modules\`, else the emitting repo's own installed root): a type-clean tree reports \`declaredScriptsVerified: true\`, and a tool it cannot resolve reports \`declaredScriptsVerified: false\` + \`unverifiedDeclaredScripts: [...]\` in its JSON — never a silent pass.`,
   ].join("\n");
 }
 
@@ -2809,11 +2881,31 @@ function readmeBody(
     [".rapidtool/project.json", "the full exported project (packet, artifacts, oracle, contracts)"],
   ];
   if (kind === "webapp" || kind === "game") {
+    const entry = kind === "webapp" ? "src/main.tsx" : "src/main.ts";
     files.push(
-      ["index.html", "vite HTML entry — mounts src/main (fixes/135 bootability)"],
-      ["vite.config.ts", "vite config (kind-appropriate plugins) — emitted for webapp"],
-      ["src/main", "browser entry that mounts the UI shell (src/ui)"],
+      ["index.html", `vite HTML entry — mounts ${entry} (fixes/135 bootability)`],
+      [
+        "vite.config.ts",
+        kind === "webapp"
+          ? "vite config — react + tailwindcss plugins (the declared devDeps)"
+          : "vite config — plain (this kind declares no framework plugin)",
+      ],
+      [entry, "browser entry that mounts the UI shell (src/ui)"],
     );
+    // W52 / 338-5: declare-or-strike — the README tables every emitted file, so
+    // the Tailwind entry the declared plugin compiles is named for webapp.
+    if (kind === "webapp") {
+      files.push(["src/styles.css", "Tailwind v4 CSS entry compiled by the declared @tailwindcss/vite plugin"]);
+    }
+  }
+  // W52 / 338-5: the per-kind runnable entry the emitter writes and package.json
+  // DECLARES (main/bin/start) — never omitted from the file table that claims to
+  // list what ships.
+  if (kind === "cli-tool" || kind === "library" || kind === "service") {
+    files.push(["src/main.ts", "runnable entry declared by package.json (main/bin/start)"]);
+    if (kind === "cli-tool") {
+      files.push([`bin/${slugName(project.name)}.mjs`, "package bin launcher — delegates to src/main.ts"]);
+    }
   }
   files.push(...specRows);
   // fixes/144 (M2): generated-tree files the spec graph does not already table
@@ -3579,11 +3671,16 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     const entryFile = kind === "webapp" ? "src/main.tsx" : "src/main.ts";
     push("index.html", emitIndexHtml(proj, `/${entryFile}`));
     // fixes/277 (R3-f06 / W-15): BOTH vite kinds get their config — webapp
-    // with the react plugin (bytes unchanged from fixes/135), game plain
-    // (its devDeps carry no framework plugin; the webapp body would break
-    // `npm run build` there). emitViteConfig takes the kind.
+    // with the react + tailwindcss plugins (W52 / 338-5 wires tailwindcss so
+    // the declared devDeps are never inert), game plain (its devDeps carry no
+    // framework plugin; the webapp body would break `npm run build` there).
+    // emitViteConfig takes the kind.
     push("vite.config.ts", emitViteConfig(kind));
     push(entryFile, emitMainEntry(kind, proj, uiPath ? relSpecifier("src", uiPath) : null));
+    // W52 / 338-5: the Tailwind v4 CSS entry the webapp's declared
+    // `@tailwindcss/vite` plugin compiles — the file that makes the two
+    // declared devDeps do work (main.tsx imports it; vite.config registers it).
+    if (kind === "webapp") push("src/styles.css", emitStylesCss());
   }
 
   if (kind === "game") {

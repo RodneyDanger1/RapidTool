@@ -120,6 +120,9 @@ type ActionRule = {
   resourceHint: string;
   /** True ⇒ only a verified human seat may decide (no machine self-approval). */
   requiresHumanSeat: boolean;
+  /** What the machine seat may not do, for the `requiresHumanSeat` refusal
+   *  clause. Absent ⇒ the historical `hitl.force` wording (byte-identical). */
+  humanGateClause?: string;
 };
 
 const POLICY_RULES: ReadonlyMap<PolicyAction, ActionRule> = new Map<PolicyAction, ActionRule>([
@@ -138,7 +141,24 @@ const POLICY_RULES: ReadonlyMap<PolicyAction, ActionRule> = new Map<PolicyAction
   // routes through this seam with requiresHumanSeat:true. Contract: the CLI
   // stamps `decidedBy` from the VERDICT (never forged), and a deny writes
   // nothing (scripts/rapidtool-cli.mjs fixtures arm).
-  ["fixtures.approve", { resource: /^fixtures:.+$/, resourceHint: "fixtures:<project>", requiresHumanSeat: true }],
+  // 338-4 (W52) re-affirmed this after auditing the doctor's "no human-approved
+  // fixtures" gap: the machine DRAFTS these cases, so a machine that also
+  // approved them would set the bar it is graded against — self-certification,
+  // not autonomy. The criterion stays satisfiable only by a verified human seat;
+  // the rationales are pinned by policy.test.ts ("fixtures.approve") and
+  // scripts/rapidtool-cli-fixtures.test.mjs ("no self-approve"). The historical
+  // reason id `force-requires-human-seat` is kept byte-identical (that scripts
+  // pin matches on it); the clause below states what a machine actually may not
+  // do here — decide the acceptance bar, not "force".
+  [
+    "fixtures.approve",
+    {
+      resource: /^fixtures:.+$/,
+      resourceHint: "fixtures:<project>",
+      requiresHumanSeat: true,
+      humanGateClause: "decide the acceptance bar a machine drafted and will be graded against",
+    },
+  ],
 ]);
 
 /** The registry surface — W5 iterates this to prove every action is routed. */
@@ -210,8 +230,10 @@ function deny(reason: string, fallback: PolicyFallback): PolicyDeny {
  * action's namespace ⇒ deny (`"none"`); missing/unrecognized seat ⇒ deny.
  *
  * Seat rule (uniform, Rule A): a claim passes iff it is the `autopilot` seat, or
- * the `human` seat presenting the out-of-band token. `hitl.force` adds Rule B:
- * the human seat is REQUIRED — a machine may never force past a human gate.
+ * the `human` seat presenting the out-of-band token. Rule B (`requiresHumanSeat`)
+ * is `hitl.force` — a machine may never force past a human gate — and
+ * `fixtures.approve` — a machine may not decide the acceptance bar it drafted and
+ * is graded against (338-4); both require the verified human seat.
  *
  * Pure / deterministic / total: no I/O, no clock, no env; identical inputs give
  * deep-equal verdicts; malformed inputs deny instead of throwing.
@@ -253,7 +275,7 @@ export function evaluatePolicy(action: string, resource: string, ctx?: PolicyCtx
     }
     if (claimed.kind === "seat") {
       return deny(
-        `force-requires-human-seat — an ${label} seat may never force past a human gate; only a verified human seat may.`,
+        `force-requires-human-seat — an ${label} seat may never ${rule.humanGateClause ?? "force past a human gate"}; only a verified human seat may.`,
         "human-seat-token",
       );
     }

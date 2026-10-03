@@ -102,6 +102,12 @@
 //      W46/332-1 (P2): the plan census partitions by label and the persisted
 //      shortfall row carries declared/planned/unbound counts, so a coverage
 //      gap is deterministic and legible, never random.
+//      W52/338-1: the plan is SPEC-DRIVEN — `reconcilePlanTypeSignatures` maps
+//      every declared spec-graph job to a planned src/jobs/<label>.ts file by
+//      rule (the model's bound signatures when present, else the deterministic
+//      `deriveTypeSignatures` floor), and the persisted implementationSpec is
+//      the reconciled set, so p6-arch/census judge the same rule. A declared
+//      job is never dropped because the model happened not to name it.
 //      A forceHuman P6
 //      gate (failed template sandbox, R3/B-03) is never machine-cleared.
 //
@@ -112,7 +118,7 @@
 //
 // Run: node --experimental-strip-types --test src/lib/codegen.server.test.ts
 // ---------------------------------------------------------------------------
-import { fnv1a } from "./algorithms.ts";
+import { deriveTypeSignatures, fnv1a } from "./algorithms.ts";
 import { briefNounHits, identifierHits, maskLiteralsAndComments } from "./sandbox.ts";
 import { applyStrReplace, type PatchRequest } from "./patch.ts";
 import {
@@ -553,8 +559,9 @@ export function p6SynthesisSystemPrompt(): string {
     "that satisfies the brief and the spec below. Return a single JSON object — the word json,",
     "exactly this envelope, no markdown fences, nothing before or after:",
     '{"module":"...complete module source as one string...","exports":["f1","f2"],"reqTrace":{"req-1":"f1"}}',
-    "Worked example (shape only — the content is yours):",
-    '{"module":"function add(a, b) { return a + b; }\\nmodule.exports.add = add;","exports":["add"],"reqTrace":{"req-1":"add"}}',
+    "Worked example (shape only — the content is yours; note every parameter and the",
+    "return type are ANNOTATED — see rule 10):",
+    '{"module":"function add(a: number, b: number): number { return a + b; }\\nmodule.exports.add = add;","exports":["add"],"reqTrace":{"req-1":"add"}}',
     "RULES (all mandatory):",
     // 216f (T-10 / F-08): the export-ceiling rule and the requirement list must
     // be CONSISTENT. The old pair ("export exactly these ... nothing more" +
@@ -571,7 +578,7 @@ export function p6SynthesisSystemPrompt(): string {
     // determinism duty stays a model instruction, not an over-claim: the
     // validator never refuses `Date.now()`/`new Date()` (a legitimate timestamp
     // use the product may need), so the prompt must not imply it does.
-    "2. Zero imports, zero requires, zero external deps. Plain functions only. Assign module.exports. Never use Math.random() (validator-enforced), and avoid any other non-deterministic primitive: ids and values must derive deterministically from the inputs so two identical runs produce identical results.",
+    "2. Zero imports, zero requires, zero external deps. Plain, fully-typed functions only. Assign module.exports. Never use Math.random() (validator-enforced), and avoid any other non-deterministic primitive: ids and values must derive deterministically from the inputs so two identical runs produce identical results.",
     "3. Full JSDoc on every exported function.",
     `4. Never reference these forbidden primitives anywhere in the module (validator-enforced): ${FORBIDDEN_PRIMITIVE_NAMES.join(", ")}.`,
     "5. Mark each requirement you implement with a \"// req-N\" comment on the implementing function.",
@@ -593,6 +600,14 @@ export function p6SynthesisSystemPrompt(): string {
     // (documented on `unawaitedAsyncValueUses`), so the prompt must not imply the
     // validator catches those (the same over-claim 335-1 4B corrected for rule 2).
     "9. When you call a function that is ASYNCHRONOUS (declared `async` — whether an earlier file exports it or this module declares it), you MUST `await` the call before reading any property off its result or destructuring it: `const x = await getProperty(id); x.ok` — never `const x = getProperty(id); x.ok`. An un-awaited async call reads `undefined` off a Promise and leaks an unhandled rejection. The validator refuses this for direct calls, `this`-receiver calls inside the declaring class, and optional calls (`f?.(…)`); it cannot see a call through a named receiver (`obj.m()`), an indirect invocation (`f.call(…)` / `(f)(…)`), or a Promise-returner not spelled `async`, so the duty is yours in those cases.",
+    // W52/338-1 follow-up: the emitted tree is compiled with `tsc --noEmit`
+    // under `strict: true` (scaffold.ts tsconfigJson) — an unannotated
+    // parameter is TS7006 (`noImplicitAny`) and an undeclared named type is
+    // TS2304, so a module written in plain JS style fails the product's OWN
+    // declared typecheck. The worked example above is annotated for the same
+    // reason: the model imitates it (338-3's keyed run hit TS7006 on all 12
+    // generated functions; 338-2 reproduced `dispatch.ts(11,21) TS7006`).
+    "10. TypeScript STRICT mode is on for the emitted tree (`noImplicitAny`): annotate EVERY function parameter and its return type. Use ONLY built-in types (string, number, boolean, unknown, any, object, `T[]`) or named types you DECLARE in this same module (`type X = {...};` / `interface X {...}`) — never reference a named domain type (e.g. `FlipProjectInput`) unless you declare it here, because an undeclared name fails the compile. Example: `function create(input: { id: string }): Promise<{ id: string }> { ... }`. An unannotated parameter fails the emitted tree's own `tsc --noEmit` compile (TS7006), which blocks the product.",
   ].join("\n");
 }
 
@@ -1819,11 +1834,24 @@ export function specGraphJobTargets(
 }
 
 /**
+ * W52/338-1: label/fn comparison form — lowercase alphanumerics only. The old
+ * `name.toLowerCase().includes(label.toLowerCase())` could never bind a
+ * HYPHENATED label: `runFollowUp` (from `deriveTypeSignatures`) does not
+ * contain the substring `follow-up`, so the declared job `follow-up`
+ * (algorithms.ts LEX) was permanently unbound. Separators are noise between a
+ * camelCase function name and a hyphen/space label; strip them on both sides.
+ */
+function normalizedLabelForm(s: string): string {
+  return String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
  * Deterministic signature→job binding. Each signature binds to the FIRST job
- * target (graph order) whose label appears case-insensitively in the
- * signature's function name; a signature with no parseable function name or no
- * label hit stays in `leftover` (expand order kept end-to-end). `bound[i]`
- * holds target i's own signatures in expand order.
+ * target (graph order) whose label appears in the signature's function name
+ * (case- and separator-insensitive — see `normalizedLabelForm`); a signature
+ * with no parseable function name or no label hit stays in `leftover` (expand
+ * order kept end-to-end). `bound[i]` holds target i's own signatures in expand
+ * order.
  */
 export function bindSignaturesToJobTargets(
   typeSignatures: readonly string[],
@@ -1836,7 +1864,7 @@ export function bindSignaturesToJobTargets(
     const name = signatureFunctionNames([raw])[0] ?? null;
     const idx = name === null
       ? -1
-      : targets.findIndex((t) => name.toLowerCase().includes(t.label.toLowerCase()));
+      : targets.findIndex((t) => normalizedLabelForm(name).includes(normalizedLabelForm(t.label)));
     if (idx >= 0) bound[idx]!.push(raw);
     else leftover.push(raw);
   }
@@ -2039,6 +2067,71 @@ export function treeChunkPlanCensus(
     paths: plan.map((c) => c.path),
     legacy: plan.every((c) => typeof c.nodeId !== "string" || c.nodeId.length === 0),
   };
+}
+
+/**
+ * W52/338-1 — THE spec-driven coverage rule. The keyed P6 plan used to be built
+ * from the model's emitted `typeSignatures` alone, so a declared spec-graph job
+ * the model happened not to name got NO `src/jobs/<label>.ts` file at all: the
+ * same brief could emit 7 modules on one run and 5 on the next (`fixes/337_0_parent.md`
+ * §5; run B's unbound `["track"]`, `codegen.server.test.ts:4400-4412`). This
+ * reconciles the model spec with the DETERMINISTIC capability floor:
+ *
+ *   - the declared job targets come from `project.specGraph` (pure A5 output);
+ *   - each target is already bound when any model signature binds to its label;
+ *   - a target no model signature binds gets `deriveTypeSignatures`' own pair
+ *     (`algorithms.ts` — the lattice capability floor), APPENDED after the model
+ *     signatures so the model's own chunks and order are never disturbed.
+ *
+ * Because `lattice`/`specGraph` are pure functions of the brief, the planned
+ * `src/jobs/*.ts` SET is now a function of the brief, not of the model's
+ * emission. Pure + deterministic; no spec graph (or no declared job) ⇒ the input
+ * list is returned unchanged (byte-identity for the legacy/no-job paths).
+ */
+export function reconcilePlanTypeSignatures(
+  project:
+    | {
+        specGraph?: { nodes?: readonly { id?: unknown; file?: unknown; purpose?: unknown }[] } | null;
+        lattice?: { jobs?: readonly string[]; entities?: readonly string[] } | null;
+      }
+    | null
+    | undefined,
+  typeSignatures: readonly string[],
+): { typeSignatures: string[]; added: string[]; addedLabels: string[] } {
+  const seen = new Set<string>();
+  const sigs: string[] = [];
+  for (const raw of typeSignatures ?? []) {
+    if (typeof raw !== "string" || !raw.trim() || seen.has(raw)) continue;
+    seen.add(raw);
+    sigs.push(raw);
+  }
+  const targets = specGraphJobTargets(project);
+  if (targets.length === 0) return { typeSignatures: sigs, added: [], addedLabels: [] };
+  const { bound } = bindSignaturesToJobTargets(sigs, targets);
+  // The floor's own job list is the lattice when present; for an imported
+  // payload that carries a spec graph but no lattice, derive it from the
+  // declared labels so the rule still holds (neutral `record` return entity).
+  const latticeJobs = Array.isArray(project?.lattice?.jobs) ? project.lattice.jobs : [];
+  const latticeEntities = Array.isArray(project?.lattice?.entities) ? project.lattice.entities : [];
+  const floorLattice = {
+    jobs: latticeJobs.length > 0 ? [...latticeJobs] : targets.map((t) => t.label),
+    entities: latticeEntities.length > 0 ? [...latticeEntities] : ["record"],
+  };
+  const floorBound = bindSignaturesToJobTargets(deriveTypeSignatures(floorLattice), targets).bound;
+  const added: string[] = [];
+  const addedLabels: string[] = [];
+  targets.forEach((t, i) => {
+    if ((bound[i] ?? []).length > 0) return; // the model already covered this declared job
+    const fill = floorBound[i] ?? [];
+    if (fill.length === 0) return; // no floor exists (e.g. the sentinel job) — nothing to add
+    addedLabels.push(t.label);
+    for (const s of fill) {
+      if (seen.has(s)) continue;
+      seen.add(s);
+      added.push(s);
+    }
+  });
+  return { typeSignatures: [...sigs, ...added], added, addedLabels };
 }
 
 /**
@@ -3491,11 +3584,36 @@ function deterministicProvenance(inputHash: string): ArtifactProvenance {
   return { producer: "deterministic", timestamp: Date.now(), inputHash };
 }
 
+/**
+ * W52/338-1 follow-up (spine): the ONE verify-evidence hash formula — mirrors
+ * verify.ts applyVerifyOutcome's `fnv1a(finalSource \u0002 evidence \u0002
+ * caseCommitment)` so one witness covers every input the verifier produces.
+ * Before this the codegen twins hashed `source \u0002 evidence` only, so two
+ * outcomes whose source+evidence agreed but whose ORACLE CASE SET differed
+ * minted the same evidence hash (a genuine verification silently conflated
+ * with another). `source` plays verify.ts's `finalSource` role — the verified
+ * module bytes codegen records. (Known limit, unchanged: codegen hashes its
+ * cleaned `finalModule` while verify.ts hashes `outcome.finalSource`; a
+ * fence/trim difference between them can still make a re-apply miss the
+ * dedupe — reported, not silently papered over.)
+ */
+function verifyEvidenceHash(source: string, outcome: VerifyOutcome): string {
+  const caseCommitment = JSON.stringify(
+    (Array.isArray(outcome.cases) ? outcome.cases : []).map((c) => {
+      const row = c as { id?: unknown; expression?: unknown } | null | undefined;
+      return [
+        typeof row?.id === "string" ? row.id : "",
+        typeof row?.expression === "string" ? row.expression : "",
+      ];
+    }),
+  );
+  return String(fnv1a(`${source}\u0002${outcome.evidence}\u0002${caseCommitment}`));
+}
+
 function verifyOutcomeArtifact(finalModule: string, outcome: VerifyOutcome): StampedArtifact {
-  // 337-3: \u0002 separates the two hashed fields (verify.ts applyVerifyOutcome
-  // parity) — a bare concatenation conflated two different verified modules
-  // whose (module, evidence) concatenations collided.
-  const evidenceHash = String(fnv1a(`${finalModule}\u0002${outcome.evidence}`));
+  // W52/338-1: the shared verify-evidence formula (verify.ts parity) — the
+  // source/evidence boundary \u0002 AND the oracle case commitment.
+  const evidenceHash = verifyEvidenceHash(finalModule, outcome);
   const caseLines: string[] = [];
   for (const c of outcome.cases ?? []) {
     const row = c as { id?: unknown; expression?: unknown } | null | undefined;
@@ -3581,9 +3699,10 @@ function upgraded(
    *  the same opts/model resolution). Blank/null ⇒ no stamp, fail closed. */
   servedModel: string | null,
 ): Project {
-  // 337-3: same boundary rule as verifyOutcomeArtifact / verify.ts
-  // applyVerifyOutcome — this hash IS the "tested" lastTest.evidenceHash.
-  const evidenceHash = String(fnv1a(`${finalModule}\u0002${outcome.evidence}`));
+  // W52/338-1: the SAME shared verify-evidence formula verifyOutcomeArtifact
+  // and verify.ts applyVerifyOutcome use — this hash IS the "tested"
+  // lastTest.evidenceHash, so one formula covers every input.
+  const evidenceHash = verifyEvidenceHash(finalModule, outcome);
   // T5.4: the model-produced module's stamp — the SERVED model id + the
   // synthesis input hash (the persisted brief hash).
   const prov = modelProvenance(servedModel, specRecord?.briefHash ?? "");
@@ -3597,7 +3716,13 @@ function upgraded(
     ...(prov ? { provenance: prov } : {}),
   };
   const memoryId = "6-episodic-0.93";
-  const memory = [
+  // W52/338-1 follow-up (spine): the L4 verified-procedure row `verify.server`
+  // mints on a PASSED outcome was silently dropped here — the automated pass
+  // consumed the outcome but never wrote its lesson. Fold it into memory
+  // idempotently by row id (an existing twin is never duplicated), mirroring
+  // verify.ts applyVerifyOutcome's own capture.
+  const lesson = outcome.lesson;
+  const episodic = [
     ...(project.memory ?? []).filter((m) => m.id !== memoryId),
     {
       id: memoryId,
@@ -3607,7 +3732,8 @@ function upgraded(
       score: 0.93,
       source: "engine" as const,
     },
-  ].slice(0, 80);
+  ];
+  const memory = (lesson && !episodic.some((m) => m.id === lesson.id) ? [...episodic, lesson] : episodic).slice(0, 80);
   const artifacts = [
     ...(project.artifacts ?? []).filter(
       (a) =>
@@ -4176,24 +4302,41 @@ async function synthesizeChunkedTree(
   // first served id is the tree's served id. Null until a chunk is accepted
   // (⇒ no artifact stamp, fail closed).
   let servedModel: string | null = null;
+  // W52/338-1: the SPEC-DRIVEN coverage rule — reconcile the model's emitted
+  // signatures with the deterministic capability floor BEFORE the plan, so every
+  // declared spec-graph job maps to a planned file by rule (see
+  // reconcilePlanTypeSignatures). No declared job unbound ⇒ `treeSpec` is the
+  // same reference and every downstream byte/prompt is unchanged.
+  const reconciled = reconcilePlanTypeSignatures(project, specRecord.typeSignatures);
+  const treeSpec: NonNullable<Project["implementationSpec"]> =
+    reconciled.added.length > 0 ? { ...specRecord, typeSignatures: reconciled.typeSignatures } : specRecord;
   // fixes/216k (105 TA-15, W6-L1 D1/D3): the chunk→file plan + its consumption
   // order are computed here from the project's own spec graph. `plan[i].path`
   // IS the file path (a job node's `src/jobs/<label>.ts` for job-keyed chunks);
   // zero job nodes ⇒ treeChunkPlan's legacy branch ⇒ identical paths, identical
   // per-chunk prompts (pre-216k byte parity). `plan.length` is the honest chunk
   // total: every plan row is exactly one synthesis call.
-  const plan = orderTreeChunks(treeChunkPlan(project, specRecord.typeSignatures));
+  const plan = orderTreeChunks(treeChunkPlan(project, treeSpec.typeSignatures));
   // fixes/153 (P1): per-attempt p6.synthesis.attempt journal — the observer
   // closure carries the chunk context so every model call of chunk i reports
   // chunk (i+1)/total + a sequential per-chunk attempt number.
   const attemptLogs: JsonLog[] = [...(project.logs ?? [])];
+  // W52/338-1: legible record of what the coverage rule ADDED — the declared
+  // jobs no model signature named, now planned from the deterministic floor.
+  // Nothing is appended when the model already named every declared job.
+  if (reconciled.added.length > 0) {
+    const detail = `declared job node(s) no model signature named — planned from the deterministic capability floor: ${reconciled.addedLabels.join(", ")} (+${reconciled.added.length} signature(s) from deriveTypeSignatures)`;
+    if (!attemptLogs.some((l) => l.event === "p6.tree.plan.reconciled" && l.detail === detail)) {
+      attemptLogs.push({ ts: Date.now(), phase: 6, level: "info", event: "p6.tree.plan.reconciled", detail });
+    }
+  }
   // W45/331-4: the plan-side shortfall — a declared spec-graph job whose label no
   // typeSignature names gets no chunk and (in tree mode) no emitted file. Count it
   // and persist the row on the project, so it survives into the packet/export
   // instead of vanishing with the scaffold's in-process warnings array. Nothing is
   // appended when every declared job is planned (byte-identity for the pipelines).
   {
-    const census = treeChunkPlanCensus(project, specRecord.typeSignatures);
+    const census = treeChunkPlanCensus(project, treeSpec.typeSignatures);
     if (census.unbound.length > 0) {
       // W46/332-1 (P2): the full partition rides the row, so the coverage
       // shortfall is legible (and deterministic) instead of a bare name list.
@@ -4212,8 +4355,9 @@ async function synthesizeChunkedTree(
       { limit: EXPAND_LESSON_RANK_LIMIT, proven },
     );
     // R10-f01 (W39 Z2): the same project-level contract block on every chunk.
+    // W52/338-1: `treeSpec` carries the reconciled (spec-driven) signature set.
     const user = withSynthesisRefusalContext(
-      withGateRepairContext(p6SynthesisChunkUserPrompt(brief, specRecord, chunk.signatures, prior, lessonLines, project.contracts), gateRepair),
+      withGateRepairContext(p6SynthesisChunkUserPrompt(brief, treeSpec, chunk.signatures, prior, lessonLines, project.contracts), gateRepair),
       synthesisRefusal,
     );
     // T-107.1 (216r): per-chunk patch-repair sink — the chunk plan's path IS
@@ -4288,7 +4432,7 @@ async function synthesizeChunkedTree(
   const materialized = materializeImportableTree(accepted);
   return treeUpgraded(
     withAttemptLogs(project, attemptLogs),
-    specRecord,
+    treeSpec,
     materialized.files,
     materialized.entrySource,
     accepted.length,

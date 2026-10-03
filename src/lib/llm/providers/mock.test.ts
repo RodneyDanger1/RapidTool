@@ -340,25 +340,45 @@ function e2eChunkModule(names: readonly string[]): string {
 describe("mock provider — E2E (brief → mock synthesis → emitted tree files)", () => {
   it("runs the real P6 chunked pipeline over canned envelopes and emits the tree verbatim (zero network)", async () => {
     const { applyPhaseResult, emptyProject } = await import("../../engine.ts");
-    const { TREE_ENTRY_PATH, chunkTypeSignatures, liveP6Synthesis, signatureFunctionNames } = await import(
-      "../../codegen.server.ts"
-    );
+    const {
+      TREE_ENTRY_PATH,
+      liveP6Synthesis,
+      reconcilePlanTypeSignatures,
+      treeChunkPlan,
+      orderTreeChunks,
+      signatureFunctionNames,
+    } = await import("../../codegen.server.ts");
     const { emitProject } = await import("../../headless.ts");
     const { parseExpandedSpecJson } = await import("../../prompt-engine.ts");
 
-    // The chunk grouping the pipeline itself will compute — used to CAN the
-    // envelopes the mock will serve (the pipeline's own plan is what is run).
-    const groups = chunkTypeSignatures(E2E_SPEC.typeSignatures);
-    assert.equal(groups.length, 3, "fixture precondition: 20 signatures chunk 8/8/4");
+    // 338-1 (W52): the pipeline's plan is now SPEC-DRIVEN —
+    // reconcilePlanTypeSignatures appends the deterministic floor chunk for every
+    // declared spec-graph job the model's signatures do not bind, so the plan is a
+    // pure function of the brief. Compute it the SAME way the pipeline does and CAN
+    // one envelope per plan row (the old fixture canned
+    // chunkTypeSignatures(E2E_SPEC.typeSignatures) = 3, which the reconciled plan
+    // outgrew — 338-1 log §7).
+    const base = {
+      ...applyPhaseResult(emptyProject({ name: "RentLedger", brief: E2E_BRIEF }), 6),
+      kind: "app" as const,
+    };
+    const plan = orderTreeChunks(
+      treeChunkPlan(base, reconcilePlanTypeSignatures(base, E2E_SPEC.typeSignatures).typeSignatures),
+    );
+    assert.equal(
+      plan.length,
+      6,
+      "fixture precondition (338-1): 20 model signatures + the declared-job floor chunks plan to 6",
+    );
 
-    // 1 expansion envelope + one synthesis envelope per chunk.
+    // 1 expansion envelope + one synthesis envelope per plan chunk.
     const mock = createMockProvider([
       okEnvelope(JSON.stringify(E2E_SPEC)),
-      ...groups.map((g) =>
+      ...plan.map((row) =>
         okEnvelope(
           JSON.stringify({
-            module: e2eChunkModule(signatureFunctionNames(g)),
-            exports: signatureFunctionNames(g),
+            module: e2eChunkModule(signatureFunctionNames(row.signatures)),
+            exports: signatureFunctionNames(row.signatures),
             reqTrace: {},
           }),
         ),
@@ -390,13 +410,16 @@ describe("mock provider — E2E (brief → mock synthesis → emitted tree files
     const network = noNetworkTripwire();
     const dir = mkdtempSync(join(tmpdir(), "rapidtool-mock-e2e-"));
     try {
-      const base = { ...applyPhaseResult(emptyProject({ name: "RentLedger", brief: E2E_BRIEF }), 6), kind: "app" as const };
       const q = await liveP6Synthesis(base, { complete: mock.complete, expand, verify });
 
       // (a) the synthesis really happened, through the mock, over the real prompts.
       assert.notEqual(q.generatedSource, base.generatedSource, "the deterministic floor was replaced by the synthesized tree entry");
       assert.equal(verifyCalls, 0, "the chunked tree path never calls the verify leg");
-      assert.equal(mock.calls().length, 4, "1 expansion + 3 chunk synthesis calls — exactly what the pipeline asked");
+      assert.equal(
+        mock.calls().length,
+        1 + plan.length,
+        "1 expansion + one synthesis call per spec-driven plan chunk — exactly what the pipeline asked",
+      );
       assert.equal(mock.remaining(), 0, "every canned envelope was consumed (none unused)");
       for (const call of mock.calls().slice(1)) {
         assert.ok(call.prompt.includes(E2E_BRIEF), "every chunk prompt carries the brief");
@@ -405,10 +428,10 @@ describe("mock provider — E2E (brief → mock synthesis → emitted tree files
 
       // (b) the emitted tree files exist at their expected paths, verbatim.
       const tree = q.generatedTree ?? [];
-      assert.equal(tree.length, 4, "A0 barrel + one file per chunk");
+      assert.equal(tree.length, 1 + plan.length, "A0 barrel + one file per plan chunk");
       assert.deepEqual(
         tree.map((t) => t.path),
-        [TREE_ENTRY_PATH, "src/jobs/rent.ts", "src/jobs/rent-2.ts", "src/jobs/rent-3.ts"],
+        [TREE_ENTRY_PATH, ...plan.map((c) => c.path)],
       );
       const emitted = await emitProject(q, dir, { redTree: "probe" });
       assert.equal(emitted.ok, true, emitted.ok ? "" : emitted.error);

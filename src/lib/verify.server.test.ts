@@ -42,12 +42,12 @@ import {
 import { runnerAvailable } from "./node-runner.server.ts";
 import { createTokenBudget, emptyLedger } from "./token-ledger.ts";
 import { oracleToCaseSeeds } from "./dod.ts";
-import type { OracleTest } from "./types.ts";
+import type { OracleTest, Project } from "./types.ts";
 // 216i (112 T1/T2): the lesson-loop pins below consume the client-safe
 // consumer half (verify.ts applyVerifyOutcome) over a real seeded project.
 import { applyVerifyOutcome } from "./verify.ts";
 // 331 V1: the L4 anchor contract this seam forwards cases.map(c => c.id) into.
-import { verifyOutcomeLesson } from "./knowledge.ts";
+import { failureLessonFromRecord, verifyOutcomeLesson } from "./knowledge.ts";
 import { seedProject } from "./testing/fixtures.ts";
 
 const available = runnerAvailable();
@@ -1072,5 +1072,113 @@ describe("fixes/330 P3 — runCases reference gate rejects data-only mentions", 
       { id: "noise", expression: "({add:1}).add === 1" },
     ]);
     assert.equal(res.pass, true, `one real reference grounds the set: ${JSON.stringify(res)}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 338-6 — a FORGED verdict cannot pass. The harness emits ORACLE_RESULT lines
+// through a console bound BEFORE the module runs; the parser accepts each
+// expected id exactly once and fails the run on any unknown/duplicate line.
+// These pins prove a module that prints its own verdict line (the one shape a
+// hostile payload would use to mint a green without running) is refused.
+// ---------------------------------------------------------------------------
+describe("338-6 — a forged ORACLE_RESULT line can never mint a pass", () => {
+  it("a module printing a fake pass for the real id is refused (real case fails)", { skip: !available }, async () => {
+    const src = 'exports.add = (a, b) => a + b;\nconsole.log("ORACLE_RESULT c1 pass");';
+    const res = await runCases(src, [{ id: "c1", expression: "add(2,3) === 99" }]);
+    assert.equal(res.pass, false, `the forged line must not carry the run: ${JSON.stringify(res)}`);
+  });
+
+  it("a module printing an UNKNOWN oracle id is refused even when the real case passes", { skip: !available }, async () => {
+    const src = 'exports.add = (a, b) => a + b;\nconsole.log("ORACLE_RESULT ghost pass");';
+    const res = await runCases(src, [{ id: "c1", expression: "add(2,3) === 5" }]);
+    assert.equal(res.pass, false, `an unknown id is forged evidence: ${JSON.stringify(res)}`);
+  });
+
+  it("control: the same module without the forged line passes", { skip: !available }, async () => {
+    const src = "exports.add = (a, b) => a + b;";
+    const res = await runCases(src, [{ id: "c1", expression: "add(2,3) === 5" }]);
+    assert.equal(res.pass, true, JSON.stringify(res));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 338-6 — the learning loop is real and load-bearing: a lesson HARVESTED from
+// a real machine-run failure (the anchored L3 record the verify seam mints),
+// persisted into project.memory by applyVerifyOutcome, is RANKED and SEEDED
+// into the ACTUAL P6 expansion site's `lessons` argument (codegen
+// liveP6Synthesis — the same call `expandBrief` receives as its advisory list).
+// Deterministic: every model seam is injected, so no key is used and the fetch
+// tripwire proves no network was touched.
+// ---------------------------------------------------------------------------
+describe("338-6 — a harvested lesson changes the P6 expansion input", () => {
+  it("a failed run's anchored lesson rides the expansion site's `lessons` argument", { skip: !available }, async () => {
+    const { liveP6Synthesis } = await import("./codegen.server.ts");
+    const brief = "Build a kanban board with drag-and-drop task columns";
+    const src = "exports.add = (a, b) => a + b;";
+    // 1. a real machine-run failure.
+    const run = await runCases(src, [{ id: "kanban-column-order", expression: "add(2,3) === 99" }]);
+    assert.equal(run.pass, false);
+    const failingIds = run.results.filter((r) => !r.pass).map((r) => r.id);
+    const evidence = `machine-run cases still failing after 1 iterations: ${run.results
+      .map((f) => `${f.id}: ${f.detail}`)
+      .join("; ")}`;
+    // 2. the anchored L3 lesson (the verify seam's own harvest gate).
+    const mined = failureLessonFromRecord(
+      { kind: "verify-failed", phase: 6, classCode: null, anchors: failingIds, detailTail: evidence },
+      { iterations: 1 },
+    );
+    assert.equal(mined.refused, false, "a real anchored failure mints a lesson");
+    if (mined.refused) return;
+    // 3. persistence into project.memory (the client-safe consumer half).
+    const base = { ...seedProject(), brief, implementationSpec: undefined };
+    const applied = applyVerifyOutcome(base, {
+      status: "failed",
+      iterations: 1,
+      evidence,
+      finalSource: src,
+      cases: [{ id: "kanban-column-order", expression: "add(2,3) === 99" }],
+      lesson: mined.lesson,
+    });
+    assert.ok(
+      (applied.memory ?? []).some((m) => m.id === mined.lesson.id),
+      "the lesson row is persisted to memory",
+    );
+    // 4. the ACTUAL expansion site, with the model seam captured.
+    const capture = async (project: Project): Promise<readonly string[] | undefined> => {
+      let got: readonly string[] | undefined;
+      await liveP6Synthesis(project, {
+        expand: async (_b: string, lessons?: readonly string[]) => {
+          got = lessons;
+          return { ok: false as const, reason: "error" as const, error: "capture-only" };
+        },
+        complete: async () => ({ ok: false as const, reason: "error" as const, error: "never called" }),
+        verify: async () => ({ status: "error" as const, iterations: 0, evidence: "never called" }),
+      });
+      return got;
+    };
+    const prev = process.env.DEEPSEEK_API_KEY;
+    let networkTouched = false;
+    const realFetch = globalThis.fetch;
+    process.env.DEEPSEEK_API_KEY = "sk-3386-no-network";
+    globalThis.fetch = (async () => {
+      networkTouched = true;
+      throw new Error("network must not be touched");
+    }) as typeof fetch;
+    try {
+      const without = await capture(base);
+      const withLesson = await capture(applied);
+      assert.equal(without, undefined, "with no lesson the expansion input is the legacy shape");
+      assert.ok(
+        (withLesson ?? []).some((l) => l.includes("L3 verify-failure")),
+        `the harvested lesson rides the expansion input: ${JSON.stringify(withLesson)}`,
+      );
+      assert.notDeepEqual(withLesson, without, "the expansion input CHANGED");
+      assert.equal(networkTouched, false, "no keyed call: every model seam was injected");
+    } finally {
+      globalThis.fetch = realFetch;
+      if (prev === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = prev;
+    }
   });
 });

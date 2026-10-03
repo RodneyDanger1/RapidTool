@@ -2305,13 +2305,21 @@ test("W46 332-4 (S3) — a valueless value flag is REFUSED coded before dispatch
 /**
  * W48 · 334-4 (S2) introduced exit 5 for a green tree whose declared scripts
  * never ran; W49 · 335-4 made that strict exit OPT-IN (`--require-verified`).
- * A fresh tree has no `node_modules/`, so its toolchain is ALWAYS unverified —
- * a default that never exits 0 is not a usable pass/fail. The DEFAULT is now
- * exit 0 and the honest signal rides the envelope (`unverified`,
- * `declaredScriptsVerified`, `unverifiedDeclaredScripts`); `--require-verified`
- * restores the strict exit 5. `tree-run` carries the same contract.
+ *
+ * 338-2 (W52) SUPERSEDED the premise this leg was written on. Back then a fresh
+ * tree had no `node_modules/`, so its declared `tsc`/`vite` never ran and its
+ * toolchain was ALWAYS unverified. The tree-run now resolves those tools from
+ * the repo's shared node_modules and runs them, and 338-2's floor-template fix
+ * makes a fresh emitted tree type-clean — so a fresh tree is now GREEN **and
+ * VERIFIED** (`declaredScriptsVerified: true`, exit 0, no `unverified` flag).
+ *
+ * The exit-5 `--require-verified` path still exists for a tree whose declared
+ * tool GENUINELY cannot resolve, so this leg CONSTRUCTS that condition honestly
+ * (one declared script points at a tool no `node_modules/.bin` provides) rather
+ * than deleting the coverage. `emit --run` re-emits and would overwrite the
+ * edit, so the unverified condition rides the read-only `tree-run` verb.
  */
-test("W49 · 335-4: emit --run / tree-run default to exit 0 on a green-but-unverified tree; --require-verified opts into exit 5", () => {
+test("W49 · 335-4 / 338-2: a fresh tree is now VERIFIED (exit 0, no unverified flag); --require-verified still exits 5 on a genuinely unresolvable declared tool", () => {
   const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-unverified-"));
   const env = { ...process.env };
   for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) {
@@ -2320,10 +2328,10 @@ test("W49 · 335-4: emit --run / tree-run default to exit 0 on a green-but-unver
   const BRIEF =
     "A small internal tool that reconciles invoice line items for a three-person accounting team.";
   try {
-    const proj = join(cwd, "unverified.json");
+    const proj = join(cwd, "verified.json");
     const created = spawnSync(
       process.execPath,
-      ["--experimental-strip-types", CLI_PATH, "create", "--brief", BRIEF, "--name", "Unverified", "--out", proj],
+      ["--experimental-strip-types", CLI_PATH, "create", "--brief", BRIEF, "--name", "Verified", "--out", proj],
       { cwd, env, encoding: "utf8", timeout: 120_000 },
     );
     assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
@@ -2337,44 +2345,34 @@ test("W49 · 335-4: emit --run / tree-run default to exit 0 on a green-but-unver
     assert.equal(
       ran.status,
       0,
-      `a green tree defaults to exit 0 (the envelope names the unverified toolchain); red is 1.\nstdout: ${ran.stdout}\nstderr: ${ran.stderr}`,
+      `338-2: a fresh tree's declared toolchain now RUNS and passes — exit 0.\nstdout: ${ran.stdout}\nstderr: ${ran.stderr}`,
     );
     const envelope = JSON.parse(ran.stdout);
-    assert.equal(envelope.ok, true, "`ok` is NOT redefined — nothing ran red");
-    assert.equal(envelope.code, undefined, "an unverified-but-green tree is not an error class");
-    assert.equal(envelope.declaredScriptsVerified, false, "the envelope names the unverified toolchain");
-    assert.equal(envelope.unverified, true);
-    assert.ok(
-      Array.isArray(envelope.unverifiedDeclaredScripts) && envelope.unverifiedDeclaredScripts.includes("typecheck"),
-      `unverifiedDeclaredScripts must name typecheck, saw ${JSON.stringify(envelope.unverifiedDeclaredScripts)}`,
-    );
+    assert.equal(envelope.ok, true, "the tree is green — nothing ran red");
+    assert.equal(envelope.code, undefined, "a green tree is not an error class");
     assert.equal(
-      envelope.unverifiedDeclaredScripts.includes("build"),
+      envelope.declaredScriptsVerified,
       true,
-      "the declared build script is unverified too",
+      "338-2: the declared typecheck/build genuinely ran and passed",
     );
-    assert.match(String(envelope.unverifiedNote), /UNVERIFIED/);
+    assert.notEqual(envelope.unverified, true, "a verified tree carries no unverified flag");
+    assert.equal(envelope.unverifiedDeclaredScripts, undefined, "nothing declared was left unrun");
     // The embedded verdict carries the same truth (one source, not a second copy).
     assert.equal(envelope.treeRun.ok, true);
-    assert.deepEqual(envelope.treeRun.unverifiedDeclaredScripts, envelope.unverifiedDeclaredScripts);
+    assert.equal(envelope.treeRun.declaredScriptsVerified, true);
 
-    // --require-verified opts INTO the strict exit 5 for the same state.
-    const strict = spawnSync(
+    // --require-verified on a VERIFIED tree: there is nothing to be strict about.
+    const strictVerified = spawnSync(
       process.execPath,
-      ["--experimental-strip-types", CLI_PATH, "emit", "--project", proj, "--out", tree, "--run", "--require-verified"],
+      ["--experimental-strip-types", CLI_PATH, "emit", "--project", proj, "--out", `${tree}-strict`, "--run", "--require-verified"],
       { cwd, env, encoding: "utf8", timeout: 120_000 },
     );
     assert.equal(
-      strict.status,
-      5,
-      `--require-verified must turn the green-but-unverified state into exit 5.\nstdout: ${strict.stdout}\nstderr: ${strict.stderr}`,
+      strictVerified.status,
+      0,
+      `--require-verified stays 0 on a verified tree.\nstdout: ${strictVerified.stdout}\nstderr: ${strictVerified.stderr}`,
     );
-    const strictEnv = JSON.parse(strict.stdout);
-    assert.equal(strictEnv.ok, true, "the strict exit is not an error class — `ok` stays true");
-    assert.equal(strictEnv.code, undefined, "no RT_E code rides the strict exit");
-    assert.equal(strictEnv.unverified, true);
 
-    // tree-run carries the same default + opt-in strict contract.
     const trDefault = spawnSync(
       process.execPath,
       ["--experimental-strip-types", CLI_PATH, "tree-run", "--dir", tree],
@@ -2383,18 +2381,55 @@ test("W49 · 335-4: emit --run / tree-run default to exit 0 on a green-but-unver
     assert.equal(
       trDefault.status,
       0,
-      `tree-run on the same unverified tree must default to exit 0.\nstdout: ${trDefault.stdout}\nstderr: ${trDefault.stderr}`,
+      `tree-run on the fresh verified tree exits 0.\nstdout: ${trDefault.stdout}\nstderr: ${trDefault.stderr}`,
     );
-    const trStrict = spawnSync(
+    const trEnv = JSON.parse(trDefault.stdout);
+    assert.equal(trEnv.declaredScriptsVerified, true, "tree-run agrees the declared toolchain ran");
+
+    // TEETH: construct the genuine unverified condition — a DECLARED script whose
+    // tool no node_modules/.bin can resolve. `tree-run` is read-only, so edit the
+    // emitted package.json and re-run; the honest signal + exit-5 both survive.
+    const pkgPath = join(tree, "package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+    pkg.scripts = { ...pkg.scripts, typecheck: "rapidtool-not-a-real-tool-338 --noEmit" };
+    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+
+    const unv = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "tree-run", "--dir", tree],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(
+      unv.status,
+      0,
+      `a green-but-unverified tree still defaults to exit 0 (red is 1).\nstdout: ${unv.stdout}\nstderr: ${unv.stderr}`,
+    );
+    const unvEnv = JSON.parse(unv.stdout);
+    assert.equal(unvEnv.ok, true, "`ok` is NOT redefined — nothing ran red");
+    assert.equal(unvEnv.code, undefined, "an unverified-but-green tree is not an error class");
+    assert.equal(unvEnv.declaredScriptsVerified, false, "the envelope names the unverified toolchain");
+    assert.equal(unvEnv.unverified, true);
+    assert.ok(
+      Array.isArray(unvEnv.unverifiedDeclaredScripts) && unvEnv.unverifiedDeclaredScripts.includes("typecheck"),
+      `unverifiedDeclaredScripts must name typecheck, saw ${JSON.stringify(unvEnv.unverifiedDeclaredScripts)}`,
+    );
+    assert.match(String(unvEnv.unverifiedNote), /UNVERIFIED/);
+    assert.deepEqual(unvEnv.treeRun.unverifiedDeclaredScripts, unvEnv.unverifiedDeclaredScripts);
+
+    const unvStrict = spawnSync(
       process.execPath,
       ["--experimental-strip-types", CLI_PATH, "tree-run", "--dir", tree, "--require-verified"],
       { cwd, env, encoding: "utf8", timeout: 120_000 },
     );
     assert.equal(
-      trStrict.status,
+      unvStrict.status,
       5,
-      `tree-run --require-verified must exit 5 on the green-but-unverified tree.\nstdout: ${trStrict.stdout}\nstderr: ${trStrict.stderr}`,
+      `--require-verified must turn the genuinely-unverified state into exit 5.\nstdout: ${unvStrict.stdout}\nstderr: ${unvStrict.stderr}`,
     );
+    const unvStrictEnv = JSON.parse(unvStrict.stdout);
+    assert.equal(unvStrictEnv.ok, true, "the strict exit is not an error class — `ok` stays true");
+    assert.equal(unvStrictEnv.code, undefined, "no RT_E code rides the strict exit");
+    assert.equal(unvStrictEnv.unverified, true);
 
     // README-cli.md documents the class and the envelope contract.
     assert.match(readmeText, /Exit 5/, "README-cli.md must document exit 5");

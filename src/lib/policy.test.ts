@@ -204,6 +204,61 @@ describe("policy — hitl.force can never be self-approved (Rule B)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 338-4 (W52) — the proof that the doctor's fixture term must STAY human.
+// The machine drafts the acceptance cases (brief-fixtures.ts), so a machine
+// seat approving them would set the bar it is then graded against:
+// self-certification, not autonomy. This suite pins the one satisfiable path
+// (a token-verified human seat) and the machine deny that makes the doctor's
+// `humanFixtures` term honest.
+// ---------------------------------------------------------------------------
+describe("policy — fixtures.approve can never be self-approved (338-4)", () => {
+  const RESOURCE = "fixtures:build.json";
+
+  it("DENIES every machine seat — the autopilot door may not decide the acceptance bar", () => {
+    for (const seat of [HARNESS, AUTOPILOT]) {
+      const verdict = evaluatePolicy("fixtures.approve", RESOURCE, { actor: seat });
+      assert.equal(verdict.decision, "deny", `${seatLabel(seat)} must not approve fixtures`);
+      assert.equal(reasonId(verdict), "force-requires-human-seat");
+      assert.equal(verdict.fallback, "human-seat-token");
+      assert.ok(
+        verdict.reason.includes(`an ${seatLabel(seat)} seat may never decide the acceptance bar`),
+        `the clause names what a machine may not do here (decide the bar), not "force": ${verdict.reason}`,
+      );
+    }
+  });
+
+  it("DENIES a bare approval and an unrecognized seat (default-deny)", () => {
+    const bare = evaluatePolicy("fixtures.approve", RESOURCE, {});
+    assert.equal(bare.decision, "deny");
+    assert.equal(reasonId(bare), "no-seat");
+    assert.equal(bare.fallback, "human-seat-token");
+    const forged = evaluatePolicy("fixtures.approve", RESOURCE, { actor: { decidedBy: "robot", seat: "x" } });
+    assert.equal(forged.decision, "deny");
+    assert.equal(reasonId(forged), "unknown-seat");
+  });
+
+  it("DENIES the human seat without the out-of-band token", () => {
+    const verdict = evaluatePolicy("fixtures.approve", RESOURCE, { actor: HUMAN });
+    assert.equal(verdict.decision, "deny");
+    assert.equal(reasonId(verdict), "human-seat-unverified");
+  });
+
+  it("ALLOWS only the token-verified human seat — the one satisfiable path", () => {
+    const verdict = evaluatePolicy("fixtures.approve", RESOURCE, { actor: HUMAN, ...VERIFIED });
+    assert.equal(verdict.decision, "allow");
+    assert.equal(reasonId(verdict), "human-seat-token-verified");
+  });
+
+  it("keeps hitl.force's own clause byte-identical (the clause is per-action)", () => {
+    const forced = evaluatePolicy("hitl.force", "gate:P6", { actor: HARNESS });
+    assert.equal(
+      forced.reason,
+      `force-requires-human-seat — an ${seatLabel(HARNESS)} seat may never force past a human gate; only a verified human seat may.`,
+    );
+  });
+});
+
 describe("policy — machine writes and the uniform seat rule", () => {
   it("allows tree.emit / repair.apply under either autopilot seat", () => {
     for (const action of ["tree.emit", "repair.apply"] as const) {

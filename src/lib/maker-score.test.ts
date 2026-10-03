@@ -25,6 +25,7 @@ import {
   type MakerScoreInput,
   type MakerScoreCard,
 } from "./maker-score.ts";
+import { fixtureAcceptanceState } from "./fixtures.ts";
 import type { Project } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 
@@ -328,6 +329,64 @@ describe("M2 runs", () => {
     const c = m2Runs(input({ treeRun: { ok: true, dir: "research/eval-out/x", testsPass: 4, testsFail: 0 } }));
     assert.equal(c.score, 1);
     assert.match(c.evidence, /treeRun ok/);
+  });
+
+  // -------------------------------------------------------------------------
+  // 338-4 (W52): the score and the doctor's acceptance criterion read ONE
+  // derivation — a behavioral pass is acceptance only over a HUMAN-approved
+  // bar. These build the state with the real `fixtureAcceptanceState` (not a
+  // literal), so a drift in the derivation reds them.
+  // -------------------------------------------------------------------------
+
+  test("338-4: behavioral pass over a human-approved bar keeps M1/M2 = 1", () => {
+    const acceptance = fixtureAcceptanceState([
+      { id: "a", approval: "approved", decidedBy: "human" },
+      { id: "b", approval: "approved", decidedBy: "human" },
+    ]);
+    assert.equal(acceptance.state, "human-approved", "fixture precondition");
+    const pass = input({
+      treeRun: { ok: true, dir: "d", testsPass: 3, testsFail: 0 },
+      behavioral: { pass: 3, fail: 0, acceptance },
+    });
+    assert.equal(m1Substance(pass).score, 1);
+    assert.match(m1Substance(pass).evidence, /behavioral pass 3/);
+    assert.equal(m2Runs(pass).score, 1);
+  });
+
+  test("338-4: a pending bar scores 0 with the doctor's own sentence (waiting ≠ accepted)", () => {
+    const acceptance = fixtureAcceptanceState([{ id: "a", approval: "pending" }]);
+    const c = m1Substance(
+      input({
+        treeRun: { ok: true, dir: "d", testsPass: 3, testsFail: 0 },
+        behavioral: { pass: 3, fail: 0, acceptance },
+      }),
+    );
+    assert.equal(c.score, 0);
+    assert.match(c.evidence, /await a human decision/);
+    assert.match(c.evidence, /--seat autopilot/, "the machine door is named as the door that may not approve");
+  });
+
+  test("338-4: an autopilot-decided bar is not acceptance — M2 = 0, never scored as human", () => {
+    const acceptance = fixtureAcceptanceState([{ id: "a", approval: "approved", decidedBy: "autopilot" }]);
+    assert.equal(acceptance.state, "machine-decided", "fixture precondition");
+    const c = m2Runs(
+      input({
+        treeRun: { ok: true, dir: "d", testsPass: 3, testsFail: 0 },
+        behavioral: { pass: 3, fail: 0, acceptance },
+      }),
+    );
+    assert.equal(c.score, 0);
+    assert.match(c.evidence, /autopilot seat/);
+  });
+
+  test("338-4: absent acceptance keeps the legacy A4 line byte-for-byte", () => {
+    const pass = input({ treeRun: { ok: true, dir: "d", testsPass: 3, testsFail: 0 }, behavioral: { pass: 3, fail: 0 } });
+    assert.equal(m1Substance(pass).score, 1);
+    assert.equal(
+      m1Substance(pass).evidence,
+      "behavioral pass 3 fixture assertion(s)",
+      "no acceptance field ⇒ legacy evidence, byte-identical",
+    );
   });
 
   test("skip ≠ green: ok:true with 0 assertions scores 0", () => {

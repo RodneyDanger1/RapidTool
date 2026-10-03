@@ -88,3 +88,49 @@ describe("validateExpectedBehavior - the declaration contract", () => {
     if (r.ok) assert.deepEqual(r.rows, []);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 338-6 — no oracle row may carry a declaration its check never evaluates.
+// The 337-3 fix closed the vacuous `complete`; this closes the same class one
+// layer down: a field the evaluator silently ignores makes the row read green
+// without the thing it declared. A `uiShell` row is a structural skip, so a
+// declared exit/stdout expectation on it can never be enforced; likewise a
+// runtime field on a file-exists / package-target-exists row.
+// ---------------------------------------------------------------------------
+describe("validateExpectedBehavior - a declaration is never silently dropped (338-6)", () => {
+  it("refuses runtime expectations on a uiShell structural-skip row", () => {
+    for (const stray of [
+      { expectExit: 1 },
+      { expectStdout: "MUST_APPEAR" },
+      { expectStderr: "MUST_APPEAR" },
+      { args: ["--x"] },
+      { mode: "exec" },
+      { timeoutMs: 1000 },
+    ]) {
+      const r = validateExpectedBehavior([{ id: "u", check: "entry-runs", uiShell: true, ...stray }]);
+      assert.equal(r.ok, false, `uiShell + ${JSON.stringify(stray)} must be refused, not silently ignored`);
+    }
+  });
+
+  it("refuses a runtime field on a non-runtime check", () => {
+    const cases: unknown[] = [
+      [{ id: "f", check: "file-exists", path: "x.ts", expectExit: 1 }],
+      [{ id: "f", check: "file-exists", path: "x.ts", target: "main" }],
+      [{ id: "p", check: "package-target-exists", target: "main", path: "x.ts" }],
+      [{ id: "p", check: "package-target-exists", target: "main", entry: "src/main.ts" }],
+    ];
+    for (const rows of cases) {
+      assert.equal(validateExpectedBehavior(rows).ok, false, `${JSON.stringify(rows)} must be refused`);
+    }
+  });
+
+  it("still accepts every legal field set (control: the corpus row shapes)", () => {
+    const ok = validateExpectedBehavior([
+      { id: "f", check: "file-exists", path: "x.ts", note: "n" },
+      { id: "p", check: "package-target-exists", target: "bin", note: "n" },
+      { id: "u", check: "entry-runs", uiShell: true, note: "n" },
+      { id: "e", check: "entry-runs", entry: "src/main.ts", mode: "exec", args: ["--x"], expectExit: 0, expectStdout: "ok", expectStderr: "warn", timeoutMs: 5000, note: "n" },
+    ]);
+    assert.equal(ok.ok, true);
+  });
+});

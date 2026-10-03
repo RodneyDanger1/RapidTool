@@ -15,8 +15,10 @@ import {
   doctorLlmKey,
   doctorSpend,
   evidenceFromJobInventory,
+  evidenceFromProjectRecord,
   factoryClaim,
   FACTORY_GAP,
+  humanFixturesFromProject,
   inventoryFromJobSources,
   jobScopeShortfall,
   productCompleteFromProject,
@@ -26,6 +28,7 @@ import {
 } from "./doctor.ts";
 import { RUNNER_IS_NOT_A_SANDBOX } from "./sandbox-policy.ts";
 import { archTrace } from "./dod.ts";
+import { fnv1a } from "./algorithms.ts";
 import type { Project } from "./types.ts";
 
 describe("doctor factory — field-truth latch", () => {
@@ -583,6 +586,90 @@ describe("OV-9 — productComplete derives from real project state", () => {
     assert.equal(ev.productComplete, false, "no loosening: the scan's leftovers still refuse the bar");
     assert.equal(ev.leftoverJobsAreReexportsOrStubs, true);
     assert.equal(ev.realMultiJobProduct, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W52 · 338-3 — real-signal wiring: humanFixtures + the project record
+// ---------------------------------------------------------------------------
+
+describe("W52 · 338-3 — the factory claim is wired to REAL signals", () => {
+  const fixture = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: "fx-1",
+    approval: "approved",
+    decidedBy: "human",
+    ...over,
+  });
+
+  it("humanFixturesFromProject: an approved human set closes the gap", () => {
+    assert.equal(humanFixturesFromProject({ acceptanceFixtures: [fixture()] }), true);
+  });
+
+  it("humanFixturesFromProject: a pending case, a machine-only stamp, or a bad shape keeps it closed", () => {
+    assert.equal(
+      humanFixturesFromProject({ acceptanceFixtures: [fixture({ approval: "pending" })] }),
+      false,
+      "a pending case is not an accepted set",
+    );
+    assert.equal(
+      humanFixturesFromProject({ acceptanceFixtures: [fixture({ decidedBy: "autopilot" })] }),
+      false,
+      "a machine seat never mints the human stamp",
+    );
+    assert.equal(
+      humanFixturesFromProject({ acceptanceFixtures: [fixture(), fixture({ approval: "pending" })] }),
+      false,
+      "every case must be approved",
+    );
+    for (const junk of [null, undefined, [], "", 42, true, {}, { acceptanceFixtures: [] }, { acceptanceFixtures: "x" }]) {
+      assert.equal(humanFixturesFromProject(junk), false, `junk refuses: ${String(junk)}`);
+    }
+  });
+
+  it("humanFixturesFromProject: a stale set (brief hash mismatch) never closes the gap", () => {
+    const stale = { acceptanceFixtures: [fixture()], acceptanceBriefHash: "not-the-live-brief", brief: "a live brief" };
+    assert.equal(humanFixturesFromProject(stale), false);
+    // Same brief the set was drafted against: fnv1a(brief) — import the SAME
+    // hash the producer uses (the pending-ify rule io/hydrate apply).
+    assert.equal(
+      humanFixturesFromProject({
+        acceptanceFixtures: [fixture()],
+        acceptanceBriefHash: String(fnv1a("a live brief")),
+        brief: "a live brief",
+      }),
+      true,
+    );
+  });
+
+  it("evidenceFromProjectRecord derives productComplete + humanFixtures; census stays fail-closed", () => {
+    const complete = { ...ov9Project(), acceptanceFixtures: [fixture()] };
+    const ev = evidenceFromProjectRecord(complete);
+    assert.equal(ev.productComplete, true, "the arch-complete record closes the product-complete gap");
+    assert.equal(ev.humanFixtures, true, "the human-approved set closes the fixtures gap");
+    assert.equal(ev.leftoverJobsAreReexportsOrStubs, true, "no tree scanned → leftover fail-closed");
+    assert.equal(ev.realMultiJobProduct, false, "no census → never a fabricated real product");
+    const claim = factoryClaim(ev, {});
+    assert.equal(claim.autonomousSoftwareFactory, false, "the unmeasured census keeps the latch false");
+    assert.deepEqual(claim.gaps, [FACTORY_GAP.leftover, FACTORY_GAP.product]);
+
+    const junkEv = evidenceFromProjectRecord(null);
+    assert.equal(junkEv.productComplete, false);
+    assert.equal(junkEv.humanFixtures, false);
+  });
+
+  it("a real two-job census + arch-complete tree + human fixtures closes EVERY gap (the latch fires)", () => {
+    const inv = inventoryFromJobSources([
+      { path: "src/jobs/a.ts", source: "export function a() { return 1; }" },
+      { path: "src/jobs/b.ts", source: "export function b() { return 2; }" },
+    ]);
+    // Before 338-3 the inventory builder ignored the project record for
+    // fixtures, so this exact state still reported the fixtures gap.
+    const project = { ...ov9Project(), acceptanceFixtures: [fixture()] };
+    const ev = evidenceFromJobInventory(inv, { project });
+    assert.equal(ev.humanFixtures, true, "derived from the record, not a hand-fed flag");
+    const claim = factoryClaim(ev, {});
+    assert.equal(claim.autonomousSoftwareFactory, true);
+    assert.deepEqual(claim.gaps, [], "no gap stands while the signals are genuinely met");
   });
 });
 

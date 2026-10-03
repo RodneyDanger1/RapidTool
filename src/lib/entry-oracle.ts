@@ -418,6 +418,30 @@ export function validateExpectedBehavior(
         error: `${label}[${i}] (${id}): unknown check ${JSON.stringify(r.check)} — one of ${[...BEHAVIOR_CHECKS].join(" | ")}`,
       };
     }
+    // 338-6: every field a row carries must be one its check actually
+    // EVALUATES. A silently-ignored field (a uiShell row's declared exit/stdout,
+    // a runtime field on file-exists/package-target-exists) made the row read
+    // green without the thing it declared — the same "a verifier that cannot
+    // fail" class as 337-3's vacuous `complete`, one layer down. `id`, `check`
+    // and `note` are metadata and always allowed.
+    const isUiShell = r.uiShell === true;
+    const evaluated =
+      check === "file-exists"
+        ? new Set(["path"])
+        : check === "package-target-exists"
+          ? new Set(["target"])
+          : isUiShell
+            ? new Set(["uiShell"])
+            : new Set(["entry", "mode", "args", "expectExit", "expectStdout", "expectStderr", "timeoutMs", "uiShell"]);
+    for (const key of Object.keys(r)) {
+      if (key === "id" || key === "check" || key === "note") continue;
+      if (!evaluated.has(key)) {
+        return {
+          ok: false,
+          error: `${label}[${i}] (${id}): ${JSON.stringify(key)} is not evaluated by ${JSON.stringify(check)}${isUiShell ? " (uiShell is a structural skip)" : ""} — a declaration that would be silently dropped is refused`,
+        };
+      }
+    }
     if (check === "file-exists" && !(typeof r.path === "string" && r.path.trim().length > 0)) {
       return { ok: false, error: `${label}[${i}] (${id}): file-exists needs a non-empty "path"` };
     }
@@ -430,9 +454,8 @@ export function validateExpectedBehavior(
     if (check === "entry-runs") {
       const uiShell = r.uiShell === true;
       const entry = typeof r.entry === "string" ? r.entry.trim().replace(/\\/g, "/").replace(/^\.\//, "") : "";
-      if (uiShell && entry) {
-        return { ok: false, error: `${label}[${i}] (${id}): uiShell is a structural skip — it must not also declare an "entry"` };
-      }
+      // (338-6: uiShell + entry is already refused by the field-scope gate
+      // above — a uiShell row evaluates nothing but its structural premise.)
       if (!uiShell && !entry) {
         return { ok: false, error: `${label}[${i}] (${id}): entry-runs needs a non-empty "entry" (the emitted-tree-relative file to run) or "uiShell": true for a UI kind` };
       }
