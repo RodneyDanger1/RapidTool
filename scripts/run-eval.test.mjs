@@ -305,6 +305,58 @@ test("(a) a grader that cannot be trusted never grades (parse guards)", () => {
   assert.equal(graderFileFor("x", GRADER_DIR).endsWith(join("graders", "x.grader.json")), true);
 });
 
+// 342-2 (W56): `passWhen.firstRun` is the per-run-kind corpus bar 342-3 declared
+// in all 11 graders. The driver must CARRY it (validated) — a malformed block is
+// refused, never silently dropped (a dropped bar would judge first runs at the
+// warm bar and keep them capped at 8/9 by arithmetic).
+test("342-2: parseGrader carries passWhen.firstRun, validated; a malformed block is a coded refusal", () => {
+  const base = { slug: "s", acceptanceBar: "bar text", requiredIdentifiers: [], requiredCapabilities: [] };
+  const good = parseGrader(
+    JSON.stringify({ ...base, passWhen: { meanAtLeast: 1, firstRun: { meanAtLeast: 1, excludeCriteria: ["M7"], note: "n" } } }),
+    "s",
+  );
+  assert.equal(good.ok, true);
+  assert.deepEqual(good.grader.passWhen.firstRun, { meanAtLeast: 1, excludeCriteria: ["M7"] });
+  assert.equal(good.grader.passWhen.meanAtLeast, 1, "the warm bar is unchanged by the firstRun block");
+  // No block → null (never a fabricated first-run bar).
+  const none = parseGrader(JSON.stringify(base), "s");
+  assert.equal(none.ok, true);
+  assert.equal(none.grader.passWhen.firstRun, null);
+  // Malformed blocks are coded refusals, NEVER silently dropped.
+  const bad = [
+    { meanAtLeast: 0, excludeCriteria: ["M7"] },
+    { meanAtLeast: 1.5, excludeCriteria: ["M7"] },
+    { meanAtLeast: "1", excludeCriteria: ["M7"] },
+    { meanAtLeast: 1, excludeCriteria: "M7" },
+    { meanAtLeast: 1, excludeCriteria: ["M11"] },
+    { meanAtLeast: 1, excludeCriteria: [7] },
+  ];
+  for (const firstRun of bad) {
+    const r = parseGrader(JSON.stringify({ ...base, passWhen: { meanAtLeast: 1, firstRun } }), "s");
+    assert.equal(r.ok, false, `malformed firstRun must be refused: ${JSON.stringify(firstRun)}`);
+    assert.ok(r.error, "the refusal must carry its reason");
+    assert.match(r.error, /RT_E_VALIDATION/, "the refusal is coded");
+  }
+  assert.equal(parseGrader(JSON.stringify({ ...base, passWhen: { firstRun: "nope" } }), "s").ok, false);
+});
+
+test("342-2: every declared corpus firstRun bar reaches the parsed grader (declared ⇒ consumed)", () => {
+  const dir = join(projectRoot(), "research", "eval-corpus", "graders");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".grader.json"));
+  assert.equal(files.length, 11, "the corpus declares 11 graders");
+  for (const f of files) {
+    const slug = f.replace(/\.grader\.json$/, "");
+    const g = loadGrader(slug);
+    assert.equal(g.ok, true, `${slug}: ${g.ok ? "" : g.error}`);
+    assert.deepEqual(
+      g.grader.passWhen.firstRun,
+      { meanAtLeast: 1, excludeCriteria: ["M7"] },
+      `${slug}: the DECLARED firstRun bar must be parsed onto passWhen`,
+    );
+    assert.equal(g.grader.passWhen.meanAtLeast, 1, `${slug}: the warm bar is untouched`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // (b) pass@k MATH
 // ---------------------------------------------------------------------------
@@ -442,6 +494,99 @@ test("(b) acceptanceFailReason names the failing clause (mean threshold vs files
   // Lenient grader: both assertion clauses are OFF → no reason even when red.
   const lenient = { passWhen: { meanAtLeast: 0.5, requireExpectedFiles: false, requireExpectedContent: false } };
   assert.equal(acceptanceFailReason({ mean: 0.5556 }, { ...okAcc, filesOk: false, contentOk: false, missingFiles: ["x"], failedContent: ["y"] }, lenient), null);
+});
+
+// 342-2 (W56): the first-run bar is CONSUMED by the pass predicate. A first run
+// cannot score M7 (no prior lesson), so its bar excludes M7 over the remaining
+// eight — every one still required (mean 1 over 8 = all eight, not a lowered
+// bar). A warm run keeps the full nine. No false green: the keyless floor and a
+// warm card missing M7 both fail.
+test("342-2: passesAcceptance selects the per-run-kind bar (first clears 8/9; warm still needs M7)", () => {
+  const card = (scores) => ({
+    criteria: Object.fromEntries(Object.entries(scores).map(([id, score]) => [id, { score, evidence: "342-2 test" }])),
+    mean: Object.values(scores).reduce((a, b) => a + b, 0) / 9,
+  });
+  const eight = card({ M1: 1, M2: 1, M3: 1, M4: 1, M5: 1, M6: 1, M7: 0, M8: 1, M9: 1 }); // 8/9, M7 only zero
+  const nine = card({ M1: 1, M2: 1, M3: 1, M4: 1, M5: 1, M6: 1, M7: 1, M8: 1, M9: 1 });
+  const floor = card({ M1: 0, M2: 0, M3: 0, M4: 0, M5: 1, M6: 1, M7: 0, M8: 1, M9: 1 }); // keyless first row
+  const grader = {
+    passWhen: {
+      meanAtLeast: 1,
+      firstRun: { meanAtLeast: 1, excludeCriteria: ["M7"] },
+      requireExpectedFiles: false,
+      requireExpectedContent: false,
+    },
+  };
+  const okAcc = { filesOk: true, contentOk: true, missingFiles: [], failedContent: [] };
+
+  assert.equal(passesAcceptance({ ...eight, runKind: "first" }, okAcc, grader), true, "an 8/9 first run (M7 excluded) clears");
+  assert.equal(passesAcceptance({ ...eight, runKind: "warm" }, okAcc, grader), false, "the SAME card warm still needs M7");
+  assert.equal(passesAcceptance({ ...nine, runKind: "warm" }, okAcc, grader), true, "a warm 9/9 still passes");
+  assert.equal(passesAcceptance({ ...floor, runKind: "first" }, okAcc, grader), false, "the keyless floor fails the first-run bar");
+  assert.equal(passesAcceptance({ ...floor, runKind: "warm" }, okAcc, grader), false, "the keyless floor fails the warm bar");
+
+  const reason = acceptanceFailReason({ ...floor, runKind: "first" }, okAcc, grader);
+  assert.ok(reason);
+  assert.match(reason, /first/, "the reason names the run kind");
+  assert.match(reason, /M7/, "the reason names the excluded criterion");
+});
+
+// 342-2b (verifier A + B): an ABSENT or unknown `runKind` must be judged on the
+// STRICTER warm bar (all nine) — never the lenient first-run bar. A legacy /
+// synthetic re-judge of a warm row that carries a criteria map must not clear
+// 8/9 by silently dropping M7.
+test("342-2b: an absent/unknown runKind is judged on the warm bar (all nine), never the lenient first-run bar", () => {
+  const card = (scores) => ({
+    criteria: Object.fromEntries(Object.entries(scores).map(([id, score]) => [id, { score, evidence: "342-2b test" }])),
+    mean: Object.values(scores).reduce((a, b) => a + b, 0) / 9,
+  });
+  const eight = card({ M1: 1, M2: 1, M3: 1, M4: 1, M5: 1, M6: 1, M7: 0, M8: 1, M9: 1 }); // 8/9, M7 only zero
+  const grader = {
+    passWhen: {
+      meanAtLeast: 1,
+      firstRun: { meanAtLeast: 1, excludeCriteria: ["M7"] },
+      requireExpectedFiles: false,
+      requireExpectedContent: false,
+    },
+  };
+  const okAcc = { filesOk: true, contentOk: true, missingFiles: [], failedContent: [] };
+
+  assert.equal(passesAcceptance({ ...eight, runKind: "first" }, okAcc, grader), true, "an explicit first run still clears 8/9");
+  assert.equal(passesAcceptance({ ...eight, runKind: "warm" }, okAcc, grader), false, "warm still needs M7");
+  assert.equal(passesAcceptance({ ...eight }, okAcc, grader), false, "an ABSENT runKind must not get the first-run bar");
+  assert.equal(passesAcceptance({ ...eight, runKind: "bogus" }, okAcc, grader), false, "an UNKNOWN runKind is judged warm");
+  const reason = acceptanceFailReason({ ...eight }, okAcc, grader);
+  assert.ok(reason, "an 8/9 unknown-kind row must report a fail reason");
+  assert.ok(!reason.includes("M7"), `an unknown kind is not a first run — no M7 exclusion claim (${reason})`);
+});
+
+// 342-2b (verifier B): the first-run exclusion list is ONE list —
+// maker-score's FIRST_RUN_UNSCOREABLE_CRITERIA. The driver must refuse a graded
+// bar that excludes a SCOREABLE criterion (a hollow first run could otherwise
+// pass by dropping M1-M4). The 11 real graders exclude only M7.
+test("342-2b: firstRun.excludeCriteria may name only the first-run-unscoreable criteria (M7)", () => {
+  const base = { slug: "s", acceptanceBar: "bar text", requiredIdentifiers: [], requiredCapabilities: [] };
+  const withExclude = (excludeCriteria) =>
+    parseGrader(JSON.stringify({ ...base, passWhen: { meanAtLeast: 1, firstRun: { meanAtLeast: 1, excludeCriteria } } }), "s");
+  assert.equal(withExclude(["M7"]).ok, true, "M7 is the first-run-unscoreable criterion");
+  for (const bad of [["M1"], ["M1", "M2", "M3", "M4"], ["M7", "M8"], ["M11"], [7]]) {
+    const r = withExclude(bad);
+    assert.equal(r.ok, false, `a first-run bar may not exclude a scoreable criterion: ${JSON.stringify(bad)}`);
+    assert.match(r.error, /RT_E_VALIDATION/, "the refusal is coded");
+    assert.match(r.error, /M7/, "the refusal names the only legal exclusion");
+  }
+});
+
+// 342-2b (verifier B): the driver consumes maker-score's shared bar helpers —
+// one exclusion list, one mean comparison. This source pin makes those exports
+// genuinely consumed (a re-implementation would drift while its own test stayed
+// green).
+test("342-2b: the driver imports maker-score's shared bar helpers (one list, one comparison)", () => {
+  const src = readFileSync(join(projectRoot(), "scripts", "run-eval.mjs"), "utf8");
+  const importLine = src.match(/import\s*\{[^}]*\}\s*from\s*"\.\.\/src\/lib\/maker-score\.ts"/s);
+  assert.ok(importLine, "run-eval.mjs imports from maker-score.ts");
+  assert.match(importLine[0], /\bmeetsRunKindBar\b/, "the shared comparison is imported, not re-implemented");
+  assert.match(importLine[0], /\bFIRST_RUN_UNSCOREABLE_CRITERIA\b/, "the shared exclusion list is imported");
 });
 
 test("(b) checkAcceptance applies expectedFiles/expectedContent from outside the tree", () => {
@@ -658,6 +803,59 @@ test("(d) the drain exits on the FIRST dod round with a coded stop (WB-2 → M9)
   assert.equal(rowsAfter, 1, `exactly ONE drain round ran the hard-DoD block — got ${rowsAfter} (80 before this fix)`);
   assert.equal(drain.p.currentPhase, 1, "cursor unmoved — a hard stop advances nothing");
   assert.equal(drain.approved.length, 0, "no gate was approved on the way out");
+});
+
+test("342-2: drainPipeline threads researchLive to the research phase (keyless free search)", async () => {
+  // The post-journey drain used to pass keyed:false only, so P7's live research
+  // never ran (the harness gap). researchLive drives the KEYLESS bare-Node
+  // overlay for research phases without keying the P8–P12 narratives.
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  const real = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes("lite.duckduckgo.com")) {
+      const target = encodeURIComponent("https://example.com/breakout-guide");
+      return new Response(
+        `<a href="//duckduckgo.com/l/?uddg=${target}">Breakout guide</a>` +
+          `<td class='result-snippet'>A real snippet about breakout paddle physics.</td>`,
+        { status: 200 },
+      );
+    }
+    return new Response("", { status: 404 });
+  };
+  try {
+    delete process.env.DEEPSEEK_API_KEY;
+
+    const p7Ready = () => {
+      const p = createProject({
+        brief: "Build a small notes app with add/list/search and its own tests.",
+        name: "ResearchDrain",
+      });
+      /** @type {Array<"complete"|"ready"|"locked">} */
+      const statuses = Array.from({ length: 13 }, (_, id) =>
+        id <= 6 ? "complete" : id === 7 ? "ready" : "locked",
+      );
+      p.currentPhase = 7;
+      p.phases = p.phases.map((rec, id) => ({ ...rec, status: statuses[id] }));
+      return p;
+    };
+
+    const withOpt = await drainPipeline(p7Ready(), { researchLive: true });
+    assert.ok((withOpt.p.research?.length ?? 0) >= 1, "a research phase ran the live overlay");
+    assert.equal(withOpt.p.research?.[0]?.provider, "duckduckgo", "the free keyless search served the finding");
+    assert.ok(
+      calls.every((u) => u.includes("duckduckgo")),
+      `no LLM/other network call (saw: ${calls.join(", ")})`,
+    );
+    const without = await drainPipeline(p7Ready(), {});
+    assert.equal(without.p.research?.length ?? 0, 0, "the default drain stays keyless — byte-identical");
+  } finally {
+    globalThis.fetch = real;
+    if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = savedKey;
+  }
 });
 
 // ---------------------------------------------------------------------------

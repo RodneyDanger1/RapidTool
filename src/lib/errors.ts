@@ -71,12 +71,14 @@ export const ERROR_CODES = [
   // names a capability whose seam exists but whose host/precondition does not
   // (yet) — an honest coded refusal, never a fake run. Append-only; consumers
   // match string literals, never array position.
-  //   - UNATTENDED_UNSUPPORTED: W-47 — no scheduler/daemon host here + the
-  //     W-01/W-02 blockers; the refusal names them (`blockers`).
   //   - CHECKPOINT_MISSING: T-107.7 `resume` — no checkpoint for the project.
   //   - NOT_IMPLEMENTED: a coded SHELL — the seam parsed the request but the
   //     full logic is not wired; the message names the TODO row.
-  "RT_E_UNATTENDED_UNSUPPORTED",
+  // RT_E_UNATTENDED_UNSUPPORTED (W-47) was REMOVED 2026-10-03 by the 342-6
+  // resume: nothing ever emitted it, and its premise — the W-01/W-02 blockers
+  // unlanded keyed — is false since 341-6 made the `unattended` verb real and
+  // self-sufficient (fixes/342_6_sweep.md). A code is minted only for a
+  // failure that actually surfaces; this one never did.
   "RT_E_CHECKPOINT_MISSING",
   "RT_E_NOT_IMPLEMENTED",
   // W31 T2 (fixes/273_t2_r15.md · R15-f02): the auth-schema preflight. Sign-in
@@ -551,12 +553,6 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
       "The git binary is not available in this environment, so the git landing tail cannot run.",
     agentAction:
       "Report the absence honestly and leave the tree uninitialized — install git, or run where git exists; never fake a landing or hand-roll repository metadata.",
-  },
-  RT_E_UNATTENDED_UNSUPPORTED: {
-    meaning:
-      "W-47: an unattended end-to-end run was requested before its host and blockers exist — there is no scheduler/daemon/queue in this product (the entry is a dumb external cron/Task-Scheduler hook) and the W-01 (keyed wild P6 seam) / W-02 (mint reachability) blockers are not landed keyed.",
-    agentAction:
-      "Do not fake an unattended run: read the `blockers` list, land W-01+W-02 keyed, then arm the external hook (the refusal payload carries the exact scheduler line) and re-run; manual `wild`/`gate` runs remain available for supervised progress.",
   },
   RT_E_CHECKPOINT_MISSING: {
     meaning:

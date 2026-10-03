@@ -22,7 +22,16 @@ import {
   treeRunLooksSkipped,
   treeRunToMakerEvidence,
   FLOOR_QUALIFIER_EVIDENCE,
+  KEYLESS_FLOOR_QUALIFIER_EVIDENCE,
   p6BriefFitPasses,
+  runKindOf,
+  barForRunKind,
+  criteriaMeanExcluding,
+  meetsRunKindBar,
+  firstRunBarIsAdmissible,
+  FIRST_RUN_UNSCOREABLE_CRITERIA,
+  FIRST_RUN_BAR_MEAN_ATLEAST,
+  type MakerBarWhen,
   type MakerScoreInput,
   type MakerScoreCard,
 } from "./maker-score.ts";
@@ -704,12 +713,24 @@ describe("M7 learning", () => {
     assert.match(c.evidence, /no prior/);
   });
 
-  test("M1+M2+M3 ≥ prior same-domain run scores 1", () => {
+  // 342-3 (W56): a prior row whose own M1+M2+M3 sum is 0 carries no lesson,
+  // so matching it reuses nothing. Pre-fix any run scored M7=1 against such a
+  // prior (mineSum ≥ 0), minting a learning point with no evidence — the
+  // exact false-green the corpus bar must not inherit.
+  test("a substance-free prior is not a lesson — it mints no learning point", () => {
+    const c = m7Learning(
+      input({ project: greenProject(), treeRun: { ok: true, testsPass: 1, testsFail: 0 }, journey: { outcome: "converged", cycles: 1, budget: 3 }, prior: { m1: 0, m2: 0, m3: 0 } }),
+    );
+    assert.equal(c.score, 0);
+    assert.match(c.evidence, /nothing was learned to reuse/);
+  });
+
+  test("M1+M3 ≥ prior learned substance scores 1", () => {
     const c = m7Learning(
       input({ project: greenProject(), treeRun: { ok: true, testsPass: 1, testsFail: 0 }, journey: { outcome: "converged", cycles: 1, budget: 3 }, prior: { m1: 1, m2: 0, m3: 1 } }),
     );
     assert.equal(c.score, 1);
-    assert.match(c.evidence, /3 ≥ prior same-domain 2/);
+    assert.match(c.evidence, /M1\+M3 2 ≥ prior learned substance 2/);
   });
 
   test("equality with the prior run still passes (run 2 ≥ run 1)", () => {
@@ -731,6 +752,27 @@ describe("M7 learning", () => {
     assert.equal(m1Substance(input({ project: p, corpus: { kind: "library", expectedCapabilities: ["ledger"] } })).score, 0);
     assert.equal(c.score, 0);
     assert.match(c.evidence, /regression/);
+  });
+
+  // 342-3 vB (verifier B): the prior's "substance" must be the criteria that
+  // represent LEARNED substance (M1 substance + M3 iterate — model-produced
+  // code and its convergence), never M2, the deterministic tree-run that even
+  // a keyless/floor run earns. Pre-vB a prior of {m1:0,m2:1,m3:0} minted M7=1
+  // (mineSum ≥ 1) — a learning claim from a floor-only prior. 19 of the 29
+  // stored m7=1 rows had exactly that prior shape.
+  test("a prior whose only substance is M2 (the deterministic tree-run) is not learned substance — M7=0", () => {
+    const c = m7Learning(
+      input({ project: greenProject(), treeRun: { ok: true, testsPass: 1, testsFail: 0 }, journey: { outcome: "converged", cycles: 1, budget: 3 }, prior: { m1: 0, m2: 1, m3: 0 } }),
+    );
+    assert.equal(c.score, 0);
+    assert.match(c.evidence, /learned substance/);
+  });
+
+  test("a prior with real learned substance (M3, not M2) is carried forward — M7=1", () => {
+    const c = m7Learning(
+      input({ project: greenProject(), treeRun: { ok: true, testsPass: 1, testsFail: 0 }, journey: { outcome: "converged", cycles: 1, budget: 3 }, prior: { m1: 0, m2: 0, m3: 1 } }),
+    );
+    assert.equal(c.score, 1);
   });
 });
 
@@ -877,10 +919,16 @@ describe("scoreMaker card", () => {
       budget: { used: 0, budget: 3 },
       stop: { onTime: true, refused: false, loud: false },
     });
-    // M1 0 (no brief vocab in the placeholder) · M2 1 · M3 0 · M4 0 · M5 1
-    // (census log surfaces the red gate) · M6 1 · M7 0 (no prior) · M8 1 · M9 1
-    assert.equal(c.total, 5);
-    assert.equal(c.mean, 5 / 9);
+    // 342-3 vB: a keyless run is floored exactly like a refused keyed run —
+    // M1-M4 are the deterministic scaffold, not model-produced software.
+    // M1-M4 0 (keyless floor) · M5 1 (census log surfaces the red gate) ·
+    // M6 1 · M7 0 (no prior) · M8 1 · M9 1
+    assert.equal(c.total, 4);
+    assert.equal(c.mean, 4 / 9);
+    for (const m of ["M1", "M2", "M3", "M4"] as const) {
+      assert.equal(c.criteria[m].score, 0);
+      assert.equal(c.criteria[m].evidence, KEYLESS_FLOOR_QUALIFIER_EVIDENCE);
+    }
   });
 });
 
@@ -955,5 +1003,166 @@ describe("fixes/154 F1 — synthesisSucceeded floor gate", () => {
     assert.equal(floored.criteria.M1.score, 0); // the gate lands at the card
     const base = scoreMaker(nineGreenRefusedRunInput());
     assert.deepEqual(floored.criteria.M7, base.criteria.M7); // M7 evidence unforced
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 342-3 (W56) — the corpus bar is per run kind.
+// A first run cannot score M7 (m7Learning), so its bar must judge the criteria
+// it CAN score — M7 excluded, every remaining criterion still required.
+// ---------------------------------------------------------------------------
+
+/** A card-like criteria record with exactly the criteria the caller names set
+ *  to 1 (the rest 0). No casts: the nine ids are written out. */
+function barCard(one: Partial<Record<"m1" | "m2" | "m3" | "m4" | "m5" | "m6" | "m7" | "m8" | "m9", 0 | 1>>): Pick<MakerScoreCard, "criteria"> {
+  const v = (x: 0 | 1 | undefined): { score: 0 | 1; evidence: string } => ({ score: x ?? 0, evidence: "test" });
+  return {
+    criteria: {
+      M1: v(one.m1),
+      M2: v(one.m2),
+      M3: v(one.m3),
+      M4: v(one.m4),
+      M5: v(one.m5),
+      M6: v(one.m6),
+      M7: v(one.m7),
+      M8: v(one.m8),
+      M9: v(one.m9),
+    },
+  };
+}
+
+/** The bar every corpus grader declares: warm = 1 over all nine; first run =
+ *  1 over the eight it can score (M7 excluded). */
+const CORPUS_BAR: MakerBarWhen = {
+  meanAtLeast: 1,
+  firstRun: { meanAtLeast: 1, excludeCriteria: ["M7"] },
+};
+
+describe("342-3 per-run-kind corpus bar", () => {
+  test("runKind is first with no prior and warm with a prior", () => {
+    assert.equal(runKindOf(null), "first");
+    assert.equal(runKindOf(undefined), "first");
+    assert.equal(runKindOf({ m1: 1, m2: 1, m3: 1 }), "warm");
+  });
+
+  test("barForRunKind: a first run drops exactly M7; a warm run drops nothing", () => {
+    assert.deepEqual(barForRunKind(CORPUS_BAR, "first"), { meanAtLeast: 1, excludeCriteria: ["M7"] });
+    assert.deepEqual(barForRunKind(CORPUS_BAR, "warm"), { meanAtLeast: 1, excludeCriteria: [] });
+    assert.deepEqual(FIRST_RUN_UNSCOREABLE_CRITERIA, ["M7"]);
+  });
+
+  test("barForRunKind: a grader with no firstRun block keeps the warm bar (back-compat)", () => {
+    assert.deepEqual(barForRunKind({ meanAtLeast: 0.5 }, "first"), { meanAtLeast: 0.5, excludeCriteria: [] });
+  });
+
+  test("criteriaMeanExcluding skips the excluded ids (8/8 = 1, not 8/9)", () => {
+    const eight = barCard({ m1: 1, m2: 1, m3: 1, m4: 1, m5: 1, m6: 1, m8: 1, m9: 1 });
+    assert.equal(criteriaMeanExcluding(eight, ["M7"]), 1);
+    assert.equal(criteriaMeanExcluding(eight, []), 8 / 9);
+    assert.equal(criteriaMeanExcluding(eight, FIRST_RUN_UNSCOREABLE_CRITERIA), 1);
+  });
+
+  test("(a) a first run that meets its real criteria clears the bar", () => {
+    const first = barCard({ m1: 1, m2: 1, m3: 1, m4: 1, m5: 1, m6: 1, m7: 0, m8: 1, m9: 1 });
+    const r = meetsRunKindBar(first, CORPUS_BAR, runKindOf(null));
+    assert.equal(r.ok, true, `expected 8/8 to clear the first-run bar, got mean ${r.mean} vs ${r.meanAtLeast}`);
+    assert.equal(r.mean, 1);
+    assert.deepEqual(r.excludeCriteria, ["M7"]);
+  });
+
+  test("(b) a stub / zero-substance first run still fails", () => {
+    // The keyless floor shape: M1-M4 forced 0 (synthesis refused), M7 0.
+    const floor = barCard({ m5: 1, m6: 1, m8: 1, m9: 1 });
+    const r = meetsRunKindBar(floor, CORPUS_BAR, runKindOf(null));
+    assert.equal(r.ok, false);
+    assert.equal(r.mean, 4 / 8);
+  });
+
+  test("(c) a warm run must still earn M7 — 8/9 with M7=0 fails the unchanged warm bar", () => {
+    const warmEight = barCard({ m1: 1, m2: 1, m3: 1, m4: 1, m5: 1, m6: 1, m7: 0, m8: 1, m9: 1 });
+    const fail = meetsRunKindBar(warmEight, CORPUS_BAR, "warm");
+    assert.equal(fail.ok, false, "a warm run cannot drop M7");
+    assert.equal(fail.mean, 8 / 9);
+    // ...and clears it only once M7 is actually earned.
+    const warmNine = barCard({ m1: 1, m2: 1, m3: 1, m4: 1, m5: 1, m6: 1, m7: 1, m8: 1, m9: 1 });
+    assert.equal(meetsRunKindBar(warmNine, CORPUS_BAR, "warm").ok, true);
+  });
+
+  test("the same 8/9 card flips with the run kind — the bar, not the card, decides", () => {
+    const card = barCard({ m1: 1, m2: 1, m3: 1, m4: 1, m5: 1, m6: 1, m7: 0, m8: 1, m9: 1 });
+    assert.equal(meetsRunKindBar(card, CORPUS_BAR, "first").ok, true);
+    assert.equal(meetsRunKindBar(card, CORPUS_BAR, "warm").ok, false);
+  });
+
+  // 342-3 vB (verifier B): a declared firstRun block is trusted by parseGrader,
+  // so maker-score must not honor a loose one. Only the genuinely unscoreable
+  // criteria may be excluded, and the first-run threshold must demand ALL the
+  // remaining criteria (mean 1) — a weaker first-run threshold is a defect,
+  // not a configuration.
+  test("barForRunKind ignores a first-run threshold below 1 — a weaker first-run bar is a defect, not a config", () => {
+    const loose: MakerBarWhen = { meanAtLeast: 1, firstRun: { meanAtLeast: 0.5, excludeCriteria: ["M7"] } };
+    assert.deepEqual(barForRunKind(loose, "first"), { meanAtLeast: 1, excludeCriteria: ["M7"] });
+  });
+
+  test("barForRunKind clamps first-run exclusions to the genuinely unscoreable set (M7 today)", () => {
+    const loose: MakerBarWhen = { meanAtLeast: 1, firstRun: { meanAtLeast: 1, excludeCriteria: ["M1", "M2", "M3", "M4"] } };
+    assert.deepEqual(barForRunKind(loose, "first"), { meanAtLeast: 1, excludeCriteria: [] });
+    const mixed: MakerBarWhen = { meanAtLeast: 1, firstRun: { meanAtLeast: 1, excludeCriteria: ["M7", "M1"] } };
+    assert.deepEqual(barForRunKind(mixed, "first"), { meanAtLeast: 1, excludeCriteria: ["M7"] });
+  });
+
+  test("meetsRunKindBar: the keyless floor cannot pass a loosely-declared first-run bar", () => {
+    // verifier B's demonstration: {meanAtLeast:0.5, excludeCriteria:["M7"]}
+    // made a 4/8 floor card pass. The pure bar must refuse it structurally.
+    const loose: MakerBarWhen = { meanAtLeast: 1, firstRun: { meanAtLeast: 0.5, excludeCriteria: ["M7"] } };
+    const floor = barCard({ m5: 1, m6: 1, m8: 1, m9: 1 });
+    assert.equal(meetsRunKindBar(floor, loose, "first").ok, false);
+  });
+
+  // 342-3 vB (hole 2): the keyless floor guarantee must be structural, not a
+  // property of the stored numbers. A keyless card (journey outcome
+  // "keyless" — driveP6Journey's honest no-op) has no machine-verified
+  // synthesis, so scoreMaker forces M1-M4 to the keyless floor and the card
+  // cannot clear any admissible corpus bar by construction.
+  const keylessNineOnItsFace = () => ({
+    project: project({
+      generatedTree: [treeFile("src/ledger.ts", "export function ledgerTotals() {}")],
+      phases: [phase(6, { passed: true })],
+      lastTest: { ok: true, detail: "verify pass", label: "tested", evidenceHash: "deadbeef1234" },
+    }),
+    corpus: { kind: "library", expectedCapabilities: ["ledger"] },
+    treeRun: { ok: true, dir: "d", testsPass: 2, testsFail: 0 },
+    journey: { outcome: "keyless" as const, cycles: 0, budget: 3 },
+    handover: { emitted: true, deployMd: true, oracleSpec: true, oracleSpecBytes: 4200 },
+    prior: { m1: 1, m2: 1, m3: 1 },
+    budget: { used: 0, budget: 3 },
+    stop: { onTime: true, refused: false, loud: false },
+  });
+
+  test("(d) a keyless card cannot clear the bar by construction — M1-M4 are the keyless floor", () => {
+    const c = card(keylessNineOnItsFace());
+    for (const m of ["M1", "M2", "M3", "M4"] as const) {
+      assert.equal(c.criteria[m].score, 0, `${m} must be the keyless floor, not a floor-shaped green`);
+    }
+    // The best a keyless card can reach is M5,M6,M7,M8,M9 = 5/9; the first-run
+    // bar (M7 excluded) is 4/8 = 0.5 < 1. Neither bar is reachable.
+    assert.equal(c.total, 5);
+    assert.equal(meetsRunKindBar(c, CORPUS_BAR, "first").ok, false);
+    assert.equal(meetsRunKindBar(c, CORPUS_BAR, "warm").ok, false);
+  });
+
+  test("firstRunBarIsAdmissible: the corpus block is admissible; loose blocks are rejected", () => {
+    assert.deepEqual(firstRunBarIsAdmissible(CORPUS_BAR), { ok: true, defects: [] });
+    const weak = firstRunBarIsAdmissible({ meanAtLeast: 1, firstRun: { meanAtLeast: 0.5, excludeCriteria: ["M7"] } });
+    assert.equal(weak.ok, false);
+    assert.match(weak.defects.join(" "), /meanAtLeast must be 1/);
+    const ducked = firstRunBarIsAdmissible({ meanAtLeast: 1, firstRun: { meanAtLeast: 1, excludeCriteria: ["M1", "M2"] } });
+    assert.equal(ducked.ok, false);
+    assert.match(ducked.defects.join(" "), /may name only/);
+    assert.deepEqual(firstRunBarIsAdmissible({ meanAtLeast: 0.5 }), { ok: true, defects: [] });
+  });
+
+  test("FIRST_RUN_BAR_MEAN_ATLEAST is 1 — the only first-run threshold that demands every scoreable criterion", () => {
+    assert.equal(FIRST_RUN_BAR_MEAN_ATLEAST, 1);
   });
 });

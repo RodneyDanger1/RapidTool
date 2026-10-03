@@ -57,6 +57,7 @@ import { recordSessionSpend, resetSessionBudget, sessionTokenBudget } from "./to
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
 import { fnv1a } from "./algorithms.ts";
 import type { PhaseId, Project, WildPlan } from "./types.ts";
+import { applyPhaseResult } from "./engine.ts";
 import type { WildReviewer } from "./engine.ts";
 import type { RtEventSeed } from "./rt-events.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
@@ -2034,6 +2035,115 @@ describe("E-12 — runPhase live delegation keeps the deterministic floor bare-N
     assert.equal(live.artifacts.filter((a) => a.kind === "research").length, 0);
     assert.equal(live.research?.length ?? 0, 0);
     assert.equal(live.phases.find((r) => r.id === 1)?.status, plain.phases.find((r) => r.id === 1)?.status);
+  });
+});
+
+describe("342-2 — researchLive runs the keyless research layer for a research phase", () => {
+  /** P7-ready: phases 0..6 sealed, 7 ready, 8..12 locked (the eval's post-journey edge). */
+  function p7Ready(): Project {
+    const p = createProject({ brief: FIXTURE_BRIEF, name: "ResearchLive" });
+    p.currentPhase = 7;
+    p.phases = Array.from({ length: 13 }, (_, id) => ({
+      id,
+      status: id <= 6 ? ("complete" as const) : id === 7 ? ("ready" as const) : ("locked" as const),
+    })) as Project["phases"];
+    return p;
+  }
+
+  /** DDG-Lite-shaped transport stub (the suite's only double): one real-shaped
+   *  result row, no network. `nodeFetch`/`oneShotFetch` both defer to a replaced
+   *  `globalThis.fetch`, so this is the documented test seam. */
+  function stubFreeSearch(): { calls: string[]; restore: () => void } {
+    const real = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes("lite.duckduckgo.com")) {
+        const target = encodeURIComponent("https://example.com/breakout-guide");
+        const html =
+          `<a href="//duckduckgo.com/l/?uddg=${target}">Breakout guide</a>` +
+          `<td class='result-snippet'>A real snippet about breakout paddle physics.</td>`;
+        return new Response(html, { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    }) as typeof fetch;
+    return {
+      calls,
+      restore: () => {
+        globalThis.fetch = real;
+      },
+    };
+  }
+
+  it("default (unset) and researchLive:false stay the deterministic floor for P7", async () => {
+    const realNow = Date.now;
+    Date.now = () => 1_700_000_000_000;
+    try {
+      const p = p7Ready();
+      const floor = applyPhaseResult(p, 7);
+      const unset = await runPhase(p, 7);
+      const off = await runPhase(p, 7, { researchLive: false });
+      assert.equal(unset.research?.length ?? 0, 0, "no live research corpus on the default path");
+      assert.equal(unset.artifacts.filter((a) => a.kind === "research").length, 1, "only the floor's illustrative artifact");
+      assert.equal(JSON.stringify(unset), JSON.stringify(off), "researchLive:false is a byte-identical no-op");
+      assert.equal(JSON.stringify(unset), JSON.stringify(floor), "the default path IS the deterministic floor");
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it("researchLive:true runs the KEYLESS free-search overlay (no LLM call, even keyed)", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    const realNow = Date.now;
+    const stub = stubFreeSearch();
+    Date.now = () => 1_700_000_000_000;
+    try {
+      // A configured key must NOT be used: the research-only overlay is keyless.
+      process.env.DEEPSEEK_API_KEY = "sk-342-2-dummy-not-a-real-key";
+      const after = await runPhase(p7Ready(), 7, { researchLive: true });
+      assert.equal(after.research?.length ?? 0, 1, "the free-search corpus landed");
+      assert.equal(after.research?.[0]?.provider, "duckduckgo");
+      assert.equal(after.research?.[0]?.items.length, 1);
+      assert.equal(after.research?.[0]?.items[0]?.url, "https://example.com/breakout-guide");
+      assert.equal(after.research?.[0]?.items[0]?.title, "Breakout guide");
+      const researchArtifacts = after.artifacts.filter((a) => a.kind === "research");
+      assert.equal(researchArtifacts.length, 2, "the floor's illustrative artifact + the real fetched finding");
+      assert.ok(
+        researchArtifacts.some((a) => a.title === "Breakout guide"),
+        "the fetched finding landed as a research artifact",
+      );
+      assert.ok(
+        researchArtifacts.every((a) => a.title !== "Phase narrative (LLM)"),
+        "no LLM narrative artifact on the research-only path",
+      );
+      assert.ok(
+        stub.calls.every((u) => u.includes("duckduckgo")),
+        `research-only made no LLM/other network call (saw: ${stub.calls.join(", ")})`,
+      );
+    } finally {
+      Date.now = realNow;
+      stub.restore();
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+
+  it("runUntilGate threads researchLive to P7; the default does not run it", async () => {
+    const stub = stubFreeSearch();
+    try {
+      const withOpt = await runUntilGate(p7Ready(), { researchLive: true, maxSteps: 1 });
+      assert.equal(withOpt.project.research?.length ?? 0, 1, "the research phase ran live through runUntilGate");
+      assert.equal(withOpt.project.research?.[0]?.provider, "duckduckgo");
+      const without = await runUntilGate(p7Ready(), { maxSteps: 1 });
+      assert.equal(
+        without.project.research?.length ?? 0,
+        0,
+        "default: the research phase stays on the deterministic floor",
+      );
+    } finally {
+      stub.restore();
+    }
   });
 });
 

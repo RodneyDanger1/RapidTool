@@ -91,7 +91,7 @@ import {
   type P6TreeTypecheckVerdict,
 } from "./codegen.server.ts";
 import { p6CycleLiveDeps } from "./headless.ts";
-import { applyPhaseResult, emptyProject } from "./engine.ts";
+import { applyPhaseResult, deliveryKindOf, emptyProject, withDeliveryKind } from "./engine.ts";
 import { runGate, archTrace } from "./dod.ts";
 import { buildPhase6Module } from "./sandbox.ts";
 import { briefNounHits, maskLiteralsAndComments } from "./sandbox.ts";
@@ -2640,22 +2640,31 @@ describe("liveP6Synthesis deps.proven ranks cross-project lessons into the promp
   });
 });
 
-// --- fixes/148 (F1): the kind-scoped tree trigger ----------------------------
+// --- fixes/148 (F1) / fixes/342-1 follow-up: the kind-scoped tree trigger ----
 // The chunk/tree decision must consider the DELIVERY KIND, not signature count
 // alone (fixes/145 M1=0 root cause — a ≤8-signature WEBAPP brief fell into
-// the byte-parity single-module path by construction). Every DECLARED kind
+// the byte-parity single-module path by construction). Every MULTI-FILE kind
 // ("app" = webapp / "tool" / "game") routes to the chunked tree regardless of
-// signature count; the ≤8 byte-parity single-module path serves ONLY
-// kind-absent (undeclared/legacy, E-15 never infers) library-style projects.
+// signature count; the ≤8 byte-parity single-module runtime harness serves the
+// SINGLE-ENTRY product kinds — kind-absent (undeclared/legacy, E-15 never
+// infers), `library`, and `service`.
 
 describe("liveP6Synthesis kind-scoped tree trigger (fixes/148 F1)", () => {
-  it("singleModuleLibraryKind: only kind-absent projects are single-module-library eligible", () => {
+  it("singleModuleLibraryKind: kind-absent + the single-entry kinds (library, service) are eligible; multi-file kinds are tree-only", () => {
     assert.equal(singleModuleLibraryKind({}), true, "kind absent → legacy single-module eligible");
     assert.equal(singleModuleLibraryKind({ kind: undefined }), true);
     assert.equal(singleModuleLibraryKind({ kind: null }), true);
     assert.equal(singleModuleLibraryKind({ kind: "app" }), false, "app (webapp) → always tree");
     assert.equal(singleModuleLibraryKind({ kind: "tool" }), false, "tool → always tree");
     assert.equal(singleModuleLibraryKind({ kind: "game" }), false, "game → always tree");
+    // W56/342-1 cross-lane contract: a widened `Project.kind` that can carry
+    // the library delivery kind must be accepted the SAME way as the current
+    // absence signal, so the widening is safe in either direction.
+    assert.equal(singleModuleLibraryKind({ kind: "library" }), true, "declared library → single-module eligible");
+    // fixes/342-1 follow-up: `service` is a SINGLE-ENTRY product exactly like a
+    // library (one runnable `src/main.ts` entry declared by package.json), so the
+    // 342-4 stamping of `kind:"service"` must NOT push it into the chunked tree.
+    assert.equal(singleModuleLibraryKind({ kind: "service" }), true, "service (single-entry runnable product) → single-module eligible like library");
   });
 
   it("a declared webapp kind with ≤8 signatures now emits a generatedTree (entry file), never the single module", async () => {
@@ -2746,6 +2755,136 @@ describe("liveP6Synthesis kind-scoped tree trigger (fixes/148 F1)", () => {
     assert.equal(tree.length, 2, "≤8 kind-absent → barrel + one chunk file (FM-01)");
     assert.equal(tree[0]!.path, TREE_ENTRY_PATH);
     assert.ok(chunk.includes("function createBoard("), "the verified module's bytes live in the chunk file");
+  });
+});
+
+// --- fixes/342-1 follow-up (P6 convergence): the `service` routing rule ------
+// A `service` is a SINGLE-ENTRY product, exactly like a `library`: the
+// K9-verified order-webhook service ships ONE runnable `src/main.ts` entry that
+// package.json declares (scaffold.projectKindOf maps both onto the same
+// `src/main.ts` emitter), 341_1 §R3 names this the "kind-absent library/service
+// lane", and scripts/run-eval.mjs maps a corpus `service` to kind-ABSENT for
+// that very reason. Both therefore belong to the ≤8-signature single-module
+// runtime harness (synthesizeSingleModule), NOT the chunked multi-file tree.
+// 342-4's engine now stamps `kind:"service"` at the keyed P6 seam, which moved
+// a service brief out of the lane by construction; accepting `kind === "service"`
+// restores the lane the classifier's own value names.
+
+describe("fixes/342-1 follow-up: a service brief stays on the single-module lane", () => {
+  const SERVICE_BRIEF =
+    "A webhook worker service: receives order events on an HTTP endpoint, validates payloads, queues retries with backoff, exposes a health check; reads PORT from the environment.";
+
+  /** Brief-faithful service module: every required brief noun is a CODE
+   *  identifier, the export surface matches the six signatures, no forbidden or
+   *  non-deterministic primitive (deterministic Node builtins only). */
+  const SERVICE_MODULE = [
+    "function receiveOrderEvent(payload) {",
+    '  if (!payload) { throw new Error("payload required"); }',
+    "  return { id: payload.id, kind: payload.kind };",
+    "}",
+    "function validatePayload(payload) {",
+    '  if (!payload || typeof payload !== "object") { throw new Error("invalid payload"); }',
+    "  return payload;",
+    "}",
+    "function queueRetry(event, attempt) {",
+    "  return { event: event, attempt: attempt };",
+    "}",
+    "function retryBackoff(attempt) {",
+    "  return Math.min(1000 * Math.pow(2, attempt), 30000);",
+    "}",
+    "function healthCheck() {",
+    '  return { status: "ok" };',
+    "}",
+    "function resolvePort(env) {",
+    '  const raw = Number.parseInt(String((env && env.PORT) || ""), 10);',
+    "  return Number.isInteger(raw) && raw > 0 && raw <= 65535 ? raw : 8080;",
+    "}",
+    "module.exports.receiveOrderEvent = receiveOrderEvent;",
+    "module.exports.validatePayload = validatePayload;",
+    "module.exports.queueRetry = queueRetry;",
+    "module.exports.retryBackoff = retryBackoff;",
+    "module.exports.healthCheck = healthCheck;",
+    "module.exports.resolvePort = resolvePort;",
+    "",
+  ].join("\n");
+
+  const SERVICE_EXPORTS = ["receiveOrderEvent", "validatePayload", "queueRetry", "retryBackoff", "healthCheck", "resolvePort"];
+
+  const SERVICE_SIGNATURES = [
+    "export function receiveOrderEvent(payload: Record<string, unknown>): Record<string, unknown>",
+    "export function validatePayload(payload: Record<string, unknown>): Record<string, unknown>",
+    "export function queueRetry(event: Record<string, unknown>, attempt: number): Record<string, unknown>",
+    "export function retryBackoff(attempt: number): number",
+    "export function healthCheck(): Record<string, unknown>",
+    "export function resolvePort(env: Record<string, string | undefined>): number",
+  ];
+
+  function serviceDeps() {
+    const calls: string[] = [];
+    const complete = async (): Promise<LlmResult> => {
+      calls.push("complete");
+      return {
+        ok: true,
+        text: JSON.stringify({
+          module: SERVICE_MODULE,
+          exports: SERVICE_EXPORTS,
+          reqTrace: { "req-1": "receiveOrderEvent", "req-2": "resolvePort" },
+        }),
+        model: "deepseek-v4-flash",
+      };
+    };
+    const expand = async (): Promise<ExpandBriefResult> => {
+      calls.push("expand");
+      return {
+        ok: true,
+        spec: {
+          requirements: ["Receive order events on an HTTP endpoint.", "Read PORT with a safe default."],
+          edgeCases: ["A missing payload is rejected."],
+          errorHandling: ["Invalid payloads throw."],
+          typeSignatures: SERVICE_SIGNATURES,
+          dataFlow: ["payload → receiveOrderEvent → validatePayload"],
+          negativeConstraints: ["DO NOT invent order fields."],
+        },
+      };
+    };
+    const verify = async (): Promise<VerifyOutcome> => {
+      calls.push("verify");
+      return {
+        status: "passed",
+        iterations: 1,
+        evidence: "6/6 machine-run cases passed on iteration 1",
+        finalSource: SERVICE_MODULE,
+        cases: [{ id: "case-1", expression: "typeof resolvePort === 'function'" }],
+      };
+    };
+    return { calls, deps: { expand, complete, verify } };
+  }
+
+  it("the REAL engine classifier stamps the REAL service brief \"service\", and that kind is single-module eligible", () => {
+    const stamped = withDeliveryKind(emptyProject({ name: "OrderWebhook", brief: SERVICE_BRIEF }));
+    assert.equal(deliveryKindOf(stamped), "service", "the real classifier decides service from the brief");
+    assert.equal(stamped.kind, "service", "withDeliveryKind stores the decision on the project");
+    assert.equal(singleModuleLibraryKind(stamped), true, "the stored service kind routes to the single-module lane");
+  });
+
+  it("a stamped service brief takes the single-module pipeline END-TO-END (machine verify, never the chunked tree)", async () => {
+    const project = withDeliveryKind(emptyProject({ name: "OrderWebhook", brief: SERVICE_BRIEF }));
+    const { calls, deps } = serviceDeps();
+    const q = await liveP6Synthesis(project, deps);
+    assert.deepEqual(
+      calls,
+      ["expand", "complete", "verify"],
+      "service: one synth call + machine verify — the single-module lane, not the chunked tree",
+    );
+    assert.equal((q.lastTest as { label?: string } | null)?.label, "tested", "machine verify mints tested on the service single-module lane");
+    assert.ok(
+      (q.logs ?? []).some((l) => l.event === "p6.synthesis" && l.detail.includes("LLM module machine-verified")),
+      "the single-module success log, never a chunked-tree log",
+    );
+    // FM-01: the recorded bytes are the deterministic materialization of the
+    // verified module, so what was sealed really is the machine-verified service.
+    const chunk = assertRecordedMaterialized(q, SERVICE_MODULE.trim(), SERVICE_EXPORTS);
+    assert.ok(chunk.includes("function resolvePort("), "the verified service module's bytes live in the chunk file");
   });
 });
 
@@ -2903,6 +3042,37 @@ describe("fixes/341-1 pre-seal self-typecheck gate", () => {
       "the tsc tail rode the repair prompt",
     );
     assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "a converged repair is not a refusal");
+  });
+
+  // W56/342-1: the measured TS2322 class (a helper annotated `number` returning
+  // `Record<string, unknown>`, live at src/jobs/validate.ts(46,11)). The bounded
+  // repair re-prompt must carry BOTH the compiler-named file + its tsc row AND
+  // the class guidance (which now lives in the system prompt) so the model can
+  // correct the exact defect instead of re-emitting it.
+  it("W56/342-1: a TS2322 self-typecheck red feeds the compiler-named file + row into the repair re-prompt", async () => {
+    let tcCalls = 0;
+    const seam = async (): Promise<P6TreeTypecheckVerdict> => {
+      tcCalls += 1;
+      return tcCalls === 1
+        ? {
+            run: "fail",
+            detail: `${TREE_CHUNK0_RELOCATED_PATH}(46,11): error TS2322: Type 'Record<string, unknown>' is not assignable to type 'number'.`,
+            files: [TREE_CHUNK0_RELOCATED_PATH],
+          }
+        : { run: "pass" };
+    };
+    const f = tcRealDeps(KANBAN_MODULE);
+    const q = await liveP6Synthesis(tcBase(), { ...f.deps, typecheckTree: seam });
+    assert.equal(tcCalls, 2, "the gate re-ran after the bounded repair");
+    const repair = f.prompts.find((p) => p.includes("fails its OWN declared `npm run typecheck`"));
+    assert.ok(repair, "the compiler report reached the repair re-prompt");
+    assert.match(repair!, /TS2322/, "the repair prompt names the compiler error code");
+    assert.match(repair!, /src\/generated\/chunk-0\.ts\(46,11\)/, "the compiler-named file + position ride the retry");
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "a converged TS2322 repair seals");
+    assert.ok(
+      q.artifacts.some((a) => a.kind === "code" && a.title.includes("Generated source tree")),
+      "the tree is sealed only after the TS2322 red clears",
+    );
   });
 
   it("SKIP is honest non-verification: it seals (as treeRun's own skip does) and logs the skip", async () => {
@@ -3372,6 +3542,101 @@ describe("W45/331-4 (Finding B) cross-chunk duplicate declarations", () => {
     assert.deepEqual(crossChunkDuplicateDeclarations(mod, null), []);
   });
 
+  // W56/342-1 (the TS2440 class, root cause): materializeImportableTree emits
+  // `import { X }` for every earlier file's export, so a later chunk's `type X`,
+  // `interface X` or `declare function X` collides with it. The pre-fix detector
+  // saw only runtime bindings, so the collision reached the emitted tree and real
+  // tsc refused it with TS2440. Reproduced: `b.ts(1,10): error TS2440: Import
+  // declaration conflicts with local declaration of 'InvoiceRow'.`
+  it("W56/342-1: a later chunk re-declaring a prior export in type/ambient space also collides (TS2440)", () => {
+    const lines = localBindingLines(
+      [
+        "type InvoiceRow = { id: string };",
+        "interface Vendor { name: string }",
+        "declare function validate(row: unknown): boolean;",
+      ].join("\n"),
+    );
+    assert.deepEqual(lines.get("InvoiceRow"), [1], "type declaration is duplicate evidence");
+    assert.deepEqual(lines.get("Vendor"), [2], "interface declaration is duplicate evidence");
+    assert.deepEqual(lines.get("validate"), [3], "declare function is duplicate evidence");
+    assert.deepEqual(
+      crossChunkDuplicateDeclarations("type InvoiceRow = { id: string };", [
+        { path: "src/generated/a.ts", exports: ["InvoiceRow"] },
+      ]),
+      [{ name: "InvoiceRow", line: 1, priorPath: "src/generated/a.ts" }],
+      "a type-space redeclaration of a prior export is refused before it reaches tsc",
+    );
+    assert.deepEqual(
+      crossChunkDuplicateDeclarations("declare function validate(row: unknown): boolean;", [
+        { path: "src/generated/b.ts", exports: ["validate"] },
+      ]),
+      [{ name: "validate", line: 1, priorPath: "src/generated/b.ts" }],
+      "a declare-function redeclaration of a prior export is refused",
+    );
+  });
+
+  // fixes/342-1 resume (verifier A): the widened detector still missed real
+  // TS2440 emitters. Real-tsc ground truth with a prior TYPE export (the harness
+  // verifier A used): `enum`, `const enum`, `export enum`, `declare class`,
+  // `abstract class` (and their export/declare variants) all emit
+  // `TS2440: Import declaration conflicts with local declaration of 'X'`, while
+  // `namespace` / `declare namespace` / `declare module` / `declare const` are
+  // silent. Each form below is a crafted two-chunk module: a.ts exports the name,
+  // b.ts imports it and redeclares it locally.
+  it("W56/342-1 (resume): enum / declare class / abstract class also collide (TS2440)", () => {
+    const cases: [string, string][] = [
+      ["enum InvoiceRow { Draft, Sent }", "InvoiceRow"],
+      ["export enum InvoiceRow { Draft, Sent }", "InvoiceRow"],
+      ["const enum InvoiceRow { Draft, Sent }", "InvoiceRow"],
+      ["export const enum InvoiceRow { Draft, Sent }", "InvoiceRow"],
+      ["declare enum InvoiceRow { Draft, Sent }", "InvoiceRow"],
+      ["declare const enum InvoiceRow { Draft, Sent }", "InvoiceRow"],
+      ["export declare const enum InvoiceRow { Draft, Sent }", "InvoiceRow"],
+      ["class InvoiceRow {}", "InvoiceRow"],
+      ["declare class InvoiceRow {}", "InvoiceRow"],
+      ["abstract class InvoiceRow {}", "InvoiceRow"],
+      ["export abstract class InvoiceRow {}", "InvoiceRow"],
+      ["declare abstract class InvoiceRow {}", "InvoiceRow"],
+      ["export declare class InvoiceRow {}", "InvoiceRow"],
+      ["export default class InvoiceRow {}", "InvoiceRow"],
+    ];
+    for (const [decl, name] of cases) {
+      assert.deepEqual(localBindingLines(decl).get(name), [1], `declaration is duplicate evidence: ${decl}`);
+      assert.deepEqual(
+        crossChunkDuplicateDeclarations(decl, [{ path: "src/generated/a.ts", exports: [name] }]),
+        [{ name, line: 1, priorPath: "src/generated/a.ts" }],
+        `a prior export redeclared via "${decl}" is refused before it reaches tsc`,
+      );
+      const refused = validateSynthesisModule(decl, [], [], [{ path: "src/generated/a.ts", exports: [name] }]);
+      assert.equal(refused.ok, false, `routed into the duplicate-declaration repair: ${decl}`);
+      if (!refused.ok) {
+        assert.equal(refused.code, "RT_E_VALIDATION");
+        assert.match(refused.error, /cross-chunk duplicate declaration/);
+        assert.match(refused.error, /already exported by src\/generated\/a\.ts/);
+      }
+    }
+  });
+
+  it("W56/342-1 (resume): namespace / declare namespace / declare module stay unflagged (real tsc is silent)", () => {
+    const controls = [
+      "namespace InvoiceRow { const y = 1; }",
+      "declare namespace InvoiceRow { const y: number; }",
+      "declare module InvoiceRow { const y: number; }",
+      'declare module "invoice-service" { const y: number; }',
+      "declare const InvoiceRow: number;",
+      "declare let InvoiceRow: number;",
+      "declare var InvoiceRow: number;",
+    ];
+    for (const decl of controls) {
+      assert.equal(localBindingLines(decl).has("InvoiceRow"), false, `not a TS2440 duplicate: ${decl}`);
+      assert.deepEqual(
+        crossChunkDuplicateDeclarations(decl, [{ path: "src/generated/a.ts", exports: ["InvoiceRow"] }]),
+        [],
+        `not refused: ${decl}`,
+      );
+    }
+  });
+
   it("the duplicate repair prompt names the identifier, line and exporting sibling", () => {
     const p = p6SynthesisDuplicateDeclRepairPrompt([
       { name: "estimateARV", line: 546, priorPath: "src/generated/list-line-items.ts" },
@@ -3652,6 +3917,28 @@ describe("216f T-10 — prompt contract: signature ceiling vs requirement duty",
     assert.ok(
       !/10\.[^\n]*\(validator-enforced\)/.test(s),
       "rule 10 does not claim a validator check that does not exist (the tree's tsc is the gate)",
+    );
+  });
+
+  // W56/342-1 (keyed P6 convergence): rule 10 names only TS7006/TS2304, but the
+  // measured keyed failures are TS2322 (assignment type), TS2749 (value used as
+  // a type) and TS2440 (import/local conflict). The bounded repair cannot fix a
+  // class the model was never told about, so the prompt must name each class and
+  // its required shape (drift-proof: the compiler, not the validator, is the gate).
+  it("W56/342-1: the system prompt names the three strict-ts classes and their required shape", () => {
+    const s = p6SynthesisSystemPrompt();
+    assert.ok(s.includes("TS2322"), "names the assignment-mismatch class (Record<string, unknown> → number)");
+    assert.ok(s.includes("TS2749"), "names the value-used-as-type class (TextDecoder)");
+    assert.ok(s.includes("TS2440"), "names the import/local-conflict class");
+    assert.ok(s.includes("TextDecoder"), "names the live value-as-type offender the keyed tree hit");
+    assert.match(s, /Record<string, unknown>/, "names the observed offender type in the required shape");
+    assert.ok(
+      /return type[^\n]*primitive|annotat[^\n]*EXACTLY match/i.test(s),
+      "states the required shape: an annotation must match the value it describes",
+    );
+    assert.ok(
+      !/11\.[^\n]*\(validator-enforced\)/.test(s),
+      "rule 11 does not claim validator enforcement — real tsc is the gate",
     );
   });
 

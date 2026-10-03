@@ -94,7 +94,15 @@ import {
   emitProject,
 } from "../src/lib/headless.ts";
 import { treeRun } from "../src/lib/compile-check.server.ts";
-import { scoreMaker, capabilityCoverage, treeFilesOf } from "../src/lib/maker-score.ts";
+import {
+  scoreMaker,
+  capabilityCoverage,
+  treeFilesOf,
+  runKindOf,
+  barForRunKind,
+  meetsRunKindBar,
+  FIRST_RUN_UNSCOREABLE_CRITERIA,
+} from "../src/lib/maker-score.ts";
 import { fnv1a } from "../src/lib/algorithms.ts";
 // W23-L1 (fixes/262): the trial rows' usage/cost evidence consumes the
 // T-107.6 ledger helpers directly — consume, never recompute. F1 (314) adds
@@ -412,7 +420,7 @@ export function graderFileFor(slug, graderDir = GRADER_DIR) {
   return join(graderDir, `${slug}.grader.json`);
 }
 
-/** One run-side grader document. @typedef {{slug: string, graderVersion: number, caseName: string, authority: string, movedFrom: string, acceptanceBar: string, requiredIdentifiers: string[], requiredCapabilities: string[], expectedFiles: string[], expectedContent: Array<{file: string, contains: string}>, expectedKind: string | null, expectedBehavior: object[], passWhen: {meanAtLeast: number, requireExpectedFiles: boolean, requireExpectedContent: boolean, requireExpectedBehavior: boolean, requireExpectedKind: boolean}}} Grader */
+/** One run-side grader document. @typedef {{slug: string, graderVersion: number, caseName: string, authority: string, movedFrom: string, acceptanceBar: string, requiredIdentifiers: string[], requiredCapabilities: string[], expectedFiles: string[], expectedContent: Array<{file: string, contains: string}>, expectedKind: string | null, expectedBehavior: object[], passWhen: {meanAtLeast: number, firstRun: {meanAtLeast: number, excludeCriteria: import("../src/lib/maker-score.ts").MakerCriterionId[]} | null, requireExpectedFiles: boolean, requireExpectedContent: boolean, requireExpectedBehavior: boolean, requireExpectedKind: boolean}}} Grader */
 
 /** Parse + validate one grader document text. Returns `{ ok: true, grader }`
  *  or `{ ok: false, error }` — a grader that cannot be trusted never grades.
@@ -435,6 +443,52 @@ export function parseGrader(raw, slug) {
   if (capabilities === null) return { ok: false, error: "requiredCapabilities must be a string array" };
   const pw = doc.passWhen && typeof doc.passWhen === "object" ? doc.passWhen : {};
   const meanAtLeast = typeof pw.meanAtLeast === "number" && pw.meanAtLeast > 0 && pw.meanAtLeast <= 1 ? pw.meanAtLeast : 1;
+  // 342-2 (W56): the per-run-kind corpus bar 342-3 declared on every grader. A
+  // first run cannot score M7 (no prior same-slug run, maker-score m7Learning),
+  // so the grader may declare a first-run threshold taken over the card's
+  // criteria MINUS `excludeCriteria`. Read it here, validated: a malformed
+  // block is a coded refusal, never silently dropped — dropping it would judge
+  // first runs at the warm bar and cap them at 8/9 by arithmetic.
+  //
+  // 342-2b (verifier B): the exclusion list is maker-score's ONE list
+  // (FIRST_RUN_UNSCOREABLE_CRITERIA). Only a criterion a first run legally
+  // cannot score may be excluded; excluding a SCOREABLE criterion would let a
+  // hollow first run pass by dropping it, so it is refused here.
+  const unscoreableIds = new Set(FIRST_RUN_UNSCOREABLE_CRITERIA.map((id) => String(id)));
+  /** @type {(v: unknown) => v is import("../src/lib/maker-score.ts").MakerCriterionId} */
+  const isUnscoreable = (v) => typeof v === "string" && unscoreableIds.has(v);
+  let firstRun = null;
+  if (pw.firstRun !== undefined && pw.firstRun !== null) {
+    const fr = pw.firstRun;
+    if (!fr || typeof fr !== "object" || Array.isArray(fr)) {
+      return { ok: false, error: `RT_E_VALIDATION: passWhen.firstRun must be an object (got ${JSON.stringify(pw.firstRun)})` };
+    }
+    if (typeof fr.meanAtLeast !== "number" || !(fr.meanAtLeast > 0) || fr.meanAtLeast > 1) {
+      return {
+        ok: false,
+        error: `RT_E_VALIDATION: passWhen.firstRun.meanAtLeast must be a number in (0, 1] (got ${JSON.stringify(fr.meanAtLeast)})`,
+      };
+    }
+    const rawExclude = fr.excludeCriteria === undefined ? [] : fr.excludeCriteria;
+    if (!Array.isArray(rawExclude)) {
+      return {
+        ok: false,
+        error: `RT_E_VALIDATION: passWhen.firstRun.excludeCriteria must be an array of criterion ids (got ${JSON.stringify(fr.excludeCriteria)})`,
+      };
+    }
+    /** @type {import("../src/lib/maker-score.ts").MakerCriterionId[]} */
+    const excludeCriteria = [];
+    for (const id of rawExclude) {
+      if (!isUnscoreable(id)) {
+        return {
+          ok: false,
+          error: `RT_E_VALIDATION: passWhen.firstRun.excludeCriteria may name only the first-run-unscoreable criteria (${FIRST_RUN_UNSCOREABLE_CRITERIA.join("|")}) (got ${JSON.stringify(id)})`,
+        };
+      }
+      if (!excludeCriteria.includes(id)) excludeCriteria.push(id);
+    }
+    firstRun = { meanAtLeast: fr.meanAtLeast, excludeCriteria };
+  }
   const expectedFiles = strList(doc.expectedFiles) ?? [];
   const expectedContent = Array.isArray(doc.expectedContent)
     ? doc.expectedContent
@@ -509,6 +563,9 @@ export function parseGrader(raw, slug) {
       expectedBehavior,
       passWhen: {
         meanAtLeast,
+        // 342-2 (W56): the declared first-run bar (null = keep the warm bar
+        // for first runs too — v1 back-compat).
+        firstRun,
         requireExpectedFiles: pw.requireExpectedFiles !== false,
         requireExpectedContent: pw.requireExpectedContent !== false,
         // A declared bar is mandatory by default — same doctrine as files/content;
@@ -1915,15 +1972,19 @@ function endingRecord({ p, res, approved, onTime, stall, position, code = null }
  * FLOOR drain there means the journey is the ONLY phase-6 synthesis (the old
  * keyed flow ran the whole drain live:true — synthesis #1 inside the drain —
  * and then let the journey re-synthesize #2; fixes/146 §2 divergence #4).
+ * `researchLive` (342-2): the post-journey drain passes it so the KEYLESS
+ *   bare-Node research overlay runs for research phases (P7/P11) even though
+ *   `keyed:false`. Without it the keyed eval never ran P7's live layer, so
+ *   `p7-research` stalled on an empty corpus (the harness path gap).
  *  @param {any} project
- *  @param {{keyed?: boolean, p6Gate?: boolean}} [options] */
-export async function drainPipeline(project, { keyed, p6Gate = false } = {}) {
+ *  @param {{keyed?: boolean, p6Gate?: boolean, researchLive?: boolean}} [options] */
+export async function drainPipeline(project, { keyed, p6Gate = false, researchLive = false } = {}) {
   let p = project;
   let lastRes = null;
   const approved = [];
   const rounds = 80;
   for (let i = 0; i < rounds; i += 1) {
-    const res = await runUntilGate(p, { autopilot: false, live: keyed, maxSteps: 60 });
+    const res = await runUntilGate(p, { autopilot: false, live: keyed, researchLive, maxSteps: 60 });
     p = res.project;
     lastRes = res;
     if (res.outcome === "hitl") {
@@ -2011,10 +2072,11 @@ export async function drainPipeline(project, { keyed, p6Gate = false } = {}) {
 /**
  * fixes/215: corpus delivery-kind → Project.kind. The corpus frontmatter
  * `kind` is a string contract (webapp/tool/game/cli-tool/library/service/"").
- * Project.kind is the 3-way "app"|"tool"|"game" (types.ts E-15). Declared
- * non-library kinds MUST become a Project.kind so codegen's tree trigger
- * (singleModuleLibraryKind) does not silently collapse them to the ≤8
- * single-module path. "library"/"service"/"" stay absent — the honest
+ * Project.kind is the 5-way DeliveryKind "app"|"tool"|"game"|"library"|
+ * "service" (types.ts DELIVERY_KINDS — widened from the 3-way E-15 shape by
+ * 342-4). Declared non-library kinds MUST become a Project.kind so codegen's
+ * tree trigger (singleModuleLibraryKind) does not silently collapse them to
+ * the ≤8 single-module path. "library"/"service"/"" stay absent — the honest
  * single-module library path. Never invents a kind the corpus didn't declare.
  */
 function deliveryKindOf(corpusKind) {
@@ -2076,7 +2138,7 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       // from THIS journey, never from a drain-side live P6 (divergence #4).
       journey = await driveP6Journey(pre.p, { budget: JOURNEY_BUDGET });
       const afterJourney = journey && journey.project ? journey.project : pre.p;
-      drain = await drainPipeline(afterJourney, { keyed: false });
+      drain = await drainPipeline(afterJourney, { keyed: false, researchLive: true });
       drain.approved = [...pre.approved, ...drain.approved];
       if (!drain.stall && drain.position === "terminal" && drain.res && drain.res.outcome !== "complete") {
         drain.onTime = false;
@@ -2275,6 +2337,10 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
         : drain.stall
           ? "RT_EVAL_STALL"
           : null;
+  // 342-2 (W56): resolve the prior ONCE — scoreMaker's M7 and the row's
+  // persisted run kind must read the SAME evidence (a first run has no prior).
+  const prior = priorFor(slug);
+  const runKind = runKindOf(prior);
   const card = scoreMaker({
     project: finalProject,
     // W5-L5 T-107.5: grading inputs come from the RUN-SIDE grader
@@ -2291,7 +2357,7 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
       loud: refusedSignal ? Boolean(stopCode) : Boolean(drain.stall),
       code: stopCode,
     },
-    prior: priorFor(slug),
+    prior,
     synthesisSucceeded,
   });
 
@@ -2353,6 +2419,9 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
     // NOT the drain's downstream `dod`, and it is NOT a measurement.
     status: noBalance ? "no-balance" : drain.res ? drain.res.outcome : "stalled",
     mode,
+    // 342-2 (W56): first = no prior same-slug run (M7 unscoreable), warm = a
+    // prior exists. passesAcceptance selects the grader's declared bar by this.
+    runKind,
     criteria: card.criteria,
     total: card.total,
     mean: Number(card.mean.toFixed(4)),
@@ -2449,12 +2518,48 @@ async function runTrial(entry, mode, grader, { trial, emitDir, graderPath }) {
  *  nothing). */
 export function passesAcceptance(row, acceptance, grader) {
   if (!row || typeof row.mean !== "number" || !Number.isFinite(row.mean)) return false;
-  if (row.mean < grader.passWhen.meanAtLeast) return false;
+  if (!rubricMeanForRow(row, grader).ok) return false;
   if (grader.passWhen.requireExpectedFiles && acceptance.filesOk !== true) return false;
   if (grader.passWhen.requireExpectedContent && acceptance.contentOk !== true) return false;
   if (grader.passWhen.requireExpectedBehavior && acceptance.behaviorOk === false) return false;
   if (grader.passWhen.requireExpectedKind && acceptance.kindOk === false) return false;
   return true;
+}
+
+/** 342-2 (W56): the rubric verdict a row is judged on, per its run kind. The
+ *  bar (and the criteria a first run legally cannot score) comes from the
+ *  grader's declared `passWhen` + the row's own persisted `runKind`; the mean
+ *  comparison is maker-score's `meetsRunKindBar` (ONE comparison — never
+ *  re-implemented here). A real entryRow always carries `criteria`; a
+ *  legacy/synthetic caller without the map falls back to its stored `mean`.
+ *  342-2b (verifier A/B): only an EXPLICIT `runKind: "first"` gets the lenient
+ *  first-run bar — an absent/unknown kind is judged on the stricter warm bar
+ *  (all nine), so a legacy re-judge cannot clear 8/9 by dropping M7. */
+function rubricMeanForRow(row, grader) {
+  const runKind = row && row.runKind === "first" ? "first" : "warm";
+  const hasCriteria = Boolean(row && row.criteria && typeof row.criteria === "object" && !Array.isArray(row.criteria));
+  if (hasCriteria) {
+    const judged = meetsRunKindBar(row, grader.passWhen, runKind);
+    return {
+      runKind,
+      mean: judged.mean,
+      meanAtLeast: judged.meanAtLeast,
+      excludeCriteria: judged.excludeCriteria,
+      hasCriteria,
+      ok: judged.ok,
+    };
+  }
+  const bar = barForRunKind(grader.passWhen, runKind);
+  return {
+    runKind,
+    mean: row.mean,
+    meanAtLeast: bar.meanAtLeast,
+    excludeCriteria: bar.excludeCriteria,
+    hasCriteria,
+    // Legacy fallback keeps the pre-342-2 comparison EXACTLY (`mean < bar` is
+    // the fail test; an undefined threshold therefore never trips it).
+    ok: !(row.mean < bar.meanAtLeast),
+  };
 }
 
 /** 255 (W20-L2): the pass verdict above is a boolean asked of SIX clauses —
@@ -2471,8 +2576,13 @@ export function acceptanceFailReason(row, acceptance, grader) {
   if (!row || typeof row.mean !== "number" || !Number.isFinite(row.mean)) {
     return "mean missing — the rubric never produced a number (crashed trial)";
   }
-  if (row.mean < grader.passWhen.meanAtLeast) {
-    return `mean ${row.mean} < ${grader.passWhen.meanAtLeast} (rubric threshold — files/content are not the cause)`;
+  const { runKind, mean, meanAtLeast, excludeCriteria, hasCriteria, ok } = rubricMeanForRow(row, grader);
+  if (!ok) {
+    if (excludeCriteria.length > 0 && hasCriteria) {
+      const scoreable = Object.keys(row.criteria).length - excludeCriteria.length;
+      return `mean ${Number(mean.toFixed(4))} < ${meanAtLeast} over ${scoreable} scoreable criteria (${runKind} run; excluded ${excludeCriteria.join(", ")}) — rubric threshold, files/content are not the cause`;
+    }
+    return `mean ${row.mean} < ${meanAtLeast} (rubric threshold — files/content are not the cause)`;
   }
   if (grader.passWhen.requireExpectedFiles && acceptance.filesOk !== true) {
     return `expected files missing: ${acceptance.missingFiles.join(", ")}`;

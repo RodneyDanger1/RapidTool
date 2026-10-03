@@ -172,4 +172,12 @@ Completes the funding correction above and supersedes the snapshot values in "Th
   ratchet (both legs exit 0); the older "'scripts/rapidtool-cli.mjs' carries typecheck errors" note is
   retired — the CLI reads **0**.
 
+## CORRECTION — 2026-10-03 (342-6 sweep): the W47 counts have drifted again
+
+The W47 correction's counts (src/lib 222 · scripts 49 · fixes 654 · wave_plans 123 at `6575669`) are
+stale at HEAD `686d7b6`. Live `git ls-files`: **src 246 · src/lib 235 · scripts 49 · fixes 719 ·
+wave_plans 139 · total 2,096**. Also: the `unattended` verb is now self-sufficient (341-6) — a stock HITL
+gate whose DoD passes is cleared through the ledgered machine actor; only a `forceHuman` gate, or any red
+DoD gate, still parks (`scripts/README-cli.md` §Resume and unattended).
+
 <!-- END START-HERE · maintained by organizers · append corrections, never rewrite history -->

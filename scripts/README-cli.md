@@ -997,16 +997,20 @@ verbs below are REAL drives wired through the same `runUntilGate` loop the origi
   from a checkpoint when one exists, else start from the project file; forces autopilot +
   live. **NOT a daemon** — there is no scheduler/queue in-product: an external hook (Windows
   Task Scheduler / cron) invokes this verb on a cadence, and each invocation is idempotent
-  (it resumes instead of restarting). Stock HITL gates (P4/P5/P8/P9) still park for a human
-  BY DESIGN: a parked exit (2) is the honest outcome, never a fake completion.
+  (it resumes instead of restarting). 341-6: it passes `machineGates`, so a stock HITL gate (P4/P5/P8/P9)
+  whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`); only a
+  `forceHuman` gate, or any red DoD gate, still parks (exit 2) — never a fake completion.
 
 The earlier `run --unattended` / `gate --unattended` flags remain as the one-shot form of the
 same drive (`--unattended` forces autopilot + live on those verbs). Neither verb is the wild
 lifecycle: `wild --resume` is the wild-mode pause/resume action, unrelated to run resume.
 
-> Honest follow-ups (do not claim them done): plan-before-first-mutation classifier review
-> (`TODO(R13-f02)`), and the shared `HISTORY_CAPS` across store/io/checkpoint (`A1-03` of
-> `wave_plans/W34/code-notes.md`, landed partially in `fixes/281`).
+> Honest follow-ups (do not claim them done): the shared `HISTORY_CAPS` across store/io/checkpoint
+> (`A1-03` of `wave_plans/W34/code-notes.md`, landed partially in `fixes/281`). *(The former
+> plan-before-first-mutation review entry is retired: `stageWildPlan` is the one staging site for both
+> wild drivers and parks at `wild.plan_review` before the first mutation — `engine.ts:4398`,
+> `store.ts:1357`, `headless.ts:5365/5592`; the browser reviewer is null and records the honest
+> "not configured" review.)*
 
 ## Agent contract (exit codes + stdout purity)
 
@@ -1134,7 +1138,6 @@ The emit→edit→re-emit verbs (`tree-run`/`repair`, fixes/150 wave G1) set the
 | `RT_E_PORT_IN_USE` | A server could not bind because the address/port is already in use (EADDRINUSE). | Stop the process holding the port or bind a different port; do not kill processes blindly. | 1–4 (classified in place) |
 | `RT_E_NETWORK_UNREACHABLE` | A network call never reached its target — DNS miss, refused or reset connection, unreachable host (includes undici's bare "fetch failed"). | Check the target host/port and connectivity; retry once if the failure may be transient, then report the unreachable endpoint honestly instead of fabricating the remote result. | 1–4 (classified in place) |
 | `RT_E_GIT_UNAVAILABLE` | The git binary is not available in this environment, so the git landing tail cannot run. | Report the absence honestly and leave the tree uninitialized — install git, or run where git exists; never fake a landing or hand-roll repository metadata. | — (no live emitter today; landing tail unwired) |
-| `RT_E_UNATTENDED_UNSUPPORTED` | W-47: an unattended end-to-end run was requested before its host and blockers exist — there is no scheduler/daemon/queue in this product and the W-01 (keyed wild P6 seam) / W-02 (mint reachability) blockers are not landed keyed. | Do not fake an unattended run: read the `blockers` list, land W-01+W-02 keyed, then arm the external hook (the refusal payload carries the exact scheduler line) and re-run; manual wild/gate runs remain available. | — (no live emitter today; console surface) |
 | `RT_E_CHECKPOINT_MISSING` | T-107.7: `resume`/`unattended` found no checkpoint at <projectDir>/.rapidtool/checkpoint.json — the run never committed a phase with a known project dir, or a COMPLETE seal cleared it (there is no successor state to re-enter). | Continue with the normal run verbs — `gate`/`run --project` writes a fresh checkpoint on every committed phase (`unattended` starts from the project file when no checkpoint exists); re-run `resume` only after a run has committed a phase beside that dir. Never invent a resumption. | 1 (resume/unattended re-entry) |
 | `RT_E_NOT_IMPLEMENTED` | The requested capability is a coded SHELL: its seam exists (types/parsing/refusal paths in place) but the full logic is not wired yet — the message names the owning TODO row. | Treat the refusal as the honest state of the build: read the named TODO(<row-id>) / lane log, implement that row, and re-run; never work around it by fabricating the missing behavior. | — (no live emitter today) |
 | `RT_E_AUTH_SCHEMA_MISSING` | Sign-in is enabled (VITE_AUTH_ENABLED is not "false") but no migration creates the Better Auth "user" table — migrations/auth/*.sql is never applied (neither the deploy migrator nor the PGLite fallback descends into it). | Copy the auth schema into the migrated directory (`cp migrations/auth/0001_auth.sql migrations/0001_auth.sql`, plus any later migrations/auth/*.sql in name order), restart, and re-run; or set VITE_AUTH_ENABLED=false to run without sign-in. Never let the app serve sign-in against a schema-less database. | 1 (migrate/build preflight) |

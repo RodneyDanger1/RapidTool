@@ -615,4 +615,21 @@ Appended 2026-09-29 by C5 (312) · sources: `fixes/311_se2_surfaces.md` CF-SE2-2
   pass / 10 skipped**, `npm run typecheck` exit 0 (both legs), `npm run lint` exit 0 / 0 warnings. The master
   table above is left in place per the append-only doctrine; trust this section over it where they differ.
 
+## §W342-6 — 2026-10-03 sweep (HEAD `686d7b6`): rows the master table still calls shells
+
+- **R13-f01 / W-47 (unattended)** — **REAL** (W36), self-sufficient since 341-6: one
+  `unattended --project` drives to a terminal state; a stock HITL gate whose DoD passes is cleared
+  through the ledgered machine actor (`approve --seat autopilot`); only `forceHuman`/red-DoD parks.
+- **T-107.7 (checkpoint + `resume`)** — **REAL** (W36): per-phase checkpoint beside the project dir;
+  341-6 proved SIGKILL → `resume` → `complete`.
+- **R13-f02 (plan-before-execute)** — **REAL**: `stageWildPlan` (`engine.ts:4398`) is the one staging
+  site for both wild drivers (`store.ts:1357`, `headless.ts:5365/5592`), parking at `wild.plan_review`.
+- **A3-f06/R3-f06 (4 kind emitters)** — **REAL** (341-1); real graders + emitted UI seam still owed.
+- **T5.7 (cassette)** — wired at the provider seam (340-4).
+- **R14-f01 (wild supervisor completer)** — shell still (seam wired; keyed evidence run owed).
+- **F1 (MCP)** — module + tests real, **no live consumer** (owner trust decision);
+  **F2 (second provider)** — resolved-but-unarmed.
+
+The master table above is left in place per append-only doctrine; trust this section over it.
+
 <!-- END-OF-FILE-MARKER-SPRINT · every lane appends ABOVE this line · never edit or delete this line -->

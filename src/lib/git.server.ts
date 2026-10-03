@@ -47,7 +47,6 @@ import {
   isVerifiedHumanSeatToken,
   seatLabel,
   type PolicyFallback,
-  type PolicySeat,
 } from "./policy.ts";
 
 // ---------------------------------------------------------------------------
@@ -103,16 +102,6 @@ export const DEFAULT_GIT_LAND_IDENTITY = {
 // ---------------------------------------------------------------------------
 // §2 · seat gate — pure, total, human-only
 // ---------------------------------------------------------------------------
-
-/** What a caller may present to a mutating call. Unknown shapes are refused. */
-export type GitLandSeat = {
-  /** The seat claiming the decision (same shapes as policy.ts's PolicySeat). */
-  actor?: PolicySeat;
-  /** The token the caller presents. */
-  humanSeatToken?: string;
-  /** The token the caller read from its own env (`RT_HUMAN_SEAT_TOKEN`). */
-  expectedHumanSeatToken?: string;
-};
 
 export type GitLandSeatAllow = { allowed: true; label: string; reason: string };
 export type GitLandSeatDeny = {

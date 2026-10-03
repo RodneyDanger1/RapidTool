@@ -51,6 +51,11 @@ import type { Project } from "./types.ts";
 // W6-L3 provider surfacing: TYPE-ONLY import — erased at compile, so the
 // client-safe runtime surface (sandbox-policy + token-ledger) is unchanged.
 import type { RapidToolModelRole } from "./llm/providers/registry.ts";
+// 342-5: the MCP consumer surface — TYPE-ONLY here (erased), so this file's
+// static graph stays client-safe; the runtime module is lazy-imported inside
+// `doctorMcp`, exactly like the registry seam in `doctorProviderTeam`.
+import type { McpServerConfig, McpToolsSurface } from "./mcp.server.ts";
+export type { McpToolsSurface as DoctorMcp } from "./mcp.server.ts";
 
 /** Evidence bag the latch reads. Absent fields default to RapidTool-now (not a factory). */
 export type FactoryEvidence = {
@@ -798,6 +803,35 @@ function buildEnvSelection(
     error: route.ok ? null : route.error,
     line: `providerEnv: ${how}, ${keys} · main=${main}`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// 342-5 — the doctor's honest MCP surface (the F1 client's consumer)
+// ---------------------------------------------------------------------------
+
+/**
+ * Report MCP truthfully: the enablement gate (`RAPIDTOOL_MCP_ENABLED`) and,
+ * ONLY when that is set AND a server is configured (`RAPIDTOOL_MCP_SERVER`),
+ * the server's own `tools/list` result. A disabled host spawns nothing and
+ * returns `tools: null` with the coded `RT_E_MCP_DISABLED` refusal; a configured
+ * host that is switched off still spawns nothing. The list is never fabricated
+ * and no simulator exists.
+ *
+ * The module is loaded through a lazy `import()` seam so this file's STATIC
+ * graph stays client-safe (mirrors `doctorProviderTeam`): no `node:` import at
+ * module load. `options.server` / `options.call` are programmatic overrides for
+ * the CLI; the env path is the default.
+ */
+export async function doctorMcp(
+  options: {
+    env?: NodeJS.ProcessEnv;
+    server?: McpServerConfig;
+    call?: { tool: string; args?: Record<string, unknown> };
+    timeoutMs?: number;
+  } = {},
+): Promise<McpToolsSurface> {
+  const mcp = await import("./mcp.server.ts");
+  return mcp.mcpToolsSurface(options);
 }
 
 // ---------------------------------------------------------------------------

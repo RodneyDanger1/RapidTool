@@ -464,6 +464,20 @@ async function driver() {
 }
 
 // ---------------------------------------------------------------------------
+// 342-5: the doctor surface (src/lib/doctor.ts) — its `doctorMcp` reports the
+// owner-gated MCP client honestly. Same lazy .ts import mechanics as the driver.
+// ---------------------------------------------------------------------------
+const DOCTOR_PATH = pathToFileURL(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "doctor.ts"),
+).href;
+
+let doctorModule = null;
+async function doctorDriver() {
+  if (!doctorModule) doctorModule = await import(DOCTOR_PATH);
+  return doctorModule;
+}
+
+// ---------------------------------------------------------------------------
 // Load the compile-check seam (src/lib/compile-check.server.ts, same lazy
 // .ts import mechanics as the driver — fixes/132 C2 `check` verb + emit
 // `--check`).
@@ -4632,7 +4646,59 @@ async function main() {
             // reported the fresh process's empty session ledger (`calls: 0`).
             ...(CLI_PROJECT ? { projectPath: CLI_PROJECT } : {}),
           });
-          respond({ ok: true, ...status }, 0);
+          // 342-5: the MCP surface — owner-gated OFF by default. It reports the
+          // gate truthfully and, only when RAPIDTOOL_MCP_ENABLED is set AND a
+          // server is configured, the REAL tools/list. A disabled host spawns
+          // nothing and lists nothing (never a fabricated list). `--mcp-call`
+          // additionally exercises the F1 read-only round-trip on that client.
+          const mcpFlag = args["mcp-call"];
+          if (mcpFlag === true) {
+            return respond(
+              { ok: false, error: "doctor: --mcp-call needs a value (the tool name to call)", code: "RT_E_VALIDATION" },
+              1,
+            );
+          }
+          let mcpCallArgs;
+          const rawCallArgs = args["mcp-call-args"];
+          if (rawCallArgs !== undefined) {
+            if (rawCallArgs === true) {
+              return respond(
+                { ok: false, error: "doctor: --mcp-call-args needs a value (a JSON object)", code: "RT_E_VALIDATION" },
+                1,
+              );
+            }
+            if (typeof rawCallArgs === "string" && rawCallArgs.trim()) {
+              try {
+                const parsed = JSON.parse(rawCallArgs);
+                if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+                  throw new Error("must be a JSON object");
+                }
+                mcpCallArgs = parsed;
+              } catch (err) {
+                return respond(
+                  {
+                    ok: false,
+                    error: `doctor: --mcp-call-args must be a JSON object — ${err instanceof Error ? err.message : String(err)}`,
+                    code: "RT_E_VALIDATION",
+                  },
+                  1,
+                );
+              }
+            }
+          }
+          const doc = await doctorDriver();
+          const mcpCallRequested = typeof mcpFlag === "string" && mcpFlag.trim().length > 0;
+          const mcp = await doc.doctorMcp({
+            env: process.env,
+            ...(mcpCallRequested ? { call: { tool: mcpFlag.trim(), args: mcpCallArgs ?? {} } } : {}),
+          });
+          // A plain `doctor` reports MCP as data (disabled is a status, not a
+          // doctor failure). An EXPLICIT `--mcp-call` is a request: its refusal
+          // is the process's coded failure (RT_E_MCP_DISABLED when off).
+          if (mcpCallRequested && mcp.refusal) {
+            return respond({ ok: false, error: mcp.refusal.error, code: mcp.refusal.code, mcp }, 1);
+          }
+          respond({ ok: true, ...status, mcp }, 0);
         } catch (err) {
           respond(
             {
@@ -4955,7 +5021,7 @@ const USAGE = {
     design: "design --project <file.json> [--html <out.html>]  # design tokens (+ standalone HTML when --html)",
     diagram: "diagram --project <file.json> --kind phases|architecture|flow [--out <file.svg>]  # SVG diagram",
     artifacts: "artifacts --project <file.json>           # index of project artifacts (id/phase/kind/title/bytes)",
-    doctor: "doctor [--tree <dir>]                       # capability pre-flight (llm/research/runner/node/factory)",
+    doctor: "doctor [--tree <dir>] [--mcp-call <tool>] [--mcp-call-args <json>]  # capability pre-flight (llm/research/runner/node/factory). The `mcp` field reports the owner-gated MCP client honestly: OFF by default (RAPIDTOOL_MCP_ENABLED unset) — zero child spawned, tools null with the coded RT_E_MCP_DISABLED refusal; only when enabled AND RAPIDTOOL_MCP_SERVER is configured is the server's REAL tools/list returned (never fabricated). --mcp-call additionally runs the read-only round-trip for that tool",
     diagnose: "diagnose [--project <file.json>]           # one-shot telemetry diagnosis from the NDJSON log tail: timeline + most-likely-cause heuristic + growth stats (no project required)",
     harvest: "harvest --project <file.json>               # bounded live-source harvest (repos/license/snippets) for the brief",
     swarm: "swarm --project <file.json>                  # deterministic advisory swarm critique of the current phase",

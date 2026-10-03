@@ -68,6 +68,11 @@
   ],
   "passWhen": {
     "meanAtLeast": 1,
+    "firstRun": {
+      "meanAtLeast": 1,
+      "excludeCriteria": ["M7"],
+      "note": "342-3: a first run has no prior same-slug run, so M7 (learning) is 0 by construction (maker-score m7Learning); judge it on the criteria it can score — the mean over the remaining eight must be 1, exactly as the warm bar demands all nine. Warm runs (a prior exists) keep meanAtLeast over all nine."
+    },
     "requireExpectedFiles": true,
     "requireExpectedContent": true,
     "requireExpectedBehavior": true,

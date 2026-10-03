@@ -22,7 +22,6 @@ import {
   HEARTBEAT_MS,
   HEARTBEAT_PERSIST_EVERY_MS,
   STALL_CRITICAL_MS,
-  type RtEventSeed,
 } from "./rt-events.ts";
 import type { StallLatch } from "./rt-ring.ts";
 
@@ -103,43 +102,4 @@ export async function boundedStepWatch<T>(
     if (overdueTimer !== null) clearTimeout(overdueTimer);
     if (timeoutTimer !== null) clearTimeout(timeoutTimer);
   }
-}
-
-/** Builder for the wild.step_overdue row a driver emits at tier 1 (§5.2). */
-export function overdueRowSeed(
-  capture: string,
-  projectId: string | null,
-  runRef: string | null,
-  elapsedMs: number,
-): RtEventSeed {
-  return {
-    level: "warn",
-    scope: "sys",
-    event: "sys.step_overdue",
-    message: `Wild step overdue at ${Math.round(elapsedMs)}ms (still awaited — cannot cancel an in-flight step)`,
-    capture,
-    projectId,
-    runRef,
-    payload: { stepElapsedMs: Math.round(elapsedMs) },
-  };
-}
-
-/** Builder for the wild.step_timeout row a driver emits at tier 2 (§5.2). */
-export function timeoutRowSeed(
-  capture: string,
-  projectId: string | null,
-  runRef: string | null,
-  elapsedMs: number,
-): RtEventSeed {
-  return {
-    level: "critical",
-    scope: "wild-step",
-    event: "wild.step_timeout",
-    message: `Wild step exceeded 2× budget (${Math.round(elapsedMs)}ms) — stall latch set; auto-pause on resolve`,
-    capture,
-    projectId,
-    runRef,
-    code: "RT_E_LLM_TIMEOUT",
-    payload: { stepElapsedMs: Math.round(elapsedMs) },
-  };
 }

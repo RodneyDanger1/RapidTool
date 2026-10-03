@@ -1,4 +1,5 @@
 import { PHASES, PHASE_BY_ID, PHASE_LAST, canEnter, phaseDef, priorsSealed } from "./phases.ts";
+import { DELIVERY_KINDS } from "./types.ts";
 import { clientSafeServerSpecifier } from "./server-spec.ts";
 // 312 C3 (CF-SE2-1): bounded settlement + trust gates for the wild-review /
 // P6-synthesis awaits. See settle.ts for the measured mock-starvation proof.
@@ -65,6 +66,7 @@ import type {
   Artifact,
   Competitor,
   DataContract,
+  DeliveryKind,
   FeasibilityScorecard,
   HitlDecision,
   HitlRequest,
@@ -183,17 +185,65 @@ function slug(s: string) {
 }
 
 /**
- * P0-03 (fixes/97): deterministic brief-kind classifier for the P8 UI phase.
- * Local by design — scaffold.projectKindOf is a sibling module this lane must
- * not import (cycle risk), and the classifier here is brief-only, not
- * file-tree-shaped. "library" and "cli-tool" are explicit brief vocabulary;
- * everything else is UI-bearing.
+ * 342-4: the ONE delivery-kind decision (the single source of truth). Returns
+ * the STORED `Project.kind` when it is a legal member of the widened
+ * `DeliveryKind` taxonomy, otherwise infers once from brief vocabulary. Every
+ * resolver reads THIS — `uiKindOf` (the P8 3-way projection) and
+ * `scaffold.projectKindOf` (the 5-way scaffold mapping) never re-infer from
+ * brief nouns themselves, so the two can no longer drift.
+ *
+ * Precedence mirrors the pre-342-4 scaffold register: an explicit delivery-kind
+ * noun (library/sdk/package…) is checked FIRST so a generic surface noun
+ * ("board"/"dashboard") can never capture a brief that names a library.
+ */
+const DELIVERY_KIND_KEYWORDS: { kind: DeliveryKind; words: string[] }[] = [
+  { kind: "library", words: ["library", "package", "sdk", "npm", "module", "statistics"] },
+  { kind: "app", words: ["ui", "dashboard", "board", "desk", "portal"] },
+  {
+    kind: "tool",
+    words: ["cli", "command-line", "commandline", "terminal", "console-tool", "parse", "convert", "agent", "script"],
+  },
+  { kind: "game", words: ["game", "play", "level", "arcade"] },
+  { kind: "service", words: ["api", "service", "webhook", "worker"] },
+];
+
+export function deliveryKindOf(project: Pick<Project, "kind" | "brief" | "domain" | "lattice">): DeliveryKind {
+  const declared = project.kind;
+  if (declared !== undefined && declared !== null && (DELIVERY_KINDS as readonly string[]).includes(declared)) {
+    return declared;
+  }
+  const tokens = new Set(
+    tokenizeWords([project.brief, project.domain ?? "", project.lattice?.jobs?.join(" ") ?? ""].join(" ")),
+  );
+  const hit = (h: string): boolean => tokens.has(h) || tokens.has(stemToken(h));
+  for (const row of DELIVERY_KIND_KEYWORDS) {
+    if (row.words.some(hit)) return row.kind;
+  }
+  return "app";
+}
+
+/**
+ * The one STAMP of `deliveryKindOf` onto a project (the keyed P6 seam calls
+ * this before synthesis so the routing signal and the emitted shape share the
+ * single decided value). A project that already carries a legal kind is
+ * returned UNCHANGED (same reference) — the decision is never re-derived.
+ */
+export function withDeliveryKind<P extends Project>(project: P): P {
+  if (project.kind !== undefined && project.kind !== null) return project;
+  return { ...project, kind: deliveryKindOf(project) };
+}
+
+/**
+ * P0-03 (fixes/97): the P8 3-way projection of the single delivery-kind
+ * decision — `uiKindOf` reads `deliveryKindOf` (never the brief itself), so a
+ * stored library kind and a kind-absent library brief resolve identically.
+ * "library" and "cli-tool" are their own surface contracts; app/game/service
+ * are UI-bearing at P8.
  */
 function uiKindOf(project: Project): "cli-tool" | "library" | "ui" {
-  const tokens = new Set(tokenizeWords(project.brief));
-  const hit = (h: string): boolean => tokens.has(h) || tokens.has(stemToken(h));
-  if (["library", "package", "sdk", "npm", "module", "statistics"].some(hit)) return "library";
-  if (["cli", "command-line", "commandline", "terminal", "console-tool"].some(hit)) return "cli-tool";
+  const kind = deliveryKindOf(project);
+  if (kind === "library") return "library";
+  if (kind === "tool") return "cli-tool";
   return "ui";
 }
 
@@ -1959,7 +2009,7 @@ export function emptyProject(input: {
   brief: string;
   /** Explicit create-time override (CLI --advisory sends false). Undefined → keyed default. */
   enforceDod?: boolean;
-  /** Delivery-kind (E-15 wave: "app"|"tool"|"game"). Declared kind wins at codegen
+  /** Delivery-kind (342-4: the 5-way DeliveryKind). Declared kind wins at codegen
    *  tree-trigger time; absent → singleModuleLibraryKind() routes to the ≤8 library path. */
   kind?: Project["kind"];
 }): Project {
@@ -2694,13 +2744,13 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
     competitors: Array.isArray(raw.competitors) ? raw.competitors : [],
     phases: phaseRepair.phases,
   };
-  // E-15 / fixes/215: `...raw` carries Project.kind through, but an unknown /
-  // non-string persisted kind (a hand-edited or legacy payload) must not
-  // survive — codegen's tree trigger (singleModuleLibraryKind) reads it
+  // E-15 / fixes/215 / 342-4: `...raw` carries Project.kind through, but an
+  // unknown / non-string persisted kind (a hand-edited or legacy payload) must
+  // not survive — codegen's tree trigger (singleModuleLibraryKind) reads it
   // directly, so a garbage value would silently mis-route synthesis. Clamp to
-  // the legal 3-way set; absent = the legacy single-module-library path
-  // (byte-identical for kind-less payloads).
-  if (!(filled.kind === "app" || filled.kind === "tool" || filled.kind === "game")) {
+  // the legal 5-way DeliveryKind set; absent = the legacy single-module-library
+  // path (byte-identical for kind-less payloads).
+  if (filled.kind !== undefined && !(DELIVERY_KINDS as readonly string[]).includes(filled.kind)) {
     delete filled.kind;
   }
   if (acceptanceFixtures !== undefined) filled.acceptanceFixtures = acceptanceFixtures;
@@ -3199,15 +3249,13 @@ async function upgradeP6Keyed(floor: Project, deps?: LiveLayerDeps): Promise<Pro
     // fixes/148 (F1 follow-up): real journeys arrive kind-absent (the
     // create path never classifies), and codegen's tree trigger is
     // kind-scoped — a kind-absent webapp brief would silently take the
-    // ≤8 single-module path and ship no tree. Stamp the delivery kind
-    // from the brief classifier here, BEFORE the codegen call: ui →
-    // "app" (webapp tree), cli-tool → "tool" (CLI tree), library →
-    // kind stays absent (the honest single-module library path).
-    if (p.kind === undefined || p.kind === null) {
-      const surfaceKind = uiKindOf(p);
-      if (surfaceKind === "ui") p = { ...p, kind: "app" };
-      else if (surfaceKind === "cli-tool") p = { ...p, kind: "tool" };
-    }
+    // ≤8 single-module path and ship no tree. Stamp the ONE delivery-kind
+    // decision here, BEFORE the codegen call (342-4): withDeliveryKind stores
+    // the same 5-way value scaffold.projectKindOf reads back, so the routing
+    // signal and the emitted shape cannot disagree. A brief that names a
+    // library now carries kind "library" (codegen's singleModuleLibraryKind
+    // must accept it alongside the absence signal — cross-lane contract).
+    p = withDeliveryKind(p);
     const codegenSpec = clientSafeServerSpecifier("codegen");
     const codegen = (await import(codegenSpec)) as {
       liveP6Synthesis?: (

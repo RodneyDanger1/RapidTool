@@ -10,6 +10,10 @@
 > **654** (was 460) · `wave_plans/` **123** (was 106) · `research/multiagent/` 103 (unchanged) ·
 > `research/eval-corpus/` 23 (unchanged). The per-node numbers below are the 2026-09-26 snapshot.
 
+> **Re-counted 2026-10-03 (342-6 sweep, HEAD `686d7b6`; `git ls-files`):** `src/` **246** · `src/lib/`
+> **235** · `scripts/` **49** · `fixes/` **719** · `wave_plans/` **139** · `research/` 476 · total tracked
+> **2,096** (includes the 192 tracked `.t4scratch/` files).
+
 ```
 RapidTool Main/
 │

@@ -2607,3 +2607,115 @@ test("341-6 - a SINGLE keyless `unattended` clears the stock gates via the machi
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Leg 17 (342-5, BEHAVIORAL spawn) — the MCP consumer is owner-gated. The
+// `doctor` verb reports the gate truthfully: OFF by default (no child spawned,
+// tools null, coded RT_E_MCP_DISABLED) and, only when enabled AND a server is
+// configured, the server's REAL tools/list. A binary that cannot exist proves
+// the disabled path never spawns — a leaked gate would surface
+// RT_E_RUNNER_FAILED (the spawn failure) instead of RT_E_MCP_DISABLED.
+// ---------------------------------------------------------------------------
+const MCP_STUB_PATH = fileURLToPath(new URL("../src/lib/mcp/stub-server.ts", import.meta.url));
+const MCP_ENV_KEYS = ["RAPIDTOOL_MCP_ENABLED", "RAPIDTOOL_MCP_SERVER", "RAPIDTOOL_MCP_ARGS", "RAPIDTOOL_MCP_CWD"];
+
+/** The scripts-leg clickield env, plus the MCP knobs cleared. */
+function mcpEnv(extra = {}) {
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR", ...MCP_ENV_KEYS]) {
+    delete env[key];
+  }
+  return { ...env, ...extra };
+}
+
+/** Spawn `doctor` (plus argv) in an isolated cwd; never depends on repo cwd. */
+function spawnDoctor(argv, env) {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-mcp-"));
+  try {
+    const res = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "doctor", ...argv], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    return res;
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
+test("342-5 — MCP OFF by default: doctor reports disabled + spawns nothing (coded RT_E_MCP_DISABLED)", () => {
+  // A configured-but-off host, and the command cannot exist: a leaked gate
+  // would spawn it and surface RT_E_RUNNER_FAILED.
+  const res = spawnDoctor([], mcpEnv({ RAPIDTOOL_MCP_SERVER: "rapidtool-definitely-missing-mcp-binary-xyz" }));
+  assert.equal(res.status, 0, `a plain doctor is a success envelope.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+  const json = JSON.parse(res.stdout);
+  assert.equal(json.ok, true);
+  assert.ok(json.mcp, "the doctor envelope carries the honest mcp surface");
+  assert.equal(json.mcp.enabled, false);
+  assert.equal(json.mcp.configured, true, "the configured flag is honest even while disabled");
+  assert.equal(json.mcp.spawnAttempted, false, "a disabled host must not spawn the configured server");
+  assert.equal(json.mcp.tools, null, "no fabricated tool list while disabled");
+  assert.equal(json.mcp.refusal.code, "RT_E_MCP_DISABLED");
+  assert.match(json.mcp.line, /disabled/);
+});
+
+test("342-5 — an explicit `--mcp-call` while OFF refuses coded at the process level", () => {
+  const res = spawnDoctor(["--mcp-call", "echo"], mcpEnv({ RAPIDTOOL_MCP_SERVER: "rapidtool-definitely-missing-mcp-binary-xyz" }));
+  assert.equal(res.status, 1, `an explicit call while disabled is a coded refusal.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+  const json = JSON.parse(res.stdout);
+  assert.equal(json.ok, false);
+  assert.equal(json.code, "RT_E_MCP_DISABLED");
+  assert.equal(json.mcp.spawnAttempted, false);
+  assert.equal(json.mcp.tools, null);
+});
+
+test("342-5 — enabled + configured: the doctor returns the REAL tools/list and the read-only round-trip", () => {
+  const enabledEnv = mcpEnv({
+    RAPIDTOOL_MCP_ENABLED: "1",
+    RAPIDTOOL_MCP_SERVER: process.execPath,
+    RAPIDTOOL_MCP_ARGS: JSON.stringify(["--experimental-strip-types", MCP_STUB_PATH, "--mode=normal"]),
+  });
+  const res = spawnDoctor(["--mcp-call", "echo", "--mcp-call-args", '{"text":"cli-342-5"}'], enabledEnv);
+  assert.equal(res.status, 0, `enabled+configured doctor --mcp-call must succeed.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+  const json = JSON.parse(res.stdout);
+  assert.equal(json.mcp.enabled, true);
+  assert.equal(json.mcp.configured, true);
+  assert.equal(json.mcp.spawnAttempted, true);
+  assert.equal(json.mcp.refusal, null);
+  assert.deepEqual(
+    json.mcp.tools.map((t) => t.name),
+    ["echo", "env", "write_thing"],
+    "the real child's tools/list — never a fabricated list",
+  );
+  assert.deepEqual(json.mcp.call.content, [{ type: "text", text: "cli-342-5" }], "the read-only round-trip content");
+
+  // A tool the server never listed is refused — never invented.
+  const bad = spawnDoctor(["--mcp-call", "delete_everything"], enabledEnv);
+  assert.equal(bad.status, 1, `an unlisted tool is a coded refusal.\nstdout: ${bad.stdout}`);
+  const badJson = JSON.parse(bad.stdout);
+  assert.equal(badJson.code, "RT_E_VALIDATION");
+  assert.equal(badJson.mcp.call, null);
+  assert.match(String(badJson.error), /did not list a tool named/);
+});
+
+test("342-5 — enabled but UNconfigured: no spawn, coded RT_E_VALIDATION naming the config var", () => {
+  const res = spawnDoctor([], mcpEnv({ RAPIDTOOL_MCP_ENABLED: "1" }));
+  assert.equal(res.status, 0);
+  const json = JSON.parse(res.stdout);
+  assert.equal(json.mcp.enabled, true);
+  assert.equal(json.mcp.configured, false);
+  assert.equal(json.mcp.spawnAttempted, false);
+  assert.equal(json.mcp.tools, null);
+  assert.equal(json.mcp.refusal.code, "RT_E_VALIDATION");
+  assert.match(json.mcp.refusal.error, /RAPIDTOOL_MCP_SERVER/);
+});
+
+test("342-5 — a malformed --mcp-call-args is refused coded (exit 1, nothing spawned)", () => {
+  const res = spawnDoctor(["--mcp-call", "echo", "--mcp-call-args", "{not-json"], mcpEnv({ RAPIDTOOL_MCP_ENABLED: "1", RAPIDTOOL_MCP_SERVER: process.execPath }));
+  assert.equal(res.status, 1);
+  const json = JSON.parse(res.stdout);
+  assert.equal(json.ok, false);
+  assert.equal(json.code, "RT_E_VALIDATION");
+  assert.match(String(json.error), /--mcp-call-args must be a JSON object/);
+});

@@ -36,11 +36,6 @@
 // pinned by `MakerCriterionId` (maker-score.ts:186).
 // ---------------------------------------------------------------------------
 
-/** Default eval-out dir, relative to the repo root. The CLI resolves it
- *  against its own module location; run-eval.mjs honors $EVAL_OUT_DIR, so the
- *  CLI's precedence is: `--dir` > $EVAL_OUT_DIR > this default. */
-export const DEFAULT_EVAL_OUT_DIR = "research/eval-out";
-
 export const EVAL_CRITERIA = ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"] as const;
 export type EvalCriterionId = (typeof EVAL_CRITERIA)[number];
 

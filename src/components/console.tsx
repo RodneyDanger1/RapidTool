@@ -7270,10 +7270,10 @@ function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void
  *    corrupt-safe, `RT_E_CHECKPOINT_MISSING` when absent / `RT_E_VALIDATION` on
  *    junk), so the console has no read seam yet: this card shows the
  *    store-level truth it CAN see (the wild run state) + TODO(N2) for the seam.
- *  - unattended — the `unattended` CLI verb is REAL (W36; scheduler-facing
- *    drive). `RT_E_UNATTENDED_UNSUPPORTED` is registered (errors.ts:79/:533)
- *    but has NO throw site today, so the row names the real verb + its real
- *    limits and does not cite the unthrown code as a live refusal (W-47).
+ *  - unattended — the `unattended` CLI verb is REAL and self-sufficient (341-6:
+ *    it clears stock HITL gates through the ledgered machine actor; only a
+ *    forceHuman or red-DoD gate parks). The obsolete `RT_E_UNATTENDED_UNSUPPORTED`
+ *    code was removed in the 342 wave once the verb was genuinely real (W-47).
  *  - stream — T5.1 shell: one-shot transport, no `--stream`, no console pane.
  *  - cassette — T5.7 340-4: WIRED at the provider seam (`deepseek.ts` /
  *    `openai-compatible.ts`). `RAPIDTOOL_CASSETTE_MODE=record|replay` +

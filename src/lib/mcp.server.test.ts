@@ -12,13 +12,21 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import {
+  MCP_ARGS_ENV,
+  MCP_CWD_ENV,
   MCP_ENABLE_ENV,
   MCP_PROTOCOL_VERSION,
+  MCP_SERVER_ENV,
   connectMcpServer,
   mcpEnabled,
+  mcpToolsSurface,
+  resolveMcpServerConfig,
   runReadOnlyToolRoundTrip,
   type McpServerConfig,
 } from "./mcp.server.ts";
+// 342-5: the doctor surface is the MCP client's consumer; imported here because
+// this lane owns this test file (doctor.test.ts is another lane's).
+import { doctorMcp } from "./doctor.ts";
 
 const STUB_PATH = fileURLToPath(new URL("./mcp/stub-server.ts", import.meta.url));
 
@@ -379,5 +387,193 @@ describe("sticky fault — a violation after a correlated reply poisons the clie
     } finally {
       await res.client.close();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 342-5 — the env-configured server + the consumer surface. These pin the two
+// halves the mission requires: config resolution is PURE, and the surface is
+// OFF by default (a disabled host spawns NOTHING, lists NOTHING — proven with a
+// binary that cannot exist, so a leaked gate would surface RT_E_RUNNER_FAILED
+// instead of RT_E_MCP_DISABLED).
+// ---------------------------------------------------------------------------
+
+const MISSING_BINARY = "rapidtool-definitely-missing-mcp-binary-xyz";
+
+/** Env for an enabled host whose server is the real stub child. */
+function stubEnv(mode: string): NodeJS.ProcessEnv {
+  return {
+    [MCP_ENABLE_ENV]: "1",
+    [MCP_SERVER_ENV]: process.execPath,
+    [MCP_ARGS_ENV]: JSON.stringify(["--experimental-strip-types", STUB_PATH, `--mode=${mode}`]),
+  };
+}
+
+describe("342-5 — resolveMcpServerConfig (pure, no I/O)", () => {
+  it("unset / blank command ⇒ configured:false (an unconfigured host is the default, not an error)", () => {
+    assert.deepEqual(resolveMcpServerConfig({}), { ok: true, configured: false });
+    assert.deepEqual(resolveMcpServerConfig({ [MCP_SERVER_ENV]: "" }), { ok: true, configured: false });
+    assert.deepEqual(resolveMcpServerConfig({ [MCP_SERVER_ENV]: "   " }), { ok: true, configured: false });
+  });
+
+  it("a command alone resolves with an empty arg list; cwd is optional", () => {
+    assert.deepEqual(resolveMcpServerConfig({ [MCP_SERVER_ENV]: "node" }), {
+      ok: true,
+      configured: true,
+      config: { command: "node", args: [] },
+    });
+    assert.deepEqual(
+      resolveMcpServerConfig({ [MCP_SERVER_ENV]: " node ", [MCP_CWD_ENV]: " C:\\work " }),
+      { ok: true, configured: true, config: { command: "node", args: [], cwd: "C:\\work" } },
+    );
+  });
+
+  it("args accept a JSON string array (unambiguous) or a whitespace-separated list", () => {
+    assert.deepEqual(
+      resolveMcpServerConfig({ [MCP_SERVER_ENV]: "node", [MCP_ARGS_ENV]: '["--flag","a b"]' }),
+      { ok: true, configured: true, config: { command: "node", args: ["--flag", "a b"] } },
+    );
+    assert.deepEqual(
+      resolveMcpServerConfig({ [MCP_SERVER_ENV]: "node", [MCP_ARGS_ENV]: "  --flag   a  " }),
+      { ok: true, configured: true, config: { command: "node", args: ["--flag", "a"] } },
+    );
+  });
+
+  it("malformed args are a coded refusal, never a silent drop", () => {
+    const notJson = resolveMcpServerConfig({ [MCP_SERVER_ENV]: "node", [MCP_ARGS_ENV]: "[oops" });
+    assert.equal(notJson.ok, false);
+    if (!notJson.ok) {
+      assert.equal(notJson.code, "RT_E_VALIDATION");
+      assert.match(notJson.error, /not valid JSON/);
+    }
+    for (const bad of ["[1,2]", '[{"a":1}]', '["ok",null]']) {
+      const r = resolveMcpServerConfig({ [MCP_SERVER_ENV]: "node", [MCP_ARGS_ENV]: bad });
+      assert.equal(r.ok, false, `${bad} is not a string array`);
+      if (!r.ok) assert.equal(r.code, "RT_E_VALIDATION");
+    }
+  });
+});
+
+describe("342-5 — mcpToolsSurface: owner-gated, OFF by default, never a fabricated list", () => {
+  it("disabled + configured: RT_E_MCP_DISABLED with zero spawn, zero tools (the missing binary would fail if spawned)", async () => {
+    const surface = await mcpToolsSurface({
+      env: { [MCP_SERVER_ENV]: MISSING_BINARY },
+      timeoutMs: 10_000,
+    });
+    assert.equal(surface.enabled, false);
+    assert.equal(surface.configured, true);
+    assert.equal(surface.spawnAttempted, false, "a disabled host must not spawn the configured server");
+    assert.equal(surface.tools, null);
+    assert.ok(surface.refusal, "a disabled surface carries its coded refusal");
+    assert.equal(surface.refusal.code, "RT_E_MCP_DISABLED");
+    assert.match(surface.refusal.error, /RAPIDTOOL_MCP_ENABLED/);
+    assert.match(surface.line, /disabled/i);
+  });
+
+  it("disabled + an injected valid server: still no spawn and no tool list", async () => {
+    const surface = await mcpToolsSurface({ env: {}, server: stub("normal"), timeoutMs: 10_000 });
+    assert.equal(surface.enabled, false);
+    assert.equal(surface.spawnAttempted, false);
+    assert.equal(surface.tools, null);
+    assert.equal(surface.refusal?.code, "RT_E_MCP_DISABLED");
+  });
+
+  it("enabled but unconfigured: no spawn, RT_E_VALIDATION naming the config var", async () => {
+    const surface = await mcpToolsSurface({ env: { [MCP_ENABLE_ENV]: "1" } });
+    assert.equal(surface.enabled, true);
+    assert.equal(surface.configured, false);
+    assert.equal(surface.spawnAttempted, false);
+    assert.equal(surface.tools, null);
+    assert.equal(surface.refusal?.code, "RT_E_VALIDATION");
+    assert.match(surface.refusal?.error ?? "", /RAPIDTOOL_MCP_SERVER/);
+  });
+
+  it("enabled + configured via env: the REAL tools/list result from the spawned child", async () => {
+    const surface = await mcpToolsSurface({ env: stubEnv("normal"), timeoutMs: 10_000 });
+    assert.equal(surface.enabled, true);
+    assert.equal(surface.configured, true);
+    assert.equal(surface.spawnAttempted, true);
+    assert.equal(surface.refusal, null);
+    assert.equal(surface.serverInfo?.name, "stub-mcp");
+    assert.equal(surface.protocolVersion, MCP_PROTOCOL_VERSION);
+    assert.deepEqual(
+      surface.tools?.map((t) => t.name),
+      ["echo", "env", "write_thing"],
+    );
+    assert.equal(surface.tools?.find((t) => t.name === "write_thing")?.readOnly, false);
+  });
+
+  it("enabled + configured + a named read-only tool: the round-trip result rides the same surface", async () => {
+    const surface = await mcpToolsSurface({
+      env: stubEnv("normal"),
+      call: { tool: "echo", args: { text: "surfaced" } },
+      timeoutMs: 10_000,
+    });
+    assert.equal(surface.refusal, null);
+    assert.deepEqual(surface.call?.content, [{ type: "text", text: "surfaced" }]);
+    assert.equal(surface.call?.isError, false);
+  });
+
+  it("enabled + configured + an unlisted tool: the surface refuses, never invents a tool", async () => {
+    const surface = await mcpToolsSurface({
+      env: stubEnv("normal"),
+      call: { tool: "delete_everything", args: {} },
+      timeoutMs: 10_000,
+    });
+    assert.equal(surface.call, null);
+    assert.equal(surface.refusal?.code, "RT_E_VALIDATION");
+    assert.match(surface.refusal?.error ?? "", /did not list a tool named/);
+  });
+
+  it("enabled + configured + a non-read-only tool: refused in the read-only round-trip", async () => {
+    const surface = await mcpToolsSurface({
+      env: stubEnv("normal"),
+      call: { tool: "write_thing", args: {} },
+      timeoutMs: 10_000,
+    });
+    assert.equal(surface.call, null);
+    assert.equal(surface.refusal?.code, "RT_E_VALIDATION");
+    assert.match(surface.refusal?.error ?? "", /not advertised read-only/);
+  });
+
+  it("enabled + a configured-but-missing binary: the spawn failure is coded and spawnAttempted is true", async () => {
+    const surface = await mcpToolsSurface({
+      env: { [MCP_ENABLE_ENV]: "1", [MCP_SERVER_ENV]: MISSING_BINARY },
+      timeoutMs: 10_000,
+    });
+    assert.equal(surface.spawnAttempted, true);
+    assert.equal(surface.tools, null);
+    assert.equal(surface.refusal?.code, "RT_E_RUNNER_FAILED");
+  });
+});
+
+describe("342-5 — doctorMcp: the honest doctor surface (the MCP client's consumer)", () => {
+  it("keyless/off: reports disabled, spawns nothing, lists nothing", async () => {
+    const mcp = await doctorMcp({ env: {} });
+    assert.equal(mcp.enabled, false);
+    assert.equal(mcp.configured, false);
+    assert.equal(mcp.spawnAttempted, false);
+    assert.equal(mcp.tools, null);
+    assert.equal(mcp.refusal?.code, "RT_E_MCP_DISABLED");
+    assert.match(mcp.line, /mcp:/);
+  });
+
+  it("disabled but configured: the configured flag is honest, still no spawn/list", async () => {
+    const mcp = await doctorMcp({ env: { [MCP_SERVER_ENV]: MISSING_BINARY } });
+    assert.equal(mcp.enabled, false);
+    assert.equal(mcp.configured, true);
+    assert.equal(mcp.spawnAttempted, false);
+    assert.equal(mcp.tools, null);
+    assert.equal(mcp.refusal?.code, "RT_E_MCP_DISABLED");
+  });
+
+  it("enabled + configured: the doctor reports the server's OWN tools", async () => {
+    const mcp = await doctorMcp({ env: stubEnv("normal"), timeoutMs: 10_000 });
+    assert.equal(mcp.enabled, true);
+    assert.equal(mcp.configured, true);
+    assert.equal(mcp.spawnAttempted, true);
+    assert.equal(mcp.refusal, null);
+    assert.equal(mcp.tools?.length, 3);
+    assert.match(mcp.line, /3 tool/);
   });
 });

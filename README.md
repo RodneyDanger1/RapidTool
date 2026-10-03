@@ -199,7 +199,7 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
 | HITL seats: no machine path can mint `decidedBy:"human"` | ✅ | TA-2 (Wave 2): `ApproveActor` + out-of-band token |
 | Lesson loop: failure signatures, refusal rows, accrual | ✅ wired+pinned | 112 T1/T2 (Waves 3–4); `knowledge.ts`/`engine.ts`/`verify.server.ts` |
 | Assertion-gap lint (tautology detection repo-wide) | ✅ | `scripts/check-assertion-gaps.mjs`; wired into `gate.sh`; 0 findings |
-| `str_replace` patch primitive (unique-match + graded fuzzy) | ✅ core | `src/lib/patch.ts` (25 test blocks today). **Not yet wired into P6/repair — carried past W6 (see `remainingwaves.md`)** |
+| `str_replace` patch primitive (unique-match + graded fuzzy) | ✅ wired | `src/lib/patch.ts` (25 test blocks today). **Wired into P6 synthesis repair** (`codegen.server.ts:127` imports `applyStrReplace`, applied at `:1083`) **and the CLI `edit` verb** (`rapidtool-cli.mjs:2860`) |
 | One-seam policy engine (default-deny approvals) | ✅ core | `src/lib/policy.ts` (33 test blocks today). **Routing wired in W5** (all 3 sites, seats byte-identical; bypass pins → W6-L2) |
 | UI: console, phase rail, HITL dock, runtime log, **command palette (⌘K)**, typed timeline | ✅ | `console.tsx` + `cmd-palette.tsx` + `runtime-timeline-pane.tsx` |
 | Headless CLI: 39 verbs, JSON output, doctor, eval harness + the read-only `eval` scorecard verb | ✅ | `scripts/rapidtool-cli.mjs`; `README-cli.md` (doc-contract tested) |
@@ -258,9 +258,11 @@ run 2026-09-16; W12 boundary gate = latest full green).
 **Shelled / in progress** (per `finalsprint.md`; shells only — no fake behavior, each has
 `TODO(<row-id>)` at its gap): the autonomy spine (wild keyed seam W-01 · mint reachability W-02 ·
 emit materialization W-03, landed-by-E1b per the RS-01 correction) · wild supervisor Node-side
-completer (R14-f01) · unattended run (W-47) · plan-before-execute (R13-f02) · checkpoint+`resume`
-(T-107.7) · 4 kind emitters + real graders + emitted UI seam (S2 — note the W30 S2 lane closed
-recon-only; recovery owed) · cassette replay (T5.7) · streaming surface (T5.1) · MCP client (F1) ·
+completer (R14-f01) · **unattended run (W-47 — REAL, W36; self-sufficient since 341-6: stock gates
+auto-clear, only `forceHuman`/red-DoD parks)** · plan-before-execute (R13-f02 — real:
+`stageWildPlan`/`engine.ts:4398` is the one staging site, `store.ts:1357`) · **checkpoint+`resume`
+(T-107.7 — REAL, W36)** · **4 kind emitters (S2 — landed by 341-1); real graders + emitted UI seam (S2 —
+recovery owed)** · **cassette replay (T5.7 — wired at the provider seam, 340-4)** · streaming surface (T5.1) · MCP client (F1) ·
 second provider (F2 — registry entry already on disk per RS-02) · per-action allow-lists (F4) ·
 per-run token ledger · dev-server bind hardening (R11-f01 — loopback default now in
 `vite.config.ts`) · `--force` quarantine (R11-f08 — CLI wire landed W42; in-engine lift owed) · pane error boundary (R6-f12, partially
@@ -290,6 +292,12 @@ CLI **39** verbs (`grep -c 'case "'`). W29–W46 are **committed** (no longer "u
 tree"), and limit #1 above holds only on the **keyless floor**: a keyed run emits a real multi-job
 product (`treeRun.substance {stubs:0, reexports:0, real:3}` in `fixes/331_0_parent.md` §2;
 `{stubs:0, reexports:0, real:2}` in `fixes/332_0_parent.md` §4).
+
+**Corrections in force — appended 2026-10-03 (342-6 sweep; HEAD `686d7b6`):** the §10 census below is a
+2026-09-30 snapshot and has drifted — live `git ls-files` reads **src 246 · src/lib 235 · scripts 49 ·
+fixes 719 · wave_plans 139 · total 2,096**. `.t4scratch/` is still **192 tracked files** and still owes a
+parent-signed `git rm` (it fails its own cleanup precondition — tracked, and named in live lane logs; see
+`fixes/342_6_sweep.md`).
 
 ## Progress so far (the paper trail)
 

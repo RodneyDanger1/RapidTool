@@ -393,7 +393,13 @@ const RESEARCH_PHASES: ReadonlySet<PhaseId> = new Set([0, 7, 11]);
  * are byte-identical to the engine's). Returns `project` unchanged when
  * nothing live succeeded — never throws, never fabricates.
  */
-async function bareNodeLiveOverlay(project: Project, phase: PhaseId): Promise<Project> {
+async function bareNodeLiveOverlay(
+  project: Project,
+  phase: PhaseId,
+  /** 342-2: research-only mode — skip the DeepSeek phase narrative so the
+   *  overlay stays keyless (the eval harness's research-only live leg). */
+  { researchOnly = false }: { researchOnly?: boolean } = {},
+): Promise<Project> {
   let items: ResearchItem[] = [];
   let cited = false;
   let provider: string | null = null;
@@ -439,45 +445,48 @@ async function bareNodeLiveOverlay(project: Project, phase: PhaseId): Promise<Pr
   }
 
   // 2) LLM phase narrative — fires whenever DeepSeek is configured, independent
-  // of whether live research succeeded.
-  try {
-    const { completeDeepSeek, isDeepSeekConfigured } = await import("./deepseek.server.ts");
-    if (isDeepSeekConfigured()) {
-      const ground =
-        items.length > 0
-          ? `Grounded in these findings:\n${items
-              .slice(0, 5)
-              .map((it) => `- ${it.title}: ${(it.content ?? "").slice(0, 200)}`)
-              .join("\n")}`
-          : "(no live research available — reason from the brief and lattice only)";
-      const comp = await completeDeepSeek(
-        `Write a concise one-paragraph phase narrative for ${project.name} (${phaseDef(phase).code} ${phaseDef(phase).title}). ${ground}\n\nBrief: ${project.brief.slice(0, 400)}`,
-      );
-      // CF-SE2-3b (312 · E2; tail landed by 317 · J3): the narrative call is
-      // metered into the process session ledger — I2: EVERY response that
-      // reports usage, success or refusal (a refusal that burned tokens still
-      // counts against the cap).
-      if (comp && comp.usage) recordSessionSpend(comp.usage);
-      if (comp && comp.ok === true && typeof comp.text === "string" && comp.text.trim()) {
-        narrative = comp.text.trim();
-      } else {
-        // OV-29's real case: the key IS present but the call failed — without
-        // this row the run read exactly like a keyless one. `comp.code` carries
-        // the provider's registered class (RT_E_LLM_REJECTED / …).
-        degradeRows.push(
-          liveDegradeRow(
-            phase,
-            "narrative",
-            comp ?? new Error("narrative call returned no result"),
-            "RT_E_LLM_REJECTED",
-          ),
+  // of whether live research succeeded. 342-2: skipped in research-only mode so
+  // the eval harness's research leg never spends an LLM call.
+  if (!researchOnly) {
+    try {
+      const { completeDeepSeek, isDeepSeekConfigured } = await import("./deepseek.server.ts");
+      if (isDeepSeekConfigured()) {
+        const ground =
+          items.length > 0
+            ? `Grounded in these findings:\n${items
+                .slice(0, 5)
+                .map((it) => `- ${it.title}: ${(it.content ?? "").slice(0, 200)}`)
+                .join("\n")}`
+            : "(no live research available — reason from the brief and lattice only)";
+        const comp = await completeDeepSeek(
+          `Write a concise one-paragraph phase narrative for ${project.name} (${phaseDef(phase).code} ${phaseDef(phase).title}). ${ground}\n\nBrief: ${project.brief.slice(0, 400)}`,
         );
+        // CF-SE2-3b (312 · E2; tail landed by 317 · J3): the narrative call is
+        // metered into the process session ledger — I2: EVERY response that
+        // reports usage, success or refusal (a refusal that burned tokens still
+        // counts against the cap).
+        if (comp && comp.usage) recordSessionSpend(comp.usage);
+        if (comp && comp.ok === true && typeof comp.text === "string" && comp.text.trim()) {
+          narrative = comp.text.trim();
+        } else {
+          // OV-29's real case: the key IS present but the call failed — without
+          // this row the run read exactly like a keyless one. `comp.code` carries
+          // the provider's registered class (RT_E_LLM_REJECTED / …).
+          degradeRows.push(
+            liveDegradeRow(
+              phase,
+              "narrative",
+              comp ?? new Error("narrative call returned no result"),
+              "RT_E_LLM_REJECTED",
+            ),
+          );
+        }
       }
+    } catch (err) {
+      narrative = null;
+      /* recorded, never silent — OV-29, fixes/252 */
+      degradeRows.push(liveDegradeRow(phase, "narrative", err, "RT_E_LLM_REJECTED"));
     }
-  } catch (err) {
-    narrative = null;
-    /* recorded, never silent — OV-29, fixes/252 */
-    degradeRows.push(liveDegradeRow(phase, "narrative", err, "RT_E_LLM_REJECTED"));
   }
 
   if (items.length === 0 && !narrative) return withLiveDegradeRows(project, degradeRows);
@@ -563,6 +572,11 @@ export async function runPhase(
   phase: PhaseId,
   opts: {
     live?: boolean;
+    /** 342-2: run ONLY the keyless bare-Node research overlay for a research
+     *  phase (0/7/11) even when `live` is false — the eval harness's
+     *  post-journey drain needs the free-search corpus without keying the
+     *  P8–P12 narratives `live:true` would. Default false ⇒ byte-identical. */
+    researchLive?: boolean;
     /** W-02 (fixes/271 · §R1-f02): injection seam for the phase-6 edge
      *  (driveP6Journey deps). Production callers omit it — the default is the
      *  real keyed journey. */
@@ -574,7 +588,15 @@ export async function runPhase(
 ): Promise<Project> {
   if (!Number.isInteger(phase) || phase < 0 || phase > PHASE_LAST) return project;
   try {
-    if (!opts.live) return applyPhaseResult(project, phase);
+    if (!opts.live) {
+      const floor = applyPhaseResult(project, phase);
+      // 342-2: the keyless research overlay for research phases — the eval
+      // harness's live-research leg (free search; no LLM narrative).
+      if (opts.researchLive === true && RESEARCH_PHASES.has(phase)) {
+        return bareNodeLiveOverlay(floor, phase, { researchOnly: true });
+      }
+      return floor;
+    }
     // W-02 (fixes/271 · §R1-f02): phase 6 owns the tested-mint edge — route it
     // through the ONE runP6Edge seam (keyed ⇒ driveP6Journey synthesis +
     // tree-run mint; keyless ⇒ the same deterministic floor liveLayer(…, 6)
@@ -721,6 +743,8 @@ async function runReady(
   proven?: readonly RankableLessonRow[],
   /** 341-6: opt-in stock-gate clearing (see `machineApproveGate`). */
   machineGates = false,
+  /** 342-2: keyless research overlay for research phases (see `runPhase`). */
+  researchLive = false,
 ): Promise<{ project: Project; stopped: boolean; error?: string; dodBlocked?: boolean }> {
   if (!priorsSealed(project.phases, phase)) {
     return { project, error: `Cannot enter P${phase} — prior phases are not sealed.`, stopped: true };
@@ -733,7 +757,7 @@ async function runReady(
     ),
     status: "running" as const,
   };
-  const updated = await runPhase(running, phase, { live, p6Deps, proven });
+  const updated = await runPhase(running, phase, { live, researchLive, p6Deps, proven });
   return finishPhase(updated, phase, autopilot, machineGates);
 }
 
@@ -797,6 +821,8 @@ async function advanceOnce(
   proven?: readonly RankableLessonRow[],
   /** 341-6: opt-in stock-gate clearing (see `machineApproveGate`). */
   machineGates = false,
+  /** 342-2: keyless research overlay for research phases (see `runPhase`). */
+  researchLive = false,
 ): Promise<{ project: Project; stopped: boolean; error?: string; dodBlocked?: boolean }> {
   const phase = project.currentPhase;
   const rec = project.phases.find((p) => p.id === phase);
@@ -852,10 +878,10 @@ async function advanceOnce(
     if (!priorsSealed(project.phases, next)) {
       return { project, error: `P${phase} must stay sealed.`, stopped: true };
     }
-    return runReady(advanceTo(project, next), next, autopilot, live, p6Deps, proven, machineGates);
+    return runReady(advanceTo(project, next), next, autopilot, live, p6Deps, proven, machineGates, researchLive);
   }
   if (rec.status === "complete") return { project, error: "Pipeline complete.", stopped: true };
-  return runReady(project, phase, autopilot, live, p6Deps, proven, machineGates);
+  return runReady(project, phase, autopilot, live, p6Deps, proven, machineGates, researchLive);
 }
 
 /** Why a run/gate invocation ended (F-02/F-04 closure — store's stoppedReason
@@ -1173,11 +1199,17 @@ export async function runUntilGate(
      *  `approve(…, HARNESS_APPROVE_ACTOR)` — the same ledgered actor the CLI
      *  `approve --seat autopilot` door uses. Default false ⇒ byte-identical. */
     machineGates?: boolean;
+    /** 342-2: run the KEYLESS bare-Node research overlay for research phases
+     *  even when `live` is false. The eval harness's post-journey drain needs
+     *  the free-search corpus (P7's `p7-research`), but must not key the
+     *  P8–P12 narratives. Default false ⇒ byte-identical. */
+    researchLive?: boolean;
   } = {},
 ): Promise<RunResult> {
   const autopilot = Boolean(opts.autopilot);
   const live = Boolean(opts.live);
   const machineGates = Boolean(opts.machineGates);
+  const researchLive = Boolean(opts.researchLive);
   const maxSteps =
     typeof opts.maxSteps === "number" && opts.maxSteps > 0 ? Math.floor(opts.maxSteps) : 40;
   // W46 · 332-2 (L1 / AW45-c06): the run's cost must survive the process. Each
@@ -1199,7 +1231,7 @@ export async function runUntilGate(
   while (iterations < maxSteps) {
     iterations += 1;
     const before = p;
-    const r = await advanceOnce(p, autopilot, live, opts.p6Deps, opts.proven, machineGates);
+    const r = await advanceOnce(p, autopilot, live, opts.p6Deps, opts.proven, machineGates, researchLive);
     p = r.project;
     if (r.error) events.push(r.error);
     if (r.dodBlocked) dodBlocked = true;

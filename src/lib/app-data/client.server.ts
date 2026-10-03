@@ -76,14 +76,6 @@ function inboundContext(): InboundContext {
   };
 }
 
-export function resolveGateAppDataBase(): string | null {
-  return inboundContext().connectorsBase;
-}
-
-export function getConnectorAccessToken(): string | null {
-  return inboundContext().token;
-}
-
 type GateJson = {
   ok?: boolean;
   data?: unknown;

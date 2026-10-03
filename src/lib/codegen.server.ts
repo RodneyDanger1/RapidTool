@@ -23,9 +23,10 @@
 //      signatures on a KIND-ABSENT (undeclared/legacy, single-module-library
 //      eligible) project ⇒ ONE chunk ⇒ the legacy byte-identical path below
 //      (single pro call + bounded repair re-prompts + machine verify →
-//      upgraded); fixes/148 (F1 — tree-trigger scope): every DECLARED
-//      delivery kind ("app" = webapp / "tool" / "game") and every >8-signature
-//      spec routes to the chunked tree REGARDLESS of signature count — a
+//      upgraded); fixes/148 (F1 — tree-trigger scope): every MULTI-FILE
+//      delivery kind (`app` = webapp / `tool` = CLI-agent / `game` = playable;
+//      `library` and `service` are single-entry) and every >8-signature spec
+//      routes to the chunked tree REGARDLESS of signature count — a
 //      ≤8-signature webapp brief must never fall into the single-module path
 //      (fixes/145 M1=0 root cause); >8 signatures ⇒ one call PER chunk
 //      (216 T0.1: the FLASH tier — fixes/125's "pro is stronger" premise is
@@ -617,6 +618,15 @@ export function p6SynthesisSystemPrompt(): string {
     // reason: the model imitates it (338-3's keyed run hit TS7006 on all 12
     // generated functions; 338-2 reproduced `dispatch.ts(11,21) TS7006`).
     "10. TypeScript STRICT mode is on for the emitted tree (`noImplicitAny`): annotate EVERY function parameter and its return type. Use ONLY built-in types (string, number, boolean, unknown, any, object, `T[]`) or named types you DECLARE in this same module (`type X = {...};` / `interface X {...}`) — never reference a named domain type (e.g. `FlipProjectInput`) unless you declare it here, because an undeclared name fails the compile. Example: `function create(input: { id: string }): Promise<{ id: string }> { ... }`. An unannotated parameter fails the emitted tree's own `tsc --noEmit` compile (TS7006), which blocks the product.",
+    // W56/342-1 (keyed P6 convergence): the measured strict-ts classes that stop
+    // keyed runs at P6 — TS2322 (a helper annotated `number` returning a
+    // `Record<string, unknown>`), TS2749 (`TextDecoder` used as a type under a
+    // value-only global) and TS2440 (a local declaration colliding with an
+    // import). Rule 10 named only TS7006/TS2304, so the model was never told the
+    // shapes a bounded repair had to correct. Real `tsc` is the gate, not the
+    // validator, so the rule claims no enforcement. The compiler report already
+    // rides the repair re-prompt; this names the classes so the retry can act.
+    "11. The emitted tree is compiled by real `tsc --noEmit` under `strict: true`; a type error blocks the product. Three classes it refuses, with the required shape for each: (a) TS2322 ASSIGNMENT TYPE MISMATCH — an annotation must EXACTLY match the value it describes: never annotate a function as returning `number` (or a variable as `number`) while its body returns a structured value such as `Record<string, unknown>`, an object literal, or an array; type such a helper `Record<string, unknown>` (or a `type`/`interface` you declare), and if you mean one numeric field, return that field rather than the whole record. (b) TS2749 VALUE USED AS A TYPE — never put a runtime VALUE in a type position: the global `TextDecoder` is a value-only constructor here, so `: TextDecoder` on a parameter, return or variable fails; every type must be one of `string | number | boolean | unknown | any | object | T[]` (or a `type`/`interface` you DECLARE in this module) — use `number[]`/`Uint8Array` for bytes and `string` for decoded text, and construct `new TextDecoder()` only at runtime. (c) TS2440 IMPORT/LOCAL CONFLICT — never declare a name locally (`function`/`class`/`const`/`type`/`interface`) that is also imported or declared under the same name; with zero imports (rule 2) each helper is declared exactly ONCE, under a name no earlier file exports.",
   ].join("\n");
 }
 
@@ -2424,10 +2434,20 @@ function maskCodeLine(line: string, state: { block: boolean; template: boolean }
 
 /**
  * W45/331-4 (Finding B): top-level binding names a module declares, mapped to the
- * 1-based line numbers of their declarations. Same declaration shapes as
- * `localBindingNames` (function/class/const/let/var incl. bare + destructured), but
- * line-preserving (a comment- or string-only line never reports) and returned as a
- * name→lines map so a refusal can name WHERE the redeclaration is. Deterministic.
+ * 1-based line numbers of their declarations. A SUPERSET of `localBindingNames`
+ * (function/class/const/let/var incl. bare + destructured): it also reports the
+ * type-space, ambient and enum/class-modifier shapes — `type X`, `interface X`,
+ * `enum X` / `const enum X` / `declare enum X`, `declare class X`,
+ * `abstract class X`, `declare function X`, `export default class X` — because
+ * `materializeImportableTree` emits `import { X }` for EVERY earlier file's
+ * exports, and each of those later declarations collides with that import as
+ * TS2440 (W56/342-1; the enum/class forms verified against the real compiler in
+ * the 342-1 resume). NOT in the set: `namespace X` / `declare namespace X` /
+ * `declare module X` — real tsc is silent on those (no TS2440), so flagging them
+ * would over-refuse. `localBindingNames` stays runtime-only for export binding,
+ * so the two detectors legitimately differ here. Line-preserving (a comment- or
+ * string-only line never reports) and returned as a name→lines map so a refusal
+ * can name WHERE the redeclaration is. Deterministic.
  */
 export function localBindingLines(module: string): Map<string, number[]> {
   const out = new Map<string, number[]>();
@@ -2441,12 +2461,20 @@ export function localBindingLines(module: string): Map<string, number[]> {
   for (let i = 0; i < lines.length; i++) {
     const code = maskCodeLine(lines[i] ?? "", state);
     if (!code.trim()) continue;
-    for (const m of code.matchAll(/^(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/gm)) add(m[1]!, i + 1);
-    for (const m of code.matchAll(/^(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/gm)) add(m[1]!, i + 1);
+    for (const m of code.matchAll(/^(?:export\s+(?:default\s+)?)?(?:declare\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/gm)) add(m[1]!, i + 1);
+    for (const m of code.matchAll(/^(?:export\s+(?:default\s+)?)?(?:(?:declare|abstract)\s+)*class\s+([A-Za-z_$][\w$]*)/gm)) add(m[1]!, i + 1);
     for (const m of code.matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?=[=;,]|$)/gm)) add(m[1]!, i + 1);
     for (const m of code.matchAll(/^(?:const|let|var)\s*[{[]([^}\]\n]*)[}\]]\s*=/gm)) {
       for (const t of m[1]!.matchAll(/[A-Za-z_$][\w$]*/g)) add(t[0]!, i + 1);
     }
+    // W56/342-1 (TS2440): type-space + ambient declarations collide with the
+    // materializer's cross-file import exactly like a runtime redeclaration.
+    // fixes/342-1 resume: enum / const enum / declare class / abstract class
+    // (incl. their export/declare variants) are real TS2440 emitters too, all
+    // verified against the pinned compiler. `namespace` / `declare namespace`
+    // / `declare module` are NOT (real tsc is silent) and stay unflagged.
+    for (const m of code.matchAll(/^(?:export\s+)?(?:declare\s+)?(?:type|interface)\s+([A-Za-z_$][\w$]*)/gm)) add(m[1]!, i + 1);
+    for (const m of code.matchAll(/^(?:export\s+(?:default\s+)?)?(?:(?:declare|const)\s+)*enum\s+([A-Za-z_$][\w$]*)/gm)) add(m[1]!, i + 1);
   }
   return out;
 }
@@ -4089,26 +4117,44 @@ function upgraded(
 }
 
 /**
- * fixes/148 (F1 — tree-trigger scope): whether a project is single-module
- * LIBRARY eligible — the ONLY state the ≤8-signature byte-parity
- * synthesizeSingleModule path may serve. E-15's Project.kind is a coarse
- * OPTIONAL delivery-kind field ("app" | "tool" | "game") that is NEVER
- * inferred on legacy/imported payloads; every declared member is a
- * NON-library multi-file surface ("app" = webapp, "game" = playable game,
- * "tool" = CLI/agent utility), whose honest module is the tree entry +
- * per-capability files. So any declared kind must route to the chunked tree
- * regardless of signature count (fixes/145 M1=0 root cause: a ≤8-signature
- * webapp brief fell into the single-module path by construction). Only a
- * KIND-ABSENT project — the brief-expressed library/module fixtures the
- * fixes/144 byte-parity regression pins protect, plus legacy payloads — may
- * keep the single-module path. Callers that resolve a richer scaffold kind
- * (webapp/service/cli-tool/library/game — scaffold.ts projectKindOf) map it
- * onto this field at create time (E-15 #1 mapping: app→webapp round-trips).
+ * fixes/148 (F1 — tree-trigger scope) / fixes/342-1 follow-up: whether a
+ * project is SINGLE-ENTRY eligible — the ONLY state the ≤8-signature
+ * byte-parity `synthesizeSingleModule` path may serve. `Project.kind` is the
+ * OPTIONAL 5-way `DeliveryKind` (342-4) decided once by `engine.deliveryKindOf`
+ * and stamped by `engine.withDeliveryKind` at the keyed P6 seam.
+ *
+ * RULE (fixes/342-1 follow-up, decided from the K9-verified service bytes): the
+ * single-module runtime harness serves the SINGLE-ENTRY product kinds — kind
+ * ABSENT (the brief-expressed library/module fixtures the fixes/144 byte-parity
+ * pins protect, plus legacy/imported payloads), `library`, and `service`. A
+ * service is a single-entry product exactly like a library: the verified
+ * order-webhook service ships ONE runnable `src/main.ts` entry declared by
+ * package.json, `scaffold.projectKindOf` maps both onto the same `src/main.ts`
+ * emitter, and `scripts/run-eval.mjs` maps a corpus `service` to kind-ABSENT for
+ * the same reason (341_1 §R3 names this the "library/service" lane). 342-4's
+ * engine stamps `kind:"service"`, which must not move that brief into the tree.
+ *
+ * The MULTI-FILE kinds — `app` (webapp), `tool` (CLI/agent utility) and `game`
+ * (playable game) — are NOT single-entry: their honest module is the tree entry
+ * + per-capability files, so they route to the chunked tree regardless of
+ * signature count (fixes/145 M1=0 root cause: a ≤8-signature webapp brief fell
+ * into the single-module path by construction).
+ *
+ * W56/342-1 (cross-lane contract): `"library"` stays in the union so the check
+ * compiled with or without the 342-4 widening of `Project["kind"]`; it is now a
+ * legal member and the explicit arm remains as documentation of intent.
  */
 export function singleModuleLibraryKind(project: {
-  kind?: Project["kind"] | null;
+  /** `"library"` is admitted in the union so the check compiles with or
+   *  without the cross-lane widening of `Project["kind"]`. */
+  kind?: Project["kind"] | "library" | null;
 }): boolean {
-  return project.kind === undefined || project.kind === null;
+  return (
+    project.kind === undefined ||
+    project.kind === null ||
+    project.kind === "library" ||
+    project.kind === "service"
+  );
 }
 
 /**
@@ -4232,15 +4278,15 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   // typeSignatures are grouped ≤8 per chunk in expand order (MetaGPT ≤8-fn
   // decomposition — fixes/134 §4 S-01). fixes/148 (F1): the tree-trigger is
   // KIND-scoped, not signature-count-only — the ≤8 byte-parity rule serves
-  // ONLY single-module-library projects (kind ABSENT: undeclared/legacy;
-  // E-15 never infers kind), where ≤8 signatures ⇒ ONE chunk ⇒ the legacy
-  // single-module path below (one pro call + bounded repair re-prompts +
-  // machine verify → upgraded) byte-for-byte. Every DECLARED delivery kind
-  // ("app" = webapp / "tool" / "game") and every >8-signature spec ⇒ the
-  // chunked tree: one pro-tier call PER chunk with the earlier chunks'
-  // exports as context, deterministic per-file validation, deterministic
-  // assembly into Project.generatedTree. A kind-absent project with zero
-  // signatures keeps the legacy path (nothing to chunk).
+  // ONLY the single-entry kinds (kind ABSENT: undeclared/legacy, E-15 never
+  // infers kind; `library`; `service` — fixes/342-1 follow-up), where ≤8
+  // signatures ⇒ ONE chunk ⇒ the legacy single-module path below (one pro call
+  // + bounded repair re-prompts + machine verify → upgraded) byte-for-byte.
+  // Every MULTI-FILE delivery kind ("app" = webapp / "tool" / "game") and every
+  // >8-signature spec ⇒ the chunked tree: one pro-tier call PER chunk with the
+  // earlier chunks' exports as context, deterministic per-file validation,
+  // deterministic assembly into Project.generatedTree. A kind-absent project
+  // with zero signatures keeps the legacy path (nothing to chunk).
   const chunkGroups = chunkTypeSignatures(specRecord.typeSignatures);
   if (singleModuleLibraryKind(project) && chunkGroups.length <= 1) {
     return synthesizeSingleModule(project, brief, specRecord, signatureNames, complete, verify, treeFailure,
@@ -4255,9 +4301,10 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
 }
 
 /**
- * fixes/144 (M2): the legacy single-module synthesis — used ONLY for
- * single-module-library (kind-absent/undeclared — fixes/148 F1) projects
- * whose spec carries ≤8 typeSignatures (one chunk), so the pre-M2 pipeline is
+ * fixes/144 (M2): the legacy single-module synthesis — used ONLY for the
+ * single-entry kinds (kind-absent/undeclared — fixes/148 F1 — plus `library`
+ * and `service` — fixes/342-1 follow-up) whose spec carries ≤8 typeSignatures
+ * (one chunk), so the pre-M2 pipeline is
  * preserved
  * byte-for-byte: one pro-tier call + one bounded repair re-prompt per failure
  * class (envelope / export-binding / forbidden / missing-signature /

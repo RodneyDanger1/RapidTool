@@ -629,3 +629,292 @@ export async function runReadOnlyToolRoundTrip(
     await connected.client.close();
   }
 }
+
+// ---------------------------------------------------------------------------
+// F1 consumer wiring (342-5) — the env-configured server + the honest surface
+// the `doctor` verb reports. Enablement stays an explicit owner decision: the
+// default is OFF, and a disabled host spawns nothing and lists nothing.
+// ---------------------------------------------------------------------------
+
+/** Env var naming the MCP server executable to spawn (`node`, `npx`, …). */
+export const MCP_SERVER_ENV = "RAPIDTOOL_MCP_SERVER";
+
+/** Env var carrying the server args: a JSON string array (unambiguous) or a
+ *  whitespace-separated list. Omitted ⇒ no args. */
+export const MCP_ARGS_ENV = "RAPIDTOOL_MCP_ARGS";
+
+/** Env var naming the child's working directory (optional). */
+export const MCP_CWD_ENV = "RAPIDTOOL_MCP_CWD";
+
+export type McpServerConfigResolution =
+  | { ok: true; configured: false }
+  | { ok: true; configured: true; config: McpServerConfig }
+  | CodedFailure;
+
+/** Parse the args env value. A JSON array is exact; a bare value is split on
+ *  whitespace (documented). A malformed JSON value is a coded refusal — never a
+ *  silent drop that would spawn the server with the wrong argv. */
+function parseMcpArgs(raw: string): { ok: true; args: string[] } | CodedFailure {
+  const text = raw.trim();
+  if (text.startsWith("[")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      return codeError(
+        "RT_E_VALIDATION",
+        `${MCP_ARGS_ENV} is not valid JSON (${err instanceof Error ? err.message : String(err)}) — pass a JSON string array or omit it.`,
+      );
+    }
+    if (!Array.isArray(parsed) || parsed.some((a) => typeof a !== "string")) {
+      return codeError(
+        "RT_E_VALIDATION",
+        `${MCP_ARGS_ENV} must be a JSON array of strings — got ${JSON.stringify(parsed)}.`,
+      );
+    }
+    return { ok: true, args: parsed as string[] };
+  }
+  return { ok: true, args: text.split(/\s+/).filter((a) => a.length > 0) };
+}
+
+/** Resolve the MCP server purely from env. Blank/unset `RAPIDTOOL_MCP_SERVER`
+ *  ⇒ `configured:false` — an unconfigured host is the default, NOT an error.
+ *  A malformed args value is a coded refusal, never a silent drop. */
+export function resolveMcpServerConfig(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): McpServerConfigResolution {
+  const rawCommand = env?.[MCP_SERVER_ENV];
+  if (typeof rawCommand !== "string" || !rawCommand.trim()) return { ok: true, configured: false };
+  const command = rawCommand.trim();
+  let args: string[] = [];
+  const rawArgs = env?.[MCP_ARGS_ENV];
+  if (typeof rawArgs === "string" && rawArgs.trim()) {
+    const parsed = parseMcpArgs(rawArgs);
+    if (!parsed.ok) return parsed;
+    args = parsed.args;
+  }
+  const rawCwd = env?.[MCP_CWD_ENV];
+  const cwd = typeof rawCwd === "string" && rawCwd.trim() ? rawCwd.trim() : undefined;
+  return { ok: true, configured: true, config: { command, args, ...(cwd ? { cwd } : {}) } };
+}
+
+/** The honest result of one `tools/list` (and optional read-only call) against
+ *  the configured server. `tools` is the REAL list the server returned — it is
+ *  `null` whenever nothing was listed, so a consumer can never read a fabricated
+ *  list. `spawnAttempted` is true only when `connectMcpServer` was invoked. */
+export type McpToolsSurface = {
+  /** The enablement switch's env var name (never its value). */
+  envVar: string;
+  enabled: boolean;
+  /** True when a server command is configured (env or an override). */
+  configured: boolean;
+  /** True only when this call handed the config to `connectMcpServer`. */
+  spawnAttempted: boolean;
+  serverInfo: McpServerInfo | null;
+  protocolVersion: string | null;
+  /** The server's own `tools/list` result, or null (never fabricated). */
+  tools: McpToolInfo[] | null;
+  /** The read-only round-trip result when a call was requested, else null. */
+  call: { tool: string; isError: boolean; content: McpContentBlock[] } | null;
+  /** The coded refusal when not listed/called; null on success. */
+  refusal: CodedFailure | null;
+  /** One-line rendering for CLI/doctor surfaces (`mcp: …`). */
+  line: string;
+};
+
+export type McpToolsSurfaceOptions = {
+  /** Environment inspected for the gate + the configured server. */
+  env?: NodeJS.ProcessEnv;
+  /** Programmatic server override (the CLI's flags). When set, the
+   *  env-configured server is ignored. */
+  server?: McpServerConfig;
+  /** Optional read-only tool call to perform on the connected client. */
+  call?: { tool: string; args?: Record<string, unknown> };
+  timeoutMs?: number;
+};
+
+function mcpSurfaceRefusalLine(code: ErrorCode, error: string): string {
+  const short = error.length > 140 ? `${error.slice(0, 140)}…` : error;
+  return `mcp: ${code} — ${short}`;
+}
+
+/** Gate + configure + spawn + `tools/list` (+ optional read-only call), then
+ *  close. This is the ONE consumer surface: the `doctor` verb reports it. When
+ *  disabled it returns `RT_E_MCP_DISABLED` with `spawnAttempted:false` and
+ *  `tools:null` — no child, no fabricated list. */
+export async function mcpToolsSurface(options: McpToolsSurfaceOptions = {}): Promise<McpToolsSurface> {
+  const env = options.env ?? process.env;
+  const enabled = mcpEnabled(env);
+
+  let configured = false;
+  let config: McpServerConfig | null = null;
+  if (options.server) {
+    configured = typeof options.server.command === "string" && options.server.command.trim().length > 0;
+    if (!configured) {
+      const refusal = codeError(
+        "RT_E_VALIDATION",
+        "the MCP server override needs a non-empty `command` to spawn",
+      );
+      return {
+        envVar: MCP_ENABLE_ENV,
+        enabled,
+        configured: false,
+        spawnAttempted: false,
+        serverInfo: null,
+        protocolVersion: null,
+        tools: null,
+        call: null,
+        refusal,
+        line: mcpSurfaceRefusalLine(refusal.code, refusal.error),
+      };
+    }
+    config = options.server;
+  } else {
+    const resolved = resolveMcpServerConfig(env);
+    if (!resolved.ok) {
+      return {
+        envVar: MCP_ENABLE_ENV,
+        enabled,
+        configured: false,
+        spawnAttempted: false,
+        serverInfo: null,
+        protocolVersion: null,
+        tools: null,
+        call: null,
+        refusal: resolved,
+        line: mcpSurfaceRefusalLine(resolved.code, resolved.error),
+      };
+    }
+    configured = resolved.configured;
+    config = resolved.configured ? resolved.config : null;
+  }
+
+  const base = {
+    envVar: MCP_ENABLE_ENV,
+    enabled,
+    configured,
+    spawnAttempted: false,
+    serverInfo: null,
+    protocolVersion: null,
+    tools: null,
+    call: null,
+  } as const;
+
+  // The gate is checked FIRST: a disabled host never spawns, even when a server
+  // is configured.
+  if (!enabled) {
+    const refusal = mcpDisabledRefusal();
+    return { ...base, refusal, line: `mcp: disabled (${MCP_ENABLE_ENV} unset/false) — 0 child spawned, no tool list fabricated` };
+  }
+  if (!config) {
+    const refusal = codeError(
+      "RT_E_VALIDATION",
+      `MCP is enabled (${MCP_ENABLE_ENV}) but no server is configured — set ${MCP_SERVER_ENV} (and ${MCP_ARGS_ENV} if needed) to spawn one.`,
+    );
+    return { ...base, refusal, line: mcpSurfaceRefusalLine(refusal.code, refusal.error) };
+  }
+
+  const connected = await connectMcpServer(config, { env, timeoutMs: options.timeoutMs });
+  if (!connected.ok) {
+    return {
+      envVar: MCP_ENABLE_ENV,
+      enabled,
+      configured,
+      spawnAttempted: true,
+      serverInfo: null,
+      protocolVersion: null,
+      tools: null,
+      call: null,
+      refusal: connected,
+      line: mcpSurfaceRefusalLine(connected.code, connected.error),
+    };
+  }
+
+  try {
+    const listed = await connected.client.listTools();
+    if (!listed.ok) {
+      return {
+        envVar: MCP_ENABLE_ENV,
+        enabled,
+        configured,
+        spawnAttempted: true,
+        serverInfo: connected.serverInfo,
+        protocolVersion: connected.protocolVersion,
+        tools: null,
+        call: null,
+        refusal: listed,
+        line: mcpSurfaceRefusalLine(listed.code, listed.error),
+      };
+    }
+    let callResult: McpToolsSurface["call"] = null;
+    if (options.call) {
+      const called = await connected.client.callTool(options.call.tool, options.call.args);
+      if (!called.ok) {
+        return {
+          envVar: MCP_ENABLE_ENV,
+          enabled,
+          configured,
+          spawnAttempted: true,
+          serverInfo: connected.serverInfo,
+          protocolVersion: connected.protocolVersion,
+          tools: listed.tools,
+          call: null,
+          refusal: called,
+          line: mcpSurfaceRefusalLine(called.code, called.error),
+        };
+      }
+      if (called.isError) {
+        const text = called.content.map((b) => b.text ?? "").join(" ").trim();
+        const refusal = codeError(
+          "RT_E_RUNNER_FAILED",
+          `MCP tool "${options.call.tool}" returned isError:true${text ? `: ${text}` : ""}`,
+        );
+        return {
+          envVar: MCP_ENABLE_ENV,
+          enabled,
+          configured,
+          spawnAttempted: true,
+          serverInfo: connected.serverInfo,
+          protocolVersion: connected.protocolVersion,
+          tools: listed.tools,
+          call: null,
+          refusal,
+          line: mcpSurfaceRefusalLine(refusal.code, refusal.error),
+        };
+      }
+      callResult = { tool: called.tool, isError: called.isError, content: called.content };
+    }
+    // The sticky fault poisons every later request; a single-call consumer must
+    // treat a non-null `faulted` as fatal even if its own reply resolved first.
+    const fault = connected.client.faulted;
+    if (fault) {
+      return {
+        envVar: MCP_ENABLE_ENV,
+        enabled,
+        configured,
+        spawnAttempted: true,
+        serverInfo: connected.serverInfo,
+        protocolVersion: connected.protocolVersion,
+        tools: listed.tools,
+        call: callResult,
+        refusal: fault,
+        line: mcpSurfaceRefusalLine(fault.code, fault.error),
+      };
+    }
+    const callSegment = callResult ? `; called read-only "${callResult.tool}"` : "";
+    return {
+      envVar: MCP_ENABLE_ENV,
+      enabled,
+      configured,
+      spawnAttempted: true,
+      serverInfo: connected.serverInfo,
+      protocolVersion: connected.protocolVersion,
+      tools: listed.tools,
+      call: callResult,
+      refusal: null,
+      line: `mcp: enabled — ${listed.tools.length} tool(s) listed from ${connected.serverInfo.name} ${connected.serverInfo.version}${callSegment}`,
+    };
+  } finally {
+    await connected.client.close();
+  }
+}

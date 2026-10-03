@@ -12,6 +12,7 @@ import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
 import type { Project, SpecGraph } from "./types.ts";
 import { DEPLOY_HONESTY_STAMP, deployNotes, deplyNotes, projectKindOf, scaffoldProject } from "./scaffold.ts";
 import type { ScaffoldFile, ScaffoldResult } from "./scaffold.ts";
+import { deliveryKindOf, withDeliveryKind } from "./engine.ts";
 
 /** A fully engine-run project (real lattice, spec graph, contracts, oracle, P6 module). */
 const fullRun = (over: Partial<Project> = {}) => runHeadless(seedProject(over), ALL_PHASES);
@@ -72,6 +73,38 @@ describe("projectKindOf (E-15 kind mapping + inference)", () => {
     );
     // The surface-noun rule still holds when no delivery kind is named.
     assert.equal(projectKindOf(primed({ brief: "A kanban board for dispatch teams" })), "webapp");
+  });
+
+  it("342-4: a STORED kind is the single source of truth — projectKindOf never re-infers against it", () => {
+    // A stored library kind must win over the brief's webapp surface noun:
+    // the resolver reads the ONE decided value instead of re-deriving a second
+    // kind from the brief. RED before: the declared-kind branch had no library
+    // row, so this fell through to inference and returned "webapp".
+    assert.equal(
+      projectKindOf(primed({ kind: "library", brief: "A kanban board for dispatch teams" })),
+      "library",
+    );
+    // Same for the other explicit kinds: stored wins over brief nouns.
+    assert.equal(projectKindOf(primed({ kind: "service", brief: "A kanban board for dispatch teams" })), "service");
+  });
+
+  it("342-4: engine decision == scaffold decision == one value, for the kanban library brief", () => {
+    const p = primed({ brief: "A kanban board library exposing a typed board client" });
+    // The engine decides ONCE (library wins over the "board" surface noun)…
+    assert.equal(deliveryKindOf(p), "library");
+    // …stamps that single value onto the project…
+    const decided = withDeliveryKind(p);
+    assert.equal(decided.kind, "library");
+    // …and the scaffold resolver reads it back — no second inference.
+    assert.equal(projectKindOf(decided), "library");
+    // The emitted tree is a real library PACKAGE (main/exports/files, no index.html).
+    const files = okFiles(scaffoldProject(decided));
+    const pkg = JSON.parse(bodyOf(scaffoldProject(decided), "package.json")) as Record<string, unknown>;
+    assert.equal(pkg.private, false, "library is publishable");
+    assert.equal(pkg.main, "./src/main.ts");
+    assert.deepEqual(pkg.exports, { ".": "./src/main.ts" }, "library declares an exports map");
+    assert.deepEqual(pkg.files, ["src"]);
+    assert.ok(!files.some((f) => f.path === "index.html"), "a library is not a webapp");
   });
 });
 

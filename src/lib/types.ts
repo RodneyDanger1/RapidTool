@@ -20,6 +20,17 @@ export type ProjectStatus =
  */
 export type ModelRoute = "deepseek-flash" | "deepseek-pro" | "deterministic" | "none";
 
+/**
+ * The ONE stored delivery-kind taxonomy (342-4). engine.deliveryKindOf decides
+ * it from the brief ONCE, withDeliveryKind stamps it at the keyed P6 seam, and
+ * every resolver (engine.uiKindOf's 3-way P8 projection, scaffold.projectKindOf)
+ * reads it back — never re-inferring from brief nouns. "app" = end-user web app,
+ * "tool" = agent/CLI utility, "game" = playable game, "library" = importable
+ * package, "service" = hosted API/worker.
+ */
+export const DELIVERY_KINDS = ["app", "tool", "game", "library", "service"] as const;
+export type DeliveryKind = (typeof DELIVERY_KINDS)[number];
+
 export type ArtifactKind =
   | "scorecard"
   | "graph"
@@ -433,13 +444,14 @@ export type Project = {
   /** Feasibility scorecard (P0 output) — null until Phase 0 runs. */
   scorecard: FeasibilityScorecard | null;
   /**
-   * Optional delivery-kind of the build (E-15 wave; additive — absent on
-   * legacy/imported projects, never inferred here). "app" = end-user web app,
-   * "tool" = agent/CLI/library-style utility, "game" = playable game. Consumers
-   * that need a richer taxonomy (scaffold emitters, CLI --kind) map this onto
-   * their own ProjectKind union with a fallback when the field is absent.
+   * Optional delivery-kind of the build (E-15 wave; WIDENED 342-4 to the
+   * 5-way DeliveryKind so "library" is expressible instead of overloading
+   * kind-absence). Additive — absent on legacy/imported projects. The engine
+   * decides it once (engine.deliveryKindOf) and stamps it at the keyed P6
+   * seam (engine.withDeliveryKind); both resolvers then READ it — consumers
+   * needing the scaffold names map it (scaffold.projectKindOf).
    */
-  kind?: "app" | "tool" | "game";
+  kind?: DeliveryKind;
   competitors: Competitor[];
   /**
    * Live-research corpus (M-01/M-06): real fetched findings per research phase,

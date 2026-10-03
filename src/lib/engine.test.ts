@@ -30,7 +30,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, databaseSchemaSql, hydrateProject, liveLayer, wildLog, wildStep, type WildReviewer } from "./engine.ts";
+import { emptyProject, databaseSchemaSql, deliveryKindOf, hydrateProject, liveLayer, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
 import { wildResumeRun } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
 import type { Project, WildParkInfo } from "./types.ts";
@@ -365,5 +365,38 @@ describe("W50/336-1 — the P12 database-schema producer (derived, never invente
     const c = { entities: [{ name: 'We"ird', fields: [{ name: "id", type: "ulid" }] }], endpoints: [] };
     assert.equal(databaseSchemaSql(c), databaseSchemaSql(c));
     assert.match(databaseSchemaSql(c), /"We""ird"/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 342-4 — kind resolution single source of truth. The engine's brief
+// classifier decides a library brief, but Project.kind could not EXPRESS
+// "library", so the decision was never stored — the tree trigger read the
+// absence signal instead. RED before the widening: hydration drops the value.
+// ---------------------------------------------------------------------------
+describe("342-4 — the stored delivery kind is the single source of truth", () => {
+  const LIB_BRIEF = "A kanban board library exposing a typed board client";
+
+  it("hydrateProject preserves a stored library kind (it must be expressible)", () => {
+    const base = emptyProject({ name: "KanbanLib", brief: LIB_BRIEF });
+    const h = hydrateProject({ ...base, kind: "library" } as never);
+    assert.equal(h.kind, "library", "a declared library kind survives hydration, not dropped as junk");
+  });
+
+  it("deliveryKindOf is the ONE decision — library-first, and a stored kind always wins", () => {
+    assert.equal(deliveryKindOf(emptyProject({ name: "KanbanLib", brief: LIB_BRIEF })), "library");
+    assert.equal(deliveryKindOf(emptyProject({ name: "Dispatch", brief: "A kanban board for dispatch teams" })), "app");
+    assert.equal(deliveryKindOf(emptyProject({ name: "Arcade", brief: "Retro arcade game with levels" })), "game");
+    assert.equal(deliveryKindOf(emptyProject({ name: "Billing", brief: "Webhook worker API for billing" })), "service");
+    // A stored value is read back verbatim — the brief is never re-inferred over it.
+    assert.equal(deliveryKindOf(emptyProject({ name: "KanbanLib", brief: LIB_BRIEF, kind: "game" })), "game");
+  });
+
+  it("withDeliveryKind stamps the decision once and is idempotent", () => {
+    const p = emptyProject({ name: "KanbanLib", brief: LIB_BRIEF });
+    assert.equal(p.kind, undefined, "create leaves the kind absent (the stamp is the one decision point)");
+    const stamped = withDeliveryKind(p);
+    assert.equal(stamped.kind, "library");
+    assert.equal(withDeliveryKind(stamped), stamped, "an already-decided project is returned unchanged");
   });
 });

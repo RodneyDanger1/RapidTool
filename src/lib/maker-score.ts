@@ -29,8 +29,15 @@
  *                   0 when a red gate hides under a clean seal.
  *   M6 handover   — emitted dir exists with DEPLOY.md + a real oracle spec
  *                   (driver-gathered fs evidence).
- *   M7 learning   — optional prior same-domain run: this run's M1+M2+M3 sum
- *                   ≥ the prior run's (no prior = 0, no claim without data).
+ *   M7 learning   — a prior same-slug run that carried LEARNED substance
+ *                   (M1 + M3 — model-produced code and its convergence; M2,
+ *                   the deterministic tree-run, does not count): this run's
+ *                   M1+M3 ≥ that prior's. 0 when there is no prior (a first
+ *                   run has no lesson to reuse) or the prior carries no
+ *                   learned substance — never a claim without data. A first
+ *                   run therefore cannot score M7 by construction; the corpus
+ *                   bar is per run kind (MakerBarWhen.firstRun excludes M7)
+ *                   instead of being lowered.
  *   M8 bounded    — journey stayed within its configured budget (param).
  *   M9 on-time    — run stopped on time; a refused/abnormal stop is 1 only
  *                   when it parked LOUDLY with a code (never silent).
@@ -160,8 +167,10 @@ export type MakerStopEvidence = {
   code?: string | null;
 } | null;
 
-/** M7 evidence: the prior same-domain run's M1..M3 (driver reads its own
- *  persisted history; absent on the first run of a slug). */
+/** M7 evidence: the prior same-slug run's M1..M3 (driver reads its own
+ *  persisted history; absent on the first run of a slug). M2 is retained for
+ *  the evidence line only — 342-3 vB excludes it from the learned-substance
+ *  test: it is the deterministic tree-run, not model-learned substance. */
 export type MakerPriorEvidence = {
   m1: number;
   m2: number;
@@ -234,6 +243,22 @@ export type MakerScoreCard = {
  *  the exact wording. */
 export const FLOOR_QUALIFIER_EVIDENCE =
   "all synthesis calls refused — tree/run/mint evidence is the deterministic floor (brief-noun-shaped by construction); no LLM-produced software exists";
+
+/** 342-3 vB (hole 2, verifier B) — the KEYLESS floor qualifier, the sibling of
+ *  the refusal floor above. A keyless run (no model configured; the driver's
+ *  P6 journey is driveP6Journey's honest no-op, outcome "keyless") produces
+ *  ONLY the deterministic scaffold, so its tree/run/mint evidence is
+ *  floor-shaped for the same reason a fully-refused keyed run's is: it is
+ *  brief-noun-shaped BY CONSTRUCTION and cannot be told apart from real
+ *  software by identifier probes. Pre-vB the floor gate fired only on
+ *  synthesisSucceeded === false, so keyless (undefined) cards were scored on
+ *  floor greens and the "keyless floor fails" guarantee held only by the
+ *  stored numbers. scoreMaker now forces M1-M4 to 0 for a keyless run, which
+ *  pins its ceiling at M5,M6,M7,M8,M9 (5/9 warm, 4/8 first-run) — below every
+ *  admissible corpus bar by construction. Exported so tests + the driver pin
+ *  the exact wording. */
+export const KEYLESS_FLOOR_QUALIFIER_EVIDENCE =
+  "keyless run — no model configured; tree/run/mint evidence is the deterministic scaffold (brief-noun-shaped by construction); no model-produced software exists";
 
 // ---------------------------------------------------------------------------
 // Small pure helpers.
@@ -636,23 +661,41 @@ export function m6Handover(input: MakerScoreInput): MakerCriterion {
   };
 }
 
-/** M7 learning — with a prior same-domain run, M1+M2+M3 must not regress. */
+/** M7 learning — a run demonstrates learning only against a prior same-slug
+ *  run that itself carried LEARNED substance: this run's M1+M3 must not
+ *  regress below that prior's M1+M3. Three honest zeros (342-3 / 342-3 vB):
+ *   · no prior → 0: a first run has no lesson to reuse, so there is no
+ *     learning claim to make. This is why the corpus bar is per run kind
+ *     (a first run excludes M7) rather than lowered;
+ *   · a prior whose own M1+M3 sum is 0 → 0: it carries no learned lesson, so
+ *     matching it reuses nothing. Pre-342-3 `mineSum ≥ 0` was vacuously true
+ *     against an all-zero prior; 342-3 vB widens this to the M2-only prior
+ *     (m1 0 / m3 0, m2 1): M2 is the deterministic tree-run a keyless/floor
+ *     run earns, not model-learned substance, so it cannot anchor a learning
+ *     claim. 19 of history.json's 29 m7=1 rows had exactly that prior shape.
+ *  The 0/1 boundary is "a real prior lesson was carried forward". */
 export function m7Learning(input: MakerScoreInput): MakerCriterion {
   const prior = input.prior;
   if (!prior) {
-    return { score: 0, evidence: "no prior same-domain run — no learning claim without data" };
+    return { score: 0, evidence: "no prior same-slug run — no learning claim without data" };
   }
-  const mineSum = m1Substance(input).score + m2Runs(input).score + m3Iterates(input).score;
-  const priorSum = (prior.m1 ?? 0) + (prior.m2 ?? 0) + (prior.m3 ?? 0);
-  if (mineSum >= priorSum) {
+  const mineLearned = m1Substance(input).score + m3Iterates(input).score;
+  const priorLearned = (prior.m1 ?? 0) + (prior.m3 ?? 0);
+  if (priorLearned === 0) {
+    return {
+      score: 0,
+      evidence: `prior same-slug run carries no learned substance (M1+M3 0; M2 ${prior.m2 ?? 0} is the deterministic tree-run) — nothing was learned to reuse`,
+    };
+  }
+  if (mineLearned >= priorLearned) {
     return {
       score: 1,
-      evidence: `M1+M2+M3 ${mineSum} ≥ prior same-domain ${priorSum} (m1 ${prior.m1}/m2 ${prior.m2}/m3 ${prior.m3})`,
+      evidence: `M1+M3 ${mineLearned} ≥ prior learned substance ${priorLearned} (m1 ${prior.m1}/m3 ${prior.m3}; M2 ${prior.m2 ?? 0} is the deterministic tree-run, not learned substance)`,
     };
   }
   return {
     score: 0,
-    evidence: `M1+M2+M3 ${mineSum} < prior same-domain ${priorSum} — regression (m1 ${prior.m1}/m2 ${prior.m2}/m3 ${prior.m3})`,
+    evidence: `M1+M3 ${mineLearned} < prior learned substance ${priorLearned} — regression (m1 ${prior.m1}/m3 ${prior.m3})`,
   };
 }
 
@@ -713,14 +756,29 @@ export function scoreMaker(input: MakerScoreInput): MakerScoreCard {
   // into "substance"/"runs"/"iterates"/"verifiable" while no LLM-produced
   // software exists (the 9/9-on-a-refused-run artifact, fixes/145 correction
   // + fixes/153 finding). M1-M4 are forced 0 with ONE shared honest qualifier.
-  // M5-M9 stay byte-identical — including M7, whose internal M1+M2+M3 math
-  // runs over the UNFORCED criteria (a run that refused everything is not a
-  // learning regression; the learning criteria judge the run's own motion,
-  // and its card is already floored). The gate is a CARD-level override: the
-  // exported m1..m4 criteria keep their own semantics for direct callers.
-  // synthesisSucceeded true/undefined → byte-identical legacy behavior.
+  // 342-3 vB (hole 2) extends the SAME card-level override to a KEYLESS run
+  // (journey outcome "keyless" — driveP6Journey's honest no-op): no model was
+  // configured, so no synthesis was ever attempted and the card is floor
+  // greens for the same reason. Without this, synthesisSucceeded === undefined
+  // skipped the gate and "the keyless floor fails" held only by the stored
+  // numbers; with it, a keyless card is pinned to M5,M6,M7,M8,M9 (5/9 warm /
+  // 4/8 first-run) — below every admissible bar by construction. A run with a
+  // real keyed journey but no attempt logs is NOT keyless and stays legacy.
+  // M5-M9 stay byte-identical — including M7, whose internal M1+M3 math runs
+  // over the UNFORCED criteria (a floored run is not a learning regression;
+  // the learning criteria judge the run's own motion, and its card is already
+  // floored). The gate is a CARD-level override: the exported m1..m4 criteria
+  // keep their own semantics for direct callers.
+  // synthesisSucceeded true, or undefined with a non-keyless journey →
+  // byte-identical legacy behavior.
   if (input.synthesisSucceeded === false) {
     const floor: MakerCriterion = { score: 0, evidence: FLOOR_QUALIFIER_EVIDENCE };
+    criteria.M1 = { ...floor };
+    criteria.M2 = { ...floor };
+    criteria.M3 = { ...floor };
+    criteria.M4 = { ...floor };
+  } else if (input.journey?.outcome === "keyless") {
+    const floor: MakerCriterion = { score: 0, evidence: KEYLESS_FLOOR_QUALIFIER_EVIDENCE };
     criteria.M1 = { ...floor };
     criteria.M2 = { ...floor };
     criteria.M3 = { ...floor };
@@ -728,4 +786,130 @@ export function scoreMaker(input: MakerScoreInput): MakerScoreCard {
   }
   const total = Object.values(criteria).reduce((acc, c) => acc + c.score, 0);
   return { criteria, total, mean: total / 9 };
+}
+
+// ---------------------------------------------------------------------------
+// 342-3 (W56) — the corpus bar is per run kind.
+//
+// A first run has no prior same-slug run, so M7 (learning) is 0 by
+// construction (m7Learning) and a bar of `meanAtLeast: 1` over all nine is
+// arithmetically unreachable — capping a first run at 8/9. That is not a
+// capability statement, so the honest fix is a bar that judges a first run on
+// the criteria it CAN score, not a lowered bar. Warm runs keep the full bar.
+// This module owns the pure semantics; the driver reads the declared bar from
+// the grader (`passWhen`) and selects by run kind.
+//
+// 342-3 vB (verifier B): the declared block is normalized, never trusted — the
+// driver's parseGrader accepts any (0,1] threshold and any criterion subset,
+// so barForRunKind structurally clamps exclusions to
+// FIRST_RUN_UNSCOREABLE_CRITERIA and forces the threshold to
+// FIRST_RUN_BAR_MEAN_ATLEAST (1: every remaining criterion). A loose grader
+// can no longer make a floor-shaped card pass; firstRunBarIsAdmissible lets a
+// loader reject one loudly instead.
+// ---------------------------------------------------------------------------
+
+/** first = no prior same-slug run (M7 unscoreable); warm = a prior exists. */
+export type MakerRunKind = "first" | "warm";
+
+/** A grader's threshold, as maker-score reads it. `meanAtLeast` is the WARM
+ *  bar (all nine criteria). `firstRun`, when declared, is the bar a first run
+ *  is judged on: the declared `meanAtLeast` is taken over the card's criteria
+ *  MINUS `excludeCriteria` (the criteria a first run legally cannot score).
+ *  Omitting a criterion is not lowering the bar — every criterion is 0/1, so a
+ *  required mean of 1 over the remaining eight demands all eight, exactly as
+ *  the warm bar demands all nine. A grader with no `firstRun` block keeps the
+ *  warm bar for first runs too (back-compat).
+ *
+ *  342-3 vB (verifier B): the declared block is NOT trusted. `barForRunKind`
+ *  applies the only admissible first-run semantics structurally — exclusions
+ *  clamped to FIRST_RUN_UNSCOREABLE_CRITERIA and the threshold forced to
+ *  FIRST_RUN_BAR_MEAN_ATLEAST — so a loose grader (a 0.5 threshold, or an
+ *  exclusion of scoreable criteria) cannot loosen the bar even though
+ *  parseGrader accepts it. `firstRunBarIsAdmissible` exposes the same rule as
+ *  a predicate so a loader can reject such a grader loudly instead. */
+export type MakerBarWhen = {
+  meanAtLeast: number;
+  firstRun?: { meanAtLeast: number; excludeCriteria: MakerCriterionId[] } | null;
+};
+
+/** The criteria a first run cannot earn evidence for. M7 (learning) is the
+ *  only one: with no prior there is no lesson to reuse. Excluded from the
+ *  first-run bar and only from it. */
+export const FIRST_RUN_UNSCOREABLE_CRITERIA: readonly MakerCriterionId[] = ["M7"];
+
+/** A first run can score every criterion except the genuinely unscoreable ones
+ *  (M7), and they are all 0/1 — so the only honest first-run threshold is 1
+ *  (ALL the remaining criteria). A weaker declared threshold is a defect that
+ *  would let a floor-shaped card pass; barForRunKind refuses to honor it. */
+export const FIRST_RUN_BAR_MEAN_ATLEAST = 1;
+
+/** first | warm, from the prior evidence the driver resolved. */
+export function runKindOf(prior: MakerPriorEvidence | null | undefined): MakerRunKind {
+  return prior ? "warm" : "first";
+}
+
+/** The threshold + excluded criteria that apply to a run of `runKind`. The
+ *  first-run branch is DERIVED, never trusted: exclusions are intersected with
+ *  FIRST_RUN_UNSCOREABLE_CRITERIA (a grader cannot exclude a scoreable
+ *  criterion to duck it) and the threshold is FIRST_RUN_BAR_MEAN_ATLEAST (all
+ *  remaining criteria). A grader with no `firstRun` block keeps the warm bar. */
+export function barForRunKind(
+  when: MakerBarWhen,
+  runKind: MakerRunKind,
+): { meanAtLeast: number; excludeCriteria: MakerCriterionId[] } {
+  if (runKind === "first" && when.firstRun) {
+    const admissible = new Set<MakerCriterionId>(FIRST_RUN_UNSCOREABLE_CRITERIA);
+    const excludeCriteria = when.firstRun.excludeCriteria.filter((id) => admissible.has(id));
+    return { meanAtLeast: FIRST_RUN_BAR_MEAN_ATLEAST, excludeCriteria };
+  }
+  return { meanAtLeast: when.meanAtLeast, excludeCriteria: [] };
+}
+
+/** 342-3 vB: whether a declared `firstRun` block is admissible. `barForRunKind`
+ *  applies these rules structurally (a loose block can never loosen the bar);
+ *  this predicate lets a LOADER reject one loudly instead of silently
+ *  normalizing it. `defects` is empty iff admissible. A block whose
+ *  `meanAtLeast` is anything but FIRST_RUN_BAR_MEAN_ATLEAST, or that names any
+ *  criterion outside FIRST_RUN_UNSCOREABLE_CRITERIA, is inadmissible. */
+export function firstRunBarIsAdmissible(when: MakerBarWhen): { ok: boolean; defects: string[] } {
+  const defects: string[] = [];
+  if (when.firstRun) {
+    if (when.firstRun.meanAtLeast !== FIRST_RUN_BAR_MEAN_ATLEAST) {
+      defects.push(
+        `firstRun.meanAtLeast must be ${FIRST_RUN_BAR_MEAN_ATLEAST} (every remaining criterion is required), got ${JSON.stringify(when.firstRun.meanAtLeast)}`,
+      );
+    }
+    const admissible = new Set<string>(FIRST_RUN_UNSCOREABLE_CRITERIA);
+    const illegal = when.firstRun.excludeCriteria.filter((id) => !admissible.has(id));
+    if (illegal.length > 0) {
+      defects.push(
+        `firstRun.excludeCriteria may name only the genuinely unscoreable ${[...admissible].join("|")}, got extra ${illegal.join(", ")}`,
+      );
+    }
+  }
+  return { ok: defects.length === 0, defects };
+}
+
+/** Mean of the criteria NOT in `excludeCriteria` (0, never NaN, when every
+ *  criterion is excluded — a bar with nothing to score is not a pass). */
+export function criteriaMeanExcluding(
+  card: Pick<MakerScoreCard, "criteria">,
+  excludeCriteria: readonly MakerCriterionId[] = [],
+): number {
+  const ids = (Object.keys(card.criteria) as MakerCriterionId[]).filter((id) => !excludeCriteria.includes(id));
+  if (ids.length === 0) return 0;
+  return ids.reduce((acc, id) => acc + card.criteria[id].score, 0) / ids.length;
+}
+
+/** Whether a card clears its run-kind threshold. This is the RUBRIC clause
+ *  only; the run-side files/content/behavior/kind clauses stay with the
+ *  driver (run-eval's passesAcceptance), so this can never relax them. */
+export function meetsRunKindBar(
+  card: Pick<MakerScoreCard, "criteria">,
+  when: MakerBarWhen,
+  runKind: MakerRunKind,
+): { ok: boolean; mean: number; meanAtLeast: number; excludeCriteria: MakerCriterionId[] } {
+  const bar = barForRunKind(when, runKind);
+  const mean = criteriaMeanExcluding(card, bar.excludeCriteria);
+  return { ok: mean >= bar.meanAtLeast, mean, meanAtLeast: bar.meanAtLeast, excludeCriteria: bar.excludeCriteria };
 }

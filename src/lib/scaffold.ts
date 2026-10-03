@@ -66,15 +66,19 @@
 //   export function deployNotes(project: Project): string  (DEPLOY.md content;
 //     the legacy misspelling `deplyNotes` stays as a back-compat alias)
 //
-// Project.kind (types.ts) is a coarse optional 3-way union — "app"|"tool"|"game";
-// projectKindOf maps it onto this 5-way taxonomy (declared kind wins) and
-// otherwise infers from brief/domain/jobs keywords per the E-15 register spec,
-// defaulting to "webapp".
+// Project.kind (types.ts) is the widened 5-way DeliveryKind the engine decides
+// once and stamps at the keyed P6 seam; projectKindOf maps it onto this 5-way
+// taxonomy and never infers from the brief itself (342-4).
 // ---------------------------------------------------------------------------
 import { PHASES } from "./phases.ts";
 import { exportProjectJson, slugName } from "./io.ts";
 import { canonicalStem } from "./algorithms.ts";
 import { BRIEF_STOPWORDS } from "./sandbox.ts";
+// 342-4: scaffold reads the ONE kind decision from the engine (scaffold → engine
+// is acyclic; engine never imports scaffold, and scaffold already reaches engine
+// through io.ts). This replaces the module's own brief-noun inference, so the two
+// resolvers cannot drift.
+import { deliveryKindOf } from "./engine.ts";
 import {
   approvedAcceptanceFixtures,
   compileFixtureAssertion,
@@ -159,30 +163,12 @@ export type ScaffoldResult =
     }
   | { ok: false; error: string };
 
-/** Register order matters: the first kind whose keyword matches wins. The
- *  explicit delivery-kind nouns (library/sdk/package…) are checked FIRST so
- *  this inference agrees with engine.uiKindOf (see projectKindOf's doc): a
- *  brief that names a library must not be captured by a generic surface noun
- *  such as "board"/"dashboard". */
-const KIND_ORDER: ProjectKind[] = ["library", "webapp", "cli-tool", "game", "service"];
-
 const KIND_LABEL: Record<ProjectKind, string> = {
   webapp: "web app",
   "cli-tool": "CLI tool",
   library: "library",
   game: "game",
   service: "service",
-};
-
-/** E-15 #1 keyword scoring table (ui/dashboard/board/desk/portal → webapp; …).
- *  The library row mirrors engine.uiKindOf's library vocabulary exactly, so the
- *  two resolvers cannot disagree on which briefs are libraries. */
-const KIND_KEYWORDS: Record<ProjectKind, string[]> = {
-  webapp: ["ui", "dashboard", "board", "desk", "portal"],
-  "cli-tool": ["parse", "convert", "cli", "agent", "script"],
-  library: ["library", "package", "sdk", "npm", "module", "statistics"],
-  game: ["game", "play", "level", "arcade"],
-  service: ["api", "service", "webhook", "worker"],
 };
 
 /** The E-27 honesty stamp every DEPLOY.md must carry (verbatim). */
@@ -523,43 +509,33 @@ function mdLine(raw: string, cap = 200): string {
 }
 
 // ---------------------------------------------------------------------------
-// Kind resolution (E-15 #1: Project.kind — explicit field wins, else infer)
+// Kind resolution (342-4: ONE decision, read here — never re-inferred)
 // ---------------------------------------------------------------------------
 
-// Project.kind (types.ts, E-15 wave) is a coarse, optional 3-way union —
-// "app" | "tool" | "game" — that consumers map onto their own taxonomy.
-// projectKindOf maps it onto this module's 5-way scaffold taxonomy (declared
-// kind always wins), then falls back to register keyword inference over
-// brief/domain/jobs (E-15 #1) and finally to "webapp".
+// Project.kind (types.ts) is the widened 5-way DeliveryKind the engine decides
+// once (engine.deliveryKindOf) and stamps at the keyed P6 seam
+// (engine.withDeliveryKind). projectKindOf only MAPS that single value onto
+// this module's 5-way scaffold taxonomy — it does not infer from the brief.
 //
-// fixes/341-1: the inference order must AGREE with engine.uiKindOf (engine.ts
-// :192), which is the classifier that ran FIRST and decided the P6 generated
-// module's shape. uiKindOf resolves every explicit delivery-kind noun
-// (library/sdk/package/npm/module/statistics) BEFORE any UI-bearing token, and
-// leaves Project.kind ABSENT for a library brief — the signal codegen's
-// singleModuleLibraryKind reads to take the library module path. So scaffold
-// checking webapp first made "a kanban board library" classify webapp here (the
-// "board" surface noun won) while the generated module was library-shaped; the
-// emitted webapp UI then bound a form to a library API — a type error the
-// pre-seal typecheck gate refuses with no repairable chunk. Library is checked
-// first here too, so the two resolvers decide the same kind for the same brief.
+// History: pre-342-4 this module kept its own register-keyword inference
+// (fixes/341-1 aligned it with engine.uiKindOf by hand), which is exactly the
+// drift the single source of truth removes: "A kanban board library" resolved
+// library in the engine but webapp here, so the emitted webapp UI bound a form
+// to a library API — an unrepairable pre-seal typecheck refusal. Now both
+// resolvers read deliveryKindOf, so they cannot disagree.
 export function projectKindOf(project: Project): ProjectKind {
-  if (project.kind === "game") return "game";
-  if (project.kind === "app") return "webapp";
-  if (project.kind === "tool") return "cli-tool";
-  // Word-token matching (never substring: "TypeScript" must not hit the
-  // cli-tool keyword "script", "build" must not hit webapp's "ui").
-  const words = new Set(
-    [project.brief, project.domain, project.lattice?.jobs?.join(" ") ?? ""]
-      .join(" ")
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter(Boolean),
-  );
-  for (const kind of KIND_ORDER) {
-    if (KIND_KEYWORDS[kind].some((kw) => words.has(kw))) return kind;
+  switch (deliveryKindOf(project)) {
+    case "app":
+      return "webapp";
+    case "tool":
+      return "cli-tool";
+    case "game":
+      return "game";
+    case "library":
+      return "library";
+    case "service":
+      return "service";
   }
-  return "webapp";
 }
 
 // ---------------------------------------------------------------------------

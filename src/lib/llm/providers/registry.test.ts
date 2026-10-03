@@ -24,6 +24,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  FALLBACK_PROVIDERS_ENV_VAR,
   KNOWN_MODEL_IDS,
   PROVIDERS,
   RAPIDTOOL_MODEL_ROLES,
@@ -1071,6 +1072,77 @@ describe("registry — second family: the live-probed candidate (F2 · W19-L5)",
     assert.equal(resolveProbeTimeoutMs(1_000), 1_000);
     for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
       assert.equal(resolveProbeTimeoutMs(bad), 3_000, `unset/hostile budget ⇒ the cap: ${String(bad)}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R13-f09 / 342-5 — the failover chain stays UNARMED, and the refusal names the
+// exact missing piece (derived from the registry's own descriptors). These make
+// the honesty load-bearing: a chain naming the only registered second family
+// cannot be armed because that family has no verified request ids AND there is
+// no registration seam to add them, while the only dispatchable family is the
+// one every role tier already routes to.
+// ---------------------------------------------------------------------------
+
+describe("R13-f09 / 342-5 — the chain resolves but cannot be honestly armed", () => {
+  it("the only registered second family (xai) is a CANDIDATE with 0 ids — a chain naming it refuses with the exact gap", async () => {
+    const restore = withCleanLlmEnv({ [FALLBACK_PROVIDERS_ENV_VAR]: "xai" });
+    const calls: Captured[] = [];
+    try {
+      const res = await callModel("main", "hello", { fetch: capturingFetch(calls) });
+      assert.equal(res.ok, false);
+      if (!res.ok) {
+        assert.equal(res.reason, "error");
+        assert.equal(res.code, "RT_E_VALIDATION");
+        assert.match(res.error ?? "", /NOT ARMED/);
+        assert.match(res.error ?? "", /"xai" is a CANDIDATE with 0 verified request ids/);
+        assert.match(
+          res.error ?? "",
+          /REGISTERS/,
+          "the refusal names the registration seam as the missing piece — a generic promise is an over-claim",
+        );
+        assert.match(res.error ?? "", /RAPIDTOOL_FALLBACK_PROVIDERS/);
+      }
+      assert.equal(calls.length, 0, "no request may leave while the chain is unarmed");
+    } finally {
+      restore();
+    }
+  });
+
+  it("a chain naming only the role-tier family (deepseek) refuses — a same-family retry is not failover", async () => {
+    const restore = withCleanLlmEnv({ [FALLBACK_PROVIDERS_ENV_VAR]: "deepseek" });
+    const calls: Captured[] = [];
+    try {
+      const res = await callModel("main", "hello", { fetch: capturingFetch(calls) });
+      assert.equal(res.ok, false);
+      if (!res.ok) {
+        assert.equal(res.code, "RT_E_VALIDATION");
+        assert.match(res.error ?? "", /SAME family the primary routes to/);
+      }
+      assert.equal(calls.length, 0);
+    } finally {
+      restore();
+    }
+  });
+
+  it("the gap is DERIVED from the registry bytes: xai stays empty and every role routes to deepseek", () => {
+    const xai = getProvider("xai");
+    assert.ok(xai, "the probed family is registered");
+    assert.deepEqual([...xai!.requestModelIds], [], "a candidate never carries an unprobed id");
+    for (const role of RAPIDTOOL_MODEL_ROLES) {
+      assert.equal(ROLE_TIERS[role].provider, "deepseek", `${role} routes to the only dispatchable family`);
+    }
+  });
+
+  it("an unset chain keeps the single-provider keyless floor byte-identical", async () => {
+    const restore = withCleanLlmEnv();
+    try {
+      const res = await callModel("main", "hello");
+      assert.equal(res.ok, false);
+      if (!res.ok) assert.equal(res.code, "RT_E_LLM_NOT_CONFIGURED");
+    } finally {
+      restore();
     }
   });
 });
