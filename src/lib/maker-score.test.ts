@@ -425,6 +425,70 @@ describe("M2 runs", () => {
     );
   });
 
+  // -------------------------------------------------------------------------
+  // A1-01 (fixes/344): a human-approved bar made of DRAFT SENTINELS
+  // ("<draft>"/"<any>") asserts nothing real. The decision seat may say
+  // human-approved, but the bar is placeholder-only — a behavioral pass over it
+  // is not acceptance and must not re-key M1/M2 green.
+  // -------------------------------------------------------------------------
+
+  test("A1-01: a placeholder-only approved bar cannot score M1/M2 green", () => {
+    const acceptance = fixtureAcceptanceState([{ id: "orc-1", approval: "approved", decidedBy: "human" }]);
+    assert.equal(acceptance.state, "human-approved", "fixture precondition");
+    const placeholderBar = project({
+      acceptanceFixtures: [
+        {
+          id: "orc-1",
+          requirementId: "orc-1",
+          capability: "record",
+          name: "job.record.happy",
+          given: {},
+          expect: { kind: "shape", value: { id: "<draft>" } },
+          kind: "pure",
+          source: "a7",
+          approval: "approved",
+          decidedBy: "human",
+        },
+      ],
+    });
+    const pass = input({
+      project: placeholderBar,
+      treeRun: { ok: true, dir: "d", testsPass: 3, testsFail: 0 },
+      behavioral: { pass: 3, fail: 0, acceptance },
+    });
+    assert.equal(m1Substance(pass).score, 0, "a sentinel bar is not substance");
+    assert.match(m1Substance(pass).evidence, /placeholder/i);
+    assert.equal(m2Runs(pass).score, 0, "a green TAP over a sentinel bar is not the accepted bar");
+    assert.match(m2Runs(pass).evidence, /placeholder/i);
+  });
+
+  test("A1-01: a real typed-literal bar still scores M1/M2 = 1 (no weakening)", () => {
+    const acceptance = fixtureAcceptanceState([{ id: "orc-1", approval: "approved", decidedBy: "human" }]);
+    const realBar = project({
+      acceptanceFixtures: [
+        {
+          id: "orc-1",
+          requirementId: "orc-1",
+          capability: "record",
+          name: "job.record.happy",
+          given: { address: "1 Main St" },
+          expect: { kind: "shape", value: { id: "p-1" } },
+          kind: "pure",
+          source: "a7",
+          approval: "approved",
+          decidedBy: "human",
+        },
+      ],
+    });
+    const pass = input({
+      project: realBar,
+      treeRun: { ok: true, dir: "d", testsPass: 3, testsFail: 0 },
+      behavioral: { pass: 3, fail: 0, acceptance },
+    });
+    assert.equal(m1Substance(pass).score, 1);
+    assert.equal(m2Runs(pass).score, 1);
+  });
+
   test("skip ≠ green: ok:true with 0 assertions scores 0", () => {
     const c = m2Runs(input({ treeRun: { ok: true, dir: "d", testsPass: 0, testsFail: 0 } }));
     assert.equal(c.score, 0);

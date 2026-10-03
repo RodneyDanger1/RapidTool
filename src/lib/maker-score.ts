@@ -51,6 +51,12 @@ import { BRIEF_STOPWORDS, briefNounHits, identifierHits } from "./sandbox.ts";
 // derivation the doctor's factory bar reads, so the scorecard cannot say
 // "accepted" while the doctor says no decision was recorded.
 import { acceptanceDecisionQuestion, type FixtureAcceptanceState } from "./fixtures.ts";
+// A1-01 (fixes/344): the acceptance bar itself must carry real literals. A bar
+// whose rows are draft sentinels ("<draft>"/"<any>") asserts nothing — a
+// behavioral pass over it is not acceptance, whatever seat approved it. Imported
+// as a pure predicate (brief-fixtures is zero-dep) so M1/M2 agree with the emit
+// guard instead of re-deriving the sentinel set.
+import { fixturesHavePlaceholder } from "./brief-fixtures.ts";
 
 // ---------------------------------------------------------------------------
 // Evidence types (driver-gathered; the scorer only reads).
@@ -393,10 +399,25 @@ function lastTestEvidence(
 // The nine criteria (each exported for boundary unit tests).
 // ---------------------------------------------------------------------------
 
+/** A1-01 (fixes/344): the project's acceptance bar is placeholder-only when any
+ *  approved fixture still carries a draft sentinel. Such a bar asserts nothing
+ *  real, so a behavioral pass over it is not acceptance regardless of the
+ *  decision seat. One sentence, shared by M1 and M2. */
+function placeholderBarQuestion(project: Project): string | null {
+  if (fixturesHavePlaceholder(project.acceptanceFixtures)) {
+    return "the approved acceptance bar is placeholder-only (<draft>/<any> sentinel literals assert nothing real) — draft with producer-authored typed literals and re-approve";
+  }
+  return null;
+}
+
 /** M1 substance. A4: when `behavioral` is supplied, score from TAP not stems. */
 export function m1Substance(input: MakerScoreInput): MakerCriterion {
   if (input.behavioral) {
     const b = input.behavioral;
+    // A1-01: a placeholder-only bar is not a bar — check BEFORE the seat
+    // question, because no decision seat can make a sentinel substantive.
+    const placeholder = placeholderBarQuestion(input.project);
+    if (placeholder !== null) return { score: 0, evidence: `no accepted bar — ${placeholder}` };
     // 338-4: the behavioral TAP ran against the acceptance bar — a pass is
     // acceptance only when that bar carries a human-approved decision. The
     // sentence is the doctor's own (acceptanceDecisionQuestion), so M1 and the
@@ -484,6 +505,9 @@ export function m2Runs(input: MakerScoreInput): MakerCriterion {
       : "";
   if (input.behavioral) {
     const b = input.behavioral;
+    // A1-01: same placeholder-bar refusal as M1 (one derivation, one sentence).
+    const placeholder = placeholderBarQuestion(input.project);
+    if (placeholder !== null) return { score: 0, evidence: `treeRun ok but no accepted bar — ${placeholder}` };
     // 338-4: same gate as M1 — a green treeRun over a behavioral bar no human
     // accepted is not a run of the accepted bar (one derivation, one sentence).
     const question = b.acceptance ? acceptanceDecisionQuestion(b.acceptance) : null;

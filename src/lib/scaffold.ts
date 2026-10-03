@@ -2729,15 +2729,19 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   // A2 (fixes/162): human-approved brief fixtures — folded into THIS spec
   // (PKG test script pins tests/oracle.spec.ts; a second brief.spec.ts
   // would never run). Partial approval → this section is omitted (byte-identical
-  // to the no-fixture emission). Requires a tree entry namespace to call.
+  // to the no-fixture emission). A1-01 (fixes/344): a set still carrying a
+  // draft sentinel ("<draft>"/"<any>") asserts nothing real and is refused by
+  // approvedAcceptanceFixtures exactly like a partial set — never a vacuous
+  // always-true assertion. Requires a tree entry namespace to call.
   const fxApproved = treeEntryOk ? approvedAcceptanceFixtures(project.acceptanceFixtures) : null;
   if (fxApproved) {
     lines.push(
       "// ---------------------------------------------------------------------------",
       "// 6. Brief-derived acceptance fixtures (fixes/162 A2) — human-approved",
-      "// input→output cases. given is JSON-literal. shape = partial match with",
-      '// "<draft>"/"<any>" placeholders. throws = substring includes. property',
-      "// cases are red-carded (no registry). Never auto-approved.",
+      "// input→output cases. given is JSON-literal. shape = partial match on",
+      "// REAL typed literals (A1-01: sentinel rows are red-carded, never folded);",
+      "// throws = substring includes; property cases are red-carded (no registry).",
+      "// Never auto-approved.",
       "// ---------------------------------------------------------------------------",
       "",
       "const entry = treeModule;",

@@ -713,42 +713,65 @@ function buildHarness(source: string, cases: VerifyCase[]): string {
   const __src = stripTypeAnnotationsForHarness(source);
   return [
     "// rapidtool verify harness (machine-authored; do not trust the LLM's claims)",
-    `const __SRC = ${JSON.stringify(__src)};`,
-    `const __CASES = ${JSON.stringify(cases)};`,
-    "const __exports = {};",
-    // Capture the REAL console before any case expression can touch it —
-    // verdict lines are emitted through __emit, never through the global,
-    // so a hostile expression can neither forge nor silence ORACLE_RESULT.
-    "const __emit = console.log.bind(console);",
-    "const __sandbox = Object.freeze({ console: Object.freeze({ log: function(){}, error: function(){}, warn: function(){}, info: function(){}, debug: function(){}, trace: function(){} }) });",
+    // 344 A2-F1: the WHOLE harness is an IIFE. Its bindings (notably the
+    // per-run nonce) must not become global-lexical names — a `new Function`
+    // module body resolves against the global scope and could otherwise read
+    // them. The nonce is read from stdin (out-of-band; it is not in the `-e`
+    // source that leaks via process.execArgv, and not in the child env), so a
+    // module that writes lookalike lines to fd 3 cannot authenticate them.
+    "(function () {",
+    "var __fs = require('node:fs');",
+    // Capture the real write BEFORE the module runs, so a module that swaps
+    // fs.writeSync to harvest the nonce cannot intercept the harness's writes.
+    "var __write = __fs.writeSync.bind(__fs);",
+    "var __Function = Function;",
+    "var __keys = Object.keys;",
+    "var __nonce = '';",
+    "try { __nonce = String(__fs.readFileSync(0, 'utf8')).trim(); } catch (e) { __nonce = ''; }",
+    // Verdict lines go ONLY to fd 3, prefixed with the nonce. The `console`
+    // global is left untouched so the module's own output stays ordinary
+    // non-authoritative stdout detail.
+    "var __emit = function (line) { try { __write(3, __nonce + ' ' + line + '\\n'); } catch (e) {} };",
+    `var __SRC = ${JSON.stringify(__src)};`,
+    `var __CASES = ${JSON.stringify(cases)};`,
+    "var __exports = {};",
+    "var __sandbox = Object.freeze({ console: Object.freeze({ log: function(){}, error: function(){}, warn: function(){}, info: function(){}, debug: function(){}, trace: function(){} }) });",
     "try {",
-    "  const __fn = new Function('exports', 'module', 'require', __SRC + '\\n; return exports;');",
-    "  const __mod = { exports: __exports };",
-    "  __fn(__exports, __mod, () => {});",
+    "  var __fn = new __Function('exports', 'module', 'require', __SRC + '\\n; return exports;');",
+    "  var __mod = { exports: __exports };",
+    "  __fn(__exports, __mod, function () {});",
     // T-05 (109 C-07): the `module` parameter is no longer a decoy. The far
     // more common `module.exports = { … }` style reassigns the property on
     // this object; fold its keys back onto __exports so BOTH CommonJS styles
     // expose the API to the `with(exports)` case scope (an `exports.x =`
     // module leaves __mod.exports === __exports and the fold is a no-op).
-    "  if (__mod.exports && __mod.exports !== __exports) { for (const k of Object.keys(__mod.exports)) __exports[k] = __mod.exports[k]; }",
+    // `__keys` is the pre-module captured Object.keys (prototype-tamper proof).
+    "  if (__mod.exports && __mod.exports !== __exports) { var __mk = __keys(__mod.exports); for (var __mi = 0; __mi < __mk.length; __mi++) __exports[__mk[__mi]] = __mod.exports[__mk[__mi]]; }",
     // T-01 (109 C-01): the runner's OWN export inventory, measured from what
     // actually compiled — it cannot lie about the module. runCases refuses to
     // mint a pass when this list is empty: nothing in a case is required to
     // reference an export, so a self-contained literal could otherwise be
     // "machine-verified" against a module that exports nothing at all.
-    "  __emit('HARNESS_EXPORTS ' + Object.keys(__exports).filter(function (k) { return typeof __exports[k] === 'function'; }).join(','));",
+    "  var __names = [];",
+    "  var __ks = __keys(__exports);",
+    "  for (var __ki = 0; __ki < __ks.length; __ki++) { if (typeof __exports[__ks[__ki]] === 'function') __names.push(__ks[__ki]); }",
+    "  var __joined = '';",
+    "  for (var __ji = 0; __ji < __names.length; __ji++) { if (__ji > 0) __joined += ','; __joined += __names[__ji]; }",
+    "  __emit('HARNESS_EXPORTS ' + __joined);",
     "  __emit('HARNESS_COMPILE pass');",
     "} catch (e) {",
     "  __emit('HARNESS_COMPILE fail ' + String(e).slice(0, 120));",
     "}",
-    "for (const c of __CASES) {",
+    "for (var __ci = 0; __ci < __CASES.length; __ci++) {",
+    "  var c = __CASES[__ci];",
     "  try {",
-    "    const v = new Function('exports', '__sandbox', 'with(exports){ with(__sandbox){ return (' + c.expression + '); } }')(__exports, __sandbox);",
+    "    var v = new __Function('exports', '__sandbox', 'with(exports){ with(__sandbox){ return (' + c.expression + '); } }')(__exports, __sandbox);",
     "    __emit('ORACLE_RESULT ' + c.id + ' ' + (v === true ? 'pass' : 'fail') + ' ' + String(v).slice(0, 80));",
     "  } catch (e) {",
     "    __emit('ORACLE_RESULT ' + c.id + ' fail error ' + String(e).slice(0, 80));",
     "  }",
     "}",
+    "})();",
   ].join("\n");
 }
 
@@ -940,39 +963,54 @@ export async function runCases(
     return { pass: false, results: [], compileError: "local bounded runner unavailable" };
   }
   const harness = buildHarness(source, validated);
-  const run = await runNodeBounded(harness, { timeoutMs });
+  const run = await runNodeBounded(harness, { timeoutMs, verdictChannel: true });
   if (!run.ok) {
     return { pass: false, results: [], compileError: `${run.reason}${run.error ? `: ${run.error}` : ""}` };
   }
   const out = run.stdout;
+  // 344 A2-F1: verdicts are read ONLY from the nonce-authenticated fd-3 channel
+  // (`run.verdict`), never from stdout. The module shares stdout with nothing
+  // authoritative now, so any `ORACLE_RESULT` line IT prints there is an
+  // impersonation of the verdict channel and fails the run; `HARNESS_EXPORTS`/
+  // `HARNESS_COMPILE` on stdout is merely non-authoritative detail (ignored —
+  // fixes/327 L5: a module that logs the marker must not cause a false refusal).
+  let forged = false;
+  for (const line of out.split("\n")) {
+    if (/^\s*ORACLE_RESULT /.test(line)) forged = true;
+  }
   // Exact-id validation: only lines whose id is an EXPECTED case id count,
-  // each exactly once — a forged `ORACLE_RESULT` line (unknown id, or a
-  // duplicate) fails the run even if the real harness lines were silenced.
+  // each exactly once — a duplicate/unknown id (impossible on the authenticated
+  // channel, but kept as defense in depth) fails the run. The parse is
+  // first-marker-wins, NOT last-line-wins: a second authenticated marker is
+  // itself a forgery signal.
   const expected = new Set(validated.map((c) => c.id));
   const seen = new Set<string>();
   const results: CaseResult[] = [];
-  let forged = false;
   let callables = "";
-  // fixes/327 L5: the compile verdict is read with the SAME last-line-wins
-  // discipline as HARNESS_EXPORTS below. The old `/^HARNESS_COMPILE fail/`
-  // (no `m` flag) only matched at position 0, so a compiling module whose own
-  // stdout began with the marker forged a "failed to compile" refusal — a
-  // false rejection of a module the harness never even tried to parse. The
-  // harness's real marker is ALWAYS emitted after the module body finishes
-  // (and is the ONLY marker when construction throws), so last-wins can never
-  // flip a real compile failure to a pass.
   let compileMarker = "";
-  for (const line of out.split("\n")) {
-    // T-01 (109 C-01): the harness's OWN export inventory, emitted right
-    // after the compile call. Last line wins — the module source has already
-    // finished running before the harness prints, so a lookalike line it
-    // printed cannot displace the measured one.
+  let sawExports = false;
+  let sawCompile = false;
+  const channel = run.verdict ?? "";
+  for (const line of channel.split("\n")) {
     const trimmed = line.trim();
+    if (!trimmed) continue;
+    // T-01 (109 C-01): the harness's OWN export inventory, emitted right
+    // after the compile call — authenticated and single-writer, so first-wins.
     if (trimmed.startsWith("HARNESS_EXPORTS")) {
+      if (sawExports) {
+        forged = true;
+        continue;
+      }
+      sawExports = true;
       callables = trimmed.slice("HARNESS_EXPORTS".length).trim();
       continue;
     }
     if (trimmed.startsWith("HARNESS_COMPILE ")) {
+      if (sawCompile) {
+        forged = true;
+        continue;
+      }
+      sawCompile = true;
       compileMarker = trimmed.slice("HARNESS_COMPILE ".length).trim();
       continue;
     }

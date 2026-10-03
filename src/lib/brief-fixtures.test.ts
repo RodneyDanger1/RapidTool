@@ -18,6 +18,7 @@ import {
   jobCoveredByCapabilities,
   coerceAcceptanceFixtures,
   compileFixtureAssertion,
+  fixtureMatchHelperSource,
   approvedAcceptanceFixtures,
   draftTypedLiterals,
   mergeDraftedFixtures,
@@ -576,7 +577,7 @@ describe("A1 coerceAcceptanceFixtures + C2 target", () => {
       approval: "approved",
       target: "createProperty",
       given: { address: "1 Main" },
-      expect: { kind: "shape", value: { id: "<draft>", history: [] } },
+      expect: { kind: "shape", value: { id: "p-1", history: [] } },
     });
     assert.equal(shape.ok, true);
     if (shape.ok) {
@@ -633,6 +634,67 @@ describe("A1 coerceAcceptanceFixtures + C2 target", () => {
     assert.equal(
       validateFixtureCase({ ...validCase(), decidedBy: "agent" as "human" }).ok,
       false,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A1-01 (fixes/344): a draft sentinel ("<draft>"/"<any>") is NOT an acceptance
+// bar. The drafter mints sentinels to unblock the draft flow; a human may
+// approve them, but they assert nothing real — no gate, emit guard, compiler,
+// or matcher may treat such a row as substantive.
+// ---------------------------------------------------------------------------
+
+describe("A1-01 — placeholder sentinels are not substantive fixtures", () => {
+  function placeholderCase(): BriefFixtureCase {
+    return {
+      id: "orc-draft",
+      requirementId: "orc-draft",
+      capability: "record",
+      name: "job.record.happy",
+      given: {},
+      expect: { kind: "shape", value: { id: "<draft>" } },
+      kind: "pure",
+      source: "a7",
+      approval: "approved",
+      decidedBy: "human",
+      target: "createProperty",
+    };
+  }
+  function realCase(): BriefFixtureCase {
+    return {
+      ...placeholderCase(),
+      id: "orc-real",
+      requirementId: "orc-real",
+      given: { address: "1 Main St" },
+      expect: { kind: "shape", value: { id: "p-1" } },
+    };
+  }
+
+  it("fixtureApprovalGate does not call a fully-approved placeholder set ok", () => {
+    const gate = fixtureApprovalGate([placeholderCase()]);
+    assert.equal(gate.ok, false, "approved sentinels assert nothing — the gate must refuse");
+    assert.deepEqual(gate.placeholderIds, ["orc-draft"]);
+    assert.equal(fixtureApprovalGate([realCase()]).ok, true, "a real typed-literal set is unaffected");
+  });
+
+  it("approvedAcceptanceFixtures refuses a placeholder set; a real set still folds", () => {
+    assert.equal(approvedAcceptanceFixtures([placeholderCase()]), null, "a sentinel bar never emits");
+    assert.equal(
+      approvedAcceptanceFixtures([placeholderCase(), { ...placeholderCase(), id: "orc-2", requirementId: "orc-2" }]),
+      null,
+    );
+    assert.equal(approvedAcceptanceFixtures([realCase()])?.length, 1);
+  });
+
+  it("compileFixtureAssertion red-cards a placeholder case; the emitted matcher carries no sentinel escape", () => {
+    const compiled = compileFixtureAssertion(placeholderCase());
+    assert.equal(compiled.ok, false, "a sentinel must never compile to a vacuous assertion");
+    if (!compiled.ok) assert.match(compiled.reason, /placeholder/i);
+    const helper = fixtureMatchHelperSource();
+    assert.ok(
+      !helper.includes("<draft>") && !helper.includes("<any>"),
+      "the emitted matcher must have no sentinel escape hatch",
     );
   });
 });

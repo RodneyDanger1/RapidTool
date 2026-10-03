@@ -20,6 +20,7 @@
 // Server-only: never import this module into a client bundle.
 // ---------------------------------------------------------------------------
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,6 +36,10 @@ type NodeRunCore =
       /** T-107.6: present ONLY when a stream was clamped to
        *  RUNNER_OUTPUT_MAX_CHARS — absent (byte-identical envelope) otherwise. */
       outputClamp?: { stdout: RunnerOutputClamp; stderr: RunnerOutputClamp };
+      /** 344 A2-F1: present ONLY when `opts.verdictChannel` requested — the
+       *  nonce-authenticated lines the child wrote to fd 3, with the per-run
+       *  nonce prefix stripped. Absent (byte-identical envelope) otherwise. */
+      verdict?: string;
     }
   | {
       ok: false;
@@ -288,9 +293,39 @@ export function removeScratchDir(dir: string, owned: boolean): void {
   }
 }
 
+/**
+ * 344 A2-F1: filter a raw fd-3 capture down to the lines the child's harness
+ * actually wrote, authenticated by the per-run nonce the parent delivered
+ * out-of-band on stdin (so it is absent from `process.execArgv`, `process.env`
+ * and every global-lexical binding the module under test can reach). The nonce
+ * prefix is stripped, leaving the legacy marker lines. A line written by the
+ * module itself (which has no way to learn the nonce) never matches. Pure.
+ */
+function authenticatedVerdict(raw: string, nonce: string): string {
+  if (!nonce) return "";
+  const prefix = `${nonce} `;
+  const lines: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.startsWith(prefix)) lines.push(line.slice(prefix.length));
+  }
+  // The authenticated lines can carry module-derived case detail; redact before
+  // they leave the runner (same policy as stdout/stderr).
+  return redactSecrets(lines.join("\n"));
+}
+
 export async function runNodeBounded(
   code: string,
-  opts?: { timeoutMs?: number },
+  opts?: {
+    timeoutMs?: number;
+    /**
+     * 344 A2-F1: open a dedicated verdict channel. The child gets stdin (where
+     * the parent writes a fresh nonce) and fd 3 (where the harness writes its
+     * marker lines prefixed with that nonce). The returned ok envelope carries
+     * `verdict` — the authenticated lines, prefix stripped. Omitted ⇒ the
+     * legacy stdio (`["ignore","pipe","pipe"]`) and no `verdict` field.
+     */
+    verdictChannel?: boolean;
+  },
 ): Promise<NodeRunResult> {
   if (!runnerAvailable()) {
     return withSandbox({
@@ -330,6 +365,7 @@ export async function runNodeBounded(
     ownsScratchDir = false;
   }
 
+  const verdictChannel = opts?.verdictChannel === true;
   const started = Date.now();
   let child: ChildProcess;
   try {
@@ -344,7 +380,12 @@ export async function runNodeBounded(
       env: scrubbedEnv(),
       maxBuffer: MAX_BUFFER,
       windowsHide: true, // no console window flash on the desktop
-      stdio: ["ignore", "pipe", "pipe"], // no stdin; bounded stdout/stderr pipes
+      // 344 A2-F1: the verdict channel adds stdin (out-of-band nonce) and fd 3
+      // (the harness's authenticated marker stream). Without it the stdio is
+      // byte-identical to the legacy `["ignore","pipe","pipe"]`.
+      stdio: verdictChannel
+        ? ["pipe", "pipe", "pipe", "pipe"]
+        : ["ignore", "pipe", "pipe"],
     } as import("node:child_process").SpawnOptions & { maxBuffer: number };
     child = spawn(process.execPath, ["-e", code], spawnOpts);
   } catch (err) {
@@ -357,8 +398,23 @@ export async function runNodeBounded(
     });
   }
 
+  // 344 A2-F1: a fresh per-run nonce, delivered to the child ONLY on stdin. It
+  // is never embedded in the `-e` source (which leaks via process.execArgv) and
+  // never placed in the child env, so the module under test cannot learn it.
+  const verdictNonce = verdictChannel ? randomBytes(16).toString("hex") : "";
+  if (verdictChannel && child.stdin) {
+    try {
+      child.stdin.write(`${verdictNonce}\n`);
+      child.stdin.end();
+    } catch {
+      // stdin closed early: the harness reads no nonce and emits nothing
+      // authenticated, so the run fails closed (empty verdict) — never open.
+    }
+  }
+
   let stdout = "";
   let stderr = "";
+  let verdictRaw = "";
   // W-26: streaming output-bomb counter — the ONLY live enforcement of
   // MAX_BUFFER. Kills the tree once the child has written more bytes than the
   // cap across both pipes; settle() then reports the coded bomb failure.
@@ -384,6 +440,13 @@ export async function runNodeBounded(
     bombCheck(d);
     stderr = (stderr + d.toString()).slice(-MAX_OUTPUT);
   });
+  if (verdictChannel) {
+    const verdictStream = child.stdio[3];
+    verdictStream?.on("data", (d: Buffer) => {
+      bombCheck(d);
+      verdictRaw = (verdictRaw + d.toString()).slice(-MAX_OUTPUT);
+    });
+  }
 
   return new Promise<NodeRunResult>((resolve) => {
     let settled = false;
@@ -486,6 +549,10 @@ export async function runNodeBounded(
               },
             }
           : {}),
+        // 344 A2-F1: only the nonce-authenticated fd-3 lines survive; anything
+        // the module wrote there itself is dropped. Omitted entirely on the
+        // legacy (non-channel) path so that envelope stays byte-identical.
+        ...(verdictChannel ? { verdict: authenticatedVerdict(verdictRaw, verdictNonce) } : {}),
       });
     };
 

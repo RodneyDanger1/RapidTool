@@ -144,6 +144,17 @@ export type BriefFixtureDraft = {
 };
 
 /**
+ * A1-01 (fixes/344): the reserved draft sentinels. The deterministic floor
+ * (draftTypedLiterals) writes them where a real typed literal is missing —
+ * "<draft>" as a shape value, "<any>" as the legacy wildcard. They are NOT
+ * data: a case whose given/expect carries one asserts nothing real, so no
+ * layer may treat it as a substantive acceptance bar.
+ */
+const PLACEHOLDER_DRAFT = "<draft>";
+const PLACEHOLDER_ANY = "<any>";
+export const BRIEF_FIXTURE_PLACEHOLDERS = [PLACEHOLDER_DRAFT, PLACEHOLDER_ANY] as const;
+
+/**
  * A5.0: producer-authored typed literals so draftBriefFixtures is not vacuous.
  * Deterministic floor (no LLM): empty given + shape `{id:"<draft>"}` or a
  * throws pattern for constraint rows. Never sets approval. The human still
@@ -162,7 +173,7 @@ export function draftTypedLiterals(args: {
       given: {},
       expect: constraint
         ? { kind: "throws", messagePattern: "invalid" }
-        : { kind: "shape", value: { id: "<draft>" } },
+        : { kind: "shape", value: { id: PLACEHOLDER_DRAFT } },
       kind: constraint ? "effect" : "pure",
     };
   }
@@ -170,7 +181,7 @@ export function draftTypedLiterals(args: {
     if (typeof cap !== "string" || cap.trim().length === 0) return;
     typed[`cap-${i + 1}`] = {
       given: {},
-      expect: { kind: "shape", value: { id: "<draft>" } },
+      expect: { kind: "shape", value: { id: PLACEHOLDER_DRAFT } },
       kind: "pure",
     };
   });
@@ -195,6 +206,11 @@ export type BriefFixtureGate = {
   approved: number;
   unapproved: BriefFixtureCase[];
   unapprovedIds: string[];
+  /** A1-01 (fixes/344): approved rows that are placeholder-only (sentinel
+   *  "<draft>"/"<any>" literals). They assert nothing real, so a set carrying
+   *  one cannot satisfy the gate even when every row is "approved". */
+  placeholder: BriefFixtureCase[];
+  placeholderIds: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -553,12 +569,18 @@ export function validateFixtureSet(cases: readonly BriefFixtureCase[]): BriefFix
 export function fixtureApprovalGate(cases: readonly BriefFixtureCase[]): BriefFixtureGate {
   const list = Array.isArray(cases) ? cases : [];
   const unapproved = list.filter((c) => c.approval !== "approved");
+  // A1-01 (fixes/344): an approved-but-placeholder row asserts nothing real —
+  // it blocks the gate exactly like an unapproved row, so a run can never claim
+  // "functional" over a set of sentinels.
+  const placeholder = list.filter((c) => c.approval === "approved" && fixtureCaseIsPlaceholder(c));
   return {
-    ok: list.length > 0 && unapproved.length === 0,
+    ok: list.length > 0 && unapproved.length === 0 && placeholder.length === 0,
     total: list.length,
     approved: list.length - unapproved.length,
     unapproved,
     unapprovedIds: unapproved.map((c) => c.id),
+    placeholder,
+    placeholderIds: placeholder.map((c) => c.id),
   };
 }
 
@@ -631,11 +653,47 @@ export function approvedAcceptanceFixtures(raw: unknown): BriefFixtureCase[] | n
   const c = coerceAcceptanceFixtures(raw);
   if (!c.value || c.value.length === 0) return null;
   if (!c.value.every((f) => f.approval === "approved")) return null;
+  // A1-01 (fixes/344): an approved set that still carries draft sentinels
+  // asserts nothing real — it is NOT a substantive acceptance bar, so the emit
+  // guard refuses it exactly like a partial approval (byte-identical to the
+  // no-fixture emission). A real typed-literal set is unaffected.
+  if (c.value.some(fixtureCaseIsPlaceholder)) return null;
   return c.value;
 }
 
-const PLACEHOLDER_DRAFT = "<draft>";
-const PLACEHOLDER_ANY = "<any>";
+/**
+ * A1-01 (fixes/344): the reserved draft sentinels are declared with the drafter
+ * (draftTypedLiterals) above; these predicates read them.
+ */
+
+/** True when any string leaf of `v` is a draft sentinel. Fixtures are plain
+ *  JSON literals by validateFixtureCase, so this recursion is cycle-free. */
+export function fixtureValueIsPlaceholder(v: unknown): boolean {
+  if (typeof v === "string") return (BRIEF_FIXTURE_PLACEHOLDERS as readonly string[]).includes(v);
+  if (Array.isArray(v)) return v.some((item) => fixtureValueIsPlaceholder(item));
+  if (v !== null && typeof v === "object") {
+    return Object.keys(v as object).some((k) => fixtureValueIsPlaceholder((v as Record<string, unknown>)[k]));
+  }
+  return false;
+}
+
+/** A case is placeholder-only when its given or its expect literal carries a
+ *  draft sentinel — such a row asserts nothing real and can never be an
+ *  acceptance bar. A real typed-literal case is unaffected. */
+export function fixtureCaseIsPlaceholder(c: unknown): boolean {
+  if (!c || typeof c !== "object") return false;
+  const rec = c as BriefFixtureCase;
+  if (fixtureValueIsPlaceholder(rec.given)) return true;
+  const ex = rec.expect;
+  if (ex && typeof ex === "object" && ex.kind === "shape") return fixtureValueIsPlaceholder(ex.value);
+  if (ex && typeof ex === "object" && ex.kind === "throws") return fixtureValueIsPlaceholder(ex.messagePattern);
+  return false;
+}
+
+/** True when any case of the set is placeholder-only. Absent/non-list ⇒ false. */
+export function fixturesHavePlaceholder(cases: readonly unknown[] | null | undefined): boolean {
+  return Array.isArray(cases) && cases.some(fixtureCaseIsPlaceholder);
+}
 
 /**
  * A2: compile ONE approved fixture into the body of a node:test callback.
@@ -645,6 +703,15 @@ const PLACEHOLDER_ANY = "<any>";
  */
 export function compileFixtureAssertion(c: BriefFixtureCase): { ok: true; body: string } | { ok: false; reason: string } {
   if (!c || typeof c !== "object") return { ok: false, reason: "case is not an object" };
+  // A1-01 (fixes/344): a draft sentinel asserts nothing real. Red-card it (the
+  // emitter turns a red card into a visible assert.fail) — never a vacuous
+  // always-true assertion.
+  if (fixtureCaseIsPlaceholder(c)) {
+    return {
+      ok: false,
+      reason: `placeholder sentinel literal (${BRIEF_FIXTURE_PLACEHOLDERS.join("/")}) — draft rows assert nothing; supply producer-authored typed literals`,
+    };
+  }
   if (c.expect?.kind === "property") {
     return { ok: false, reason: "property fixtures have no registry (C5 red-card)" };
   }
@@ -687,11 +754,13 @@ export function compileFixtureAssertion(c: BriefFixtureCase): { ok: true; body: 
   return { ok: false, reason: "unsupported expect.kind" };
 }
 
-/** Runtime helper source emitted once into oracle.spec.ts when fixtures exist. */
+/** Runtime helper source emitted once into oracle.spec.ts when fixtures exist.
+ *  A1-01 (fixes/344): no sentinel escape hatch — a "<draft>"/"<any>" literal
+ *  compares exactly like any other value, so a placeholder row can never
+ *  partial-match a real return value. */
 export function fixtureMatchHelperSource(): string {
   return [
     `function __fxPartialMatch(actual: unknown, expected: unknown): boolean {`,
-    `  if (expected === ${JSON.stringify(PLACEHOLDER_ANY)} || expected === ${JSON.stringify(PLACEHOLDER_DRAFT)}) return true;`,
     `  if (expected !== null && typeof expected === "object" && actual !== null && typeof actual === "object") {`,
     `    if (Array.isArray(expected)) {`,
     `      if (!Array.isArray(actual) || actual.length !== expected.length) return false;`,

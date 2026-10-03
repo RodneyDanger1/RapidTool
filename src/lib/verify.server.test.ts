@@ -40,6 +40,7 @@ import {
   sanitizeOracleExpression,
   verifyAndFixServer,
 } from "./verify.server.ts";
+import type { VerifyCase } from "./verify.server.ts";
 import { runnerAvailable } from "./node-runner.server.ts";
 import { createTokenBudget, emptyLedger } from "./token-ledger.ts";
 import { oracleToCaseSeeds } from "./dod.ts";
@@ -492,14 +493,16 @@ describe("109 T-12 — verify-safety regression block", () => {
 });
 
 // ---------------------------------------------------------------------------
-// fixes/327 L5 — the compile verdict is parsed last-marker-wins, exactly like
-// HARNESS_EXPORTS. The old `/^HARNESS_COMPILE fail/` (no `m`) matched only at
-// position 0, so a compiling module whose OWN first stdout line began with the
-// marker was falsely refused ("source failed to compile") even though the
-// harness compiled it fine. The harness's real marker is emitted after the
-// module body, so it always wins.
+// fixes/327 L5 — a module's own stdout cannot decide the compile verdict.
+// (344 A2-F1 CHANGED THE MECHANISM: the verdict now rides the nonce-
+// authenticated fd-3 channel, so stdout is non-authoritative detail outright —
+// this pin no longer relies on last-marker-wins. The legacy line format is
+// unchanged; only the channel moved.) The old `/^HARNESS_COMPILE fail/` (no
+// `m`) matched only at position 0, so a compiling module whose OWN first stdout
+// line began with the marker was falsely refused ("source failed to compile")
+// even though the harness compiled it fine.
 // ---------------------------------------------------------------------------
-describe("fixes/327 L5 — harness compile verdict (last-marker-wins)", () => {
+describe("fixes/327 L5 — harness compile verdict (stdout is non-authoritative)", () => {
   it("a module that prints the compile marker but COMPILES is not falsely refused", { skip: !available }, async () => {
     const res = await runCases('console.log("HARNESS_COMPILE fail"); exports.add = (a, b) => a + b;', [
       { id: "add", expression: "add(2,3) === 5" },
@@ -1267,11 +1270,14 @@ describe("fixes/330 P3 — runCases reference gate rejects data-only mentions", 
 });
 
 // ---------------------------------------------------------------------------
-// 338-6 — a FORGED verdict cannot pass. The harness emits ORACLE_RESULT lines
-// through a console bound BEFORE the module runs; the parser accepts each
-// expected id exactly once and fails the run on any unknown/duplicate line.
-// These pins prove a module that prints its own verdict line (the one shape a
-// hostile payload would use to mint a green without running) is refused.
+// 338-6 — a FORGED verdict cannot pass. (344 A2-F1 CHANGED THE MECHANISM: the
+// harness now emits ORACLE_RESULT lines on the nonce-authenticated fd-3
+// channel, not on stdout; the parser accepts each expected id exactly once and
+// fails the run on any unknown/duplicate line. A module that prints its own
+// ORACLE_RESULT line on stdout is impersonating the verdict channel and fails
+// the run outright.) These pins prove a module that prints its own verdict line
+// (the one shape a hostile payload would use to mint a green without running)
+// is refused.
 // ---------------------------------------------------------------------------
 describe("338-6 — a forged ORACLE_RESULT line can never mint a pass", () => {
   it("a module printing a fake pass for the real id is refused (real case fails)", { skip: !available }, async () => {
@@ -1521,5 +1527,114 @@ describe("341-3 — no dead oracle-signature duplicate is exported", () => {
       false,
       "the dead duplicate stays removed (codegen.server.ts owns signatureFunctionNames)",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 344 A2-F1 (Critical) — the module under test can no longer forge the verdict.
+//
+// The pre-fix harness emitted HARNESS_EXPORTS / HARNESS_COMPILE / ORACLE_RESULT
+// on the SAME stdout as the module, and runCases parsed those lines
+// last-line-wins. A module that THROWS on load and exports nothing could
+// `setTimeout(() => console.log('HARNESS_EXPORTS exports');
+// console.log('HARNESS_COMPILE pass'))` and turn a broken module into
+// `{pass:true}` — bypassing BOTH the compile-fail and the no-callables
+// refusals — which then minted `lastTest {label:"tested"}`. The verdict now
+// rides a dedicated fd-3 channel authenticated by a per-run nonce delivered
+// out-of-band on the child's stdin; runCases reads verdicts ONLY from that
+// channel and treats stdout as non-authoritative detail. (RED before the fix:
+// the two `forgery` cases below returned pass:true.)
+// ---------------------------------------------------------------------------
+describe("344 A2-F1 — the verdict channel is unforgeable by the module", () => {
+  // The exact repro: a module that throws on load, exports nothing, and
+  // schedules lookalike marker lines on stdout.
+  const FORGE_THROWING =
+    "setTimeout(function(){ console.log('HARNESS_EXPORTS exports'); console.log('HARNESS_COMPILE pass'); }, 0);\n" +
+    "throw new Error('module is broken on load');";
+  // V2's stronger shape: no throw at all — just a bare lookalike print.
+  const FORGE_NO_THROW =
+    "setTimeout(function(){ console.log('HARNESS_EXPORTS exports'); console.log('HARNESS_COMPILE pass'); }, 0);\n" +
+    "console.log('HARNESS_EXPORTS exports');\n" +
+    "console.log('HARNESS_COMPILE pass');";
+  const FORGE_CASE: VerifyCase[] = [{ id: "c1", expression: "typeof exports === 'object'" }];
+
+  it("(a) a load-throwing module that schedules lookalike markers is refused", { skip: !available }, async () => {
+    const res = await runCases(FORGE_THROWING, FORGE_CASE);
+    assert.equal(res.pass, false, `forgery must be refused, got ${JSON.stringify(res)}`);
+    assert.equal(res.compileError, "source failed to compile in the harness");
+  });
+
+  it("(b) a plain lookalike console.log module (no throw) is refused as vacuous", { skip: !available }, async () => {
+    const res = await runCases(FORGE_NO_THROW, FORGE_CASE);
+    assert.equal(res.pass, false, `forgery must be refused, got ${JSON.stringify(res)}`);
+    assert.equal(res.compileError, NO_CALLABLE_EXPORTS_REASON);
+  });
+
+  it("(e) a module writing lookalikes directly to fd 3 (no nonce) cannot pass", { skip: !available }, async () => {
+    const src =
+      'const fs = process.getBuiltinModule("fs");\n' +
+      'try { fs.writeSync(3, "HARNESS_EXPORTS evil\\nHARNESS_COMPILE pass\\n"); } catch (e) {}\n' +
+      'setTimeout(function(){ try { fs.writeSync(3, "ORACLE_RESULT c1 pass\\n"); } catch (e) {} }, 0);';
+    const res = await runCases(src, FORGE_CASE);
+    assert.equal(res.pass, false, `an unauthenticated fd-3 line must not carry the run: ${JSON.stringify(res)}`);
+  });
+
+  it("(e2) hooking fs.writeSync cannot capture the nonce and forge a verdict", { skip: !available }, async () => {
+    // The module wraps fs.writeSync to harvest whatever the harness writes to
+    // fd 3, then forges an authenticated-looking line. The harness captures the
+    // REAL writeSync before the module runs and keeps the nonce in IIFE scope,
+    // so the hook sees no nonce and the forged line is dropped.
+    const src =
+      'const fs = process.getBuiltinModule("fs");\n' +
+      'let cap = "";\n' +
+      'const real = fs.writeSync;\n' +
+      'fs.writeSync = function (fd, s) { if (fd === 3 && !cap) cap = String(s).split(" ")[0]; return real.call(fs, fd, s); };\n' +
+      'exports.add = (a, b) => a + b;\n' +
+      'setTimeout(function(){ try { fs.writeSync(3, cap + " ORACLE_RESULT c1 pass\\n"); } catch (e) {} }, 0);';
+    const res = await runCases(src, [{ id: "c1", expression: "add(2,3) === 99" }]);
+    assert.equal(res.pass, false, `a harvested-nonce forgery must not pass: ${JSON.stringify(res)}`);
+    assert.equal(res.results[0]?.pass, false, "the real failing case still decides the verdict");
+  });
+
+  it("(c) control: a genuinely green module still passes", { skip: !available }, async () => {
+    const res = await runCases("exports.add = (a, b) => a + b;", [{ id: "add", expression: "add(2,3) === 5" }]);
+    assert.equal(res.pass, true, JSON.stringify(res));
+    assert.equal(res.compileError, undefined);
+    assert.equal(res.results[0]?.pass, true);
+  });
+
+  it("(d) control: a genuine compile failure still refuses", { skip: !available }, async () => {
+    const res = await runCases("exports.add = (", [{ id: "add", expression: "add(2,3) === 5" }]);
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, "source failed to compile in the harness");
+  });
+
+  it("(end-to-end) verifyAndFixServer refuses the forgery and mints no tested label", { skip: !available }, async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([{ cases: [{ id: "c1", expression: "typeof exports === 'object'" }] }]);
+    try {
+      const outcome = await verifyAndFixServer(FORGE_THROWING, "", { maxIterations: 1 });
+      assert.notEqual(outcome.status, "passed", `the forgery must not mint a pass: ${JSON.stringify(outcome)}`);
+      const applied = applyVerifyOutcome(seedProject(), outcome);
+      const label = (applied.lastTest as { label?: string } | null)?.label ?? null;
+      assert.notEqual(label, "tested", "no machine-proof stamp for a module that never loaded");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("(end-to-end control) a genuinely green module passes and mints tested", { skip: !available }, async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([{ cases: [{ id: "c1", expression: "add(2,3) === 5" }] }]);
+    try {
+      const outcome = await verifyAndFixServer("exports.add = (a, b) => a + b;", "", { maxIterations: 1 });
+      assert.equal(outcome.status, "passed", JSON.stringify(outcome));
+      const applied = applyVerifyOutcome(seedProject(), outcome);
+      assert.equal((applied.lastTest as { label?: string } | null)?.label, "tested");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
   });
 });

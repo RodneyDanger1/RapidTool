@@ -181,3 +181,34 @@ describe("clampRunnerOutput — small caps never ship a marker stub (337-3)", ()
     assert.ok(large.text.endsWith("A"), "tail kept");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 344 A2-F1 — the opt-in verdict channel. `verdictChannel` opens stdin (the
+// parent writes a fresh nonce) and fd 3 (the harness's marker stream); the ok
+// envelope gains `verdict` with only the nonce-authenticated lines, prefix
+// stripped. A child that writes to fd 3 itself cannot authenticate. The legacy
+// path must stay byte-identical (no `verdict` field).
+// ---------------------------------------------------------------------------
+describe("runNodeBounded verdict channel (344 A2-F1)", () => {
+  it("omits `verdict` on the legacy path (byte-identical envelope)", async () => {
+    if (!runnerAvailable()) return;
+    const res = await runNodeBounded("console.log('legacy-ok')", { timeoutMs: 5_000 });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal("verdict" in res, false, "no verdict field without verdictChannel");
+    assert.match(res.stdout, /legacy-ok/);
+  });
+
+  it("captures fd 3 but drops every line the child writes itself (no nonce)", async () => {
+    if (!runnerAvailable()) return;
+    const code =
+      "const fs = require('node:fs');" +
+      "fs.writeSync(3, 'FORGED-HARNESS_COMPILE pass\\n');" +
+      "console.log('detail-on-stdout');";
+    const res = await runNodeBounded(code, { timeoutMs: 5_000, verdictChannel: true });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(res.verdict, "", "unauthenticated fd-3 lines are dropped");
+    assert.match(res.stdout, /detail-on-stdout/);
+  });
+});

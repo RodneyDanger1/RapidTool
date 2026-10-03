@@ -13,6 +13,7 @@ import type { Project, SpecGraph } from "./types.ts";
 import { DEPLOY_HONESTY_STAMP, deployNotes, deplyNotes, projectKindOf, scaffoldProject } from "./scaffold.ts";
 import type { ScaffoldFile, ScaffoldResult } from "./scaffold.ts";
 import { deliveryKindOf, withDeliveryKind } from "./engine.ts";
+import { compileFixtureAssertion, fixtureMatchHelperSource } from "./brief-fixtures.ts";
 
 /** A fully engine-run project (real lattice, spec graph, contracts, oracle, P6 module). */
 const fullRun = (over: Partial<Project> = {}) => runHeadless(seedProject(over), ALL_PHASES);
@@ -741,7 +742,7 @@ describe("A2 — approved fixtures fold into tests/oracle.spec.ts", () => {
     capability: "record",
     name: "job.record.happy",
     given: { address: "1 Main" },
-    expect: { kind: "shape" as const, value: { id: "<draft>" } },
+    expect: { kind: "shape" as const, value: { id: "p-1" } },
     kind: "pure" as const,
     source: "a7" as const,
     approval: "approved" as const,
@@ -795,6 +796,21 @@ describe("A2 — approved fixtures fold into tests/oracle.spec.ts", () => {
     const pkg = JSON.parse(bodyOf(scaffoldProject(p), "package.json")) as { scripts?: { test?: string } };
     assert.ok(pkg.scripts?.test?.includes("tests/oracle.spec.ts"), "still the single oracle.spec test script");
     assert.ok(!pkg.scripts?.test?.includes("brief.spec"), "no second test file");
+  });
+
+  it("A1-01: an approved placeholder set is refused at emit — no vacuous fx. test", () => {
+    const placeholder = { ...fx, expect: { kind: "shape" as const, value: { id: "<draft>" } } };
+    const spec = bodyOf(
+      scaffoldProject(treeProject({ acceptanceFixtures: [placeholder] })),
+      "tests/oracle.spec.ts",
+    );
+    assert.ok(!spec.includes("fx.orc-1"), "a sentinel bar must not emit an always-true fx. test");
+    assert.ok(!spec.includes("<draft>"), "no sentinel literal survives into the spec");
+    assert.equal(compileFixtureAssertion(placeholder).ok, false, "the compiler red-cards a sentinel");
+    assert.ok(
+      !fixtureMatchHelperSource().includes("<draft>"),
+      "the emitted matcher carries no sentinel escape hatch",
+    );
   });
 });
 
