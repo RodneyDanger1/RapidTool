@@ -41,10 +41,13 @@ test("console.tsx: no aria-label on a generic (roleless) div/span", () => {
   assert.deepEqual(genericRoleLabelled(CONSOLE), []);
 });
 
-test("console.tsx: the run screen has a `main` landmark with an id + skip link", () => {
-  assert.match(CONSOLE, /<main\b[^>]*\bid="run-main"/, "run screen must render <main id=\"run-main\">");
-  assert.match(CONSOLE, /href="#run-main"/, "the skip link must target the main region");
-  assert.match(CONSOLE, /Skip to main content/, "the skip link must have visible text");
+test("console.tsx: the run screen's `main` is the global skip target", () => {
+  // 336-5: the run-only skip link is superseded by the ONE global link in
+  // routes/__root.tsx; every screen main now carries id="main-content" (pinned
+  // in ui-shell-guards.test.ts). The console must not render a second
+  // identical first-focus stop.
+  assert.match(CONSOLE, /<main\b[^>]*\bid="main-content"/, "run screen must render <main id=\"main-content\">");
+  assert.doesNotMatch(CONSOLE, /Skip to main content/, "the skip link must live in __root.tsx, not here");
   // exactly one closing tag per opening tag of each kind (no stray rename).
   assert.equal((CONSOLE.match(/<main\b/g) ?? []).length, (CONSOLE.match(/<\/main>/g) ?? []).length);
 });

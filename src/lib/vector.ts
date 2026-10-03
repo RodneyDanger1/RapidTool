@@ -701,7 +701,9 @@ export function geometricMonogram(
   const accent = tokenHex(tokens, "accent") ?? row[1];
   const onBrand = tokenHex(tokens, "onBrand") ?? "#ffffff";
   const initials = monogramInitials(name);
-  const fontSize = initials.length >= 2 ? (initials.length >= 3 ? 26 : 34) : 46;
+  // monogramInitials returns 1-2 chars, so only two rungs exist (34 for 2, 46
+  // for 1). A `>= 3` rung was unreachable; pinned by vector.test.ts.
+  const fontSize = initials.length >= 2 ? 34 : 46;
   const tilt = (h % 50) - 25; // -25..24 degrees
   const dotR = 3 + ((h >>> 17) % 3); // 3..5
   const font =

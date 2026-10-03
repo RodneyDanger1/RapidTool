@@ -323,8 +323,15 @@ win. The trail:
 ```bash
 bash scripts/gate.sh          # the one command: 6 gates, JSON verdict, exit 0 required
 node --experimental-strip-types scripts/rapidtool-cli.mjs doctor   # env/factory truth incl. autonomousSoftwareFactory
-npm run eval                  # the acceptance harness (fixtures); needs a key for real runs
+node --experimental-strip-types scripts/run-eval.mjs --out <dir>   # acceptance harness (fixtures) into YOUR dir
 ```
+
+*(Corrected 2026-10-02 by the W50 boundary owner, from the W49 lane-336-4 work: the bare
+`npm run eval` line used to be shown unqualified. A bare run now **refuses with exit 2** —
+it would rewrite the tracked `research/eval-out/**`, which is why no wave had dared run it.
+Pass `--out <dir>` (or `EVAL_OUT_DIR`) to write the scorecard into a scratch directory; an
+explicit `--out research/eval-out` still regenerates the tracked copy on purpose. Keyless runs
+are the deterministic floor; `--keyed` needs a funded key.)*
 
 Nothing in this README is a promise — each row above is pinned by a test or a command you can
 re-run. Where reality is behind, the docs say so, the packets say so, and `doctor` says so.
@@ -553,7 +560,9 @@ others).
 - **Gate:** `gate.sh` — the stability gate: typecheck → lint → assertion-gap lint → both test
   legs → build; one JSON verdict on stdout; `--double` = flake detector (exit 3).
 - **Eval:** `run-eval.mjs` — the maker-loop eval driver (keyless deterministic floor; `--keyed`
-  for real runs; grades corpus fixtures, writes `research/eval-out/results.json` + `history.json`).
+  for real runs; grades corpus fixtures, writes `results.json` + `history.json` into `--out`
+  (or `EVAL_OUT_DIR`); a bare run against the tracked `research/eval-out` is **refused with
+  exit 2** unless you name it explicitly — W49 lane 336-4, corrected 2026-10-02).
 - **DB:** `migrate.mjs` (deploy-time migrator, `pg`; runs inside `npm run build`) ·
   `migration-plan.mjs` (bookkeeping shared by migrate.mjs + `src/lib/db.ts`; pure).
 - **Env/tooling:** `with-app-env.mjs` (merges `.grok/app-env.json` into npm script envs) ·

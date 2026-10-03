@@ -58,7 +58,7 @@ import { applyWrite, rollback, snapshotPaths } from "./write-set.ts";
 // Static import is safe here: headless is a backend module (node:fs already
 // top-level) and never enters the client graph (store.ts lazy-imports it).
 import { classifyError, type ErrorCode } from "./errors.ts";
-import { checkpointAdmits, clearCheckpoint, readCheckpoint, writeCheckpoint } from "./checkpoint.server.ts";
+import { CHECKPOINT_CAPS, checkpointAdmits, clearCheckpoint, readCheckpoint, writeCheckpoint } from "./checkpoint.server.ts";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -946,7 +946,15 @@ export function loadResumableCheckpoint(
  *      would rewind completed work — the live X2b shape: a stale gate-park
  *      snapshot at P4 silently rewound a file already advanced to P5);
  *   5. state: the file records MORE completed phases than the snapshot (the
- *      file knows work the snapshot does not).
+ *      file knows work the snapshot does not);
+ *   6. rejection / retry: the file records a rejection at the re-entry edge
+ *      (project `blocked` or the edge record `rejected`), or a
+ *      `rejectionHistory` the snapshot predates (a retried edge) — human
+ *      history the snapshot cannot hold (fixes/325 A4, fixes/336 · 336-2);
+ *   7. array growth: the file carries more artifacts / logs / decisions /
+ *      memory rows than the snapshot (a non-drive mutation like `ingest` landed
+ *      work after the per-phase commit) — skipped when the snapshot is at its
+ *      bound, where the trimmed suffix makes counts incomparable (fixes/336 · 336-2).
  * A file BEHIND the snapshot is deliberately NOT superseded: that is the
  * crash-recovery shape `resume` exists for (the file is only saved at the END
  * of a drive, so a crash leaves it lagging the per-phase commits).
@@ -1012,6 +1020,57 @@ export function checkpointSupersededBy(
     return {
       superseded: true,
       reason: `the project file records a rejected P${snapshotPhase} (status ${String(file?.status)}) — the snapshot predates the human rejection; resuming would drop it`,
+    };
+  }
+  // 7. retry-after-rejection (fixes/336 · 336-2): `reject` flips the edge to
+  //    rejected/blocked (axis 6); `retry` unlocks it back to ready/running but
+  //    KEEPS `rejectionHistory`, and NEITHER verb updates the per-phase
+  //    snapshot. Resuming the pre-rejection snapshot therefore rewinds the
+  //    retried edge and drops the rejection record + its decision (live
+  //    keyless probe: running/ready/history 1/decisions 1 → awaiting_hitl/
+  //    history 0/decisions 0). The file holds human history the snapshot
+  //    cannot describe — the file is the current truth.
+  const rejectionCount = (record: unknown): number => {
+    const history = (record as { rejectionHistory?: unknown } | null | undefined)?.rejectionHistory;
+    return Array.isArray(history) ? history.length : 0;
+  };
+  const snapEdgeRecord = (Array.isArray(snapshot?.phases) ? snapshot.phases : []).find(
+    (record) => (record as { id?: unknown } | null | undefined)?.id === snapshotPhase,
+  );
+  if (rejectionCount(edgeRecord) > rejectionCount(snapEdgeRecord)) {
+    return {
+      superseded: true,
+      reason: `the project file records ${rejectionCount(edgeRecord)} rejection(s) at P${snapshotPhase} the snapshot predates — resuming would drop the rejection record`,
+    };
+  }
+  // 8. array growth (fixes/336 · 336-2): a NON-DRIVE mutation (`ingest` lands a
+  //    report's artifacts/logs/memory at the current edge; reject/retry land
+  //    decisions) does not refresh the per-phase snapshot. Resuming the snapshot
+  //    rewrites the file and DROPS that work (live keyless probe: park P4 /
+  //    11 artifacts → ingest → 12 → resume → 11, the report gone). A normal
+  //    park leaves checkpoint and file counts EQUAL (measured 20/20 artifacts,
+  //    32/32 logs, 13/13 memory, 2/2 decisions), so growth means the file holds
+  //    work the snapshot lacks. Each axis is skipped once the snapshot is AT its
+  //    bound (a trimmed snapshot is a suffix — counts are not comparable then).
+  const grew = (key: "artifacts" | "logs" | "decisions" | "memory", cap: number): boolean => {
+    const snapshotRows = Array.isArray(snapshot?.[key]) ? (snapshot[key] as unknown[]) : [];
+    const fileRows = Array.isArray(file?.[key]) ? (file[key] as unknown[]) : [];
+    return snapshotRows.length < cap && fileRows.length > snapshotRows.length;
+  };
+  const grown = (
+    [
+      ["artifacts", CHECKPOINT_CAPS.artifacts],
+      ["logs", CHECKPOINT_CAPS.logs],
+      ["decisions", CHECKPOINT_CAPS.decisions],
+      ["memory", CHECKPOINT_CAPS.memory],
+    ] as const
+  ).find(([key, cap]) => grew(key, cap));
+  if (grown) {
+    const snapshotRows = Array.isArray(snapshot?.[grown[0]]) ? (snapshot[grown[0]] as unknown[]).length : 0;
+    const fileRows = Array.isArray(file?.[grown[0]]) ? (file[grown[0]] as unknown[]).length : 0;
+    return {
+      superseded: true,
+      reason: `the project file carries ${fileRows} ${grown[0]} row(s) — more than the snapshot's ${snapshotRows}; the file holds work the snapshot does not`,
     };
   }
   const countSealed = (p: Project): number =>
@@ -2737,30 +2796,42 @@ async function applyTreeRunTestedMint(project: Project, verdict: TreeRunOutcome)
  * `.rapidtool/project.json` record to the tested stamp + evidence hash the run
  * just earned — the same self-guarded mint the journeys use (mintTreeRunTested:
  * outcome.ok AND ≥1 executed assertion). A red run, an ok run that executed no
- * spec, an already-tested project, or a dir that carries no record writes
- * NOTHING into the dir (absence is honest; a stamp is never fabricated,
- * downgraded, or repaired into existence).
+ * spec, or a dir that carries no record writes NOTHING into the dir (absence is
+ * honest; a stamp is never fabricated or downgraded). A re-run over an
+ * already-`tested` project writes nothing when the verdict is unchanged, and
+ * DOES promote when this verdict refreshed a stale hash (fixes/336 · 336-2) —
+ * the refreshed record's packet is recompiled before it is written, so the
+ * emitted record never describes a different verification state.
  */
 export async function promoteEmittedTreeTested(
   project: Project,
   dir: string,
   outcome: TreeRunOutcome,
 ): Promise<{ project: Project; promoted: boolean }> {
-  const before = (project.lastTest as { label?: string } | null | undefined)?.label ?? null;
+  const beforeHash = (project.lastTest as { evidenceHash?: string } | null | undefined)?.evidenceHash ?? null;
   const minted = await applyTreeRunTestedMint(project, outcome);
-  const after = (minted.lastTest as { label?: string } | null | undefined)?.label ?? null;
-  // Fresh mint only: `tested` earned by THIS verdict (idempotent with the
-  // mint's own early return; an existing stamp is never rewritten).
-  if (after !== "tested" || before === "tested") return { project: minted, promoted: false };
+  const afterLabel = (minted.lastTest as { label?: string } | null | undefined)?.label ?? null;
+  const afterHash = (minted.lastTest as { evidenceHash?: string } | null | undefined)?.evidenceHash ?? null;
+  // Promote when THIS verdict produced (or REFRESHED — fixes/336 · 336-2) the
+  // stamp the record must carry; a same-verdict re-run (hash unchanged) writes
+  // nothing (no churn), and an already-`tested` project whose recorded hash was
+  // stale is now promoted so the emitted record never keeps a hash from a
+  // different tree.
+  if (afterLabel !== "tested" || afterHash === null || afterHash === beforeHash) {
+    return { project: minted, promoted: false };
+  }
+  // The promotion writes the WHOLE record, so its packet must describe the
+  // verification stamp this verdict just earned (refresh BEFORE persisting).
+  const refreshed = stampPacket(minted);
   const recordPath = resolve(dir, ".rapidtool", "project.json");
-  if (!existsSync(recordPath)) return { project: minted, promoted: false };
+  if (!existsSync(recordPath)) return { project: refreshed, promoted: false };
   try {
-    writeFileSync(recordPath, exportProjectJson(minted), "utf8");
-    return { project: minted, promoted: true };
+    writeFileSync(recordPath, exportProjectJson(refreshed), "utf8");
+    return { project: refreshed, promoted: true };
   } catch {
     // best-effort: the minted LEDGER still returns to the caller; the artifact
     // record is left exactly as emitted (never half-promoted).
-    return { project: minted, promoted: false };
+    return { project: refreshed, promoted: false };
   }
 }
 
@@ -2954,6 +3025,13 @@ export async function driveP6Journey(
           };
         }
       }
+      // fixes/336 · 336-2: the mint and the DoD/gate record just changed this
+      // project's verification state — recompile the packet (the SAME builder
+      // every other stamp site uses) so the record's OWN packet describes the
+      // stamp and gate it now carries. Without this the persisted record ships
+      // a packet whose P6 line / DoD section predate the mint (the live
+      // stale-vs-fresh divergence 336-3 measured).
+      finalProject = stampPacket(finalProject);
       if (gate !== null && gate.passed === true) {
         // A6: when fixtures exist, converge only if every case is human-approved
         // AND the oracle spec actually asserted (never auto-approve; never
@@ -2992,6 +3070,11 @@ export async function driveP6Journey(
           "p6.journey.converged",
           `tree-run ok after ${cycle}/${budget} cycle(s) + P6 gate green (${gate.evidenceHash.slice(0, 8)})`,
         );
+        // Re-stamp LAST (fixes/336 · 336-2): the converged log is the final
+        // record mutation, so compile the packet AFTER it — the returned
+        // record's own packet is then byte-identical to a fresh compile of the
+        // record, and never lags the verification state it describes.
+        finalProject = stampPacket(finalProject);
         events.push(`cycle ${cycle}: tree-run ok + P6 gate passed — P6 journey converged`);
         return { outcome: "converged", project: finalProject, cycles: cycle, budget, treeTail: null, refusal, gate, events };
       }
@@ -3614,9 +3697,19 @@ export async function repairTreeDir(
     if (gate !== null && gate.passed === true) {
       finalProject = await applyTreeRunTestedMint(finalProject, verdict);
     }
+    // fixes/336 · 336-2: the mint/gate pair changed the verification state —
+    // recompile the packet so the ledger (and the promoted emitted record)
+    // describes the stamp it now carries.
+    finalProject = stampPacket(finalProject);
+    const beforeLt = before as { label?: string; evidenceHash?: string } | null | undefined;
+    const afterLt = finalProject.lastTest as { label?: string; evidenceHash?: string } | null | undefined;
+    // A FRESH mint OR a REFRESHED stale hash both mean "this run's verdict is
+    // now the recorded one" — either qualifies the caller attestation for the
+    // emitted dir's own record.
     const minted =
-      (finalProject.lastTest as { label?: string } | null | undefined)?.label === "tested" &&
-      (before as { label?: string } | null | undefined)?.label !== "tested";
+      afterLt?.label === "tested" &&
+      (beforeLt?.label !== "tested" ||
+        (typeof afterLt.evidenceHash === "string" && afterLt.evidenceHash !== beforeLt?.evidenceHash));
     return { project: finalProject, gate, minted };
   };
   // 2. First verdict over the untouched dir (read-only — never clobber before
@@ -3641,6 +3734,9 @@ export async function repairTreeDir(
     const green = await recordGreen(p, verdict);
     if (green.gate !== null && green.gate.passed === true) {
       p = p6JourneyLog(green.project, "info", "p6.journey.converged", "tree-run ok on the first run — dir green after re-import (no synthesis repair needed)");
+      // Re-stamp LAST (fixes/336 · 336-2) — the converged log is the final
+      // record mutation, so the packet describes the record as returned.
+      p = stampPacket(p);
       events.push(`cycle 0: tree-run ok over the re-imported dir — converged without synthesis`);
       return finish({
         ok: true,
@@ -3783,6 +3879,9 @@ export async function repairTreeDir(
       const green = await recordGreen(p, verdict);
       if (green.gate !== null && green.gate.passed === true) {
         p = p6JourneyLog(green.project, "info", "p6.journey.converged", `tree-run ok after ${cycle}/${budget} repair cycle(s)`);
+        // Re-stamp LAST (fixes/336 · 336-2) — the converged log is the final
+        // record mutation, so the packet describes the record as returned.
+        p = stampPacket(p);
         events.push(`cycle ${cycle}: tree-run ok — repair converged`);
         return finish({
           ok: true,

@@ -57,6 +57,7 @@ import type { PhaseId, Project } from "./types.ts";
 import type { RtEventSeed } from "./rt-events.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 import { TREE_ENTRY_PATH } from "./codegen.server.ts";
+import { compileAgentPacket } from "./packet.ts";
 
 // fix 327 L1 — non-hermetic keyless suite. The host shell may carry a real
 // DEEPSEEK_API_KEY (this box sets one in the User scope), which flips
@@ -1009,9 +1010,22 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
         traces: (p.traces ?? []).map((a) => ({ ...a, ranAt: 0 })),
         artifacts: (p.artifacts ?? []).map((a) => ({
           ...a,
-          body: typeof a.body === "string" ? stripVolatiles(a.body) : a.body,
+          // The packet artifact's body IS the compiled packet — same
+          // volatile-sensitive truncated tail as `packet` below; the artifact
+          // content itself is compared structurally.
+          body:
+            typeof a.body === "string"
+              ? stripVolatiles(a.body).split("## Artifacts (trimmed)")[0]
+              : a.body,
         })),
-        packet: stripVolatiles(p.packet),
+        // W50 · 336-2 (pre-existing flake, reconciled): compileAgentPacket's
+        // artifact-truncation BUDGET is length-sensitive to the volatile
+        // compiled_at/input_hash values, so the packet's trimmed artifact TAIL
+        // is not byte-stable across two compiles (the cut lands at a different
+        // character). The artifact content is compared structurally in the
+        // `artifacts` field below, so compare only the volatile-masked packet
+        // HEAD here (System / Mission / DoD / ledger — the deterministic text).
+        packet: stripVolatiles(p.packet).split("## Artifacts (trimmed)")[0],
         phases: (p.phases ?? []).map((r) => ({
           ...r,
           startedAt: typeof r.startedAt === "number" ? 0 : r.startedAt,
@@ -3821,6 +3835,93 @@ describe("W49 · 335-2 — journey drive + save/load integrity", () => {
       // The browser/console PASTE defense is untouched: the same oversized string is refused.
       const pasted = importProject(readFileSync(file, "utf8"));
       assert.equal(pasted.ok, false, "an oversized PASTE is still refused (hostile-input cap preserved)");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W50 · 336-2 — the minted record's OWN Agent Packet must describe the mint.
+// The packet is compiled by stampPacket and rendered from the project's state;
+// the P6 mint (lastTest) and the gate record change that state. The journey,
+// the repair arm and the promotion must recompile the packet before the record
+// is persisted, or the shipped record carries a packet whose P6 line predates
+// its own `tested` stamp (the stale-vs-fresh divergence 336-3 measured).
+// ---------------------------------------------------------------------------
+describe("W50 · 336-2 — the minted record's own packet describes the mint", () => {
+  /** A green, EXECUTED tree-run verdict (the mint's precondition). */
+  const greenExecuted = (): TreeRunOutcome =>
+    ({
+      ok: true,
+      dir: "/scratch/tree",
+      compile: { ok: true, dir: "/scratch/tree", checked: 2, passed: 2, failed: 0, skipped: 0, verdicts: [] },
+      tests: [{ file: "tests/oracle.spec.ts", run: "pass", tests: { pass: 3, fail: 0 }, detail: "3 passed" }],
+      run: { kind: "webapp", run: "pass", entry: "src/main.tsx", detail: "started" },
+      declaredScriptsVerified: true,
+      unverifiedDeclaredScripts: [],
+    }) as unknown as TreeRunOutcome;
+
+  /** A P6-complete project whose tree satisfies the REAL P6 gate probes
+   *  (brief-fit + arch), so the journey exercises the real mint + real gate. */
+  function p6Fixture(): Project {
+    const p = createProject({ brief: "probe", name: "PacketProbe" });
+    p.currentPhase = 6;
+    p.phases = Array.from({ length: 13 }, (_, id) => ({
+      id,
+      status: id <= 6 ? ("complete" as const) : id === 7 ? ("ready" as const) : ("locked" as const),
+    })) as Project["phases"];
+    p.generatedSource = "export const probe = 1;";
+    p.generatedTree = [
+      { path: "src/index.ts", source: "export const probe = 1;", hash: "h1", attempt: 0 },
+      { path: "src/domain/core.ts", source: "export function deliverCoreWorkflow() { return 1; }", hash: "h2", attempt: 0 },
+    ];
+    p.artifacts = [{ id: "code-6", phase: 6, kind: "code", title: "P6 code", body: "export const probe = 1;" }];
+    p.lastTest = null;
+    p.specGraph = null;
+    return p;
+  }
+
+  it("the converged record's own packet carries the minted hash, its DoD line, and equals a fresh compile", async () => {
+    const res = await driveP6Journey(p6Fixture(), {
+      deps: { synthesize: async () => p6Fixture(), runTree: async () => greenExecuted() },
+    });
+    assert.equal(res.outcome, "converged", "the real mint + real gate converge over this fixture");
+    const hash = (res.project.lastTest as { evidenceHash?: string } | null)?.evidenceHash;
+    assert.ok(hash && hash.length > 0, "the tested stamp was minted");
+    assert.ok(res.project.packet.includes(hash!), "the record's packet names the minted evidence hash");
+    assert.match(res.project.packet, /self-test \(machine-verified\)/);
+    assert.match(res.project.packet, /Gate P6: PASS/);
+    // The record is its own artifact: a fresh compile of it must agree byte-for-byte.
+    assert.equal(res.project.packet, compileAgentPacket(res.project), "the packet is not stale (agrees with a fresh compile)");
+  });
+
+  it("the packet ARTIFACT body is the freshly compiled packet, not a stale copy beside it", async () => {
+    const res = await driveP6Journey(p6Fixture(), {
+      deps: { synthesize: async () => p6Fixture(), runTree: async () => greenExecuted() },
+    });
+    const art = (res.project.artifacts ?? []).find((a) => a.kind === "packet");
+    assert.ok(art, "the sealed packet artifact exists");
+    assert.equal(art!.body, res.project.packet, "the artifact body is the freshly compiled packet");
+  });
+
+  it("promotion of an already-tested project refreshes a stale hash and recompiles the emitted record's packet", async () => {
+    const dir = tempDir();
+    try {
+      mkdirSync(join(dir, ".rapidtool"), { recursive: true });
+      const recordPath = join(dir, ".rapidtool", "project.json");
+      const stale = {
+        ...p6Fixture(),
+        lastTest: { ok: true, detail: "tree-run green: OLD TREE", label: "tested", evidenceHash: "OLDSTALE" },
+      } as Project;
+      writeFileSync(recordPath, exportJson(stale), "utf8");
+      const prom = await promoteEmittedTreeTested(stale, dir, greenExecuted());
+      assert.equal(prom.promoted, true, "a refreshed stamp is promoted (the old hash described another tree)");
+      const hash = (prom.project.lastTest as { evidenceHash?: string } | null)?.evidenceHash;
+      const rec = JSON.parse(readFileSync(recordPath, "utf8")) as Project;
+      assert.equal((rec.lastTest as { evidenceHash?: string } | null)?.evidenceHash, hash, "the emitted record carries the refreshed hash");
+      assert.ok(rec.packet.includes(hash!), "the emitted record's own packet names the refreshed hash");
+      assert.equal(rec.packet, compileAgentPacket(prom.project), "the promoted record's packet agrees with a fresh compile");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

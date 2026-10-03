@@ -50,16 +50,25 @@ describe("PHASES table integrity", () => {
     }
   });
 
-  it("335-1: P8/P9/P12 summaries declare the deliverables no producer emits (no silent nothing)", () => {
+  it("335-1 (W50/336-1): P8/P9/P12 summaries declare the deliverables with no producer (no silent nothing)", () => {
     // Each phase names a deliverable in its summary; where the deterministic
     // floor and the live path produce no such artifact, the summary must say so
-    // (the P2/P3 convention), never let the promise read as produced.
+    // AND why (the P2/P3 convention), never let the promise read as produced.
     assert.match(phaseDef(8).summary, /No component code is generated/, "P8: component code has no producer");
+    assert.match(phaseDef(8).summary, /carries no component-level contract/, "P8: the reason is stated");
     assert.match(phaseDef(9).summary, /not a generated script/, "P9: GPU allocation has no producer");
+    assert.match(phaseDef(9).summary, /names no GPU workload/, "P9: the reason is stated");
+    // W50/336-1: the P12 database schema now HAS a producer (derived from the A6
+    // contract) — the summary states that, and keeps parity the reasoned gap.
     assert.match(
       phaseDef(12).summary,
-      /roadmap declarations, not generated artifacts/,
-      "P12: DB schemas / frontend-backend parity have no producer",
+      /PostgreSQL schema \(Database schema \(SQL DDL\)\) derived from the A6 data contract/,
+      "P12: the schema is produced from the contract",
+    );
+    assert.match(
+      phaseDef(12).summary,
+      /Frontend\/backend parity is a roadmap declaration/,
+      "P12: parity has no producer",
     );
   });
 });
@@ -188,10 +197,71 @@ describe("W49/335-1 driven-run tail coverage (F-11)", () => {
     assert.equal(cov.tailStart, PHASE_TAIL_START);
     assert.ok(cov.tailArtifacts >= 6, `the tail wrote ${cov.tailArtifacts} artifacts, expected ≥6`);
     assert.match(phaseCoverageLine(cov), /^13 of 13 phases executed \/ \d+ artifacts from P7–P12$/);
+    assert.deepEqual(cov.emptyPhases, [], "no complete phase is a silent no-op");
 
     // P12 legally owns ADRs + OpenAPI (F-11 saw both as empty strings).
     assert.ok((done.openapi ?? "").length > 0, "P12 wrote the OpenAPI document");
     assert.ok((done.adr ?? "").length > 0, "P12 wrote the ADRs");
+  });
+
+  // -------------------------------------------------------------------------
+  // W50/336-1: the three STOP-item producers and the wiring proof.
+  // -------------------------------------------------------------------------
+  it("W50/336-1: P12 produces the database schema derived from the A6 data contract", async () => {
+    const done = await drain(createProject({ brief: BRIEF, name: "RentLedger" }));
+    const schema = (done.artifacts ?? []).find(
+      (a) => a.phase === 12 && a.title === "Database schema (SQL DDL)",
+    );
+    assert.ok(schema, "P12 wrote the database-schema artifact (the 335-1 STOP item)");
+    assert.equal(schema!.kind, "docs");
+    assert.equal(schema!.language, "sql");
+    // Every table comes from a contract entity — the input is real, not invented.
+    const entities = done.contracts?.entities ?? [];
+    assert.ok(entities.length > 0, "fixture precondition: the A6 contract carries entities");
+    for (const e of entities) {
+      assert.ok(
+        schema!.body.includes(`CREATE TABLE IF NOT EXISTS "${e.name}"`),
+        `schema declares table "${e.name}" from the contract`,
+      );
+      for (const f of e.fields) {
+        assert.ok(schema!.body.includes(`"${f.name}"`), `schema declares column "${f.name}" on "${e.name}"`);
+      }
+    }
+    // The DDL is honest about not being executed, and its input source is named.
+    assert.match(schema!.body, /provisions and runs no database \(B-18\)/);
+    assert.match(schema!.body, /derived from the A6 data contract/);
+  });
+
+  it("W50/336-1: every phase enters, records and hands off — no empty phase, no orphaned artifact kind", async () => {
+    const done = await drain(createProject({ brief: BRIEF, name: "RentLedger" }));
+    // Enter: each real phase emitted its phase.enter log row.
+    for (const def of PHASES) {
+      assert.ok(
+        (done.logs ?? []).some((l) => l.phase === def.id && l.event === "phase.enter"),
+        `P${def.id} never logged phase.enter — it silently no-oped`,
+      );
+    }
+    // Record: every phase record is complete with a recorded DoD verdict.
+    const completed = (done.phases ?? []).filter((r) => r.status === "complete");
+    assert.equal(completed.length, 13, "all 13 phase records sealed");
+    for (const r of completed) {
+      assert.ok(r.gate, `P${r.id} sealed with no recorded DoD verdict`);
+    }
+    // Hand off: the packet names the current edge and carries the packet artifact.
+    assert.ok((done.packet ?? "").includes("## Current edge"), "the packet hands off to the next agent");
+    assert.ok((done.artifacts ?? []).some((a) => a.kind === "packet"), "the packet artifact is recorded");
+    // No orphaned artifact kind: every kind in the ArtifactKind union is
+    // actually produced in the run (a declared kind no producer emits would be
+    // an orphan).
+    const produced = new Set<string>((done.artifacts ?? []).map((a) => a.kind));
+    const union = [
+      "scorecard", "graph", "memory", "mcp", "security", "validation", "code", "research",
+      "ui", "cicd", "edge", "tools", "docs", "packet", "algorithm", "gate",
+    ];
+    for (const k of union) {
+      assert.ok(produced.has(k), `artifact kind "${k}" is in the union but no phase produced it`);
+    }
+    assert.deepEqual(phaseCoverage(done.phases, done.artifacts ?? []).emptyPhases, []);
   });
 
   it("a run stopped before the tail reports its emptiness as the honest census line (never silent)", () => {
@@ -199,6 +269,46 @@ describe("W49/335-1 driven-run tail coverage (F-11)", () => {
     const cov = phaseCoverage(fresh.phases, fresh.artifacts ?? []);
     assert.equal(cov.executed, 0);
     assert.equal(cov.tailArtifacts, 0);
+    assert.deepEqual(cov.emptyPhases, []);
     assert.equal(phaseCoverageLine(cov), "0 of 13 phases executed / 0 artifacts from P7–P12");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W50/336-1 — the census counts what a phase PRODUCES, not the driver's
+// bookkeeping rows: a gate verdict (kind "gate") and the packet row are not
+// deliverables, so the same 13-phase run reports the same total whichever
+// driver recorded the gates. A complete phase with no deliverable is named.
+// ---------------------------------------------------------------------------
+describe("W50/336-1 phaseCoverage bookkeeping", () => {
+  it("excludes the packet and gate rows from the tail count (driver-independent)", () => {
+    const phases = [7, 8, 12].map((id) => ({ id, status: "complete" }));
+    const rows = [
+      { phase: 7, kind: "research" },
+      { phase: 7, kind: "gate" },
+      { phase: 8, kind: "ui" },
+      { phase: 8, kind: "gate" },
+      { phase: 12, kind: "docs" },
+      { phase: 12, kind: "docs" },
+      { phase: 12, kind: "gate" },
+      { phase: 12, kind: "packet" },
+    ];
+    const cov = phaseCoverage(phases, rows);
+    assert.equal(cov.tailArtifacts, 4, "research + ui + 2 docs deliverable rows (3 gate + 1 packet excluded)");
+    assert.deepEqual(cov.emptyPhases, [], "each complete phase produced a deliverable");
+  });
+
+  it("names every complete phase that produced no deliverable artifact", () => {
+    const phases = [
+      { id: 0, status: "complete" },
+      { id: 1, status: "complete" },
+      { id: 2, status: "awaiting_hitl" },
+    ];
+    const rows = [
+      { phase: 0, kind: "gate" }, // bookkeeping only → P0 produced nothing
+      { phase: 1, kind: "graph" },
+    ];
+    const cov = phaseCoverage(phases, rows);
+    assert.deepEqual(cov.emptyPhases, [0], "P0 completed with only its gate row; P2 never completed");
   });
 });

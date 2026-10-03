@@ -586,7 +586,13 @@ export function p6SynthesisSystemPrompt(): string {
     // `src/jobs/rehab.ts` called an earlier file's async `getProperty` without
     // `await` and read `.ok` off the returned Promise (undefined), floating the
     // rejection past the test and reding the whole spec file.
-    "9. When you call a function that is ASYNCHRONOUS (declared `async` / returns a Promise — whether an earlier file exports it or this module declares it), you MUST `await` the call before reading any property off its result or destructuring it: `const x = await getProperty(id); x.ok` — never `const x = getProperty(id); x.ok` (validator-enforced: an un-awaited async call reads `undefined` off a Promise and leaks an unhandled rejection).",
+    // W50/336-1: the enforcement claim is SCOPED to what the guard can actually
+    // see — a direct call, a `this` receiver inside the declaring class, and the
+    // optional-call tail. A call through a named receiver, an indirect
+    // invocation, or a Promise-returner not spelled `async` is outside the guard
+    // (documented on `unawaitedAsyncValueUses`), so the prompt must not imply the
+    // validator catches those (the same over-claim 335-1 4B corrected for rule 2).
+    "9. When you call a function that is ASYNCHRONOUS (declared `async` — whether an earlier file exports it or this module declares it), you MUST `await` the call before reading any property off its result or destructuring it: `const x = await getProperty(id); x.ok` — never `const x = getProperty(id); x.ok`. An un-awaited async call reads `undefined` off a Promise and leaks an unhandled rejection. The validator refuses this for direct calls, `this`-receiver calls inside the declaring class, and optional calls (`f?.(…)`); it cannot see a call through a named receiver (`obj.m()`), an indirect invocation (`f.call(…)` / `(f)(…)`), or a Promise-returner not spelled `async`, so the duty is yours in those cases.",
   ].join("\n");
 }
 
@@ -2587,7 +2593,9 @@ type AsyncCallSite = { name: string; calleeStart: number; openParen: number };
  * a named receiver (`obj.m()`), an indirect invocation (`fn.call(…)`/`fn.apply(…)`,
  * or a parenthesized/comma-discarded callee `(fn)(id)` / `(0, fn)(id)`), and an
  * unresolvable dynamic computed key stay outside this guard (their receiver/value
- * cannot be tied to a bare declaration). Pure.
+ * cannot be tied to a bare declaration). The `this`-receiver arm additionally
+ * needs the `async NAME(` declaration to begin its own line — `asyncMethodBodyRanges`
+ * is line-anchored, so a method declared mid-line is not discoverable. Pure.
  */
 export function unawaitedAsyncValueUses(module: string, asyncNames: readonly string[]): AsyncUnawaitedUse[] {
   const src = typeof module === "string" ? module : "";
@@ -4649,8 +4657,12 @@ export function treeRunTestedEvidence(o: TreeRunOutcome): {
  *  - a RED outcome returns the SAME project reference (the journey records the
  *    failure tail — a mint here would be a fake pass);
  *  - a project already carrying a machine "tested" stamp (the ≤8-signature
- *    verifyAndFixServer path) is returned unchanged — real verify evidence
- *    outranks the tree-run summary;
+ *    verifyAndFixServer path, OR an earlier tree-run mint) is compared by its
+ *    recorded `evidenceHash`: the SAME verdict keeps the stamp unchanged
+ *    (`p6.tree.tested.unchanged` says so, no rewrite); a DIFFERENT verdict
+ *    refreshes the stamp from THIS tree-run (`p6.tree.tested.refreshed`, both
+ *    hashes named) so the record never carries a hash that describes a
+ *    different verification state (fixes/336 · 336-2);
  *  - an ok tree-run that executed NO specs (UI-shell/webapp tree without
  *    executable specs, or a no-spec headless tree) is NOT minted — the honest
  *    current state stands and a coded `p6.tree.tested.skipped` warn log
@@ -4658,11 +4670,14 @@ export function treeRunTestedEvidence(o: TreeRunOutcome): {
  */
 export function mintTreeRunTested(project: Project, outcome: TreeRunOutcome): Project {
   if (!outcome || outcome.ok !== true) return project;
-  const current = project.lastTest as { label?: string } | null | undefined;
-  if (current && current.label === "tested") return project;
+  const current = project.lastTest as { label?: string; evidenceHash?: string } | null | undefined;
+  const alreadyTested = current?.label === "tested";
   const ev = treeRunTestedEvidence(outcome);
   const logs = project.logs ?? [];
   if (!ev.executed) {
+    // No fresh evidence to compare or mint; an existing stamp is left exactly
+    // as it stands (a run that executed nothing has nothing to say about it).
+    if (alreadyTested) return project;
     const skipNote = `tree-run ok but no executable spec ran (${ev.specFiles} spec file(s), ${ev.assertions} assertion(s)${
       outcome.run ? `; entry ${outcome.run.kind} ${outcome.run.run}` : ""
     }) — no "tested" stamp minted (honest: nothing executed headless)`;
@@ -4681,6 +4696,46 @@ export function mintTreeRunTested(project: Project, outcome: TreeRunOutcome): Pr
     };
   }
   const evidenceHash = String(fnv1a(ev.summary));
+  if (alreadyTested) {
+    // 336-2 follow-up: an already-"tested" project must not keep an evidence
+    // hash that describes a DIFFERENT verification (the same two-artifacts-
+    // disagree class as the stale packet). Same verdict ⇒ the stamp already
+    // describes this tree-run: keep it, say so, do not rewrite. Different ⇒
+    // the record must not keep a stale hash — refresh from THIS verdict.
+    if (typeof current?.evidenceHash === "string" && current.evidenceHash === evidenceHash) {
+      return {
+        ...project,
+        logs: [
+          ...logs,
+          {
+            ts: Date.now(),
+            phase: 6 as PhaseId,
+            level: "info" as const,
+            event: "p6.tree.tested.unchanged",
+            detail: `tested stamp already describes this tree-run · fnv1a ${evidenceHash.slice(0, 8)} — kept (no rewrite)`,
+          },
+        ].slice(-200),
+      };
+    }
+    const prior =
+      typeof current?.evidenceHash === "string" && current.evidenceHash.length > 0
+        ? current.evidenceHash.slice(0, 8)
+        : "(none)";
+    return {
+      ...project,
+      lastTest: testedLastTestStamp(`tree-run green: ${ev.summary}`, evidenceHash),
+      logs: [
+        ...logs,
+        {
+          ts: Date.now(),
+          phase: 6 as PhaseId,
+          level: "warn" as const,
+          event: "p6.tree.tested.refreshed",
+          detail: `tested stamp refreshed — recorded evidence ${prior} did not describe this tree-run · fnv1a ${evidenceHash.slice(0, 8)}`,
+        },
+      ].slice(-200),
+    };
+  }
   return {
     ...project,
     lastTest: testedLastTestStamp(`tree-run green: ${ev.summary}`, evidenceHash),

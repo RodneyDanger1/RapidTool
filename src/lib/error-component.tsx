@@ -72,6 +72,7 @@ export function AppErrorComponent({ error }: ErrorComponentProps) {
 
   return (
     <main
+      id="main-content"
       role="alert"
       className="flex min-h-screen flex-col items-center justify-center gap-3 bg-bg px-6 text-center text-fg"
     >
@@ -110,7 +111,10 @@ export function AppErrorComponent({ error }: ErrorComponentProps) {
  */
 export function AppNotFoundComponent() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-bg px-6 text-center text-fg">
+    <main
+      id="main-content"
+      className="flex min-h-screen flex-col items-center justify-center gap-3 bg-bg px-6 text-center text-fg"
+    >
       <h1 className="text-lg font-semibold">Page not found</h1>
       <p className="max-w-md text-sm text-muted">
         The address you opened doesn’t match any RapidTool screen.

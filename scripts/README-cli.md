@@ -282,6 +282,11 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.j
 #     No keyed calls, no writes, no network, nothing fabricated — a missing history prints as
 #     'no history', never a fake 0 delta.
 node --experimental-strip-types scripts/rapidtool-cli.mjs eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]
+#     The HARNESS that WRITES this scorecard is `npm run eval` (scripts/run-eval.mjs). W50
+#     (336-4): it refused the bare default into the working tree because that rewrites tracked
+#     research/eval-out/**. Pass a scratch --out: `npm run eval -- --out <scratch-dir>` (or set
+#     EVAL_OUT_DIR); to regenerate the tracked scorecard on purpose, name it:
+#     `npm run eval -- --out research/eval-out`.
 
 # 35. resume (T-107.7 — REAL, W36): read the per-phase checkpoint that run/gate wrote beside
 #     the project dir, admit it (identity + mode + integer phase sanity), hydrate it, and

@@ -30,7 +30,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, hydrateProject, liveLayer, wildLog, wildStep, type WildReviewer } from "./engine.ts";
+import { emptyProject, databaseSchemaSql, hydrateProject, liveLayer, wildLog, wildStep, type WildReviewer } from "./engine.ts";
 import { wildResumeRun } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
 import type { Project, WildParkInfo } from "./types.ts";
@@ -319,5 +319,51 @@ describe("331 V3 — wildLog never throws into the run it observes", () => {
     for (let i = 0; i < 205; i++) p = wildLog(p, 0, "info", "wild.tick", `t${i}`);
     assert.equal(p.logs.length, 200, "capped at 200 like every log writer");
     assert.equal(p.logs.at(-1)!.detail, "t204", "newest row survives the cap");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W50/336-1 — the P12 database-schema producer (the 335-1 STOP item). The A6
+// contract carries the schema input (entity names + typed fields), so the DDL
+// is DERIVED; nothing is invented and an empty contract produces no schema.
+// ---------------------------------------------------------------------------
+describe("W50/336-1 — the P12 database-schema producer (derived, never invented)", () => {
+  it("derives one CREATE TABLE per contract entity with the contract's own columns", () => {
+    const sql = databaseSchemaSql({
+      entities: [
+        {
+          name: "Shop",
+          fields: [
+            { name: "id", type: "ulid" },
+            { name: "total", type: "int" },
+            { name: "closedAt", type: "datetime?" },
+            { name: "status", type: "enum" },
+          ],
+        },
+      ],
+      endpoints: [],
+    });
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS "Shop" \(/);
+    assert.match(sql, /"id" TEXT NOT NULL PRIMARY KEY/);
+    assert.match(sql, /"total" INTEGER NOT NULL/);
+    assert.match(sql, /"status" TEXT NOT NULL/);
+    assert.match(sql, /"closedAt" TIMESTAMP/);
+    assert.ok(!/"closedAt" TIMESTAMP NOT NULL/.test(sql), "a `?` field is nullable");
+    assert.match(sql, /derived from the A6 data contract/);
+    assert.match(sql, /provisions and runs no database \(B-18\)/);
+  });
+
+  it("fabricates nothing: an empty or absent contract yields no schema", () => {
+    assert.equal(databaseSchemaSql(null), "");
+    assert.equal(databaseSchemaSql(undefined), "");
+    assert.equal(databaseSchemaSql({ entities: [], endpoints: [] }), "");
+    assert.equal(databaseSchemaSql({ entities: [{ name: "", fields: [] }], endpoints: [] }), "");
+    assert.equal(databaseSchemaSql({ entities: [{ name: "Empty", fields: [] }], endpoints: [] }), "");
+  });
+
+  it("is deterministic and escapes an embedded double quote in a name", () => {
+    const c = { entities: [{ name: 'We"ird', fields: [{ name: "id", type: "ulid" }] }], endpoints: [] };
+    assert.equal(databaseSchemaSql(c), databaseSchemaSql(c));
+    assert.match(databaseSchemaSql(c), /"We""ird"/);
   });
 });

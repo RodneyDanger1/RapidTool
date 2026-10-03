@@ -832,6 +832,115 @@ function loopBodyHead(masked: string, bodyAt: number): string {
 }
 
 /**
+ * The kind of scope a `{` opens, from the loop scanner's point of view. A class
+ * body or an object literal can contain ONLY members, so a bare `while`/`for`/
+ * `do` token directly inside one names a method or accessor — never a loop
+ * (`class C { while(x) {} }`, `const o = { while(x) {} }`). Class *static
+ * blocks* get their own `block` frame (see `braceFrameKind`), so a real loop
+ * inside one stays counted.
+ */
+type BraceFrame = "block" | "class" | "object";
+
+/**
+ * True when the `{` at `braceIdx` opens a CLASS BODY. Scans back to the nearest
+ * `class` keyword with no statement or brace boundary in between, so
+ * `class C {` and `class C extends f(X) {` match while a plain block
+ * (`if (x) {`) does not — its `)` is preceded by the earlier block's `}`.
+ */
+function opensClassBody(masked: string, braceIdx: number): boolean {
+  let depth = 0;
+  for (let i = braceIdx - 1; i >= 0; i--) {
+    const c = masked[i];
+    if (c === "}" && depth === 0) return false; // a completed block precedes this brace
+    if (c === ")" || c === "]" || c === "}") depth++;
+    else if (c === "(" || c === "[") {
+      if (depth === 0) return false;
+      depth--;
+    } else if (c === "{") {
+      if (depth === 0) return false;
+      depth--;
+    } else if (c === ";" && depth === 0) return false;
+    else if (
+      depth === 0 &&
+      c === "s" &&
+      masked.startsWith("class", i - 4) &&
+      masked[i - 5] !== "." &&
+      !/[A-Za-z0-9_$]/.test(masked[i - 5] ?? "")
+    ) {
+      // Validate the slice as a class header (`[Name] [extends …]`) so a `class`
+      // that is the tail of some other expression is not read as this header.
+      const header = masked.slice(i + 1, braceIdx);
+      return (
+        !/[;{}]/.test(header) &&
+        /^\s*(?:[A-Za-z_$][\w$]*)?\s*(?:extends[\s\S]*)?$/.test(header)
+      );
+    }
+  }
+  return false;
+}
+
+/**
+ * True when the `:` at `colonIdx` is a TERNARY colon (`c ? { … } : { … }`) and
+ * not a label / `case` / object-key colon. A ternary colon is preceded by an
+ * unclosed `?` at the same nesting; a label/`case` colon is not.
+ */
+function colonIsTernary(masked: string, colonIdx: number): boolean {
+  let depth = 0;
+  for (let i = colonIdx - 1; i >= 0; i--) {
+    const c = masked[i];
+    if (c === ")" || c === "]" || c === "}") depth++;
+    else if (c === "(" || c === "[") {
+      if (depth === 0) return false;
+      depth--;
+    } else if (c === "{") {
+      if (depth === 0) return false;
+      depth--;
+    } else if (c === ";" && depth === 0) return false;
+    else if (
+      c === "?" &&
+      depth === 0 &&
+      masked[i - 1] !== "?" &&
+      masked[i + 1] !== "?" &&
+      masked[i + 1] !== "."
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Classify the `{` at `braceIdx` given the frame that encloses it. */
+function braceFrameKind(
+  masked: string,
+  braceIdx: number,
+  enclosing: BraceFrame,
+): BraceFrame {
+  let j = braceIdx - 1;
+  while (j >= 0 && /\s/.test(masked[j]!)) j--;
+  if (j < 0) return "block";
+  const c = masked[j];
+  // Value positions (object literal / destructuring — neither holds a
+  // statement): after `= ( [ , ?` or a keyword whose operand is an expression.
+  if (c === "=" || c === "(" || c === "[" || c === "," || c === "?") return "object";
+  if (c === ">" && j > 0 && masked[j - 1] === "=") return "block"; // arrow body
+  // `:` opens a member VALUE inside an object/class frame; in a block frame it
+  // opens a ternary arm (object literal) or a label / `case` block.
+  if (c === ":") {
+    if (enclosing === "object" || enclosing === "class") return "object";
+    return colonIsTernary(masked, j) ? "object" : "block";
+  }
+  if (/[A-Za-z0-9_$]/.test(c)) {
+    let k = j;
+    while (k >= 0 && /[A-Za-z0-9_$]/.test(masked[k]!)) k--;
+    const word = masked.slice(k + 1, j + 1);
+    if (word === "return" || word === "yield" || word === "in" || word === "of") {
+      return "object";
+    }
+  }
+  return opensClassBody(masked, braceIdx) ? "class" : "block";
+}
+
+/**
  * 1-based line numbers for ASCENDING character indices, in a single forward
  * pass (T10 / 112 F6): `lineOf` used to rescan from char 0 for every recorded
  * loop — O(loops × source). The keyword scan visits indices in ascending
@@ -856,6 +965,9 @@ export function complexityOf(source: string): ComplexityReport {
   const n = masked.length;
   const loops: RecordedLoop[] = [];
   const braceIsLoop: boolean[] = [];
+  // Parallel to `braceIsLoop`: the scope kind of each open `{`, so a loop
+  // keyword at MEMBER position in a class body / object literal is not counted.
+  const braceKinds: BraceFrame[] = [];
   const loopFrames: { lin: number; hal: number; nesting: number }[] = [];
   let pending: { lin: number; hal: number; nesting: number } | null = null;
   // 328 P3: kwIdx of each `while` that terminates a `do` we recorded — the ONLY
@@ -872,6 +984,9 @@ export function complexityOf(source: string): ComplexityReport {
       for (; pos < n; pos++) {
         const c = masked[pos];
         if (c === "{") {
+          braceKinds.push(
+            braceFrameKind(masked, pos, braceKinds[braceKinds.length - 1] ?? "block"),
+          );
           if (pending !== null) {
             braceIsLoop.push(true);
             loopFrames.push(pending);
@@ -880,6 +995,7 @@ export function complexityOf(source: string): ComplexityReport {
             braceIsLoop.push(false);
           }
         } else if (c === "}") {
+          braceKinds.pop();
           const isLoop = braceIsLoop.pop() ?? false;
           if (isLoop) loopFrames.pop();
         }
@@ -892,6 +1008,9 @@ export function complexityOf(source: string): ComplexityReport {
     for (; pos < kwIdx; pos++) {
       const c = masked[pos];
       if (c === "{") {
+        braceKinds.push(
+          braceFrameKind(masked, pos, braceKinds[braceKinds.length - 1] ?? "block"),
+        );
         if (pending !== null) {
           braceIsLoop.push(true);
           loopFrames.push(pending);
@@ -900,6 +1019,7 @@ export function complexityOf(source: string): ComplexityReport {
           braceIsLoop.push(false);
         }
       } else if (c === "}") {
+        braceKinds.pop();
         const isLoop = braceIsLoop.pop() ?? false;
         if (isLoop) loopFrames.pop();
       }
@@ -912,6 +1032,18 @@ export function complexityOf(source: string): ComplexityReport {
     let prevNc = kwIdx - 1;
     while (prevNc >= 0 && /\s/.test(masked[prevNc]!)) prevNc--;
     if (prevNc >= 0 && masked[prevNc] === ".") {
+      pos = kwEnd;
+      continue;
+    }
+    // 336-6: a class body or object literal holds only members, so a bare
+    // `while`/`for`/`do` at member position names a method/accessor, not a loop
+    // (`class C { while(x) {} }` / `const o = { while(x) {} }` published O(n)).
+    // The `for` head-shape test below cannot cover `while`, whose `(params)` is
+    // lexically identical to a condition — only the scope kind distinguishes
+    // them. A class static block gets its own `block` frame, so a real loop
+    // inside it still counts.
+    const frameKind = braceKinds[braceKinds.length - 1];
+    if (frameKind === "class" || frameKind === "object") {
       pos = kwEnd;
       continue;
     }

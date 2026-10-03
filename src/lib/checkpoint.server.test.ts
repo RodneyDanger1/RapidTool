@@ -29,7 +29,7 @@ import {
 } from "./checkpoint.server.ts";
 import { PHASES } from "./phases.ts";
 import type { Project } from "./types.ts";
-import { checkpointSupersededBy } from "./headless.ts";
+import { checkpointSupersededBy, loadResumableCheckpoint } from "./headless.ts";
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), "rapidtool-ckpt-"));
 
@@ -398,5 +398,223 @@ describe("FIX-2c — checkpoint staleness vs the named project file (X2b OBS)", 
       false,
       "a retried (ready) edge is not a rejection — resume may re-park it",
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // fixes/336 · 336-2 (Ledger): the RETRY-after-rejection shape. `reject`
+  // flips the file edge to rejected/blocked (superseded, above); `retry`
+  // unlocks it back to ready/running and KEEPS `rejectionHistory`, but the
+  // per-phase snapshot was written BEFORE the rejection and is never updated
+  // by reject/retry. Pre-fix the verdict was superseded:false, so `resume`
+  // re-drove from the stale snapshot and silently rewound the file:
+  // live keyless probe — before resume status running / edge ready /
+  // rejectionHistory 1 / decisions 1; after resume awaiting_hitl / 0 / 0.
+  // The file holds human history the snapshot cannot describe.
+  // -------------------------------------------------------------------------
+  it("336-2: a file RETRIED after a rejection is superseded — the snapshot predates the rejection record", () => {
+    const verdict = checkpointSupersededBy(
+      snap(), // snapshot: P4 awaiting_hitl, no rejection history
+      4,
+      snap({
+        status: "running",
+        phases: [
+          { id: 0, status: "complete" },
+          { id: 1, status: "complete" },
+          { id: 2, status: "complete" },
+          { id: 3, status: "complete" },
+          { id: 4, status: "ready", rejectionHistory: [{ note: "probe reject", at: 1 }] },
+        ],
+      }),
+    );
+    assert.equal(verdict.superseded, true, "a retried edge carrying rejection history must not be resumed over");
+    assert.match(String(verdict.reason), /rejection/);
+    // The designed re-park shape stays resumable: a ready edge with NO
+    // rejection history has nothing the snapshot cannot describe.
+    assert.equal(
+      checkpointSupersededBy(
+        snap(),
+        4,
+        snap({ phases: [...snap().phases.slice(0, 4), { id: 4, status: "ready" }] }),
+      ).superseded,
+      false,
+      "a never-rejected ready edge stays the designed re-entry shape",
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // fixes/336 · 336-2 (Ledger): the NON-DRIVE mutation shape (`ingest`). A
+  // report lands artifacts at the current edge without refreshing the per-phase
+  // snapshot, so the pre-fix verdict was superseded:false and `resume` rewrote
+  // the file from the snapshot — DROPPING the ingested work (live keyless
+  // probe: park P4 / 11 artifacts → ingest → 12 → resume → 11, the report gone).
+  // A normal park leaves checkpoint and file array counts EQUAL (measured:
+  // 20/20 artifacts, 32/32 logs, 13/13 memory, 2/2 decisions), so "the file has
+  // more rows than the snapshot" means the file holds work the snapshot lacks.
+  // -------------------------------------------------------------------------
+  it("336-2: a file that GAINED artifacts since the snapshot is superseded — resume would drop ingested work", () => {
+    const one = snap({
+      artifacts: [{ id: "a-1", phase: 4, kind: "gate", title: "P4 gate", body: "ok" }],
+    } as Partial<Project>);
+    const two = snap({
+      artifacts: [
+        { id: "a-1", phase: 4, kind: "gate", title: "P4 gate", body: "ok" },
+        { id: "report-1", phase: 4, kind: "docs", title: "[agent report] ingested", body: "work" },
+      ],
+    } as Partial<Project>);
+    const verdict = checkpointSupersededBy(one, 4, two);
+    assert.equal(verdict.superseded, true, "artifacts the snapshot lacks must never be rewound away");
+    assert.match(String(verdict.reason), /artifact/);
+    // The designed park shape (equal rows) stays resumable.
+    assert.equal(checkpointSupersededBy(one, 4, one).superseded, false, "no growth ⇒ the snapshot stays the re-entry point");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/336 · 336-2 (Ledger): the RESUME seam — read → admit → hydrate →
+// re-entry (`headless.loadResumableCheckpoint`). No test reached this seam
+// before; the CLI probes in fixes/336_2_ledger.md carry the fresh-process half,
+// these pin the coded branch behaviour. Deterministic: explicit ask.projectId /
+// ask.mode, so the ambient DEEPSEEK_API_KEY never leaks into the mode.
+// ---------------------------------------------------------------------------
+describe("336-2 — the resume seam: read → admit → hydrate, coded refusals", () => {
+  const RUN1: CheckpointRun = { phase: 1, step: 0, mode: "keyless" };
+  /** A project that really carries a record for the recorded re-entry phase. */
+  const resumableProject = (id: string): Project =>
+    ({
+      id,
+      phases: [
+        { id: 0, status: "complete" },
+        { id: 1, status: "awaiting_hitl" },
+      ],
+      logs: [],
+      decisions: [],
+    }) as unknown as Project;
+
+  it("happy path: the recorded phase is the re-entry point and the project is HYDRATED", () => {
+    const dir = tempDir();
+    try {
+      const written = writeCheckpoint(dir, resumableProject("p-res"), RUN1);
+      assert.equal(written.ok, true);
+      const resumed = loadResumableCheckpoint(dir, { projectId: "p-res", mode: "keyless" });
+      assert.equal(resumed.ok, true);
+      if (!resumed.ok) return;
+      assert.equal(resumed.project.id, "p-res");
+      assert.equal(resumed.project.currentPhase, 1, "re-entry is at the recorded phase, not P0");
+      assert.deepEqual(resumed.resumedFrom, { phase: 1, step: 0 }, "the envelope names the re-entry coordinates");
+      assert.equal((resumed.project as { _v?: number })._v, 2, "hydrateProject ran — the raw snapshot is never returned");
+      assert.ok(resumed.savedAt > 0);
+      assert.equal(resumed.path, checkpointPath(dir));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the snapshot round-trip keeps every phase record, its gate verdict, and the artifacts", () => {
+    const dir = tempDir();
+    try {
+      const gate = { passed: true, unmet: [], evidenceHash: "h-1", checkedAt: 42 };
+      const project = {
+        id: "p-gate",
+        phases: [
+          { id: 0, status: "complete", gate, startedAt: 1 },
+          { id: 1, status: "awaiting_hitl" },
+        ],
+        logs: [],
+        decisions: [],
+        artifacts: [
+          { id: "a-1", phase: 0, kind: "gate", title: "P0 gate", body: "ok", createdAt: 1 },
+          { id: "a-2", phase: 0, kind: "scorecard", title: "P0 scorecard", body: "ok", createdAt: 2 },
+        ],
+      } as unknown as Project;
+      assert.equal(writeCheckpoint(dir, project, { phase: 1, step: 0, mode: "keyless" }).ok, true);
+      const resumed = loadResumableCheckpoint(dir, { projectId: "p-gate", mode: "keyless" });
+      assert.equal(resumed.ok, true);
+      if (!resumed.ok) return;
+      // hydrateProject's repairPhases re-inserts the phases the minimal snapshot
+      // never carried (as locked placeholders) — the ORIGINAL records must still
+      // be present and unchanged, never dropped.
+      assert.equal(resumed.project.phases.find((r) => r.id === 0)?.status, "complete");
+      assert.equal(resumed.project.phases.find((r) => r.id === 1)?.status, "awaiting_hitl");
+      assert.deepEqual(resumed.project.phases.find((r) => r.id === 0)?.gate, gate, "the P0 gate verdict survives");
+      assert.deepEqual(
+        resumed.project.artifacts.map((a) => a.id),
+        ["a-1", "a-2"],
+        "every artifact survives the snapshot round-trip (park path keeps the work)",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refusal: identity mismatch — a snapshot is never hydrated for a different project", () => {
+    const dir = tempDir();
+    try {
+      assert.equal(writeCheckpoint(dir, resumableProject("p-res"), RUN1).ok, true);
+      const resumed = loadResumableCheckpoint(dir, { projectId: "p-other", mode: "keyless" });
+      assert.equal(resumed.ok, false);
+      if (!resumed.ok) {
+        assert.equal(resumed.code, "RT_E_VALIDATION");
+        assert.match(resumed.error, /project mismatch/);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refusal: mode mismatch — a keyed snapshot never resumes keyless and vice versa", () => {
+    const dir = tempDir();
+    try {
+      assert.equal(writeCheckpoint(dir, resumableProject("p-res"), RUN1).ok, true);
+      const resumed = loadResumableCheckpoint(dir, { projectId: "p-res", mode: "keyed" });
+      assert.equal(resumed.ok, false);
+      if (!resumed.ok) {
+        assert.equal(resumed.code, "RT_E_VALIDATION");
+        assert.match(resumed.error, /mode mismatch/);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refusal A20: a snapshot with no phase record for its recorded phase is refused (internal incoherence)", () => {
+    const dir = tempDir();
+    try {
+      // The writer only checks the run shape; the project's phase list can
+      // legitimately lack the recorded id (a foreign/hand-built payload) —
+      // the reader must refuse rather than hydrate an edge it cannot describe.
+      assert.equal(writeCheckpoint(dir, fixtureProject("p-res"), { phase: 1, step: 0, mode: "keyless" }).ok, true);
+      const resumed = loadResumableCheckpoint(dir, { projectId: "p-res", mode: "keyless" });
+      assert.equal(resumed.ok, false);
+      if (!resumed.ok) {
+        assert.equal(resumed.code, "RT_E_VALIDATION");
+        assert.match(resumed.error, /no phase record/);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refusal: no checkpoint at a real path is RT_E_CHECKPOINT_MISSING (never a silent fresh start)", () => {
+    const dir = tempDir();
+    try {
+      const resumed = loadResumableCheckpoint(dir, { mode: "keyless" });
+      assert.equal(resumed.ok, false);
+      if (!resumed.ok) assert.equal(resumed.code, "RT_E_CHECKPOINT_MISSING");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refusal: junk bytes are RT_E_VALIDATION — resume never guesses", () => {
+    const dir = tempDir();
+    try {
+      mkdirSync(join(dir, ".rapidtool"), { recursive: true });
+      writeFileSync(checkpointPath(dir), "{not json", "utf8");
+      const resumed = loadResumableCheckpoint(dir, { mode: "keyless" });
+      assert.equal(resumed.ok, false);
+      if (!resumed.ok) assert.equal(resumed.code, "RT_E_VALIDATION");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

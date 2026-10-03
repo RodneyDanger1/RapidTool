@@ -53,6 +53,7 @@ import {
   p6SynthesisSystemPrompt,
   p6SynthesisUserPrompt,
   P6_SYNTH_MAX_TOKENS,
+  P6_SYNTH_CHUNK_SIZE,
   P6_SYNTH_PRIOR_MAX_FILES,
   P6_SYNTH_PROMPT_MAX_CHARS,
   P6_SYNTH_TIMEOUT_MS,
@@ -2938,6 +2939,93 @@ describe("216f T-10 — prompt contract: signature ceiling vs requirement duty",
       "the validator does NOT refuse Date.now() — which is why the prompt may not claim it does",
     );
   });
+
+  // W50/336-1 (P6 residual — prompt rules): rule 9 claimed "(validator-enforced)"
+  // without scoping it to what the async guard can actually see. A named receiver,
+  // an indirect invocation, or a Promise-returner not spelled `async` is outside
+  // the guard, so the prompt must not imply those are refused.
+  it("W50/336-1: rule 9 scopes its validator-enforced claim to the guard's real coverage", () => {
+    const s = p6SynthesisSystemPrompt();
+    assert.ok(
+      !/validator-enforced: an un-awaited async call reads/.test(s),
+      "the unscoped rule-9 enforcement parenthetical is gone",
+    );
+    assert.match(
+      s,
+      /The validator refuses this for direct calls, `this`-receiver calls inside the declaring class, and optional calls/,
+      "rule 9 states exactly what the validator refuses",
+    );
+    assert.match(
+      s,
+      /it cannot see a call through a named receiver \(`obj\.m\(\)`\), an indirect invocation/,
+      "rule 9 names the shapes outside the guard instead of over-claiming them",
+    );
+    assert.ok(!/returns a Promise — whether an earlier file exports it/.test(s), "the Promise-returner over-claim is gone");
+  });
+
+  it("W50/336-1: exactly rules 2, 4 and 8 carry the literal (validator-enforced) claim (drift-proof)", () => {
+    const rules = new Map<number, string>();
+    for (const line of p6SynthesisSystemPrompt().split("\n")) {
+      const m = /^(\d+)\.\s/.exec(line);
+      if (m) rules.set(Number(m[1]), line);
+    }
+    const claiming = [...rules.entries()]
+      .filter(([, line]) => line.includes("(validator-enforced)"))
+      .map(([n]) => n)
+      .sort((a, b) => a - b);
+    assert.deepEqual(claiming, [2, 4, 8], "a rule that claims enforcement must be a rule the validator enforces");
+  });
+
+  // W50/336-1 (P6 residual — the async guard's stated limits): each documented
+  // limit is pinned, so the docblock cannot drift from the bytes.
+  it("W50/336-1: every documented async-guard limit is pinned (accepted shapes, and the one conservative refusal)", () => {
+    const names = ["getProperty"];
+    assert.deepEqual(unawaitedAsyncValueUses("store.getProperty(id).ok;", names), [], "named receiver is outside");
+    assert.deepEqual(unawaitedAsyncValueUses("getProperty.call(null, id).ok;", names), [], "indirect .call is outside");
+    assert.deepEqual(unawaitedAsyncValueUses("(getProperty)(id).ok;", names), [], "parenthesized callee is outside");
+    assert.deepEqual(unawaitedAsyncValueUses("(0, getProperty)(id).ok;", names), [], "comma-discarded callee is outside");
+    assert.deepEqual(
+      asyncNamesInScope("function f() { return new Promise(() => {}); }", null),
+      [],
+      "a Promise-returner not spelled `async` is undiscoverable",
+    );
+    const dyn = unawaitedAsyncValueUses("getProperty(id)[k];", names);
+    assert.equal(dyn.length, 1, "an unresolvable dynamic key stays conservatively refused");
+    assert.equal(dyn[0]!.form, "computed-read");
+    const midLine = "class C { async getProperty(id) { return {}; } m() { return this.getProperty(id).ok; } }";
+    assert.deepEqual(
+      unawaitedAsyncValueUses(midLine, names),
+      [],
+      "the this-receiver arm needs the async declaration to begin its own line",
+    );
+    const formatted = [
+      "class C {",
+      "  async getProperty(id) { return {}; }",
+      "  m() { return this.getProperty(id).ok; }",
+      "}",
+    ].join("\n");
+    assert.equal(
+      unawaitedAsyncValueUses(formatted, names).length,
+      1,
+      "the line-anchored declaration IS discovered and the this-receiver read refused",
+    );
+  });
+
+  // W50/336-1 (P6 residual — chunk bounds): an invalid perChunk falls back to the
+  // default; duplicates/non-strings never fork a chunk or an export.
+  it("W50/336-1: chunk bounds hold for an invalid perChunk, dedupe and non-string rows", () => {
+    const sigs = Array.from({ length: 20 }, (_, i) => `f${i}(): number`);
+    const baseline = chunkTypeSignatures(sigs, P6_SYNTH_CHUNK_SIZE).map((c) => c.length);
+    assert.deepEqual(baseline, [8, 8, 4]);
+    for (const bad of [0, -1, NaN, Infinity] as const) {
+      assert.deepEqual(
+        chunkTypeSignatures(sigs, bad).map((c) => c.length),
+        baseline,
+        `perChunk=${String(bad)} falls back to the default size`,
+      );
+    }
+    assert.deepEqual(chunkTypeSignatures(["a", "a", "b", "", "b", 5 as unknown as string]), [["a", "b"]]);
+  });
 });
 
 // --- 216r T-107.1 (W8-L5): the patch (str_replace) repair level ----------------
@@ -4407,6 +4495,74 @@ describe("W48/334-1c tree-run mint evidence folds the declared-script state", ()
     const uh = (unverified.lastTest as { evidenceHash?: string } | null)?.evidenceHash;
     assert.ok(vh && uh, "both states still mint a tested verdict");
     assert.notEqual(vh, uh, "the P6 DoD's proof artifact distinguishes the toolchain states");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W50/336-2 — the tested stamp must not keep a STALE evidence hash. The old
+// early return skipped any already-"tested" project, so a fresh tree-run over
+// an EDITED tree reported a new verdict in its envelope while the record kept
+// the OLD tree's hash (two artifacts describing the same verification, in
+// disagreement). Same verdict ⇒ keep the stamp + say so; different ⇒ refresh.
+// ---------------------------------------------------------------------------
+describe("W50/336-2 the tested stamp is hash-aware on an already-tested project", () => {
+  const outcome = (over: Partial<TreeRunOutcome> = {}): TreeRunOutcome =>
+    ({
+      ok: true,
+      dir: "C:/scratch/rt-336-2",
+      compile: { ok: true, dir: "C:/scratch/rt-336-2", checked: 2, passed: 2, failed: 0, skipped: 0, verdicts: [] },
+      tests: [
+        {
+          file: "tests/oracle.spec.ts",
+          compile: { file: "tests/oracle.spec.ts", ok: true, verdict: null },
+          tests: { pass: 3, fail: 0 },
+          run: "pass",
+        },
+      ],
+      run: { kind: "webapp", run: "pass", entry: "src/main.tsx", detail: "started" },
+      ...over,
+    }) as unknown as TreeRunOutcome;
+  const base = (): Project => emptyProject({ name: "Mint336", brief: "A dispatch board for field service." });
+  const hashOf = (o: TreeRunOutcome): string => String(fnv1a(treeRunTestedEvidence(o).summary));
+
+  it("the SAME verdict keeps the stamp unchanged and says so (no second mint row)", () => {
+    const first = mintTreeRunTested(base(), outcome());
+    const stamp = first.lastTest;
+    const again = mintTreeRunTested(first, outcome());
+    assert.equal(again.lastTest, stamp, "the recorded stamp object is not rewritten");
+    assert.equal(
+      (again.logs ?? []).filter((l) => l.event === "p6.tree.tested").length,
+      1,
+      "the fresh-mint row is not duplicated",
+    );
+    assert.ok(
+      (again.logs ?? []).some((l) => l.event === "p6.tree.tested.unchanged"),
+      "the kept stamp is stated explicitly",
+    );
+  });
+
+  it("a DIFFERENT verdict refreshes the recorded hash — never keeps a stale one", () => {
+    const first = mintTreeRunTested(base(), outcome());
+    const other = outcome({ declaredScriptsVerified: false, unverifiedDeclaredScripts: ["typecheck", "build"] });
+    const newHash = hashOf(other);
+    assert.notEqual((first.lastTest as { evidenceHash?: string }).evidenceHash, newHash, "the verdicts really differ");
+    const refreshed = mintTreeRunTested(first, other);
+    assert.equal(
+      (refreshed.lastTest as { evidenceHash?: string }).evidenceHash,
+      newHash,
+      "the record now describes THIS tree-run",
+    );
+    assert.match(String((refreshed.lastTest as { detail?: string }).detail), /tree-run green/);
+    const row = (refreshed.logs ?? []).find((l) => l.event === "p6.tree.tested.refreshed");
+    assert.ok(row, "the refresh is logged (never silent)");
+    assert.match(String(row!.detail), new RegExp(String((first.lastTest as { evidenceHash?: string }).evidenceHash).slice(0, 8)));
+    assert.match(String(row!.detail), new RegExp(newHash.slice(0, 8)));
+  });
+
+  it("a green run that executed NO spec leaves an existing stamp exactly as it stands", () => {
+    const first = mintTreeRunTested(base(), outcome());
+    const noSpec = outcome({ tests: [] });
+    assert.equal(mintTreeRunTested(first, noSpec), first, "nothing to say from a run that executed nothing");
   });
 });
 

@@ -977,11 +977,22 @@ function WildToggle({ project }: { project: Project }) {
       useRapid.getState().setWildMode(project.id, target);
       setErr(null);
       if (target) {
-        // Enabling Wild Mode starts the autonomous loop. startWildRun is an
-        // async store action that drives the bounded loop and resolves to an
-        // honest result; the WildConsole strip below observes wildRun by
-        // polling, so this is intentionally fire-and-forget.
-        void useRapid.getState().startWildRun(project.id);
+        // 336-5 wiring: the start's REFUSAL arm used to be dropped (`void
+        // startWildRun(...)`), so enabling Wild on a build that cannot start
+        // (e.g. already complete) left the toggle reading "on" with no
+        // explanation. Handle it exactly like the resume path
+        // (onPauseToggle) and render it (below) — the result is no longer lost.
+        void useRapid
+          .getState()
+          .startWildRun(project.id)
+          .then(
+            (res) => {
+              if (!res.ok) setErr(res.error.length > 0 ? res.error : "Wild run did not start.");
+            },
+            (errCaught: unknown) => {
+              setErr(errCaught instanceof Error ? errCaught.message : String(errCaught));
+            },
+          );
       }
     } catch (errCaught) {
       setErr(errCaught instanceof Error ? errCaught.message : String(errCaught));
@@ -1022,8 +1033,14 @@ function WildToggle({ project }: { project: Project }) {
       </button>
       <span role="status" className="sr-only">
         {active ? "Wild mode on" : "Wild mode off"}
-        {err ? ` — ${err}` : ""}
       </span>
+      {/* 336-5: the start/enable refusal is visible, not only announced — the
+          result of startWildRun used to be dropped entirely. */}
+      {err ? (
+        <span role="alert" className="font-mono text-2xs text-danger [overflow-wrap:anywhere]">
+          {err}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -1797,7 +1814,7 @@ export function HomeScreen() {
       {/* R6-f12: pane boundary — a render throw in the home content keeps the
           header (shell) mounted and lands one `ui.pane_crash` row. */}
       <PaneBoundary label="Home screen">
-      <main className="mx-auto grid max-w-6xl gap-10 px-5 py-10 lg:grid-cols-[1.15fr_0.85fr] lg:py-16">
+      <main id="main-content" className="mx-auto grid max-w-6xl gap-10 px-5 py-10 lg:grid-cols-[1.15fr_0.85fr] lg:py-16">
         <section>
           <p className="font-mono text-xs tracking-widest text-accent uppercase">Governed delivery</p>
           <h1 className="mt-3 max-w-xl text-4xl font-medium leading-tight tracking-tight text-fg sm:text-5xl">
@@ -2023,6 +2040,12 @@ export function RunScreen({ id }: { id: string }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   /** W312 C4 · 311 §6 #8: the A1–A8 algorithm cards collapse to one line. */
   const [algoOpen, setAlgoOpen] = useState(false);
+  /** 336-5 mobile density: the header's read-only status chips AND the
+   *  view/config controls (Guide/Settings/Shortcuts/theme) collapse behind one
+   *  disclosure below `sm` (they stacked to ~7 rows before content at 390px).
+   *  The run-affecting controls (Autopilot, Wild) stay visible; every collapsed
+   *  control stays rendered and reachable (nothing is hidden on `sm`+). */
+  const [headerStatusOpen, setHeaderStatusOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportDraft, setReportDraft] = useState("");
@@ -2228,12 +2251,12 @@ export function RunScreen({ id }: { id: string }) {
 
   if (!project) {
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-bg px-5">
+      <main id="main-content" className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-bg px-5">
         <p className="text-sm text-muted">This build doesn't exist or was archived.</p>
         <Link to="/" className="text-sm text-accent underline-offset-4 hover:underline">
           Back to intake
         </Link>
-      </div>
+      </main>
     );
   }
 
@@ -2800,16 +2823,10 @@ export function RunScreen({ id }: { id: string }) {
 
   return (
     <div className="flex min-h-dvh flex-col bg-bg">
-      {/* 335-5 a11y: the Run screen is the one screen with a 13-item phase nav
-          ahead of the content, so give keyboard/AT users a first-stop skip
-          link (the audit found the screen had header/nav/aside landmarks but
-          no `main`, unlike Home). */}
-      <a
-        href="#run-main"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-[60] focus:rounded-md focus:border focus:border-accent focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-fg focus:shadow-lg"
-      >
-        Skip to main content
-      </a>
+      {/* 336-5: 335-5's run-screen-only skip link is superseded by the ONE
+          global link in routes/__root.tsx (now that every screen's main
+          landmark, including this one, carries id="main-content"). Keeping
+          both would render two identical first-focus stops. */}
       {/* R6-f12 (330_6): the Run header (name/rename, status chips, Autopilot,
           Wild, Guide/Settings/Shortcuts) was the last unwrapped Run surface —
           a render throw there unmounted the WHOLE Run screen via the router's
@@ -2873,6 +2890,28 @@ export function RunScreen({ id }: { id: string }) {
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2 font-mono text-xs text-muted">
+          {/* 336-5 mobile density: the six read-only status chips + the four
+              view/config controls (Guide, Settings, Shortcuts, theme) stacked
+              to ~7 rows before content at 390px (measured header 291px tall /
+              content at 364px of 844). ONE toggle collapses BOTH groups into a
+              disclosure below `sm`; the run-affecting controls (Autopilot,
+              Wild) stay visible, and `sm:flex` on both groups keeps desktop
+              byte-identical in DOM order. Nothing is hidden on `sm`+, and every
+              collapsed control stays reachable one tap away. */}
+          <button
+            type="button"
+            onClick={() => setHeaderStatusOpen((v) => !v)}
+            aria-expanded={headerStatusOpen}
+            aria-controls="run-status-strip run-options-strip"
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-sm border border-border px-2 hover:border-accent/40 focus-visible:ring-2 focus-visible:ring-accent/40 sm:hidden"
+          >
+            <Activity className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Status &amp; options</span>
+          </button>
+          <div
+            id="run-status-strip"
+            className={`${headerStatusOpen ? "flex" : "hidden"} w-full flex-wrap items-center gap-2 sm:flex sm:w-auto`}
+          >
           <span className="rounded-sm border border-border px-2 py-1">{project.domain}</span>
           <StatusChip label={llmChipLabel} tone={llmChipTone} title={llmChipTitle} />
           <StatusChip
@@ -2899,6 +2938,7 @@ export function RunScreen({ id }: { id: string }) {
               saved {fmtClock(lastSaved)}
             </span>
           ) : null}
+          </div>
           {/* 311 §2 (unnamed control #1): the input was only implicitly associated
               (wrapped label) and the probe measured no accessible name, so the
               span now carries an id and the input points at it explicitly. */}
@@ -2914,10 +2954,21 @@ export function RunScreen({ id }: { id: string }) {
               id="autopilot-toggle-label"
               title="Auto-approves eligible gates only: non-stock gates whose DoD check passed. Stock P4/P5/P8/P9 gates and human-only gates still stop for you."
             >
-              Autopilot · auto-approve eligible gates
+              Autopilot
+              {/* 336-5 density: the scope sentence stays on `sm`+ and in the
+                  title/aria name; the mobile chip shows the control's name so
+                  Autopilot + Wild share one row. No claim is added. */}
+              <span className="hidden sm:inline"> · auto-approve eligible gates</span>
             </span>
           </label>
           <WildToggle project={project} />
+          {/* 336-5: the view/config controls are one responsive group so the
+              mobile disclosure can collapse them together with the chips while
+              desktop DOM order is unchanged (they still follow Autopilot/Wild). */}
+          <div
+            id="run-options-strip"
+            className={`${headerStatusOpen ? "flex" : "hidden"} w-full flex-wrap items-center gap-2 sm:flex sm:w-auto`}
+          >
           <button
             type="button"
             onClick={() => setGuideOpen(true)}
@@ -2947,6 +2998,7 @@ export function RunScreen({ id }: { id: string }) {
             <span className="hidden sm:inline">Shortcuts</span>
           </button>
           <ThemeToggle />
+          </div>
         </div>
       </header>
       </PaneBoundary>
@@ -2966,7 +3018,7 @@ export function RunScreen({ id }: { id: string }) {
             and lands one `ui.pane_crash` row. */}
         <PaneBoundary label="Run screen">
         <main
-          id="run-main"
+          id="main-content"
           className="min-w-0 border-b border-line lg:border-b-0 lg:border-r"
           aria-busy={running || undefined}
         >
@@ -7218,10 +7270,16 @@ function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void
  */
 function ShellSurfacesCard({ project }: { project: Project }) {
   const run = wildStateOf(project).run;
-  const rawPlan = project.wildPlan;
-  // Same guard as engine.readWildPlan: only a plan whose `steps` is an array is
-  // treated as stored; anything else falls to the honest absence line.
-  const plan = rawPlan && Array.isArray(rawPlan.steps) ? rawPlan : null;
+  // 336-5 wiring: read the plan through the store's DOCUMENTED accessor
+  // (store.ts wildPlanFor → engine.readWildPlan). Before this the card read
+  // `project.wildPlan` directly, so the store action's own doc ("the console's
+  // READ path for the plan-before-execute surface … reads this") named a
+  // consumer it did not have. The honest empty fallback (`source: "empty"`) is
+  // absence, not a plan, so the card still falls to its absence line — the same
+  // rendering as before for every realistic state.
+  const wildPlanFor = useRapid((s) => s.wildPlanFor);
+  const rawPlan = wildPlanFor(project.id);
+  const plan = rawPlan && rawPlan.source !== "empty" && Array.isArray(rawPlan.steps) ? rawPlan : null;
   const stepCount = plan ? plan.steps.length : 0;
   const resumeLine = run
     ? run.active === true

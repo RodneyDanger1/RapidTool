@@ -836,3 +836,60 @@ describe("complexityOf — 330 P3 property/method-name loop keywords are not loo
     assert.equal(complexityOf("outer: while (c) { break outer; }").loops, 1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 336-6: a `while` (or `for`/`do`) METHOD NAME in a class body / object literal
+// has a `(params)` list lexically identical to a real `while (cond)`, so the
+// head-shape test cannot separate them. Scope kind does: members only.
+// ---------------------------------------------------------------------------
+describe("complexityOf — 336-6 class/object member `while` is not a loop", () => {
+  it("does not count a class/object method or accessor named `while`", () => {
+    assert.equal(complexityOf("class C { while(x) {} }").loops, 0);
+    assert.equal(complexityOf("class C { while(x) {} }").notation, "O(1)");
+    assert.deepEqual(complexityOf("class C { while(x) {} }").lineRefs, []);
+    assert.equal(complexityOf("const o = { while(x) {} };").loops, 0);
+    assert.equal(complexityOf("const o = { while: 1 };").loops, 0);
+    assert.equal(complexityOf("class C { get while() { return 1; } }").loops, 0);
+    assert.equal(complexityOf("class C { async while(x) { return x; } }").loops, 0);
+    assert.equal(complexityOf("class C { static while(x) {} }").loops, 0);
+    assert.equal(complexityOf("class C { do(x) {} }").loops, 0);
+    assert.equal(complexityOf("class C { *while(x) { yield x; } }").loops, 0);
+    assert.equal(complexityOf("const o = { while(x) {}, run() {} };").loops, 0);
+    // object values (ternary arms and nested members) are member scopes too
+    assert.equal(complexityOf("const o = c ? { while(x) {} } : { while(y) {} };").loops, 0);
+    assert.equal(complexityOf("const o = { a: { while(x) {} } };").loops, 0);
+  });
+
+  it("control: every REAL while / do form is still counted", () => {
+    const real = [
+      "while (lo <= hi) { lo++; }",
+      "function f() { while (lo <= hi) { lo++; } }",
+      "exports.f = () => { while (lo <= hi) { lo++; } };",
+      "class C { m() { while (lo <= hi) { lo++; } } }",
+      "const o = { m() { while (lo <= hi) { lo++; } } };",
+      "class C { static { while (lo <= hi) { lo++; } } }",
+      "if (ok) { while (lo <= hi) { lo++; } }",
+      "for (const y of ys) { x++; }",
+    ];
+    for (const src of real) {
+      assert.equal(complexityOf(src).loops, 1, `must count the real loop: ${src}`);
+    }
+    assert.equal(complexityOf("while (lo <= hi) { lo++; }").notation, "O(n)");
+    assert.equal(complexityOf("do { x++; } while (c);").loops, 1);
+  });
+
+  it("control: a block after a class/label/`case` is not misread as a member scope", () => {
+    // A completed `class { … }` before the block must not make it a class body.
+    assert.equal(complexityOf("class C {} if (ok) { while (c) { x++; } }").loops, 1);
+    // A labelled block and a `case` block open statements, not object values.
+    assert.equal(complexityOf("outer: { while (c) { x++; } }").loops, 1);
+    assert.equal(complexityOf("switch (k) { case 1: while (c) { x++; } }").loops, 1);
+    assert.equal(complexityOf("outer: { while (c) { x++; } }").notation, "O(n)");
+  });
+
+  it("control: nested real loops inside a class method keep their depth", () => {
+    const rep = complexityOf("class C { m() { while (a) { while (b) { x++; } } } }");
+    assert.equal(rep.loops, 2);
+    assert.equal(rep.notation, "O(n^2)");
+  });
+});

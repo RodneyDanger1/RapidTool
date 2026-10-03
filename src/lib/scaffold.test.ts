@@ -1339,3 +1339,42 @@ describe("W49 / 335-3 — cli-tool declares its runnable entry (main)", () => {
     assert.ok(paths.includes(`bin/${slug}.mjs`), "the bin launcher is an emitted file");
   });
 });
+
+// ---------------------------------------------------------------------------
+// W50 / 336-3 (Transit) — DEPLOY.md must state what the emitted bytes actually
+// declare. The pre-fix Test section told the operator to run `npm test` against
+// a tree whose package.json declares no `test` script (zero oracle rows) and
+// claimed "no todo stubs" on a tree whose own README counts test.skip rows.
+// ---------------------------------------------------------------------------
+describe("W50 / 336-3 — DEPLOY.md matches the emitted oracle bytes", () => {
+  it("a NOT IMPLEMENTED oracle row makes DEPLOY.md carry the census, not a 'no todo stubs' claim", () => {
+    const p = seedProject(); // P0: rows with no module surface are NOT IMPLEMENTED
+    const result = scaffoldProject(p);
+    const readme = bodyOf(result, "README.md");
+    assert.ok(
+      readme.includes("NOT IMPLEMENTED"),
+      "precondition: this emission really carries a NOT IMPLEMENTED row (README census)",
+    );
+    const dep = bodyOf(result, "DEPLOY.md");
+    assert.ok(
+      !dep.includes("no todo stubs"),
+      "DEPLOY.md must not claim every row asserts when the emitted spec skips one",
+    );
+    assert.ok(dep.includes("NOT IMPLEMENTED"), "DEPLOY.md names the skipped rows");
+    assert.ok(dep.includes("npm test"), "the emitted package.json still declares a test script");
+  });
+
+  it("no oracle rows: package.json declares no test script, so DEPLOY.md never says `npm test`", () => {
+    const p = seedProject({ oracle: [] });
+    const result = scaffoldProject(p);
+    const pkg = JSON.parse(bodyOf(result, "package.json")) as { scripts: Record<string, string> };
+    assert.equal(pkg.scripts.test, undefined, "no oracle rows => no declared test script");
+    const dep = bodyOf(result, "DEPLOY.md");
+    assert.ok(!dep.includes("npm test"), "DEPLOY.md must not instruct a script the tree never declares");
+    assert.ok(dep.includes("## Test"), "the Test section still exists");
+    assert.ok(
+      dep.includes("No oracle rows are recorded yet"),
+      "the Test section states the honest reason instead",
+    );
+  });
+});

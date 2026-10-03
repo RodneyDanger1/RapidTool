@@ -421,19 +421,23 @@ describe("DoD property tests (E-26)", () => {
 // ---------------------------------------------------------------------------
 
 describe("T-14 — phase coverage census on real runs", () => {
-  it("full 13-phase run: rail reports 13 of 13 / 8 P7–P12 artifacts", () => {
+  it("full 13-phase run: rail reports 13 of 13 / 9 P7–P12 artifacts", () => {
     const done = fullRun();
     assert.equal(done.status, "complete");
     assert.ok(
-      done.packet.includes("Phase coverage: 13 of 13 phases executed / 8 artifacts from P7–P12"),
+      done.packet.includes("Phase coverage: 13 of 13 phases executed / 9 artifacts from P7–P12"),
       `full-run packet carries the real census (got ${JSON.stringify(
         done.packet.match(/Phase coverage: [^\n]*/)?.[0] ?? null,
       )})`,
     );
     // Independent recount from the artifact rows the census consumes — the
-    // stored kind "packet" row is NOT a phase deliverable and never counts.
-    const tail = done.artifacts.filter((a) => a.phase >= 7 && a.kind !== "packet").length;
-    assert.equal(tail, 8, "artifact rows independently agree with the rail's 8");
+    // stored kind "packet" AND "gate" rows are BOOKKEEPING, never phase
+    // deliverables (the same two-kind rule phases.ts:227 owns). W49 added a
+    // third real P12 deliverable (the DB-schema SQL), so the tail is 9.
+    const tail = done.artifacts.filter(
+      (a) => a.phase >= 7 && a.kind !== "packet" && a.kind !== "gate",
+    ).length;
+    assert.equal(tail, 9, "artifact rows independently agree with the rail's 9");
   });
 
   it("stopped 7-phase prefix: rail reports 7 of 13 / 0 — never the all-ran claim", () => {

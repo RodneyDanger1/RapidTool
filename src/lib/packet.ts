@@ -50,6 +50,31 @@ const TRUNC_MARKER = "…[TRUNCATED — regenerate at a HITL gate for the full p
  *  14 KB of context with no required-output contract to report against. */
 const REQUIRED_OUTPUT_HEADING = "\n## Required output schema\n";
 
+/**
+ * W50 / 336-3b (Transit): the volatile renders the truncation budget must not
+ * SEE. `compiled_at` (24-char ISO) and `input_hash` (1–10 decimal digits) are
+ * real, meaningful provenance and stay in the packet verbatim — but their
+ * run-to-run WIDTH is not a function of stable project state, and the budget
+ * was measured against the rendered text, so a one-character volatile shift
+ * could move the last "\n\n" boundary that fits and drop a whole content block
+ * (measured: `headless.test.ts` W-02 keyless floor, 3/8 masked-unequal). This
+ * mask is applied ONLY to the copy the cut decision reads; the emitted bytes are
+ * the real lines. Mask widths are the field ceilings (ISO 24, fnv1a decimal 10),
+ * so the normalized copy is never shorter than the real one inside the budget.
+ */
+const VOLATILE_ISO_MASK = "0000-00-00T00:00:00.000Z";
+const VOLATILE_HASH_MASK = "0000000000";
+function maskVolatileLengths(s: string): string {
+  // Exact rendered shapes only: `compiled_at` is always a 24-char ISO
+  // (isoFromMs), `input_hash` is always ≤10 decimal digits (fnv1a). Masking to
+  // those ceilings means the normalized copy is never shorter than the real one,
+  // so the "result never exceeds the budget" invariant holds by construction.
+  return s
+    .replace(/"compiled_at": "\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z"/g, `"compiled_at": "${VOLATILE_ISO_MASK}"`)
+    .replace(/compiled_at: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z/g, `compiled_at: ${VOLATILE_ISO_MASK}`)
+    .replace(/"input_hash": "\d{1,10}"/g, `"input_hash": "${VOLATILE_HASH_MASK}"`);
+}
+
 /** Collapse whitespace and cap a note so ledger/loop rows stay one line (T2/T9). */
 function quoteNote(note: string | undefined, cap: number): string {
   const clean = (note ?? "").replace(/\s+/g, " ").trim();
@@ -968,8 +993,17 @@ export function compileAgentPacket(
       : []),
     ``,
     `## Ranked memory (A2 FusionRank)`,
+    // W50 / 336-3 (Transit): R4/B-05 pins the ENGINE ORDERING (memory bootstrapped
+    // before the packet compiles), so a fresh project's packet never reaches this
+    // fallback — it is NOT a pin on this text. The pre-fix sentence ("treat Phase 0
+    // research as first write") issued a Phase-0 instruction from a render that fires
+    // at ANY edge and asserted a history the render cannot know (memory can be empty
+    // because a payload was stripped after Phase 0 completed). At P0 the pointer is in
+    // scope; past P0 the honest statement is the observable one.
     memoryRows.length === 0 && provenRows.length === 0
-      ? "(empty — treat Phase 0 research as first write)"
+      ? phase.id === 0
+        ? "(empty — treat Phase 0 research as first write)"
+        : "(empty — no memory rows are recorded for this project)"
       : displayRanked.length === 0
         ? "(no rankable memory rows — every row is malformed or empty)"
         : [
@@ -1076,34 +1110,57 @@ export function compileAgentPacket(
  * boundary that fits (or at the budget with the partial trailing line dropped
  * when no section boundary fits). The result never exceeds the budget, the
  * marker says so out loud, and the whole function is deterministic — a pure
- * function of the assembled string.
+ * function of the STABLE assembled string.
+ *
+ * W50 / 336-3b (Transit): "stable" is made true here. `compiled_at`/`input_hash`
+ * are rendered into `assembled` and their WIDTH moves run-to-run, so a budget
+ * measured against the rendered text could land on a different boundary for the
+ * same stable project (a whole artifact block survived in one compile and not
+ * the other). The DECISION is taken on a volatile-length-normalized copy; the
+ * emitted bytes are the REAL lines at the same line indices, so the volatile
+ * values stay verbatim and an under-budget packet is byte-identical.
  */
 function truncateToBudget(assembled: string): string {
   // A1-33: every path reserves room for the marker LINE, so the doc above
   // ("the result never exceeds the budget") is true on the legacy/pathological
   // cuts too, not just on the budget-derived one.
   const markerLine = `\n${TRUNC_MARKER}`;
+  const normalized = maskVolatileLengths(assembled);
+  const realLines = assembled.split("\n");
+  /** The REAL prefix whose line count equals the normalized cut's line count.
+   *  Masks contain no newline, so index k names the same line in both copies. */
+  const realLineCut = (normCut: string): string =>
+    realLines.slice(0, normCut.split("\n").length).join("\n");
   const headingAt = assembled.indexOf(REQUIRED_OUTPUT_HEADING);
-  if (headingAt === -1) {
-    // No schema section (future format drift): legacy whole-document cut.
-    return `${assembled.slice(0, PACKET_MAX_CHARS - markerLine.length)}${markerLine}`;
+  const headingAtN = normalized.indexOf(REQUIRED_OUTPUT_HEADING);
+  if (headingAt === -1 || headingAtN === -1) {
+    // No schema section (future format drift): legacy whole-document cut,
+    // decided on the normalized copy and emitted on the real lines.
+    const normCut = normalized
+      .slice(0, PACKET_MAX_CHARS - markerLine.length)
+      .replace(/\n[^\n]*$/, "");
+    return `${realLineCut(normCut)}${markerLine}`;
   }
   const tail = assembled.slice(headingAt); // "\n## Required output schema\n…" through the end
+  const tailN = normalized.slice(headingAtN);
   const markerBlock = `\n\n${TRUNC_MARKER}\n`;
-  const budget = PACKET_MAX_CHARS - tail.length - markerBlock.length;
+  const budget = PACKET_MAX_CHARS - tailN.length - markerBlock.length;
   if (budget <= 0) {
     // Tail + marker alone over budget (pathological): degrade to the legacy
     // cut rather than emit a schema-less head or an over-budget document.
-    return `${assembled.slice(0, PACKET_MAX_CHARS - markerLine.length)}${markerLine}`;
+    const normCut = normalized
+      .slice(0, PACKET_MAX_CHARS - markerLine.length)
+      .replace(/\n[^\n]*$/, "");
+    return `${realLineCut(normCut)}${markerLine}`;
   }
-  const head = assembled.slice(0, headingAt);
+  const headN = normalized.slice(0, headingAtN);
   // Cut at the last section boundary that fits (>= half the budget); without
   // one, cut at the budget and drop the partial trailing line.
-  const boundaryAt = head.lastIndexOf("\n\n", budget);
+  const boundaryAt = headN.lastIndexOf("\n\n", budget);
   const cutAt = boundaryAt >= Math.floor(budget / 2) ? boundaryAt : budget;
-  let cut = head.slice(0, cutAt);
-  if (cutAt === budget) cut = cut.replace(/\n[^\n]*$/, "");
-  return `${cut}${markerBlock}${tail}`;
+  let cutN = headN.slice(0, cutAt);
+  if (cutAt === budget) cutN = cutN.replace(/\n[^\n]*$/, "");
+  return `${realLineCut(cutN)}${markerBlock}${tail}`;
 }
 
 // ---------------------------------------------------------------------------

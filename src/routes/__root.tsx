@@ -78,6 +78,19 @@ export const Route = createRootRoute({
         />
       </head>
       <body className="bg-bg font-sans text-fg">
+        {/* 336-5: ONE global keyboard bypass. Every screen's <main> carries
+            id="main-content" — Home + the run screen + the run-not-found state
+            (console.tsx), and the 404/error screens (error-component.tsx) — so
+            the target can never dangle. This supersedes 335-5's run-screen-only
+            link (its run-only copy is removed from console.tsx). It is the
+            first focusable node in <body>; TelemetryBoot / PreviewHostBridge
+            render null. */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-[60] focus:rounded-md focus:border focus:border-accent focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-fg focus:shadow-lg"
+        >
+          Skip to main content
+        </a>
         <TelemetryBoot />
         <PreviewHostBridge />
         <AuthProvider>

@@ -64,6 +64,7 @@ import { coerceAcceptanceFixtures } from "./brief-fixtures.ts";
 import type {
   Artifact,
   Competitor,
+  DataContract,
   FeasibilityScorecard,
   HitlDecision,
   HitlRequest,
@@ -505,6 +506,67 @@ function domainSurface(domain: string): string[] {
     analytics: ["warehouse / BI"],
   };
   return map[domain] ?? ["external services named by the brief"];
+}
+
+/** PostgreSQL type for one contract field type (`ulid`/`string`/`enum`/`int`/
+ *  `datetime`, plus the `?` nullable suffix). The A6 bank's vocabulary is
+ *  closed (algorithms.ts FIELD_BANK); a foreign/unknown type degrades to TEXT —
+ *  a lossy-but-safe widening, never a fabricated column type. */
+function schemaSqlType(type: string): string {
+  switch (type) {
+    case "int":
+      return "INTEGER";
+    case "datetime":
+      return "TIMESTAMP";
+    case "ulid":
+    case "string":
+    case "enum":
+      return "TEXT";
+    default:
+      return "TEXT";
+  }
+}
+
+/**
+ * W50/336-1 (P12 producer): PostgreSQL-flavoured DDL derived from the A6 data
+ * contract. `project.contracts.entities` genuinely carries the schema input —
+ * every entity with its field names and types (algorithms.ts `synthesizeContracts`)
+ * — so the P12 "database schema" deliverable is DERIVED from the spec, never
+ * invented: every table and column comes from a contract entity/field, and a
+ * contract with no entities returns "" (no schema is fabricated).
+ *
+ * Honesty (B-18): the emitted scaffold provisions and runs no database, so the
+ * body's own header states the DDL is a spec, not a provisioned database. Pure
+ * and deterministic: identical contracts ⇒ identical bytes.
+ */
+export function databaseSchemaSql(contracts: DataContract | null | undefined): string {
+  const entities = Array.isArray(contracts?.entities) ? contracts.entities : [];
+  const tables = entities.filter((e) => e && typeof e.name === "string" && e.name.trim().length > 0);
+  if (tables.length === 0) return "";
+  const esc = (s: string): string => s.replace(/"/g, '""');
+  const lines: string[] = [
+    `-- Database schema derived from the A6 data contract (project.contracts.entities).`,
+    `-- Declarative spec only: the emitted scaffold provisions and runs no database (B-18).`,
+    `-- Dialect: PostgreSQL.`,
+    ``,
+  ];
+  for (const e of tables) {
+    const fields = Array.isArray(e.fields) ? e.fields : [];
+    const cols: string[] = [];
+    for (const f of fields) {
+      if (!f || typeof f.name !== "string" || !f.name.trim()) continue;
+      const rawType = typeof f.type === "string" ? f.type : "";
+      const nullable = rawType.endsWith("?");
+      const sqlType = schemaSqlType(nullable ? rawType.slice(0, -1) : rawType);
+      const name = esc(f.name);
+      const pk = f.name === "id" && !nullable ? " PRIMARY KEY" : "";
+      cols.push(`  "${name}" ${sqlType}${nullable ? "" : " NOT NULL"}${pk}`);
+    }
+    if (cols.length === 0) continue;
+    lines.push(`CREATE TABLE IF NOT EXISTS "${esc(e.name)}" (`, cols.join(",\n"), `);`, ``);
+  }
+  if (lines.length === 4) return "";
+  return lines.join("\n").trimEnd() + "\n";
 }
 
 export function synthesizePhase(
@@ -1198,12 +1260,18 @@ export function synthesizePhase(
       const deliveryDetail = seal.clean
         ? "All 13 phases sealed."
         : `All 13 phases sealed. ${seal.failed.length} failed gates: ${seal.failed.join(", ")}`;
+      // W50/336-1: the P12 database-schema deliverable had no producer (335-1
+      // STOP item). The A6 contract carries the input, so the DDL is DERIVED
+      // here (databaseSchemaSql) and emitted as its own artifact — a contract
+      // with no entities yields no row (never a fabricated schema).
+      const schema = databaseSchemaSql(project.contracts);
       return {
         openapi,
         adr,
         artifacts: [
           art(12, "docs", "Architecture Decision Records", adr, "markdown"),
           art(12, "docs", "OpenAPI 3.1", openapi, "yaml"),
+          ...(schema ? [art(12, "docs", "Database schema (SQL DDL)", schema, "sql")] : []),
         ],
         memory: [mem("semantic", "ADRs capture the product's entity model and pipeline decisions.", 0.97)],
         logs: [

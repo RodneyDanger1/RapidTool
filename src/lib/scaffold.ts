@@ -2973,10 +2973,40 @@ function recordedArtifacts(project: Project): string[] {
  * from the P9/P12 artifacts recorded on the project plus per-kind defaults;
  * the pipeline never executed or validated those templates, credentials are
  * human-gated, and nothing in the scaffold deploys anywhere by itself.
+ *
+ * W50 / 336-3 (Transit): the Test section must match what the emit actually
+ * wrote. `packageJson` DELETES the `test` script when the project has no oracle
+ * rows, and the emitted spec skips every row with no module surface
+ * (`test.skip("<id> — NOT IMPLEMENTED")`). The pre-fix text told the operator to
+ * run `npm test` against a tree that declares none, and claimed "no todo stubs"
+ * on a tree whose README counts skipped rows. `census` is the README's own
+ * classification (scaffoldProject passes the very object it rendered); a direct
+ * caller that omits it keeps the clean-row bytes.
  */
-export function deployNotes(project: Project): string {
+export function deployNotes(project: Project, census?: OracleRowCensus | null): string {
   const kind = projectKindOf(project);
   const envNames = ENV_LINES[kind];
+  const hasOracleRows = project.oracle.length > 0;
+  const notImplemented = census?.notImplemented.length ?? 0;
+  const testSection: string[] = hasOracleRows
+    ? [
+        "## Test",
+        "",
+        "```text",
+        "  npm test",
+        "```",
+        "",
+        notImplemented > 0
+          ? `Oracle specs in \`tests/oracle.spec.ts\` assert the emitted modules' real current behavior — NOT that every row is implemented. ${notImplemented} pinned row(s) are NOT IMPLEMENTED and are emitted as visibly-marked \`test.skip("<id> — NOT IMPLEMENTED")\` (skipped, never green — see the oracle-row census in README.md). Every row keeps its pinned \`orc-*\` id; green means the scaffold modules are intact and every oracle seam is still honestly stubbed. A seam test fails the moment that seam is implemented — that is the cue to replace it with the row's real acceptance assertion.`
+          : "Oracle specs in `tests/oracle.spec.ts` are REAL assertions over the emitted modules (fixes/135) — no todo stubs. Every row keeps its pinned `orc-*` id; green means the scaffold modules are intact and every oracle seam is still honestly stubbed. A seam test fails the moment that seam is implemented — that is the cue to replace it with the row's real acceptance assertion.",
+        "",
+      ]
+    : [
+        "## Test",
+        "",
+        "No oracle rows are recorded yet, so the emitted `package.json` declares no `test` script — run the pipeline to P0/P1, then re-emit.",
+        "",
+      ];
   const hasTemplates = project.artifacts.some(
     (a) => a.kind === "cicd" || (a.kind === "docs" && /OpenAPI|Decision/i.test(a.title)),
   );
@@ -3068,14 +3098,7 @@ export function deployNotes(project: Project): string {
     "| --- | --- |",
     ...envNames.map((name) => `| \`${name}\` | ${ENV_MEANING[name] ?? "see .env.example"} |`),
     "",
-    "## Test",
-    "",
-    "```text",
-    "  npm test",
-    "```",
-    "",
-    "Oracle specs in `tests/oracle.spec.ts` are REAL assertions over the emitted modules (fixes/135) — no todo stubs. Every row keeps its pinned `orc-*` id; green means the scaffold modules are intact and every oracle seam is still honestly stubbed. A seam test fails the moment that seam is implemented — that is the cue to replace it with the row's real acceptance assertion.",
-    "",
+    ...testSection,
     "## Deploy — human-gated, nothing automatic",
     "",
     "No deployment is configured, wired or implied by this repository. Concretely:",
@@ -3542,7 +3565,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   // (fixes/216k parent boundary repair: the README push moved BELOW the
   // spec-graph node loop — it renders the job-scope/bridge census arrays the
   // loop fills; emitting it here ran before the loop: TDZ + empty counts.)
-  push("DEPLOY.md", deployNotes(proj));
+  push("DEPLOY.md", deployNotes(proj, oracleCensus));
   push(".env.example", envExample(kind));
   push(".gitignore", gitignoreFile());
   push("package.json", packageJson(kind, proj, proj.oracle.length > 0));

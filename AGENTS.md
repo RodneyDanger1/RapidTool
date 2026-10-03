@@ -74,9 +74,11 @@ contract in full) lives in **`AGENT_GUIDE.md`**; the CLI machine contract is
   green from its exit code alone; require the expected test's own `ok N - <name>` line in
   the same output.
 - CLI: `node --experimental-strip-types scripts/rapidtool-cli.mjs <verb> …` — single JSON
-  object on stdout, exit taxonomy 0/1/2/3/4 (exit 2 = parked at a HITL gate or
-  `blocked` — the docs' `scripts/README-cli.md` §Agent contract owns the full
-  taxonomy); failures carry their `RT_E_*` code on the object.
+  object on stdout, exit taxonomy 0/1/2/3/4 plus **5** (exit 2 = parked at a HITL gate or
+  `blocked`; exit 5 = `--require-verified` on `emit --run`/`tree-run` when the tree is green
+  but its declared `typecheck`/`build` never ran — the docs' `scripts/README-cli.md`
+  §Agent contract owns the full taxonomy); failures carry their `RT_E_*` code on the object.
+  *(Exit 5 corrected 2026-10-02 by the W50 boundary owner; the W49 lane-335-4 added it.)*
   Red results are never a clean 0: a red-gate complete seal exits 1 (`RT_E_GATES_FAILED`,
   `sealedWithFailures: true`) and `emit --run` exits 1 when the emitted tree is not ok.
   Every exit stamps an NDJSON event under `<dir>/.rapidtool/logs/`; `diagnose` reads it back.
@@ -119,7 +121,13 @@ contract in full) lives in **`AGENT_GUIDE.md`**; the CLI machine contract is
 
 ## Legacy scaffolding — do not build on it
 
-`.grok/`, `server/` middleware, `scripts/grok-pwa-*`, `AGENTS.project.md`, and `startup.sh`
-are stale scaffolding from the repo's origin. They are **not the contract** (ignore them
-unless a named doc above points at them). Their keep-or-descope fate is decided in
-94 §B1 / 96. Do not delete or extend them until that lands.
+Most of `.grok/` (18 `skills/*`, 6 `references/*`, and the writer-less stale `.grok/status`)
+plus `server/` middleware, `scripts/grok-pwa-*`, `AGENTS.project.md`, and `startup.sh` are
+stale scaffolding from the repo's origin. But `.grok/` is **partially load-bearing — do not
+delete these reads:** `scripts/with-app-env.mjs:34` reads `.grok/app-env.json` on every
+`npm run dev/build/preview` (it ships `VITE_AUTH_ENABLED=false`); `scripts/brand-check.mjs:91`
+reads `.grok/skills/og/SKILL.md` and `:44` writes `.grok/og-pending`; `scripts/preview.mjs:33-34`
+uses `.grok/preview.{pid,log}`. Their keep-or-descope fate is decided in 94 §B1 / 96; do not
+delete or extend until that lands.
+*(Corrected 2026-10-02 by the W50 boundary owner from the W48 lane-334-6 audit: the previous
+blanket "not the contract" sentence was false for those four live reads.)*

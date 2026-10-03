@@ -512,10 +512,11 @@ test("ST-1: approveHitl records the DoD gate before compiling — gate_passed is
 // T-14 (106 §6, finding F-11) — phase-coverage honesty: the rail line and the
 // System JSON envelope must state the REAL census. Verified by probe (W4-L5):
 // fresh project = 0 of 13 / 0 tail artifacts; a 7-phase prefix (stopped run) =
-// 7 of 13 / 0; a full 13-phase fixture run = 13 of 13 / 8 tail artifacts
-// (P7–P12 rows EXCLUDING the stored kind "packet" row — phaseCoverage's own
-// documented exclusion, so the number here is the helper's real arithmetic,
-// not the probe's raw row count).
+// 7 of 13 / 0; a full 13-phase fixture run = 13 of 13 / 9 tail artifacts
+// (P7–P12 rows EXCLUDING the two bookkeeping kinds — the stored "packet" row and
+// each phase's recorded DoD "gate" row — phaseCoverage's own documented exclusions,
+// so the number here is the helper's real arithmetic, not the probe's raw row count).
+// W50/336-1 moved this 8 → 9: the P12 PostgreSQL schema deliverable is a real producer row.
 // ---------------------------------------------------------------------------
 
 test("T-14: fresh project rail carries the honest 0-of-13 coverage line", () => {
@@ -563,23 +564,23 @@ test("T-14: a stopped 7-phase run reports 7 of 13 / 0 — never implies all 13 r
   assert.deepEqual(env.phase_coverage, { executed: 7, total: 13, artifacts_from_p7_p12: 0 });
 });
 
-test("T-14: a completed 13-phase run reports its real 13 of 13 / 8 — matching the artifact rows", async () => {
+test("T-14: a completed 13-phase run reports its real 13 of 13 / 9 — matching the artifact rows", async () => {
   const fixtures = await import("./testing/fixtures.ts");
   const done = fixtures.runHeadless(fixtures.seedProject(), fixtures.ALL_PHASES);
   assert.equal(done.status, "complete");
   const out = compileAgentPacket(done);
   assert.ok(
-    out.includes("Phase coverage: 13 of 13 phases executed / 8 artifacts from P7–P12"),
+    out.includes("Phase coverage: 13 of 13 phases executed / 9 artifacts from P7–P12"),
     `full run census (got ${JSON.stringify(out.match(/Phase coverage: [^\n]*/)?.[0] ?? null)})`,
   );
   // Independent cross-check: recount the same fact straight off the artifact
   // rows the helper consumes — the rail line may never drift from the data.
   const tail = done.artifacts.filter(
-    (a) => a.phase >= 7 && a.kind !== "packet",
+    (a) => a.phase >= 7 && a.kind !== "packet" && a.kind !== "gate",
   ).length;
-  assert.equal(tail, 8, "artifact rows independently agree with the 8 the rail reports");
+  assert.equal(tail, 9, "artifact rows independently agree with the 9 the rail reports");
   const env = parseSystemJson(out);
-  assert.deepEqual(env.phase_coverage, { executed: 13, total: 13, artifacts_from_p7_p12: 8 });
+  assert.deepEqual(env.phase_coverage, { executed: 13, total: 13, artifacts_from_p7_p12: 9 });
 });
 
 test("runPhaseAsync returns a valid deterministic result for P0 (async entry does not throw)", async () => {
@@ -1307,3 +1308,27 @@ test("W49/335-3: the Scorecard fallback never instructs an out-of-scope Phase 0 
   assert.ok(out.includes("the scorecard is a Phase 0 output"), "it names the source honestly instead");
 });
 
+test("W50/336-3: past P0 the memory-empty placeholder is state-only, never an out-of-scope Phase-0 instruction", () => {
+  const p = makeProject();
+  p.currentPhase = 4 as Project["currentPhase"];
+  p.memory = [];
+  const out = compileAgentPacket(p);
+  assert.ok(out.includes("## Ranked memory (A2 FusionRank)"), "the section still renders");
+  assert.equal(
+    out.includes(EMPTY_MEM_LINE),
+    false,
+    "an edge past P0 must not instruct a Phase-0 rewrite",
+  );
+  assert.ok(
+    out.includes("(empty — no memory rows are recorded for this project)"),
+    "it states the observable fact instead",
+  );
+});
+
+test("W50/336-3: the P0 memory-empty placeholder is unchanged (R4/B-05 pins the ordering, not the text)", () => {
+  const p = makeProject();
+  assert.equal(p.currentPhase, 0, "premise: a fresh project sits at P0");
+  p.memory = [];
+  const out = compileAgentPacket(p);
+  assert.ok(out.includes(EMPTY_MEM_LINE), "at P0 the Phase-0 pointer is in scope and stays");
+});

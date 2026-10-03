@@ -75,9 +75,12 @@
  * dir, unparseable entries, red scores — all printed and recorded, never
  * thrown as process failures). Keyless = the honest regression leg.
  *
- * Run: npm run eval            (keyless)
- *      npm run eval -- --keyed (one bounded keyed entry when the key is set)
- *      npm run eval -- --trials=3 [--all|--limit=N]   (trials + pass@k)
+ * Run: npm run eval -- --out <dir>   (REQUIRED unless EVAL_OUT_DIR is set: the
+ *                                    bare default would rewrite the tracked
+ *                                    research/eval-out/** — see evalOutRefusal)
+ *      npm run eval -- --out <dir> --keyed       (one bounded keyed entry when the key is set)
+ *      npm run eval -- --out <dir> --trials=3 [--all|--limit=N]   (trials + pass@k)
+ *      npm run eval -- --out research/eval-out   (explicitly regenerate the tracked scorecard)
  */
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync, rmSync, renameSync } from "node:fs";
 import { join, dirname, basename, resolve, relative, isAbsolute } from "node:path";
@@ -144,11 +147,51 @@ const ROOT = resolve(HERE, "..");
 /** Corpus dir honors EVAL_CORPUS_DIR (isolated scratch runs for lane proof /
  *  future keyed experiments) — default is D3's research/eval-corpus. */
 const CORPUS_DIR = process.env.EVAL_CORPUS_DIR ? resolve(process.env.EVAL_CORPUS_DIR) : join(ROOT, "research", "eval-corpus");
-/** Eval output honors EVAL_OUT_DIR (keeps scratch runs out of the real
- *  results/history used for M7 priors). */
-const OUT_DIR = process.env.EVAL_OUT_DIR ? resolve(process.env.EVAL_OUT_DIR) : join(ROOT, "research", "eval-out");
+/** Eval output honors `--out <dir>` and EVAL_OUT_DIR (both keep scratch runs
+ *  out of the real results/history used for M7 priors); `--out` wins over the
+ *  env. The bare default is the TRACKED `research/eval-out/**` — see
+ *  `evalOutRefusal` for why an un-chosen default write into the repo is refused. */
+const OUT_ARG = (() => {
+  const eq = process.argv.find((a) => a.startsWith("--out="));
+  if (eq !== undefined && eq.slice("--out=".length).trim() !== "") return eq.slice("--out=".length);
+  const i = process.argv.indexOf("--out");
+  if (i !== -1 && typeof process.argv[i + 1] === "string" && !process.argv[i + 1].startsWith("--")) return process.argv[i + 1];
+  return null;
+})();
+const DEFAULT_OUT_DIR = join(ROOT, "research", "eval-out");
+const OUT_EXPLICIT = OUT_ARG !== null || Boolean(process.env.EVAL_OUT_DIR);
+const OUT_DIR = OUT_ARG !== null ? resolve(OUT_ARG) : process.env.EVAL_OUT_DIR ? resolve(process.env.EVAL_OUT_DIR) : DEFAULT_OUT_DIR;
 const RESULTS_PATH = join(OUT_DIR, "results.json");
 const HISTORY_PATH = join(OUT_DIR, "history.json");
+
+/**
+ * W50 · 336-4 (Switchboard) — the eval OUT_DIR guard, pure so the pin can call
+ * it directly (scripts/run-eval.test.mjs). The driver used to default OUT_DIR to
+ * the repo's TRACKED `research/eval-out/**` and rewrite it in place (results.json,
+ * history.json, every <slug>/ trial tree) — which is why no wave dared run
+ * `npm run eval`: the tree went dirty. A write into the working tree is allowed
+ * only when the caller CHOSE it (`--out <dir>` / `EVAL_OUT_DIR`); the bare default
+ * is refused so a scorecard can be produced in scratch without dirtying the tree.
+ * An explicit `--out research/eval-out` still regenerates the tracked scorecard on
+ * purpose — the guard refuses surprise, not intent.
+ * @returns {{ code: string, message: string } | null}
+ */
+export function evalOutRefusal(outDir, { explicit = false, repoRoot = ROOT } = {}) {
+  if (explicit) return null;
+  const rel = relative(repoRoot, outDir);
+  const insideRepo = rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  if (!insideRepo) return null;
+  return {
+    // RT_E_VALIDATION is the registered usage/config class (errors.ts) — no new
+    // registry row is invented here.
+    code: "RT_E_VALIDATION",
+    message:
+      `eval: refusing to write eval artifacts into the repo working tree by default (out=${outDir}). ` +
+      `It would rewrite tracked research/eval-out/** and leave \`git status\` dirty. ` +
+      `Re-run against a scratch dir: npm run eval -- --out <scratch-dir> (or set EVAL_OUT_DIR). ` +
+      `To regenerate the tracked scorecard on purpose: npm run eval -- --out research/eval-out.`,
+  };
+}
 /** RUN-SIDE GRADER DIR (W5-L5 / T-107.5). Per-case acceptance bars live in
  *  `<corpus>/graders/<slug>.grader.json` — run-side files read ONLY by this
  *  driver (EVAL_GRADER_DIR overrides for scratch/test corpora). They are never
@@ -2962,8 +3005,17 @@ async function main() {
     console.log("exit 0 — the probe reports; a failed probe is data, not a crash");
     process.exit(0);
   }
+  // W50 · 336-4: an UN-CHOSEN OUT_DIR inside the repo (the bare default) is
+  // refused BEFORE any write — the guard's message names both remedies. Preflight
+  // above writes nothing, so it is exempt; `--out` / EVAL_OUT_DIR are explicit.
+  const outRefusal = evalOutRefusal(OUT_DIR, { explicit: OUT_EXPLICIT });
+  if (outRefusal !== null) {
+    console.error(outRefusal.message);
+    process.exit(2);
+  }
   const mode = KEYED_OK ? "keyed" : "keyless";
   console.log(`rapidtool eval · mode=${mode}${KEYED && !KEYED_OK ? " (--keyed requested but DEEPSEEK_API_KEY unset — falling back to keyless)" : ""} · corpus=${CORPUS_DIR}`);
+  console.log(`out: ${OUT_DIR} (${OUT_EXPLICIT ? "--out / EVAL_OUT_DIR" : "default"})`);
   console.log(
     `graders: run-side acceptance bars under ${GRADER_DIR} (read by this driver only — never emitted into a project tree) · trials=${TRIALS}` +
       (TRIALS !== TRIALS_REQUESTED ? ` (--trials=${TRIALS_REQUESTED} invalid or over max ${MAX_TRIALS} → ${TRIALS})` : ""),

@@ -29,47 +29,61 @@ import { dirname, join, relative, resolve } from "node:path";
 import { isMainModule, projectRoot } from "./with-app-env.mjs";
 
 /**
- * The honest tail shared by every entry whose surface has no owner in the W45
- * lane table: it is RECORDED, not justified. An entry says why the module has
- * no test today, never that having no test is fine.
- */
-const UNCOVERED_NO_OWNER =
-  "reached by no test; uncovered and unowned in the W48 lane table — a test or an owner is owed (R9-f05), recorded so a regression cannot fall back to a silent exemption.";
-
-/**
- * Modules that are deliberately not covered, each with the reason a reviewer
- * needs. A NEW uncovered module (absent here) fails the guard; these entries
- * pin the gap R9-f05 already recorded so the guard is a ratchet, not a
- * blanket exemption. Entries may only be REMOVED by adding a real test.
+ * W50 · 336-6 correction: every entry below now states the HONEST reason it is
+ * here, and the three kinds are distinguishable:
+ *   · HARNESS-BLOCKED — the module is live but the node test harness physically
+ *     cannot load it (`.tsx` JSX, `import.meta.env`, extensionless relative
+ *     imports, TS parameter properties). Each reason names the exact blocker,
+ *     verified by importing the module under `node --experimental-strip-types`.
+ *   · NO CONSUMER — nothing in the repo imports the module (dead code, proposed
+ *     for removal; never deleted here because dead-code removal is the owner's
+ *     call).
+ *   · NO BEHAVIOUR — importable pure data whose only test would freeze a value.
+ *
+ * An entry says why the module has no test today, never that having no test is
+ * fine. A NEW uncovered module (absent here) still fails the guard; these
+ * entries pin the gap R9-f05 recorded so the guard is a ratchet, not a blanket
+ * exemption. Entries may only be REMOVED by adding a real test.
  */
 export const COVERAGE_ALLOWLIST = {
-  // --- R9-f05 T5.2-A honesty surface: CLOSED by W46 · 332-5 ---
-  // `fixtures.review.ts` + `fixtures.server.ts` are now reached by
-  // `src/lib/fixtures.review.test.ts`. Their allowlist entries were removed
-  // (the entries may only be removed by adding a real test) so a regression
-  // that orphans them again FAILS this guard instead of falling back to a
-  // recorded exemption.
-  // --- auth surface (14 modules; the R9-f05 "auth/* (8)" has grown) ---
-  "src/lib/auth/client.ts": `better-auth client. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/email-password.ts": `auth email/password flow. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/gate-session-marker.ts": `HITL gate session marker. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/gate-session.server.ts": `HITL gate session (server half). ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/gates.tsx": `auth gate components. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/middleware.ts": `auth middleware adapter. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/pglite-dialect.ts": `PGlite SQL dialect for better-auth. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/popup.server.ts": `auth popup server handler. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/preview.ts": `auth preview helper. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/provider.tsx": `auth React provider. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/providers.ts": `auth provider registry. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/server.ts": `auth server config. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/use-current-user.ts": `auth client hook. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/auth/verify.server.ts": `auth verification (server half). ${UNCOVERED_NO_OWNER}`,
+  // --- R9-f05 T5.2-A honesty surface: CLOSED by W46 · 332-5 (and by W50 · 336-6
+  // for db.ts / gate-session-marker.ts / providers.ts / preview.ts, whose real
+  // tests now reach them, so their entries are deleted — a regression that
+  // orphans them again FAILS this guard instead of falling back to an exemption).
+  // --- auth surface: HARNESS-BLOCKED (live; cannot be imported by the runner) ---
+  "src/lib/auth/client.ts":
+    "LIVE browser auth entry (imported by auth/gates.tsx, auth/use-current-user.ts, auth/middleware.ts). Harness-blocked: reads `import.meta.env.VITE_AUTH_ENABLED` at module load — a Vite-only transform; under plain Node the import throws `Cannot read properties of undefined (reading 'VITE_AUTH_ENABLED')`.",
+  "src/lib/auth/gate-session.server.ts":
+    "LIVE gate-session materializer (imported by auth/server.ts:40). Harness-blocked: its own relative imports omit the extension (`./gate-identity.server`, `./gate-session-marker`); Vite resolves them, but strip-only ESM fails with `Cannot find module`.",
+  "src/lib/auth/pglite-dialect.ts":
+    "LIVE Kysely dialect over PGlite (imported by auth/server.ts:42). Harness-blocked: constructor parameter properties (`constructor(private readonly …)`) are rejected by strip-only mode (`TypeScript parameter property is not supported in strip-only mode`); the test script does not pass --experimental-transform-types.",
+  "src/lib/auth/popup.server.ts":
+    "LIVE `/auth/popup` handler (loaded by the Vite `authPopupPlugin`, vite.config.ts:112 `ssrLoadModule`). Harness-blocked: transitively imports auth/server.ts, whose `./preview` specifier omits the extension.",
+  "src/lib/auth/server.ts":
+    "LIVE app Better Auth instance (reached at runtime via popup.server.ts / verify.server.ts). Harness-blocked: its relative import `\"./preview\"` (server.ts:48) omits the extension — Vite resolves it, strip-only ESM does not (`Cannot find module ./preview`). Adding the extension in that unowned file would make this module testable.",
+  "src/lib/auth/use-current-user.ts":
+    "LIVE client session hook (imported by auth/gates.tsx:6). Harness-blocked: imports auth/client.ts, which reads `import.meta.env` at load (Vite-only).",
+  "src/lib/auth/verify.server.ts":
+    "LIVE server-side session resolver (imported by auth/middleware.ts:42). Harness-blocked: transitively imports auth/server.ts, whose `./preview` import omits the extension.",
+  // --- auth surface: `.tsx` (JSX is outside the node runner) ---
+  "src/lib/auth/provider.tsx":
+    "LIVE app-root provider (imported by src/routes/__root.tsx:3). `.tsx`: `node --experimental-strip-types` refuses JSX files (`Unknown file extension \".tsx\"`) and test discovery is `*.test.ts` only.",
+  // --- auth surface: importable, but not a useful test target ---
+  "src/lib/auth/email-password.ts":
+    "LIVE email/password on/off switch (imported by auth/server.ts:39). Pure one-line flag: the only possible test freezes its value, which would fight the documented enable path (`emailAndPasswordEnabled = true`), so it is allowlisted rather than pinned.",
+  "src/lib/auth/gates.tsx":
+    "NO CONSUMER (precise scan: the only reference is a doc-comment example in auth/use-current-user.ts:49; no real import anywhere) AND `.tsx`, so the node runner cannot load it. Proposed: wire it to a route or remove it.",
+  "src/lib/auth/middleware.ts":
+    "LIVE-by-contract: `authMiddleware` is THE documented server-function wrapper, but ZERO importers in this repo (its only `import` is its own doc comment at :12). Importable, yet driving its behaviour needs the TanStack Start server runtime; a node test could only assert the export exists. Proposed: wire a real server function to it, or remove.",
+  "src/lib/error-component.tsx":
+    "LIVE router error/not-found boundary (imported by src/router.tsx:2 and src/routes/__root.tsx:4). `.tsx`: `node --experimental-strip-types` refuses JSX files and test discovery is `*.test.ts` only.",
   // --- the remainder R9-f05 named ---
-  "src/lib/app-data/index.ts": `client-safe app-data barrel (types + login helpers); the server-only halves are covered, this barrel has no importer — wire it to a consumer or delete it. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/db.ts": `server-only SQL/PGlite factory; no module imports it yet (the build/migrate path names it only in prose) — wire a consumer or delete it. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/error-component.tsx": `React error boundary; imported only by routes/router, which no test reaches (no client render harness in the repo). ${UNCOVERED_NO_OWNER}`,
-  "src/lib/multiplayer/index.ts": `barrel for the dormant P2P client; nothing imports it. ${UNCOVERED_NO_OWNER}`,
-  "src/lib/multiplayer/p2p.ts": `DORMANT by design (documented HONESTY header): no /api/rtc relay and no consumer ship today; keep as the relay contract and test it when a relay lands. ${UNCOVERED_NO_OWNER}`,
+  "src/lib/app-data/index.ts":
+    "NO CONSUMER: a barrel with ZERO importers (precise scan over src/, scripts/, vite.config.ts and every test — the only hit is this allowlist entry). Its re-exported members are already reached directly via app-data.test.ts. Proposed for deletion.",
+  "src/lib/multiplayer/index.ts":
+    "NO CONSUMER: a barrel with ZERO importers (it only re-exports the dormant multiplayer/p2p.ts). Proposed for deletion.",
+  "src/lib/multiplayer/p2p.ts":
+    "DORMANT by design (its own HONESTY header): no `/api/rtc` relay ships and no live consumer exists (its only importer is the dead multiplayer/index.ts barrel). Its WebRTC paths need RTCPeerConnection and `import.meta.env`, so no node test can drive them. Proposed: keep only as the relay contract, or remove.",
 };
 
 const SPEC_RE = /\b(?:from|import|require)\s*\(?\s*["']([^"']+)["']/g;

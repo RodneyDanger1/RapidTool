@@ -364,6 +364,39 @@ describe("geometricMonogram (deterministic floor)", () => {
     assert.notEqual(geometricMonogram("Acme Dispatch", 7), geometricMonogram("Acme Dispatch", 8));
   });
 
+  it("monogramInitials never exceeds 2 chars, so the fontSize ladder has no 3-char rung", () => {
+    // Every return path builds at most (first + last) or a 2-char fallback, so a
+    // `>= 3 ? 26` fontSize branch can never run. Pin the invariant AND the
+    // observable mapping so a 3-char rung cannot be reintroduced unexercised.
+    const corpus = [
+      "Acme Dispatch",
+      "Nexus",
+      "",
+      "   ",
+      "A",
+      "a-b_c.d",
+      "one two three four",
+      "ACME",
+      "123 456",
+      "!@#$%",
+    ];
+    for (const name of corpus) {
+      const initials = monogramInitials(name);
+      assert.ok(
+        initials.length >= 1 && initials.length <= 2,
+        `${JSON.stringify(name)} -> ${JSON.stringify(initials)} (${initials.length} chars)`,
+      );
+    }
+    assert.ok(geometricMonogram("Nexus", 0).includes('font-size="46"'), "1 char -> 46");
+    assert.ok(geometricMonogram("Acme Dispatch", 0).includes('font-size="34"'), "2 chars -> 34");
+    for (const name of corpus) {
+      assert.ok(
+        !geometricMonogram(name, 0).includes('font-size="26"'),
+        `${JSON.stringify(name)} hits the unreachable 3-char fontSize branch`,
+      );
+    }
+  });
+
   it("renders initials, seeded geometry, and project-palette colors", () => {
     assert.equal(monogramInitials("Acme Dispatch"), "AD");
     assert.equal(monogramInitials("Nexus"), "N");

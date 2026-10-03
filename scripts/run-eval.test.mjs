@@ -20,6 +20,7 @@ import {
   drainPipeline,
   emitEvalRunRow,
   endTrialCallTap,
+  evalOutRefusal,
   finishRunMarker,
   formatFundednessLines,
   formatPreflightLines,
@@ -1674,5 +1675,66 @@ test("W44 A5 — the empty-corpus results.json writer is atomic and keeps the le
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// W50 · 336-4 (Switchboard) — the eval OUT_DIR safety guard. `npm run eval`
+// used to default OUT_DIR to the TRACKED research/eval-out/** and rewrite it in
+// place, so the scorecard could not be produced without dirtying the tree.
+// `evalOutRefusal` refuses an UN-CHOSEN in-repo OUT_DIR and allows an explicit
+// `--out`/EVAL_OUT_DIR (including the tracked dir on purpose). The pure decision
+// is RED-first: before the guard existed this export (and the call) were absent.
+// ---------------------------------------------------------------------------
+test("W50 336-4 — evalOutRefusal refuses an un-chosen in-repo OUT_DIR and allows explicit/outside", () => {
+  const tracked = join(ROOT, "research", "eval-out");
+  const refusal = evalOutRefusal(tracked, { explicit: false, repoRoot: ROOT });
+  assert.ok(refusal && typeof refusal.message === "string" && refusal.code === "RT_E_VALIDATION");
+  assert.match(refusal.message, /git status/, "the refusal names the dirty-tree consequence");
+  assert.match(refusal.message, /--out/, "the refusal names the --out remedy");
+  assert.match(refusal.message, /EVAL_OUT_DIR/, "the refusal names the env remedy");
+  // An EXPLICIT choice of the same tracked dir is allowed — the guard refuses
+  // surprise, not intent (regenerating the tracked scorecard is a real action).
+  assert.equal(evalOutRefusal(tracked, { explicit: true, repoRoot: ROOT }), null);
+  // A dir OUTSIDE the repo needs no opt-in, even without explicit naming.
+  assert.equal(evalOutRefusal(join(tmpdir(), "rapidtool-eval-out"), { explicit: false, repoRoot: ROOT }), null);
+  // A sibling sharing a name prefix is NOT inside the repo (relative() must be used).
+  assert.equal(evalOutRefusal(`${ROOT}-sibling`, { explicit: false, repoRoot: ROOT }), null);
+});
+
+test("W50 336-4 — `--out` directs the artifacts and WINS over EVAL_OUT_DIR (env dir stays empty)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rapidtool-3364-out-"));
+  const corpus = join(dir, "emptycorpus");
+  const envOut = join(dir, "env-out");
+  const argOut = join(dir, "arg-out");
+  mkdirSync(corpus, { recursive: true });
+  try {
+    /** @type {Record<string, string | undefined>} */
+    const env = { ...process.env, EVAL_CORPUS_DIR: corpus, EVAL_OUT_DIR: envOut };
+    delete env.DEEPSEEK_API_KEY;
+    const res = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", fileURLToPath(new URL("./run-eval.mjs", import.meta.url)), `--out=${argOut}`],
+      { cwd: dir, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(res.status, 0, `--out must run: exit 0.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+    assert.ok(existsSync(join(argOut, "results.json")), "--out=<dir> must receive results.json");
+    assert.equal(
+      existsSync(join(envOut, "results.json")),
+      false,
+      "--out must WIN over EVAL_OUT_DIR — the env dir must stay empty",
+    );
+    assert.match(res.stdout, /out: .*(arg-out)/, "the run names the effective out dir it used");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("W50 336-4 — main() invokes the OUT_DIR guard before any write (source pin)", () => {
+  const src = readFileSync(new URL("./run-eval.mjs", import.meta.url), "utf8");
+  assert.match(src, /const outRefusal = evalOutRefusal\(OUT_DIR, \{ explicit: OUT_EXPLICIT \}\);/);
+  assert.match(src, /console\.error\(outRefusal\.message\);\s*\n\s*process\.exit\(2\);/);
+  // --out is parsed (and beats the env) before OUT_DIR is computed.
+  assert.match(src, /const OUT_ARG = /);
+  assert.match(src, /const OUT_DIR = OUT_ARG !== null \? resolve\(OUT_ARG\) : process\.env\.EVAL_OUT_DIR/);
 });
 
