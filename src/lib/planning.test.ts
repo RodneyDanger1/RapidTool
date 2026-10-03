@@ -76,6 +76,28 @@ describe("planSteps (createPlanning factory)", () => {
     assert.deepEqual(res.plan.steps, res.steps);
   });
 
+  it("marks an over-long model id's truncation instead of silently reshaping it", async () => {
+    // The action/why fields cut with TRUNC_MARK ("a cut is never silent"); the
+    // id used a bare slice, so a 60-char id became a 48-char id a consumer
+    // could not tell from a genuine one. Deterministic: same reply → same id.
+    const longId = "z".repeat(60);
+    const { completer } = scripted([
+      okText(JSON.stringify({ steps: [{ id: longId, action: "gather contracts", why: "grounding" }] })),
+    ]);
+    const api = createPlanning(completer);
+    const res = await api.planSteps(GOAL, CONTEXT);
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    const id = res.steps[0].id;
+    assert.ok(id.length <= 48, `id stays within the cap (got ${id.length})`);
+    assert.ok(id.includes("…[TRUNCATED]"), `the cut is marked, got ${JSON.stringify(id)}`);
+    assert.notEqual(id, longId.slice(0, 48));
+    const again = await createPlanning(scripted([
+      okText(JSON.stringify({ steps: [{ id: longId, action: "gather contracts", why: "grounding" }] })),
+    ]).completer).planSteps(GOAL, CONTEXT);
+    assert.equal(again.ok && again.steps[0].id, id, "deterministic across runs");
+  });
+
   it("caps the plan at the requested step count", async () => {
     const { completer } = scripted([okText(VALID_PLAN_JSON)]);
     const api = createPlanning(completer);

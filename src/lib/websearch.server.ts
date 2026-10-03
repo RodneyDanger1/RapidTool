@@ -343,13 +343,18 @@ async function wikipediaSearch(
   return results
     .filter((r) => r !== null && typeof r === "object")
     .slice(0, maxResults)
-    .map((r) => ({
-      title: typeof r.title === "string" ? r.title : "",
-      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(
-        (r.title ?? "").replace(/ /g, "_"),
-      )}`,
-      content: typeof r.snippet === "string" ? stripHtml(r.snippet) : "",
-    }));
+    .map((r) => {
+      // 337-3: guard the title ONCE for both uses — `(r.title ?? "")` returns a
+      // non-string value as-is (e.g. a number), so `.replace` threw a TypeError
+      // that failed the last-resort Wikipedia provider, inconsistent with the
+      // snippet read below and with this function's own hostile-input posture.
+      const title = typeof r.title === "string" ? r.title : "";
+      return {
+        title,
+        url: `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`,
+        content: typeof r.snippet === "string" ? stripHtml(r.snippet) : "",
+      };
+    });
 }
 
 /**

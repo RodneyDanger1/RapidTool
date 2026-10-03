@@ -278,6 +278,38 @@ describe("runSandboxed", () => {
     assert.equal(res.detail, "worker unavailable");
   });
 
+  // 337-3 Trust: if createObjectURL succeeds and the factory then throws, the
+  // catch returned without revoking the blob URL (small leak on the failure
+  // path). The URL API is stubbed so the assertions are deterministic.
+  it("revokes the blob URL when the worker factory throws", async () => {
+    const realCreate = URL.createObjectURL;
+    const realRevoke = URL.revokeObjectURL;
+    let created = 0;
+    let revoked = 0;
+    try {
+      URL.createObjectURL = (() => {
+        created += 1;
+        return "blob:test-worker";
+      }) as typeof URL.createObjectURL;
+      URL.revokeObjectURL = (() => {
+        revoked += 1;
+      }) as typeof URL.revokeObjectURL;
+      const res = await runSandboxed("whatever();", {
+        timeoutMs: 100,
+        workerFactory: () => {
+          throw new Error("factory boom");
+        },
+      });
+      assert.equal(res.ok, false);
+      assert.equal(res.detail, "worker unavailable");
+      assert.equal(created, 1, "the blob URL was created");
+      assert.equal(revoked, 1, "and must be revoked when the worker factory throws");
+    } finally {
+      URL.createObjectURL = realCreate;
+      URL.revokeObjectURL = realRevoke;
+    }
+  });
+
   it("happy path: template module passes inside the worker", async () => {
     const code = buildPhase6Module({ name: "demo", jobs: ["job-a"] });
     const worker = fakeWorker("eval");
@@ -387,6 +419,19 @@ describe("verifyClaims (post-hoc claim gates)", () => {
     const r = verifyClaims([null, { kind: "file-exists" }] as unknown as ClaimRow[], {});
     assert.equal(r.ok, false);
     assert.equal(r.unmet.length, 2);
+  });
+
+  // 337-3 Trust: `kind` and `target` are validated, but `c.expect.toLowerCase()`
+  // was called unguarded, so a hostile contains-identifier claim with a
+  // non-string expect threw out of a function documented pure/hostile-tolerant.
+  it("a non-string expect on a contains-identifier claim is unmet, never a throw", () => {
+    const r = verifyClaims(
+      [{ kind: "contains-identifier", target: "src/generated.ts", expect: 42 }] as unknown as ClaimRow[],
+      artifacts,
+    );
+    assert.equal(r.ok, false);
+    assert.equal(r.unmet.length, 1);
+    assert.match(r.unmet[0]!, /malformed claim row/);
   });
 });
 

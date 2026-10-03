@@ -271,3 +271,36 @@ describe("foreign-shape guards (W40 N1)", () => {
     assert.equal(applyVerifyOutcome(p, {} as never), p);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 337-3 Trust — the P0-09 dedupe hash must separate its two inputs. The hash
+// is fnv1a(finalSource + evidence): without a boundary between the fields two
+// DIFFERENT verified outcomes whose concatenation is equal (("ab","c") vs
+// ("a","bc") → "abc") mint the same evidenceHash, and the second — a genuinely
+// different machine-verified source — is dropped as a "duplicate" of the first.
+// ---------------------------------------------------------------------------
+
+describe("applyVerifyOutcome — the evidence hash is boundary-safe", () => {
+  it("a different verified source is never dropped as a duplicate of an unrelated one", () => {
+    const p = seedProject();
+    const first = applyVerifyOutcome(p, {
+      status: "passed",
+      iterations: 1,
+      evidence: "DEF",
+      finalSource: "abc",
+    });
+    assert.equal(first.generatedSource, "abc");
+    assert.equal((first.lastTest as { label?: string } | null)?.label, "tested", "the first verdict stamps tested");
+
+    // finalSource + evidence concatenate to the SAME string as the first
+    // outcome ("abc" + "DEF" === "abcD" + "EF"), but the parts differ.
+    const second = applyVerifyOutcome(first, {
+      status: "passed",
+      iterations: 1,
+      evidence: "EF",
+      finalSource: "abcD",
+    });
+    assert.notEqual(second, first, "a different verified outcome is not a duplicate");
+    assert.equal(second.generatedSource, "abcD", "the second verified source must be applied, not swallowed");
+  });
+});

@@ -8,8 +8,15 @@
  *    downgrade the parent page could otherwise drive in-app navigation.
  *  - Loopback (`localhost`, `127.0.0.1`, `[::1]`) — HTTP allowed, because a
  *    local Grok dev harness embedding the app has no TLS.
- *  - Sandbox guest pages (`*.grok-sandbox.com`) may additionally be paired
- *    with a same-suffix parent host (see isRemintPreviewPair).
+ *  - A sandbox guest page (`*.grok-sandbox.com` — the host this app is served
+ *    on inside the Grok live preview; see auth/preview.ts) additionally trusts
+ *    its DIRECT parent frame for ANY http(s) origin: the sandbox wrapper is the
+ *    embedder, and the grok.com/loopback allowlist cannot name it. A
+ *    `*.preview.<domain>` guest may instead be paired with `<domain>` or
+ *    `grok.<domain>` (isRemintPreviewPair). The per-message gate — event.source
+ *    === window.parent AND event.origin === the origin resolved here — lives in
+ *    preview-host-bridge.ts, and is what bounds an arbitrary direct parent to
+ *    navigation/location messages.
  */
 
 export function isGrokEmbedderOrigin(origin: string): boolean {

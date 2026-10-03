@@ -143,6 +143,25 @@ describe("freeWebSearch", () => {
     }
   });
 
+  it("a non-string Wikipedia title is hardened, never a TypeError that kills the last-resort provider", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("duckduckgo")) return htmlResponse("no results");
+      if (u.includes("searx")) return jsonResponse({ results: [] });
+      if (u.includes("prop=extracts")) return jsonResponse({ query: { pages: {} } });
+      // Hostile shape: a present title that is not a string. The sibling field
+      // read (`snippet`) is already guarded; the URL derivation must be too.
+      return jsonResponse({ query: { search: [{ title: 42, snippet: "s" }] } });
+    }) as SearchFetch;
+
+    const res = await freeWebSearch("logistics", { ...FAST, fetchImpl });
+    assert.equal(res.ok, true, "the Wikipedia provider must survive a malformed title");
+    if (res.ok) {
+      assert.equal(res.provider, "wikipedia");
+      assert.equal(res.items[0].title, "");
+    }
+  });
+
   it("enriches the top Wikipedia hits with their real intro extract", async () => {
     const fetchImpl = (async (url: unknown) => {
       const u = String(url);

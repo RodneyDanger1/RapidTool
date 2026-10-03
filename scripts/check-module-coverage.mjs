@@ -32,8 +32,9 @@ import { isMainModule, projectRoot } from "./with-app-env.mjs";
  * W50 · 336-6 correction: every entry below now states the HONEST reason it is
  * here, and the three kinds are distinguishable:
  *   · HARNESS-BLOCKED — the module is live but the node test harness physically
- *     cannot load it (`.tsx` JSX, `import.meta.env`, extensionless relative
- *     imports, TS parameter properties). Each reason names the exact blocker,
+ *     cannot load it (`.tsx` JSX, `import.meta.env`; the extensionless-relative-
+ *     import and TS-parameter-property classes were cleared in W51 · 337-2, so
+ *     they no longer appear here). Each reason names the exact blocker,
  *     verified by importing the module under `node --experimental-strip-types`.
  *   · NO CONSUMER — nothing in the repo imports the module (dead code, proposed
  *     for removal; never deleted here because dead-code removal is the owner's
@@ -50,21 +51,24 @@ export const COVERAGE_ALLOWLIST = {
   // for db.ts / gate-session-marker.ts / providers.ts / preview.ts, whose real
   // tests now reach them, so their entries are deleted — a regression that
   // orphans them again FAILS this guard instead of falling back to an exemption).
-  // --- auth surface: HARNESS-BLOCKED (live; cannot be imported by the runner) ---
+  // --- auth surface: live; mixed classes. client.ts / use-current-user.ts read
+  //     `import.meta.env` (still harness-blocked); the five W51 · 337-2 entries
+  //     below are NOW node-loadable but have no driveable behaviour in the
+  //     harness — their old blocker text was true until W51 and is corrected.
   "src/lib/auth/client.ts":
     "LIVE browser auth entry (imported by auth/gates.tsx, auth/use-current-user.ts, auth/middleware.ts). Harness-blocked: reads `import.meta.env.VITE_AUTH_ENABLED` at module load — a Vite-only transform; under plain Node the import throws `Cannot read properties of undefined (reading 'VITE_AUTH_ENABLED')`.",
   "src/lib/auth/gate-session.server.ts":
-    "LIVE gate-session materializer (imported by auth/server.ts:40). Harness-blocked: its own relative imports omit the extension (`./gate-identity.server`, `./gate-session-marker`); Vite resolves them, but strip-only ESM fails with `Cannot find module`.",
+    "LIVE Better Auth gate-session plugin (imported by auth/server.ts:40). NOW NODE-LOADABLE — W51 · 337-2 added the missing `.ts` to its two relative imports; verified by importing it under `node --experimental-strip-types` (exit 0). No test drives it: exercising `gateIdentitySessions()` needs a live Better Auth `/get-session` request context the node harness does not provide.",
   "src/lib/auth/pglite-dialect.ts":
-    "LIVE Kysely dialect over PGlite (imported by auth/server.ts:42). Harness-blocked: constructor parameter properties (`constructor(private readonly …)`) are rejected by strip-only mode (`TypeScript parameter property is not supported in strip-only mode`); the test script does not pass --experimental-transform-types.",
+    "LIVE Kysely dialect over PGlite (imported by auth/server.ts:42). NOW NODE-LOADABLE — W51 · 337-2 replaced its constructor parameter properties with explicit field assignments; verified by import under `node --experimental-strip-types` (exit 0). No test drives it: a behavioural test needs a PGlite instance, and db.ts's PGlite branch calls Vite's `import.meta.glob` (absent under plain Node).",
   "src/lib/auth/popup.server.ts":
-    "LIVE `/auth/popup` handler (loaded by the Vite `authPopupPlugin`, vite.config.ts:112 `ssrLoadModule`). Harness-blocked: transitively imports auth/server.ts, whose `./preview` specifier omits the extension.",
+    "LIVE `/auth/popup` handler (loaded by the Vite `authPopupPlugin`, vite.config.ts:112 `ssrLoadModule`). NOW NODE-LOADABLE — W51 · 337-2 fixed the transitive `auth/server.ts` `./preview` specifier; verified by import under `node --experimental-strip-types` (exit 0). No test drives it: `handleAuthPopupRequest` calls `auth.api.signInWithOAuth2` (a live Better Auth backend + network).",
   "src/lib/auth/server.ts":
-    "LIVE app Better Auth instance (reached at runtime via popup.server.ts / verify.server.ts). Harness-blocked: its relative import `\"./preview\"` (server.ts:48) omits the extension — Vite resolves it, strip-only ESM does not (`Cannot find module ./preview`). Adding the extension in that unowned file would make this module testable.",
+    "LIVE app Better Auth instance (reached at runtime via popup.server.ts / verify.server.ts). NOW NODE-LOADABLE — W51 · 337-2 added `.ts` to the `\"./preview\"`/`\"./providers\"` specifiers and removed pglite-dialect's parameter properties; verified by import under `node --experimental-strip-types` (exit 0). No test drives it: asserting `betterAuth({…})` behaviour needs a live database + broker.",
   "src/lib/auth/use-current-user.ts":
     "LIVE client session hook (imported by auth/gates.tsx:6). Harness-blocked: imports auth/client.ts, which reads `import.meta.env` at load (Vite-only).",
   "src/lib/auth/verify.server.ts":
-    "LIVE server-side session resolver (imported by auth/middleware.ts:42). Harness-blocked: transitively imports auth/server.ts, whose `./preview` import omits the extension.",
+    "LIVE server-side session resolver (imported by auth/middleware.ts:42). NOW NODE-LOADABLE — W51 · 337-2 fixed the transitive `auth/server.ts` `./preview` specifier; verified by import under `node --experimental-strip-types` (exit 0). No test drives it: `getSessionUser`/`requireUserId` need the TanStack Start request context (`getRequest()`), absent in the node harness.",
   // --- auth surface: `.tsx` (JSX is outside the node runner) ---
   "src/lib/auth/provider.tsx":
     "LIVE app-root provider (imported by src/routes/__root.tsx:3). `.tsx`: `node --experimental-strip-types` refuses JSX files (`Unknown file extension \".tsx\"`) and test discovery is `*.test.ts` only.",

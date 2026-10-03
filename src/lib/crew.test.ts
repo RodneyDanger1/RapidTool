@@ -305,6 +305,26 @@ describe("runCrew plan-act mode", () => {
     assert.equal(res.messages.filter((m) => m.role !== "reviewer")[0].content, "Executed step 1 (s1).");
     assert.equal(res.stopped, "max-steps");
   });
+
+  it("uses the VALIDATED role table for a non-array `roles` payload (hostile wire shape)", async () => {
+    // A hostile server-fn payload can carry `roles` as a bare string. The
+    // override parser reads that as "no override" (not an error), so plan-act
+    // must fall back to the phase table — not index the string's characters
+    // into ROLE_SPECS (`spec.budgetTokens` threw a TypeError that the client
+    // wrapper mislabeled RT_E_INTERNAL). Default mode already handled it.
+    const crew = createCrew(routedCompleter({ turn: (n) => stepEnvelope(n - 1, `s${n - 1}`) }));
+    const hostile = { mode: "plan-act", phase: 6, live: false, roles: "coder" } as unknown as Parameters<
+      typeof crew.runCrew
+    >[1];
+    const res = await crew.runCrew(seededProject(), hostile);
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    // Falls back to the P6 table (coder → tester), never a thrown TypeError.
+    assert.deepEqual(
+      res.messages.filter((m) => m.role !== "reviewer").map((m) => m.role),
+      ["coder", "tester"],
+    );
+  });
 });
 
 describe("runCrew default mode regression", () => {

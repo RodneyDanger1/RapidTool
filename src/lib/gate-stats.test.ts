@@ -128,6 +128,31 @@ describe("approvalHealth", () => {
     assert.equal(h.flag, "ok");
   });
 
+  it("applies the 20 s fast/rubber boundary to the RAW mean, never the rounded display value", () => {
+    // 19 999 + 20 000 + 20 000 = 59 999 → raw mean 19 999.67 s < 20 s. The
+    // displayed mean rounds to 20 000; judging the flag off the rounded value
+    // read "ok" for a run whose true mean is under the bar.
+    const under = [
+      decision({ decidedAt: now, requestedAt: now - 19_999 }),
+      decision({ decidedAt: now - 1, requestedAt: now - 1 - 20_000 }),
+      decision({ decidedAt: now - 2, requestedAt: now - 2 - 20_000 }),
+    ];
+    const hUnder = approvalHealth(under);
+    assert.equal(hUnder.meanLatencyMs, 20000, "the displayed mean rounds up");
+    assert.equal(hUnder.flag, "rubber", "raw mean 19 999.67 < 20 s ⇒ rubber (zero rejects)");
+
+    // 20 001 + 20 000 + 20 000 = 60 001 → raw mean 20 000.33 s ≥ 20 s. The
+    // displayed mean rounds DOWN to 20 000, which used to read "fast".
+    const over = [
+      decision({ decidedAt: now, requestedAt: now - 20_001 }),
+      decision({ decidedAt: now - 1, requestedAt: now - 1 - 20_000 }),
+      decision({ decidedAt: now - 2, requestedAt: now - 2 - 20_000 }),
+    ];
+    const hOver = approvalHealth(over);
+    assert.equal(hOver.meanLatencyMs, 20000, "the displayed mean rounds down");
+    assert.equal(hOver.flag, "ok", "raw mean 20 000.33 ≥ 20 s ⇒ not fast");
+  });
+
   it("window excludes stale decisions (window over decidedAt)", () => {
     const fresh = approvals(3, 5000, now); // inside default 7-day window
     const stale = approvals(3, 4000, now - 8 * 24 * 3600 * 1000); // 8 days old

@@ -22,6 +22,7 @@ import {
   ingest,
   keyedTrailOutcome,
   loadProject,
+  nextAction,
   p6CycleLiveDeps,
   packet,
   promoteEmittedTreeTested,
@@ -49,6 +50,7 @@ import type { ApproveActor, P6JourneyCycleContext } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
 import { runGate } from "./dod.ts";
 import { IMPORT_MAX_CHARS, importProject } from "./io.ts";
+import { checkpointPath, readCheckpoint } from "./checkpoint.server.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { recordSessionSpend, resetSessionBudget, sessionTokenBudget } from "./token-ledger.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
@@ -513,6 +515,22 @@ describe("packet / exportJson / summary", () => {
     assert.equal(s.sealedWithFailures, false);
     // and it survives JSON serialization
     assert.doesNotThrow(() => JSON.stringify(s));
+  });
+
+  it("A20: nextAction reads the current edge's record by ID, not array position", () => {
+    // A reordered phases array is not something hydrate produces, but
+    // nextAction is an exported wire surface: positional indexing read some
+    // OTHER phase's status as the current edge's (P12's locked record at
+    // index 0), missing the running arm entirely.
+    const p = createProject({ brief: FIXTURE_BRIEF });
+    const running = p.phases.map((r) => (r.id === 0 ? { ...r, status: "running" as const } : r));
+    const reordered = [...running].reverse();
+    assert.equal(nextAction({ ...p, phases: reordered }).kind, "running");
+    // The rejected arm reads positionally too — same law.
+    const rejected = p.phases.map((r) => (r.id === 0 ? { ...r, status: "rejected" as const } : r));
+    const rejectedAction = nextAction({ ...p, phases: [...rejected].reverse() });
+    assert.equal(rejectedAction.kind, "run");
+    assert.match(rejectedAction.why, /rejected/, "the rejected arm is named, not the generic default");
   });
 });
 
@@ -3922,6 +3940,80 @@ describe("W50 · 336-2 — the minted record's own packet describes the mint", (
       assert.equal((rec.lastTest as { evidenceHash?: string } | null)?.evidenceHash, hash, "the emitted record carries the refreshed hash");
       assert.ok(rec.packet.includes(hash!), "the emitted record's own packet names the refreshed hash");
       assert.equal(rec.packet, compileAgentPacket(prom.project), "the promoted record's packet agrees with a fresh compile");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W51/337-1 (336-2 §9.4) — the `repair` verb refreshes the run checkpoint.
+// `repairTreeDir` mutates generatedTree / lastTest / the P6 gate without
+// necessarily growing a bounded array, so the supersession growth axis alone
+// cannot prove a stale snapshot is behind the file; the CLI passes the project
+// dir and the repair now writes (or, on a terminal seal, clears) the snapshot
+// exactly like runUntilGate.
+// ---------------------------------------------------------------------------
+describe("W51/337-1 — repairTreeDir refresh the run checkpoint (336-2 §9.4)", () => {
+  const emptyCompile = { ok: false, dir: "", checked: 0, passed: 0, failed: 1, skipped: 0, verdicts: [] };
+  const greenVerdict: TreeRunOutcome = {
+    ok: true,
+    dir: "",
+    compile: { ...emptyCompile, ok: true, failed: 0, passed: 1, checked: 1 },
+    tests: [
+      { file: "tests/oracle.spec.ts", compile: "pass", run: "pass", tests: { pass: 1, fail: 0 }, detail: "1 passed" },
+    ],
+    run: { kind: "library", run: "skip", detail: "no entry to smoke" },
+  };
+
+  it("writes a resumable snapshot carrying the repaired ledger when given a checkpointDir", async () => {
+    const dir = tempDir();
+    const cpDir = tempDir();
+    try {
+      mkdirSync(join(dir, "src", "generated"), { recursive: true });
+      writeFileSync(join(dir, "src", "generated", "hvac.ts"), "export const hvac = () => 1;\n");
+      // Parked at P6 (not complete) so the repair's post-work exit takes the
+      // WRITE arm, not the terminal-seal clear arm.
+      const base = parkAt(createProject({ brief: FIXTURE_BRIEF }), 6);
+      const candidate: Project = {
+        ...base,
+        generatedTree: [{ path: "src/generated/hvac.ts", source: "export const hvac = () => 1;", hash: "f1", attempt: 0 }],
+      };
+      assert.equal(readCheckpoint(cpDir).ok, false, "no snapshot before the repair");
+      const res = await repairTreeDir(candidate, dir, {
+        checkpointDir: cpDir,
+        deps: { runTree: async () => greenVerdict },
+      });
+      const cp = readCheckpoint(cpDir);
+      assert.equal(cp.ok, true, "the repair wrote a resumable snapshot (336-2 §9.4)");
+      if (cp.ok) {
+        assert.equal(cp.checkpoint.run.phase, res.project.currentPhase, "the snapshot re-enters at the repaired edge");
+        assert.equal(cp.checkpoint.project.id, res.project.id);
+        const snapTree = cp.checkpoint.project.generatedTree ?? [];
+        assert.equal(snapTree.length, 1, "the snapshot carries the repaired tree, not a hollow copy");
+        assert.equal(snapTree[0]?.path, "src/generated/hvac.ts");
+        // The re-import refreshed the row hash from the on-disk bytes — the
+        // repair really changed the ledger, which is why the snapshot matters.
+        assert.notEqual(snapTree[0]?.hash, "f1", "the imported hash is the on-disk truth");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(cpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("without a checkpointDir the repair writes nothing (legacy bytes preserved)", async () => {
+    const dir = tempDir();
+    try {
+      mkdirSync(join(dir, "src", "generated"), { recursive: true });
+      writeFileSync(join(dir, "src", "generated", "hvac.ts"), "export const hvac = () => 1;\n");
+      const base = parkAt(createProject({ brief: FIXTURE_BRIEF }), 6);
+      const candidate: Project = {
+        ...base,
+        generatedTree: [{ path: "src/generated/hvac.ts", source: "export const hvac = () => 1;", hash: "f1", attempt: 0 }],
+      };
+      await repairTreeDir(candidate, dir, { deps: { runTree: async () => greenVerdict } });
+      assert.equal(existsSync(checkpointPath(dir)), false, "no dir ⇒ no checkpoint, nowhere on disk");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -164,7 +164,15 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
   const passed = outcome.status === "passed";
   const now = Date.now();
   const evidence = typeof outcome.evidence === "string" ? outcome.evidence : "";
-  const evidenceHash = String(fnv1a(`${outcome.finalSource ?? ""}${evidence}`));
+  // The hash must separate its two inputs: concatenating finalSource+evidence
+  // without a boundary let two different verified outcomes (("ab","c") vs
+  // ("a","bc") → "abc") mint the same stamp, so the second was dropped as a
+  // "duplicate" and the record kept the first source. \u0002 is the repo's
+  // row-hash separator (packet.ts packetInputHash); it names the boundary for
+  // every input the verifier produces. (A field that itself contained \u0002
+  // stays theoretically ambiguous — a length prefix would be strictly safer —
+  // but no verifier output carries one.)
+  const evidenceHash = String(fnv1a(`${outcome.finalSource ?? ""}\u0002${evidence}`));
   // P0-09 dedupe (23 CAVEAT-2): same-hash re-apply is a no-op (same reference).
   const prior = project.lastTest as { label?: string; evidenceHash?: string } | null;
   if (passed && prior?.label === "tested" && prior.evidenceHash === evidenceHash) {

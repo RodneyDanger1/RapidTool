@@ -366,23 +366,27 @@ export function checkEntryContract(
       detail: hit ? `emitted: ${row.path}` : `absent from the emitted tree: ${row.path}`,
     });
   }
+  // `pending` was the pre-U1 never-evaluated status; no row produces it now
+  // (parseGrader rejects a runtime row that names nothing to evaluate), so the
+  // counter is structurally 0.
+  const pending = rows.filter((r) => (r.status as string) === "pending").length;
   return {
     declared: rows.length,
     rows,
     passed: rows.filter((r) => r.status === "pass").length,
     failed: rows.filter((r) => r.status === "fail").length,
-    // `pending` was the pre-U1 never-evaluated status; no row produces it now
-    // (parseGrader rejects a runtime row that names nothing to evaluate). The
-    // counter stays so the record shape and `complete` cannot silently rot.
-    pending: rows.filter((r) => (r.status as string) === "pending").length,
+    pending,
     uiShell: rows.filter((r) => r.status === "ui-shell").length,
     // ok = no row FAILED — a ui-shell structural skip is not a failure (the
     // same reading treeRun's entryGreen applies to a ui-shell entry).
     ok: rows.every((r) => r.status !== "fail"),
-    // complete = no runtime row still awaits evidence. A ui-shell row is
-    // TERMINAL (a verified structural skip), so it never keeps `complete`
-    // false for a webapp/game tree.
-    complete: rows.every((r) => (r.status as string) !== "pending"),
+    // complete = something WAS declared AND no runtime row still awaits evidence.
+    // 337-3: `rows.every(... !== "pending")` was vacuously true for every
+    // contract — including an empty declaration — so `complete` could never be
+    // false (a verifier that cannot fail). The zero-row case is exactly the
+    // state that must not read as a completeness claim; a ui-shell row stays
+    // TERMINAL, so it never keeps `complete` false for a webapp/game tree.
+    complete: rows.length > 0 && pending === 0,
     note: rows.length === 0 ? 'no expectedBehavior rows declared (v1 grader — the verification label reads "files+content only")' : null,
   };
 }

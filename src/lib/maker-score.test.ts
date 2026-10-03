@@ -431,6 +431,20 @@ describe("M3 iterates", () => {
   test("no journey evidence and no gate scores 0", () => {
     assert.equal(m3Iterates(input()).score, 0);
   });
+
+  // 337-3 Trust: m2/m4 read every optional hash through `typeof`; m3 did not,
+  // so a gate that is not the typed PhaseRecord.gate shape (no evidenceHash)
+  // crashed the whole rubric with a TypeError instead of returning a criterion.
+  test("a green P6 gate without an evidenceHash is read defensively, never crashing the scorer", () => {
+    const p = project({
+      phases: [{ id: 6, status: "complete", gate: { passed: true, unmet: [], checkedAt: 1 } }],
+      lastTest: { ok: true, detail: "self-test", label: "self-test" },
+    });
+    const c = m3Iterates(input({ project: p, journey: { outcome: "keyless", cycles: 0, budget: 3 } }));
+    assert.equal(c.score, 1, "a green gate + ok lastTest still derives convergence");
+    assert.match(c.evidence, /no hash/);
+    assert.doesNotMatch(c.evidence, /undefined/);
+  });
 });
 
 // ---------------------------------------------------------------------------

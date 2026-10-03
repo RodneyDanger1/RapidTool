@@ -8,8 +8,8 @@ import {
   gateIdentityFromHeaders,
   gateIdentityUserInfo,
   sessionBoundToGateIdentity,
-} from "./gate-identity.server";
-import { GATE_SESSION_MARKER_COOKIE } from "./gate-session-marker";
+} from "./gate-identity.server.ts";
+import { GATE_SESSION_MARKER_COOKIE } from "./gate-session-marker.ts";
 
 export const GATE_PROVIDER_ID = "grok-gate";
 const GATE_ACCOUNT_ISSUER = "https://grok.com";

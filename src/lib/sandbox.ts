@@ -473,6 +473,16 @@ export async function runSandboxed(
     }
     worker = workerFactory(blobUrl ?? "blob:sandbox-worker");
   } catch {
+    // 337-3: the URL was created before the factory ran; a throwing factory
+    // used to return here without revoking it (blob-URL leak on the failure
+    // path). Best-effort, same posture as the settle path below.
+    if (blobUrl !== null) {
+      try {
+        URL.revokeObjectURL(blobUrl);
+      } catch {
+        // Blob URLs unsupported (odd host) — nothing to revoke.
+      }
+    }
     return { ok: false, detail: "worker unavailable" };
   }
   const id = ++sandboxRunId;
@@ -563,6 +573,13 @@ export function verifyClaims(
         break;
       }
       case "contains-identifier": {
+        // 337-3: `expect` is part of the claim shape the kind requires — a
+        // non-string is a malformed row (unmet), never a TypeError out of this
+        // function's documented pure/hostile-tolerant contract.
+        if (typeof c.expect !== "string") {
+          unmet.push(`malformed claim row (no expect): ${JSON.stringify(c)}`);
+          break;
+        }
         if (content === undefined) {
           unmet.push(`missing file: ${c.target}`);
           break;

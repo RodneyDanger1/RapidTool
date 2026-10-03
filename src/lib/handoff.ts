@@ -13,7 +13,7 @@
 // content, so it runs under `node --experimental-strip-types --test`.
 // ---------------------------------------------------------------------------
 import { DOD, runGate } from "./dod.ts";
-import { phaseDef } from "./phases.ts";
+import { PHASE_LAST, phaseDef } from "./phases.ts";
 import type { PhaseId, Project } from "./types.ts";
 
 /** Collapse internal whitespace and cap a line for one-line context rows. */
@@ -191,7 +191,7 @@ export function phaseHandoff(project: Project, phase: PhaseId): string {
     `The five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.`,
   );
   out.push(
-    phase >= 12
+    phase >= PHASE_LAST
       ? `Next legal edge: none — pipeline complete.`
       : `Next legal edge: only P${(phase + 1) as PhaseId} if this phase completes.`,
   );

@@ -248,11 +248,16 @@ export function clampToolOutput(
   const elided = text.length - head - tail;
   const marker = `\n… [${elided} chars elided by compaction] …\n`;
   const out = `${text.slice(0, head)}${marker}${tail > 0 ? text.slice(text.length - tail) : ""}`;
-  // The loop above sizes head+marker+tail to ≤ cap; this guard is belt-and-braces.
-  return {
-    text: out.length <= cap ? out : out.slice(0, cap),
-    clamped: true,
-    originalChars: text.length,
-    elidedChars: elided,
-  };
+  // A cap between 64 and ~90 cannot fit the 0.6·cap head PLUS the marker, so
+  // `out` overflows and the old `out.slice(0, cap)` cut THROUGH the marker —
+  // an unparseable stub replacing real content (probe: cap 64..90, every
+  // oversized input). `out.length > cap` is the ONE honest trigger: the marker
+  // is a substring of `out` by construction, so a marker-presence test on `out`
+  // itself can never be false (a dead guard), and slicing a tail char would
+  // under-report the elision. Fall back to the counted plain head-cut the <64
+  // arm uses.
+  if (out.length > cap) {
+    return { text: text.slice(0, cap), clamped: true, originalChars: text.length, elidedChars: text.length - cap };
+  }
+  return { text: out, clamped: true, originalChars: text.length, elidedChars: elided };
 }

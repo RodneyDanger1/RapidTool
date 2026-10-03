@@ -2405,6 +2405,11 @@ export function RunScreen({ id }: { id: string }) {
       .then((res) => {
         if (!res.ok) setError(codedFailureText(res.error, res.code));
         else setNote("");
+      }, (errCaught: unknown) => {
+        // rejectAsync cannot reject today (the store action's contract), but a
+        // rejection must not float: `.finally` does not absorb one, so handle it
+        // like every other failure and surface the message (WildToggle class).
+        setError(errCaught instanceof Error ? errCaught.message : String(errCaught));
       })
       .finally(() => {
         busyRef.current = false;

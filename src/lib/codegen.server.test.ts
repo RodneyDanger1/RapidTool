@@ -618,6 +618,39 @@ describe("liveP6Synthesis (T4/T5 — fixes/97 P0-01 Part B)", () => {
     assert.deepEqual(calls, ["expand", "complete", "verify"]);
   });
 
+  // 337-3 Trust: the tested stamp's evidenceHash is fnv1a(finalModule +
+  // outcome.evidence). With no boundary between the fields, two DIFFERENT
+  // verified outcomes whose concatenation is equal (("ab","c") vs ("a","bc"))
+  // mint the SAME "tested" stamp — the record then claims two different
+  // machine-verified modules are one verification state.
+  it("the tested stamp's evidence hash separates the module/evidence boundary (no collision)", async () => {
+    const hashOf = (q: Project): string => {
+      const lt = q.lastTest as { evidenceHash?: string } | null;
+      return String(lt?.evidenceHash ?? "");
+    };
+    const evTail = "1/1 machine-run cases passed on iteration 1";
+    const runWith = (finalSource: string, evidence: string): Promise<Project> =>
+      liveP6Synthesis(
+        p6Base(),
+        fakeDeps({
+          verifyOutcome: {
+            status: "passed",
+            iterations: 1,
+            evidence,
+            finalSource,
+            cases: [{ id: "c1", expression: "1 === 1" }],
+          },
+        }).deps,
+      );
+    // cleanRepairedSource trims: cleaned(moduleA + "X") === cleaned(moduleA) + "\nX",
+    // so ("…X", evTail) and ("…", "\nX" + evTail) concatenate identically.
+    const a = await runWith(`${KANBAN_MODULE}X`, evTail);
+    const b = await runWith(KANBAN_MODULE, `\nX${evTail}`);
+    assert.ok(hashOf(a).length > 0, "run A minted a tested stamp");
+    assert.ok(hashOf(b).length > 0, "run B minted a tested stamp");
+    assert.notEqual(hashOf(a), hashOf(b), "two different verified modules must not share one tested evidence hash");
+  });
+
   it("read-back: captured lesson rows in project memory reach the P6 expansion (fixes/124 A3-03)", async () => {
     const base = p6Base();
     const lessonRow = {
@@ -3788,7 +3821,9 @@ describe("T5.4 artifact provenance (real emit data)", () => {
       // FM-01 (W37 Y1): the verify record hashes the verified MODULE bytes (its
       // real derivation input — verifyOutcomeArtifact(finalModule, outcome));
       // generatedSource is now the materialized barrel, so recompute from the module.
-      String(fnv1a(`${KANBAN_MODULE.trim()}${evidence}`)),
+      // 337-3 Trust: the production derivation separates the two fields with
+      // \u0002 — this mirror recomputes the boundary-safe form.
+      String(fnv1a(`${KANBAN_MODULE.trim()}\u0002${evidence}`)),
       "input hash = fnv1a(verified module + evidence) — the record's real derivation input",
     );
   });

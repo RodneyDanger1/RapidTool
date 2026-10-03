@@ -156,7 +156,11 @@ function normalizePlanSteps(raw: unknown, cap: number): PlanStep[] {
     const o = entry as Record<string, unknown>;
     const action = typeof o.action === "string" ? cutToChars(o.action.trim(), PLAN_ACTION_MAX_CHARS) : "";
     if (!action) continue;
-    const idRaw = typeof o.id === "string" ? o.id.trim().slice(0, PLAN_ID_MAX_CHARS) : "";
+    // F2-84/determinism law: the SAME marked cut the action/why fields use —
+    // a bare `.slice` silently reshaped an over-long model id into an
+    // indistinguishable 48-char id (the module's own "a cut is never silent"
+    // contract, and a consumer could not tell a truncated id from a real one).
+    const idRaw = typeof o.id === "string" ? cutToChars(o.id.trim(), PLAN_ID_MAX_CHARS) : "";
     const base = idRaw && !used.has(idRaw) ? idRaw : `step-${out.length + 1}`;
     let id = base;
     let suffix = 2;

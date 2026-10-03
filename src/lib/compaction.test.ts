@@ -296,6 +296,38 @@ describe("compaction — clampToolOutput (per-tool-result cap, marked + counted)
     assert.equal(r.elidedChars, 68);
   });
 
+  it("a cap too small for the FULL marker never ships a truncated marker stub", () => {
+    // cap 64..90 passes the `< 64` plain-head-cut floor, so the marked layout
+    // runs — but 0.6·cap head + the ~35-char marker exceeds cap, and the old
+    // `out.slice(0, cap)` cut the marker itself into an unparseable stub (not
+    // a marker, not a clean head-cut). The ONE trigger is the layout overflow
+    // (`out.length > cap`); the marker-presence arms are mutually exclusive
+    // and a head-cut carries no marker fragment at all.
+    for (let cap = 64; cap <= 130; cap++) {
+      const text = "A".repeat(cap + 50);
+      const r = clampToolOutput(text, cap);
+      assert.equal(r.clamped, true, `cap ${cap}: oversized text is clamped`);
+      assert.ok(r.text.length <= cap, `cap ${cap}: output never exceeds the cap`);
+      const marker = `\n… [${r.elidedChars} chars elided by compaction] …\n`;
+      const fullyMarked = r.text.includes(marker);
+      const countedHeadCut = r.text === text.slice(0, cap) && r.elidedChars === text.length - cap;
+      assert.ok(
+        fullyMarked || countedHeadCut,
+        `cap ${cap}: elision must be fully marked or a counted head-cut (got ${JSON.stringify(r.text.slice(0, 80))})`,
+      );
+      assert.ok(!(fullyMarked && countedHeadCut), `cap ${cap}: the two arms are mutually exclusive`);
+      if (countedHeadCut) {
+        // No half a marker: the fallback is a clean cut, not a stub.
+        assert.equal(
+          r.text.includes("chars elided by compaction"),
+          false,
+          `cap ${cap}: a head-cut must not leave a marker fragment`,
+        );
+        assert.equal(r.text, text.slice(0, cap), `cap ${cap}: the head-cut keeps the plain prefix`);
+      }
+    }
+  });
+
   it("is total: non-string input and garbage caps never throw", () => {
     const rNull = clampToolOutput(null as never);
     assert.deepEqual(rNull, { text: "", clamped: false, originalChars: 0, elidedChars: 0 });

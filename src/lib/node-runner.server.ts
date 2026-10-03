@@ -126,8 +126,25 @@ export function clampRunnerOutput(
   const elided = text.length - head - tail;
   const marker = `\n… [${elided} chars elided by runner output cap] …\n`;
   const out = `${text.slice(0, head)}${marker}${tail > 0 ? text.slice(text.length - tail) : ""}`;
+  // 337-3 Trust (mirror of 337-1's compaction.clampToolOutput fix): a cap
+  // between 64 and ~105 cannot fit the 0.6*cap head PLUS this marker, so the
+  // marked layout is sliced through the marker itself — an unparseable stub
+  // replaces real content AND the reported elision under-counts (probe: cap 90
+  // -> "86 chars elided by runner output"). A truncated marker is not marked:
+  // fall back to the same counted plain head-cut the <64 arm uses.
+  // W51 boundary: `out` is built as `${head}${marker}${tail}`, so the former
+  // `|| !out.includes(marker)` disjunct was entailed-dead — collapsed to the
+  // one reachable trigger, matching the compaction twin.
+  if (out.length > cap) {
+    return {
+      text: text.slice(0, cap),
+      clamped: true,
+      originalChars: text.length,
+      elidedChars: text.length - cap,
+    };
+  }
   return {
-    text: out.length <= cap ? out : out.slice(0, cap),
+    text: out,
     clamped: true,
     originalChars: text.length,
     elidedChars: elided,
@@ -391,24 +408,13 @@ export async function runNodeBounded(
       for (const t of graceTimers) clearTimeout(t);
       graceTimers.clear();
       const advertised = withSandbox(r);
-      // Sync-first cleanup keeps the common case immediate (callers/test
-      // observe no scratch residue right after the run). On Windows rmSync
-      // THROWS while a pipe-holding grandchild still has its cwd inside the
-      // dir — then defer: resolve first, best-effort remove on a later tick,
-      // so the caller never blocks on a lingering grandchild.
-      try {
-        removeScratchDir(dir, ownsScratchDir);
-      } catch {
-        resolve(advertised);
-        setImmediate(() => {
-          try {
-            removeScratchDir(dir, ownsScratchDir);
-          } catch {
-            // best-effort — OS temp cleanup is the backstop
-          }
-        });
-        return;
-      }
+      // Sync-first, best-effort cleanup: removeScratchDir is TOTAL (it swallows
+      // every error — see its own docblock), so an in-use/locked scratch dir is
+      // simply left for the OS temp cleaner and the caller is never blocked on a
+      // lingering grandchild. The old try/catch deferral that stood here was
+      // unreachable by construction (337-3 probe: removeScratchDir never throws)
+      // and its comment claimed a deferral the bytes never performed.
+      removeScratchDir(dir, ownsScratchDir);
       resolve(advertised);
     };
 

@@ -47,7 +47,7 @@ import { approvedAcceptanceFixtures } from "./brief-fixtures.ts";
 import { runSummaryLesson, templateEmissionLesson, type RankableLessonRow } from "./knowledge.ts";
 import { exportPacketText, exportProjectJson, importProject, slugName } from "./io.ts";
 import { applyReportResult, validateReport, type ReportApplyReason } from "./report-intake.ts";
-import { canEnter, PHASES, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
+import { canEnter, PHASES, PHASE_LAST, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
 import { evaluatePolicy, seatLabel } from "./policy.ts";
 import { applyWrite, rollback, snapshotPaths } from "./write-set.ts";
 // T-107.7 (W33 lane L2 write half · W36 lane N2 read half): the real run
@@ -569,7 +569,7 @@ export async function runPhase(
     proven?: readonly RankableLessonRow[];
   } = {},
 ): Promise<Project> {
-  if (!Number.isInteger(phase) || phase < 0 || phase > 12) return project;
+  if (!Number.isInteger(phase) || phase < 0 || phase > PHASE_LAST) return project;
   try {
     if (!opts.live) return applyPhaseResult(project, phase);
     // W-02 (fixes/271 · §R1-f02): phase 6 owns the tested-mint edge — route it
@@ -703,7 +703,7 @@ function finishPhase(
   // awaiting_hitl (the record is only complete after approval).
   p = recordGateInto(p, phase);
   if (p.status === "blocked") return { project: p, stopped: true };
-  if (p.status !== "awaiting_hitl" && phase < 12) {
+  if (p.status !== "awaiting_hitl" && phase < PHASE_LAST) {
     // T0.4 (fixes/162): store.finishPhase refuses to LEAVE when enforceDod
     // and the just-recorded gate is red. Headless used to auto-advance past
     // the P10 hard gate — rapidtool run/gate and run-eval silently skipped it.
@@ -774,7 +774,7 @@ async function advanceOnce(
     }
     return { project, error: "Waiting on human approval.", stopped: true };
   }
-  if (rec.status === "complete" && phase < 12) {
+  if (rec.status === "complete" && phase < PHASE_LAST) {
     const next = (phase + 1) as PhaseId;
     // T0.4: leaving a completed phase under enforceDod requires a passing gate
     // (store.advanceOnce parity). Cursor stays; artifact + dod.blocked log land.
@@ -1628,7 +1628,10 @@ export function nextAction(project: Project): NextAction {
     return { kind: "unknown", cmd: "status", phase: project.currentPhase, why: GENERIC_NEXT_WHY };
   }
   const current = phaseDef(project.currentPhase);
-  if (project.phases[project.currentPhase]?.status === "running") {
+  // A20: the edge's record is looked up by ID, never by array position — a
+  // sparse/reordered phases array (hand-built or foreign payload) otherwise
+  // reads some OTHER phase's status as the current edge's.
+  if (project.phases.find((r) => r.id === project.currentPhase)?.status === "running") {
     return {
       kind: "running",
       cmd: "gate",
@@ -1669,7 +1672,7 @@ export function nextAction(project: Project): NextAction {
       why: `A gate check on ${phaseDef(failedGate.id).code} failed — review the gate record before continuing.`,
     };
   }
-  if (project.phases[project.currentPhase]?.status === "rejected") {
+  if (project.phases.find((r) => r.id === project.currentPhase)?.status === "rejected") {
     return {
       kind: "run",
       cmd: "gate",
@@ -3615,7 +3618,17 @@ function applySynthesizedTreeToDir(
 export async function repairTreeDir(
   project: Project,
   dir: string,
-  opts: { budget?: number; deps?: Partial<RepairTreeDeps> } = {},
+  opts: {
+    budget?: number;
+    deps?: Partial<RepairTreeDeps>;
+    /** W51/337-1 (336-2 §9.4): the project's working dir. When present, the
+     *  repair refreshes the run checkpoint beside `.rapidtool/` (or clears it
+     *  on a terminal seal) so a later `resume` re-enters the repaired ledger
+     *  instead of rewinding it — the repair path mutates generatedTree/lastTest
+     *  without necessarily growing a bounded array, which the supersession
+     *  growth axis alone cannot prove. Absent ⇒ no-op (the pre-wiring bytes). */
+    checkpointDir?: string;
+  } = {},
 ): Promise<RepairTreeResult> {
   const target = resolve(dir);
   const budget =
@@ -3625,10 +3638,16 @@ export async function repairTreeDir(
   // repair's synthesis spend onto the returned ledger — a repair verb is a
   // drive verb, and its cost must survive the process like `run`/`gate` spend.
   const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
-  const finish = (r: RepairTreeResult): RepairTreeResult => ({
-    ...r,
-    project: foldInvocationEvidence(r.project, spendBaseline),
-  });
+  const finish = (r: RepairTreeResult): RepairTreeResult => {
+    const project = foldInvocationEvidence(r.project, spendBaseline);
+    // T-107.7 (W33 · N2) · W51/337-1: every post-work exit refreshes the run
+    // checkpoint with the repaired ledger; a complete seal clears it (nothing to
+    // resume) — exactly runUntilGate's terminal policy. Guarded no-op without a
+    // dir, so the browser/in-process/test paths keep their exact bytes.
+    if (project.status === "complete") clearRunCheckpoint(opts.checkpointDir);
+    else commitRunCheckpoint(opts.checkpointDir, project);
+    return { ...r, project };
+  };
   // T-107.1 (216r · W7-L1): the dir repair runs its cycles with the patch
   // (str_replace) repair level ON (defaultRepairSynthesize). A custom
   // deps.synthesize seam replaces it verbatim — the caller owns the level then.

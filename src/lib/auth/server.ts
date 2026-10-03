@@ -45,10 +45,16 @@ import {
   PREVIEW_ALLOWED_HOSTS,
   PREVIEW_CLIENT_ID,
   PREVIEW_CLIENT_SECRET,
-} from "./preview";
+} from "./preview.ts";
 
 // Kick (and share) PGLite bootstrap as soon as the auth server module loads.
-void ensureDbReady();
+// `ensureDbReady()` rejects when PGLite cannot open/migrate — a real,
+// reportable failure — so handle it here: a bare `void` on this fire-and-forget
+// kick would float an unhandled rejection that kills the process. db.ts's own
+// eager start logs the underlying error; this keeps the kick honest.
+void ensureDbReady().catch((err) => {
+  console.error("[auth] PGLite bootstrap failed:", err);
+});
 
 /**
  * Preview secret must outlive module reloads: PGLite (and its session rows) is
@@ -258,4 +264,4 @@ export function readSessionToken(): string | null {
 
 // Re-exported for convenience; the array lives in the dependency-free
 // `providers.ts` so the client can import it too.
-export { GROK_PROVIDERS } from "./providers";
+export { GROK_PROVIDERS } from "./providers.ts";

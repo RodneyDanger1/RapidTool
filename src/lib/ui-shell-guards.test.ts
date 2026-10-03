@@ -111,3 +111,16 @@ test("WildToggle surfaces startWildRun's refusal instead of dropping it", () => 
   );
   assert.match(CONSOLE_TSX, /role="alert"[\s\S]{0,120}\{err\}/, "the refusal must be visible");
 });
+
+test("Reject dock handles a rejection from rejectAsync (no floating promise)", () => {
+  // W51 · 337-2: `void rejectAsync(...).then(onFulfilled).finally(...)` had NO
+  // onRejected. `.finally` does not absorb a rejection, so IF rejectAsync ever
+  // rejected the failure would float as an unhandled rejection (the same class
+  // the WildToggle fix closed). The store action cannot throw today, but the
+  // call site must still handle the rejection and surface it.
+  assert.match(
+    CONSOLE_TSX,
+    /void rejectAsync\(projectId, note\)\s*\.then\(\s*\(res\)\s*=>\s*\{[\s\S]*?\},\s*\(errCaught: unknown\)\s*=>/,
+    "rejectAsync's rejection must be handled, not left floating",
+  );
+});

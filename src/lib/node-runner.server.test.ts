@@ -10,6 +10,7 @@ import {
   runnerAvailable,
   runNodeBounded,
   runnerIsolationClaim,
+  clampRunnerOutput,
 } from "./node-runner.server.ts";
 
 describe("redactSecrets (174-15)", () => {
@@ -136,5 +137,47 @@ describe("runNodeBounded advertises sandbox:false (not a security sandbox)", () 
     if (!res.ok) {
       assert.equal(res.reason, "refused");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 337-3 Trust: clampRunnerOutput carried the same truncated-marker defect Core
+// fixed in compaction.clampToolOutput (337-1). A cap too small to fit the 0.6*cap
+// head PLUS the marker produced an unparseable marker STUB instead of a marked
+// head-cut (probe: cap 90 -> "86 chars elided by runner output").
+// ---------------------------------------------------------------------------
+
+describe("clampRunnerOutput — small caps never ship a marker stub (337-3)", () => {
+  const text = "A".repeat(2000);
+
+  it("a cap too small for the full elision marker falls back to a counted head-cut", () => {
+    for (const cap of [64, 80, 90, 100, 120]) {
+      const r = clampRunnerOutput(text, cap);
+      assert.equal(r.clamped, true, `cap ${cap}: clamped`);
+      assert.ok(r.text.length <= cap, `cap ${cap}: length ${r.text.length} <= ${cap}`);
+      const plainHeadCut = r.text === text.slice(0, cap);
+      const marker = /\[(\d+) chars elided by runner output cap\] \u2026/.exec(r.text);
+      if (plainHeadCut) {
+        assert.equal(r.elidedChars, text.length - cap, `cap ${cap}: the head-cut counts every dropped char`);
+      } else {
+        assert.ok(
+          marker,
+          `cap ${cap}: neither a plain head-cut nor a fully-rendered marker -> ${JSON.stringify(r.text.slice(0, 90))}`,
+        );
+        assert.equal(Number(marker[1]), r.elidedChars, `cap ${cap}: the marker names the count the record reports`);
+        assert.equal(r.text.length, cap, `cap ${cap}: a marked layout fits the cap exactly`);
+      }
+    }
+  });
+
+  it("the sub-64 arm and a large cap both keep their documented shapes", () => {
+    const tiny = clampRunnerOutput(text, 10);
+    assert.equal(tiny.text, text.slice(0, 10));
+    assert.equal(tiny.elidedChars, text.length - 10);
+    const large = clampRunnerOutput(text, 500);
+    assert.ok(large.text.length <= 500);
+    assert.match(large.text, /chars elided by runner output cap\] \u2026/, "the large-cap path keeps the FULL marker");
+    assert.ok(large.text.startsWith("A".repeat(300)), "head kept");
+    assert.ok(large.text.endsWith("A"), "tail kept");
   });
 });

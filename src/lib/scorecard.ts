@@ -219,11 +219,17 @@ function readEntry(raw: unknown): EvalEntry | null {
     const cell = rawCriteria[id];
     if (isRecord(cell)) {
       const score = num(cell.score);
-      criteria[id] = {
-        score: score === null ? 0 : score,
-        evidence: typeof cell.evidence === "string" ? cell.evidence : "",
-      };
-      if (score === null) missingCriteria.push(id);
+      // 337-3: a PRESENT cell with no numeric score is ABSENT (the honesty
+      // contract above) — storing a synthetic {score: 0} made aggregateCriteria
+      // count a real scored zero and buildDelta mint a "0 − before" regression.
+      if (score === null) {
+        missingCriteria.push(id);
+      } else {
+        criteria[id] = {
+          score,
+          evidence: typeof cell.evidence === "string" ? cell.evidence : "",
+        };
+      }
     } else {
       missingCriteria.push(id);
     }

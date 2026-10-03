@@ -170,3 +170,54 @@ describe("scorecard reader — L1-E2 endClass/verification/census", () => {
     assert.deepEqual(card.derived.endClass, { funded: 1, unfunded: 0, unmeasured: 0, absent: 0 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// 337-3 Trust: a PRESENT criterion cell whose `score` is not a finite number
+// was stored as {score: 0} while the module's own contract (header, lines
+// 29-30) says absence is never defaulted to 0. The synthetic 0 then counted as
+// a real scored cell in aggregateCriteria and produced a 0 - before regression
+// in buildDelta. The cell must stay ABSENT (the honesty contract), with the id
+// named in missingCriteria.
+// ---------------------------------------------------------------------------
+
+describe("scorecard reader - a present cell with no numeric score is ABSENT (337-3)", () => {
+  it("omits the cell, counts no zero, and mints no per-criterion regression", () => {
+    const malformed = entryRow({
+      slug: "s1",
+      total: 1,
+      mean: 0.11,
+      // M1 present as a cell object, but no numeric score (a corrupt / hand-edited row).
+      criteria: { M1: { evidence: "cell present, score missing" } },
+    });
+    const parsed = resultsDoc([malformed]);
+    const entry = parsed.entries[0];
+    assert.equal(entry.criteria.M1, undefined, "a present cell without a numeric score stays ABSENT - never a synthetic 0");
+    assert.ok(entry.missingCriteria.includes("M1"), "and the id is named in missingCriteria");
+
+    const history: EvalHistoryRow[] = [
+      {
+        at: "2026-09-20T00:00:00.000Z",
+        mode: "keyless",
+        slug: "s1",
+        trial: 1,
+        trials: 1,
+        pass: null,
+        endClass: null,
+        criteria: { M1: 1 },
+        total: 1,
+        mean: 0.11,
+      },
+    ];
+    const card = cardFor([malformed], history);
+    const m1 = card.criteria.find((c) => c.id === "M1");
+    assert.ok(m1);
+    assert.equal(m1.scoredBy, 0, "nothing scored M1");
+    assert.equal(m1.zeros, 0, "a missing score is not a zero score");
+    assert.deepEqual(m1.zerosSlugs, [], "the slug is never blamed for a 0 it did not record");
+    assert.equal(m1.mean, null);
+    const delta = card.entries[0].historyDelta;
+    assert.ok(delta);
+    assert.equal(delta.perCriterion.M1, undefined, "no fabricated 0 - before regression from a missing score");
+    assert.equal(delta.direction, "flat", "with totals equal, the missing cell must not tilt the direction");
+  });
+});

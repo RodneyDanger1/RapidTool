@@ -2597,7 +2597,7 @@ async function main() {
           );
         }
         try {
-          const res = await h.repairTreeDir(project, resolve(dirArg.value), { budget });
+          const res = await h.repairTreeDir(project, resolve(dirArg.value), { budget, checkpointDir: dirname(resolve(path)) });
           const importSummary = {
             imported: res.import.imported.length,
             changed: res.import.changed,

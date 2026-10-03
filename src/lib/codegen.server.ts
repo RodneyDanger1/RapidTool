@@ -3492,7 +3492,10 @@ function deterministicProvenance(inputHash: string): ArtifactProvenance {
 }
 
 function verifyOutcomeArtifact(finalModule: string, outcome: VerifyOutcome): StampedArtifact {
-  const evidenceHash = String(fnv1a(`${finalModule}${outcome.evidence}`));
+  // 337-3: \u0002 separates the two hashed fields (verify.ts applyVerifyOutcome
+  // parity) — a bare concatenation conflated two different verified modules
+  // whose (module, evidence) concatenations collided.
+  const evidenceHash = String(fnv1a(`${finalModule}\u0002${outcome.evidence}`));
   const caseLines: string[] = [];
   for (const c of outcome.cases ?? []) {
     const row = c as { id?: unknown; expression?: unknown } | null | undefined;
@@ -3578,7 +3581,9 @@ function upgraded(
    *  the same opts/model resolution). Blank/null ⇒ no stamp, fail closed. */
   servedModel: string | null,
 ): Project {
-  const evidenceHash = String(fnv1a(`${finalModule}${outcome.evidence}`));
+  // 337-3: same boundary rule as verifyOutcomeArtifact / verify.ts
+  // applyVerifyOutcome — this hash IS the "tested" lastTest.evidenceHash.
+  const evidenceHash = String(fnv1a(`${finalModule}\u0002${outcome.evidence}`));
   // T5.4: the model-produced module's stamp — the SERVED model id + the
   // synthesis input hash (the persisted brief hash).
   const prov = modelProvenance(servedModel, specRecord?.briefHash ?? "");

@@ -1525,7 +1525,7 @@ export function applyPhaseResult(project: Project, phase: PhaseId): Project {
   const merged: Project = {
     ...primed,
     phases,
-    status: needsHitl ? "awaiting_hitl" : phase === 12 ? "complete" : "running",
+    status: needsHitl ? "awaiting_hitl" : phase === PHASE_LAST ? "complete" : "running",
     currentPhase: phase,
     scorecard: result.scorecard ?? primed.scorecard,
     competitors: result.competitors ?? primed.competitors,
@@ -1830,8 +1830,8 @@ export function approveHitl(
     ...project,
     phases,
     hitl: null,
-    status: phase === 12 ? "complete" : "running",
-    currentPhase: phase === 12 ? 12 : next,
+    status: phase === PHASE_LAST ? "complete" : "running",
+    currentPhase: phase === PHASE_LAST ? PHASE_LAST : next,
     decisions,
     logs: [
       ...project.logs,
@@ -2434,7 +2434,7 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
       if (rec?.status === "complete") highestContig = i;
       else break;
     }
-    const sealedEdge = Math.max(0, Math.min(12, highestContig + 1)) as PhaseId;
+    const sealedEdge = Math.max(0, Math.min(PHASE_LAST, highestContig + 1)) as PhaseId;
     if (currentPhase !== sealedEdge) {
       holeRepaired = true;
       currentPhase = sealedEdge;
@@ -5032,7 +5032,7 @@ export async function wildStep(
     }
     if (rec.status === "complete") {
       emitStart(phase);
-      if (phase === 12) return finishStep(wildFinalize(project, phase), "finalize");
+      if (phase === PHASE_LAST) return finishStep(wildFinalize(project, phase), "finalize");
       return finishStep(await wildLeavePhase(project, phase, reviewer, opts), "advance");
     }
     if (rec.status === "locked") {
@@ -5114,7 +5114,7 @@ export async function wildStep(
     if (done.hitl?.phase === phase) {
       return finishStep(await wildApproveGate(done, phase, reviewer, opts), "gate");
     }
-    if (phase === 12) {
+    if (phase === PHASE_LAST) {
       // P0-08 Hole B (fixes/97): the terminal packet was compiled inside
       // applyPhaseResult BEFORE the P12 gate was recorded — re-stamp so the
       // final packet's gate_passed for P12 is never null on wild runs.

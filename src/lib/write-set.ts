@@ -58,7 +58,11 @@ function absOf(root: string, rel: string): string {
   const rootNorm = normalize(root.endsWith(sep) || root.endsWith("/") ? root : root + sep);
   const absNorm = normalize(abs);
   const rootCmp = rootNorm.replace(/\\/g, "/").toLowerCase();
-  const absCmp = (absNorm + (absNorm.endsWith(sep) ? "" : "")).replace(/\\/g, "/").toLowerCase();
+  // 337-3: this used to be `(absNorm + (absNorm.endsWith(sep) ? "" : ""))` — a
+  // ternary with identical branches (dead expression, called out by both
+  // watchdogs). The prefix check below is already separator-safe, so the plain
+  // normalized value is the whole rule.
+  const absCmp = absNorm.replace(/\\/g, "/").toLowerCase();
   const rootPrefix = rootCmp.endsWith("/") ? rootCmp : rootCmp + "/";
   if (absCmp !== rootCmp.replace(/\/$/, "") && !absCmp.startsWith(rootPrefix)) {
     throw new Error(`write-set: path escaped root: ${rel}`);

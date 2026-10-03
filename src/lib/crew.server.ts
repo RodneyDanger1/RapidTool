@@ -993,6 +993,7 @@ export function createCrewRuntime(deps: {
         session,
         {
           phase,
+          roles,
           maxSteps,
           maxTotalTokens,
           maxPromptTokens,
@@ -1166,6 +1167,11 @@ export function createCrewRuntime(deps: {
     session: CrewSession,
     cfg: {
       phase: PhaseId;
+      /** The VALIDATED role sequence (resolveRolesOverride's output, or the
+       *  phase table) — never re-read raw `opts.roles` here: a hostile
+       *  non-array `roles` passes the override parser as "no override" and
+       *  would index a string's characters into `ROLE_SPECS`. */
+      roles: CrewRole[];
       maxSteps: number;
       maxTotalTokens: number;
       maxPromptTokens: number;
@@ -1174,7 +1180,7 @@ export function createCrewRuntime(deps: {
     },
     complete: CrewCompleter,
   ): Promise<CrewRunResult> {
-    const { phase, maxSteps, maxTotalTokens, maxPromptTokens, maxArtifacts, live } = cfg;
+    const { phase, roles, maxSteps, maxTotalTokens, maxPromptTokens, maxArtifacts, live } = cfg;
     const def = phaseDef(phase);
     // F2-10 (W42 · L2-P5): the plan-act wire calls run through the run's ONE
     // budgeted completer (gated + metered) — never the raw deps.complete.
@@ -1209,7 +1215,6 @@ export function createCrewRuntime(deps: {
       });
     }
 
-    const roles = opts.roles && opts.roles.length > 0 ? opts.roles : rolesForPhase(phase);
     const executed: PlanStep[] = [];
     let stopped: CrewStopReason = "done";
     let step = 0;

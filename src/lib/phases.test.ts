@@ -8,11 +8,13 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type { PhaseId, Project } from "./types.ts";
 import {
   HITL_PHASES,
   PHASES,
   PHASE_BY_ID,
+  PHASE_LAST,
   PHASE_TAIL_START,
   STOCK_HITL,
   canEnter,
@@ -310,5 +312,59 @@ describe("W50/336-1 phaseCoverage bookkeeping", () => {
     ];
     const cov = phaseCoverage(phases, rows);
     assert.deepEqual(cov.emptyPhases, [0], "P0 completed with only its gate row; P2 never completed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W51/337-1 — the graph authority is PHASE_LAST, never a bare 12. The bounds
+// in the driver/prompt files (engine.ts, headless.ts, handoff.ts) must name the
+// constant so a phase-count change can never leave a stale literal behind. The
+// equality pin makes the value observable: change the graph and this suite (and
+// the scrub below) tells you to revisit every bound.
+// ---------------------------------------------------------------------------
+describe("W51/337-1 phase bounds name PHASE_LAST (never a bare 12)", () => {
+  // Only phase-bound forms: a comparison involving a phase variable, a
+  // Math.min/max clamp against 12, or a `? 12 :` terminal edge. Deliberately
+  // NOT the 12-char HITL note floor (`length < 12`) or a phase-id argument
+  // (`art(12, …)`), which are different 12s.
+  const BARE_PHASE_BOUND_12 = [
+    /\b(?:phase|currentPhase|nextPhase)\s*(?:===|!==|>=|<=|>|<)\s*12\b/,
+    /\b12\s*(?:===|!==|>=|<=|>|<)\s*(?:phase|currentPhase|nextPhase)\b/,
+    /Math\.(?:min|max)\(\s*12\s*,/,
+    /\?\s*12\s*:/,
+  ];
+
+  it("pins the graph's last id (a phase-count change must revisit every bound)", () => {
+    assert.equal(PHASE_LAST, 12, "PHASE_LAST moved — sweep engine.ts/headless.ts/handoff.ts for bare 12 bounds");
+  });
+
+  it("the scrub's own regex has teeth (matches the class it forbids)", () => {
+    assert.ok(
+      BARE_PHASE_BOUND_12.some((re) => re.test("if (phase === 12) return;")),
+      "the scrub regex must match a bare phase-12 bound",
+    );
+    assert.ok(BARE_PHASE_BOUND_12.some((re) => re.test("Math.min(12, highest + 1)")));
+    for (const benign of ['note.length < 12', 'art(12, "docs", adr, "markdown")', "hitl-4-1699"]) {
+      assert.equal(
+        BARE_PHASE_BOUND_12.some((re) => re.test(benign)),
+        false,
+        `the scrub must not flag a benign 12 (${benign})`,
+      );
+    }
+  });
+
+  it("no bare-12 phase bound remains in engine.ts / headless.ts / handoff.ts", () => {
+    for (const file of ["./engine.ts", "./headless.ts", "./handoff.ts"]) {
+      const lines = readFileSync(new URL(file, import.meta.url), "utf8").split("\n");
+      lines.forEach((line, i) => {
+        for (const re of BARE_PHASE_BOUND_12) {
+          assert.equal(
+            re.test(line),
+            false,
+            `${file}:${i + 1} carries a bare-12 phase bound — use PHASE_LAST: ${line.trim()}`,
+          );
+        }
+      });
+    }
   });
 });

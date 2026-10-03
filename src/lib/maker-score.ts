@@ -472,9 +472,15 @@ export function m3Iterates(input: MakerScoreInput): MakerCriterion {
   const gate = rec6 && rec6.gate && typeof rec6.gate === "object" ? rec6.gate : null;
   const lt = lastTestEvidence(input.project);
   if (gate && gate.passed === true && lt && lt.ok === true) {
+    // 337-3: read the hash defensively (m2/m4 parity). A gate outside the typed
+    // PhaseRecord.gate shape must yield a criterion, never a TypeError.
+    const gateHash =
+      typeof gate.evidenceHash === "string" && gate.evidenceHash.length > 0
+        ? gate.evidenceHash.slice(0, 8)
+        : "no hash";
     return {
       score: 1,
-      evidence: `derived convergence: P6 gate passed (${gate.evidenceHash.slice(0, 8)}) + lastTest ok (${lt.label ?? "unlabeled"})`,
+      evidence: `derived convergence: P6 gate passed (${gateHash}) + lastTest ok (${lt.label ?? "unlabeled"})`,
     };
   }
   const why =

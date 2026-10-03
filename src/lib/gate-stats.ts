@@ -70,10 +70,17 @@ export function approvalHealth(
   const n = human.length;
 
   const timed = human.filter((d) => d.decidedAt > d.requestedAt);
-  const meanLatencyMs =
+  // The displayed mean is rounded, but the fast/rubber threshold must be
+  // applied to the RAW mean: rounding first moves the 20 s boundary by up to
+  // 0.5 ms, so latencies summing to 59 999 ms over 3 rows (raw mean 19 999.67)
+  // would round to 20 000 and read "ok" while the documented rule (mean < 20 s)
+  // says fast/rubber; 60 001 ms over 3 rows (raw 20 000.33) would round to
+  // 20 000 and read "fast" though the mean is not under 20 s.
+  const rawMeanLatencyMs =
     timed.length > 0
-      ? Math.round(timed.reduce((sum, d) => sum + (d.decidedAt - d.requestedAt), 0) / timed.length)
+      ? timed.reduce((sum, d) => sum + (d.decidedAt - d.requestedAt), 0) / timed.length
       : 0;
+  const meanLatencyMs = Math.round(rawMeanLatencyMs);
   const rejects = human.filter((d) => d.decision === "reject").length;
   const rejectRate = n > 0 ? round3(rejects / n) : 0;
 
@@ -82,7 +89,7 @@ export function approvalHealth(
   // zero timed rows (requestedAt === decidedAt everywhere) must never be read
   // as "fast" — that would accuse a human of rubber-stamping with no evidence.
   if (n >= 3 && timed.length > 0) {
-    const fast = meanLatencyMs < 20000;
+    const fast = rawMeanLatencyMs < 20000;
     if (fast && rejectRate < 0.05) flag = "rubber";
     else if (fast) flag = "fast";
   }

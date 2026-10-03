@@ -209,27 +209,25 @@ describe("W11 L2 honesty guards — T4.1/TA-16 verify-kind never fabricates", ()
 
 // ---------------------------------------------------------------------------
 // W16 L4 (OV-18) — the custom-cap marker WINDOW is pinned. 217b §1.4 E1
-// (fixes/217b_watchdog_verification.md:123-130) registered this unfixed and
-// deliberately unpinned: for custom caps ≈64–118 the marked layout cannot fit
-// (head = 0.6·cap, marker ≈45 chars) so the final `out.slice(0, cap)` ships a
-// TORN marker and drops the tail. This block pins that exact regime — torn
-// caps, counts, boundary scans — so it can never drift silently. The torn rows
-// are REGISTERED-DEGRADED: they are expected to FLIP when the fix lands (exact
-// patch proposal in fixes/244_lane4_pinned_windows.md §OV-18); until then they
-// document current behaviour, never bless it.
+// (fixes/217b_watchdog_verification.md:123-130) registered the TORN-marker
+// regime (custom caps ≈64–118) as unfixed; W51 · 337-3 landed the fix (the
+// same fallback 337-1 landed in compaction.clampToolOutput): when the marked
+// layout cannot fit, the result is the COUNTED plain head-cut the <64 arm uses
+// — never a sliced/partial marker. This block pins the FLIPPED regime — the
+// plain-cut window, the intact window, the counts and the boundary scans — so
+// the torn state can never silently return.
 // Capture: scratch probe against the module (values literal below; the probe
-// command lives in fixes/244 §Evidence). The 48 000 production identity and the
+// command lives in fixes/337_3_trust.md). The 48 000 production identity and the
 // <64 counted plain cut are untouched by this block.
 // ---------------------------------------------------------------------------
-describe("W16 L4 honesty guards — OV-18 clamp window pin (custom caps)", () => {
+describe("W16 L4 honesty guards — OV-18 clamp window pin (custom caps, torn regime retired)", () => {
   const TAIL = "TAIL-END";
   const L = 50_000;
   const longText = "A".repeat(L - TAIL.length) + TAIL;
   const FULL_MARKER = /\n… \[(\d+) chars elided by runner output cap\] …\n/;
-  const headOf = (cap: number) => Math.floor(cap * 0.6);
   /** Scan caps 64–400 and return the window's three edges for this text. */
   const scanEdges = (text: string) => {
-    let lastTorn = -1;
+    let lastPlain = -1;
     let firstIntact = -1;
     let firstTailFull = -1;
     for (let cap = 64; cap <= 400; cap++) {
@@ -238,19 +236,21 @@ describe("W16 L4 honesty guards — OV-18 clamp window pin (custom caps)", () =>
         if (firstIntact < 0) firstIntact = cap;
         if (firstTailFull < 0 && r.text.endsWith(TAIL)) firstTailFull = cap;
       } else {
-        lastTorn = cap;
+        lastPlain = cap;
       }
     }
-    return { lastTorn, firstIntact, firstTailFull };
+    return { lastPlain, firstIntact, firstTailFull };
   };
 
-  it("pins the regime window at exact caps (L=50 000): torn marker 64–115 · intact 116+ · full tail 136+", () => {
+  it("pins the regime window at exact caps (L=50 000): plain counted cut 64–115 · intact 116+ · full tail 136+", () => {
     // Literal capture table — every row a pin of the window at that cap.
+    // In the plain-cut window elided = L − cap (the head-cut drops everything
+    // after it); in the intact window elided = L − head − tail.
     const rows = [
       { cap: 63, outLen: 63, intact: false, tailFull: false, elided: 49_937 },
-      { cap: 64, outLen: 64, intact: false, tailFull: false, elided: 49_962 },
-      { cap: 100, outLen: 100, intact: false, tailFull: false, elided: 49_940 },
-      { cap: 115, outLen: 115, intact: false, tailFull: false, elided: 49_931 },
+      { cap: 64, outLen: 64, intact: false, tailFull: false, elided: 49_936 },
+      { cap: 100, outLen: 100, intact: false, tailFull: false, elided: 49_900 },
+      { cap: 115, outLen: 115, intact: false, tailFull: false, elided: 49_885 },
       { cap: 116, outLen: 116, intact: true, tailFull: false, elided: 49_931 },
       { cap: 120, outLen: 120, intact: true, tailFull: false, elided: 49_927 },
       { cap: 135, outLen: 135, intact: true, tailFull: false, elided: 49_912 },
@@ -266,7 +266,7 @@ describe("W16 L4 honesty guards — OV-18 clamp window pin (custom caps)", () =>
       assert.equal(
         r.text.match(FULL_MARKER) !== null,
         row.intact,
-        `cap ${row.cap}: marker ${row.intact ? "intact" : "TORN (registered 217b §1.4 E1)"}`,
+        `cap ${row.cap}: marker ${row.intact ? "intact" : "absent (counted plain cut, 337-3)"}`,
       );
       assert.equal(
         r.text.endsWith(TAIL),
@@ -276,51 +276,39 @@ describe("W16 L4 honesty guards — OV-18 clamp window pin (custom caps)", () =>
       assert.equal(r.elidedChars, row.elided, `cap ${row.cap}: counted elision`);
     }
     // Window edges as scans (no magic numbers beyond the asserted edge itself):
-    // for THIS text the torn marker ends at 115, intact markers start at 116,
-    // and the full tail first fits at 136. The edges move with the digit count
-    // of the elided number (proven just below), which is why the registered
-    // window reads "≈64–118", not a fixed range.
-    assert.deepEqual(scanEdges(longText), { lastTorn: 115, firstIntact: 116, firstTailFull: 136 }, "edges (L=50 000)");
+    // for THIS text the plain-cut window ends at 115, intact markers start at
+    // 116, and the full tail first fits at 136. The edges move with the digit
+    // count of the elided number (proven just below).
+    assert.deepEqual(scanEdges(longText), { lastPlain: 115, firstIntact: 116, firstTailFull: 136 }, "edges (L=50 000)");
     // digit-count dependence: a 1 000-char stream (3-digit elided count →
     // shorter marker) moves every edge down — pinned at both sample lengths.
     assert.deepEqual(
       scanEdges("B".repeat(1_000 - TAIL.length) + TAIL),
-      { lastTorn: 110, firstIntact: 111, firstTailFull: 131 },
+      { lastPlain: 110, firstIntact: 111, firstTailFull: 131 },
       "edges (L=1 000) — digit-count dependence",
     );
   });
 
-  it("the torn window is LABELLED, not silent: marker prefix present, marker TORN, no tail, count = L − head", () => {
+  it("the too-small window is a COUNTED plain head-cut, never a torn marker (337-3)", () => {
     const r = clampRunnerOutput(longText, 100);
-    assert.equal(r.text.length, 100, "the torn result is the marked layout sliced to the cap");
-    assert.ok(r.text.includes("\n… ["), "the marker PREFIX lands — the cut is never a silent one");
-    assert.equal(
-      r.text.match(FULL_MARKER),
-      null,
-      "REGISTERED: the marker is TORN — the closing `] …` never lands at this cap (217b §1.4 E1)",
-    );
-    assert.ok(!r.text.endsWith(TAIL), "no tail survives inside the torn window");
-    assert.equal(
-      r.elidedChars,
-      L - headOf(100),
-      "count = originalChars − head (all post-head input is out; the marker bytes are what pushed the tail out)",
-    );
-    // 63 is the last cap that takes the counted plain cut — no torn marker there.
+    assert.equal(r.text, longText.slice(0, 100), "the result IS the head-cut — no marker bytes at all");
+    assert.equal(r.text.match(FULL_MARKER), null, "and certainly no marker (torn or otherwise)");
+    assert.ok(!r.text.includes("\n… ["), "not even the marker PREFIX lands (the stub was the defect)");
+    assert.ok(!r.text.endsWith(TAIL), "no tail survives inside the plain-cut window");
+    assert.equal(r.elidedChars, L - 100, "count = originalChars − the kept head, exactly");
+    // 63 takes the same counted plain cut — the two arms are now identical here.
     const plain = clampRunnerOutput(longText, 63);
     assert.equal(plain.text, longText.slice(0, 63), "below 64: bare head-cut (by design, no marker bytes)");
     assert.equal(plain.elidedChars, L - 63, "…and the cut still counts what it dropped");
-    assert.ok(!plain.text.includes("\n… ["), "no marker (and no torn marker) below 64");
-    // Slightly-over case: L=101 at cap 100 — the torn marker names 41 while
-    // the text's own tail was 1 char beyond the slice. The count is still
-    // "input chars not kept" (head=60 of 101), but the reader sees a broken
-    // marker instead of the designed head+marker+tail layout.
+    // Slightly-over case: L=101 at cap 100 — a plain head-cut of 1 elided char,
+    // never a broken marker naming a bogus count.
     const slight = clampRunnerOutput("A".repeat(93) + TAIL, 100);
-    assert.equal(slight.text.length, 100);
-    assert.equal(slight.text.match(FULL_MARKER), null, "L=101 @ 100 is inside the torn window too");
-    assert.equal(slight.elidedChars, 41, "count = 101 − 60 (head) — exact for 'input chars not kept'");
+    assert.equal(slight.text, ("A".repeat(93) + TAIL).slice(0, 100));
+    assert.equal(slight.text.match(FULL_MARKER), null, "L=101 @ 100 is inside the plain-cut window too");
+    assert.equal(slight.elidedChars, 1, "count = 101 − 100 — exact for 'input chars not kept'");
   });
 
-  it("sweep rule, caps 64–400 (L=50 000): every result is torn-exactly or intact-exactly — never silent, never over-counted", () => {
+  it("sweep rule, caps 64–400 (L=50 000): every result is intact-exactly or plain-cut-exactly — never a partial marker", () => {
     for (let cap = 64; cap <= 400; cap++) {
       const r = clampRunnerOutput(longText, cap);
       assert.equal(r.clamped, true, `cap ${cap}: clamped`);
@@ -336,9 +324,9 @@ describe("W16 L4 honesty guards — OV-18 clamp window pin (custom caps)", () =>
         );
         assert.equal(Number(m[1]), r.elidedChars, `cap ${cap}: the marker names the envelope's own count`);
       } else {
-        assert.equal(r.text.length, cap, `cap ${cap}: torn result fills the cap`);
-        assert.ok(r.text.includes("\n… ["), `cap ${cap}: torn, but never silent`);
-        assert.equal(r.elidedChars, L - headOf(cap), `cap ${cap}: torn count = originalChars − head`);
+        assert.equal(r.text, longText.slice(0, cap), `cap ${cap}: the fallback is the exact head-cut`);
+        assert.ok(!r.text.includes("\n… ["), `cap ${cap}: no partial marker may land`);
+        assert.equal(r.elidedChars, L - cap, `cap ${cap}: plain-cut count = originalChars − cap`);
       }
     }
   });
