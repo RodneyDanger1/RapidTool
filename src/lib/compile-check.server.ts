@@ -1152,6 +1152,66 @@ function isShapeMarker(expr: string): boolean {
   );
 }
 
+/** Keywords/literals that never name the module under test — mirrors the
+ *  oracle-lane floor (`verify.server.ts` ORACLE_NON_MODULE_WORDS). */
+const NON_MODULE_WORDS: ReadonlySet<string> = new Set([
+  "true", "false", "null", "undefined", "void", "typeof", "this", "new",
+  "in", "of", "instanceof", "delete", "NaN", "Infinity",
+]);
+
+/** Any identifier that could name the module under test (not a language
+ *  keyword/literal). Mirrors the oracle lane's hasOracleModuleRead.
+ *
+ *  346 SB-2 hole: an identifier directly preceded by a digit is a numeric
+ *  literal's suffix, not a binding — `1n` (`n`), `1e3` (`e3`), `0x1` (`x1`),
+ *  `1_000` (`_000`). Without this, a literal-only `assert.equal(1n, 2)` read
+ *  `n` as a module read and classified behavioural. A real identifier can never
+ *  be immediately preceded by a digit in valid JS, so this hides no read. */
+function hasModuleRead(expr: string): boolean {
+  for (const m of expr.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
+    if (NON_MODULE_WORDS.has(m[0])) continue;
+    const prev = m.index > 0 ? expr[m.index - 1]! : "";
+    if (prev >= "0" && prev <= "9") continue; // numeric-literal suffix
+    return true;
+  }
+  return false;
+}
+
+/** A JS numeric literal — decimal (with exponent / `_` separators), hex, octal,
+ *  binary, bigint, signed, or leading-dot. `isConcreteOperand` needs the FULL
+ *  grammar, not just `\d+`: a bigint/exponent literal is a concrete expected
+ *  value, and treating it as a module read both minted a literal-only probe as
+ *  behavioural (`assert.equal(1n, 2)`) and red-flagged a genuine read tied to
+ *  one (`assert.equal(m.n, 1e3)`). 346 SB-2. */
+const NUMERIC_LITERAL_RE =
+  /^[-+]?(?:0[xX][0-9a-fA-F][0-9a-fA-F_]*|0[oO][0-7][0-7_]*|0[bB][01][01_]*|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][-+]?\d[\d_]*)?|\.\d[\d_]*(?:[eE][-+]?\d[\d_]*)?)n?$/;
+
+/** A concrete expected value on one side of a comparison: a number, boolean, a
+ *  masked string literal (blank after masking), or an object/array literal.
+ *  `null`/`undefined`/`void 0` are deliberately NOT concrete — a comparison
+ *  against them is the presence probe this floor rejects. Parentheses are
+ *  stripped first. Mirrors isConcreteExpectedToken in the oracle lane. */
+function isConcreteOperand(expr: string): boolean {
+  const e = expr.trim().replace(/^\(+/, "").replace(/\)+$/, "").trim();
+  if (e === "") return true; // masked string literal
+  if (NUMERIC_LITERAL_RE.test(e)) return true;
+  if (e === "true" || e === "false") return true;
+  return e.startsWith("{") || e.startsWith("[");
+}
+
+/** True for a presence-only operand (`null`, `undefined`, `void 0`). */
+function isPresenceOperand(expr: string): boolean {
+  const e = expr.trim().replace(/^\(+/, "").replace(/\)+$/, "").trim();
+  return e === "null" || e === "undefined" || /^void\s+0$/.test(e);
+}
+
+/** A module read: an identifier that could name the module under test, on an
+ *  operand that is not itself a pure literal (`{a: 1}` carries the key `a`, but
+ *  it is a literal, not a module read). */
+function operandIsModuleRead(expr: string): boolean {
+  return !isConcreteOperand(expr) && hasModuleRead(expr);
+}
+
 const ASSERT_EQUALITY = new Set([
   "equal",
   "strictEqual",
@@ -1164,22 +1224,30 @@ const ASSERT_EQUALITY = new Set([
 ]);
 
 /**
- * 346 E1 (item 2): is this single assertion shape-only? `ok`/`assert` reject a
- * bare presence probe or a type/length marker; the equality family is shape
- * only when a side is a type/presence/length marker. `throws`/`rejects`/`match`
- * observe a call outcome and are never shape-only. Pure.
+ * 346 E1 (item 2) + 346 SB-2: is this single assertion shape-only? `ok`/`assert`
+ * reject a bare presence probe, a type/length marker, and an expression with no
+ * module read at all (`assert.ok(1 === 1)`). The equality family is shape-only
+ * unless it ties a module read to a concrete expected value (a number, boolean,
+ * masked string, or object/array literal) — a literal tautology
+ * (`assert.equal(1, 1)`), a presence comparison (`assert.equal(x, undefined)`),
+ * and a type/length marker are NOT behavioural. This mirrors the oracle-lane
+ * floor (`verify.server.ts behaviouralOracleExpression`). `throws`/`rejects`/
+ * `match` observe a call outcome and are never shape-only. Pure.
  */
 function assertionIsShapeOnly(name: string, args: string): boolean {
   const parts = splitTopLevelArgs(args);
   if (name === "ok" || name === "notOk") {
     const first = parts[0] ?? "";
-    return isShapeMarker(first) || isBareRead(first);
+    return isShapeMarker(first) || isBareRead(first) || !hasModuleRead(first);
   }
   if (ASSERT_EQUALITY.has(name)) {
-    if (parts.some(isShapeMarker)) return true;
-    // `equal(flag, <masked>)` — one bare read against an elided literal is not
-    // enough to call it shape-only behaviour; only a marker makes it shape.
-    return false;
+    const left = parts[0] ?? "";
+    const right = parts[1] ?? "";
+    if (isShapeMarker(left) || isShapeMarker(right)) return true;
+    if (isPresenceOperand(left) || isPresenceOperand(right)) return true;
+    const tiedLeft = operandIsModuleRead(left) && isConcreteOperand(right);
+    const tiedRight = operandIsModuleRead(right) && isConcreteOperand(left);
+    return !(tiedLeft || tiedRight);
   }
   return false;
 }

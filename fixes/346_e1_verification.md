@@ -60,8 +60,11 @@ non-`ReferenceError` throw. It now assigns `__jobOutcomeOk` (return is not `NaN`
 stub shape now fails the row.
 
 **Change (compile-check).** New pure `specSourceHasBehaviouralAssert(source)` (masked source; classifies each
-`assert.*` — `ok`/`notOk` reject bare presence + typeof/length/`Array.isArray`; the equality family rejects a
-type/presence/length marker; `throws`/`rejects`/`match` are call-outcome and always behavioural).
+`assert.*` — `ok`/`notOk` reject bare presence + typeof/length/`Array.isArray`; the equality family is
+behavioural only when it ties a module read to a concrete value (a number, boolean, masked string, or
+object/array literal) — a literal tautology, a presence comparison, and a type/length marker are NOT
+behavioural; `throws`/`rejects`/`match` are call-outcome and always behavioural). *(Corrected post-pause
+under SB-2 — the first cut accepted literal tautologies/presence operands; see §6.)*
 `runSpecFile` now requires it (a shape-only spec → `run:"fail"`, `behavioural:false`, detail
 `"no behavioral assertion ran"`); a pass sets `behavioural:true`. `TreeSpecVerdict.behavioural?: boolean` added.
 
@@ -169,3 +172,38 @@ runtimes. No existing gate or pin was weakened.
 - L1-F3 remains latent-until-forced: no producer in the repo exits 0 with a TAP `# fail N`, so the guard is
   defense in depth, pinned at the pure `specExitIsGreen` seam rather than reproduced through a real child.
 - A1-04 is closed for the codegen + headless + CLI paths; the browser `verify.fix` seam (stop #3) remains.
+
+---
+
+## 6. Post-pause completion — SB-2 (tree-lane behavioural parity)
+
+V1 refuted the item-2 sentence above: the tree-lane equality classifier counted literal tautologies and bare
+presence operands as behavioural (`assert.equal(1, 1)`, `assert.equal(true, true)`, `assert.equal(undefined,
+undefined)`, `assert.equal(x, undefined)`, `assert.notStrictEqual(ep, null)`), while the oracle lane rejects
+the equivalent `1 === 1`. Fixed after the wave resumed.
+
+**Change (`compile-check.server.ts`).** `assertionIsShapeOnly` now mirrors the oracle-lane rule
+(`verify.server.ts behaviouralOracleExpression`):
+- `ok`/`notOk` reject a bare read, a shape marker, **and** an expression with no module read at all
+  (`assert.ok(1 === 1)`).
+- the equality family is behavioural **only** when one operand is a module read (an identifier that is not a
+  pure literal — `{a: 1}` is a literal, not a read) and the other is a concrete expected value (number,
+  boolean, masked string literal, or an object/array literal). A literal tautology, a bare
+  `null`/`undefined`/`void 0` operand, and a type/length marker are shape-only.
+- the module doc comment and the item-2 sentence above were corrected.
+
+**RED (host v24.15.0).** The new classifier pins are red pre-change (the eight forms classify `true`). Both
+the comma-in-a-tag and the NUL/`|` pins are red against the committed pre-fix `knowledge.ts` baseline too
+(see E2 §SB-1).
+**GREEN (both runtimes).** `compile-check.server.test.ts` **96 tests · 95 pass · 0 fail · 1 skipped** on
+v24.15.0 and v22.23.2. Consumers re-run: `scaffold.test.ts` + `codegen.server.test.ts` +
+`emitted-honesty.test.ts` **308/308**; `wild-step.test.ts` + `sweep73-fuzz.test.ts` + `verify.server.test.ts`
+**187/187**.
+
+**Pins added.** `346 SB-2: literal tautologies and presence-only operands are not behavioural` (eight
+true-negative forms + two real-module controls, incl. `assert.deepEqual(JOBS, ["a"])`); `346 SB-2: treeRun
+refuses a spec whose only assertion is a literal tautology` (`run:"fail"`, `behavioural:false`, detail exact).
+The shared `PASSING_SPEC` fixture and the `purity` fixture now carry a genuine behavioural assertion (a read
+tied to a concrete value) so their tree-run stays green — the previous vacuous filler was exactly the defect.
+The emitted-spec shapes stay behavioural: `assert.deepEqual(JOBS, [...])` / `assert.deepEqual(ENDPOINTS, ...)`
+tie a module read to an object/array literal, so real scaffolded projects are unaffected.

@@ -1110,14 +1110,13 @@ export function b18Tail(): string {
 // ids; the wired half is verify.server.ts (`droppedPinnedOracleIds` guards
 // `generateCases`'s pinnedOracleIds, refusing a reduced oracle).
 //
-// 344 A1-04 / 345 F2 (declare-or-strike): the pinning is DORMANT at runtime —
-// the production keyed verify callers pass neither `seeds` nor
-// `pinnedOracleIds` (headless.ts `verifyGeneratedSource` and the
-// codegen.server.ts `defaultDeps.verify` binding), so a reduced oracle is not
-// actually refused today. Wiring those call sites to forward
-// `oracleToCaseSeeds(project.oracle)` + `project.oracle.map((o) => o.id)` is
-// the owed change (see fixes/345_f2_fixer.md STOP-and-REPORT). These helpers
-// remain pure; nothing here claims a live consumer.
+// 346 E1 · A1-04 (E-08 live): the pinning IS wired at runtime — the production
+// keyed verify callers forward `seeds: oracleToCaseSeeds(project.oracle)` +
+// `pinnedOracleIds: project.oracle.map((o) => o.id)` (headless.ts
+// `verifyGeneratedSource`, codegen.server.ts `defaultDeps.verify` →
+// verifyAndFixServer). verify.server.ts threads both into `generateCases`:
+// `buildOracleCasesPrompt` PREPENDS the seeds, and a returned case list that
+// drops a pinned id is refused. These helpers remain pure; the consumer is live.
 
 /** Render each A7 oracle row as a `# orc-<id> <name> — <given> ⇒ <expect>` seed line. */
 export function oracleToCaseSeeds(oracle: OracleTest[]): string {

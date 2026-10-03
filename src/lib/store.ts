@@ -1231,13 +1231,20 @@ function unionRows(local: readonly unknown[], remote: readonly unknown[]): unkno
 }
 
 /** Scalar/engine fields whose change in another tab is genuine drift worth
- *  warning about (a rename/notes/status/phase this tab had not seen). */
+ *  warning about (a rename/notes/status/phase this tab had not seen), plus the
+ *  operator-owned toggles (enforceDod/wildMode/kind) whose change — unlike an
+ *  engine append — alters no row array, so `union.length` alone would miss it
+ *  and the reconcile would report `changed: false`, silently keeping this tab's
+ *  stale value (a lost cross-tab update). */
 function crossTabDrifted(local: Project, remote: Project): boolean {
   return (
     local.name !== remote.name ||
     local.notes !== remote.notes ||
     local.status !== remote.status ||
-    local.currentPhase !== remote.currentPhase
+    local.currentPhase !== remote.currentPhase ||
+    local.enforceDod !== remote.enforceDod ||
+    local.wildMode !== remote.wildMode ||
+    local.kind !== remote.kind
   );
 }
 

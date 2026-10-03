@@ -1008,6 +1008,34 @@ describe("216g / 112 T1 — deterministic failure-signature ids (no per-run fork
     }
   });
 
+  // fixes/346 A2-F7 residual: joining zero elements and joining one EMPTY
+  // element both yielded "" — `tags:[]` and `tags:[""]` (likewise
+  // `supersedes:[]`/absent and `supersedes:[""]`) shared an address and the
+  // second distinct row was silently swallowed.
+  it("an EMPTY list element cannot collide with an empty list (tags + supersedes)", () => {
+    const file = tempStorePath();
+    try {
+      const store = new KnowledgeStore(file);
+      const emptyTags = store.savePattern({ ...BASE, tags: [] });
+      const oneEmptyTag = store.savePattern({ ...BASE, tags: [""] });
+      assert.equal(emptyTags.appended, true);
+      assert.equal(oneEmptyTag.appended, true, "an empty tag element must not merge with no tags");
+      assert.notEqual(emptyTags.entry.id, oneEmptyTag.entry.id);
+      // Idempotence survives: re-saving the empty-element row hits its own id.
+      assert.equal(store.savePattern({ ...BASE, tags: [""] }).entry.id, oneEmptyTag.entry.id);
+      assert.equal(store.count(), 2, "both distinct tag rows persist");
+
+      const noSup = store.savePattern({ ...BASE, title: "sup", supersedes: [] });
+      const oneEmptySup = store.savePattern({ ...BASE, title: "sup", supersedes: [""] });
+      assert.equal(noSup.appended, true);
+      assert.equal(oneEmptySup.appended, true, "an empty supersede id must not merge with no supersedes");
+      assert.notEqual(noSup.entry.id, oneEmptySup.entry.id);
+      assert.equal(store.count(), 4, "both distinct supersedes rows persist");
+    } finally {
+      cleanup(file);
+    }
+  });
+
   it("a pipe INSIDE an anchor element cannot forge a two-anchor signature", () => {
     const one = failureSignature({ kind: "gate-unmet", phase: 6, anchors: ["a|b"] });
     const two = failureSignature({ kind: "gate-unmet", phase: 6, anchors: ["a", "b"] });

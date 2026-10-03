@@ -2071,6 +2071,92 @@ test("330 Switchboard (T4) — `run`/`gate`/`unattended --knowledge`: accepted s
   }
 });
 
+// ---------------------------------------------------------------------------
+// 346 wave — the MISSING-file half of the configured-but-unreadable contract
+// (fixes/216g §T4: "Configured-but-unreadable/corrupt store ⇒ degraded:true …
+// never silently swallowed as 'no lessons'"). The T4 leg above pins the
+// corrupt case; KnowledgeStore.readStore() treats a MISSING file as an EMPTY
+// store, so the resolver returned degraded:false and packet/run seeded NOTHING
+// under ok:true — the exact silent "no lessons" the tier-1 seam forbids. This
+// leg pins the coded refusal on the packet arm AND the drive-verb resolver
+// (both call sites), plus the negative control (a real store still seeds).
+// ---------------------------------------------------------------------------
+test("346 — a missing --knowledge store refuses CODED (exit 4), never a silent 'no lessons'", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-missing-knowledge-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  try {
+    const proj = join(cwd, "proj.json");
+    const missing = join(cwd, "does-not-exist.json"); // never created
+    const created = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        CLI_PATH,
+        "create",
+        "--brief",
+        "Build an inventory tracker for a small warehouse team: track products, stock levels, and reorder alerts with a simple dispatcher workflow.",
+        "--name",
+        "MissingKnowledgePin",
+        "--out",
+        proj,
+      ],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+
+    for (const verb of ["packet", "run", "gate"]) {
+      const res = spawnSync(
+        process.execPath,
+        ["--experimental-strip-types", CLI_PATH, verb, "--project", proj, "--knowledge", missing],
+        { cwd, env, encoding: "utf8", timeout: 120_000 },
+      );
+      assert.ok(!/(^|\n)\s+at\s/.test(res.stderr ?? ""), `[${verb}] must never print a Node stack:\n${res.stderr}`);
+      assert.equal(
+        res.status,
+        4,
+        `[${verb}] a configured-but-missing store is the same coded refusal class as a corrupt one (exit 4), never a silent ok:true.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`,
+      );
+      const json = JSON.parse(res.stdout);
+      assert.equal(json.ok, false, `[${verb}] refusal envelope`);
+      assert.equal(json.code, "RT_E_VALIDATION", `[${verb}] the resolver's own code`);
+      assert.match(String(json.error), /does not exist/, `[${verb}] the refusal names the missing file: ${json.error}`);
+      assert.ok(
+        String(json.error).includes("does-not-exist.json"),
+        `[${verb}] the refusal names the exact path: ${json.error}`,
+      );
+      assert.equal(json.exit_code, res.status, `[${verb}] envelope exit_code mirrors the process exit`);
+    }
+
+    // Negative control: a REAL store still seeds (the guard must not turn every
+    // --knowledge into a refusal).
+    const store = join(cwd, "store.json");
+    const saved = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        CLI_PATH,
+        "knowledge",
+        "--store",
+        store,
+        "--save",
+        JSON.stringify({ project: "OTHER PROJECT", kind: "fix", title: "T", tags: ["lesson"], body: "b", score: 0.9 }),
+      ],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(saved.status, 0, `store fixture save failed.\nstdout: ${saved.stdout}\nstderr: ${saved.stderr}`);
+    const seeded = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "packet", "--project", proj, "--knowledge", store],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(seeded.status, 0, `a real store must still seed.\nstdout: ${seeded.stdout}\nstderr: ${seeded.stderr}`);
+    assert.equal(JSON.parse(seeded.stdout).ok, true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 
 // ---------------------------------------------------------------------------
 // Leg 21 (W45 · 331-1 Keywright) — API-key resolution + the loud coded conflict.

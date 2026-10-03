@@ -951,6 +951,23 @@ function respondDriveOutcome(h, res, { path, extras = {} }) {
 // "no lessons". Absent flag ⇒ `{ present: false }` and the option is omitted,
 // so the drive stays byte-identical to today.
 // ---------------------------------------------------------------------------
+/** A configured `--knowledge` store whose FILE does not exist is "configured but
+ *  unreadable" (fixes/216g §T4) — KnowledgeStore.readStore treats a missing file
+ *  as an EMPTY store, so the resolver would report `degraded:false` and the verb
+ *  would seed NOTHING under ok:true. Refuse it coded (exit 4, the same class as a
+ *  corrupt store) so a mistyped path is never a silent "no lessons". */
+function missingKnowledgeStoreRefusal(cmdName, storePath) {
+  return respond(
+    {
+      ok: false,
+      error: `${cmdName}: cannot seed proven lessons from ${storePath}: the store file does not exist (a configured store that cannot be read is never a silent "no lessons").`,
+      code: "RT_E_VALIDATION",
+      remedy: `Point --knowledge at an existing store file, or drop the flag (an absent flag leaves the run byte-identical). Create a store with \`knowledge --store ${storePath} --save '<json>'\`.`,
+    },
+    4,
+  );
+}
+
 async function resolveProvenRows(cmdName, args, project) {
   if (typeof args.knowledge === "undefined") return { present: false };
   if (pathFlagMissing(args.knowledge)) {
@@ -959,8 +976,10 @@ async function resolveProvenRows(cmdName, args, project) {
       1,
     );
   }
+  const storePath = resolve(args.knowledge);
+  if (!existsSync(storePath)) return missingKnowledgeStoreRefusal(cmdName, storePath);
   const k = await knowledgeDriver();
-  const resolved = k.provenRowsFromStore(resolve(args.knowledge), project.name, {
+  const resolved = k.provenRowsFromStore(storePath, project.name, {
     limit: k.EXPAND_LESSON_RANK_LIMIT,
   });
   if (resolved.degraded) {
@@ -1881,6 +1900,10 @@ async function main() {
         }
         let text;
         if (typeof args.knowledge === "string" && args.knowledge.trim()) {
+          // A configured-but-MISSING store is unreadable the same way a corrupt
+          // one is (fixes/216g §T4): refuse it coded rather than seed nothing.
+          const knowledgeStorePath = resolve(args.knowledge);
+          if (!existsSync(knowledgeStorePath)) return missingKnowledgeStoreRefusal("packet", knowledgeStorePath);
           try {
             const k = await knowledgeDriver();
             // 329: use the knowledge module's OWN store->rows resolver instead of
@@ -1889,7 +1912,7 @@ async function main() {
             // injectProven directly, so a read failure could only throw). The
             // helper additionally reports a DEGRADED read (reason + code) that
             // this arm surfaces as the same coded refusal it always returned.
-            const resolved = k.provenRowsFromStore(resolve(args.knowledge), project.name, {
+            const resolved = k.provenRowsFromStore(knowledgeStorePath, project.name, {
               limit: k.EXPAND_LESSON_RANK_LIMIT,
             });
             if (resolved.degraded) {

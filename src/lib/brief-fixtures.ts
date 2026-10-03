@@ -677,21 +677,23 @@ export function fixtureValueIsPlaceholder(v: unknown): boolean {
   return false;
 }
 
-/** 346 E1 (L1-F5): an EMPTY shape expectation — `{}` or `[]` — makes
- *  `__fxPartialMatch(actual, expected)` vacuously true for ANY object (its
- *  `Object.keys(expected).every(...)` / `.every(...)` runs over zero keys). A
- *  non-empty shape requires at least the named keys/elements, so it is a real
- *  partial-match. Pure. */
+/** 346 E1 (L1-F5): an EMPTY OBJECT shape expectation (`{}`) makes
+ *  `__fxPartialMatch(actual, {})` vacuously true for ANY object (its
+ *  `Object.keys(expected).every(...)` runs over zero keys). An empty ARRAY is
+ *  NOT vacuous: the helper's array branch requires `actual.length ===
+ *  expected.length`, so `[]` is a real exact-length assertion (it rejects a
+ *  non-empty array, an object, or a primitive) — 346 A6. Pure. */
 export function fixtureShapeValueIsVacuous(v: unknown): boolean {
-  if (Array.isArray(v)) return v.length === 0;
+  if (Array.isArray(v)) return false;
   if (v !== null && typeof v === "object") return Object.keys(v as object).length === 0;
   return false;
 }
 
 /** A case is "placeholder-only" (asserts nothing real) when its given or its
- *  expect literal carries a draft sentinel, OR its expect.shape value is empty
- *  (346 E1 · L1-F5: an empty shape is vacuous, not substantive). Such a row can
- *  never be an acceptance bar. A real typed-literal case is unaffected. */
+ *  expect literal carries a draft sentinel, OR its expect.shape value is an
+ *  empty OBJECT (346 E1 · L1-F5: `{}` is vacuous, not substantive; an empty
+ *  array is a real assertion — 346 A6). Such a row can never be an acceptance
+ *  bar. A real typed-literal case is unaffected. */
 export function fixtureCaseIsPlaceholder(c: unknown): boolean {
   if (!c || typeof c !== "object") return false;
   const rec = c as BriefFixtureCase;
@@ -723,7 +725,7 @@ export function compileFixtureAssertion(c: BriefFixtureCase): { ok: true; body: 
     return {
       ok: false,
       reason:
-        "expect.shape value is empty ({} / []) — __fxPartialMatch is vacuously true for any object; supply at least one expected key or element",
+        "expect.shape value is an empty object ({}) — __fxPartialMatch is vacuously true for any object; supply at least one expected key (an empty array [] is a real assertion and is accepted)",
     };
   }
   // A1-01 (fixes/344): a draft sentinel asserts nothing real. Red-card it (the

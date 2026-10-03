@@ -27,7 +27,7 @@
 //   node --test scripts/factory-watch.test.mjs
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -88,6 +88,21 @@ function jsonOf(res) {
       `factory-watch did not print one JSON object (exit ${res.status}).\nstdout: ${res.stdout}\nstderr: ${res.stderr}`,
     );
   }
+}
+
+/** Spawn a factory tick without blocking — for the concurrent-ticks race. */
+function runFactoryAsync(args, opts = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [SCRIPT_PATH, ...args], {
+      cwd: opts.cwd,
+      env: keylessEnv(),
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +362,46 @@ test("queue intake in --dry-run plans without writing", { timeout: 120_000 }, ()
     "a dry-run invokes no create",
   );
 });
+
+// Two ticks sharing one --work dir concurrently must not lose each other's
+// durable record. The old blind atomic overwrite was last-writer-wins: both
+// projects were driven, but only one survived in factory-state.json.
+test(
+  "concurrent ticks on one --work keep BOTH project records (no lost update)",
+  { timeout: 600_000 },
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "rapidtool-factory-watch-x-"));
+    const work = join(root, "work");
+    const intakeA = join(root, "intakeA");
+    const intakeB = join(root, "intakeB");
+    mkdirSync(intakeA, { recursive: true });
+    mkdirSync(intakeB, { recursive: true });
+    writeFileSync(join(intakeA, "alpha.md"), BRIEF, "utf8");
+    writeFileSync(join(intakeB, "beta.md"), BRIEF, "utf8");
+
+    const [a, b] = await Promise.all([
+      runFactoryAsync(["--intake", intakeA, "--work", work], { cwd: root }),
+      runFactoryAsync(["--intake", intakeB, "--work", work], { cwd: root }),
+    ]);
+    assert.equal(a.status, 1, `alpha tick reports its keyless stall.\n${a.stdout}\n${a.stderr}`);
+    assert.equal(b.status, 1, `beta tick reports its keyless stall.\n${b.stdout}\n${b.stderr}`);
+
+    // Both projects really were driven on disk...
+    assert.ok(existsSync(join(work, "alpha", "build.json")), "alpha project was created");
+    assert.ok(existsSync(join(work, "beta", "build.json")), "beta project was created");
+
+    // ...and BOTH durable records survive the concurrent commits.
+    const statePath = join(work, "state", "factory-state.json");
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    assert.ok(state.projects.alpha, "alpha's record survived the concurrent commit");
+    assert.ok(state.projects.beta, "beta's record survived the concurrent commit");
+    assert.equal(state.projects.alpha.briefHash, briefHash(BRIEF));
+    assert.equal(state.projects.beta.briefHash, briefHash(BRIEF));
+    assert.equal(state.projects.alpha.status, "stalled");
+    assert.equal(state.projects.beta.status, "stalled");
+    assert.equal(existsSync(`${statePath}.lock`), false, "the state lock is released");
+  },
+);
 
 test("usage refusals are coded — no intake/queue, both, or a missing --work", () => {
   const none = runFactory([]);

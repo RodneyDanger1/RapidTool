@@ -149,22 +149,35 @@ describe("fixes/346 A2-F5 — CLI-reachable legs use the one-shot seam", () => {
     ["harvest.ts", "../../harvest.ts"],
     ["probe.ts", "./probe.ts"],
   ];
-  // Catches both a bare `fetch(` and an explicit global reach-through
-  // (`globalThis.fetch(` / `window.fetch(` / `self.fetch(`) — the evasion V1
-  // found in the first, looser lookbehind. `oneShotFetch(` (capital F) and the
-  // injected `opts.fetch` seam are deliberately not flagged.
+  // Catches a bare `fetch(` and any reach-through to the global binding: dot
+  // or optional-chain or spaced-dot access, `["fetch"]` / `['fetch']` bracket
+  // notation, a bare property grab (`const f = globalThis.fetch`), and the
+  // `Reflect.apply(fetch, …)` indirection. `oneShotFetch(` (capital F) and the
+  // injected `opts.fetch` seam are deliberately not flagged, nor is prose.
   const GLOBAL_FETCH =
-    /(?<![A-Za-z0-9_$])(?:globalThis|window|self)\.fetch\s*\(|(?<![A-Za-z0-9_$.])fetch\s*\(/;
+    /(?<![A-Za-z0-9_$])(?:globalThis|window|self)\s*(?:\?\s*)?\.\s*fetch\b|(?<![A-Za-z0-9_$])(?:globalThis|window|self)\s*\[\s*(["'])fetch\1\s*\]|Reflect\s*\.\s*apply\s*\(\s*fetch\b|(?<![A-Za-z0-9_$.])fetch\s*\(/;
 
   it("the guard is falsifiable: it catches bare/global fetch( and ignores the seam", () => {
     const samples: Array<[string, boolean]> = [
+      // Positives: every spelling that reaches the network must be caught.
       ["const r = await fetch(url, init);", true],
       ["const r = await globalThis.fetch(url, init);", true],
       ["const r = await window.fetch(url);", true],
       ["const r = await self.fetch(url);", true],
+      ["const r = await globalThis[\"fetch\"](url);", true],
+      ["const r = await globalThis['fetch'](url);", true],
+      ["const r = (globalThis.fetch)(url);", true],
+      ["const f = globalThis.fetch; f(url);", true],
+      ["Reflect.apply(fetch, null, [url]);", true],
+      ["const r = await globalThis?.fetch(url);", true],
+      ["const r = await globalThis . fetch(url);", true],
+      // Negatives: the seam, other identifiers, and prose must stay clean.
       ["const impl = opts.fetch ?? oneShotFetch;", false],
+      ["const b = opts.fetch(url, init);", false],
       ["return oneShotFetch(url, init);", false],
       ["const r = myFetch(url);", false],
+      ["// the raw fetch is replaced by the one-shot seam", false],
+      ["const label = \"fetch\";", false],
     ];
     for (const [sample, caught] of samples) {
       assert.equal(GLOBAL_FETCH.test(sample), caught, `sample: ${sample}`);

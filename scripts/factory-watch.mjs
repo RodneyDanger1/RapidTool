@@ -67,6 +67,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -272,11 +273,101 @@ export function emitDelivered(envelope, exitCode) {
 // ---------------------------------------------------------------------------
 // fs helpers.
 // ---------------------------------------------------------------------------
-function atomicWriteJson(path, value) {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  renameSync(tmp, path);
+const STATE_LOCK_WAIT_MS = 15_000;
+const STATE_LOCK_STALE_MS = 30_000;
+
+/** True if a pid is a live process (a lock owned by a dead pid is stale). */
+function pidAlive(pid) {
+  if (!Number.isInteger(pid)) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === "EPERM"; // exists but not ours
+  }
+}
+
+/**
+ * Cross-process mutex for the one durable state file. Exclusive-create with a
+ * stale-lock breaker (a crashed owner must not wedge every later tick).
+ */
+function acquireStateLock(lockPath) {
+  const deadline = Date.now() + STATE_LOCK_WAIT_MS;
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try {
+      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, at: Date.now() }), {
+        encoding: "utf8",
+        flag: "wx",
+      });
+      return;
+    } catch (err) {
+      if (err?.code !== "EEXIST") throw err;
+      let stale = false;
+      try {
+        const info = JSON.parse(readFileSync(lockPath, "utf8"));
+        stale = Date.now() - (info?.at ?? 0) > STATE_LOCK_STALE_MS || !pidAlive(info?.pid);
+      } catch {
+        stale = true; // an unreadable lock is abandoned
+      }
+      if (stale) {
+        try {
+          rmSync(lockPath, { force: true });
+        } catch {
+          // raced the owner's release — retry
+        }
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`state lock busy (${lockPath}) — another factory tick holds it`);
+      }
+      Atomics.wait(sleeper, 0, 0, 25);
+    }
+  }
+}
+
+function releaseStateLock(lockPath) {
+  try {
+    rmSync(lockPath, { force: true });
+  } catch {
+    // already gone
+  }
+}
+
+/**
+ * Commit the in-memory state under an exclusive lock. We start from the freshest
+ * on-disk state and overlay ONLY the slugs this tick owns (dirtySlugs), so a
+ * concurrent tick's newer record is never clobbered by our stale startup snapshot
+ * — and a blind whole-object overwrite can never drop it either.
+ */
+function commitState(statePath, state, dirtySlugs) {
+  const lockPath = `${statePath}.lock`;
+  mkdirSync(dirname(statePath), { recursive: true });
+  acquireStateLock(lockPath);
+  try {
+    state.updatedAt = new Date().toISOString();
+    let projects = state.projects;
+    if (existsSync(statePath)) {
+      const disk = readJson(statePath);
+      if (
+        !disk ||
+        typeof disk !== "object" ||
+        typeof disk.projects !== "object" ||
+        disk.projects === null
+      ) {
+        throw new Error(
+          `${statePath}: the factory state is malformed — refusing to overwrite it`,
+        );
+      }
+      projects = { ...disk.projects };
+      for (const slug of dirtySlugs) projects[slug] = state.projects[slug];
+    }
+    const tmp = `${statePath}.tmp-${process.pid}`;
+    writeFileSync(tmp, `${JSON.stringify({ ...state, projects }, null, 2)}\n`, "utf8");
+    renameSync(tmp, statePath);
+  } finally {
+    releaseStateLock(lockPath);
+  }
 }
 
 function readJson(path) {
@@ -455,6 +546,7 @@ function main() {
 
   const results = [];
   let worked = 0;
+  const dirtySlugs = new Set(); // slugs this tick owned and wrote
   for (const brief of intake.briefs ?? []) {
     const slug = slugify(brief.name);
     const projectFile = join(work, slug, "build.json");
@@ -512,6 +604,7 @@ function main() {
     entry.emitDir = emitDir;
     entry.updatedAt = new Date().toISOString();
     state.projects[slug] = entry;
+    dirtySlugs.add(slug);
 
     // --- Step 1: create (idempotent — a project file already on disk is resumed) ---
     if (!existsSync(projectFile)) {
@@ -528,14 +621,14 @@ function main() {
           created.stderr.slice(0, 500).trim() ||
           "create failed";
         entry.attempts += 1;
-        atomicWriteJson(statePath, withStamp(state));
+        commitState(statePath, state, dirtySlugs);
         results.push(row(entry, "create-failed"));
         continue;
       }
     }
     entry.status = "driving";
     entry.phase = entry.phase ?? 0;
-    atomicWriteJson(statePath, withStamp(state)); // crash checkpoint: resume, not restart
+    commitState(statePath, state, dirtySlugs); // crash checkpoint: resume, not restart
 
     // --- Step 2: drive to a terminal state with the machine seat only ---
     const driven = runCli(["unattended", "--project", projectFile], timeoutMs);
@@ -548,14 +641,14 @@ function main() {
       entry.reason = drive.reason;
       entry.phase = driven.envelope?.summary?.currentPhase ?? entry.phase ?? null;
       entry.needsHuman = drive.needsHuman === true;
-      atomicWriteJson(statePath, withStamp(state));
+      commitState(statePath, state, dirtySlugs);
       results.push(row(entry, `drive-${drive.kind}`));
       continue;
     }
 
     entry.phase = driven.envelope?.summary?.currentPhase ?? entry.phase;
     entry.status = "driving";
-    atomicWriteJson(statePath, withStamp(state));
+    commitState(statePath, state, dirtySlugs);
 
     // --- Step 3: deliver — emit --git into the per-project dir ---
     const emitted = runCli(
@@ -571,7 +664,7 @@ function main() {
         emitted.envelope?.error ??
         `emit --git did not prove a delivery (exit ${emitted.exitCode})${emitted.envelope?.ok === true ? " — no commit and no .git on disk" : ""}`;
       entry.needsHuman = true;
-      atomicWriteJson(statePath, withStamp(state));
+      commitState(statePath, state, dirtySlugs);
       results.push(row(entry, "deliver-failed"));
       continue;
     }
@@ -587,7 +680,7 @@ function main() {
       noop: emitted.envelope.git.noop === true,
       commit: emitted.envelope.git.commit ?? null,
     };
-    atomicWriteJson(statePath, withStamp(state));
+    commitState(statePath, state, dirtySlugs);
     results.push(row(entry, "delivered"));
   }
 
@@ -631,11 +724,6 @@ function main() {
     },
     exitCode,
   );
-}
-
-function withStamp(state) {
-  state.updatedAt = new Date().toISOString();
-  return state;
 }
 
 /** A compact per-item result row (the delivery record is in the state file). */

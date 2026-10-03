@@ -153,3 +153,51 @@ So the honest action is to remove the switch that implied resilience.
   records and were left untouched.
 - Not in this lane: A2-F3 (repo map on the single-module lane), A2-F9 (dead exports), the remaining
   L3/A4 open items from `fixes/345_0_parent.md` §5.
+
+---
+
+## Post-pause completion — SB-1 (V1 refutation closed: RED-first proof + log entry)
+
+V1 refuted A2-F7's injectivity claim: the tags/supersedes lists were `.join(",")` **before** the field codec
+ran, so `tags:["a,b"]` and `tags:["a","b"]` produced the same fingerprint, the second `savePattern` returned
+`appended:false`, and a distinct learned row was silently swallowed. The killed fixer had already landed the
+per-element codec (`encodeAddressList` escapes each element for `,` before joining) plus the pins; the owed
+deliverables were the RED-first proof and this log entry. Both are done.
+
+**Verification of the landed fix.** `knowledge.test.ts` + `llm/providers/one-shot-fetch.test.ts`
+**65 tests · 65 pass · 0 fail · 0 skipped** on host v24.15.0 and Node v22.23.2 (the A2-F7 pins: NUL-shift,
+`["a,b"]` vs `["a","b"]` tag and `["a|b"]` vs `["a","b"]` anchor round-trips, and the delimiter-free
+byte-parity pin). The static guard was also tightened to catch `globalThis.fetch(` / `window.fetch(` /
+`self.fetch(` (SB-3).
+
+**RED-first proof.** A temporary git worktree at the committed pre-fix baseline `988b158` (new test files
+copied in, the repo `node_modules` junctioned) ran the pins against the pre-fix bytes:
+
+```
+$ node --experimental-strip-types --test --test-reporter=tap src/lib/knowledge.test.ts src/lib/llm/providers/one-shot-fetch.test.ts
+    not ok 2 - a NUL inside a field cannot collide two distinct knowledge rows
+    not ok 3 - failureSignature: anchors ['a,b'] and ['a','b'] are distinct, and the probe tag round-trips
+    not ok 4 - a comma INSIDE a tag element cannot collide with two tag elements
+    not ok 5 - a pipe INSIDE an anchor element cannot forge a two-anchor signature
+not ok 11 - fixes/346 A2-F5 — CLI-reachable legs use the one-shot seam
+    not ok 2 - tavily.server.ts: uses oneShotFetch and no bare/global fetch(
+    not ok 3 - harvest.ts: uses oneShotFetch and no bare/global fetch(
+    not ok 4 - probe.ts: uses oneShotFetch and no bare/global fetch(
+# tests 65  # pass 58  # fail 7  # skipped 0
+```
+
+The SB-1 pin's failure text (`knowledge.test.ts:992` on the pre-fix bytes):
+
+```
+not ok 4 - a comma INSIDE a tag element cannot collide with two tag elements
+      error: |-
+        ['a,b'] and ['a','b'] must not share an id
+        false !== true
+      code: 'ERR_ASSERTION'
+```
+
+GREEN against the fixed tree: the same command is `# tests 65 # pass 65 # fail 0`. The worktree was removed;
+the main tree is untouched by the proof.
+
+**Not touched (honest).** `dod.ts:1113-1120` (stale DORMANT comment, SB-4), the A2-F5 line-number drift noted
+by V1 (SB-5), and the failover-removal silence disclosure (SB-6) remain as reported.

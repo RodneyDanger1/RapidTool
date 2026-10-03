@@ -357,14 +357,16 @@ function encodeAddressField(field: string, delimiters: readonly string[]): strin
   return out;
 }
 
-/** Reverse `encodeAddressField` (unknown tags pass through unchanged). */
+/** Reverse `encodeAddressField` (unknown tags pass through unchanged). `\u0001s`
+ *  is the empty-ELEMENT tag produced by `encodeAddressList`, not by
+ *  `encodeAddressField`, so it decodes back to "". */
 function decodeAddressField(encoded: string): string {
   let out = "";
   for (let i = 0; i < encoded.length; i++) {
     const ch = encoded[i];
     if (ch === ADDRESS_ESCAPE && i + 1 < encoded.length) {
       const tag = encoded[++i];
-      out += tag === "e" ? ADDRESS_ESCAPE : tag === "n" ? "\u0000" : tag === "p" ? "|" : tag === "c" ? "," : tag;
+      out += tag === "e" ? ADDRESS_ESCAPE : tag === "n" ? "\u0000" : tag === "p" ? "|" : tag === "c" ? "," : tag === "s" ? "" : tag;
     } else {
       out += ch;
     }
@@ -376,9 +378,17 @@ function decodeAddressField(encoded: string): string {
  *  AFTER the join is the V1-refuted A2-F7 defect: `["a,b"]` and `["a","b"]`
  *  collapse to one string (and normal multi-tag joins churn because the join
  *  commas themselves get escaped). Per-element escaping is injective and leaves
- *  delimiter-free lists byte-identical to the legacy `join(",")`. */
+ *  delimiter-free lists byte-identical to the legacy `join(",")`.
+ *
+ *  fixes/346 A2-F7 residual: joining zero elements and joining one EMPTY element
+ *  both yield "" — `[]` and `[""]` shared an address, so the second distinct row
+ *  (tags or supersedes) was silently swallowed. Give the empty element its own
+ *  tag (`\u0001s`), which `encodeAddressField` can never emit because it maps
+ *  `\u0001` to `\u0001e`; non-empty elements stay byte-identical (no id churn). */
 function encodeAddressList(items: readonly string[], delimiters: readonly string[]): string {
-  return items.map((item) => encodeAddressField(item, delimiters)).join(",");
+  return items
+    .map((item) => (item === "" ? `${ADDRESS_ESCAPE}s` : encodeAddressField(item, delimiters)))
+    .join(",");
 }
 
 /** Collapse a candidate entry to its fingerprint string (deterministic AND

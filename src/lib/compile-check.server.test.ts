@@ -176,7 +176,12 @@ function writeEmittedTree(root: string, specBody: string, extraSpecs: [string, s
 const PASSING_SPEC = [
   `import { test } from "node:test";`,
   `import assert from "node:assert/strict";`,
-  `test("orc-1 arithmetic", () => { assert.equal(1 + 1, 2); });`,
+  // 346 SB-2: the spec must carry ≥1 genuine behavioural assertion (a read tied
+  // to a concrete value); a literal-only assertion set no longer earns a green
+  // tree-run. Self-contained so it loads in every fixture tree, whatever the
+  // subject entry module exports.
+  `const boot = () => "ok";`,
+  `test("orc-1 boot returns ok", () => { assert.equal(boot(), "ok"); });`,
   `test("orc-2 rows shape", () => { assert.deepEqual({ a: 1 }, { a: 1 }); });`,
   ``,
 ].join("\n");
@@ -499,9 +504,10 @@ describe("treeRun — execute the emitted tree in-loop (fixes/144 M3/B3)", () =>
           `import { test } from "node:test";`,
           `import assert from "node:assert/strict";`,
           `import { writeFileSync } from "node:fs";`,
+          `import * as m from "../src/main.ts";`,
           `test("cwd write stays off the subject", () => {`,
           `  writeFileSync("src/main.ts", "export const boot = () => 'mutated';\\n");`,
-          `  assert.equal(1, 1);`,
+          `  assert.equal(m.boot(), "ok");`,
           `});`,
           ``,
         ].join("\n"),
@@ -2320,6 +2326,62 @@ describe("346 E1 item 2 - a shape-only spec is not a behavioural pass", () => {
     assert.equal(specSourceHasBehaviouralAssert(``), false);
   });
 
+  // V1 refutation (SB-2): the tree lane accepted literal tautologies and bare
+  // presence operands that the oracle lane (behaviouralOracleExpression)
+  // rejects. Parity: behavioural need a module read tied to a concrete value.
+  it("346 SB-2: literal tautologies and presence-only operands are not behavioural", () => {
+    const notBehavioural = [
+      `test("x", () => { assert.equal(1, 1); });`,
+      `test("x", () => { assert.equal(true, true); });`,
+      `test("x", () => { assert.equal(undefined, undefined); });`,
+      `test("x", () => { assert.deepEqual({ a: 1 }, { a: 1 }); });`,
+      `test("x", () => { assert.equal(x, undefined); });`,
+      `test("x", () => { assert.equal(x, null); });`,
+      `test("x", () => { assert.notStrictEqual(ep, null); });`,
+      `test("x", () => { assert.ok(1 === 1); });`,
+    ];
+    for (const src of notBehavioural) {
+      assert.equal(specSourceHasBehaviouralAssert(src), false, src);
+    }
+    // Probes that surface real module text are unaffected.
+    assert.equal(specSourceHasBehaviouralAssert(`test("x", () => { assert.deepEqual(JOBS, ["a"]); });`), true);
+    assert.equal(specSourceHasBehaviouralAssert(`test("x", () => { assert.equal(m.boot(), "ok"); });`), true);
+  });
+
+  // V2 hole (346 SB-2): the equality/ok floor saw a numeric literal's SUFFIX as
+  // a module identifier (`1n` → `n`, `1e3` → `e3`, `0x1` → `x1`, `1_000` →
+  // `_000`), so a literal-only assertion classified behavioural; the same bug
+  // missed the literal as a concrete expected value, red-flagging a genuine
+  // read tied to a scientific/separated number. One fix: recognize the full JS
+  // numeric-literal grammar and never read a digit-prefixed token as a binding.
+  it("346 SB-2: numeric-literal suffixes are not module reads; numeric literals are concrete", () => {
+    const literalOnly = [
+      `test("x", () => { assert.equal(1n, 2); });`,
+      `test("x", () => { assert.equal(0x1, 2); });`,
+      `test("x", () => { assert.equal(0b101, 2); });`,
+      `test("x", () => { assert.equal(0o7, 8); });`,
+      `test("x", () => { assert.equal(1e3, 2); });`,
+      `test("x", () => { assert.equal(1_000, 2); });`,
+      `test("x", () => { assert.ok(1n === 2); });`,
+      `test("x", () => { assert.strictEqual(-1n, 2); });`,
+    ];
+    for (const src of literalOnly) {
+      assert.equal(specSourceHasBehaviouralAssert(src), false, src);
+    }
+    // FALSE-RED control: a module read tied to a concrete numeric literal IS
+    // behavioural, whatever literal form the expected value takes.
+    const genuine = [
+      `test("x", () => { assert.equal(m.n, 1n); });`,
+      `test("x", () => { assert.equal(m.width, 1e3); });`,
+      `test("x", () => { assert.strictEqual(count, 1_000); });`,
+      `test("x", () => { assert.equal(m.mask, 0xff); });`,
+      `test("x", () => { assert.equal(add(2, 3), 5); });`,
+    ];
+    for (const src of genuine) {
+      assert.equal(specSourceHasBehaviouralAssert(src), true, src);
+    }
+  });
+
   it("treeRun refuses a spec that only asserts shape (no behavioral assertion ran)", async () => {
     const dir = tempDir();
     try {
@@ -2341,6 +2403,28 @@ describe("346 E1 item 2 - a shape-only spec is not a behavioural pass", () => {
       assert.equal(r.tests[0]!.behavioural, false);
       assert.equal(r.tests[0]!.detail, "no behavioral assertion ran");
       assert.equal(r.ok, false, "a shape-only tree is not green");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("346 SB-2: treeRun refuses a spec whose only assertion is a literal tautology", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(
+        dir,
+        [
+          `import { test } from "node:test";`,
+          `import assert from "node:assert/strict";`,
+          `test("tautology", () => { assert.equal(1, 1); });`,
+          ``,
+        ].join("\n"),
+      );
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.tests[0]!.run, "fail", "a tautology is not a behavioural pass");
+      assert.equal(r.tests[0]!.behavioural, false);
+      assert.equal(r.tests[0]!.detail, "no behavioral assertion ran");
+      assert.equal(r.ok, false, "a tautology-only tree is not green");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

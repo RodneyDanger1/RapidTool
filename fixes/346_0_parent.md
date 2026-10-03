@@ -90,3 +90,35 @@ stopped; this file is the resume map.
 
 `346_e1_verification.md` · `346_e2_resilience.md` · `346_e3_orchestrator.md` · `346_e4_ui.md` ·
 `346_v1_validate.md` · (this file). Prior waves: `345_0_parent.md`, `344_0_parent.md`, …
+
+---
+
+## 6. RESUME COMPLETE — 2026-10-03 (this file is now a record, not a resume map)
+
+The recorded order in §4 was executed, plus an independent validation and a parallel
+agent sweep. Everything below is committed together as the 346 wave landing.
+
+- **SB-2 — DONE.** The tree-lane behavioural floor (`compile-check.server.ts`) now mirrors the oracle lane:
+  a literal tautology, a bare `null`/`undefined` operand, and a numeric-literal suffix (`1n`/`1e3`/`0x1`)
+  are NOT behavioural; a module read tied to a concrete value is. Pins + a real `treeRun` regression test
+  added; E1's overstated item-2 sentence corrected (`346_e1_verification.md` §2/§6).
+- **SB-1 — DONE.** The per-element content-address codec is verified injective, and the residual
+  `[]`-vs-`[""]` collision is closed (`knowledge.ts`). The owed **RED-first proof** (a worktree at
+  `988b158` → 4 knowledge pins + 3 guard legs red) and the log entry are in `346_e2_resilience.md`.
+- **V2 — DONE.** `346_v2_validate.md`: orchestrator adversarial probe 12/12 (0 keyed calls), browser checks
+  6/6 (desktop + mobile) for SpendChip / artifact windowing / corrupt-blob rescue / cross-tab / a11y,
+  census + destruction audit (0 tracked deletions), assertion-gap lint clean.
+- **Agent sweep — LANDED** (each with a failing-then-passing pin): orchestrator cross-process state lock +
+  dirty-slug commit (`factory-watch.mjs`); a configured-but-missing `--knowledge` store refuses coded
+  (`rapidtool-cli.mjs`); cross-tab operator toggles no longer lose updates (`store.ts`); an empty-array
+  shape is a real assertion, not a placeholder (`brief-fixtures.ts`); the one-shot guard catches
+  bracket/optional-chain/`Reflect.apply` evasions; the stale DORMANT E-08 comment corrected (`dod.ts`).
+- **Boundary gate — GREEN.** typecheck 0 · lint 0 · assertion-gaps 0 · scripts 446/0 · lib 3370/0/2 ·
+  build 0; `flakes:[]`, `hardFails:[]`.
+- **Lower-priority §4 items:** SB-3 (guard evasion) closed; SB-4 (`dod.ts` stale comment) closed;
+  SB-5 (log line drift) noted; SB-6 disclosed. Remaining known gap from this wave: the oracle lane in
+  `verify.server.ts` still lacks the numeric-literal recognition the tree lane now has (parity follow-up).
+- **Autonomy claim:** an independent audit (`346_audit_autonomy.md`) refutes "100% autonomous software
+  factory" — `doctor` prints `autonomousSoftwareFactory:false` by design (the bar requires a human-approved
+  fixture row), and keyed-P6 reliability + delivery-time verification + isolation remain. The prioritized
+  plan is in that file.

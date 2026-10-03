@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { stripTypeScriptTypes } from "node:module";
 import {
   approveAllFixtureCases,
   approveFixtureCases,
@@ -18,6 +19,7 @@ import {
   jobCoveredByCapabilities,
   coerceAcceptanceFixtures,
   compileFixtureAssertion,
+  fixtureCaseIsPlaceholder,
   fixtureMatchHelperSource,
   fixtureShapeValueIsVacuous,
   approvedAcceptanceFixtures,
@@ -701,11 +703,13 @@ describe("A1-01 — placeholder sentinels are not substantive fixtures", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 346 E1 (L1-F5): an EMPTY shape value (`{}` / `[]`) is not a sentinel, so the
+// 346 E1 (L1-F5): an EMPTY-OBJECT shape value (`{}`) is not a sentinel, so the
 // A1-01 placeholder scan missed it — yet `__fxPartialMatch(actual, {})` is true
 // for ANY object (Object.keys of an empty expectation trivially `.every`). Such
 // a row asserts only "returns an object"; it is rejected at the same seam the
-// placeholder rule uses (case predicate + compile red-card).
+// placeholder rule uses (case predicate + compile red-card). An empty ARRAY is
+// NOT vacuous (346 A6): the matcher's array branch is an exact-length check, so
+// `[]` is a substantive bar and stays accepted.
 // ---------------------------------------------------------------------------
 
 describe("346 E1 L1-F5 — an empty expect.shape is near-vacuous and refused", () => {
@@ -725,9 +729,9 @@ describe("346 E1 L1-F5 — an empty expect.shape is near-vacuous and refused", (
     };
   }
 
-  it("fixtureShapeValueIsVacuous recognises only an empty object/array", () => {
+  it("fixtureShapeValueIsVacuous recognises only an empty OBJECT (not [])", () => {
     assert.equal(fixtureShapeValueIsVacuous({}), true);
-    assert.equal(fixtureShapeValueIsVacuous([]), true);
+    assert.equal(fixtureShapeValueIsVacuous([]), false);
     assert.equal(fixtureShapeValueIsVacuous({ id: "p-1" }), false);
     assert.equal(fixtureShapeValueIsVacuous([1]), false);
     assert.equal(fixtureShapeValueIsVacuous("x"), false);
@@ -752,5 +756,32 @@ describe("346 E1 L1-F5 — an empty expect.shape is near-vacuous and refused", (
     assert.equal(fixtureShapeValueIsVacuous((real.expect as { value: unknown }).value), false);
     assert.equal(compileFixtureAssertion(real).ok, true);
     assert.equal(approvedAcceptanceFixtures([real])?.length, 1);
+  });
+
+  // 346 A6: an EMPTY-ARRAY shape is a REAL exact-length assertion, not a
+  // vacuous one. `__fxPartialMatch(actual, [])` is true ONLY for an empty
+  // array (the helper's array branch checks `actual.length !== 0`), rejecting
+  // [1] / {} / "x" — so treating [] as a placeholder falsely refused a
+  // legitimate "returns []" acceptance bar. Only an empty OBJECT is vacuous.
+  it("an empty-array shape is a substantive bar, not a placeholder", () => {
+    const helperJs = stripTypeScriptTypes(fixtureMatchHelperSource(), { mode: "strip" });
+    const match = new Function(`${helperJs}\nreturn __fxPartialMatch;`)() as (
+      a: unknown,
+      e: unknown,
+    ) => boolean;
+    assert.equal(match([], []), true, "empty array matches the empty expectation");
+    assert.equal(match([1], []), false, "a non-empty array must NOT match []");
+    assert.equal(match({}, []), false, "an object must NOT match []");
+    assert.equal(match("x", []), false, "a primitive must NOT match []");
+
+    const emptyArrayCase: BriefFixtureCase = {
+      ...emptyShapeCase(),
+      expect: { kind: "shape", value: [] },
+    };
+    assert.equal(fixtureShapeValueIsVacuous([]), false, "[] is not vacuous");
+    assert.equal(fixtureCaseIsPlaceholder(emptyArrayCase), false, "an [] shape asserts something real");
+    assert.equal(compileFixtureAssertion(emptyArrayCase).ok, true, "an [] shape compiles");
+    assert.equal(approvedAcceptanceFixtures([emptyArrayCase])?.length, 1, "an [] bar is approved, not refused");
+    assert.equal(fixtureApprovalGate([emptyArrayCase]).ok, true, "the gate admits an [] bar");
   });
 });
