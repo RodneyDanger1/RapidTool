@@ -65,6 +65,54 @@ describe("W45 331-1 oneShotFetch (production transport)", () => {
     assert.equal(parsed.ok, true);
   });
 
+  it("a cross-origin redirect never forwards the Authorization header", async () => {
+    // 343-2 sweep: this transport carries the provider API key. Standard fetch
+    // strips authorization/cookie on an origin-changing redirect; following one
+    // blind would hand the bearer token to whatever host the Location names.
+    let auth: string | undefined;
+    let trace: string | undefined;
+    const victim = createServer((req, res) => {
+      auth = req.headers["authorization"] as string | undefined;
+      trace = req.headers["x-trace"] as string | undefined;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve) => victim.listen(0, "127.0.0.1", resolve));
+    const victimPort = (victim.address() as AddressInfo).port;
+    try {
+      // Same-origin sanity: the victim DOES receive the auth header when it is
+      // the direct target (so the strip below is about the origin change).
+      const direct = await oneShotFetch(`http://127.0.0.1:${victimPort}/direct`, {
+        method: "GET",
+        headers: { authorization: "Bearer sk-abcdef0123456789" },
+      });
+      assert.equal(direct.status, 200);
+      assert.equal(auth, "Bearer sk-abcdef0123456789");
+
+      const redirector = createServer((_req, res) => {
+        res.writeHead(302, { location: `http://127.0.0.1:${victimPort}/cross` });
+        res.end();
+      });
+      await new Promise<void>((resolve) => redirector.listen(0, "127.0.0.1", resolve));
+      const redirectorPort = (redirector.address() as AddressInfo).port;
+      try {
+        auth = undefined;
+        trace = undefined;
+        const res = await oneShotFetch(`http://127.0.0.1:${redirectorPort}/api`, {
+          method: "GET",
+          headers: { authorization: "Bearer sk-abcdef0123456789", "x-trace": "keep-me" },
+        });
+        assert.equal(res.status, 200);
+        assert.equal(auth, undefined, "authorization must NOT cross an origin-changing redirect");
+        assert.equal(trace, "keep-me", "non-credential headers still travel");
+      } finally {
+        await new Promise<void>((resolve) => redirector.close(() => resolve()));
+      }
+    } finally {
+      await new Promise<void>((resolve) => victim.close(() => resolve()));
+    }
+  });
+
   it("honors an aborted signal with an AbortError", async () => {
     const controller = new AbortController();
     controller.abort();

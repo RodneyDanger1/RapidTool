@@ -69,6 +69,22 @@ function normalizeHeaders(headers: HeadersInit | undefined): Record<string, stri
   return out;
 }
 
+/**
+ * Headers that must NEVER cross an origin-changing redirect (fetch semantics,
+ * WHATWG fetch §HTTP-redirect-fetch). This transport carries the provider API
+ * key in `authorization`; forwarding it to whatever host a `Location` names
+ * would leak the credential to a third party.
+ */
+function stripCrossOriginSecrets(headers: HeadersInit | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(normalizeHeaders(headers))) {
+    const n = k.toLowerCase();
+    if (n === "authorization" || n === "cookie" || n === "proxy-authorization") continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 function bodyToString(body: BodyInit | null | undefined): string | null {
   if (body === null || body === undefined) return null;
   if (typeof body === "string") return body;
@@ -118,12 +134,18 @@ function requestOnce(
         if (status >= 300 && status < 400 && location && redirectsLeft > 0) {
           res.resume(); // drain the redirect socket so it closes here
           const keepMethod = status === 307 || status === 308;
+          const nextUrl = new URL(location, parsed);
           const nextInit: RequestInit = {
             ...init,
             method: keepMethod ? init.method : "GET",
             body: keepMethod ? init.body : undefined,
+            // A redirect to a DIFFERENT origin drops the credential headers;
+            // the same origin keeps them (fetch's own rule).
+            ...(nextUrl.origin !== parsed.origin
+              ? { headers: stripCrossOriginSecrets(init.headers) }
+              : {}),
           };
-          requestOnce(new URL(location, parsed).toString(), nextInit, redirectsLeft - 1).then(
+          requestOnce(nextUrl.toString(), nextInit, redirectsLeft - 1).then(
             resolve,
             reject,
           );

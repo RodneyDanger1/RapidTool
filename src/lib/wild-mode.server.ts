@@ -262,7 +262,7 @@ export function parseWildReview(text: string): { verdict: "approve" | "reject"; 
  * feedback counts as substantive when it carries at least one token of >= 5
  * letters that is not a generic approval word, or a reference (>= 4 chars) to
  * one of the artifact titles / gate criterion ids shown in the review prompt.
- * Everything else ("looks good, approve", "all good", "no issues") is flagged
+ * Everything else ("looks good, approve", "all good", "ok fine") is flagged
  * so the loop reports an honest error instead of minting a rubber-stamp
  * approval. Pure — cheap to unit test.
  */

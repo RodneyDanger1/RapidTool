@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRtRing, rtHydrate, rtPush, rtRowBytes, rtSerialize, rtStats, rtTail, type RtRing } from "./rt-ring.ts";
-import { RING_CAP, messageHash } from "./rt-events.ts";
+import { RING_CAP, RING_BYTES, messageHash } from "./rt-events.ts";
 import type { RtEvent } from "./rt-events.ts";
 
 let seq = 0;
@@ -269,4 +269,31 @@ test("M3-07: rtSerialize on a null ring emits the empty frame — hydrates clean
   const back = rtHydrate(raw);
   assert.equal(back.rows.length, 0);
   assert.equal(back.recoveredCorrupt, false);
+});
+
+test("hydrate enforces the ring bounds: an oversized/tampered blob is trimmed (row cap + byte cap)", () => {
+  // A persisted blob is localStorage — user-writable and possibly written by a
+  // build with different caps. Hydration must re-apply the SAME bounds rtPush
+  // does, or the "200 rows / 64 KB" contract holds only until the next push.
+  const manyRows = Array.from({ length: RING_CAP + 100 }, (_, i) =>
+    row({ ts: 1_000 + i, message: `h${i}` }),
+  );
+  const byRowCount = rtHydrate(
+    JSON.stringify({ version: 1, sessionId: "s-big", rows: manyRows }),
+  );
+  assert.equal(byRowCount.rows.length, RING_CAP, "row cap applies on hydrate");
+  assert.equal(byRowCount.rows[0].message, "h100", "oldest rows dropped first");
+  assert.equal(byRowCount.rows[RING_CAP - 1].message, `h${RING_CAP + 99}`, "newest row kept");
+  assert.ok(rtStats(byRowCount).bytes <= RING_BYTES, "row-capped result fits bytes");
+
+  // Row count within the cap, but the serialized payload exceeds the byte cap.
+  const bulky = Array.from({ length: RING_CAP }, (_, i) =>
+    row({ ts: 2_000 + i, message: `b${i}-${"x".repeat(280)}` }),
+  );
+  const byBytes = rtHydrate(
+    JSON.stringify({ version: 1, sessionId: "s-fat", rows: bulky }),
+  );
+  assert.ok(rtStats(byBytes).bytes <= RING_BYTES, "byte cap applies on hydrate");
+  assert.ok(byBytes.rows.length >= 1 && byBytes.rows.length < RING_CAP, "oldest trimmed to fit");
+  assert.equal(byBytes.rows[byBytes.rows.length - 1].message, `b${RING_CAP - 1}-${"x".repeat(280)}`, "newest kept");
 });

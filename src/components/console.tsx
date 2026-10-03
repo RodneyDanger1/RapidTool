@@ -54,6 +54,10 @@ import { approvalHealth } from "@/lib/gate-stats";
 import { policyOverlayRefusal } from "@/lib/policy";
 import { downloadFilename, exportPacketText, exportProjectJson, slugName } from "@/lib/io";
 import { phaseHandoff } from "@/lib/handoff";
+// 343-2 (W57): the deterministic repo map — client-safe (it imports only
+// sandbox.ts/dod.ts), so the console can render the same ranked outline the
+// Agent Packet carries instead of only a raw path list.
+import { repoMapElisionMarker, repoMapForProject } from "@/lib/repo-map";
 import type { Artifact, ChatLogRow, JsonLog, PhaseId, PhaseRecord, PhaseStatus, Project, ProjectStatus } from "@/lib/types";
 import {
   buildVaultNotes,
@@ -2248,6 +2252,15 @@ export function RunScreen({ id }: { id: string }) {
     return counts;
   }, [artifacts]);
   const tokenEst = useMemo(() => estimateTokens(project?.packet ?? ""), [project?.packet]);
+  // 343-2: the ranked repo map for the generated tree (or the legacy single
+  // module). Computed before the null guard so the hook order is stable; a null
+  // project yields the honest empty map. A roomier budget than the packet's
+  // section because the pane is scrollable, still char-bounded with the same
+  // visible elision marker.
+  const repoMap = useMemo(
+    () => repoMapForProject(project, { budget: 6_000 }),
+    [project],
+  );
 
   if (!project) {
     return (
@@ -3674,6 +3687,51 @@ export function RunScreen({ id }: { id: string }) {
             </Tabs.Content>
 
             <Tabs.Content value="packet" forceMount className="data-[state=inactive]:hidden">
+              {/* 343-2: the deterministic repo map — the same ranked outline the
+                  Agent Packet carries, so the human sees which generated file
+                  exports what and what depends on what. Rank is a documented,
+                  pure score; the list is char-bounded with a visible elision
+                  marker; an empty tree shows an honest empty state. */}
+              <div className="px-5 pt-4">
+                <div className="rounded-md border border-border bg-surface">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border px-3 py-2">
+                    <h3 className="text-sm font-medium text-fg">Repo map</h3>
+                    <span className="font-mono text-2xs text-faint">
+                      {repoMap.empty
+                        ? "no generated tree recorded"
+                        : `${repoMap.shownFiles} of ${repoMap.totalFiles} file(s) · ranked by in-degree, exports, size, role · ${repoMap.chars}/${repoMap.budget} chars`}
+                    </span>
+                  </div>
+                  {repoMap.empty ? (
+                    <p className="px-3 py-4 text-sm text-muted">
+                      No generated tree yet — a keyed Phase 6 run records the files this outline
+                      ranks. An empty tree produces an empty map; nothing is invented here.
+                    </p>
+                  ) : (
+                    <ol className="scroll-thin max-h-56 space-y-1.5 overflow-y-auto px-3 py-3">
+                      {repoMap.entries.map((e) => (
+                        <li key={e.path} className="min-w-0">
+                          <p className="font-mono text-xs break-all text-fg">{e.path}</p>
+                          <p className="text-xs break-words text-muted">
+                            {e.symbols.length > 0
+                              ? `${e.symbols.join(", ")}${e.hidden > 0 ? ` (+${e.hidden} more)` : ""}`
+                              : "(no named exports)"}
+                            <span className="text-faint">
+                              {" "}
+                              · {e.role} · in {e.inbound} · {e.lines} ln
+                            </span>
+                          </p>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  {repoMap.truncated ? (
+                    <p className="border-t border-border px-3 py-1.5 font-mono text-2xs text-warn">
+                      {repoMapElisionMarker(repoMap.omitted, repoMap.budget)}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
               {project.packet ? (
                 <div className="px-5 pt-4 pb-5">
                   {/* DF-26 (W16 lane 3): truncation made loud where the packet is

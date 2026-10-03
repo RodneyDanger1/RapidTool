@@ -56,7 +56,7 @@ export const MCP_PROTOCOL_VERSION = "2024-11-05";
 /** Default per-request bound; a hung server can never strand a caller. */
 export const MCP_DEFAULT_TIMEOUT_MS = 10_000;
 
-/** Default cap on a single in-flight reply line. */
+/** Default cap, in UTF-8 bytes, on a single in-flight reply line. */
 export const MCP_DEFAULT_MAX_FRAME_BYTES = 4 * 1024 * 1024;
 
 /** Bounded grace after `stdin.end()` before the child is killed on `close()`. */
@@ -125,7 +125,7 @@ export interface McpConnectOptions {
   env?: NodeJS.ProcessEnv;
   /** Per-request timeout. */
   timeoutMs?: number;
-  /** Max bytes for one reply line. */
+  /** Max UTF-8 bytes for one reply line. */
   maxFrameBytes?: number;
   /** Client identity sent in `initialize`. */
   clientInfo?: McpServerInfo;
@@ -198,6 +198,9 @@ class StdioMcpClient implements McpClient {
   private readonly pending = new Map<number, PendingRequest>();
   private nextId = 1;
   private stdoutBuffer = "";
+  /** Running UTF-8 byte length of `stdoutBuffer` (kept incrementally so the
+   *  byte cap never rescans the whole buffer per chunk — that would be O(n²)). */
+  private stdoutBufferedBytes = 0;
   private stderrTail = "";
   private closed = false;
   /** The sticky fault: first one wins, never clears, refuses every later request. */
@@ -268,7 +271,11 @@ class StdioMcpClient implements McpClient {
   private onStdout(text: string): void {
     if (this.closed || this.fault !== null) return;
     this.stdoutBuffer += text;
-    if (this.stdoutBuffer.length > this.maxFrameBytes && !this.stdoutBuffer.includes("\n")) {
+    // The cap is documented in BYTES, so meter real UTF-8 bytes. The counter is
+    // maintained incrementally: `setEncoding("utf8")` never splits a code point
+    // across chunks, so per-chunk `Buffer.byteLength` sums to the concatenation.
+    this.stdoutBufferedBytes += Buffer.byteLength(text, "utf8");
+    if (this.stdoutBufferedBytes > this.maxFrameBytes && !this.stdoutBuffer.includes("\n")) {
       this.failAll("RT_E_VALIDATION", `MCP reply exceeded the ${this.maxFrameBytes}-byte frame cap`);
       return;
     }
@@ -279,14 +286,16 @@ class StdioMcpClient implements McpClient {
       if (this.fault !== null) return;
       const line = this.stdoutBuffer.slice(0, newline);
       this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1);
-      if (line.length > this.maxFrameBytes) {
+      const lineBytes = Buffer.byteLength(line, "utf8");
+      this.stdoutBufferedBytes -= lineBytes + 1; // + the peeled "\n"
+      if (lineBytes > this.maxFrameBytes) {
         this.failAll("RT_E_VALIDATION", `MCP reply exceeded the ${this.maxFrameBytes}-byte frame cap`);
         return;
       }
       if (line.trim().length > 0) this.onLine(line);
       newline = this.stdoutBuffer.indexOf("\n");
     }
-    if (this.stdoutBuffer.length > this.maxFrameBytes) {
+    if (this.stdoutBufferedBytes > this.maxFrameBytes) {
       this.failAll("RT_E_VALIDATION", `MCP reply exceeded the ${this.maxFrameBytes}-byte frame cap`);
     }
   }

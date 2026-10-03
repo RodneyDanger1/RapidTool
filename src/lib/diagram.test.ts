@@ -12,6 +12,7 @@ import {
   STATUS_THEME,
   UNKNOWN_KIND_THEME,
   buildDiagram,
+  kindTheme,
   resolveFlowHighlight,
   resolvePhaseStatus,
 } from "./diagram.ts";
@@ -506,5 +507,13 @@ describe("palette integrity", () => {
     assert.equal(Object.keys(KIND_THEME).length, 16);
     assert.equal(new Set(ALL_KINDS.map((k) => KIND_THEME[k].fill)).size, 16);
     assert.equal(new Set(ALL_KINDS.map((k) => KIND_THEME[k].stroke)).size, 16);
+  });
+
+  it("kindTheme falls back to UNKNOWN_KIND_THEME for prototype member names", () => {
+    // The exported contract says runtime-garbage kinds get the fallback theme;
+    // a plain-object read would instead hand back Object.prototype members.
+    for (const kind of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      assert.deepEqual(kindTheme(kind), UNKNOWN_KIND_THEME, `${kind} must use the fallback theme`);
+    }
   });
 });

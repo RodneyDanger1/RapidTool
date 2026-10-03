@@ -436,7 +436,11 @@ const FAMILY_KEYWORDS: [FamilyId, RegExp][] = [
  */
 function familyFor(project: Project): FamilyId {
   const domain = (project.domain ?? "").trim().toLowerCase();
-  const canonical = CANONICAL_DOMAIN[domain];
+  // Own-key lookup: a plain-object read returns Object.prototype.constructor /
+  // __proto__ for those domains, which is not a FamilyId and crashed CASTS[...].
+  const canonical = Object.prototype.hasOwnProperty.call(CANONICAL_DOMAIN, domain)
+    ? CANONICAL_DOMAIN[domain]
+    : undefined;
   if (canonical) return canonical;
   const haystack = `${project.name ?? ""} ${project.brief ?? ""}`.toLowerCase();
   for (const [family, re] of FAMILY_KEYWORDS) {
@@ -697,7 +701,7 @@ export function designHtml(project: Project): string {
     `      <div class="chips">`,
     `        ${chip("chip-brand", esc(t.palette.name))}`,
     `        ${chip("chip-accent", `domain: ${esc(domain)}`)}`,
-    `        ${chip(STATUS_TONE[status] ?? "chip-neutral", `status: ${esc(status)}`)}`,
+    `        ${chip(Object.prototype.hasOwnProperty.call(STATUS_TONE, status) ? STATUS_TONE[status] : "chip-neutral", `status: ${esc(status)}`)}`,
     `        ${chip("chip-neutral", `phase P${esc(String(project.currentPhase ?? 0))}`)}`,
     `      </div>`,
     `      <h1>${esc(name)} — design system</h1>`,

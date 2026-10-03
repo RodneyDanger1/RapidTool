@@ -370,6 +370,25 @@ describe("designHtml — XSS safety & text rendering", () => {
     assert.ok(html.includes("custom · "));
   });
 
+  it("treats Object.prototype member names as unknown (no inherited-key lookup)", () => {
+    // Project.domain is a free string (engine.ts `typeof raw.domain === "string"`);
+    // a plain-object table lookup would return Object.prototype.constructor /
+    // __proto__ for those domains and crash the Design surface.
+    for (const domain of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      const t = designTokens(proj({ name: "Proto Probe", domain }));
+      assert.ok(
+        t.palette.name.startsWith("custom · "),
+        `${domain} must fall back to the custom family, got ${t.palette.name}`,
+      );
+    }
+  });
+
+  it("renders a real status chip class for a prototype-key status", () => {
+    const html = designHtml(proj({ name: "Proto Status", status: "constructor" as Project["status"] }));
+    assert.ok(!/class="chip function/.test(html), "an inherited function must not become the chip class");
+    assert.ok(html.includes("chip-neutral"), "an unknown status falls back to the neutral chip");
+  });
+
   it("renders deterministic sample content when the intent lattice is absent", () => {
     const p = proj({ name: "No Lattice", lattice: null });
     const t = designTokens(p);

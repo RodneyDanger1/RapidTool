@@ -223,7 +223,8 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 // diagnose.ts / rt-timeline.ts / rapidtool-cli.mjs do NOT count), and none is
 // emitted server- or CLI-side under its exact name. Emit one, or trim it — a
 // registered name nothing emits is a guardrail only in prose.
-//   boot.start · boot.ready · sys.memory · boundary.crash · ui.action_error ·
+//   boot.start · boot.ready · sys.memory · sys.step_overdue ·
+//     boundary.crash · ui.action_error ·
 //     store.action_error · engine.phase_fallback · engine.phase_error ·
 //     wild.driver_cap · wild.driver_stall · wild.driver_start_refused ·
 //     wild.driver_paused_auto · wild.driver_resumed · wild.driver_error ·
@@ -256,6 +257,12 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 // end + the top-catch crash row; ≤3 per run), so the +3 names are +3 emitters;
 // the dead list above is unchanged (re-derived at the T5.4 landing, not
 // inherited).
+// W56 · 343-3 re-count 2026-10-03 (same non-test `event:` scan pattern):
+// catalogue 60 · emitted 21 · dead 39 — the 342-6 sweep removed
+// watchdog.overdueRowSeed (its `event: "sys.step_overdue"` was the name's only
+// emit-site literal), so sys.step_overdue moved onto the dead list above
+// (added there). No name was added or removed and no other list member changed;
+// the arithmetic is re-derived, not inherited.
 // ---------------------------------------------------------------------------
 
 /** True when the event string is a catalogue member. */

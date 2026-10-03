@@ -225,6 +225,14 @@ export function rtHydrate(raw: unknown): RtRing {
     if (!isRtEventLike(r)) continue;
     rows.push(sanitizeRtEvent(r));
   }
+  // M3 (W56 · 343-3): hydration re-applies the SAME bounds rtPush does. A
+  // persisted blob is localStorage — user-writable, and possibly written by a
+  // build with different caps — so without this trim the "200 rows / 64 KB"
+  // contract held only until the next push (a tampered blob loaded unbounded
+  // rows into the in-memory ring, rtStats and the diagnose panes). Oldest
+  // rows drop first, exactly like the push path.
+  while (rows.length > RING_CAP) rows.shift();
+  while (rows.length > 1 && serializedRowsBytes(rows) > RING_BYTES) rows.shift();
   const heartbeat = isRtEventLike(obj.lastHeartbeat) ? sanitizeRtEvent(obj.lastHeartbeat as RtEvent) : null;
   const stallRaw = obj.stall;
   const STALL_CLASSES = new Set(["step-overdue", "mainthread-stall", "step-timeout"]);

@@ -70,6 +70,9 @@ import { fileURLToPath } from "node:url";
 // existing default byte-identical.
 import { createNodeWildReviewer } from "./wild-review.ts";
 import type { QuarantineFailure } from "./quarantine.ts";
+// fixes/343_3: the delivery seam's types are type-only here (erased); the real
+// git child seam is dynamic-imported inside landEmittedTree below.
+import type { GitLandEmittedOk, GitLandEmittedOptions, GitLandResult, LandSubject } from "./git.server.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 import type {
   ArtifactKind,
@@ -2520,6 +2523,27 @@ export async function emitProject(
       /* ignore */
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// fixes/343_3 · the delivery tail (CLI `emit --git`). headless IS the CLI's
+// bare-Node host, so the land seam is mounted here: the CLI hands the just-
+// emitted manifest + the project, and the REAL git mechanics live in
+// git.server.ts's `gitLandEmitted` (see its §6b doctrine — emitted-product
+// only, manifest-only staging, the host repo structurally refused, idempotent).
+// The dynamic import keeps git.server.ts's node:child_process seam off every
+// eager path, the same discipline this file's other server-only mounts follow.
+// ---------------------------------------------------------------------------
+export type LandEmittedTreeOptions = GitLandEmittedOptions;
+
+/** Land an EMITTED tree as one Conventional-Commits delivery commit (fixes/343_3). */
+export async function landEmittedTree(
+  subject: LandSubject,
+  dir: string,
+  opts: LandEmittedTreeOptions,
+): Promise<GitLandResult<GitLandEmittedOk>> {
+  const { gitLandEmitted } = await import("./git.server.ts");
+  return gitLandEmitted(subject, dir, opts);
 }
 
 // ---------------------------------------------------------------------------

@@ -146,6 +146,22 @@ describe("checkpoint.server — the §A1 hardening pins (W36 N2)", () => {
       );
       const fractional = readCheckpoint(dir);
       assert.equal(fractional.ok, false, "fractional phase refused at READ time too (A1-07)");
+
+      // A1-07: the integer out-of-graph upper bound is enforced at READ time,
+      // not only at checkpointAdmits — a hand-edited `run.phase: 13` must be
+      // refused here (the reader proves the shape before any caller sees it).
+      writeFileSync(
+        path,
+        JSON.stringify({
+          version: CHECKPOINT_VERSION,
+          savedAt: Date.now(),
+          run: { phase: PHASES.length, step: 0, mode: "keyless" },
+          project: { id: "p", phases: [{ id: 0 }] },
+        }),
+        "utf8",
+      );
+      const outOfGraph = readCheckpoint(dir);
+      assert.equal(outOfGraph.ok, false, "an out-of-graph integer phase is refused at READ time too (A1-07)");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

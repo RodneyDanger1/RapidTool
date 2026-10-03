@@ -146,6 +146,19 @@ import {
 // R12-f04 (fixes/271): the P6 phase max lives in the client-safe constants
 // table; this module consumes it (single source — no literal fork).
 import { P6_PHASE_MAX_MS } from "./rt-events.ts";
+// fixes/343-1: the opt-in best-of-N policy (count resolution + deterministic
+// lazy selection). The gates it selects against stay in this module.
+import {
+  candidatesLogDetail,
+  resolveSynthesisCandidates,
+  selectBestOfN,
+  type CandidateEvaluation,
+} from "./synthesis-policy.ts";
+// fixes/343-1 follow-up (343-2 STOP-and-REPORT): the deterministic repo map —
+// the ranked, budgeted outline of the persisted tree, fed to the PRIMARY chunk
+// prompt so a resumed/re-synthesized run extends a tree it can see. Client-safe
+// and dependency-free, so this server module may import it freely.
+import { repoMapForProject } from "./repo-map.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 // fixes/341-1: the real declared-`typecheck` runner (the tree-run's own
 // compiler seam) + the pure scaffold emitter the pre-seal gate materializes
@@ -198,6 +211,14 @@ const TRUNCATION_MARK = "\n…[TRUNCATED — brief longer than the synthesis bud
  * mark the elision visibly — never silently drop context.
  */
 export const P6_SYNTH_PRIOR_MAX_FILES = 12;
+
+/**
+ * fixes/343-1 follow-up (343-2 STOP-and-REPORT): the char budget for the repo
+ * map block appended to the PRIMARY chunk prompt. `repo-map.ts` clamps the
+ * render so `rendered.length <= budget`; 1200 keeps the block within the same
+ * bounded-context discipline as the other appended blocks.
+ */
+export const P6_SYNTH_REPO_MAP_BUDGET = 1_200;
 
 /**
  * R12-f01: per-chunk prompt char budget for the PRIOR block. A pathological
@@ -623,10 +644,13 @@ export function p6SynthesisSystemPrompt(): string {
     // `Record<string, unknown>`), TS2749 (`TextDecoder` used as a type under a
     // value-only global) and TS2440 (a local declaration colliding with an
     // import). Rule 10 named only TS7006/TS2304, so the model was never told the
-    // shapes a bounded repair had to correct. Real `tsc` is the gate, not the
-    // validator, so the rule claims no enforcement. The compiler report already
-    // rides the repair re-prompt; this names the classes so the retry can act.
-    "11. The emitted tree is compiled by real `tsc --noEmit` under `strict: true`; a type error blocks the product. Three classes it refuses, with the required shape for each: (a) TS2322 ASSIGNMENT TYPE MISMATCH — an annotation must EXACTLY match the value it describes: never annotate a function as returning `number` (or a variable as `number`) while its body returns a structured value such as `Record<string, unknown>`, an object literal, or an array; type such a helper `Record<string, unknown>` (or a `type`/`interface` you declare), and if you mean one numeric field, return that field rather than the whole record. (b) TS2749 VALUE USED AS A TYPE — never put a runtime VALUE in a type position: the global `TextDecoder` is a value-only constructor here, so `: TextDecoder` on a parameter, return or variable fails; every type must be one of `string | number | boolean | unknown | any | object | T[]` (or a `type`/`interface` you DECLARE in this module) — use `number[]`/`Uint8Array` for bytes and `string` for decoded text, and construct `new TextDecoder()` only at runtime. (c) TS2440 IMPORT/LOCAL CONFLICT — never declare a name locally (`function`/`class`/`const`/`type`/`interface`) that is also imported or declared under the same name; with zero imports (rule 2) each helper is declared exactly ONCE, under a name no earlier file exports.",
+    // shapes a bounded repair had to correct. W57/343-1's keyed best-of-N probe
+    // added a fourth, measured live: TS2323 (`Cannot redeclare exported
+    // variable`) — candidate 1 declared `resolvePort`/`validateOrderEvent`
+    // twice. Real `tsc` is the gate, not the validator, so the rule claims no
+    // enforcement. The compiler report already rides the repair re-prompt; this
+    // names the classes so the retry can act.
+    "11. The emitted tree is compiled by real `tsc --noEmit` under `strict: true`; a type error blocks the product. Four classes it refuses, with the required shape for each: (a) TS2322 ASSIGNMENT TYPE MISMATCH — an annotation must EXACTLY match the value it describes: never annotate a function as returning `number` (or a variable as `number`) while its body returns a structured value such as `Record<string, unknown>`, an object literal, or an array; type such a helper `Record<string, unknown>` (or a `type`/`interface` you declare), and if you mean one numeric field, return that field rather than the whole record. (b) TS2749 VALUE USED AS A TYPE — never put a runtime VALUE in a type position: the global `TextDecoder` is a value-only constructor here, so `: TextDecoder` on a parameter, return or variable fails; every type must be one of `string | number | boolean | unknown | any | object | T[]` (or a `type`/`interface` you DECLARE in this module) — use `number[]`/`Uint8Array` for bytes and `string` for decoded text, and construct `new TextDecoder()` only at runtime. (c) TS2440 IMPORT/LOCAL CONFLICT — never declare a name locally (`function`/`class`/`const`/`type`/`interface`) that is also imported or declared under the same name; with zero imports (rule 2) each helper is declared exactly ONCE, under a name no earlier file exports. (d) TS2323 DUPLICATE EXPORTED VARIABLE — `Cannot redeclare exported variable`: declare each exported variable exactly ONCE at top level. Never declare the same exported `const`/`let`/`var`/`function`/`class` name twice in one module, and never reuse a name an earlier file already exports; a second top-level declaration of an exported name fails the compile — emit ONE declaration, then assign `module.exports.<name>` once.",
   ].join("\n");
 }
 
@@ -1195,6 +1219,20 @@ function withTreeFailureContext(user: string, treeFailure?: string): string {
   if (!t) return user;
   return user +
     `\n\nP6 PREVIOUS-CYCLE FAILURE CONTEXT (the prior cycle's recorded tree-run/oracle failure — the failing file or oracle case and its first not-ok reason; repair the stated cause with real working code; this is recorded evidence, NOT a new requirement):\n${t.slice(0, P6_TREE_FAILURE_CONTEXT_MAX)}`;
+}
+
+/** fixes/343-1 follow-up (343-2 STOP-and-REPORT): the PRIMARY chunk prompt's
+ *  reader for the persisted tree's deterministic repo map (`repo-map.ts`). A
+ *  resumed/re-synthesized run then sees the ranked outline of the tree it is
+ *  extending (`path: exported symbols · in-degree, size, role`) instead of
+ *  re-deriving everything from the brief. Built from `project.generatedTree`
+ *  ONLY — the keyless floor's placeholder `generatedSource` is not a tree the
+ *  run is extending, so a tree-less project renders nothing and the prompt is
+ *  byte-identical to the legacy text (empty `rendered` ⇒ this returns `user`).
+ *  The map guarantees no guessed symbols; the render is already ≤ its budget. */
+function withRepoMapContext(user: string, rendered: string): string {
+  if (!rendered) return user;
+  return `${user}\n\nREPO MAP (deterministic outline of the tree so far — path: exported symbols, ranked):\n${rendered}`;
 }
 
 /** Repair re-prompt after an unparseable envelope (audit-88 bounded-retry pattern). */
@@ -3437,6 +3475,16 @@ export type P6SynthesisDeps = {
    *  does NOT disable the gate.
    */
   typecheckTree?: P6TreeTypecheck;
+  /** fixes/343-1: opt-in best-of-N sample count for a unit of synthesis — the
+   *  env var `P6_SYNTH_CANDIDATES` is the production knob (this option wins
+   *  over it so a caller/test is explicit). Default 1 = today's single sample,
+   *  byte-identical; hard-capped at `P6_SYNTH_CANDIDATES_MAX` (4). When >1, the
+   *  model is resampled only while the current candidate fails the deterministic
+   *  gates (structure -> brief-fit -> pre-seal typecheck) and the first candidate
+   *  that clears them is kept; a winner is recorded in a
+   *  `p6.synthesis.candidates` event naming the count, the winner, and why every
+   *  candidate won/lost. */
+  candidates?: number;
 };
 
 /** Number of expandBrief attempts on a transient/timeout failure (backoff). */
@@ -4203,6 +4251,10 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   // ranked with the memory lessons at every lesson site below; absent/empty ⇒
   // opts.proven is undefined ⇒ byte-identical legacy prompts.
   const proven = deps?.proven;
+  // fixes/343-1: the opt-in best-of-N sample count. `deps.candidates` wins over
+  // `P6_SYNTH_CANDIDATES`; the resolver clamps to 1..P6_SYNTH_CANDIDATES_MAX and
+  // defaults to 1, so an unset env keeps every byte and model call below legacy.
+  const candidates = resolveSynthesisCandidates(deps?.candidates, process.env.P6_SYNTH_CANDIDATES);
   const brief = typeof project.brief === "string" ? project.brief : "";
   if (!brief.trim() || !Array.isArray(project.phases)) return project;
 
@@ -4290,14 +4342,14 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   const chunkGroups = chunkTypeSignatures(specRecord.typeSignatures);
   if (singleModuleLibraryKind(project) && chunkGroups.length <= 1) {
     return synthesizeSingleModule(project, brief, specRecord, signatureNames, complete, verify, treeFailure,
-      patchRepairs, gateRepair, synthesisRefusal, proven, typecheck);
+      patchRepairs, gateRepair, synthesisRefusal, proven, typecheck, candidates);
   }
   // fixes/216k (105 TA-15, W6-L1): the chunked driver computes its own
   // chunk→file plan (treeChunkPlan) and consumption order (orderTreeChunks)
   // INSIDE — the caller no longer passes a flat grouping. Job-keyed chunks land
   // at their spec-graph `src/jobs/*.ts` paths; a job-less graph keeps the
   // pre-216k index-keyed mapping byte-for-byte (treeChunkPlan's legacy branch).
-  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair, synthesisRefusal, proven, typecheck);
+  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair, synthesisRefusal, proven, typecheck, candidates);
 }
 
 /**
@@ -4339,6 +4391,8 @@ async function synthesizeSingleModule(
    *  tree is judged by the same declared `typecheck`; a red verdict refuses the
    *  seal (never a machine-run-green but type-red `tested` artifact). */
   typecheck: P6TreeTypecheck | null = null,
+  /** fixes/343-1: opt-in best-of-N sample count (1 ⇒ legacy byte-identical). */
+  candidates = 1,
 ): Promise<Project> {
   // --- Step 2 (legacy): synthesis (one call + one bounded repair re-prompt) --
   const lessonLines = lessonLinesForBrief(
@@ -4414,6 +4468,58 @@ async function synthesizeSingleModule(
   }
   if (envelope === null) {
     return refuse(withAttemptLogs(project, attemptLogs), "RT_E_LLM_REJECTED", "model returned an unparseable synthesis envelope after one repair attempt");
+  }
+
+  // --- Step 2b: opt-in best-of-N candidate selection (fixes/343-1) -----------
+  // Engaged ONLY when the caller/env asked for >1 candidates; the default (1)
+  // leaves every line below byte-identical. Each candidate is judged against
+  // the ordered deterministic gates that already exist on this path — structure
+  // (validateSynthesisModule) → brief-fit (briefFitSatisfied) → pre-seal
+  // typecheck (the real tsc seam) — and the FIRST candidate to clear them all
+  // is kept, so a gate-green winner skips the bounded repair block below. When
+  // NO candidate clears the gates the primary sample stands and the legacy
+  // repair path still runs: selection is never worse than not selecting.
+  // Extra samples are produced lazily (only while the current candidate fails)
+  // and metered through the same session budget as every repair call.
+  if (candidates > 1) {
+    const gateCandidate = async (env: SynthesisEnvelope): Promise<CandidateEvaluation> => {
+      const structure = validateSynthesisModule(env.module, env.exports, signatureNames);
+      if (!structure.ok) return { passed: false, reason: `structure refused (${structure.code}: ${structure.error})` };
+      const fitCheck = briefFitSatisfied(brief, env.module);
+      if (!fitCheck.ok) return { passed: false, reason: `brief-fit missing ${fitCheck.missing.slice(0, 6).join(", ")}` };
+      if (typecheck === null) return { passed: true, reason: "structure + brief-fit (no typecheck seam)" };
+      const candidateTree = materializeImportableTree([
+        { path: TREE_ENTRY_PATH, source: env.module, exports: env.exports, reqTrace: env.reqTrace },
+      ]);
+      const verdict = await runTreeSelfTypecheck(project, candidateTree, typecheck);
+      if (verdict.run === "fail") {
+        return { passed: false, reason: `pre-seal typecheck refused (${String(verdict.detail ?? "").replace(/\s+/g, " ").slice(0, 200)})` };
+      }
+      return {
+        passed: true,
+        reason: verdict.run === "pass" ? "structure + brief-fit + pre-seal typecheck" : "structure + brief-fit (typecheck skipped — unverified)",
+      };
+    };
+    const selection = await selectBestOfN<SynthesisEnvelope>(
+      candidates,
+      async (index) => {
+        if (index === 0) return envelope;
+        const resample = await completeCall(user, opts);
+        const resampleStop = accountRepairUsage(resample);
+        if (resampleStop !== null) return null; // budget stop — keep sampling bounded and honest
+        if (!resample.ok) return null;
+        return parseSynthesisEnvelope(resample.text, readSink);
+      },
+      gateCandidate,
+    );
+    if (selection.chosen !== null && selection.winner !== null) envelope = selection.chosen;
+    pushAttemptLog(attemptLogs, {
+      ts: Date.now(),
+      phase: 6 as PhaseId,
+      level: "info",
+      event: "p6.synthesis.candidates",
+      detail: candidatesLogDetail("single-module", candidates, selection.winner, selection.outcomes),
+    });
   }
 
   // --- Step 3: deterministic validation + brief-fit pre-acceptance -----------
@@ -4693,6 +4799,9 @@ async function synthesizeChunkedTree(
    *  (re-synthesized with the compiler's tail as tree-failure context) and, if
    *  still red, an honest partial refusal — never a sealed red tree. */
   typecheck: P6TreeTypecheck | null = null,
+  /** fixes/343-1: opt-in best-of-N sample count for the compiler-named chunks
+   *  (1 ⇒ legacy single re-synthesis, byte-identical). */
+  candidates = 1,
 ): Promise<Project> {
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
@@ -4764,6 +4873,15 @@ async function synthesizeChunkedTree(
     }
   }
 
+  // fixes/343-1 follow-up (343-2): the persisted tree's ranked outline, built
+  // once and appended to every PRIMARY chunk prompt. Tree-only input so the
+  // keyless floor's placeholder `generatedSource` can never masquerade as the
+  // tree being extended; no tree ⇒ `rendered === ""` ⇒ no block (legacy bytes).
+  const repoMap = repoMapForProject(
+    { generatedTree: Array.isArray(project.generatedTree) ? project.generatedTree : null },
+    { budget: P6_SYNTH_REPO_MAP_BUDGET },
+  ).rendered;
+
   for (let i = 0; i < plan.length; i++) {
     const chunk = plan[i]!;
     const lessonLines = lessonLinesForBrief(
@@ -4773,12 +4891,15 @@ async function synthesizeChunkedTree(
     );
     // R10-f01 (W39 Z2): the same project-level contract block on every chunk.
     // W52/338-1: `treeSpec` carries the reconciled (spec-driven) signature set.
-    const user = withTreeFailureContext(
-      withSynthesisRefusalContext(
-        withGateRepairContext(p6SynthesisChunkUserPrompt(brief, treeSpec, chunk.signatures, prior, lessonLines, project.contracts), gateRepair),
-        synthesisRefusal,
+    const user = withRepoMapContext(
+      withTreeFailureContext(
+        withSynthesisRefusalContext(
+          withGateRepairContext(p6SynthesisChunkUserPrompt(brief, treeSpec, chunk.signatures, prior, lessonLines, project.contracts), gateRepair),
+          synthesisRefusal,
+        ),
+        treeFailure,
       ),
-      treeFailure,
+      repoMap,
     );
     // T-107.1 (216r): per-chunk patch-repair sink — the chunk plan's path IS
     // the emitted tree file's path; absent when the level is off (legacy).
@@ -4860,7 +4981,18 @@ async function synthesizeChunkedTree(
     if (first.run === "fail") {
       const offenders = typecheckOffenderIndices(first, accepted);
       const context = typecheckRepairContext(first);
+      const tc = typecheck;
       let repairedAny = false;
+      // fixes/343-1: opt-in best-of-N over the compiler-named chunks. With the
+      // default (1) the block below collapses to the legacy single re-synthesis.
+      // With >1, an offender chunk is resampled up to `candidates` times with
+      // the SAME compiler-informed prompt (the tsc tail is the context, so the
+      // samples are strictly better-informed than a fresh primary prompt) and
+      // the first sample whose substituted assembled tree clears the REAL tsc
+      // is kept. Candidate 1 is probed first, so no resample happens when the
+      // existing single sample already clears the gate (Pareto on spend). Only
+      // when no sample clears the tree's tsc does candidate 1 stand and the
+      // existing second gate decide — selection is never worse than today.
       for (const i of offenders) {
         const chunk = plan[i]!;
         const priorForI = accepted.slice(0, i).map((f) => ({
@@ -4887,21 +5019,76 @@ async function synthesizeChunkedTree(
         const repairPatch: PatchRepairOptions | undefined = patchRepairs
           ? { path: chunk.path, log: (entry) => pushAttemptLog(attemptLogs, entry) }
           : undefined;
-        const repaired = await synthesizeChunkEnvelope(
-          complete,
-          repairUser,
-          opts,
-          signatureFunctionNames(chunk.signatures),
-          context,
-          repairPatch,
-          (attempt, res) =>
-            pushAttemptLog(
-              attemptLogs,
-              synthAttemptLogEntry({ chunkIndex: i, chunkTotal: plan.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
-            ),
-          (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, chunk.path)),
-          priorForI,
-        );
+        const produceChunk = () =>
+          synthesizeChunkEnvelope(
+            complete,
+            repairUser,
+            opts,
+            signatureFunctionNames(chunk.signatures),
+            context,
+            repairPatch,
+            (attempt, res) =>
+              pushAttemptLog(
+                attemptLogs,
+                synthAttemptLogEntry({ chunkIndex: i, chunkTotal: plan.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
+              ),
+            (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, chunk.path)),
+            priorForI,
+          );
+        let repaired = await produceChunk();
+        if (candidates > 1) {
+          const outcomes: string[] = [];
+          let winner: number | null = null;
+          if (repaired.ok) {
+            const fallback = repaired;
+            const substitute = (c: typeof fallback) => {
+              const probe = accepted.slice();
+              probe[i] = {
+                path: chunk.path,
+                source: c.envelope.module,
+                exports: [...c.envelope.exports],
+                reqTrace: { ...c.envelope.reqTrace },
+              };
+              return probe;
+            };
+            const v0 = await runTreeSelfTypecheck(project, materializeImportableTree(substitute(fallback)), tc);
+            if (v0.run !== "fail") {
+              winner = 0;
+              outcomes.push(`candidate 1: selected — ${v0.run === "pass" ? "pre-seal typecheck" : "typecheck skipped"}`);
+            } else {
+              outcomes.push(`candidate 1: rejected — tsc refused (${String(v0.detail ?? "").replace(/\s+/g, " ").slice(0, 160)})`);
+              for (let k = 1; k < candidates; k++) {
+                const candidate = await produceChunk();
+                if (!candidate.ok) {
+                  outcomes.push(`candidate ${k + 1}: rejected — structure refused (${candidate.code}: ${candidate.error})`);
+                  continue;
+                }
+                const v = await runTreeSelfTypecheck(project, materializeImportableTree(substitute(candidate)), tc);
+                if (v.run === "fail") {
+                  outcomes.push(`candidate ${k + 1}: rejected — tsc refused (${String(v.detail ?? "").replace(/\s+/g, " ").slice(0, 160)})`);
+                  continue;
+                }
+                repaired = candidate;
+                winner = k;
+                outcomes.push(`candidate ${k + 1}: selected — ${v.run === "pass" ? "pre-seal typecheck" : "typecheck skipped"}`);
+                break;
+              }
+              if (winner === null) {
+                repaired = fallback;
+                outcomes.push("kept candidate 1 — no resample cleared the tree's tsc");
+              }
+            }
+          } else {
+            outcomes.push(`candidate 1: rejected — structure refused (${repaired.code}: ${repaired.error})`);
+          }
+          pushAttemptLog(attemptLogs, {
+            ts: Date.now(),
+            phase: 6 as PhaseId,
+            level: "info",
+            event: "p6.synthesis.candidates",
+            detail: candidatesLogDetail(`chunk ${i + 1}/${plan.length}`, candidates, winner, outcomes),
+          });
+        }
         if (!repaired.ok) {
           return partialTreeRefuse(
             withAttemptLogs(project, attemptLogs),

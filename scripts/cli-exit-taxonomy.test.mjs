@@ -2719,3 +2719,33 @@ test("342-5 — a malformed --mcp-call-args is refused coded (exit 1, nothing sp
   assert.equal(json.code, "RT_E_VALIDATION");
   assert.match(String(json.error), /--mcp-call-args must be a JSON object/);
 });
+
+// ---------------------------------------------------------------------------
+// fixes/343_3 — the delivery lane's CLI wiring. Source-level pins (the bytes
+// ARE the artifact a reviewer diffs): `emit --git` must read the flag and hand
+// the just-emitted manifest to the headless land wrapper, which must delegate
+// to git.server's fixed-allowlist seam. The BEHAVIOUR is proven with real temp
+// repos in src/lib/headless.test.ts + src/lib/git.server.test.ts; this pin
+// keeps the one call site from being quietly un-wired later.
+// ---------------------------------------------------------------------------
+test("343-3 — `emit --git` is wired to the delivery seam (source pin)", () => {
+  assert.ok(cliText.includes('flag(args, "git")'), "the emit arm must read the --git flag");
+  assert.ok(
+    cliText.includes("h.landEmittedTree(project, res.dir, { files: res.files })"),
+    "the emit arm must call the headless delivery seam with the emitted manifest",
+  );
+  const gitSrc = readFileSync(new URL("../src/lib/git.server.ts", import.meta.url), "utf8");
+  assert.ok(
+    gitSrc.includes("export async function gitLandEmitted("),
+    "git.server.ts must export the land seam",
+  );
+  assert.ok(
+    gitSrc.includes("export const GIT_LAND_DELIVERY_MARKER ="),
+    "the delivery marker must be a fixed constant (the foreign-repo guard)",
+  );
+  const headlessSrc = readFileSync(new URL("../src/lib/headless.ts", import.meta.url), "utf8");
+  assert.ok(
+    headlessSrc.includes("export async function landEmittedTree("),
+    "headless.ts must export the CLI-facing land wrapper",
+  );
+});

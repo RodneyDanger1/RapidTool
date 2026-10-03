@@ -408,6 +408,64 @@ describe("harvestRepos", () => {
     );
   });
 
+  // 343 bh2 F3: HARVEST_BOUNDS_LABEL claims a 12 s wall-clock budget, but the
+  // search leg was given a FIXED `timeoutMs: 8000` (and the injected seam got
+  // no timeout at all) while the deadline was only checked BETWEEN queries — so
+  // N slow legs could overrun the claim. The remaining budget must now be
+  // threaded into every dispatched leg.
+  it("343 bh2 F3: each search leg receives the remaining wall-clock budget, not a fixed timeout", async () => {
+    const seenTimeouts: number[] = [];
+    const search: HarvestOptions["search"] = async (q, opts) => {
+      seenTimeouts.push(opts.timeoutMs ?? -1);
+      await new Promise((r) => setTimeout(r, 60)); // consume part of the budget
+      return {
+        ok: true,
+        query: q,
+        items: [{ title: "Acme", url: "https://github.com/acme/scheduler", content: "s" }],
+        provider: "duckduckgo",
+      };
+    };
+    await harvestRepos(["q1", "q2"], { timeoutMs: 1000, maxQueries: 2, maxFetches: 0, search });
+    assert.equal(seenTimeouts.length, 2, "both queries must be dispatched while budget remains");
+    assert.ok(
+      seenTimeouts[0] > 0 && seenTimeouts[0] <= 1000,
+      `the first leg must get a positive slice of the budget, got ${seenTimeouts[0]}`,
+    );
+    assert.ok(
+      seenTimeouts[1] > 0 && seenTimeouts[1] < seenTimeouts[0],
+      `the second leg must get the SHRUNK remaining budget, got ${seenTimeouts[1]} after ${seenTimeouts[0]}`,
+    );
+  });
+
+  // The deadline is only real if a leg that IGNORES its slice still cannot
+  // vanish silently: the overrun must surface as a coded degraded result, never
+  // a clean harvest.
+  it("343 bh2 F3: a search leg that ignores its slice and overruns the deadline yields a coded RT_E_BUDGET_EXHAUSTED note", async () => {
+    const search: HarvestOptions["search"] = async (q) => {
+      // The seam receives the transformed query ("q1" -> "q1 github").
+      if (q.startsWith("q1")) {
+        return {
+          ok: true,
+          query: q,
+          items: [{ title: "Acme", url: "https://github.com/acme/scheduler", content: "s" }],
+          provider: "duckduckgo",
+        };
+      }
+      await new Promise((r) => setTimeout(r, 150)); // deliberately ignores the handed ~100 ms slice
+      return {
+        ok: true,
+        query: q,
+        items: [{ title: "Beta", url: "https://github.com/beta/two", content: "s" }],
+        provider: "duckduckgo",
+      };
+    };
+    const res = await harvestRepos(["q1", "q2"], { timeoutMs: 100, maxQueries: 2, maxFetches: 0, search });
+    assert.ok(
+      res.notes.some((n) => n.includes("RT_E_BUDGET_EXHAUSTED")),
+      `an ignored budget must surface as a coded degraded result: ${JSON.stringify(res.notes)}`,
+    );
+  });
+
   // W5-L2 (c): every fetch attempt fails while the budget is spent. Pinned honest
   // shape (probe 2026-09-16, real output): attempts 4 → hits 2, both `web-search`
   // (the candidates' own search snippets), one per-candidate failure note each —

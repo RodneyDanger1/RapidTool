@@ -13,7 +13,11 @@
 //     failure, unparseable payload — falls back to the deterministic keyword
 //     floor and the returned `source` flag says "keyword" (never "llm").
 //   - `harvestRepos` is bounded: at most HARVEST_DEFAULT_MAX_FETCHES (4) direct
-//     fetches and a HARVEST_DEFAULT_TIMEOUT_MS (12 s) wall-clock budget. Hits
+//     fetches and a HARVEST_DEFAULT_TIMEOUT_MS (12 s) wall-clock budget. Every
+//     search leg is handed only the REMAINING slice of that budget (capped at
+//     HARVEST_SEARCH_TIMEOUT_MS), so the deadline is real: a leg that ignores
+//     its slice is detected after the await and reported as a coded
+//     RT_E_BUDGET_EXHAUSTED degraded result, never a clean harvest. Hits
 //     carry a per-hit `provenance` so consumers know exactly what was fetched.
 //   - `extractPatterns` is a structural-regex, pattern-level scan — NOT an AST
 //     parse (see EXTRACT_PATTERN_DISCLAIMER).
@@ -40,6 +44,10 @@ import type { MemoryEntry, PhaseId, Project } from "./types.ts";
 export const HARVEST_DEFAULT_MAX_FETCHES = 4;
 /** Wall-clock budget for one harvestRepos call (search + fetches). */
 export const HARVEST_DEFAULT_TIMEOUT_MS = 12_000;
+/** Per-search-leg ceiling. Each dispatched search gets
+ *  `min(remaining wall-clock budget, this cap)`, so a single leg can never be
+ *  granted more time than the overall deadline still has. */
+export const HARVEST_SEARCH_TIMEOUT_MS = 8_000;
 /** Max search queries actually dispatched inside one harvestRepos call. */
 export const HARVEST_DEFAULT_MAX_QUERIES = 2;
 /** Keyword-floor query count. */
@@ -106,8 +114,9 @@ export type HarvestLlmResult =
 
 /** Test/dev seams — every option defaults to the real, bounded behavior. */
 export type HarvestOptions = {
-  /** Search backend override (tests inject a fake). */
-  search?: (query: string, opts: { maxResults?: number }) => Promise<ResearchResult>;
+  /** Search backend override (tests inject a fake). `timeoutMs` is the
+   *  remaining slice of the wall-clock budget the leg must honour. */
+  search?: (query: string, opts: { maxResults?: number; timeoutMs?: number }) => Promise<ResearchResult>;
   /** Plain-text fetcher override (tests inject a fake). */
   fetchText?: (url: string, opts: { timeoutMs: number }) => Promise<string>;
   /** JSON fetcher override (tests inject a fake). */
@@ -389,7 +398,7 @@ async function defaultFetchJson(url: string, o: { timeoutMs: number }): Promise<
 
 export async function harvestRepos(queries: readonly string[], opts: HarvestOptions = {}): Promise<HarvestSearchResult> {
   const notes: string[] = [];
-  const search = opts.search ?? ((q, o) => freeWebSearch(q, { maxResults: o.maxResults, timeoutMs: 8000 }));
+  const search = opts.search ?? ((q, o) => freeWebSearch(q, { maxResults: o.maxResults, timeoutMs: o.timeoutMs ?? HARVEST_SEARCH_TIMEOUT_MS }));
   const fetchText = opts.fetchText ?? defaultFetchText;
   const fetchJson = opts.fetchJson ?? defaultFetchJson;
   const maxFetches = Math.max(0, opts.maxFetches ?? HARVEST_DEFAULT_MAX_FETCHES);
@@ -422,10 +431,20 @@ export async function harvestRepos(queries: readonly string[], opts: HarvestOpti
     const searchQuery = /github/i.test(q) ? q : `${q} github`;
     let res: ResearchResult;
     try {
-      res = await search(searchQuery, { maxResults: 4 });
+      // Hand the leg only the time the deadline still has (capped), so a
+      // cooperating backend can never be granted a stale fixed budget.
+      res = await search(searchQuery, { maxResults: 4, timeoutMs: Math.min(remainingMs(), HARVEST_SEARCH_TIMEOUT_MS) });
     } catch (err) {
       notes.push(`search threw for "${q}" (${err instanceof Error ? err.message : String(err)}) — skipped`);
       continue;
+    }
+    // A leg that ignored its slice has already overrun the wall-clock budget.
+    // Surface it as a coded degraded result (the loop-top check skips any
+    // later query); the honest hits already in hand are still processed below.
+    if (remainingMs() <= 0) {
+      notes.push(
+        `search for "${q}" overran the ${timeoutMs} ms wall-clock budget [RT_E_BUDGET_EXHAUSTED] — no further queries dispatched`,
+      );
     }
     if (!res.ok) {
       notes.push(`search unavailable for "${q}" (${res.reason}${res.error ? `: ${res.error}` : ""})`);

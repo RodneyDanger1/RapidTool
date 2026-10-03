@@ -372,7 +372,14 @@ type OpenAiChatBody = {
     message?: { content?: unknown; reasoning_content?: unknown };
     finish_reason?: unknown;
   }>;
-  usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+  usage?: {
+    prompt_tokens?: unknown;
+    completion_tokens?: unknown;
+    /** OpenAI-style context-cache split (the sibling DeepSeek field is
+     *  `prompt_cache_hit_tokens`); `LlmUsage.cachedPromptTokens` documents
+     *  exactly this source (llm.ts). */
+    prompt_tokens_details?: { cached_tokens?: unknown };
+  };
 };
 
 /**
@@ -576,6 +583,11 @@ async function completeOpenAiCompatibleInner(
             usage: {
               promptTokens: usage.prompt_tokens,
               completionTokens: usage.completion_tokens,
+              // Additive + conditional, exactly like deepseek.ts: a response (or
+              // tape) that reports no cache split keeps the legacy 2-key object.
+              ...(typeof usage.prompt_tokens_details?.cached_tokens === "number"
+                ? { cachedPromptTokens: usage.prompt_tokens_details.cached_tokens }
+                : {}),
             },
           }
         : {}),

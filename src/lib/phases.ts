@@ -22,7 +22,7 @@ export const PHASES: PhaseDef[] = [
     code: "P2",
     title: "Memory & Context Consolidation",
     summary:
-      "Context & persistence plan — project memory rows, spec grounding, honest persistence model (T-107.7's checkpoint module ships in-tree but unwired — no wired durable checkpoint layer yet).",
+      "Context & persistence plan — project memory rows, spec grounding, honest persistence model (T-107.7 per-phase run checkpoints are wired: a bounded atomic snapshot is committed beside .rapidtool/ after every committed phase and re-entered by the resume/unattended verbs).",
     hitl: false,
   },
   {

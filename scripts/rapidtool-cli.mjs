@@ -2195,6 +2195,32 @@ async function main() {
           // envelope still carries `unverified` / `declaredScriptsVerified` /
           // `unverifiedDeclaredScripts`, so the honest signal is preserved and a
           // hard gate passes --require-verified to get exit 5.
+          // fixes/343_3 · git-native delivery: `emit --git` lands the just-
+          // emitted tree as ONE Conventional-Commits commit through
+          // headless.landEmittedTree → git.server's §6b seam (emitted-product
+          // only, manifest-only staging, the host repo structurally refused,
+          // idempotent). The envelope carries the REAL commit; a land refusal
+          // is coded and flips payload.ok false (exit 1) — the emitted tree
+          // still exists on disk either way.
+          if (flag(args, "git")) {
+            const landed = await h.landEmittedTree(project, res.dir, { files: res.files });
+            payload.git = landed.ok
+              ? {
+                  dir: landed.dir,
+                  message: landed.message,
+                  committed: landed.committed,
+                  noop: landed.noop,
+                  commit: landed.commit,
+                  files: landed.files,
+                  foreign: landed.foreign,
+                }
+              : { ok: false, reason: landed.reason, code: landed.code ?? "RT_E_INTERNAL", error: landed.error };
+            if (!landed.ok) {
+              payload.ok = false;
+              payload.code = landed.code ?? "RT_E_INTERNAL";
+              if (typeof payload.error !== "string") payload.error = landed.error;
+            }
+          }
           respond(
             payload,
             payload.ok ? (payload.unverified === true && flag(args, "require-verified") ? 5 : 0) : 1,
@@ -5005,7 +5031,7 @@ const USAGE = {
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",
     packet: "packet --project <file.json> [--out <file.md>] [--knowledge <store.json>]  # --knowledge seeds the Ranked-memory section with cross-project accepted lesson rows (tier-1, advisory)",
     export: "export --project <file.json> [--out <file.json>]",
-    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok, exit 0 when it is ok (the envelope always carries declaredScriptsVerified/unverifiedDeclaredScripts when a declared script did not run); --require-verified opts into exit 5 for that green-but-unverified state; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse)",
+    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified] [--git]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok, exit 0 when it is ok (the envelope always carries declaredScriptsVerified/unverifiedDeclaredScripts when a declared script did not run); --require-verified opts into exit 5 for that green-but-unverified state; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse); --git lands the emitted tree as ONE Conventional-Commits delivery commit (feat(<slug>): <brief>) — emitted files only, a foreign file is reported not committed, the host repo is never a target, and a clean tree is a no-op (envelope `git`)",
     fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR approve selected/all ids — never auto-approves: --approve routes through the policy seam's human seat (--i-am-human + a TTY re-entry of RT_HUMAN_SEAT_TOKEN; a denied verdict writes nothing and stamps no decidedBy)",
     eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, nothing fabricated — the eval-out documents are never written (like every verb, the exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/); a missing history prints as 'no history', never a fake 0 delta",
     "tree-run": "tree-run --dir <dir> [--project <file.json>] [--require-verified]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0 (the envelope still names an unverified declared toolchain; --require-verified turns that state into exit 5); red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",

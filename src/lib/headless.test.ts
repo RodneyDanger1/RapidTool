@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   applyVerifyOutcome,
@@ -21,6 +21,7 @@ import {
   importTreeDir,
   ingest,
   keyedTrailOutcome,
+  landEmittedTree,
   loadProject,
   nextAction,
   p6CycleLiveDeps,
@@ -4646,6 +4647,93 @@ describe("W51/337-1 — repairTreeDir refresh the run checkpoint (336-2 §9.4)",
       };
       await repairTreeDir(candidate, dir, { deps: { runTree: async () => greenVerdict } });
       assert.equal(existsSync(checkpointPath(dir)), false, "no dir ⇒ no checkpoint, nowhere on disk");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/343_3 · the delivery tail END-TO-END: a REAL emitted tree (the same
+// `emitProject` the CLI calls) is git-landed with a Conventional Commits
+// message derived from the project's own brief. All git work lives under
+// $TEMP/rt343_3; the repo's own HEAD sha is asserted byte-identical.
+// ---------------------------------------------------------------------------
+describe("landEmittedTree — real emitted tree → committed delivery (fixes/343_3)", () => {
+  const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+  const LAND_SCRATCH = process.env.RT343_3_SCRATCH_ROOT ?? join(tmpdir(), "rt343_3");
+  mkdirSync(LAND_SCRATCH, { recursive: true });
+  const landDir = (): string => mkdtempSync(join(LAND_SCRATCH, "land-"));
+  const HAS_GIT = spawnSync("git", ["--version"], { encoding: "utf8" }).status === 0;
+  const repoHead = (): string =>
+    (spawnSync("git", ["-C", REPO_ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout ?? "").trim();
+  const count = (dir: string): number => {
+    const r = spawnSync("git", ["-C", dir, "rev-list", "--count", "HEAD"], { encoding: "utf8" });
+    return r.status === 0 ? Number.parseInt((r.stdout ?? "0").trim(), 10) : 0;
+  };
+
+  it("commits a fresh emitted tree with feat(<slug>): <brief>, then a second land is a clean no-op", async (t) => {
+    if (!HAS_GIT) return t.skip("git is not installed on this host");
+    const dir = landDir();
+    const before = repoHead();
+    try {
+      const project = createProject({ brief: FIXTURE_BRIEF, name: "Land Delivery" });
+      const emitted = await emitProject(project, dir);
+      assert.equal(emitted.ok, true, emitted.ok ? "" : emitted.error);
+      if (!emitted.ok) return;
+      assert.ok(emitted.files.length > 0, "emit must report its file manifest");
+
+      const landed = await landEmittedTree(project, dir, { files: emitted.files });
+      assert.equal(landed.ok, true, landed.ok ? "" : landed.error);
+      if (!landed.ok) return;
+      assert.equal(landed.committed, true);
+      assert.equal(landed.noop, false);
+      assert.match(landed.message, /^feat\(land-delivery\): /);
+      assert.equal(landed.commit?.subject, landed.message);
+      assert.equal(count(dir), 1, "exactly one delivery commit");
+
+      const log = spawnSync("git", ["-C", dir, "log", "--oneline"], { encoding: "utf8" });
+      assert.match(log.stdout, /^[0-9a-f]{7,} /m);
+      assert.ok(
+        log.stdout.split("\n").some((l) => l.endsWith(` ${landed.message}`)),
+        `git log must carry the conventional subject:\n${log.stdout}`,
+      );
+      const status = spawnSync("git", ["-C", dir, "status", "--porcelain"], { encoding: "utf8" });
+      assert.equal(status.stdout.trim(), "", "the emitted tree is clean after landing");
+
+      const again = await landEmittedTree(project, dir, { files: emitted.files });
+      assert.equal(again.ok, true, again.ok ? "" : again.error);
+      if (again.ok) {
+        assert.equal(again.committed, false);
+        assert.equal(again.noop, true);
+        assert.equal(again.commit, null);
+      }
+      assert.equal(count(dir), 1, "the second land must not mint an empty commit");
+      assert.equal(repoHead(), before, "the RapidTool repo HEAD sha must be unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a foreign file added after emit is left untracked and reported (not silently committed)", async (t) => {
+    if (!HAS_GIT) return t.skip("git is not installed on this host");
+    const dir = landDir();
+    const before = repoHead();
+    try {
+      const project = createProject({ brief: FIXTURE_BRIEF, name: "Land Foreign" });
+      const emitted = await emitProject(project, dir);
+      assert.equal(emitted.ok, true, emitted.ok ? "" : emitted.error);
+      if (!emitted.ok) return;
+      writeFileSync(join(dir, "NOTES.md"), "not part of the emission\n", "utf8");
+
+      const landed = await landEmittedTree(project, dir, { files: emitted.files });
+      assert.equal(landed.ok, true, landed.ok ? "" : landed.error);
+      if (!landed.ok) return;
+      assert.ok(!landed.files.includes("NOTES.md"), `NOTES.md must not be committed: ${JSON.stringify(landed.files)}`);
+      assert.ok(landed.foreign.includes("NOTES.md"), `NOTES.md must be reported: ${JSON.stringify(landed.foreign)}`);
+      const status = spawnSync("git", ["-C", dir, "status", "--porcelain"], { encoding: "utf8" });
+      assert.match(status.stdout, /^\?\? NOTES\.md$/m);
+      assert.equal(repoHead(), before, "the RapidTool repo HEAD sha must be unchanged");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

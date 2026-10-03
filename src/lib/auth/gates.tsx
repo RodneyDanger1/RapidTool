@@ -64,18 +64,33 @@ export function SignInGate({
 }
 
 export function SignInButtons() {
+  // signIn() genuinely rejects (pop-up blocked, a failed broker exchange, a
+  // provider error). Without a handler the rejection floats as an unhandled
+  // promise (and rt-client's global capture reports it) while the visitor sees
+  // nothing. Surface the failure and let them retry.
+  const [failed, setFailed] = useState<string | null>(null);
   return (
     <div className="flex w-full max-w-sm flex-col gap-2">
       {GROK_PROVIDERS.map((p) => (
         <button
           key={p.providerId}
           type="button"
-          onClick={() => signIn(p.providerId, { callbackURL: "/" })}
+          onClick={() => {
+            setFailed(null);
+            void signIn(p.providerId, { callbackURL: "/" }).catch((err: unknown) => {
+              setFailed(err instanceof Error ? err.message : String(err));
+            });
+          }}
           className="w-full cursor-pointer rounded-md border border-neutral-300 px-4 py-2 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
         >
           Continue with {p.label}
         </button>
       ))}
+      {failed !== null ? (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          {failed}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -13,17 +13,23 @@ import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_GIT_LAND_IDENTITY,
+  EMITTED_RECORD_REL,
+  GIT_LAND_DELIVERY_MARKER,
   GIT_LANDING_MARKER_KIND,
   GIT_LANDING_MARKER_REL,
   GIT_LANDING_MARKER_VERSION,
   GIT_LANDING_OUTPUT_CAP,
   GIT_LANDING_SUBCOMMANDS,
+  LAND_COMMIT_TYPE,
   checkGitLandSeat,
+  conventionalLandMessage,
   gitLandCommit,
+  gitLandEmitted,
   gitLandInit,
   gitLandReadBack,
   gitLandingAvailable,
@@ -59,6 +65,46 @@ after(() => {
     }
   }
 });
+
+/**
+ * fixes/343_3: the delivery seam's own scratch root — the wave rule is that
+ * every git operation this lane runs lives under $TEMP/rt343_3 (never beside
+ * the W18L3 root, and never in the repo). Reaped by the same after() above.
+ */
+const LAND_SCRATCH = process.env.RT343_3_SCRATCH_ROOT ?? join(tmpdir(), "rt343_3");
+mkdirSync(LAND_SCRATCH, { recursive: true });
+function landScratch(prefix: string): string {
+  const d = mkdtempSync(join(LAND_SCRATCH, prefix));
+  made.push(d);
+  return d;
+}
+
+/** Seed a MINIMAL tree with the shape `headless.emitProject` writes: the
+ *  emitted record plus a small manifest. The seam's contract reads only the
+ *  record's existence, so this exercises the real guard cheaply; the REAL
+ *  emitted-tree end-to-end proof lives in headless.test.ts. */
+function seedEmittedTree(dir: string, extra: Record<string, string> = {}): string[] {
+  for (const rel of [EMITTED_RECORD_REL, ".gitignore", "package.json", "src/index.ts", ...Object.keys(extra)]) {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+  }
+  writeFileSync(join(dir, EMITTED_RECORD_REL), `${JSON.stringify({ id: "land-test", name: "Land Test" })}\n`, "utf8");
+  writeFileSync(join(dir, ".gitignore"), "node_modules/\ndist/\n.rapidtool/logs/\n", "utf8");
+  writeFileSync(join(dir, "package.json"), '{ "name": "land-test" }\n', "utf8");
+  writeFileSync(join(dir, "src", "index.ts"), "export const x = 1;\n", "utf8");
+  const manifest = [EMITTED_RECORD_REL, ".gitignore", "package.json", "src/index.ts"];
+  for (const [rel, body] of Object.entries(extra)) {
+    writeFileSync(join(dir, rel), body, "utf8");
+    manifest.push(rel);
+  }
+  return manifest;
+}
+
+/** `git rev-list --count HEAD` in a scratch repo; -1 when the repo is unborn. */
+function commitCount(dir: string): number {
+  const r = spawnSync("git", ["-C", dir, "rev-list", "--count", "HEAD"], { encoding: "utf8" });
+  if (r.status !== 0) return 0;
+  return Number.parseInt((r.stdout ?? "0").trim(), 10);
+}
 
 const HAS_GIT = spawnSync("git", ["--version"], { encoding: "utf8" }).status === 0;
 /** An absolute path to a binary that does not exist (the coded git-absent path). */
@@ -654,5 +700,174 @@ describe("the host repo stays untouched", () => {
           `(not this suite — all its targets are outside the repo);\n--- before ---\n${fp0}\n--- after ---\n${fp1}`,
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 · the delivery seam — land an EMITTED product (fixes/343_3)
+//
+// Unlike the seat-gated gitLand* API above (human ceremony for interactive
+// use), `gitLandEmitted` is the CLI's `emit --git` tail: it stages ONLY the
+// emitted manifest, writes its own marker INSIDE .git/ (invisible to the
+// emit walker), refuses a foreign repo root (the host included), and is
+// idempotent (a clean tree is a no-op, never an empty commit). Every test
+// runs in $TEMP/rt343_3 and the repo's HEAD sha is asserted unchanged.
+// ---------------------------------------------------------------------------
+
+describe("conventionalLandMessage — pure, derived from the real brief/spec", () => {
+  it("derives feat(<slug>): <first brief line>", () => {
+    assert.equal(
+      conventionalLandMessage({ name: "Dispatch Pro", brief: "Build a dispatch board for field crews." }),
+      `${LAND_COMMIT_TYPE}(dispatch-pro): Build a dispatch board for field crews.`,
+    );
+  });
+
+  it("prefers the first real implementationSpec requirement over the brief", () => {
+    assert.equal(
+      conventionalLandMessage({
+        name: "Billing",
+        brief: "The whole brief text.",
+        implementationSpec: { requirements: ["MUST invoice per usage", "MUST export CSV"] },
+      }),
+      `${LAND_COMMIT_TYPE}(billing): MUST invoice per usage`,
+    );
+  });
+
+  it("takes the first non-empty line, collapses whitespace, caps long text", () => {
+    const multi = conventionalLandMessage({ name: "X", brief: "\n\n  Line one.  \nLine two." });
+    assert.equal(multi, `${LAND_COMMIT_TYPE}(x): Line one.`);
+    const long = conventionalLandMessage({ name: "X", brief: "word ".repeat(60) });
+    assert.ok(long.length <= `${LAND_COMMIT_TYPE}(x): `.length + 72, long);
+    assert.ok(long.endsWith("…"), long);
+  });
+
+  it("is total — empty/absent text falls back, never throws", () => {
+    assert.equal(conventionalLandMessage({ name: "", brief: "" }), `${LAND_COMMIT_TYPE}(project): initial emission`);
+    assert.equal(conventionalLandMessage({ name: "X", brief: "   " }), `${LAND_COMMIT_TYPE}(x): initial emission`);
+  });
+});
+
+describe("gitLandEmitted — the emitted-product delivery tail", () => {
+  it("inits + commits a fresh emitted-shaped tree with the conventional message, then no-ops", async (t) => {
+    if (!HAS_GIT) return t.skip("git is not installed on this host");
+    const dir = landScratch("land-ok-");
+    const files = seedEmittedTree(dir);
+    const subject = { name: "Land Delivery", brief: "Ship the thing." };
+
+    const first = await gitLandEmitted(subject, dir, { files });
+    assert.equal(first.ok, true, first.ok ? "" : first.error);
+    if (!first.ok) return;
+    assert.equal(first.committed, true);
+    assert.equal(first.noop, false);
+    assert.equal(first.message, `${LAND_COMMIT_TYPE}(land-delivery): Ship the thing.`);
+    assert.equal(first.commit?.subject, first.message);
+    assert.equal(first.branch, "main");
+    assert.ok(first.files.includes("package.json"), `files=${JSON.stringify(first.files)}`);
+    assert.deepEqual(first.foreign, []);
+    assert.ok(existsSync(join(dir, GIT_LAND_DELIVERY_MARKER)) || existsSync(join(dir, ".git", GIT_LAND_DELIVERY_MARKER)));
+    assert.equal(commitCount(dir), 1);
+    const rawLog = spawnSync("git", ["-C", dir, "log", "--oneline"], { encoding: "utf8" });
+    assert.match(rawLog.stdout, /^[0-9a-f]{7,} /m);
+    assert.ok(
+      rawLog.stdout.split("\n").some((l) => l.endsWith(` ${first.message}`)),
+      `git log must carry the conventional subject:\n${rawLog.stdout}`,
+    );
+    const status = spawnSync("git", ["-C", dir, "status", "--porcelain"], { encoding: "utf8" });
+    assert.equal(status.stdout.trim(), "", "work tree is clean after the delivery commit");
+
+    // Second land: identical manifest ⇒ nothing staged ⇒ honest no-op (no empty commit).
+    const second = await gitLandEmitted(subject, dir, { files });
+    assert.equal(second.ok, true, second.ok ? "" : second.error);
+    if (!second.ok) return;
+    assert.equal(second.committed, false);
+    assert.equal(second.noop, true);
+    assert.equal(second.commit, null);
+    assert.equal(commitCount(dir), 1, "a second land must never mint an empty commit");
+  });
+
+  it("stages ONLY the emitted manifest — a foreign file is left untracked and reported", async (t) => {
+    if (!HAS_GIT) return t.skip("git is not installed on this host");
+    const dir = landScratch("land-foreign-");
+    const files = seedEmittedTree(dir);
+    writeFileSync(join(dir, "NOTES.md"), "a human note that is not part of the emission\n", "utf8");
+
+    const r = await gitLandEmitted({ name: "F", brief: "b" }, dir, { files });
+    assert.equal(r.ok, true, r.ok ? "" : r.error);
+    if (!r.ok) return;
+    assert.ok(!r.files.includes("NOTES.md"), `foreign must not be staged: ${JSON.stringify(r.files)}`);
+    assert.ok(r.foreign.includes("NOTES.md"), `foreign must be reported: ${JSON.stringify(r.foreign)}`);
+    const tracked = spawnSync("git", ["-C", dir, "ls-files", "--error-unmatch", "NOTES.md"], { encoding: "utf8" });
+    assert.notEqual(tracked.status, 0, "the foreign file must not be tracked");
+    const status = spawnSync("git", ["-C", dir, "status", "--porcelain"], { encoding: "utf8" });
+    assert.match(status.stdout, /^\?\? NOTES\.md$/m);
+  });
+
+  it("refuses a dir without the emitted record (not-an-emitted-tree)", async (t) => {
+    if (!HAS_GIT) return t.skip("git is not installed on this host");
+    const dir = landScratch("land-norecord-");
+    writeFileSync(join(dir, "package.json"), "{}\n", "utf8");
+    const r = await gitLandEmitted({ name: "X", brief: "b" }, dir, { files: ["package.json"] });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.reason, "not-an-emitted-tree");
+    assert.equal(existsSync(join(dir, ".git")), false, "nothing may be initialized on a refusal");
+  });
+
+  it("refuses a FOREIGN repo root carrying the record (no delivery marker) — the host-repo class", async (t) => {
+    if (!HAS_GIT) return t.skip("git is not installed on this host");
+    const dir = landScratch("land-foreign-repo-");
+    const files = seedEmittedTree(dir);
+    const init = spawnSync("git", ["init"], { cwd: dir, encoding: "utf8" });
+    assert.equal(init.status, 0);
+    const r = await gitLandEmitted({ name: "X", brief: "b" }, dir, { files });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.reason, "not-a-landing-repo");
+    assert.equal(commitCount(dir), 0, "no commit may land in a foreign repository");
+  });
+
+  it("THE HOST GUARD: the repo root is refused and its HEAD sha is unchanged", async (t) => {
+    if (!HAS_GIT) return t.skip("git is not installed on this host");
+    const head0 = repoFingerprint().split("\n")[1];
+    const r = await gitLandEmitted({ name: "X", brief: "b" }, REPO_ROOT, { files: [EMITTED_RECORD_REL] });
+    assert.equal(r.ok, false);
+    assert.equal(repoFingerprint().split("\n")[1], head0, "the repo HEAD must never move");
+    assert.equal(existsSync(join(REPO_ROOT, ".git", GIT_LAND_DELIVERY_MARKER)), false);
+  });
+
+  it("refuses bad manifests (empty / traversal / absolute / backslash) with bad-input", async (t) => {
+    if (!HAS_GIT) return t.skip("git is not installed on this host");
+    const dir = landScratch("land-manifest-");
+    seedEmittedTree(dir);
+    for (const files of [[], ["../escape"], ["C:/Windows/x"], ["a\\b"], [""]]) {
+      const r = await gitLandEmitted({ name: "X", brief: "b" }, dir, { files });
+      assert.equal(r.ok, false, `expected refusal for ${JSON.stringify(files)}`);
+      if (!r.ok) assert.equal(r.reason, "bad-input");
+    }
+    assert.equal(existsSync(join(dir, ".git")), false, "a bad manifest must not initialize a repo");
+  });
+
+  it("pins the coded git-absent path (nothing written)", async (t) => {
+    if (!HAS_GIT) return t.skip("git is not installed on this host");
+    const dir = landScratch("land-absent-");
+    seedEmittedTree(dir);
+    const r = await gitLandEmitted({ name: "X", brief: "b" }, dir, {
+      files: [EMITTED_RECORD_REL],
+      gitBin: BOGUS_GIT,
+    });
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.reason, "git-absent");
+      assert.equal(r.code, "RT_E_GIT_UNAVAILABLE");
+    }
+    assert.equal(existsSync(join(dir, ".git")), false);
+  });
+
+  it("a full delivery cycle leaves the host repo's HEAD sha byte-identical", async (t) => {
+    if (!HAS_GIT) return t.skip("git is not installed on this host");
+    const before = repoFingerprint();
+    const dir = landScratch("land-cycle-");
+    assert.equal((await gitLandEmitted({ name: "Cycle", brief: "one" }, dir, { files: seedEmittedTree(dir) })).ok, true);
+    assert.equal((await gitLandEmitted({ name: "Cycle", brief: "one" }, dir, { files: seedEmittedTree(dir, {}) })).ok, true);
+    const after = repoFingerprint();
+    assert.equal(after.split("\n")[1], before.split("\n")[1], "the repo HEAD sha must not move");
   });
 });

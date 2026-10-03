@@ -174,9 +174,12 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs export --project build
 #    tree in-loop (parse + every emitted *.spec.ts + entry smoke; exit 1 on red,
 #    exit 0 when green — the envelope still names an unverified declared toolchain);
 #    --require-verified opts into exit 5 for that green-but-unverified state;
+#    --git lands the emitted tree in its own directory: init when absent, then ONE
+#    Conventional-Commits commit staged from the emitted manifest only (idempotent;
+#    a foreign file is reported, never committed; the RapidTool repo is never a target);
 #    --red-tree banner admits an uncleared red tree-run WITH the unmissable banner
 #    on the emitted README (default refuse — see the Emit section)
-node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json [--out emitted/] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified]
+node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json [--out emitted/] [--check] [--run] [--git] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified]
 
 # 10. Compact JSON-safe snapshot (name, currentPhase, status, phaseCounts, lastGate,
 #     researchCount, memoryCount, vaultReady)

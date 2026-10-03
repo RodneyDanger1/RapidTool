@@ -985,6 +985,39 @@ describe("registry — second family: the live-probed candidate (F2 · W19-L5)",
     }
   });
 
+  it("343 bh2: the OpenAI-compatible adapter records OpenAI-style cache-hit tokens", async () => {
+    // LlmUsage.cachedPromptTokens documents the OpenAI-style
+    // `prompt_tokens_details.cached_tokens` source; the DeepSeek twin parses its
+    // `prompt_cache_hit_tokens`, but the OpenAI-compatible adapter dropped the
+    // whole `prompt_tokens_details` block — a silent under-count once this
+    // family is armed. Reach the adapter directly (the xai candidate carries no
+    // verified ids yet).
+    const restore = withEnv({ [XAI_KEY]: "sk-xai-spike" });
+    try {
+      const provider = createOpenAiCompatibleProvider(XAI_SPEC, ["probe-model-id"]);
+      const res = await provider.complete("hello", {
+        model: "probe-model-id" as never,
+        fetch: (async () =>
+          new Response(
+            JSON.stringify({
+              choices: [{ message: { content: "hi" } }],
+              model: "probe-model-id",
+              usage: { prompt_tokens: 100, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 80 } },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          )) as typeof fetch,
+      });
+      assert.equal(res.ok, true);
+      if (res.ok) {
+        assert.equal(res.usage?.promptTokens, 100);
+        assert.equal(res.usage?.completionTokens, 5);
+        assert.equal(res.usage?.cachedPromptTokens, 80, "the OpenAI cache-hit split must survive");
+      }
+    } finally {
+      restore();
+    }
+  });
+
   it("probeProviderModels: keyless ⇒ configured:false + RT_E_LLM_NOT_CONFIGURED with ZERO network I/O", async () => {
     const restore = withCleanLlmEnv();
     const calls: string[] = [];

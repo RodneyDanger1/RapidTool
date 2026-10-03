@@ -59,6 +59,7 @@ import {
   P6_SYNTH_CHUNK_SIZE,
   P6_SYNTH_PRIOR_MAX_FILES,
   P6_SYNTH_PROMPT_MAX_CHARS,
+  P6_SYNTH_REPO_MAP_BUDGET,
   P6_SYNTH_TIMEOUT_MS,
   relTsImport,
   signatureFunctionNames,
@@ -102,10 +103,11 @@ import type { DeepSeekCompleteOptions } from "./deepseek.server.ts";
 import type { ExpandBriefResult } from "./prompt-engine.ts";
 import type { VerifyOutcome } from "./verify.server.ts";
 import type { LlmResult } from "./llm.ts";
-import type { Project } from "./types.ts";
+import type { GeneratedTreeFile, Project } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
 import { exportProjectJson, importProject, type ArtifactProvenance } from "./io.ts";
+import { repoMapForProject } from "./repo-map.ts";
 
 // --- fixtures -----------------------------------------------------------------
 
@@ -3922,16 +3924,25 @@ describe("216f T-10 — prompt contract: signature ceiling vs requirement duty",
 
   // W56/342-1 (keyed P6 convergence): rule 10 names only TS7006/TS2304, but the
   // measured keyed failures are TS2322 (assignment type), TS2749 (value used as
-  // a type) and TS2440 (import/local conflict). The bounded repair cannot fix a
-  // class the model was never told about, so the prompt must name each class and
-  // its required shape (drift-proof: the compiler, not the validator, is the gate).
-  it("W56/342-1: the system prompt names the three strict-ts classes and their required shape", () => {
+  // a type) and TS2440 (import/local conflict). W57/343-1's keyed probe added a
+  // fourth: TS2323 (a module redeclaring an exported variable). The bounded
+  // repair cannot fix a class the model was never told about, so the prompt must
+  // name each class and its required shape (drift-proof: the compiler, not the
+  // validator, is the gate).
+  it("W56/342-1 + 343-1: the system prompt names the four strict-ts classes and their required shape", () => {
     const s = p6SynthesisSystemPrompt();
     assert.ok(s.includes("TS2322"), "names the assignment-mismatch class (Record<string, unknown> → number)");
     assert.ok(s.includes("TS2749"), "names the value-used-as-type class (TextDecoder)");
     assert.ok(s.includes("TS2440"), "names the import/local-conflict class");
+    assert.ok(s.includes("TS2323"), "names the duplicate-exported-variable class (343-1's measured keyed probe)");
     assert.ok(s.includes("TextDecoder"), "names the live value-as-type offender the keyed tree hit");
     assert.match(s, /Record<string, unknown>/, "names the observed offender type in the required shape");
+    assert.match(s, /Cannot redeclare exported variable/, "names the exact TS2323 compiler message");
+    assert.match(
+      s,
+      /declare each exported variable exactly ONCE|never declare the same exported/i,
+      "states the required TS2323 shape: declare each exported variable exactly once at top level",
+    );
     assert.ok(
       /return type[^\n]*primitive|annotat[^\n]*EXACTLY match/i.test(s),
       "states the required shape: an annotation must match the value it describes",
@@ -5608,4 +5619,240 @@ describe("W50/336-2 the tested stamp is hash-aware on an already-tested project"
     assert.equal(mintTreeRunTested(first, noSpec), first, "nothing to say from a run that executed nothing");
   });
 });
+
+describe("fixes/343-1 opt-in best-of-N synthesis (gate-based selection)", () => {
+  /** A brief-faithful module that the injected seam below reads as type-RED
+   *  (the measured class: TextDecoder used as a type ⇒ TS2749 in the real tsc). */
+  const BAD_TC = [
+    "function createBoard(name: string): { id: string; name: string; columns: unknown[] } {",
+    '  if (name === "") { throw new Error("name required"); }',
+    '  return { id: "b-" + name, name: name, columns: [] };',
+    "}",
+    "function addColumn(board: { columns: unknown[] }, columns: unknown[]): { columns: unknown[] } {",
+    "  board.columns = columns;",
+    "  return board;",
+    "}",
+    "function dragCard(cards: unknown[]): unknown[] {",
+    "  const dec: TextDecoder = new TextDecoder();",
+    "  return cards;",
+    "}",
+    "function kanbanBoard(columns: unknown[]): { columns: unknown[] } {",
+    "  return { columns: columns };",
+    "}",
+    "module.exports.createBoard = createBoard;",
+    "module.exports.addColumn = addColumn;",
+    "module.exports.dragCard = dragCard;",
+    "module.exports.kanbanBoard = kanbanBoard;",
+  ].join("\n");
+
+  /** A deterministic stand-in for a stochastic resample: successive synthesis
+   *  calls return `scripts[n]` (the last one repeats), so a brief that fails on
+   *  samples 1..k and converges on sample k+1 is reproduced exactly. */
+  function bofDeps(scripts: string[], candidates: number | undefined) {
+    const prompts: string[] = [];
+    let synthCalls = 0;
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      prompts.push(prompt);
+      const src = scripts[Math.min(synthCalls, scripts.length - 1)]!;
+      synthCalls += 1;
+      return { ok: true, text: JSON.stringify({ ...KANBAN_ENVELOPE, module: src }), model: "deepseek-v4-flash" };
+    };
+    const expand = async () => ({ ok: true as const, spec: KANBAN_SPEC });
+    const verify = async () => ({ status: "passed" as const, iterations: 0, evidence: "unused", finalSource: "", cases: [] });
+    // The selector is deterministic and mirrors the real tsc: any materialized
+    // file carrying `TextDecoder` is the compiled TS2749 class.
+    const typecheckTree = async (cand: Project): Promise<P6TreeTypecheckVerdict> => {
+      const bad = (cand.generatedTree ?? []).some((f) => f.source.includes("TextDecoder"));
+      return bad
+        ? {
+            run: "fail",
+            detail: `${TREE_CHUNK0_RELOCATED_PATH}(10,12): error TS2749: 'TextDecoder' refers to a value, but is being used as a type here.`,
+            files: [TREE_CHUNK0_RELOCATED_PATH],
+          }
+        : { run: "pass" };
+    };
+    const deps: Partial<P6SynthesisDeps> = {
+      complete,
+      expand,
+      verify,
+      typecheckTree,
+      ...(candidates === undefined ? {} : { candidates }),
+    };
+    return { prompts, deps, synthCalls: () => synthCalls };
+  }
+
+  /** kind "tool" + declared job nodes dropped ⇒ the chunked tree, one chunk. */
+  function bofBase(): Project {
+    const base = { ...p6Base(), kind: "tool" as const };
+    base.specGraph = {
+      nodes: (base.specGraph?.nodes ?? []).filter((n) => !String(n.id).startsWith("job-")),
+    } as Project["specGraph"];
+    return base;
+  }
+
+  const sealed = (q: Project) => q.artifacts.some((a) => a.kind === "code" && a.title.includes("Generated source tree"));
+  const candidatesEvent = (q: Project) => (q.logs ?? []).find((l) => l.event === "p6.synthesis.candidates");
+
+  it("RED baseline: with the default N=1 the same brief refuses (the single sample fails tsc)", async () => {
+    const f = bofDeps([BAD_TC, BAD_TC], undefined);
+    const q = await liveP6Synthesis(bofBase(), f.deps);
+    assert.ok(!sealed(q), "N=1 does not seal a type-red tree");
+    assert.ok(q.logs.some((l) => l.event === "p6.synthesis.refused"), "N=1 refuses, exactly as before 343-1");
+    assert.equal(candidatesEvent(q), undefined, "N=1 emits NO candidates event (the legacy path is untouched)");
+    assert.equal(f.synthCalls(), 2, "N=1 is the legacy one primary + one bounded repair");
+  });
+
+  it("GREEN: with N>1 an independent resample that clears the tree's tsc is selected and sealed", async () => {
+    const f = bofDeps([BAD_TC, BAD_TC, KANBAN_MODULE], 4);
+    const q = await liveP6Synthesis(bofBase(), f.deps);
+    assert.ok(sealed(q), "the second candidate converges and the tree seals");
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "a converged best-of-N is not a refusal");
+    const ev = candidatesEvent(q);
+    assert.ok(ev, "the selection is recorded");
+    assert.match(String(ev!.detail), /chunk 1\/1 · candidates 4 · winner 2/);
+    assert.match(String(ev!.detail), /candidate 1: rejected — tsc refused/);
+    assert.match(String(ev!.detail), /candidate 2: selected/);
+    assert.equal(f.synthCalls(), 3, "one primary + one rejected repair + one selected resample");
+  });
+
+  it("all candidates rejected ⇒ the first structure-valid sample stands and the second gate refuses", async () => {
+    const f = bofDeps([BAD_TC, BAD_TC, BAD_TC], 3);
+    const q = await liveP6Synthesis(bofBase(), f.deps);
+    assert.ok(!sealed(q), "a tree that never clears its tsc is never sealed");
+    assert.ok(q.logs.some((l) => l.event === "p6.synthesis.refused"), "honest refusal when no candidate clears the gate");
+    const ev = candidatesEvent(q);
+    assert.ok(ev, "the failed selection is still recorded");
+    assert.match(String(ev!.detail), /winner none/);
+    assert.match(String(ev!.detail), /kept candidate 1/);
+  });
+
+  it("single-entry lane: an independent resample that clears the pre-seal tsc is selected and sealed", async () => {
+    // p6Base() is kind-absent + ≤8 signatures ⇒ the single-module path.
+    const f = bofDeps([BAD_TC, KANBAN_MODULE], 2);
+    const q = await liveP6Synthesis(p6Base(), f.deps);
+    assert.ok(
+      q.artifacts.some((a) => a.kind === "code" && a.title.includes("Generated module")),
+      "the single-module candidate converges and seals",
+    );
+    const ev = candidatesEvent(q);
+    assert.ok(ev, "the single-module selection is recorded");
+    assert.match(String(ev!.detail), /^single-module · candidates 2 · winner 2/);
+    assert.match(String(ev!.detail), /candidate 1: rejected — pre-seal typecheck refused/);
+  });
+
+  it("P6_SYNTH_CANDIDATES drives the count when no explicit option is given", async () => {
+    const prev = process.env.P6_SYNTH_CANDIDATES;
+    process.env.P6_SYNTH_CANDIDATES = "3";
+    try {
+      const f = bofDeps([BAD_TC, BAD_TC, KANBAN_MODULE], undefined);
+      const q = await liveP6Synthesis(bofBase(), f.deps);
+      assert.ok(sealed(q), "the env-opted best-of-N converges");
+      const ev = candidatesEvent(q);
+      assert.match(String(ev!.detail), /candidates 3 · winner 2/);
+    } finally {
+      if (prev === undefined) delete process.env.P6_SYNTH_CANDIDATES;
+      else process.env.P6_SYNTH_CANDIDATES = prev;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/343-1 follow-up (343-2 STOP-and-REPORT): the chunked P6 synthesis
+// prompt carries the persisted tree's deterministic repo map, so a resumed /
+// re-synthesized run sees the ranked outline of the tree it is extending.
+// Conditional by construction: a project with no `generatedTree` renders no map
+// and the primary prompt is byte-identical (the map contributes zero bytes).
+// ---------------------------------------------------------------------------
+describe("fixes/343-1 follow-up: the chunked P6 prompt carries the persisted repo map (343-2)", () => {
+  /** A real multi-file tree as a resumed run would persist it, plus two
+   *  pseudo-exports (a comment and a string literal) that must never surface. */
+  const PERSISTED_TREE: GeneratedTreeFile[] = [
+    {
+      path: "src/generated.ts",
+      source: 'export * from "./core.ts";\nexport * from "./jobs/rent.ts";\n',
+      hash: "h-entry",
+      attempt: 0,
+    },
+    {
+      path: "src/core.ts",
+      source: "export function core(x: number): number { return x; }\n",
+      hash: "h-core",
+      attempt: 0,
+    },
+    {
+      path: "src/jobs/rent.ts",
+      source:
+        'export function collectRent(id: string): number { return 1; }\n' +
+        '// export function ghost(): number { return 0; }\n' +
+        'const prose = "export function phantom(): number { return 0; }";\n',
+      hash: "h-rent",
+      attempt: 0,
+    },
+  ];
+
+  /** kind "tool" + declared job nodes dropped ⇒ the chunked tree lane (one chunk). */
+  function repoMapBase(): Project {
+    const base = { ...p6Base(), kind: "tool" as const };
+    base.specGraph = {
+      nodes: (base.specGraph?.nodes ?? []).filter((n) => !String(n.id).startsWith("job-")),
+    } as Project["specGraph"];
+    return base;
+  }
+
+  /** Captures the real primary synthesis prompts. Both pipeline seams are
+   *  replaced ⇒ the typecheck gate is inert (these tests pin prompt bytes). */
+  function promptDeps() {
+    const prompts: string[] = [];
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      prompts.push(prompt);
+      return { ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" };
+    };
+    const expand = async () => ({ ok: true as const, spec: KANBAN_SPEC });
+    const verify = async () => ({ status: "passed" as const, iterations: 0, evidence: "unused", finalSource: "", cases: [] });
+    return { prompts, deps: { complete, expand, verify } as Partial<P6SynthesisDeps> };
+  }
+
+  it("GREEN: a persisted tree is rendered as ONE bounded block appended to the primary chunk prompt", async () => {
+    const noTree = promptDeps();
+    await liveP6Synthesis(repoMapBase(), noTree.deps);
+    assert.ok(!noTree.prompts[0]!.includes("REPO MAP"), "a tree-less project's prompt carries no map block");
+
+    const withTree = promptDeps();
+    const base = repoMapBase();
+    base.generatedTree = PERSISTED_TREE;
+    await liveP6Synthesis(base, withTree.deps);
+
+    const map = repoMapForProject({ generatedTree: PERSISTED_TREE }, { budget: P6_SYNTH_REPO_MAP_BUDGET });
+    assert.ok(map.rendered.length > 0, "the persisted tree renders a non-empty map");
+    assert.ok(map.rendered.length <= P6_SYNTH_REPO_MAP_BUDGET, "the map respects its char budget");
+    assert.ok(P6_SYNTH_REPO_MAP_BUDGET <= 1200, "the documented ≤1200-char budget bound");
+
+    assert.equal(
+      withTree.prompts[0],
+      `${noTree.prompts[0]}\n\nREPO MAP (deterministic outline of the tree so far — path: exported symbols, ranked):\n${map.rendered}`,
+      "the map block is exactly appended — every other prompt byte is unchanged",
+    );
+    assert.match(withTree.prompts[0]!, /src\/core\.ts: core/);
+    assert.match(withTree.prompts[0]!, /src\/jobs\/rent\.ts: collectRent/);
+    // No invention: commented / string-literal pseudo-exports are not symbols.
+    assert.ok(!withTree.prompts[0]!.includes("ghost"), "a commented pseudo-export never becomes a symbol");
+    assert.ok(!withTree.prompts[0]!.includes("phantom"), "a string-literal pseudo-export never becomes a symbol");
+  });
+
+  it("control: no `generatedTree` (and an empty tree) contributes zero prompt bytes", async () => {
+    const absent = promptDeps();
+    await liveP6Synthesis(repoMapBase(), absent.deps);
+    const empty = repoMapBase();
+    empty.generatedTree = [];
+    const emptyRun = promptDeps();
+    await liveP6Synthesis(empty, emptyRun.deps);
+    assert.equal(emptyRun.prompts[0], absent.prompts[0], "an undefined and an empty tree both leave the prompt byte-identical");
+    assert.equal(
+      repoMapForProject({ generatedTree: [] }, { budget: P6_SYNTH_REPO_MAP_BUDGET }).rendered,
+      "",
+      "an empty tree renders nothing — the block is conditional",
+    );
+  });
+});
+
 

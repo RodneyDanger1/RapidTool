@@ -110,10 +110,14 @@ test("catalogue: every event name maps to a legal scope (sync pin, mirrors error
 test("coalesce window math: same fingerprint within 5s coalesces, after it does not", () => {
   const prev = row({ ts: 5_000, scope: "llm-call", event: "llm.timeout", code: "RT_E_LLM_TIMEOUT", message: "boom" });
   const same = row({ ts: 9_999, scope: "llm-call", event: "llm.timeout", code: "RT_E_LLM_TIMEOUT", message: "boom" });
+  // Exactly RT_COALESCE_MS (5 000 ms) is INSIDE the window — pins `<=`, so a
+  // mutation to `<` fails here instead of surviving on the 9 999/10 001 samples.
+  const atBoundary = row({ ts: 10_000, scope: "llm-call", event: "llm.timeout", code: "RT_E_LLM_TIMEOUT", message: "boom" });
   const late = row({ ts: 10_001, scope: "llm-call", event: "llm.timeout", code: "RT_E_LLM_TIMEOUT", message: "boom" });
   const otherEvent = row({ ts: 6_000, scope: "llm-call", event: "llm.rejected", code: "RT_E_LLM_TIMEOUT", message: "boom" });
   const otherCode = row({ ts: 6_000, scope: "llm-call", event: "llm.timeout", code: null, message: "boom" });
   assert.equal(shouldCoalesce(prev, same, same.ts), true);
+  assert.equal(shouldCoalesce(prev, atBoundary, atBoundary.ts), true);
   assert.equal(shouldCoalesce(prev, late, late.ts), false);
   assert.equal(shouldCoalesce(prev, otherEvent, otherEvent.ts), false);
   assert.equal(shouldCoalesce(prev, otherCode, otherCode.ts), false);

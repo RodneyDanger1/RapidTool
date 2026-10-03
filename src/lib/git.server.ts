@@ -41,6 +41,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unli
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { classifyError, type ErrorCode } from "./errors.ts";
+import { slugName } from "./io.ts";
 import { scrubbedEnv } from "./node-runner.server.ts";
 import {
   evaluatePolicy,
@@ -226,6 +227,7 @@ export type GitLandFailure =
         | "already-a-repo"
         | "not-a-repo"
         | "not-a-landing-repo"
+        | "not-an-emitted-tree"
         | "nothing-to-commit";
       code: "RT_E_VALIDATION";
       error: string;
@@ -1323,5 +1325,446 @@ export async function gitLandReadBack(
     commits,
     stdout: logRun.stdout,
     durationMs: headRun.durationMs + logRun.durationMs,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// §6b · the delivery seam — `land` the EMITTED product (fixes/343_3 · W55).
+//
+// What this adds: the W18 lane (`gitLand*` above) made an emitted tree landable
+// BEHIND THE HUMAN SEAT, but no user-facing call site ever invoked it — the
+// CLI emitted a generated app and left it unversioned ("no git landing"). This
+// seam is that call site's engine: the CLI `emit --git` tail — one `init` +
+// one Conventional-Commits delivery commit of the tree `emitProject` wrote.
+//
+// Doctrine (why this is NOT the seat API above):
+//   · It mints history for the USER'S EMITTED PRODUCT only. The target must
+//     carry the emitted record (`<dir>/<EMITTED_RECORD_REL>`), and only the
+//     emitted manifest's files are ever staged (`add -- <manifest>`), so a
+//     foreign file is reported, never silently committed.
+//   · THE HOST REPO can never be a target even by mistake: a dir inside any
+//     work tree is refused before init, and an existing `.git` is committed
+//     into ONLY when it carries this seam's own marker, written INSIDE `.git/`
+//     (GIT_LAND_DELIVERY_MARKER) so the emit walker — which skips `.git` —
+//     sees no foreign file on a re-emit. A foreign repository root, the host
+//     repo included, is refused structurally, seat or not.
+//   · It inherits the module's fixed allowlist, argv-array-only spawn, scrubbed
+//     child env (no secret-bearing key, no ambient identity) and bounded
+//     timeout — no new git verb, no network, no shell.
+//   · IDEMPOTENT: a clean tree is an honest no-op (`noop:true`), never an
+//     empty commit.
+// ---------------------------------------------------------------------------
+
+/** The delivery marker, written INSIDE `.git/` — never committed, and
+ *  invisible to the emit walker (EMIT_SKIP_DIRS skips `.git`). It proves a
+ *  repository was created by THIS seam, so a foreign repo root is refused even
+ *  when it happens to carry an emitted record. */
+export const GIT_LAND_DELIVERY_MARKER = "rapidtool-landing.json";
+export const GIT_LAND_DELIVERY_MARKER_KIND = "rapidtool-land-delivery";
+export const GIT_LAND_DELIVERY_MARKER_VERSION = 1;
+/** The emitted-product record `emitProject` always writes; its presence is the
+ *  proof that the target is a RapidTool emission, not an arbitrary directory. */
+export const EMITTED_RECORD_REL = ".rapidtool/project.json";
+/** Conventional Commits type for a generated product delivery. */
+export const LAND_COMMIT_TYPE = "feat";
+/** Cap on the subject's summary segment (type+scope ride outside it). */
+export const LAND_SUBJECT_MAX_CHARS = 72;
+
+/** The minimal shape the message derivation reads — a Project satisfies it. */
+export type LandSubject = {
+  name: string;
+  brief: string;
+  implementationSpec?: { requirements?: readonly string[] } | null;
+};
+
+export type GitLandEmittedOk = {
+  ok: true;
+  dir: string;
+  repoRoot: string;
+  branch: string | null;
+  /** The Conventional Commits message this land used / would use. */
+  message: string;
+  /** True when a new commit actually landed. */
+  committed: boolean;
+  /** True when the tree was already clean — an honest no-op, not an empty commit. */
+  noop: boolean;
+  commit: { hash: string; subject: string } | null;
+  /** Emit-relative paths this delivery staged (only the emitted manifest). */
+  files: string[];
+  /** Files present in the tree but NOT part of the emission (left untracked). */
+  foreign: string[];
+  stdout: string;
+  durationMs: number;
+};
+
+export type GitLandEmittedOptions = {
+  /** The emitted manifest (`emitProject`'s `files`) — the ONLY paths staged. */
+  files: readonly string[];
+  identity?: { name: string; email: string };
+  gitBin?: string;
+  timeoutMs?: number;
+};
+
+function collapseSpaces(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function firstNonEmptyLine(text: string): string {
+  for (const line of text.split(/\r?\n/)) {
+    if (line.trim().length > 0) return line;
+  }
+  return "";
+}
+
+/** Cap to `max` chars at a word boundary, ending in an ellipsis (result ≤ max). */
+function capWords(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let cut = text.slice(0, max - 1);
+  const at = cut.lastIndexOf(" ");
+  if (at > Math.floor(max * 0.5)) cut = cut.slice(0, at);
+  cut = cut.replace(/[\s.,;:!?-]+$/, "");
+  if (cut.length === 0) cut = text.slice(0, max - 1).trimEnd();
+  return `${cut}…`;
+}
+
+/**
+ * Pure, total: `feat(<slug>): <one-line summary>` derived from the REAL spec —
+ * the first implementationSpec requirement when one exists (the distilled
+ * spec line), else the brief's first non-empty line — collapsed to one line
+ * and capped. Never fabricated, never throws.
+ */
+export function conventionalLandMessage(subject: LandSubject): string {
+  const slug = slugName(typeof subject?.name === "string" ? subject.name : "");
+  const reqs = subject?.implementationSpec?.requirements;
+  const spec = Array.isArray(reqs)
+    ? reqs.find((r): r is string => typeof r === "string" && r.trim().length > 0)
+    : undefined;
+  const source =
+    spec !== undefined
+      ? spec
+      : typeof subject?.brief === "string"
+        ? firstNonEmptyLine(subject.brief)
+        : "";
+  const summary = capWords(collapseSpaces(source), LAND_SUBJECT_MAX_CHARS) || "initial emission";
+  return `${LAND_COMMIT_TYPE}(${slug}): ${summary}`;
+}
+
+function deliveryMarkerPath(dir: string): string {
+  return join(dir, ".git", GIT_LAND_DELIVERY_MARKER);
+}
+
+function hasDeliveryMarker(dir: string): boolean {
+  const p = deliveryMarkerPath(dir);
+  if (!existsSync(p)) return false;
+  try {
+    const parsed = JSON.parse(readFileSync(p, "utf8")) as { landing?: unknown; version?: unknown };
+    return parsed.landing === GIT_LAND_DELIVERY_MARKER_KIND && parsed.version === GIT_LAND_DELIVERY_MARKER_VERSION;
+  } catch {
+    return false;
+  }
+}
+
+/** Atomic marker write (same write-then-rename discipline as writeLandingMarker). */
+function writeDeliveryMarker(dir: string): void {
+  const p = deliveryMarkerPath(dir);
+  const text = `${JSON.stringify(
+    {
+      landing: GIT_LAND_DELIVERY_MARKER_KIND,
+      version: GIT_LAND_DELIVERY_MARKER_VERSION,
+      landedAt: new Date().toISOString(),
+    },
+    null,
+    2,
+  )}\n`;
+  const staging = `${p}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(staging, text, "utf8");
+    renameSync(staging, p);
+  } catch (err) {
+    try {
+      if (existsSync(staging)) unlinkSync(staging);
+    } catch {
+      /* best-effort staging sweep */
+    }
+    throw err;
+  }
+}
+
+/** Validate the emit manifest: non-empty, emit-relative, forward-slashed,
+ *  traversal-free. Returns the normalized list or a refusal reason. */
+function normalizeManifest(files: unknown): { ok: true; files: string[] } | { ok: false; error: string } {
+  if (!Array.isArray(files) || files.length === 0) {
+    return { ok: false, error: "files must be a non-empty array of emit-relative paths" };
+  }
+  const out: string[] = [];
+  for (const f of files) {
+    if (typeof f !== "string" || f.length === 0) {
+      return { ok: false, error: "files must contain only non-empty strings" };
+    }
+    if (f.includes("\0")) return { ok: false, error: "files must not contain NUL" };
+    if (f.includes("\\")) return { ok: false, error: `files must use forward slashes (got ${JSON.stringify(f)})` };
+    if (f.startsWith("/") || /^[A-Za-z]:/.test(f)) {
+      return { ok: false, error: `files must be relative to the emit dir (got ${JSON.stringify(f)})` };
+    }
+    if (f.split("/").some((seg) => seg === "" || seg === "." || seg === "..")) {
+      return { ok: false, error: `files must not escape the emit dir (got ${JSON.stringify(f)})` };
+    }
+    out.push(f);
+  }
+  return { ok: true, files: out };
+}
+
+/** Validate the commit identity (same bounds as gitLandCommit). */
+function normalizeIdentity(
+  identity: unknown,
+): { ok: true; name: string; email: string } | { ok: false; error: string } {
+  const id = (identity ?? DEFAULT_GIT_LAND_IDENTITY) as { name?: unknown; email?: unknown };
+  const name = id?.name;
+  const email = id?.email;
+  if (
+    typeof name !== "string" ||
+    name.trim().length === 0 ||
+    name.length > MAX_IDENTITY_NAME_CHARS ||
+    hasControlChar(name)
+  ) {
+    return { ok: false, error: `identity.name must be a non-empty single-line string (≤ ${MAX_IDENTITY_NAME_CHARS} chars)` };
+  }
+  if (
+    typeof email !== "string" ||
+    email.length > MAX_IDENTITY_EMAIL_CHARS ||
+    hasControlChar(email) ||
+    !/^[^\s@]+@[^\s@]+$/.test(email)
+  ) {
+    return { ok: false, error: `identity.email must look like user@host (≤ ${MAX_IDENTITY_EMAIL_CHARS} chars)` };
+  }
+  return { ok: true, name, email };
+}
+
+/** Split `git status --porcelain=v1` into staged paths and untracked paths. */
+function parsePorcelain(out: string): { staged: string[]; untracked: string[] } {
+  const staged: string[] = [];
+  const untracked: string[] = [];
+  for (const raw of out.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (line.length < 3) continue;
+    const code = line.slice(0, 2);
+    let p = line.slice(3);
+    const arrow = p.indexOf(" -> ");
+    if (arrow >= 0) p = p.slice(arrow + 4);
+    if (code === "??") untracked.push(p);
+    else if (code[0] !== " ") staged.push(p);
+  }
+  return { staged, untracked };
+}
+
+/**
+ * Land an EMITTED tree as one Conventional-Commits delivery commit. See the
+ * §6b doctrine above: emitted-product only, manifest-only staging, host repo
+ * structurally refused, idempotent. Never throws — every branch is coded.
+ */
+export async function gitLandEmitted(
+  subject: LandSubject,
+  dir: unknown,
+  opts: GitLandEmittedOptions,
+): Promise<GitLandResult<GitLandEmittedOk>> {
+  const gitBin = typeof opts?.gitBin === "string" && opts.gitBin.trim().length > 0 ? opts.gitBin.trim() : "git";
+  const timeout = resolveTimeoutMs(opts?.timeoutMs);
+  if (typeof timeout === "object") {
+    return { ok: false, reason: "bad-input", code: "RT_E_VALIDATION", error: timeout.error };
+  }
+  const manifest = normalizeManifest(opts?.files);
+  if (!manifest.ok) {
+    return { ok: false, reason: "bad-input", code: "RT_E_VALIDATION", error: manifest.error };
+  }
+  const identity = normalizeIdentity(opts?.identity);
+  if (!identity.ok) {
+    return { ok: false, reason: "bad-input", code: "RT_E_VALIDATION", error: identity.error };
+  }
+
+  const v = validateDir(dir);
+  if (!v.ok) return { ok: false, reason: "bad-input", code: "RT_E_VALIDATION", error: v.error };
+  const target = v.dir;
+  const shape = isDirectoryOf(target);
+  if (shape === "missing") {
+    return { ok: false, reason: "target-missing", code: "RT_E_VALIDATION", error: `dir ${JSON.stringify(target)} does not exist`, dir: target };
+  }
+  if (shape === "not-a-directory") {
+    return { ok: false, reason: "target-not-a-directory", code: "RT_E_VALIDATION", error: `dir ${JSON.stringify(target)} is not a directory`, dir: target };
+  }
+
+  if (!existsSync(join(target, EMITTED_RECORD_REL))) {
+    return {
+      ok: false,
+      reason: "not-an-emitted-tree",
+      code: "RT_E_VALIDATION",
+      dir: target,
+      error:
+        `dir ${JSON.stringify(target)} carries no emitted record (${EMITTED_RECORD_REL}) — the delivery tail ` +
+        `lands only a tree emitProject wrote (the record is the proof of emission)`,
+    };
+  }
+
+  const message = conventionalLandMessage(subject);
+  const hasGit = existsSync(join(target, ".git"));
+
+  if (hasGit) {
+    if (!hasDeliveryMarker(target)) {
+      return {
+        ok: false,
+        reason: "not-a-landing-repo",
+        code: "RT_E_VALIDATION",
+        dir: target,
+        error:
+          `dir ${JSON.stringify(target)} already carries a .git this delivery tail did not create — refusing to ` +
+          `commit into a foreign repository (the host repo is never a delivery target)`,
+      };
+    }
+    const probe = await workTreeRoot(target, gitBin, timeout);
+    if (probe.failure) return failureFromRun(probe.failure, target, gitBin);
+    if (probe.root === null || !samePath(probe.root, target)) {
+      return {
+        ok: false,
+        reason: "target-in-work-tree",
+        code: "RT_E_VALIDATION",
+        dir: target,
+        error: `dir ${JSON.stringify(target)} is not the work-tree root of its own delivery repo (${JSON.stringify(probe.root)})`,
+      };
+    }
+  } else {
+    const probe = await workTreeRoot(target, gitBin, timeout);
+    if (probe.failure) return failureFromRun(probe.failure, target, gitBin);
+    if (probe.root !== null) {
+      return {
+        ok: false,
+        reason: "target-in-work-tree",
+        code: "RT_E_VALIDATION",
+        dir: target,
+        error:
+          `dir ${JSON.stringify(target)} is inside the work tree rooted at ${JSON.stringify(probe.root)} — the ` +
+          `delivery tail never nests a repository (the host repo is never a target)`,
+      };
+    }
+    const init = await runGit({ subcommand: "init", argv: ["-c", "init.defaultBranch=main", "init"] }, {
+      gitBin,
+      cwd: target,
+      timeoutMs: timeout,
+    });
+    if (!init.ok) return failureFromRun(init, target, gitBin);
+    const check = await workTreeRoot(target, gitBin, timeout);
+    if (check.failure) return failureFromRun(check.failure, target, gitBin);
+    if (check.root === null || !samePath(check.root, target)) {
+      return {
+        ok: false,
+        reason: "git-failed",
+        code: "RT_E_RUNNER_FAILED",
+        dir: target,
+        gitBin,
+        error: `git init ran but git does not report ${JSON.stringify(target)} as its work-tree root`,
+      };
+    }
+    try {
+      writeDeliveryMarker(target);
+    } catch (err) {
+      try {
+        rmSync(join(target, ".git"), { recursive: true, force: true });
+      } catch {
+        /* best-effort sweep of the just-created repo */
+      }
+      return {
+        ok: false,
+        reason: "marker-failed",
+        code: classifyError(err, "RT_E_INTERNAL"),
+        dir: target,
+        error: `could not write the delivery marker (${GIT_LAND_DELIVERY_MARKER} in .git/): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
+  }
+
+  const add = await runGit({ subcommand: "add", argv: ["add", "--", ...manifest.files] }, {
+    gitBin,
+    cwd: target,
+    timeoutMs: timeout,
+  });
+  if (!add.ok) return failureFromRun(add, target, gitBin);
+  const status = await runGit({ subcommand: "status", argv: ["status", "--porcelain=v1"] }, {
+    gitBin,
+    cwd: target,
+    timeoutMs: timeout,
+  });
+  if (!status.ok) return failureFromRun(status, target, gitBin);
+  const { staged, untracked } = parsePorcelain(status.stdout);
+  const manifestSet = new Set(manifest.files);
+  const foreign = untracked.filter((p) => !manifestSet.has(p));
+
+  if (staged.length === 0) {
+    return {
+      ok: true,
+      dir: target,
+      repoRoot: resolve(target),
+      branch: branchFromHeadFile(target),
+      message,
+      committed: false,
+      noop: true,
+      commit: null,
+      files: [],
+      foreign,
+      stdout: status.stdout,
+      durationMs: add.durationMs + status.durationMs,
+    };
+  }
+
+  const commit = await runGit(
+    {
+      subcommand: "commit",
+      argv: [
+        "-c",
+        `user.name=${identity.name}`,
+        "-c",
+        `user.email=${identity.email}`,
+        "commit",
+        "-m",
+        message,
+      ],
+    },
+    { gitBin, cwd: target, timeoutMs: timeout },
+  );
+  if (!commit.ok) return failureFromRun(commit, target, gitBin);
+
+  const readBack = await runGit(
+    { subcommand: "log", argv: ["log", "-n", "1", "--pretty=format:%H%x09%an <%ae>%x09%s"] },
+    { gitBin, cwd: target, timeoutMs: timeout },
+  );
+  if (!readBack.ok) return failureFromRun(readBack, target, gitBin);
+  const line = readBack.stdout.split("\n")[0] ?? "";
+  const parts = line.split("\t");
+  if (parts.length < 3 || !/^[0-9a-f]{40}$/.test(parts[0])) {
+    return {
+      ok: false,
+      reason: "git-failed",
+      code: "RT_E_RUNNER_FAILED",
+      dir: target,
+      gitBin,
+      stdout: readBack.stdout,
+      stderr: readBack.stderr,
+      durationMs: readBack.durationMs,
+      error: `delivery commit landed but the read-back could not parse HEAD: ${JSON.stringify(line)}`,
+    };
+  }
+
+  return {
+    ok: true,
+    dir: target,
+    repoRoot: resolve(target),
+    branch: branchFromHeadFile(target),
+    message,
+    committed: true,
+    noop: false,
+    commit: { hash: parts[0], subject: parts.slice(2).join("\t") },
+    files: staged,
+    foreign,
+    stdout: commit.stdout,
+    durationMs: add.durationMs + status.durationMs + commit.durationMs,
   };
 }

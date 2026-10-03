@@ -260,6 +260,32 @@ describe("coded refusals — never a partial pass", () => {
     }
   });
 
+  // 343 bh2 F4: the frame cap is named/documented in BYTES
+  // (MCP_DEFAULT_MAX_FRAME_BYTES, "exceeded the N-byte frame cap") but was
+  // enforced with String.length (UTF-16 code units), so a multibyte frame could
+  // reach ~3-4x the advertised byte budget. The real stub's `echo` tool makes a
+  // reply whose UTF-16 length is under the cap while its UTF-8 byte length is
+  // over it — exactly the frame the old check admitted.
+  it("343 bh2 F4: refuses a multibyte frame whose UTF-8 bytes exceed the cap though its UTF-16 length does not", async () => {
+    const maxFrameBytes = 600;
+    // 400 UTF-16 code units = 1200 UTF-8 bytes.
+    const pad = "€".repeat(400);
+    assert.ok(pad.length < maxFrameBytes, "premise: the pad is under the cap in UTF-16 units");
+    assert.ok(Buffer.byteLength(pad, "utf8") > maxFrameBytes, "premise: the pad is over the cap in UTF-8 bytes");
+    const res = await connectMcpServer(stub("normal"), { env: ENABLED_ENV, timeoutMs: 10_000, maxFrameBytes });
+    if (!res.ok) throw new Error(`expected connect to succeed: ${res.error}`);
+    try {
+      const call = await res.client.callTool("echo", { text: pad });
+      if (call.ok) {
+        throw new Error("expected the multibyte frame to be refused at the documented byte cap");
+      }
+      assert.equal(call.code, "RT_E_VALIDATION");
+      assert.match(call.error, /frame cap/);
+    } finally {
+      await res.client.close();
+    }
+  });
+
   it("surfaces a JSON-RPC error response with RT_E_RUNNER_FAILED", async () => {
     const res = await connectMcpServer(stub("error-response"), { env: ENABLED_ENV, timeoutMs: 10_000 });
     if (!res.ok) throw new Error(`expected connect to succeed: ${res.error}`);

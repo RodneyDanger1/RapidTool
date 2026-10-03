@@ -103,7 +103,12 @@ export const DOC_THEME: Record<string, KindBoxTheme> = {
 };
 
 export function kindTheme(kind: string): KindBoxTheme {
-  return (KIND_THEME as Record<string, KindBoxTheme | undefined>)[kind] ?? UNKNOWN_KIND_THEME;
+  // Own-key lookup: "constructor"/"__proto__" would otherwise return an
+  // Object.prototype member, breaking the documented UNKNOWN_KIND_THEME
+  // fallback for runtime-garbage kinds.
+  return Object.prototype.hasOwnProperty.call(KIND_THEME, kind)
+    ? KIND_THEME[kind as ArtifactKind]
+    : UNKNOWN_KIND_THEME;
 }
 
 // --- tiny XML / geometry helpers --------------------------------------------

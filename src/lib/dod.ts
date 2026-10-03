@@ -1055,14 +1055,16 @@ export const CAPABILITIES = {
       "Outbound: DeepSeek API + research providers only. No MCP client, no Brave, no repo.fs, no sandbox.exec servers (P2-3 roadmap).",
   },
   memory: {
-    // A1-37: checkpoint.server.ts (T-107.7) ships in-tree with NO call site
-    // yet, so the claim below is still literally true. When the resume wiring
-    // lands, move "durable-checkpoints" to implemented and rewrite this claim
-    // IN THE SAME commit — the claim text copies into user-visible artifacts.
-    implemented: ["project-memory-80-row", "knowledge-store-file"],
-    declared: ["durable-checkpoints", "cross-encoder-rerank"],
+    // A1-37 closed: the T-107.7 resume wiring landed — headless.runUntilGate's
+    // commitRunCheckpoint writes the bounded per-phase snapshot and the CLI
+    // resume/unattended verbs re-enter it via loadResumableCheckpoint — so
+    // "durable-checkpoints" moved to implemented and the claim below was
+    // rewritten in the same change (the claim text copies into user-visible
+    // artifacts; a stale claim here is a declare-or-strike violation).
+    implemented: ["project-memory-80-row", "knowledge-store-file", "durable-checkpoints"],
+    declared: ["cross-encoder-rerank"],
     claim:
-      "Persistence = browser localStorage + JSON project files. No wired durable checkpoint layer (T-107.7's module is in-tree, no call site yet), no RRF/cross-encoder (FusionRank is lexical, deliberately).",
+      "Persistence = browser localStorage + JSON project files, plus wired per-phase run checkpoints: a bounded atomic snapshot is committed beside .rapidtool/ after every committed phase and re-entered by the resume/unattended verbs (T-107.7). No RRF/cross-encoder (FusionRank is lexical, deliberately).",
   },
   model: {
     implemented: ["deepseek-v4-flash", "deepseek-v4-pro"],
