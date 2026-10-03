@@ -14,7 +14,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { judgePhase } from "./judgment.ts";
 import { runGate } from "./dod.ts";
-import { emptyProject } from "./engine.ts";
+import { applyPhaseResult, emptyProject } from "./engine.ts";
+import { approve } from "./headless.ts";
+import { buildPhase6Module } from "./sandbox.ts";
 import { runToGate, seedProject } from "./testing/fixtures.ts";
 import type { PhaseId, Project } from "./types.ts";
 
@@ -184,5 +186,54 @@ describe("216g / 112 T3 — judgePhase verdict ladder (pure, no LLM)", () => {
       );
     }
     assert.ok(!/\bfetch\s*\(/.test(src), "no network call anywhere in the module");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 339-3 (W53) — the verdict ladder reads the honest DoD state vocabulary, and
+// the park classification is proven on the ledger: a stock park is clearable by
+// the MACHINE seat (autopilot row), a forceHuman park is not.
+// ---------------------------------------------------------------------------
+describe("339-3 (W53) — verdict detail vocabulary + park classification", () => {
+  it("rung 2 names the deterministic floor state, not just the probe id", () => {
+    const floor: Project = {
+      ...emptyProject({
+        name: "JudgeFloor",
+        brief: "A dispatch board for field service: dispatch techs, board jobs, service parts.",
+      }),
+      generatedSource: buildPhase6Module({ name: "JudgeFloor", jobs: ["dispatch"], rejectionNote: null, variant: 0 }),
+      lastTest: { ok: true, detail: "tests.pass" },
+      phases: [{ id: 6 as PhaseId, status: "complete" }],
+    };
+    const j = judgePhase(floor, 6);
+    assert.equal(j.verdict, "fail:deterministic");
+    assert.ok(j.unmet.includes("p6-brief-fit"), "the unmet id is still the machine anchor");
+    assert.match(j.detail, /deterministic floor state/, "the verdict detail names the state");
+  });
+
+  it("a stock park is cleared by the machine seat; a forceHuman park is not", () => {
+    // Stock P4 park: approve()'s default actor is the autopilot/harness seat —
+    // the machine door the policy seam permits for hitl.approve. runToGate
+    // stops at the phase MOUTH, so actually execute P4 to open its stock gate.
+    const parked = applyPhaseResult(runToGate(seedProject(), 4), 4 as PhaseId);
+    assert.equal(parked.status, "awaiting_hitl", "premise: P4 parks at a stock HITL gate");
+    const cleared = approve(parked);
+    assert.ok(
+      !runGate(cleared, 4).unmet.some((g) => g.id === "p4-approved"),
+      "the machine door satisfies p4-approved (machine-resolvable park)",
+    );
+    const row = (cleared.decisions ?? []).find((d) => d.phase === 4 && d.decision === "approve");
+    assert.ok(row, "the approval lands on the append-only ledger");
+    assert.equal(row!.decidedBy, "autopilot");
+    assert.match(row!.note ?? "", /\[seat harness\]/, "the row names the machine seat, never a human");
+
+    // forceHuman park (a reframe gate): no autopilot path may clear it.
+    const forced: Project = {
+      ...seedProject(),
+      currentPhase: 0 as PhaseId,
+      status: "awaiting_hitl",
+      hitl: { phase: 0 as PhaseId, title: "Reframe", prompt: "x", stakes: "y", forceHuman: true },
+    };
+    assert.throws(() => approve(forced), /forceHuman/, "a machine seat may never approve a forceHuman gate");
   });
 });

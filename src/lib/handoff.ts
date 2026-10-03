@@ -21,6 +21,12 @@ function oneLine(s: string, cap = 240): string {
   return s.replace(/\s+/g, " ").trim().slice(0, cap);
 }
 
+/** 339-5 (Packet): the emitted scaffold always materializes the spec-graph
+ *  `tests` node at this fixed path (`scaffold.ts` TREE_RESERVED), whatever
+ *  `file` text the node carries, so the handoff names the contract path the
+ *  emitter actually writes rather than a node's raw `file`. Mirrors packet.ts. */
+const EMITTED_ORACLE_SPEC = "tests/oracle.spec.ts";
+
 /**
  * F3 sweep: artifact rows that pass the shape guard can still carry
  * WRONG-TYPE scalar fields (a hand-edited import can hold `body: 42` or an
@@ -66,11 +72,17 @@ export function phaseHandoff(project: Project, phase: PhaseId): string {
     )
     .slice(-6);
   const gate = runGate(project, phase);
-  const unmetIds = new Set(gate.unmet.map((g) => g.id));
-  const criteria = (DOD[phase] ?? []).map((item) => ({
-    criterion: item.criterion,
-    met: !unmetIds.has(item.id),
-  }));
+  // 339-5 (Packet): for a red row render the unmet item's AUGMENTED `criterion`.
+  // dod.ts (339-3) appends a state line to a failed state-probed criterion (the
+  // deterministic-floor p6-brief-fit) and drops it from the bare registry item,
+  // so reading only `item.criterion` printed the static label and discarded the
+  // state. The [x]/[ ] flag still comes from the unmet id set; the machine
+  // envelope is untouched (the checklist is prose).
+  const unmetById = new Map(gate.unmet.map((g) => [g.id, g]));
+  const criteria = (DOD[phase] ?? []).map((item) => {
+    const u = unmetById.get(item.id);
+    return { criterion: u?.criterion ?? item.criterion, met: !u };
+  });
 
   const lattice = project.lattice;
   const schedule = project.schedule;
@@ -182,21 +194,17 @@ export function phaseHandoff(project: Project, phase: PhaseId): string {
   out.push(
     `Return your work as ONE JSON report matching the packet's report_schema — {phase, status: "complete"|"blocked"|"partial", summary, files?: string[], tests_run?: [{command, pass, evidence?}], artifacts?: [{title, body, language?}]} — the ingest seam validates this exact shape.`,
   );
-  // W52 / 338-5 (Product): name the runnable acceptance command, not just the
-  // report shape. Every export profile says "run the oracle tests from the
-  // packet", but neither the packet nor this handoff named a command or the
-  // oracle spec path — a fresh agent could not self-check. Conditional on the
-  // project carrying oracle rows (the emitted tree declares `test` exactly then).
-  const oracleSpecPath = (() => {
-    const nodes = Array.isArray(project.specGraph?.nodes) ? project.specGraph.nodes : [];
-    const testsNode = nodes.find(
-      (n) => n && (n.id === "tests" || /^tests\//.test(String(n.file ?? ""))),
-    );
-    return testsNode && typeof testsNode.file === "string" ? testsNode.file : "tests/oracle.spec.ts";
-  })();
+  // W52 / 338-5 (Product) + 339-5 (Packet): name the runnable acceptance
+  // command, not just the report shape. Every export profile says "run the
+  // oracle tests from the packet", but neither the packet nor this handoff
+  // named a command or the oracle spec path — a fresh agent could not
+  // self-check. Conditional on the project carrying oracle rows (the emitted
+  // tree declares `test` exactly then). The spec path is the EMITTED contract
+  // path (EMITTED_ORACLE_SPEC), not a spec-graph node's raw `file`.
+  const oracleSpecPath = EMITTED_ORACLE_SPEC;
   out.push(
     Array.isArray(project.oracle) && project.oracle.length > 0
-      ? `Verify before reporting: run the emitted oracle spec (\`${oracleSpecPath}\`) with the tree's declared test script (\`npm test\`) and record each command you ran in the report's \`tests_run\`. A red run is not a bypass — patch and re-run.`
+      ? `Verify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (\`npm install\`, then \`npm run typecheck\`, then \`npm test\`) — \`npm test\` executes the emitted oracle spec (\`${oracleSpecPath}\`). Record each command you ran in the report's \`tests_run\`. A red run is not a bypass — patch and re-run.`
       : `No oracle rows are recorded for this project yet, so this edge has no runnable acceptance spec — the machine-checked DoD gate above is the exit signal.`,
   );
   // 335-3 (Transit): state the seam's ACTUAL acceptance rules, not just the

@@ -465,6 +465,11 @@ export async function completeOpenAiCompatible(
     // vendor's own documented default applies (this adapter invents nothing, and
     // forwards NO reasoning/thinking field: see the file header).
     ...maxTokensKnob,
+    // `json_object` is the same MODE HINT as the DeepSeek provider (see
+    // DeepSeekCompleteOptions.json): a request for valid JSON, NOT schema or
+    // grammar enforcement. This family's strict `json_schema` support is
+    // UNPROBED (the file header claims nothing a probe did not read back), so
+    // only the mode hint is sent and callers must validate the parsed reply.
     ...(opts.json ? { response_format: { type: "json_object" as const } } : {}),
     stream: false,
   };

@@ -151,6 +151,26 @@ export function runEntryOracle(
             "declared uiShell, but the tree carries no index.html — the structural premise is false, so this is not a UI shell (never a silent pass)",
         };
   }
+  // 339-6 (the 338-6 class, one layer down at the runner): a declared pin the
+  // evaluator cannot actually violate is a verifier that cannot fail. An
+  // empty-string stdout/stderr pin is satisfied by `String(out).includes("")`
+  // for EVERY run; a non-integer expectExit was silently coerced to the
+  // default 0, so the declared exit was never evaluated. The validator refuses
+  // both through the normal path; the runner refuses them too, so a direct
+  // caller (evaluateEntryRunsRow / a tree-side reader) can never mint a green
+  // from a hollow row. Refused before the spawn — nothing to run.
+  if (row.expectStdout !== undefined && (typeof row.expectStdout !== "string" || row.expectStdout.length === 0)) {
+    return { status: "fail", detail: "declared expectStdout is empty — includes(\"\") is always true, so the pin can never fail" };
+  }
+  if (row.expectStderr !== undefined && (typeof row.expectStderr !== "string" || row.expectStderr.length === 0)) {
+    return { status: "fail", detail: "declared expectStderr is empty — includes(\"\") is always true, so the pin can never fail" };
+  }
+  if (row.expectExit !== undefined && !Number.isInteger(row.expectExit)) {
+    return {
+      status: "fail",
+      detail: `declared expectExit ${JSON.stringify(row.expectExit)} is not an integer 0..255 — refusing rather than silently evaluating the default 0`,
+    };
+  }
   if (!has(row.entry as string)) {
     return { status: "fail", detail: `entry not emitted: ${row.entry} — nothing to run` };
   }

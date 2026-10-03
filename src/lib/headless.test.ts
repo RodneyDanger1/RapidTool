@@ -1527,7 +1527,19 @@ describe("fixes/153 (P2) — the refusal→next-cycle loop: cycle N+1 knows cycl
     const refusal = `RT_E_LLM_REJECTED · ${"model refused ".repeat(40)}`;
     const rdeps = p6CycleLiveDeps({ cycle: 2, refusal });
     assert.deepEqual(Object.keys(rdeps!), ["synthesisRefusal"]);
-    assert.equal(rdeps!.synthesisRefusal!.length, 200, "bounded to the ~200-char refusal cap");
+    assert.equal(
+      rdeps!.synthesisRefusal!.length,
+      refusal.length,
+      "a refusal under the cap rides whole (339 wave raised the cap 200 → 1200)",
+    );
+    // Over-cap refusal: bounded to the 1200-char cap, never the whole reason.
+    const longRefusal = `RT_E_LLM_REJECTED · ${"model refused ".repeat(200)}`;
+    const lrdeps = p6CycleLiveDeps({ cycle: 2, refusal: longRefusal });
+    assert.equal(
+      lrdeps!.synthesisRefusal!.length,
+      1200,
+      "bounded to the 1200-char refusal cap",
+    );
     // Both evidence kinds ride together when both exist.
     const both = p6CycleLiveDeps({ cycle: 3, treeFailureTail: tail, refusal });
     assert.deepEqual(Object.keys(both!).sort(), ["synthesisRefusal", "treeFailure"]);

@@ -168,6 +168,22 @@ export type DeepSeekCompleteOptions = {
   model?: LlmModel;
   system?: string;
   maxTokens?: number;
+  /**
+   * Request the vendor's JSON OUTPUT MODE — `response_format:{type:"json_object"}`
+   * on the wire (the body spread in `completeDeepSeekInner`), plus the explicit
+   * "Respond with valid JSON only" system instruction the mode requires (added
+   * just above that body — without it DeepSeek may loop on whitespace until the
+   * token cap; api-docs.deepseek.com/guides/json_mode).
+   *
+   * GUARANTEED: a request for one syntactically valid JSON OBJECT, made through
+   * the vendor's documented mode. NOT GUARANTEED: any schema, key-set, or type
+   * enforcement. DeepSeek's only structured-output capability is this
+   * `json_object` MODE HINT — there is NO strict `json_schema`/grammar mode, so
+   * a conforming-looking reply can still omit fields or carry wrong types.
+   * Callers that need a specific SHAPE must validate the parsed reply
+   * deterministically (the spec envelope does: prompt-engine.ts
+   * `expandedSpecViolations`) — never treat `json:true` as schema enforcement.
+   */
   json?: boolean;
   /**
    * fixes/156 (E1): per-request thinking override. `thinking: false` forces

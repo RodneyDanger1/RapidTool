@@ -85,6 +85,66 @@ describe("llm complete", () => {
     assert.deepEqual(body.response_format, { type: "json_object" });
   });
 
+  // Item 2 contract pin: `json:true` is the vendor's `json_object` MODE HINT,
+  // never a schema/grammar claim — DeepSeek has no strict `json_schema` mode.
+  // The request carries the explicit emit-JSON instruction the mode requires.
+  it("json mode is a MODE HINT only: no schema/grammar fields, explicit instruction present", async () => {
+    process.env[KEY] = "sk-test";
+    const captured: {
+      body: { messages?: Array<{ role?: string; content?: string }>; response_format?: unknown };
+    } = { body: {} };
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      captured.body = JSON.parse(String(init?.body));
+      return okResponse({
+        model: "deepseek-v4-flash",
+        choices: [{ message: { content: "{}" } }],
+      });
+    }) as typeof fetch;
+
+    const result = await completeDeepSeek("return {}", { json: true });
+    assert.equal(result.ok, true);
+    const rf = captured.body.response_format as Record<string, unknown>;
+    assert.deepEqual(rf, { type: "json_object" }, "exactly the documented mode hint");
+    for (const claim of ["json_schema", "schema", "strict", "grammar"]) {
+      assert.equal(claim in rf, false, `no ${claim} claim — the provider has no such mode`);
+    }
+    assert.deepEqual(
+      captured.body.messages?.[0],
+      { role: "system", content: "Respond with valid JSON only — no prose, no markdown fences." },
+      "the explicit emit-JSON instruction the mode requires",
+    );
+  });
+
+  it("the OpenAI-compatible twin sends the same mode hint and instruction (no schema claim)", async () => {
+    process.env[XAI_API_KEY_ENV] = "sk-test";
+    const captured: {
+      body: { messages?: Array<{ role?: string; content?: string }>; response_format?: unknown };
+    } = { body: {} };
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      captured.body = JSON.parse(String(init?.body));
+      return okResponse({
+        model: "probe-model-id",
+        choices: [{ message: { content: "{}" } }],
+      });
+    }) as typeof fetch;
+
+    const probed = createOpenAiCompatibleProvider(XAI_SPEC, ["probe-model-id" as never]);
+    const result = await completeOpenAiCompatible(XAI_SPEC, probed.requestModelIds, "return {}", {
+      model: "probe-model-id" as never,
+      json: true,
+    });
+    assert.equal(result.ok, true);
+    const rf = captured.body.response_format as Record<string, unknown>;
+    assert.deepEqual(rf, { type: "json_object" });
+    for (const claim of ["json_schema", "schema", "strict", "grammar"]) {
+      assert.equal(claim in rf, false, `no ${claim} claim in the OpenAI-compatible adapter either`);
+    }
+    assert.deepEqual(captured.body.messages?.[0], {
+      role: "system",
+      content: "Respond with valid JSON only — no prose, no markdown fences.",
+    });
+  });
+
   it("maps the pro tier to thinking enabled with a generous budget", async () => {
     process.env[KEY] = "sk-test";
     const captured: { body: unknown } = { body: {} };

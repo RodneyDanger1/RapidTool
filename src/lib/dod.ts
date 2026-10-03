@@ -30,7 +30,20 @@ import {
   identifierHits,
 } from "./sandbox.ts";
 
-export type GateItem = { id: string; criterion: string; probe: (p: Project) => boolean };
+export type GateItem = {
+  id: string;
+  criterion: string;
+  probe: (p: Project) => boolean;
+  /** Optional honest STATE line for a FAILED probe. `runGate` appends it to the
+   *  returned unmet item's `criterion` and exposes it as `reason`, so a RED
+   *  criterion can name WHICH state the project is in (e.g. the deterministic
+   *  keyless floor) instead of stranding a reader on a bare criterion. Registry
+   *  items with nothing state-specific to say leave it unset. */
+  unmetReason?: (p: Project) => string;
+  /** `runGate`-only: the evaluated `unmetReason` (absent on registry items and
+   *  on met criteria). */
+  reason?: string;
+};
 
 // --- defensive probe helpers -------------------------------------------------
 
@@ -467,6 +480,59 @@ export function archTrace(p: Project): ArchTrace {
   };
 }
 
+// --- p6-brief-fit honest state (339-3, W53) ---------------------------------
+
+/** fixes/255 §P1's union read, factored so the probe and its state line can
+ *  never drift: the source `p6-brief-fit` measures — barrel + every tree file
+ *  in tree mode, else the single module. */
+function briefFitSource(p: Project): string {
+  const tree = Array.isArray(p.generatedTree) ? p.generatedTree : [];
+  return tree.length > 0
+    ? [
+        p.generatedSource ?? "",
+        ...tree.map((f) => (f && typeof f.source === "string" ? f.source : "")),
+      ].join("\n")
+    : p.generatedSource ?? "";
+}
+
+/** 339-3 (W53): the honest STATE line for a FAILED p6-brief-fit. A keyless
+ *  deterministic floor can NEVER pass this criterion (the placeholder module
+ *  implements phase bookkeeping only and carries no brief vocabulary), so the
+ *  red message must name the state instead of a bare criterion:
+ *  - the floor with no keyed synthesis attempted;
+ *  - the floor kept after a keyed synthesis refusal (the model ran, no cycle
+ *    was accepted);
+ *  - a real single module / tree whose union dropped the brief's nouns.
+ *  Pure and total: reads only project state. A vocabulary-free brief never
+ *  reaches here (the probe passes vacuously). */
+function briefFitUnmetReason(p: Project): string {
+  const { required } = briefNounHits(p.brief);
+  const source = briefFitSource(p);
+  const hits = identifierHits(required, source);
+  const missing = required.filter((t) => !hits.includes(t));
+  const tail =
+    missing.length > 0
+      ? ` (missing: ${missing.slice(0, 12).join(", ")}${missing.length > 12 ? ", …" : ""})`
+      : "";
+  const tree = Array.isArray(p.generatedTree) ? p.generatedTree : [];
+  // The deterministic floor's exact shape: runGenerated's template contract,
+  // the same signature sandbox.runGenerated admits (tree absent, source = the
+  // engine-authored placeholder). A real synthesized module never opens so.
+  const floorShape = tree.length === 0 && /^const JOBS = \[/.test(source) && source.includes("function test_no_skip");
+  if (floorShape) {
+    const attempted = (p.logs ?? []).some(
+      (l) => l?.event === "p6.synthesis.refused" || l?.event === "p6.journey.exhausted",
+    );
+    return attempted
+      ? `deterministic floor state — keyed model synthesis ran but no cycle was accepted (p6.synthesis.refused); the P6 placeholder implements phase bookkeeping only and carries none of the brief's required nouns${tail}`
+      : `deterministic floor state — no keyed model synthesis ran; the P6 placeholder implements phase bookkeeping only and carries none of the brief's required nouns${tail}`;
+  }
+  if (tree.length > 0) {
+    return `keyed tree synthesis ran (${tree.length} file(s)) but its union dropped the brief's required nouns${tail}`;
+  }
+  return `generated source is missing the brief's required nouns${tail}`;
+}
+
 // --- DoD registry -------------------------------------------------------------
 
 /**
@@ -650,6 +716,7 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       id: "p6-brief-fit",
       criterion:
         "Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode)",
+      unmetReason: briefFitUnmetReason,
       probe: (p) => {
         const { required } = briefNounHits(p.brief);
         if (required.length === 0) return true;
@@ -659,15 +726,7 @@ export const DOD: Record<PhaseId, GateItem[]> = {
         // file: the SAME artifact the engine's pre-acceptance fit check
         // measures (codegen assembleTreeEntry). The union can only ADD hits,
         // so no verdict flips PASS→FAIL.
-        const tree = Array.isArray(p.generatedTree) ? p.generatedTree : [];
-        const source =
-          tree.length > 0
-            ? [
-                p.generatedSource ?? "",
-                ...tree.map((f) => (f && typeof f.source === "string" ? f.source : "")),
-              ].join("\n")
-            : p.generatedSource ?? "";
-        const hits = identifierHits(required, source);
+        const hits = identifierHits(required, briefFitSource(p));
         // 322 X1 (P6-C, parent pick): ½ → 0.35. The half-bar assumed
         // entity-heavy briefs (fixes/97 kanban fixtures); prose-heavy product
         // briefs carry flavor words no honest implementation names identifiers
@@ -818,7 +877,20 @@ export function runGate(
     };
   }
   const results = evaluate(project, items);
-  const unmet = items.filter((_, i) => !results[i].ok);
+  // 339-3 (W53): a failed criterion with a state probe (`unmetReason`) carries
+  // the honest STATE line in its returned `criterion` — so every consumer that
+  // prints the recorded criterion (gate artifact, hard-DoD block, red-seal
+  // digest, judgePhase) tells a human WHICH state the project is in, not a
+  // bare criterion. The probe id is untouched; the evidence hash is unaffected
+  // (it hashes `id:pass|fail` only).
+  const unmet = items
+    .map((item, i) => ({ item, ok: results[i].ok }))
+    .filter((r) => !r.ok)
+    .map(({ item }) => {
+      const reason = item.unmetReason?.(project);
+      if (typeof reason !== "string" || reason.trim() === "") return item;
+      return { ...item, reason, criterion: `${item.criterion} — ${reason}` };
+    });
   // 322 X3 (OBS-6): verdict-vector fingerprint only — see the runGate docstring;
   // it does not cover artifact content.
   const evidence = items

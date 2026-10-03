@@ -161,9 +161,21 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
   // W40 N1 (H1 leftover): a junk outcome (null/non-object/statusless) is the
   // same no-state-change path as not-configured — never deref a foreign shape.
   if (!outcome || typeof outcome.status !== "string" || outcome.status === "not-configured") return project;
+  // 339-6: a `passed` status is a CLAIM; only a genuine runner pass may mint
+  // `tested`. verify.server.ts's runner always returns the evidence of the run
+  // — a non-empty evidence string AND the non-empty case set it evaluated. An
+  // envelope claiming "passed" with a present-but-EMPTY case set, or with no
+  // evidence text, is hollow: it is refused on this same no-state-change path
+  // (never a fabricated verdict) instead of stamping a `tested` label that
+  // maker-score M4 / judgment.ts read as machine proof (they check label+hash,
+  // not the detail dod.ts p6-verified checks). An ABSENT `cases` field stays
+  // accepted: it is the legacy envelope shape verify.test.ts's 337-3 hash test
+  // pins (lane 339-1).
+  const evidence = typeof outcome.evidence === "string" ? outcome.evidence : "";
+  const emptyCaseSet = Array.isArray(outcome.cases) && outcome.cases.length === 0;
+  if (outcome.status === "passed" && (evidence.trim().length === 0 || emptyCaseSet)) return project;
   const passed = outcome.status === "passed";
   const now = Date.now();
-  const evidence = typeof outcome.evidence === "string" ? outcome.evidence : "";
   // The hash must separate its two inputs: concatenating finalSource+evidence
   // without a boundary let two different verified outcomes (("ab","c") vs
   // ("a","bc") → "abc") mint the same stamp, so the second was dropped as a
@@ -177,9 +189,9 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
   // source+evidence but a DIFFERENT case set minted the same hash and the
   // second genuine verification was silently dropped as a "duplicate". The
   // commitment is the [id, expression] pairs in order (values only, so no
-  // object-key-order dependence). KNOWN LIMIT: the codegen.server.ts twins
-  // (verifyOutcomeArtifact :3497, upgraded :3586) still hash finalSource+evidence
-  // — aligning them to this form needs codegen.server.ts (not this lane's file).
+  // object-key-order dependence). The codegen.server.ts twins
+  // (verifyEvidenceHash, shared by verifyOutcomeArtifact + upgraded) now use
+  // this same three-part formula.
   const caseCommitment = JSON.stringify(
     (Array.isArray(outcome.cases) ? outcome.cases : []).map((c) => {
       const row = c as { id?: unknown; expression?: unknown } | null | undefined;
@@ -195,8 +207,10 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
   if (passed && prior?.label === "tested" && prior.evidenceHash === evidenceHash) {
     return project;
   }
+  // 339-6: a foreign `cases` value (non-array) must not throw into the caller —
+  // this seam's contract is "pure, never throws". Only an array carries cases.
   const caseLines: string[] = [];
-  for (const c of outcome.cases ?? []) {
+  for (const c of Array.isArray(outcome.cases) ? outcome.cases : []) {
     const row = c as { id?: unknown; expression?: unknown } | null | undefined;
     if (!row || typeof row !== "object") continue;
     const id = typeof row.id === "string" ? row.id : "";

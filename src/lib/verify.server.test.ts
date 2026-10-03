@@ -101,9 +101,12 @@ function withFakeKey(): () => void {
 const LEGACY_PROMPT = [
   "Write executable verification cases for the following source module. Return JSON ONLY:",
   '{"cases": [{"id": "case-1", "expression": "<boolean JS expression using the module\'s exported names>"}]}.',
-  "Expressions must be self-contained booleans (e.g. `add(2,3) === 5`, `typeof buildPlan === 'function'`).",
-  "Each expression is EXACTLY ONE boolean expression. FORBIDDEN in every case: semicolons,",
-  "const/let/var declarations, assignments, multiple statements, arrow functions, and template literals.",
+  "Expressions must be self-contained booleans (e.g. add(2,3) === 5, typeof buildPlan === 'function').",
+  "Return EXACTLY ONE boolean expression per case, over the module's exported names, and do NOT wrap",
+  "it in backticks. Avoid semicolons, const/let/var declarations, assignments, multiple statements,",
+  "arrow functions and template literals. (A declaration followed by a final boolean is a tolerated",
+  "repair the harness reduces to the final expression, and its declarations are DISCARDED — never",
+  "rely on it; emit the bare boolean expression.)",
   "Every expression must EVALUATE WITHOUT THROWING: do NOT test rejection paths (invalid phase,",
   "unknown job, missing fields) — the harness cannot catch thrown errors, and the module's",
   "guards are correct behavior, not bugs. Test happy-path + brief-required behavior only.",
@@ -240,6 +243,27 @@ describe("E-08 oracle seeding (A4-b — prompt builder)", () => {
       seeded.endsWith(buildOracleCasesPrompt({ source: SOURCE, brief: BRIEF, seeds: "" })),
       true,
       "the legacy instruction body is preserved verbatim under seeding",
+    );
+  });
+
+  it("339-1: the prompt states the CLEAN single-expression form and never backticks the example", () => {
+    const prompt = buildOracleCasesPrompt({ source: SOURCE, brief: "", seeds: "" });
+    assert.ok(
+      !prompt.includes("`add(2,3) === 5`"),
+      "the worked example must NOT be backtick-wrapped — the model echoes backticks, which the sanitizer rejects by design",
+    );
+    assert.ok(prompt.includes("add(2,3) === 5"), "the worked example is present, unwrapped");
+    assert.ok(
+      prompt.includes("do NOT wrap") && prompt.includes("in backticks"),
+      "the prompt tells the model explicitly not to wrap the expression in backticks",
+    );
+    assert.ok(
+      !prompt.includes("FORBIDDEN in every case"),
+      "the old blanket FORBIDDEN-declarations rule is reconciled with the tolerated repair",
+    );
+    assert.ok(
+      prompt.includes("tolerated") && prompt.includes("DISCARDED"),
+      "the declaration(s); final-boolean form is described honestly as a tolerated repair whose declarations never run",
     );
   });
 });
@@ -1015,6 +1039,172 @@ describe("fixes/328 P3 — generateCases diagnoses an empty reply honestly", () 
 });
 
 // ---------------------------------------------------------------------------
+// 339-1 deliverable 2 — the name-binding gate in generateCases. A case may
+// READ or CALL only an exported name in the caller's measured `contract` (the
+// signatureNames codegen threads from oracleContractNames) or a pinned JS
+// global; anything else can only throw `ReferenceError: <name> is not
+// defined` at machine-run time. One bounded repair retry names
+// `<case-id> → <identifier>`, then an honest RT_E_VALIDATION refusal. The
+// control proves a fully-bound set still commits with no retry; the pinned-row
+// tests prove a pinned row is REPAIRED in place, never dropped.
+// ---------------------------------------------------------------------------
+describe("339-1 generateCases name-binding gate (a case cannot commit an undefined identifier)", () => {
+  const CONTRACT = ["mean", "median"];
+
+  it("repairs a case calling an undefined identifier, then commits the fixed expression", async () => {
+    const restoreKey = withFakeKey();
+    const bad = { cases: [{ id: "c1", expression: "mean(computeAvg([1,2,3])) === 2" }] };
+    const good = { cases: [{ id: "c1", expression: "mean([1,2,3]) === 2" }] };
+    const mock = mockChat([bad, good]);
+    try {
+      const res = await generateCases(SOURCE, "mean module", CONTRACT, "", []);
+      assert.equal(res.ok, true, "the repaired case commits");
+      if (res.ok) assert.equal(res.cases[0]?.expression, "mean([1,2,3]) === 2");
+      assert.equal(mock.calls.length, 2, "exactly one bounded repair retry");
+      assert.match(mock.calls[1]!.prompt, /c1/, "the repair prompt names the offending case id");
+      assert.match(mock.calls[1]!.prompt, /computeAvg/, "the repair prompt names the undefined identifier");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("refuses after the retry when the undefined identifier survives (RT_E_VALIDATION, offender named)", async () => {
+    const restoreKey = withFakeKey();
+    const bad = { cases: [{ id: "c7", expression: "mean(computeAvg([1,2,3])) === 2" }] };
+    const mock = mockChat([bad, bad]);
+    try {
+      const res = await generateCases(SOURCE, "mean module", CONTRACT, "", []);
+      assert.equal(res.ok, false);
+      if (!res.ok) {
+        assert.equal(res.reason, "error");
+        assert.equal(res.code, "RT_E_VALIDATION");
+        assert.match(res.error ?? "", /c7/);
+        assert.match(res.error ?? "", /computeAvg/);
+        assert.match(res.error ?? "", /undefined identifier/);
+      }
+      assert.equal(mock.calls.length, 2, "one bounded repair retry, then an honest refusal");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  // 339-1 resume #3 (verifier A): the gate inspected CALL position only, so a
+  // bare VALUE read of an undefined identifier committed with no retry and then
+  // died at run time (`ReferenceError: missing is not defined`). It must now be
+  // repaired before commit.
+  it("repairs a bare VALUE-READ of an undefined identifier (not only a call)", async () => {
+    const restoreKey = withFakeKey();
+    const bad = { cases: [{ id: "c1", expression: "missing === 2 && mean([1,2,3]) === 2" }] };
+    const good = { cases: [{ id: "c1", expression: "mean([1,2,3]) === 2" }] };
+    const mock = mockChat([bad, good]);
+    try {
+      const res = await generateCases(SOURCE, "mean module", CONTRACT, "", []);
+      assert.equal(res.ok, true, "the repaired case commits");
+      if (res.ok) assert.equal(res.cases[0]?.expression, "mean([1,2,3]) === 2");
+      assert.equal(mock.calls.length, 2, "exactly one bounded repair retry");
+      assert.match(mock.calls[1]!.prompt, /missing/, "the repair prompt names the undefined identifier");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("repairs a method call on an undefined object (obj.mean())", async () => {
+    const restoreKey = withFakeKey();
+    const bad = { cases: [{ id: "c1", expression: "obj.mean() === 2" }] };
+    const good = { cases: [{ id: "c1", expression: "mean([1,2,3]) === 2" }] };
+    const mock = mockChat([bad, good]);
+    try {
+      const res = await generateCases(SOURCE, "mean module", CONTRACT, "", []);
+      assert.equal(res.ok, true);
+      assert.equal(mock.calls.length, 2);
+      assert.match(mock.calls[1]!.prompt, /obj/);
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("control: a fully-bound case set (exports + JS globals) commits with no retry", async () => {
+    const restoreKey = withFakeKey();
+    const ok = {
+      cases: [
+        { id: "c1", expression: "mean([1,2,3]) === 2" },
+        { id: "c2", expression: "Math.abs(median([1,2,3])) >= 0" },
+        { id: "c3", expression: "typeof mean === 'function'" },
+      ],
+    };
+    const mock = mockChat([ok]);
+    try {
+      const res = await generateCases(SOURCE, "mean module", CONTRACT, "", []);
+      assert.equal(res.ok, true);
+      assert.equal(mock.calls.length, 1, "no retry when every called name is bound");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("repairs a PINNED row in place — a pinned id is never dropped to satisfy the gate", async () => {
+    const restoreKey = withFakeKey();
+    const offPinned = {
+      cases: [
+        { id: "orc-1", expression: 'dispatch({ job: "dispatch" }) === true' },
+        { id: "orc-2", expression: 'missingHelper({ job: "dispatch" }) === true' },
+        { id: "orc-3", expression: 'dispatch({ job: "dispatch" }) === true' },
+      ],
+    };
+    const fixed = { cases: [{ id: "orc-2", expression: 'dispatch({ job: "dispatch" }) === true' }] };
+    const mock = mockChat([offPinned, fixed]);
+    try {
+      const res = await generateCases(SOURCE, BRIEF, ["dispatch"], SEEDS, ORACLE_IDS);
+      assert.equal(res.ok, true);
+      if (res.ok) {
+        const ids = res.cases.map((c) => c.id);
+        for (const id of ORACLE_IDS) assert.ok(ids.includes(id), `pinned ${id} preserved`);
+        assert.equal(
+          res.cases.find((c) => c.id === "orc-2")?.expression,
+          'dispatch({ job: "dispatch" }) === true',
+          "the pinned row was repaired in place, not dropped",
+        );
+      }
+      assert.equal(mock.calls.length, 2);
+      assert.match(mock.calls[1]!.prompt, /orc-2/, "the repair prompt names the offending pinned row");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("refuses (never drops the pinned row) when the pinned repair still calls an undefined identifier", async () => {
+    const restoreKey = withFakeKey();
+    const offPinned = {
+      cases: [
+        { id: "orc-1", expression: 'dispatch({ job: "dispatch" }) === true' },
+        { id: "orc-2", expression: 'missingHelper({ job: "dispatch" }) === true' },
+        { id: "orc-3", expression: 'dispatch({ job: "dispatch" }) === true' },
+      ],
+    };
+    const mock = mockChat([offPinned, offPinned]);
+    try {
+      const res = await generateCases(SOURCE, BRIEF, ["dispatch"], SEEDS, ORACLE_IDS);
+      assert.equal(res.ok, false);
+      if (!res.ok) {
+        assert.equal(res.code, "RT_E_VALIDATION");
+        assert.match(res.error ?? "", /orc-2/);
+        assert.match(res.error ?? "", /missingHelper/);
+      }
+      assert.equal(mock.calls.length, 2);
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // fixes/330 P3 — the reference gate must require a VALUE-position read. The
 // 328 P3 gate scanned every identifier TOKEN, so a data-only mention of the
 // export name — an object-literal KEY (`({add:1}).add === 1`) or regex content
@@ -1180,5 +1370,69 @@ describe("338-6 — a harvested lesson changes the P6 expansion input", () => {
       if (prev === undefined) delete process.env.DEEPSEEK_API_KEY;
       else process.env.DEEPSEEK_API_KEY = prev;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 339-6 — the `tested` mint is airtight: a hollow "passed" envelope (a
+// present-but-empty case set, or no evidence text) is REFUSED at the client
+// seam, never stamped tested. verify.server.ts's genuine runner pass always
+// carries the non-empty case set it evaluated and a non-empty evidence string;
+// anything else is a fabrication path that maker-score M4 / judgment.ts read
+// as machine proof (they check the label + hash, not the detail dod.ts checks).
+// An ABSENT `cases` field stays accepted — the legacy envelope shape the
+// 337-3 hash test in verify.test.ts pins (lane 339-1).
+// ---------------------------------------------------------------------------
+describe("339-6 — a hollow 'passed' outcome never mints tested", () => {
+  const base = {
+    status: "passed" as const,
+    iterations: 1,
+    finalSource: "exports.add = (a, b) => a + b;",
+  };
+  const testedLabel = (p: Project): string | null =>
+    (p.lastTest as { label?: string } | null)?.label ?? null;
+
+  it("a present-but-empty case set (`cases: []`) mints no tested label", () => {
+    const p = seedProject();
+    const q = applyVerifyOutcome(p, {
+      ...base,
+      evidence: "1/1 machine-run cases passed on iteration 1",
+      cases: [],
+    });
+    assert.equal(testedLabel(q), null, "an empty case set is not a runner pass");
+    assert.equal(q, p, "a refused hollow verdict changes no state");
+  });
+
+  it("a whitespace-only evidence string mints no tested label", () => {
+    const p = seedProject();
+    const q = applyVerifyOutcome(p, {
+      ...base,
+      evidence: "   ",
+      cases: [{ id: "c1", expression: "add(2,3) === 5" }],
+    });
+    assert.equal(testedLabel(q), null, "a pass with no evidence text is not a runner pass");
+    assert.equal(q, p, "a refused hollow verdict changes no state");
+  });
+
+  it("control: a genuine pass (non-empty evidence + case set) still mints tested", () => {
+    const p = seedProject();
+    const q = applyVerifyOutcome(p, {
+      ...base,
+      evidence: "1/1 machine-run cases passed on iteration 1",
+      cases: [{ id: "c1", expression: "add(2,3) === 5" }],
+    });
+    assert.equal(testedLabel(q), "tested");
+  });
+
+  it("a non-iterable `cases` never throws into the caller (never-throws contract)", () => {
+    const p = seedProject();
+    const q = applyVerifyOutcome(p, {
+      status: "failed",
+      iterations: 1,
+      evidence: "boom",
+      cases: 7 as never,
+    });
+    assert.ok(q && typeof q === "object", "applyVerifyOutcome returned a project, never threw");
+    assert.ok((q.logs ?? []).some((l) => l.event === "verify.fail"), "the failed verdict is still recorded");
   });
 });

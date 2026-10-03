@@ -187,10 +187,19 @@ export function judgePhase(project: Project, phase: PhaseId): PhaseJudgment {
         risks: riskRows(project, phase).map((l) => l.event),
       };
     }
+    // 339-3 (W53): read the honest state vocabulary the DoD probe attached to
+    // its unmet items (dod.ts `unmetReason`). The id list alone stranded a
+    // reader on a probe name; the reason names WHICH state the project is in
+    // (e.g. the keyless deterministic floor vs. a real run missing the nouns).
+    const reasons = gate.unmet
+      .filter((u) => typeof u.reason === "string" && u.reason.trim() !== "")
+      .map((u) => `${u.id}: ${u.reason}`);
     return {
       phase,
       verdict: "fail:deterministic",
-      detail: `P${phase} gate unmet (${unmetIds.length} probe(s)): ${unmetIds.join(", ")}.`,
+      detail: `P${phase} gate unmet (${unmetIds.length} probe(s)): ${unmetIds.join(", ")}.${
+        reasons.length > 0 ? ` ${reasons.join(" ")}` : ""
+      }`,
       evidence: {
         reproduce: `runGate(project, ${phase})`,
         hash: gate.evidenceHash,

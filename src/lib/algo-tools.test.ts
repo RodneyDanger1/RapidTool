@@ -796,6 +796,73 @@ describe("exportedNamesOf — 330 P3 module boundary + object-literal exports", 
   });
 });
 
+// ---------------------------------------------------------------------------
+// 339-2 — verifier A's over-rejection vector: exportedNamesOf missed four REAL
+// CommonJS export forms, so a module that MIXED a recognised export with one of
+// them dropped the missed name and the oracle contract under-advertised the
+// surface (a case calling the real export was flagged undefined and refused).
+// The new forms keep the 109 T-08 / 330 P3 boundary discipline.
+// ---------------------------------------------------------------------------
+describe("exportedNamesOf — 339-2 computed keys, alias, Object.assign (real CJS exports)", () => {
+  it("inventories computed string-key assignments (single / double quotes, spaced bracket)", () => {
+    assert.deepEqual(exportedNamesOf("function sub(){}; module.exports['sub'] = sub;"), ["sub"]);
+    assert.deepEqual(exportedNamesOf('function sub(){}; module.exports["sub"] = sub;'), ["sub"]);
+    assert.deepEqual(exportedNamesOf("function sub(){}; exports['sub'] = sub;"), ["sub"]);
+    assert.deepEqual(exportedNamesOf("function sub(){}; module.exports [ 'sub' ] = sub;"), ["sub"]);
+  });
+
+  it("inventories the `module.exports = <ident>` reassignment alias — declared top-level name only", () => {
+    assert.deepEqual(exportedNamesOf("function sub(){}; module.exports = sub;"), ["sub"]);
+    assert.deepEqual(exportedNamesOf("const sub = 1; module.exports = sub;"), ["sub"]);
+    assert.deepEqual(exportedNamesOf("class sub {} module.exports = sub;"), ["sub"]);
+    assert.deepEqual(exportedNamesOf("async function sub(){}; module.exports = sub;"), ["sub"]);
+    // undeclared identifier / member / call expression is not an alias
+    assert.deepEqual(exportedNamesOf("module.exports = sub;"), []);
+    assert.deepEqual(exportedNamesOf("function sub(){}; module.exports = sub.x;"), []);
+    assert.deepEqual(exportedNamesOf("function sub(){}; module.exports = sub();"), []);
+    // a name that is not top-level (function expression / parameter) does not count
+    assert.deepEqual(exportedNamesOf("const x = function inner(){}; module.exports = inner;"), []);
+    assert.deepEqual(exportedNamesOf("function g(sub){ module.exports = sub; }"), []);
+  });
+
+  it("inventories `Object.assign(<exports>, { … })` literal keys", () => {
+    assert.deepEqual(exportedNamesOf("function sub(){}; Object.assign(module.exports, { sub });"), ["sub"]);
+    assert.deepEqual(exportedNamesOf("function sub(){}; Object.assign(exports, { sub });"), ["sub"]);
+    assert.deepEqual(exportedNamesOf('Object.assign(exports, { "sub": sub });'), ["sub"]);
+    assert.deepEqual(exportedNamesOf("Object.assign(module.exports, { ...base, sub });"), ["sub"]);
+    // a non-literal second argument is not statically knowable
+    assert.deepEqual(exportedNamesOf("Object.assign(module.exports, src);"), []);
+  });
+
+  it("quoted object-literal keys are real exports too (masker blanked them)", () => {
+    assert.deepEqual(exportedNamesOf("module.exports = { 'q': 1 };"), ["q"]);
+    assert.deepEqual(exportedNamesOf('module.exports = { "a": 1, b: 2, "c": 3 };'), ["a", "b", "c"]);
+    assert.deepEqual(exportedNamesOf('const s = "module.exports = { \'q\': 1 }";'), []);
+  });
+
+  it("boundary discipline (109 T-08 / 330 P3) holds for every new form", () => {
+    // member-chain / mid-identifier tails never match (computed, alias, assign)
+    assert.deepEqual(exportedNamesOf("obj.module.exports['x'] = 1;"), []);
+    assert.deepEqual(exportedNamesOf("my_module.exports['x'] = 1;"), []);
+    assert.deepEqual(exportedNamesOf("myexports['x'] = 1;"), []);
+    assert.deepEqual(exportedNamesOf("obj.module.exports = sub; function sub(){}"), []);
+    assert.deepEqual(exportedNamesOf("obj.Object.assign(module.exports, { sub });"), []);
+    // non-code lookalikes never become exports
+    assert.deepEqual(exportedNamesOf("const s = \"module.exports['x'] = 1;\";"), []);
+    assert.deepEqual(exportedNamesOf("// module.exports['x'] = 1\n"), []);
+    // `==` is a comparison, not an export assignment
+    assert.deepEqual(exportedNamesOf("module.exports['x'] == 1;"), []);
+    assert.deepEqual(exportedNamesOf("function sub(){}; module.exports == sub;"), []);
+  });
+
+  it("keeps every pre-existing form green (dot, bare, object literal, ESM)", () => {
+    assert.deepEqual(exportedNamesOf("module.exports.z = 3;"), ["z"]);
+    assert.deepEqual(exportedNamesOf("exports.real = 4;"), ["real"]);
+    assert.deepEqual(exportedNamesOf("module.exports = { add, run };"), ["add", "run"]);
+    assert.deepEqual(exportedNamesOf("export const a = 1, b = 2;"), ["a", "b"]);
+  });
+});
+
 describe("complexityOf — 330 P3 property/method-name loop keywords are not loops", () => {
   it("does not count `obj.for(x)` / `obj.while(x)` / `obj?.do(x)` as loops", () => {
     assert.equal(complexityOf("const v = obj.for(x);").loops, 0);

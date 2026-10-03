@@ -10,10 +10,11 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { runGate } from "./dod.ts";
+import { recordGateInto, runGate } from "./dod.ts";
 import { mintTreeRunTested } from "./codegen.server.ts";
 import { emptyProject } from "./engine.ts";
-import type { Project } from "./types.ts";
+import { buildPhase6Module } from "./sandbox.ts";
+import type { PhaseId, Project } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 
 const base = (): Project => emptyProject({ name: "Dod334", brief: "A dispatch board for field service." });
@@ -100,5 +101,99 @@ describe("W48 / 334-3 (T1b) — p6-test / p6-verified vs an unverified declared 
       true,
       "control: a green, detailed, hash-carrying verdict is met",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 339-3 (W53) — p6-brief-fit floor honesty + satisfiability.
+//
+// The keyless deterministic floor can NEVER pass p6-brief-fit: the placeholder
+// module implements phase bookkeeping only and carries no brief vocabulary. So
+// a RED criterion must NAME the state the project is in — the deterministic
+// floor (no keyed synthesis ran, or a refused synthesis that kept the floor)
+// versus a real run that simply dropped the brief's nouns — instead of leaving
+// a human with a bare criterion. The other satisfiability half (a legitimate
+// brief-faithful module passes) is pinned here too.
+// ---------------------------------------------------------------------------
+const FIT_BRIEF = "A dispatch board for field service: dispatch techs, board jobs, service parts.";
+
+const floorProject = (over: Partial<Project> = {}): Project => ({
+  ...emptyProject({ name: "FloorFit", brief: FIT_BRIEF }),
+  generatedSource: buildPhase6Module({ name: "FloorFit", jobs: ["dispatch"], rejectionNote: null, variant: 0 }),
+  lastTest: { ok: true, detail: "tests.pass" },
+  phases: [{ id: 6 as PhaseId, status: "complete" }],
+  ...over,
+});
+
+const p6BriefFitUnmet = (p: Project) => runGate(p, 6).unmet.find((g) => g.id === "p6-brief-fit");
+
+describe("339-3 (W53) — p6-brief-fit names the floor state and is satisfiable by a real module", () => {
+  it("the deterministic floor can never pass p6-brief-fit, and the unmet criterion NAMES that state", () => {
+    const item = p6BriefFitUnmet(floorProject());
+    assert.ok(item, "the keyless floor fails p6-brief-fit (the placeholder carries no brief vocabulary)");
+    assert.match(item!.reason ?? "", /deterministic floor state/);
+    assert.match(item!.reason ?? "", /no keyed model synthesis ran/);
+    assert.match(
+      item!.criterion,
+      /deterministic floor state/,
+      "the criterion text every consumer reads carries the state, not a bare noun list",
+    );
+  });
+
+  it("a refused keyed synthesis that kept the floor says the model ran but no cycle was accepted", () => {
+    const p = floorProject({
+      logs: [
+        {
+          ts: 1,
+          phase: 6 as PhaseId,
+          level: "warn",
+          event: "p6.synthesis.refused",
+          detail: "RT_E_RUNNER_FAILED · case payload rejected by harness safety check",
+        },
+      ],
+    });
+    const item = p6BriefFitUnmet(p);
+    assert.match(item?.reason ?? "", /keyed model synthesis ran but no cycle was accepted/);
+    assert.match(item?.reason ?? "", /p6\.synthesis\.refused/);
+  });
+
+  it("a non-floor module that dropped the brief's nouns names THAT state, never the floor", () => {
+    const p = floorProject({ generatedSource: "export const add = (a, b) => a + b;" });
+    const item = p6BriefFitUnmet(p);
+    assert.match(item?.reason ?? "", /generated source is missing the brief's required nouns/);
+    assert.ok(!/deterministic floor state/.test(item?.reason ?? ""), "a real module is not the floor");
+    assert.match(item?.reason ?? "", /missing: /);
+  });
+
+  it("keyed tree synthesis that dropped the nouns names the tree state", () => {
+    const p = floorProject({
+      generatedSource: 'export * from "./generated.ts";',
+      generatedTree: [{ path: "src/generated.ts", source: "export const noop = 1;", hash: "h", attempt: 0 }],
+    });
+    const item = p6BriefFitUnmet(p);
+    assert.match(item?.reason ?? "", /keyed tree synthesis ran \(1 file\(s\)\)/);
+  });
+
+  it("a legitimate module carrying the brief's nouns as identifiers passes (the other half)", () => {
+    const p = floorProject({
+      generatedSource:
+        "export function dispatchBoard() { return 1; }\nexport function fieldService() { return 2; }",
+    });
+    assert.ok(
+      !runGate(p, 6).unmet.some((g) => g.id === "p6-brief-fit"),
+      "a brief-faithful module satisfies p6-brief-fit",
+    );
+  });
+
+  it("the recorded gate verdict and its artifact carry the same floor-state vocabulary", () => {
+    const recorded = recordGateInto(floorProject(), 6);
+    const gate = recorded.phases.find((r) => r.id === 6)?.gate;
+    assert.ok(gate, "the P6 gate is recorded");
+    assert.ok(
+      gate!.unmet.some((u) => /deterministic floor state/.test(u)),
+      "the recorded unmet list carries the state",
+    );
+    const artifact = (recorded.artifacts ?? []).find((a) => a.kind === "gate" && a.phase === 6);
+    assert.ok(artifact && /deterministic floor state/.test(artifact.body), "the gate artifact body carries the state");
   });
 });

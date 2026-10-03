@@ -17,6 +17,9 @@ import {
   assembleTreeEntry,
   asyncExportNames,
   asyncNamesInScope,
+  boundedRefusalDetail,
+  oracleContractNames,
+  P6_REFUSAL_DETAIL_MAX,
   briefFitSatisfied,
   chunkTypeSignatures,
   crossChunkDuplicateDeclarations,
@@ -83,6 +86,7 @@ import {
   type EnvelopeReadFailure,
   type P6SynthesisDeps,
 } from "./codegen.server.ts";
+import { p6CycleLiveDeps } from "./headless.ts";
 import { applyPhaseResult, emptyProject } from "./engine.ts";
 import { runGate, archTrace } from "./dod.ts";
 import { buildPhase6Module } from "./sandbox.ts";
@@ -798,6 +802,29 @@ describe("liveP6Synthesis (T4/T5 — fixes/97 P0-01 Part B)", () => {
     assert.equal(q.implementationSpec?.briefHash, String(fnv1a(KANBAN_BRIEF)));
   });
 
+  // 339-4 STOP-and-REPORT: the cached-spec reuse guard checked `requirements`
+  // ONLY, so a spec persisted before the six-key envelope (its other five keys
+  // absent at runtime — the type says they exist, the persisted JSON did not
+  // carry them) was reused as if conformant. expandedSpecViolations is the
+  // authority now.
+  it("a cached spec missing the other five keys is NOT reused — it is re-expanded", async () => {
+    const base = p6Base();
+    // A pre-lane persisted spec: only `requirements` was ever written; the
+    // five other machine-checked keys are absent at runtime.
+    const legacy = {
+      requirements: KANBAN_SPEC.requirements,
+      source: "p6" as const,
+      briefHash: String(fnv1a(KANBAN_BRIEF)),
+      createdAt: Date.now(),
+    } as unknown as NonNullable<Project["implementationSpec"]>;
+    const seeded: Project = { ...base, implementationSpec: legacy };
+    const { calls, deps } = fakeDeps();
+    const q = await liveP6Synthesis(seeded, deps);
+    assert.ok(calls.includes("expand"), "a five-key-partial cached spec must be re-expanded, never reused");
+    assert.deepEqual(calls, ["expand", "complete", "verify"]);
+    assert.deepEqual(q.implementationSpec?.typeSignatures, KANBAN_SIGNATURES, "the re-expanded spec replaces the partial one");
+  });
+
   it("not-configured returns the SAME reference (no network, no log)", async () => {
     const base = p6Base();
     delete process.env.DEEPSEEK_API_KEY;
@@ -826,6 +853,36 @@ describe("liveP6Synthesis (T4/T5 — fixes/97 P0-01 Part B)", () => {
     const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
     assert.ok(refusal);
     assert.match(refusal.detail, /RT_E_LLM_NOT_CONFIGURED/);
+  });
+
+  // 339-4 STOP-and-REPORT: the legacy expansion refusal flattened every error
+  // to RT_E_LLM_REJECTED, dropping the coded RT_E_VALIDATION class
+  // expandBrief now returns for a non-conforming spec envelope.
+  it("a coded expandBrief refusal surfaces its own code, never RT_E_LLM_REJECTED", async () => {
+    const base = p6Base();
+    const { deps } = fakeDeps({
+      expandResult: {
+        ok: false,
+        reason: "error",
+        code: "RT_E_VALIDATION",
+        error: 'model returned a non-conforming expansion payload: missing key "edgeCases"',
+      },
+    });
+    const q = await liveP6Synthesis(base, deps);
+    assert.equal(q.generatedSource, base.generatedSource, "floor stands");
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal);
+    assert.match(refusal.detail, /RT_E_VALIDATION/, "the coded spec-envelope refusal keeps its class");
+    assert.ok(!/RT_E_LLM_REJECTED/.test(refusal.detail), "a non-conforming spec is never mislabeled RT_E_LLM_REJECTED");
+  });
+
+  it("an uncoded expandBrief error still falls back to RT_E_LLM_REJECTED", async () => {
+    const base = p6Base();
+    const { deps } = fakeDeps({ expandResult: { ok: false, reason: "error", error: "provider blew up" } });
+    const q = await liveP6Synthesis(base, deps);
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal);
+    assert.match(refusal.detail, /RT_E_LLM_REJECTED/);
   });
 
   it("unparseable envelope ×2 (one bounded repair) → RT_E_LLM_REJECTED refusal", async () => {
@@ -2167,15 +2224,15 @@ describe("liveP6Synthesis deps.synthesisRefusal rides the PRIMARY synthesis prom
     }
   });
 
-  it("single-module: multi-line reason is whitespace-collapsed and the block is bounded to 200 chars", async () => {
+  it("single-module: multi-line reason is whitespace-collapsed and the block is bounded to 1200 chars", async () => {
     const messy = await runPrimary("RT_E_LLM_REJECTED ·   the model\nrefused\t the  tree   brief");
     assert.ok(
       messy[0]!.includes(block("RT_E_LLM_REJECTED · the model refused the tree brief")),
       "a whitespace-collapsed single-line block (newlines/tabs/runs → one space)",
     );
-    const long = await runPrimary("Z".repeat(260));
-    assert.ok(long[0]!.endsWith(block("Z".repeat(200))), "a >200-char refusal is capped at the 200-char bound");
-    assert.equal(long[0]!.includes("Z".repeat(201)), false, "the cap never leaks a 201st char into the prompt");
+    const long = await runPrimary("Z".repeat(1300));
+    assert.ok(long[0]!.endsWith(block("Z".repeat(1200))), "a >1200-char refusal is capped at the 1200-char bound");
+    assert.equal(long[0]!.includes("Z".repeat(1201)), false, "the cap never leaks a 1201st char into the prompt");
   });
 
   it("chunked: every PRIMARY chunk prompt carries the block once when deps.synthesisRefusal is present; absent keeps the legacy bytes", async () => {
@@ -2231,6 +2288,232 @@ describe("liveP6Synthesis deps.synthesisRefusal rides the PRIMARY synthesis prom
     const ri = primary.indexOf("P6 PREVIOUS-REFUSAL CONTEXT");
     assert.ok(gi >= 0 && ri >= 0, "both context blocks are present on the primary prompt");
     assert.ok(gi < ri, "the gateRepair block precedes the refusal block (stable composition order)");
+  });
+});
+
+// --- W52/339-2: the refusal reason survives + the oracle binds to the real exports ---
+// Gap (on disk): the 338 keyed run refused three cycles with a 160-char
+// head-only refusal detail, so the harness/sanitizer's OWN reason and the
+// offending case id — which ride the END of the verify evidence — never reached
+// the operator OR the next cycle's synthesis prompt. And the oracle's contract
+// was the PLAN's signature list, not the module's measured export surface.
+
+describe("W52/339-2 boundedRefusalDetail (reason survives, never a silent head cut)", () => {
+  it("leaves a short detail byte-identical; blank/garbage resolves to the honest 'unknown'", () => {
+    assert.equal(boundedRefusalDetail("RT_E_VALIDATION · empty module"), "RT_E_VALIDATION · empty module");
+    assert.equal(boundedRefusalDetail("   "), "unknown");
+  });
+
+  it("a >max detail keeps its head AND tail — the case id and the sanitizer's own reason survive", () => {
+    const filler = Array.from(
+      { length: 40 },
+      (_, i) => `case-${i + 1}: not run — case payload rejected by harness safety check`,
+    ).join("; ");
+    const evidence =
+      `machine-run cases still failing after 3 iterations: ${filler}; ` +
+      "case-41: expression rejected by harness safety check (template literals are not allowed)";
+    const out = boundedRefusalDetail(evidence);
+    assert.ok(evidence.length > P6_REFUSAL_DETAIL_MAX, "the fixture actually exceeds the bound");
+    assert.ok(out.length <= P6_REFUSAL_DETAIL_MAX, `≤ ${P6_REFUSAL_DETAIL_MAX} chars (was ${out.length})`);
+    assert.ok(out.startsWith("machine-run cases still failing"), "the head survives");
+    assert.match(out, /…\[elided \d+ chars\]…/, "a visible middle elision, never a silent head cut");
+    assert.ok(out.includes("case-41"), "the offending case id survives");
+    assert.ok(out.includes("template literals are not allowed"), "the sanitizer's OWN reason survives");
+    assert.ok(out.length > 160, "the old 160-char head-only slice would have dropped both");
+  });
+});
+
+describe("W52/339-2 oracleContractNames (the oracle contract is the module's REAL export surface)", () => {
+  it("returns the MEASURED export inventory, not the claimed subset", () => {
+    const mod = [
+      "function add(a) { return a; }",
+      "function subtract(a) { return -a; }",
+      "module.exports.add = add;",
+      "module.exports.subtract = subtract;",
+    ].join("\n");
+    assert.deepEqual(oracleContractNames(mod, ["add"]), ["add", "subtract"]);
+  });
+
+  it("falls back to the validated claimed exports when the module exposes none measurably", () => {
+    assert.deepEqual(oracleContractNames("", ["add", "subtract"]), ["add", "subtract"]);
+    assert.deepEqual(oracleContractNames("  ", []), []);
+  });
+
+  it("ORACLE-CONTRACT: a computed real export is not dropped when mixed with a recognised one", () => {
+    // verifier A's over-rejection vector: `exportedNamesOf` missed
+    // `module.exports['sub'] =`, and the fallback only fires on an EMPTY list, so
+    // a module mixing it with `module.exports.add = add` advertised just
+    // `["add"]` — a case calling the real `sub` was flagged undefined and refused.
+    // The contract must carry BOTH real exports.
+    const mixed =
+      "function add(){}; function sub(){}; module.exports.add = add; module.exports['sub'] = sub;";
+    assert.deepEqual(oracleContractNames(mixed, ["add", "sub"]), ["add", "sub"]);
+    // each newly-recognised form is a contract name on its own
+    assert.deepEqual(oracleContractNames("function sub(){}; module.exports['sub'] = sub;", []), ["sub"]);
+    assert.deepEqual(oracleContractNames("function sub(){}; module.exports = sub;", []), ["sub"]);
+    assert.deepEqual(oracleContractNames("function sub(){}; Object.assign(exports, { sub });", []), ["sub"]);
+  });
+
+  it("the machine oracle is contracted to the measured exports (a superset of the plan's signatures)", async () => {
+    const base = p6Base();
+    let seen: readonly string[] | undefined;
+    const complete = async (): Promise<LlmResult> => ({
+      ok: true,
+      text: JSON.stringify(KANBAN_ENVELOPE),
+      model: "deepseek-v4-flash",
+    });
+    const q = await liveP6Synthesis(base, {
+      complete,
+      expand: async () => ({ ok: true, spec: KANBAN_SPEC }), // plan signatures: createBoard, addColumn only
+      verify: async (_s, _b, opts) => {
+        seen = opts?.signatureNames;
+        return { status: "passed", iterations: 1, evidence: "4/4 passed", finalSource: KANBAN_MODULE, cases: [] };
+      },
+    });
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim());
+    assert.deepEqual(seen, ["addColumn", "createBoard", "dragCard", "kanbanBoard"]);
+    assert.ok(seen!.includes("dragCard"), "the module's real export, absent from the plan list, is in the oracle contract");
+  });
+});
+
+describe("W52/339-2 the refusal detail reaches the operator AND the next cycle", () => {
+  it("a long verify evidence keeps the failing case id + the sanitizer's reason (not clipped at 160)", async () => {
+    const base = p6Base();
+    const filler = Array.from({ length: 8 }, (_, i) => `case-${i + 1}: fail false`).join("; ");
+    const evidence =
+      `machine-run cases still failing after 3 iterations: ${filler}; ` +
+      "case-9: expression rejected by harness safety check (template literals are not allowed)";
+    const { deps } = fakeDeps({ verifyOutcome: { status: "failed", iterations: 3, evidence } });
+    const q = await liveP6Synthesis(base, deps);
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal, "p6.synthesis.refused logged");
+    assert.match(refusal!.detail, /RT_E_RUNNER_FAILED/);
+    assert.ok(refusal!.detail.length > 160, "the detail is no longer head-clipped at 160");
+    assert.ok(refusal!.detail.includes("case-9"), "the offending case id reached the record");
+    assert.ok(refusal!.detail.includes("template literals are not allowed"), "the sanitizer's own reason reached the record");
+  });
+
+  it("a long synthesisRefusal reaches the next cycle's PRIMARY prompt uncut (≤ the raised cap)", async () => {
+    const base = p6Base();
+    const reason = "cause: " + "X".repeat(900) + " :end";
+    const prompts: string[] = [];
+    const complete = async (p: string): Promise<LlmResult> => {
+      prompts.push(p);
+      return { ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(base, {
+      complete,
+      expand: async () => ({ ok: true, spec: KANBAN_SPEC }),
+      verify: async () => ({ status: "passed", iterations: 1, evidence: "ok", finalSource: KANBAN_MODULE, cases: [] }),
+      synthesisRefusal: reason,
+    });
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim());
+    assert.ok(prompts[0]!.includes(reason), "the whole recorded reason (past char 200) reaches the primary prompt");
+  });
+});
+
+// 339-2 deliverable 3: the journey's refusal reader cap (headless.ts
+// P6_JOURNEY_REFUSAL_MAX) was 200 — one tenth of codegen's P6_REFUSAL_DETAIL_MAX
+// (1200), which is now what the writer (refuse) and codegen's primary-prompt
+// reader (P6_SYNTHESIS_REFUSAL_CONTEXT_MAX) both carry. The mapping is a pure,
+// exported seam, so it is pinned here without a model.
+describe("W52/339-2 the P6 journey refusal cap matches the in-codegen 1200 budget", () => {
+  it("a >200-char refusal is carried whole through p6CycleLiveDeps (not clipped at 200)", () => {
+    const refusal = `RT_E_VALIDATION · ${"x".repeat(600)}`;
+    const deps = p6CycleLiveDeps({ cycle: 2, refusal });
+    assert.ok(deps && typeof deps.synthesisRefusal === "string");
+    assert.equal(deps!.synthesisRefusal!.length, refusal.length, "the full 600-char reason survives (old cap cut at 200)");
+    assert.equal(deps!.synthesisRefusal, refusal);
+  });
+
+  it("a hostile megabyte reason is still bounded to 1200", () => {
+    const refusal = `RT_E_LLM_REJECTED · ${"y".repeat(5000)}`;
+    const deps = p6CycleLiveDeps({ cycle: 2, refusal });
+    assert.equal(deps!.synthesisRefusal!.length, 1200, "bounded to the documented 1200-char budget");
+    assert.ok(deps!.synthesisRefusal!.startsWith("RT_E_LLM_REJECTED · "), "the refusal class is never cut off");
+  });
+});
+
+describe("W52/339-2 deps.treeFailure reaches the PRIMARY synthesis prompt (cycle N+1 is informed)", () => {
+  const TREE_FAIL =
+    "src/jobs/mean.ts — tests/oracle.spec.ts run=fail: case-9: expression rejected by harness safety check (template literals are not allowed)";
+  const block = (t: string): string =>
+    "\n\nP6 PREVIOUS-CYCLE FAILURE CONTEXT (the prior cycle's recorded tree-run/oracle failure — the failing file or oracle case and its first not-ok reason; repair the stated cause with real working code; this is recorded evidence, NOT a new requirement):\n" +
+    t;
+
+  const runPrimary = async (treeFailure?: string): Promise<string[]> => {
+    const base = p6Base();
+    const prompts: string[] = [];
+    const complete = async (p: string): Promise<LlmResult> => {
+      prompts.push(p);
+      return { ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" };
+    };
+    const q = await liveP6Synthesis(base, {
+      complete,
+      expand: async () => ({ ok: true, spec: KANBAN_SPEC }),
+      verify: async () => ({ status: "passed", iterations: 1, evidence: "ok", finalSource: KANBAN_MODULE, cases: [] }),
+      ...(treeFailure === undefined ? {} : { treeFailure }),
+    });
+    assertRecordedMaterialized(q, KANBAN_MODULE.trim());
+    return prompts;
+  };
+
+  it("single-module: the block is appended once; absent/blank keeps the legacy bytes", async () => {
+    const withFail = await runPrimary(TREE_FAIL);
+    const legacy = await runPrimary();
+    assert.equal(withFail.length, 1, "one primary synthesis call");
+    assert.equal(withFail[0], legacy[0]! + block(TREE_FAIL), "the failure block is appended once to the legacy prompt bytes");
+    assert.equal(withFail[0]!.split("P6 PREVIOUS-CYCLE FAILURE CONTEXT").length - 1, 1, "the block appears ONCE");
+    assert.equal(legacy[0]!.includes("P6 PREVIOUS-CYCLE FAILURE CONTEXT"), false, "absent treeFailure ⇒ no block");
+    for (const blank of ["", "   ", "\n\t  \n"]) {
+      assert.deepEqual(await runPrimary(blank), legacy, `blank treeFailure ${JSON.stringify(blank)} keeps the legacy bytes`);
+    }
+  });
+
+  it("chunked: every PRIMARY chunk prompt carries the block once", async () => {
+    const base = p6Base(LEDGER_BRIEF);
+    const withFail = chunkedDeps();
+    const legacy = chunkedDeps();
+    const qWith = await liveP6Synthesis(base, { ...withFail.deps, treeFailure: TREE_FAIL });
+    const qLegacy = await liveP6Synthesis(base, legacy.deps);
+    assert.ok((qWith.generatedTree ?? []).length >= 2, "the chunked tree assembled");
+    assert.deepEqual(
+      (qLegacy.generatedTree ?? []).map((f) => f.path),
+      (qWith.generatedTree ?? []).map((f) => f.path),
+      "the additive failure context does not change the tree shape",
+    );
+    const synth = (ps: string[]): string[] => ps.filter((p) => p.includes("TYPE SIGNATURES (must export"));
+    const withPrompts = synth(withFail.prompts);
+    const legacyPrompts = synth(legacy.prompts);
+    assert.equal(withPrompts.length, legacyPrompts.length, "same number of chunk synthesis calls");
+    assert.ok(withPrompts.length >= 2, "a real multi-chunk run");
+    for (let i = 0; i < withPrompts.length; i++) {
+      assert.equal(withPrompts[i], legacyPrompts[i]! + block(TREE_FAIL), `chunk ${i + 1}'s primary prompt = legacy bytes + one block`);
+      assert.equal(withPrompts[i]!.split("P6 PREVIOUS-CYCLE FAILURE CONTEXT").length - 1, 1, `chunk ${i + 1} carries the block once`);
+    }
+  });
+
+  it("composition order: gateRepair, then refusal, then the failure context", async () => {
+    const base = p6Base();
+    const prompts: string[] = [];
+    const complete = async (p: string): Promise<LlmResult> => {
+      prompts.push(p);
+      return { ok: true, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" };
+    };
+    await liveP6Synthesis(base, {
+      complete,
+      expand: async () => ({ ok: true, spec: KANBAN_SPEC }),
+      verify: async () => ({ status: "passed", iterations: 1, evidence: "ok", finalSource: KANBAN_MODULE, cases: [] }),
+      gateRepair: "P6 DoD unmet: p6-brief-fit",
+      synthesisRefusal: "RT_E_RUNNER_FAILED · case-2: error ReferenceError: computeMean is not defined",
+      treeFailure: TREE_FAIL,
+    });
+    const primary = prompts[0]!;
+    const gi = primary.indexOf("P6 GATE REPAIR CONTEXT");
+    const ri = primary.indexOf("P6 PREVIOUS-REFUSAL CONTEXT");
+    const fi = primary.indexOf("P6 PREVIOUS-CYCLE FAILURE CONTEXT");
+    assert.ok(gi >= 0 && ri >= 0 && fi >= 0, "all three context blocks are present");
+    assert.ok(gi < ri && ri < fi, "stable composition order");
   });
 });
 

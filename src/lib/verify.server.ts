@@ -46,6 +46,11 @@ import { briefNounHits, identifierHits } from "./sandbox.ts";
 import { failureLessonFromRecord, verifyOutcomeLesson } from "./knowledge.ts";
 import type { ErrorCode } from "./errors.ts";
 import type { JsonLog, MemoryEntry } from "./types.ts";
+// 339-1: the P6 prompt mandates fully-typed TypeScript (rule 10), but the
+// harness compiles __SRC with the JS-only `new Function`. Strip the types on
+// the PARENT side (Node builtin, present on both required runtimes) before the
+// source is embedded, so the child needs no new API.
+import { stripTypeScriptTypes } from "node:module";
 
 export type VerifyCase = { id: string; expression: string };
 
@@ -107,13 +112,217 @@ export type OracleExpressionCheck =
   | { ok: false; reason: string };
 
 /**
+ * 339-1: keywords and literals that can occupy a VALUE position in a case
+ * expression without naming a binding — never undefined-identifier offenders.
+ * Kept LITERAL and auditable (a computed `globalThis` walk would accept any
+ * global, the thing the pinned allowlist exists to prevent).
+ */
+const ORACLE_CASE_LITERAL_WORDS: ReadonlySet<string> = new Set([
+  "true", "false", "null", "undefined", "this", "new", "typeof", "void",
+  "delete", "in", "instanceof", "of",
+]);
+
+/**
+ * 339-1: the names a `const`/`let`/`var` declaration statement BINDS. Parses the
+ * declarator list at top level (outside strings/brackets), taking every
+ * identifier on each declarator's left of `=` — a simple identifier (`const a`)
+ * or a whole destructuring pattern (`const { x, y } = o`, `const [p] = a`). A
+ * pattern contributes every identifier token (keys included), so the result is
+ * a SUPERSET of the real bindings; over-collecting can only make a later
+ * rejected read report the "declarations are not executed" reason instead of a
+ * ReferenceError — it can never under-report a bound name and let a discarded
+ * binding read slip through. Pure; never throws.
+ */
+function declaredNames(statement: string): string[] {
+  const m = /^(?:const|let|var)\b([\s\S]*)$/.exec(statement);
+  if (!m) return [];
+  const names: string[] = [];
+  let cur = "";
+  let collecting = true;
+  let depth = 0;
+  let state: "normal" | "sq" | "dq" | "template" = "normal";
+  const flush = () => {
+    for (const t of cur.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
+      if (!ORACLE_CASE_LITERAL_WORDS.has(t[0])) names.push(t[0]);
+    }
+    cur = "";
+  };
+  const body = m[1];
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    const next = body[i + 1];
+    if (state !== "normal") {
+      if (ch === "\\" && next !== undefined) i++;
+      else if (
+        (state === "sq" && ch === "'") ||
+        (state === "dq" && ch === '"') ||
+        (state === "template" && ch === "`")
+      ) {
+        state = "normal";
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") {
+      state = ch === "'" ? "sq" : ch === '"' ? "dq" : "template";
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") {
+      depth++;
+      if (collecting) cur += ch;
+      continue;
+    }
+    if (ch === ")" || ch === "]" || ch === "}") {
+      depth--;
+      if (collecting) cur += ch;
+      continue;
+    }
+    // A top-level `,` starts the next declarator; a top-level `=` ends the
+    // current declarator's binding pattern and begins its (unexecuted)
+    // initializer, which contributes no bindings.
+    if (depth === 0 && ch === ",") {
+      if (collecting) flush();
+      collecting = true;
+      continue;
+    }
+    if (depth === 0 && ch === "=" && collecting) {
+      flush();
+      collecting = false;
+      continue;
+    }
+    if (collecting) cur += ch;
+  }
+  if (collecting) flush();
+  return [...new Set(names)];
+}
+
+/**
+ * 339-1: the quote-aware `declaration(s); final-boolean` repair, shared in
+ * spirit with parseOracleCases' split. `src` is split into top-level
+ * statements on `;` or a line terminator OUTSIDE string literals, comments and
+ * brackets; the FINAL statement plus the names the declaration prefix BINDS
+ * (`declaredNames`) are returned ONLY when every preceding statement is a
+ * `const`/`let`/`var` declaration. Any other multi-statement shape (including
+ * `a; b` and a bare expression before another statement) returns null, so the
+ * strict scan below still rejects it — this can never smuggle a statement past
+ * the gate. The declarations are NEVER executed, so a final boolean that reads
+ * a bound name is refused by the caller with a precise reason (rather than
+ * throwing `ReferenceError` at machine-run time). Pure; never throws.
+ */
+function splitDeclarationPrefix(src: string): { final: string; bound: string[] } | null {
+  const parts: string[] = [];
+  let cur = "";
+  let state: "normal" | "sq" | "dq" | "template" | "line" | "block" = "normal";
+  let depth = 0;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    const next = src[i + 1];
+    if (state === "sq" || state === "dq" || state === "template") {
+      cur += ch;
+      if (ch === "\\" && next !== undefined) {
+        cur += next;
+        i++;
+      } else if (
+        (state === "sq" && ch === "'") ||
+        (state === "dq" && ch === '"') ||
+        (state === "template" && ch === "`")
+      ) {
+        state = "normal";
+      }
+      continue;
+    }
+    if (state === "line") {
+      if (ch === "\n" || ch === "\r") {
+        state = "normal";
+        parts.push(cur);
+        cur = "";
+      }
+      continue;
+    }
+    if (state === "block") {
+      if (ch === "*" && next === "/") {
+        state = "normal";
+        i++;
+      }
+      continue;
+    }
+    if (ch === "'") {
+      state = "sq";
+      cur += ch;
+      continue;
+    }
+    if (ch === '"') {
+      state = "dq";
+      cur += ch;
+      continue;
+    }
+    if (ch === "`") {
+      state = "template";
+      cur += ch;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      state = "line";
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      state = "block";
+      i++;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") {
+      depth++;
+      cur += ch;
+      continue;
+    }
+    if (ch === ")" || ch === "]" || ch === "}") {
+      depth--;
+      cur += ch;
+      continue;
+    }
+    if (
+      depth === 0 &&
+      (ch === ";" || ch === "\n" || ch === "\r" || ch === "\u2028" || ch === "\u2029")
+    ) {
+      parts.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  parts.push(cur);
+  const segments = parts.map((s) => s.trim()).filter((s) => s.length > 0);
+  if (segments.length < 2) return null;
+  const bound: string[] = [];
+  for (let i = 0; i < segments.length - 1; i++) {
+    if (!/^(?:const|let|var)\b/.test(segments[i])) return null;
+    for (const n of declaredNames(segments[i])) if (!bound.includes(n)) bound.push(n);
+  }
+  return { final: segments[segments.length - 1], bound };
+}
+
+/**
  * Validate + sanitize one oracle expression BEFORE it is spliced into the
- * harness (`with(exports){ return (E); }`). The expression must stay a single
- * expression: statement separators (`;`), template literals (backticks),
- * unterminated/unbalanced `()`/`[]`/`{}`, comment smuggling and stray line
- * terminators are rejected or neutralized, and the keyword scan below rejects
- * the named escape hatches (function/eval/globals + `constructor`/`prototype`/
- * `__proto__` — 109 C-05).
+ * harness (`with(exports){ return (E); }`).
+ *
+ * ACCEPTED GRAMMAR (339-1 — aligned with what the oracle prompt asks for; see
+ * buildOracleCasesPrompt below and the P6 synthesis prompt in
+ * codegen.server.ts): exactly ONE of
+ *   (a) a single JS boolean expression over the module's exported callables —
+ *       `computeMean(nums) === 2`, `typeof buildPlan === 'function'`; or
+ *   (b) the tolerated repair form `declaration(s); final-boolean` — one or
+ *       more `const`/`let`/`var` statements followed by a final boolean
+ *       expression, separated by `;` or a line terminator. The declarations
+ *       are DISCARDED (they never execute; see the honest-scope note) and the
+ *       final expression alone is spliced into the harness. A final boolean
+ *       that READS a name its discarded prefix bound is REFUSED up front
+ *       ("declarations are not executed — rewrite as ONE expression") rather
+ *       than accepted and then throwing `ReferenceError` at run time.
+ * Everything else is REJECTED: any non-declaration multi-statement payload
+ * (`a; b`), a mid-expression `;`, an embedded backtick/template literal,
+ * unterminated/unbalanced `()`/`[]`/`{}`, comment smuggling, stray bare
+ * assignments/arrows/shift-assignments, a top-level comma operator, and the
+ * named keyword escape hatches (function/eval/globals + `constructor`/
+ * `prototype`/`__proto__` — 109 C-05).
  *
  * HONEST SCOPE (fixes/216a, 109 C-05): this is a STATEMENT-FORM gate, NOT a
  * sandbox. It stops a hostile reply from splicing its own statements into the
@@ -123,6 +332,10 @@ export type OracleExpressionCheck =
  * `node-runner.server.ts` — which is bounded, not isolated — and the module
  * under test already runs with full globals in that same child process.
  * Characters inside string literals are data and pass through untouched.
+ * (The `declaration(s)` prefix of form (b) is likewise never executed, so the
+ * prefix's bound names are tracked and a final boolean that reads one is
+ * refused HERE with a precise reason — never accepted and then failed at run
+ * time with a `ReferenceError`.)
  * Pure — never throws.
  */
 export function sanitizeOracleExpression(raw: unknown): OracleExpressionCheck {
@@ -132,7 +345,12 @@ export function sanitizeOracleExpression(raw: unknown): OracleExpressionCheck {
   // Tolerate exactly ONE trailing statement terminator — a no-op outside the
   // wrapper parens that LLM oracles routinely emit (`expr;`). Any remaining
   // `;` (a real statement separator) is still rejected by the scan below.
-  const src = raw.replace(/;\s*$/, "");
+  const withoutTerminator = raw.replace(/;\s*$/, "");
+  // 339-1: the tolerated `declaration(s); final-boolean` repair — keep only
+  // the final statement when everything before it is a declaration, and hold
+  // on to the names that prefix BINDS (they are never executed).
+  const split = splitDeclarationPrefix(withoutTerminator);
+  const src = split?.final ?? withoutTerminator;
   let out = "";
   let state: "normal" | "sq" | "dq" | "line" | "block" = "normal";
   let depth = 0;
@@ -261,6 +479,18 @@ export function sanitizeOracleExpression(raw: unknown): OracleExpressionCheck {
     )
   ) {
     return { ok: false, reason: "disallowed construct (function/eval/global access)" };
+  }
+  // 339-1: the declaration prefix of form (b) never executes, so a final
+  // boolean that READS a name the prefix bound can only throw
+  // `ReferenceError: <name> is not defined` at machine-run time. Refuse it
+  // HERE, up front, with a reason that says exactly how to repair it.
+  if (split && split.bound.length > 0) {
+    const bound = new Set(split.bound);
+    for (const name of referenceIdentifiers(stripStringsAndComments(expression))) {
+      if (bound.has(name)) {
+        return { ok: false, reason: "declarations are not executed — rewrite as ONE expression" };
+      }
+    }
   }
   return { ok: true, expression };
 }
@@ -433,10 +663,54 @@ function formatLintSummary(findings: LintFailure[]): string {
   return findings.map((f) => `${f.rule} x${f.occurrences}`).join("; ");
 }
 
+/**
+ * 339-1 (oracle-harness): remove TypeScript type syntax from a module before it
+ * is embedded in the harness. The P6 prompt (codegen.server.ts `p6SynthesisSystemPrompt`
+ * rule 10 + its worked example) mandates FULLY-TYPED functions, but the harness
+ * compiles __SRC with `new Function` — a JS-only parser — so an unstripped typed
+ * module throws `SyntaxError: Unexpected token ':'`, leaves __exports empty, and
+ * every oracle case then dies (`ReferenceError: <name> is not defined`) or
+ * returns false. The run can therefore never pass and p6-verified never mints.
+ *
+ * PARSE-FIRST (339-1 resume #3): a source the JS parser ACCEPTS is returned
+ * byte-identical and run VERBATIM — never re-parsed as TypeScript. The TS parser
+ * reads `const g = f(a < b, c > (d));` (valid JS: `f((a<b), (c>d))`) as a
+ * generic argument list and rewrites the bytes to `f(a          (d))`, a silent
+ * semantic change the harness would then run instead of the module. Only a
+ * source the JS parser REFUSES (TS annotations, enums, …) is handed to the
+ * stripper, and a stripper failure still falls back to the RAW bytes so the
+ * harness's existing honest `HARNESS_COMPILE fail` path reports it — never a
+ * silent pass, and never a refusal earlier than the harness itself.
+ *
+ * RESIDUAL, named not hidden: `new Function` also refuses a valid-JS MODULE
+ * body (`import`/`export` syntax, top-level `await`), so those still reach the
+ * stripper, which CAN rewrite them — e.g. `export const g = f(a < b, c > (d));`
+ * comes back as `export const g = f(a          (d));`. That is not a false pass:
+ * the child harness compiles __SRC with the SAME `new Function`, so a source
+ * this guard refused can never run there either — `runCases` reports the honest
+ * `source failed to compile in the harness`, never a mutation pass. The
+ * byte-identical guarantee covers exactly the sources the JS parser accepts.
+ */
+export function stripTypeAnnotationsForHarness(source: string): string {
+  try {
+    // Body-parse only — never invoked. A source the JS parser accepts is run
+    // verbatim; only a source it rejects is TypeScript-stripped.
+    new Function(source);
+    return source;
+  } catch {
+    try {
+      return stripTypeScriptTypes(source, { mode: "strip" });
+    } catch {
+      return source;
+    }
+  }
+}
+
 function buildHarness(source: string, cases: VerifyCase[]): string {
+  const __src = stripTypeAnnotationsForHarness(source);
   return [
     "// rapidtool verify harness (machine-authored; do not trust the LLM's claims)",
-    `const __SRC = ${JSON.stringify(source)};`,
+    `const __SRC = ${JSON.stringify(__src)};`,
     `const __CASES = ${JSON.stringify(cases)};`,
     "const __exports = {};",
     // Capture the REAL console before any case expression can touch it —
@@ -509,6 +783,45 @@ export const NO_CALLABLE_EXPORTS_REASON =
 export const NO_EXPORT_REFERENCE_REASON =
   "no oracle case references an exported callable name — machine verification is vacuous";
 
+/** The case id at `index`, with runCases' own `case-N` fallback. Pure. */
+function caseIdAt(cases: readonly unknown[], index: number): string {
+  const c = cases[index];
+  const rec = c && typeof c === "object" ? (c as Record<string, unknown>) : null;
+  return rec && typeof rec.id === "string" && rec.id ? rec.id : `case-${index + 1}`;
+}
+
+/**
+ * 339-1 operator-visibility bounds. The sanitizer's own `reason` is a fixed
+ * short string and is NEVER truncated by the cap — only the optional rejected
+ * expression excerpt is bounded (and dropped if it would not fit), so a
+ * refusal row always names which case and why. The cap is documented here so
+ * the invariant is auditable.
+ */
+export const REJECTION_DETAIL_MAX_CHARS = 240;
+/** Cap on the rejected expression excerpt inside a rejection detail row. */
+export const REJECTION_EXPR_EXCERPT_MAX_CHARS = 100;
+
+/**
+ * 339-1: build one rejection detail row. `prefix` distinguishes the offending
+ * case from the cases that were not run; `reason` is the sanitizer's own
+ * string (never cut); `rejectedId` names the offending case for every row.
+ * Pure; never throws.
+ */
+function rejectionDetail(
+  prefix: string,
+  reason: string,
+  rejectedId: string,
+  expression: unknown,
+): string {
+  const head = `${prefix} — ${reason} (case: ${rejectedId})`;
+  const raw = typeof expression === "string" ? expression : "";
+  const excerpt = raw.replace(/\s+/g, " ").trim().slice(0, REJECTION_EXPR_EXCERPT_MAX_CHARS);
+  if (!excerpt) return head;
+  const suffix = ` (expression: “${excerpt}${raw.length > REJECTION_EXPR_EXCERPT_MAX_CHARS ? "…" : ""}”)`;
+  if (head.length + suffix.length > REJECTION_DETAIL_MAX_CHARS) return head;
+  return head + suffix;
+}
+
 export async function runCases(
   source: string,
   cases: VerifyCase[],
@@ -522,12 +835,14 @@ export async function runCases(
     return { pass: false, results: [], compileError: "no cases to run" };
   }
   const validated: { id: string; expression: string }[] = [];
-  let rejection: { index: number; reason: string } | null = null;
+  let rejection: { index: number; reason: string; expression: unknown } | null = null;
   cases.forEach((c, index) => {
     const rec = c && typeof c === "object" ? (c as Record<string, unknown>) : null;
     const chk = sanitizeOracleExpression(rec ? rec.expression : undefined);
     if (!chk.ok) {
-      if (!rejection) rejection = { index, reason: chk.reason };
+      if (!rejection) {
+        rejection = { index, reason: chk.reason, expression: rec ? rec.expression : undefined };
+      }
       return;
     }
     validated.push({
@@ -535,8 +850,9 @@ export async function runCases(
       expression: chk.expression,
     });
   });
-  const rej = rejection as { index: number; reason: string } | null;
+  const rej = rejection as { index: number; reason: string; expression: unknown } | null;
   if (rej !== null) {
+    const rejId = caseIdAt(cases, rej.index);
     return {
       pass: false,
       results: cases.map((c, index) => {
@@ -547,12 +863,17 @@ export async function runCases(
         return {
           id,
           pass: false,
-          detail: isRejected
-            ? `expression rejected by harness safety check (${rej.reason})`
-            : "not run — case payload rejected by harness safety check",
+          detail: rejectionDetail(
+            isRejected
+              ? "expression rejected by harness safety check"
+              : "not run — case payload rejected by harness safety check",
+            rej.reason,
+            rejId,
+            rej.expression,
+          ),
         };
       }),
-      compileError: "one or more case expressions failed the harness safety check",
+      compileError: `one or more case expressions failed the harness safety check: ${rejId} — ${rej.reason}`,
     };
   }
   const { runNodeBounded, runnerAvailable } = await import("./node-runner.server.ts");
@@ -771,6 +1092,88 @@ function referenceIdentifiers(code: string): string[] {
 }
 
 /**
+ * 339-1: the JS global names a case expression may CALL without being an
+ * undefined-identifier error. Pinned LITERALLY (an auditable list, not a
+ * computed `globalThis` walk) so the accepted call surface is reviewable: a
+ * case may call an exported name in the caller's measured `contract` or one of
+ * these globals, and nothing else. `console` is listed for completeness even
+ * though sanitizeOracleExpression() rejects it before execution.
+ */
+const ORACLE_CASE_GLOBALS: ReadonlySet<string> = new Set([
+  "Math", "JSON", "Object", "Array", "String", "Number", "Boolean", "Date",
+  "Set", "Map", "WeakMap", "WeakSet", "RegExp", "Promise", "Symbol", "BigInt",
+  "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError",
+  "URIError", "EvalError", "isNaN", "isFinite", "NaN", "Infinity", "undefined",
+  "parseInt", "parseFloat", "encodeURIComponent", "decodeURIComponent",
+  "encodeURI", "decodeURI", "structuredClone", "queueMicrotask", "console",
+]);
+
+/** 339-1: operator keywords that can legally occupy call position (`typeof(x)`)
+ *  — not identifiers, so they can never be an undefined-name offender. */
+const ORACLE_CASE_KEYWORDS: ReadonlySet<string> = new Set([
+  "typeof", "void", "delete", "instanceof", "in",
+]);
+
+/**
+ * 339-1 deliverable 2 (resume #3): the identifiers one case expression READS in
+ * VALUE position — called or merely referenced — that are neither in `contract`
+ * (the module's MEASURED export surface) nor a pinned JS global / keyword /
+ * literal, nor a name bound by the expression's own tolerated declaration
+ * prefix. That set is exactly the shape that can only throw
+ * `ReferenceError: <name> is not defined` when the harness runs it.
+ *
+ * The original cut inspected CALL position only, so a value read
+ * (`missing === 2 && mean([1,2,3]) === 2`) or a parenthesised-sequence call
+ * (`(0, missing)(…)`) committed with no retry and then died at run time.
+ * Built from referenceIdentifiers() — VALUE-position, property-aware — so a
+ * property METHOD is never mistaken for an identifier: `Math.round(x)` yields
+ * only `Math` (a pinned global), never `round`; property names after `.`,
+ * object-literal keys, labels and regex/string content stay unflagged, and
+ * numeric literals are masked so `1e5` / `0x1F` / `2n` are not read as names.
+ * A tolerated `declaration(s); final-boolean` repair is scanned at its FINAL
+ * statement only, with the discarded prefix's bound names treated as defined
+ * (the prefix never executes, so reading one is refused by the sanitizer, not
+ * re-reported here as an undefined name). Pure; never throws.
+ */
+export function undefinedCaseIdentifiers(
+  expression: unknown,
+  contract: readonly string[],
+): string[] {
+  if (typeof expression !== "string" || !expression.trim()) return [];
+  const split = splitDeclarationPrefix(expression.replace(/;\s*$/, ""));
+  const code = stripStringsAndComments(split ? split.final : expression).replace(
+    /\b\d[\w.]*/g,
+    (m) => " ".repeat(m.length),
+  );
+  const allowed = new Set<string>(ORACLE_CASE_GLOBALS);
+  for (const k of ORACLE_CASE_KEYWORDS) allowed.add(k);
+  for (const k of ORACLE_CASE_LITERAL_WORDS) allowed.add(k);
+  for (const n of contract) if (typeof n === "string" && n) allowed.add(n);
+  if (split) for (const n of split.bound) allowed.add(n);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const name of referenceIdentifiers(code)) {
+    if (allowed.has(name) || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+/** 339-1 deliverable 2: every undefined VALUE-READ/CALLED identifier across
+ *  `cases` as `{ id, name }` (first occurrence per pair), in case order. Pure. */
+export function caseNameBindingOffenders(
+  cases: readonly VerifyCase[],
+  contract: readonly string[],
+): { id: string; name: string }[] {
+  const out: { id: string; name: string }[] = [];
+  for (const c of cases) {
+    for (const name of undefinedCaseIdentifiers(c.expression, contract)) out.push({ id: c.id, name });
+  }
+  return out;
+}
+
+/**
  * Static proxy for "the module under test exports callable names": the source
  * assigns to `exports`/`module.exports` AND carries a function value
  * (`function` keyword or an arrow) — the CommonJS shapes the generation
@@ -899,9 +1302,12 @@ export function buildOracleCasesPrompt(input: OracleCasesPromptInput): string {
   const base = [
     "Write executable verification cases for the following source module. Return JSON ONLY:",
     "{\"cases\": [{\"id\": \"case-1\", \"expression\": \"<boolean JS expression using the module's exported names>\"}]}.",
-    "Expressions must be self-contained booleans (e.g. `add(2,3) === 5`, `typeof buildPlan === 'function'`).",
-    "Each expression is EXACTLY ONE boolean expression. FORBIDDEN in every case: semicolons,",
-    "const/let/var declarations, assignments, multiple statements, arrow functions, and template literals.",
+    "Expressions must be self-contained booleans (e.g. add(2,3) === 5, typeof buildPlan === 'function').",
+    "Return EXACTLY ONE boolean expression per case, over the module's exported names, and do NOT wrap",
+    "it in backticks. Avoid semicolons, const/let/var declarations, assignments, multiple statements,",
+    "arrow functions and template literals. (A declaration followed by a final boolean is a tolerated",
+    "repair the harness reduces to the final expression, and its declarations are DISCARDED — never",
+    "rely on it; emit the bare boolean expression.)",
     "Every expression must EVALUATE WITHOUT THROWING: do NOT test rejection paths (invalid phase,",
     "unknown job, missing fields) — the harness cannot catch thrown errors, and the module's",
     "guards are correct behavior, not bugs. Test happy-path + brief-required behavior only.",
@@ -1070,6 +1476,58 @@ export async function generateCases(
           ok: false,
           reason: "error",
           error: `oracle case list dropped pinned A7 rows: ${stillMissing.join(", ")} — refused (E-08 pin: never a blind pass on a reduced oracle)`,
+          code: "RT_E_VALIDATION",
+        };
+      }
+    }
+  }
+  // 339-1 deliverable 2: a case may READ or CALL only the module's measured
+  // exports (the `contract` codegen.server.ts threads from oracleContractNames)
+  // or a pinned JS global. Anything else can only throw
+  // `ReferenceError: <name> is not defined` at machine-run time, so it can
+  // never be committed: ONE bounded repair retry naming each offender as
+  // `<case-id> → <identifier>`, then an honest refusal. The merge is by id, so
+  // a repair reply that omits a case (including a pinned A7 row) leaves the
+  // original in place — this gate can never DROP a pinned row, and an offending
+  // pinned row is refused rather than silently removed. Skipped only when the
+  // caller passes NO contract (nothing measured to bind against — the same
+  // boundary oracleBriefGrounded draws for a vocabulary-free brief); with a
+  // measured surface it always runs.
+  if (contract.length > 0) {
+    let offenders = caseNameBindingOffenders(cases, contract);
+    if (offenders.length > 0) {
+      const detail = offenders.map((o) => `${o.id} → ${o.name}`).join(", ");
+      const retry = await runBudgetedCall(budget, () =>
+        callModel(
+          "weak",
+          [
+            "Your previous reply included oracle cases that reference an identifier the module does not export.",
+            `Repair these cases now (case id → undefined identifier): ${detail}.`,
+            "Rewrite ONLY the offending cases so they reference only a name the module exports or a standard JS global (Math, JSON, Object, Array, String, Number, …).",
+            "Never drop or rename a case id — repair its expression in place; a pinned case id must stay.",
+            'Return JSON ONLY: {"cases": [{"id": "case-1", "expression": "<boolean expression>"}]}.',
+            "Same rules as before: single boolean expressions, no semicolons/declarations/assignments.",
+          ].join("\n"),
+          { json: true },
+        ),
+      );
+      if (isBudgetStopRefusal(retry)) return retry;
+      if (retry.ok) {
+        const repaired = parseOracleJson(retry.text);
+        if (repaired !== null) {
+          const byId = new Map<string, VerifyCase>(cases.map((c) => [c.id, c]));
+          for (const r of repaired) byId.set(r.id, r);
+          cases = [...byId.values()];
+        }
+      }
+      offenders = caseNameBindingOffenders(cases, contract);
+      if (offenders.length > 0) {
+        return {
+          ok: false,
+          reason: "error",
+          error: `oracle case(s) reference undefined identifier(s): ${offenders
+            .map((o) => `${o.id} → ${o.name}`)
+            .join(", ")} — refused (a case reading an undefined identifier cannot be committed)`,
           code: "RT_E_VALIDATION",
         };
       }

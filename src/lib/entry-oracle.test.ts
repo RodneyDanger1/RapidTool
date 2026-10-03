@@ -9,9 +9,12 @@
 //
 // Run: node --experimental-strip-types --test src/lib/entry-oracle.test.ts
 // ---------------------------------------------------------------------------
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { checkEntryContract, validateExpectedBehavior } from "./entry-oracle.ts";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { checkEntryContract, runEntryOracle, validateExpectedBehavior } from "./entry-oracle.ts";
 
 const DIR = process.cwd();
 
@@ -132,5 +135,56 @@ describe("validateExpectedBehavior - a declaration is never silently dropped (33
       { id: "e", check: "entry-runs", entry: "src/main.ts", mode: "exec", args: ["--x"], expectExit: 0, expectStdout: "ok", expectStderr: "warn", timeoutMs: 5000, note: "n" },
     ]);
     assert.equal(ok.ok, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 339-6 — the sibling hunt for the 338-6 class, one layer down at the RUNNER
+// (runEntryOracle is the shared truth `evaluateEntryRunsRow` + every tree-side
+// declaration reader consume). A declaration that can never be violated is a
+// verifier that cannot fail:
+//   - an empty-string expectStdout/expectStderr pin is satisfied by
+//     `String(out).includes("")` for EVERY run, so it proves nothing;
+//   - a non-integer expectExit was silently coerced to the default 0, so the
+//     declared exit was never evaluated.
+// The validator refuses both through the normal path; the runner must refuse
+// them too, so a direct caller can never mint a green from a hollow row.
+// ---------------------------------------------------------------------------
+describe("runEntryOracle — a declared pin must be able to fail (339-6)", () => {
+  let dir = "";
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), "rt3396-oracle-"));
+    writeFileSync(join(dir, "main.js"), 'console.log("ok");\n');
+  });
+  after(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+  const has = (p: string): boolean => p === "main.js";
+  const row = (extra: Record<string, unknown>) =>
+    ({ id: "e", check: "entry-runs", entry: "main.js", ...extra }) as unknown as Parameters<
+      typeof runEntryOracle
+    >[0];
+
+  it("an empty-string stdout pin is refused, never vacuously satisfied", () => {
+    const v = runEntryOracle(row({ expectStdout: "" }), dir, has);
+    assert.equal(v.status, "fail", "includes('') is always true — the pin must be refused");
+    assert.match(v.detail, /empty/i);
+  });
+
+  it("an empty-string stderr pin is refused, never vacuously satisfied", () => {
+    const v = runEntryOracle(row({ expectStderr: "" }), dir, has);
+    assert.equal(v.status, "fail");
+    assert.match(v.detail, /empty/i);
+  });
+
+  it("a non-integer expectExit is refused, never silently defaulted to 0", () => {
+    const v = runEntryOracle(row({ expectExit: "1" }), dir, has);
+    assert.equal(v.status, "fail", "a declared exit the runner never evaluates must not read green");
+    assert.match(v.detail, /expectExit/i);
+  });
+
+  it("control: a real pin on the same entry still passes", () => {
+    const v = runEntryOracle(row({ expectStdout: "ok", expectExit: 0 }), dir, has);
+    assert.equal(v.status, "pass", v.detail);
   });
 });

@@ -284,14 +284,16 @@ function formsForCapability(capability: string): string[] {
   return out;
 }
 
-/** The p6-brief-fit probe semantics (dod.ts), verbatim: ≥ half (min 1) of the
- *  brief's required nouns appear as identifiers in `source`. Vocabulary-free
- *  briefs pass vacuously. */
+/** The p6-brief-fit probe semantics (dod.ts's probe and codegen.server.ts's
+ *  briefFitSatisfied), verbatim: ≥ 0.35 (min 1) of the brief's required nouns
+ *  appear as identifiers in `source`. 322 X1 (P6-C) recalibrated the bar ½ →
+ *  0.35 on all three sites; this function previously kept the stale half-bar
+ *  while claiming parity. Vocabulary-free briefs pass vacuously. */
 export function p6BriefFitPasses(brief: string, source: string): boolean {
   const required = briefNounHits(brief).required;
   if (required.length === 0) return true;
   const hits = identifierHits(required, typeof source === "string" ? source : "");
-  return hits.length >= Math.max(1, Math.ceil(required.length * 0.5));
+  return hits.length >= Math.max(1, Math.ceil(required.length * 0.35));
 }
 
 /** The real tree files of a project (path + source of every generatedTree

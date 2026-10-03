@@ -5,6 +5,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { phaseHandoff } from "./handoff.ts";
+import { applyPhaseResult } from "./engine.ts";
 import { ALL_PHASES, runHeadless, runToGate, seedProject } from "./testing/fixtures.ts";
 
 const fullRun = () => runHeadless(seedProject(), ALL_PHASES);
@@ -63,6 +64,28 @@ describe("phaseHandoff", () => {
     const text = phaseHandoff(seedProject({ oracle: [] }), 0);
     assert.equal(text.includes("npm test"), false, "no command points at a script the tree does not declare");
     assert.match(text, /machine-checked DoD gate/, "the DoD gate is named as the exit signal instead");
+  });
+
+  it("names the emitted contract spec path, never a spec-graph node's raw file (W52/338-5 + 339-5)", () => {
+    const p = seedProject();
+    // The emitter ALWAYS writes the tests node at tests/oracle.spec.ts, so a
+    // node whose raw `file` differs must not become the accepted spec path.
+    p.specGraph = {
+      nodes: [
+        { id: "n1", file: "src/models.ts", purpose: "domain model", dependsOn: [], owner: "architect" },
+        { id: "tests", file: "spec/acceptance.ts", purpose: "oracle", dependsOn: [], owner: "tester" },
+      ],
+      order: ["n1", "tests"],
+    };
+    assert.ok(p.oracle.length > 0, "premise: the fixture carries oracle rows");
+    const tail = phaseHandoff(p, 0).slice(phaseHandoff(p, 0).indexOf("## Expected output"));
+    assert.ok(tail.includes("(`tests/oracle.spec.ts`)"), "the emitted contract spec path is named");
+    assert.equal(
+      tail.includes("(`spec/acceptance.ts`)"),
+      false,
+      "a raw node file the emitter never writes is not named as the spec path",
+    );
+    assert.ok(tail.includes("from the emitted tree root"), "the runnable context is stated");
   });
 
   it("pulls prior-phase artifact context for a later phase", () => {
@@ -198,5 +221,24 @@ describe("phaseHandoff", () => {
     const text = phaseHandoff(null as never, 0);
     assert.match(text, /# P0 Deep Research & Feasibility — agent handoff/);
     assert.match(text, /\(no brief recorded\)/);
+  });
+
+  it("renders the failed criterion's STATE on a red DoD row, not the bare static label (339-3/339-5)", () => {
+    // Execute P6 on the deterministic floor: the placeholder module implements
+    // phase bookkeeping only, so p6-brief-fit is red BY CONSTRUCTION. dod.ts
+    // (339-3) appends a state line to that unmet item's `criterion`; the
+    // handoff must render the augmented criterion, never the bare registry label.
+    const floor = applyPhaseResult(runToGate(seedProject(), 6), 6);
+    const text = phaseHandoff(floor, 6);
+    const row = text.split("\n").find((l) => l.startsWith("- [ ] Brief-conformance"));
+    assert.ok(row, "the p6-brief-fit criterion renders as an unmet [ ] row");
+    assert.ok(
+      row.includes("deterministic floor state"),
+      `the red row names the floor state (got ${JSON.stringify(row)})`,
+    );
+    assert.ok(
+      row.startsWith("- [ ] Brief-conformance: required brief nouns appear as identifiers"),
+      "the state line is appended to the registry criterion, not a replacement",
+    );
   });
 });

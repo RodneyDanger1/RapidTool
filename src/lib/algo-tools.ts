@@ -276,49 +276,177 @@ function esCollectBindingNames(masked: string, i: number, out: string[]): number
 }
 
 /**
- * fixes/330 P3: names exported by `module.exports = { … }`. Top-level keys
- * only: a leading `get `/`set `/`async ` modifier is stripped, and `...spread`
- * / computed `[expr]` keys contribute nothing (a spread's names are not
- * statically knowable; the masker has already blanked string keys). Balanced
- * scanning keeps a nested object / call / method body from splitting on its
- * own commas.
+ * fixes/330 P3 (extended 339-2): names exported by the object literal whose
+ * opening `{` sits at `openBrace` in `masked`. Top-level keys only: a leading
+ * `get `/`set `/`async ` modifier is stripped, and `...spread` / computed
+ * `[expr]` keys contribute nothing (a spread's names are not statically
+ * knowable). Balanced scanning keeps a nested object / call / method body from
+ * splitting on its own commas. A quoted key (`{ "x": v }`) IS a real export
+ * name the masker blanked, so 339-2 recovers the literal from the
+ * length-preserving `source` at the same indices (the old "masker blanked
+ * string keys" note treated those as intentionally dropped, advertising
+ * "(none)" for a module that plainly exports its API).
  */
-function moduleExportsObjectNames(masked: string): string[] {
+function objectLiteralKeys(masked: string, source: string, openBrace: number): string[] {
   const out: string[] = [];
-  const opener = /(^|[^A-Za-z0-9_$.])module\s*\.\s*exports\s*=\s*\{/g;
-  let m: RegExpExecArray | null;
-  while ((m = opener.exec(masked)) !== null) {
-    const openBrace = m.index + m[0].length - 1;
-    let depth = 0;
-    let segStart = openBrace + 1;
-    const flush = (end: number): void => {
-      const seg = masked.slice(segStart, end).trim();
-      if (!seg || seg.startsWith("...") || seg.startsWith("[")) return;
-      const mod = /^(?:get|set|async)\s+/.exec(seg);
-      const id = esReadIdent(mod ? seg.slice(mod[0].length) : seg, 0);
-      if (id !== null) out.push(id.name);
-    };
-    for (let i = openBrace; i < masked.length; i++) {
-      const c = masked[i]!;
-      if (c === "{" || c === "(" || c === "[") depth++;
-      else if (c === "}" || c === ")" || c === "]") {
-        depth--;
-        if (depth === 0) {
-          flush(i);
-          break;
-        }
-      } else if (c === "," && depth === 1) {
+  let depth = 0;
+  let segStart = openBrace + 1;
+  const flush = (end: number): void => {
+    const seg = masked.slice(segStart, end).trim();
+    if (!seg || seg.startsWith("...") || seg.startsWith("[")) return;
+    const mod = /^(?:get|set|async)\s+/.exec(seg);
+    const id = esReadIdent(mod ? seg.slice(mod[0].length) : seg, 0);
+    if (id !== null) {
+      out.push(id.name);
+      return;
+    }
+    // Quoted string key — blanked by the masker; recover the literal from source.
+    const raw = source.slice(segStart, end).trim();
+    const q = /^(['"])((?:\\.|(?!\1).)*)\1\s*:/.exec(raw);
+    if (q !== null && q[2]!.trim().length > 0) out.push(q[2]!);
+  };
+  for (let i = openBrace; i < masked.length; i++) {
+    const c = masked[i]!;
+    if (c === "{" || c === "(" || c === "[") depth++;
+    else if (c === "}" || c === ")" || c === "]") {
+      depth--;
+      if (depth === 0) {
         flush(i);
-        segStart = i + 1;
+        break;
       }
+    } else if (c === "," && depth === 1) {
+      flush(i);
+      segStart = i + 1;
     }
   }
   return out;
 }
 
+/** fixes/330 P3: names exported by `module.exports = { … }`. */
+function moduleExportsObjectNames(masked: string, source: string): string[] {
+  const out: string[] = [];
+  const opener = /(^|[^A-Za-z0-9_$.])module\s*\.\s*exports\s*=\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = opener.exec(masked)) !== null) {
+    const openBrace = m.index + m[0].length - 1;
+    for (const n of objectLiteralKeys(masked, source, openBrace)) out.push(n);
+  }
+  return out;
+}
+
+/**
+ * 339-2: string-key export assignments — `module.exports['x'] =` /
+ * `module.exports["x"] =` / `exports['x'] =`. The masker blanks the quoted key,
+ * so the bracket interior is located structurally in `masked` and the literal
+ * is recovered from the length-preserving `source`. Boundary discipline mirrors
+ * the dot forms (109 T-08 / 330 P3): the opener must sit at statement position,
+ * so neither a mid-identifier tail (`my_module.exports['x']`) nor a
+ * member-chain tail (`obj.module.exports['x']`) matches.
+ */
+function moduleExportsStringKeyNames(masked: string, source: string): string[] {
+  const out: string[] = [];
+  const re = /(^|[^A-Za-z0-9_$.])(?:module\.exports|exports)\s*\[(\s*)\]\s*=(?!=)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(masked)) !== null) {
+    const open = m.index + m[0].indexOf("[", m[1]!.length) + 1;
+    const lit = /(['"])((?:\\.|(?!\1).)*)\1/.exec(source.slice(open, open + m[2]!.length));
+    if (lit !== null && lit[2]!.length > 0) out.push(lit[2]!);
+  }
+  return out;
+}
+
+/**
+ * 339-2: `Object.assign(module.exports, { … })` / `Object.assign(exports, { … })`
+ * — a real, statically knowable export inventory the dot/object scanners
+ * missed; the literal's keys are extracted with the same `objectLiteralKeys`
+ * rules used for `module.exports = { … }`. Only a literal SECOND argument
+ * contributes (a spread/variable source is not statically knowable), and the
+ * call must sit at statement position so a member-chain tail never matches.
+ */
+function objectAssignExportNames(masked: string, source: string): string[] {
+  const out: string[] = [];
+  const opener =
+    /(^|[^A-Za-z0-9_$.])Object\s*\.\s*assign\s*\(\s*(?:module\.exports|exports)\s*,\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = opener.exec(masked)) !== null) {
+    const openBrace = m.index + m[0].length - 1;
+    for (const n of objectLiteralKeys(masked, source, openBrace)) out.push(n);
+  }
+  return out;
+}
+
+/**
+ * 339-2: top-level binding names declared via `function` / `class` /
+ * `const` / `let` / `var`. Brace/paren/bracket depth keeps a nested declaration
+ * (`function outer(){ function inner(){} }`) out. `async` needs no special case
+ * — it is skipped as a plain word, so `async function f` still registers `f`.
+ * Used only to validate a `module.exports = <ident>` reassignment alias.
+ */
+function topLevelBindingNames(masked: string): Set<string> {
+  const out = new Set<string>();
+  let depth = 0;
+  let i = 0;
+  while (i < masked.length) {
+    const c = masked[i]!;
+    if (c === "{" || c === "(" || c === "[") {
+      depth++;
+      i++;
+      continue;
+    }
+    if (c === "}" || c === ")" || c === "]") {
+      if (depth > 0) depth--;
+      i++;
+      continue;
+    }
+    if (depth !== 0 || !ES_ID_START.test(c)) {
+      i++;
+      continue;
+    }
+    const id = esReadIdent(masked, i);
+    if (id === null) {
+      i++;
+      continue;
+    }
+    i = id.end;
+    if (id.name === "function" || id.name === "class") {
+      let j = esSkipWs(masked, i);
+      if (masked[j] === "*") j = esSkipWs(masked, j + 1);
+      const nm = esReadIdent(masked, j);
+      if (nm !== null) {
+        out.add(nm.name);
+        i = nm.end;
+      }
+    } else if (id.name === "const" || id.name === "let" || id.name === "var") {
+      const decl = esmDeclaratorNames(masked, i);
+      for (const n of decl.names) out.add(n);
+      i = decl.end;
+    }
+  }
+  return out;
+}
+
+/**
+ * 339-2: `module.exports = <ident>` — the module reassigns its export object to
+ * a top-level binding (e.g. `module.exports = sub`). Only a name the module
+ * actually declares at depth 0 counts as a real export; an undeclared
+ * identifier, or a member/call expression (`sub.x`, `sub()`), is not an alias.
+ */
+function moduleExportsAliasNames(masked: string): string[] {
+  const declared = topLevelBindingNames(masked);
+  const out: string[] = [];
+  const re =
+    /(^|[^A-Za-z0-9_$.])module\.exports\s*=\s*([A-Za-z_$][\w$]*)(?=[ \t]*\r?(?:[;,)}]|$|\n))/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(masked)) !== null) {
+    if (declared.has(m[2]!)) out.push(m[2]!);
+  }
+  return out;
+}
+
 /** Names bound by an `export const|let|var` declarator list starting at the
- *  first declarator; stops at the first top-level `;`. */
-function esmDeclaratorNames(masked: string, start: number): string[] {
+ *  first declarator; stops at the first top-level `;`. `end` is where scanning
+ *  stopped, so a caller can resume past the declarator list (339-2). */
+function esmDeclaratorNames(masked: string, start: number): { names: string[]; end: number } {
   const out: string[] = [];
   let i = start;
   for (;;) {
@@ -332,7 +460,7 @@ function esmDeclaratorNames(masked: string, start: number): string[] {
     if (masked[i] === ",") { i++; continue; }
     break;
   }
-  return out;
+  return { names: out, end: i };
 }
 
 /**
@@ -345,8 +473,11 @@ function esmDeclaratorNames(masked: string, start: number): string[] {
  * module exports these names ONLY", so a phantom name would push the model
  * into writing cases that fail at runtime. Covers the ESM declaration forms
  * this codebase emits (function incl. async + generators, class, const/let/var
- * incl. multi-declarator lists and destructuring patterns — 328 P3) plus
- * CommonJS `exports.x = …` / `module.exports.x = …` assignments. Member-chain
+ * incl. multi-declarator lists and destructuring patterns — 328 P3) plus the
+ * CommonJS forms `exports.x = …` / `module.exports.x = …`, computed string keys
+ * (`module.exports['x'] =` / `exports["x"] =`), the object-literal forms
+ * `module.exports = { … }` and `Object.assign(module.exports, { … })`, and the
+ * reassignment alias `module.exports = <top-level ident>` (339-2). Member-chain
  * lookalikes (`obj.exports.x = …`) are excluded — they are object properties,
  * not module exports. Deterministic, sorted.
  */
@@ -374,7 +505,15 @@ export function exportedNamesOf(source: string): string[] {
   // (109 T-05) — `module.exports = { … }` — was not inventoried, so the
   // property-case prompt advertised "(none)" for a module that plainly
   // exports its API.
-  for (const n of moduleExportsObjectNames(masked)) names.add(n);
+  for (const n of moduleExportsObjectNames(masked, source)) names.add(n);
+  // 339-2: the CJS forms the dot/object scanners above cannot see — computed
+  // string keys, the `module.exports = <ident>` reassignment alias, and
+  // `Object.assign(<exports>, { … })`. Each keeps the 109 T-08 / 330 P3
+  // boundary discipline (statement position; no mid-identifier / member-chain
+  // tail) and reuses the same masker, so prose/strings still contribute nothing.
+  for (const n of moduleExportsStringKeyNames(masked, source)) names.add(n);
+  for (const n of objectAssignExportNames(masked, source)) names.add(n);
+  for (const n of moduleExportsAliasNames(masked)) names.add(n);
   // ESM declarations: `function` (incl. `async` / `function*` generators) and
   // `class` each carry a single hoisted name. `const/let/var` declarations may
   // bind MANY names and may destructure — 328 P3 parses the whole declarator
@@ -387,7 +526,7 @@ export function exportedNamesOf(source: string): string[] {
   while ((m = esmDecl.exec(masked)) !== null) names.add(m[1]);
   const esmVar = /\bexport\s+(?:const|let|var)\s+/g;
   while ((m = esmVar.exec(masked)) !== null) {
-    for (const n of esmDeclaratorNames(masked, m.index + m[0].length)) names.add(n);
+    for (const n of esmDeclaratorNames(masked, m.index + m[0].length).names) names.add(n);
   }
   // 329: ESM re-export LISTS — `export { a, b as c }` and `export { x } from "…"`
   // (the form 328 P3 recorded as not inventoried). The EXPORTED name is what a

@@ -22,6 +22,7 @@ import {
   treeRunLooksSkipped,
   treeRunToMakerEvidence,
   FLOOR_QUALIFIER_EVIDENCE,
+  p6BriefFitPasses,
   type MakerScoreInput,
   type MakerScoreCard,
 } from "./maker-score.ts";
@@ -128,6 +129,29 @@ describe("M1 substance", () => {
     const c = m1Substance(input({ project: p, corpus: { kind: "library" } }));
     assert.equal(c.score, 0);
     assert.match(c.evidence, /fails p6-brief-fit/);
+  });
+
+  // -------------------------------------------------------------------------
+  // 339-3 (W53): M1's single-module bar IS the engine's p6-brief-fit bar —
+  // dod.ts's probe and codegen.server.ts briefFitSatisfied both use
+  // max(1, ceil(required × 0.35)) (322 X1 recalibrated ½ → 0.35). Pre-fix the
+  // rubric used a stale 0.5 half-bar while its comment claimed "verbatim"
+  // parity, so a 0.35–0.49-coverage module passed the engine's pre-acceptance
+  // check but scored M1 "fails p6-brief-fit". One bar, one story.
+  // -------------------------------------------------------------------------
+  test("single-module bar is the shared p6-brief-fit 0.35 bar — ceil(20×0.35)=7, six hits fail / seven pass", () => {
+    const nouns =
+      "aurora basalt cipher dune ember fjord glade harbor isle juniper kestrel lagoon mesa nimbus orchid peak quarry ridge summit tundra".split(" ");
+    const brief = nouns.join(" ");
+    const src = (k: number) => nouns.slice(0, k).map((n) => `const ${n} = 0;`).join("\n");
+    // Boundary is the SAME one codegen.server.test.ts pins for briefFitSatisfied.
+    assert.equal(p6BriefFitPasses(brief, src(7)), true, "seven hits meet the 0.35 bar");
+    assert.equal(p6BriefFitPasses(brief, src(6)), false, "six hits are one short of the 0.35 bar");
+    const one = { project: project({ brief, generatedSource: src(7) }), corpus: { kind: "library", expectedCapabilities: [] } };
+    const zero = { project: project({ brief, generatedSource: src(6) }), corpus: { kind: "library", expectedCapabilities: [] } };
+    assert.equal(m1Substance(input(one)).score, 1, "7/20 nouns pass M1 (the stale 0.5 bar would have failed it)");
+    assert.equal(card(one).criteria.M1.score, 1, "the scorecard tells the same story as the engine");
+    assert.equal(m1Substance(input(zero)).score, 0, "6/20 nouns is one short and scores 0");
   });
 
   test("single-module webapp kind never passes the single-module bar (not a library kind)", () => {

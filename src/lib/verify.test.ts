@@ -5,7 +5,10 @@ import {
   runCases,
   generateCases,
   sanitizeOracleExpression,
+  undefinedCaseIdentifiers,
   lintFailures,
+  NO_CALLABLE_EXPORTS_REASON,
+  stripTypeAnnotationsForHarness,
 } from "./verify.server.ts";
 import { runnerAvailable } from "./node-runner.server.ts";
 import { applyVerifyOutcome, withCommonJsExports } from "./verify.ts";
@@ -65,6 +68,137 @@ describe("runCases (real local runner)", () => {
     assert.equal(res.pass, false);
     assert.ok(res.compileError);
   });
+
+  // 339-1 (oracle-harness): the P6 prompt (rule 10 + the worked example) now
+  // mandates FULLY-TYPED TypeScript functions. The harness compiles __SRC with
+  // the JS-only `new Function`, so a typed module throws `Unexpected token ':'`,
+  // leaves __exports empty, and every case then errors/returns false — the real
+  // keyed run's P6 block. The module must be stripped to valid JS first.
+  it("strips TypeScript annotations from the module before compiling it", { skip: !available }, async () => {
+    const src = [
+      "function mean(values: number[]): number {",
+      "  let total: number = 0;",
+      "  for (const v of values) total += v;",
+      "  return total / values.length;",
+      "}",
+      "module.exports.mean = mean;",
+    ].join("\n");
+    const res = await runCases(src, [{ id: "mean-avg", expression: "mean([1,2,3]) === 2" }]);
+    assert.equal(res.compileError, undefined, `unexpected compileError: ${res.compileError}`);
+    assert.equal(res.results[0]?.pass, true, JSON.stringify(res.results));
+    assert.equal(res.pass, true, JSON.stringify(res));
+  });
+
+  // 339-1: HARNESS_EXPORTS must still be measured from what ACTUALLY compiled
+  // (now the stripped bytes), so the vacuous-pass gate keeps working on typed
+  // modules: a typed module that exports only a non-callable value is refused.
+  it("measures HARNESS_EXPORTS from the stripped module (typed non-callable export is still vacuous)", { skip: !available }, async () => {
+    const src = "const answer: number = 42;\nmodule.exports.answer = answer;\n";
+    const res = await runCases(src, [{ id: "c1", expression: "answer === 42" }]);
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, NO_CALLABLE_EXPORTS_REASON);
+  });
+
+  // 339-1 resume #3 (verifier A, false attestation): the OLD stripper re-parsed
+  // this valid-JS module as TypeScript and rewrote the ambiguous generic-looking
+  // call `f(a < b, c > (d))` (= f((a<b),(c>d)) in real JS) to `f(a          (d))`.
+  // The harness ran the MUTATION and minted `pass:true` while the module's real
+  // exports.r was `false`. The parse-first guard must run the ORIGINAL bytes.
+  it("runs the ORIGINAL bytes for an ambiguous generic-looking module (never a mutation pass)", { skip: !available }, async () => {
+    const src =
+      "function a(x) { return true; }\n" +
+      "function f(x, y) { return y === undefined; }\n" +
+      "function g(x, y) { return y === undefined; }\n" +
+      "const b = 2, c = 1, d = 5;\n" +
+      "module.exports.g = g;\n" +
+      "module.exports.r = f(a < b, c > (d));\n";
+    // Ground truth: the module's REAL bytes evaluate r to false.
+    const realModule = { exports: {} as Record<string, unknown> };
+    new Function("exports", "module", "require", `${src}\n;return module.exports;`)(
+      realModule.exports,
+      realModule,
+      () => {},
+    );
+    assert.equal(realModule.exports.r, false, "the real module's r is false");
+    const res = await runCases(src, [{ id: "c1", expression: "r === true && g(1, undefined) === true" }]);
+    assert.equal(res.pass, false, JSON.stringify(res));
+    assert.equal(res.results[0]?.pass, false, JSON.stringify(res.results));
+  });
+
+  // 339-1 resume #3: the discarded declaration prefix never executes, so a
+  // final boolean that reads a bound name is refused UP FRONT with a precise
+  // reason — never accepted and then failed with a runtime ReferenceError.
+  it("refuses a declaration-repair case up front (never a runtime ReferenceError)", { skip: !available }, async () => {
+    const src =
+      "function mean(a) { let s = 0; for (const v of a) s += v; return s / a.length; }\nmodule.exports.mean = mean;\n";
+    const res = await runCases(src, [{ id: "c1", expression: "const nums = [1,2,3]; mean(nums) === 2" }]);
+    assert.equal(res.pass, false);
+    assert.match(res.results[0]!.detail, /declarations are not executed/);
+    assert.doesNotMatch(res.results[0]!.detail, /ReferenceError/);
+  });
+
+  // 339-1: TS-only syntax the `strip` mode cannot rewrite (enum/namespace/
+  // parameter properties) must fall back to the RAW source so the harness's
+  // EXISTING honest compile-fail path reports it — never a silent pass.
+  it("falls back to the raw source on unsupported TS-only syntax (honest compile fail, not a pass)", { skip: !available }, async () => {
+    const src = "enum E { A }\nmodule.exports.E = E;\n";
+    const res = await runCases(src, [{ id: "e", expression: "E.A === 0" }]);
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, "source failed to compile in the harness");
+  });
+});
+
+describe("stripTypeAnnotationsForHarness (339-1)", () => {
+  // Plain-JS modules must be byte-identical through the harness (strip is a
+  // no-op): the fix may not perturb a source that was already valid JS.
+  it("is a byte-for-byte no-op on plain JavaScript", () => {
+    const plain = "exports.add = (a, b) => a + b;\n";
+    assert.equal(stripTypeAnnotationsForHarness(plain), plain);
+    // generic-looking angle brackets / regex content are NOT TS types
+    const generic = "const n = a < b > c;\nconst re = /</g;\nexports.f = () => n && re;\n";
+    assert.equal(stripTypeAnnotationsForHarness(generic), generic);
+    const moduleExports = "function add(a, b) { return a + b; }\nmodule.exports = { add };\n";
+    assert.equal(stripTypeAnnotationsForHarness(moduleExports), moduleExports);
+  });
+
+  // 339-1 resume #3: the AMBIGUOUS generic-looking JS call `f(a < b, c > (d))`
+  // (real JS `f((a<b),(c>d))`) is what the TS parser misreads as a generic
+  // argument list. A parse-first helper must return the ORIGINAL bytes.
+  it("never re-parses an ambiguous generic-looking plain-JS call as TypeScript", () => {
+    const src =
+      "function a(x) { return true; }\n" +
+      "function f(x, y) { return y === undefined; }\n" +
+      "const b = 2, c = 1, d = 5;\n" +
+      "module.exports.r = f(a < b, c > (d));\n";
+    assert.equal(stripTypeAnnotationsForHarness(src), src);
+    assert.equal(stripTypeAnnotationsForHarness("const g = f(a < b, c > (d));"), "const g = f(a < b, c > (d));");
+  });
+
+  // 339-1 resume #3 (verifier A Mutation B): a colon-eating stripper would
+  // corrupt these valid-JS shapes. Each must come back byte-identical.
+  it("is a no-op on colon-bearing plain JavaScript (object literal, ternary, label, default param)", () => {
+    const objLit = 'const cfg = { a: 1, b: "x:y", c: true };\nexports.cfg = cfg;\n';
+    assert.equal(stripTypeAnnotationsForHarness(objLit), objLit);
+    const ternary = "const v = cond ? 1 : 2;\nexports.v = v;\n";
+    assert.equal(stripTypeAnnotationsForHarness(ternary), ternary);
+    const label = "outer: for (let i = 0; i < 3; i++) { if (i) break outer; }\nexports.i = 1;\n";
+    assert.equal(stripTypeAnnotationsForHarness(label), label);
+    const defaultParam = "function f(a = 1, b = a + 1) { return a + b; }\nexports.f = f;\n";
+    assert.equal(stripTypeAnnotationsForHarness(defaultParam), defaultParam);
+  });
+
+  it("removes annotations but leaves the JavaScript statements intact", () => {
+    const typed = "function add(a: number, b: number): number { return a + b; }\nmodule.exports.add = add;\n";
+    const stripped = stripTypeAnnotationsForHarness(typed);
+    assert.ok(!stripped.includes(": number"));
+    assert.ok(stripped.includes("function add("));
+    assert.ok(stripped.includes("module.exports.add = add;"));
+  });
+
+  it("returns the raw source when the stripper rejects the input", () => {
+    const broken = "function {{{";
+    assert.equal(stripTypeAnnotationsForHarness(broken), broken);
+  });
 });
 
 describe("sanitizeOracleExpression", () => {
@@ -112,6 +246,49 @@ describe("sanitizeOracleExpression", () => {
     assert.equal(chk.ok, true);
   });
 
+  // 339-1: the oracle prompt asks for ONE expression, but the model — told to
+  // avoid semicolons — routinely emits `declaration + final boolean`. The
+  // quote-aware parse repair splits the `;` form; the sanitizer accepts the
+  // SAME tolerated shape ONLY when the final boolean does not read a name the
+  // discarded prefix bound.
+  //
+  // 339-1 resume #3 (verifier A repair trap): the prefix is DISCARDED and never
+  // executes, so `const nums = [1,2,3]; mean(nums) === 2` was accepted and then
+  // always failed at run time (`ReferenceError: nums is not defined`). It is
+  // now refused up front with a precise, repairable reason.
+  it("refuses a declaration repair whose final boolean reads a discarded name", () => {
+    const reason = "declarations are not executed — rewrite as ONE expression";
+    for (const src of [
+      "const nums = [1,2,3]; computeMean(nums) === 2",
+      "const nums = [1,2,3]\ncomputeMean(nums) === 2",
+      "let a = 1;\nconst b = 2;\na + b === 3",
+      "const spec = { name: 'x' }; synthesize(spec).ok === true",
+      "const { lo, hi } = range; lo <= hi",
+    ]) {
+      assert.deepEqual(sanitizeOracleExpression(src), { ok: false, reason }, src);
+    }
+  });
+
+  it("still accepts a declaration repair whose final boolean reads no discarded name", () => {
+    assert.deepEqual(sanitizeOracleExpression("const a = 1; computeMean([1,2,3]) === 2"), {
+      ok: true,
+      expression: "computeMean([1,2,3]) === 2",
+    });
+    // a string that merely spells a bound name is data, not a read
+    assert.deepEqual(sanitizeOracleExpression("const s = 'nums'; 'nums'.length === 4"), {
+      ok: true,
+      expression: "'nums'.length === 4",
+    });
+  });
+
+  it("the declaration repair never smuggles a non-declaration statement through", () => {
+    // A leading non-declaration is NOT the tolerated form — the separator gate
+    // still refuses it (this is the 109 C-05 statement-smuggling pin).
+    assert.equal(sanitizeOracleExpression("a; b").ok, false);
+    assert.equal(sanitizeOracleExpression("const a = 1; doThing(); a === 1").ok, false);
+    assert.equal(sanitizeOracleExpression("const a = 1\nprocess.exit(0)").ok, false);
+  });
+
   it("collapses stray line terminators instead of allowing ASI", () => {
     const chk = sanitizeOracleExpression("f(1) === 1\n&& g(2) === 2");
     assert.equal(chk.ok, true);
@@ -146,6 +323,28 @@ describe("runCases safety guards (no runner needed)", () => {
     assert.equal(res.results[1].pass, false);
     assert.match(res.results[1].detail, /rejected by harness safety check/);
     assert.match(res.compileError ?? "", /safety check/);
+  });
+
+  // 339-1: a rejected payload must tell a human WHICH case and WHY — the
+  // sanitizer's own reason was previously dropped from every row but the
+  // first, so "case payload rejected by harness safety check" named neither.
+  it("surfaces the rejected case id and the sanitizer's own reason on every row", async () => {
+    const res = await runCases("exports.add = (a, b) => a + b;", [
+      { id: "good", expression: "add(2,3) === 5" },
+      { id: "evil", expression: 'add(2,3) === 5); console.log("x"); (true' },
+    ]);
+    assert.equal(res.pass, false);
+    assert.equal(res.results.length, 2);
+    // the offending case reports its own rejection with the sanitizer's reason
+    assert.match(res.results[1].detail, /^expression rejected by harness safety check/);
+    assert.match(res.results[1].detail, /unbalanced '\)'/);
+    // the case that was not run names the rejecter AND carries the same reason
+    assert.match(res.results[0].detail, /not run — case payload rejected by harness safety check/);
+    assert.match(res.results[0].detail, /evil/);
+    assert.match(res.results[0].detail, /unbalanced '\)'/);
+    // the run-level refusal names the offender too
+    assert.match(res.compileError ?? "", /evil/);
+    assert.match(res.compileError ?? "", /unbalanced '\)'/);
   });
 
   it("refuses a non-array cases payload honestly", async () => {
@@ -192,6 +391,84 @@ describe("generateCases", () => {
       if (prev === undefined) delete process.env.DEEPSEEK_API_KEY;
       else process.env.DEEPSEEK_API_KEY = prev;
     }
+  });
+});
+
+// 339-1 deliverable 2 (resume #3): the name-binding predicate generateCases
+// enforces — a case may READ or CALL only an export from the caller's measured
+// contract or a pinned JS global/keyword/literal. Property names, object keys,
+// labels and string content are never mistaken for identifiers.
+describe("undefinedCaseIdentifiers (339-1 name-binding predicate)", () => {
+  const CONTRACT = ["mean", "median"];
+
+  it("reports a called name that is neither an export nor a pinned global", () => {
+    assert.deepEqual(undefinedCaseIdentifiers("mean(computeAvg([1,2,3])) === 2", CONTRACT), ["computeAvg"]);
+  });
+
+  // 339-1 resume #3 (verifier A): CALL position alone missed bare value reads,
+  // method calls on an undefined object and parenthesised-sequence calls —
+  // each committed with no retry and then threw at machine-run time.
+  it("reports a value-read or property-call identifier the module does not export", () => {
+    assert.deepEqual(undefinedCaseIdentifiers("missing === 2 && mean([1,2,3]) === 2", CONTRACT), ["missing"]);
+    assert.deepEqual(undefinedCaseIdentifiers("obj.mean() === 2", CONTRACT), ["obj"]);
+    assert.deepEqual(undefinedCaseIdentifiers("(0, missing)([1]) === 2 && mean([1]) === 1", CONTRACT), ["missing"]);
+    assert.deepEqual(undefinedCaseIdentifiers("typeof missing === 'undefined'", CONTRACT), ["missing"]);
+  });
+
+  it("never mistakes a property method for an identifier (Math.round)", () => {
+    assert.deepEqual(undefinedCaseIdentifiers("Math.round(1.5) === 2", CONTRACT), []);
+    assert.deepEqual(undefinedCaseIdentifiers("mean([1]).toString() === '1'", CONTRACT), []);
+  });
+
+  // NO-OVER-REJECTION PIN: every bound form the prompt allows and the previous
+  // (call-position) cut accepted must still yield zero offenders.
+  it("accepts every bound form (globals, methods, ternary, typeof, literals)", () => {
+    const bound = [
+      "mean([1,2,3]) === 2",
+      "Math.max(mean([1,2,3])) === 3",
+      "Number.isFinite(mean([1])) === true",
+      "JSON.stringify(mean([1])) === '2'",
+      "Object.keys(mean([1])) === []",
+      "Array.isArray(mean([1])) === false",
+      "String(mean([1])) === '2'",
+      "Boolean(mean([1])) === true",
+      "Date.now() > 0 && mean([1,2,3]) === 2",
+      "new RegExp('x').test('x') && mean([1,2,3]) === 2",
+      "parseInt(mean([1])) === 2",
+      "parseFloat('1.5') === 1.5 && mean([1,2,3]) === 2",
+      "isNaN(mean([1])) === false",
+      "isFinite(mean([1])) === true",
+      "encodeURIComponent('a b') === 'a%20b' && mean([1,2,3]) === 2",
+      "structuredClone(mean([1])) === 2",
+      "median([1]).toString() === '1'",
+      "mean([1,2,3]) === 2 ? true : false",
+      "typeof mean === 'function'",
+      "typeof(mean) === 'function'",
+      "1e5 > mean([1]) && 0x1F > 0 && 2n > 1n",
+    ];
+    for (const e of bound) assert.deepEqual(undefinedCaseIdentifiers(e, CONTRACT), [], e);
+  });
+
+  it("scans stripped code: an identifier inside a string literal is data", () => {
+    assert.deepEqual(undefinedCaseIdentifiers('label("computeAvg()") === "computeAvg()"', ["label"]), []);
+  });
+
+  // The declaration prefix of a tolerated repair never executes, so its bound
+  // names are DEFINED for this predicate (reading one is the SANITIZER's
+  // up-front refusal, not a re-reported undefined name). The `;` form reaches
+  // this gate already split by parseOracleCases, so its residual read IS the
+  // undefined offender.
+  it("treats a discarded declaration prefix's bound names as defined", () => {
+    assert.deepEqual(undefinedCaseIdentifiers("const nums = [1,2,3]\nmean(nums) === 2", CONTRACT), []);
+    assert.deepEqual(undefinedCaseIdentifiers("mean(nums) === 2", CONTRACT), ["nums"]);
+    // keywords, object keys and property names stay unflagged
+    assert.deepEqual(undefinedCaseIdentifiers("const o = { mean: 1 }; o.mean === 1", CONTRACT), []);
+  });
+
+  it("is defensive: non-string/empty input yields no offenders", () => {
+    assert.deepEqual(undefinedCaseIdentifiers("", CONTRACT), []);
+    assert.deepEqual(undefinedCaseIdentifiers(undefined, CONTRACT), []);
+    assert.deepEqual(undefinedCaseIdentifiers(42, CONTRACT), []);
   });
 });
 

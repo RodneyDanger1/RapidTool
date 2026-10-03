@@ -171,6 +171,15 @@ export async function complete(
     model?: LlmModel;
     system?: string;
     maxTokens?: number;
+    /**
+     * Request the provider's JSON OUTPUT MODE (`response_format:{type:"json_object"}`).
+     * GUARANTEED: a request for one syntactically valid JSON object via the
+     * vendor's documented mode. NOT GUARANTEED: schema, key-set, or type
+     * enforcement — DeepSeek has no strict `json_schema`/grammar mode, so
+     * validate the parsed reply when a shape matters (see prompt-engine.ts's
+     * `expandedSpecViolations`). The full contract lives on
+     * `DeepSeekCompleteOptions.json` in llm/providers/deepseek.ts.
+     */
     json?: boolean;
     /** fixes/156 E1 parity (C1-f08 · W39·K6): the server validator (:50-62)
      *  always accepted `thinking` and the runtime forwards the whole opts
@@ -204,6 +213,8 @@ const callModelServer = createServerFn({ method: "POST" })
         model?: string;
         system?: string;
         maxTokens?: number;
+        /** Provider JSON OUTPUT MODE (a `json_object` mode hint, not schema
+         *  enforcement — see `complete`'s `json` contract on the main facade). */
         json?: boolean;
         /** fixes/156 E1 parity: forwarded to the provider so a structured
          *  json envelope can disable thinking on the pro tier. */
@@ -229,6 +240,8 @@ export async function callModel(
     model?: string;
     system?: string;
     maxTokens?: number;
+    /** Provider JSON OUTPUT MODE (a `json_object` mode hint, not schema
+     *  enforcement — see `complete`'s `json` contract on the main facade). */
     json?: boolean;
     thinking?: boolean;
   },

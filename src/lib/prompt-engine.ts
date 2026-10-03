@@ -15,15 +15,24 @@
 //       typeSignatures, dataFlow, negativeConstraints}. The model derives
 //       every field from the brief + policies alone (never invents
 //       platforms/APIs/error codes); optional prior-run `lessons` (fixes/98
-//       §5 Tier 3) render as a labeled advisory list. An unparseable reply
-//       yields an honest {ok:false, reason:"error"} — the machine never
-//       fabricates a spec.
+//       §5 Tier 3) render as a labeled advisory list. A reply that is not a
+//       six-key STRING-ARRAY JSON object (unparseable, a missing key, a
+//       non-array key, or a non-string/blank element) gets ONE bounded repair
+//       re-prompt, then an honest CODED refusal ({ok:false, reason:"error",
+//       code:"RT_E_VALIDATION"}) — the machine never fabricates a spec, and no
+//       malformed element is silently dropped into a `[]` default.
 //
 //   PURE / DETERMINISTIC (keyless, safe anywhere):
 //     parseExpandedSpecJson(text) — tolerant JSON parser/normalizer used by
 //       expandBrief; also the public seam for callers that cache raw replies.
 //       Normalization is deterministic: trim, drop empties, dedupe preserving
 //       first occurrence, fixed six-key shape (missing keys -> []).
+//     expandedSpecViolations(value) — the strict, deterministic envelope CHECK
+//       over the six-key string-array shape (missing key / non-array key /
+//       non-string-or-blank element; requirements needs ≥1 usable entry; extra
+//       top-level keys are tolerated — see its doc). expandBrief refuses on a
+//       violation; it validates the REPLY, never a claim that the model was
+//       constrained.
 //     applyPolicies(spec, policies) — PURE injection of negative constraints
 //       ('DO NOT use external ORMs' etc.) into spec.negativeConstraints.
 //       Belt-and-braces over the LLM path: even if the model ignored the
@@ -39,6 +48,7 @@ import {
   isDeepSeekConfigured,
 } from "./deepseek.server.ts";
 import { dualChannelFailDetail } from "./errors.ts";
+import type { ErrorCode } from "./errors.ts";
 
 /** The exhaustive expansion shape expandBrief emits and applyPolicies enriches. */
 export type ExpandedSpec = {
@@ -58,7 +68,15 @@ export type ExpandedSpec = {
 
 export type ExpandBriefResult =
   | { ok: true; spec: ExpandedSpec }
-  | { ok: false; reason: "not-configured" | "error"; error?: string };
+  | {
+      ok: false;
+      reason: "not-configured" | "error";
+      error?: string;
+      /** Machine-readable class of the refusal (errors.ts). A non-conforming
+       *  spec envelope carries RT_E_VALIDATION; a provider refusal forwards
+       *  the provider's own RT_E_LLM_* code. */
+      code?: ErrorCode;
+    };
 
 /** Prompt budget caps (documented so callers cannot be surprised by a cut).
  *  Over-budget briefs/policies are cut WITH an explicit truncation marker —
@@ -94,13 +112,34 @@ function cleanList(value: unknown): string[] {
   return out;
 }
 
-/**
- * Parse a DeepSeek JSON reply into an ExpandedSpec. Tolerant of ```json
- * fences and of missing/extra keys; normalizes every list via cleanList.
- * Returns null when the text is not JSON, not an object, or carries no
- * usable requirements (the one field a spec cannot live without).
- */
-export function parseExpandedSpecJson(text: string): ExpandedSpec | null {
+/** The six machine-checked keys of the expansion envelope, in canonical order.
+ *  The spec graph feeds plan + oracle generation. A reply that omits or
+ *  malforms any of them — missing key, non-array key, or a non-string/blank
+ *  element — is REFUSED after one bounded repair; no malformed element is
+ *  silently dropped into a `[]` default. */
+export const EXPANDED_SPEC_KEYS = [
+  "requirements",
+  "edgeCases",
+  "errorHandling",
+  "typeSignatures",
+  "dataFlow",
+  "negativeConstraints",
+] as const;
+
+/** Normalize a parsed spec reply object into the fixed six-key shape. Pure. */
+function normalizeExpandedSpec(rec: Record<string, unknown>): ExpandedSpec {
+  return {
+    requirements: cleanList(rec.requirements),
+    edgeCases: cleanList(rec.edgeCases),
+    errorHandling: cleanList(rec.errorHandling),
+    typeSignatures: cleanList(rec.typeSignatures),
+    dataFlow: cleanList(rec.dataFlow),
+    negativeConstraints: cleanList(rec.negativeConstraints),
+  };
+}
+
+/** Strip a ```json fence, JSON.parse, and require a plain object; null otherwise. */
+function parseSpecReplyObject(text: string): Record<string, unknown> | null {
   if (typeof text !== "string") return null;
   const cleaned = text
     .trim()
@@ -114,17 +153,84 @@ export function parseExpandedSpecJson(text: string): ExpandedSpec | null {
     return null;
   }
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
-  const rec = obj as Record<string, unknown>;
-  const requirements = cleanList(rec.requirements);
-  if (requirements.length === 0) return null;
-  return {
-    requirements,
-    edgeCases: cleanList(rec.edgeCases),
-    errorHandling: cleanList(rec.errorHandling),
-    typeSignatures: cleanList(rec.typeSignatures),
-    dataFlow: cleanList(rec.dataFlow),
-    negativeConstraints: cleanList(rec.negativeConstraints),
-  };
+  return obj as Record<string, unknown>;
+}
+
+/**
+ * Deterministic envelope check over a VALUE already parsed from a spec reply.
+ * Returns the ordered list of violations ([expanded order]); `[]` means the
+ * six-key envelope is conforming. This validates the REPLY — it is never a
+ * claim that the model was constrained: the provider's `json` knob is a
+ * `json_object` MODE HINT with no schema/grammar enforcement (see
+ * DeepSeekCompleteOptions.json in llm/providers/deepseek.ts).
+ *
+ * Element rule (the defect this closes): every one of the six keys is an
+ * array of plain non-empty STRINGS — `ExpandedSpec`, and the persisted
+ * `Project.implementationSpec` every consumer reads (p6SynthesisChunkUserPrompt,
+ * signatureFunctionNames, archCapabilities, the engine's dataFlow join;
+ * types.ts:539-549). A non-string or blank element is a violation, because
+ * cleanList would otherwise silently drop it and yield `[]`. An EXPLICIT empty
+ * array `[]` is preserved as-is and is NOT a violation on the five
+ * non-requirements keys — it is the model's stated answer, not a dropped
+ * element; `requirements` alone must carry ≥1 usable entry. There is no
+ * array-of-objects key, so a nested-object element is caught by the same
+ * element rule (Case D).
+ *
+ * Extra top-level keys are deliberately TOLERATED: the six keys are a MINIMUM
+ * shape, not an exact key set. The persisted implementationSpec record
+ * legitimately carries provenance keys (`source`/`briefHash`/`createdAt`), and
+ * codegen.server.ts re-validates that record with this same function — a
+ * forbidden-extras rule would strand every cached spec.
+ */
+export function expandedSpecViolations(value: unknown): string[] {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return ["reply is not a JSON object"];
+  }
+  const rec = value as Record<string, unknown>;
+  const out: string[] = [];
+  for (const key of EXPANDED_SPEC_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(rec, key)) {
+      out.push(`missing key "${key}"`);
+      continue;
+    }
+    const field = rec[key];
+    if (!Array.isArray(field)) {
+      out.push(`"${key}" is not an array`);
+      continue;
+    }
+    // Every element must be a usable string; name each offending index so the
+    // violation is legible (and the repair re-prompt's caller can see it).
+    const bad: number[] = [];
+    field.forEach((el, i) => {
+      if (typeof el !== "string" || el.trim() === "") bad.push(i);
+    });
+    if (bad.length > 0) {
+      out.push(`"${key}" has non-string or blank entries at index ${bad.join(", ")}`);
+    }
+    if (key === "requirements" && cleanList(field).length === 0) {
+      out.push('"requirements" has no usable entries');
+    }
+  }
+  return out;
+}
+
+/**
+ * Parse a DeepSeek JSON reply into an ExpandedSpec. Tolerant of ```json
+ * fences and of missing/extra keys; normalizes every list via cleanList.
+ * Returns null when the text is not JSON, not an object, or carries no
+ * usable requirements (the one field a spec cannot live without).
+ *
+ * NOTE: this is the tolerant parser/normalizer seam. The STRICT envelope
+ * check expandBrief enforces is `expandedSpecViolations` — a caller that
+ * caches a raw reply and feeds it here still gets the legacy six-key floor
+ * (missing keys -> []), so it must run the violation check itself if it
+ * wants the refusal.
+ */
+export function parseExpandedSpecJson(text: string): ExpandedSpec | null {
+  const rec = parseSpecReplyObject(text);
+  if (rec === null) return null;
+  const spec = normalizeExpandedSpec(rec);
+  return spec.requirements.length === 0 ? null : spec;
 }
 
 /** Marker appended to any brief/policy that had to be cut at a budget cap —
@@ -134,13 +240,14 @@ const TRUNCATION_MARK = "\n…[TRUNCATED — input longer than the budget cap; t
 /** fixes/129 bounded repair line (research/99 §2): appended ONCE to a re-sent
  *  expansion prompt when the model returns an unparseable expansion payload.
  *  It re-states the exact envelope and forbids prose/fences. The repair is a
- *  single bounded re-prompt; a second unparseable reply is an honest refusal
- *  ({ok:false, reason:"error", error:"model returned an unparseable expansion
- *  payload"}) — never a blind multi-retry and never a fabricated spec. */
+ *  single bounded re-prompt; a second non-conforming reply is an honest CODED
+ *  refusal ({ok:false, reason:"error", code:"RT_E_VALIDATION",
+ *  error:"model returned a non-conforming expansion payload: <violations>"}) —
+ *  never a blind multi-retry and never a fabricated spec. */
 export const EXPANSION_REPAIR_LINE =
   "Your previous reply was not a valid expansion payload. Reply with ONE JSON object with EXACTLY these six keys: " +
   '{"requirements": [...], "edgeCases": [...], "errorHandling": [...], "typeSignatures": [...], "dataFlow": [...], "negativeConstraints": [...]} ' +
-  "- no prose, no markdown fences, no code blocks. requirements must be a NON-EMPTY array of 5-12 implementable sentences derived ONLY from the brief above (never invent features, platforms, dependencies, or error codes); every other array follows the field rules above.";
+  "- no prose, no markdown fences, no code blocks. Every array element must be a plain, non-empty string (no objects, no numbers, no nulls, no blank strings). requirements must be a NON-EMPTY array of 5-12 implementable sentences derived ONLY from the brief above (never invent features, platforms, dependencies, or error codes); every other array follows the field rules above.";
 
 /** User-message builder: brief (capped, marked) + optional policies (capped,
  *  counted) + optional prior-run lessons (fixes/98 §5 Tier 3: a provenance-
@@ -239,15 +346,21 @@ function expansionPrompt(
  *
  * Honesty ladder: key absent -> not-configured BEFORE any network I/O;
  * empty/whitespace brief -> validation error before any network I/O;
- * unparseable model JSON -> ONE bounded repair re-prompt (fixes/129,
- * research/99 §2) re-sending the prompt + EXPANSION_REPAIR_LINE; a second
- * unparseable reply -> {ok:false, reason:"error"} — never a fabricated or
- * silently-substituted spec.
+ * a reply that is not a conforming six-key STRING-ARRAY object (unparseable,
+ * or a parsed object with a missing key, a non-array key, or a non-string/blank
+ * element) -> ONE bounded repair re-prompt (fixes/129, research/99 §2)
+ * re-sending the prompt + EXPANSION_REPAIR_LINE; a second non-conforming reply
+ * -> {ok:false, reason:"error", code:"RT_E_VALIDATION"} naming the violations —
+ * never a fabricated spec and never a malformed element silently defaulted.
  */
-type ExpansionCallResult = ExpandBriefResult | null; // null = unparseable payload
+type ExpansionCallResult =
+  | { kind: "spec"; spec: ExpandedSpec }
+  /** The reply was not a usable six-key spec object — the repair class. */
+  | { kind: "nonconforming"; violations: string[] }
+  | { kind: "failure"; result: ExpandBriefResult };
 
-/** One expansion LLM call (flash, json:true, 90s budget). Returns the parsed
- *  spec, an honest failure result, or null when the payload was unparseable. */
+/** One expansion LLM call (flash, json:true, 90s budget). Returns a parsed
+ *  spec, the deterministic envelope violations, or an honest failure result. */
 async function expansionCall(prompt: string): Promise<ExpansionCallResult> {
   const res = await completeDeepSeek(prompt, {
     model: DEEPSEEK_MODELS.flash,
@@ -261,22 +374,38 @@ async function expansionCall(prompt: string): Promise<ExpansionCallResult> {
       "You are RapidTool's hyper-prompt engine: you expand terse product briefs into exhaustive, honest, BUILD-READY implementation specs that a builder agent can turn into working, tested code with docs. Fidelity to the brief is your first duty — never add, drop, or soften a stated requirement. Return the single JSON object the user describes — no prose before or after it.",
   });
   if (!res.ok) {
-    return res.reason === "not-configured"
-      ? { ok: false, reason: "not-configured" }
-      : { ok: false, reason: "error", error: res.error };
+    return {
+      kind: "failure",
+      result:
+        res.reason === "not-configured"
+          ? { ok: false, reason: "not-configured" }
+          : {
+              ok: false,
+              reason: "error",
+              error: res.error,
+              ...(res.code ? { code: res.code } : {}),
+            },
+    };
   }
   // 185-H1: hostile/stub `{ ok:true, error }` is never a spec. Fail-close here
-  // (provider lie) so expandBrief does NOT take the unparseable-repair path.
+  // (provider lie) so expandBrief does NOT take the repair path.
   const dual = dualChannelFailDetail(res);
   if (dual) {
     return {
-      ok: false,
-      reason: "error",
-      error: `expansion dual-channel response (${dual}) — never treat ok:true+error as a spec`,
+      kind: "failure",
+      result: {
+        ok: false,
+        reason: "error",
+        code: "RT_E_LLM_REJECTED",
+        error: `expansion dual-channel response (${dual}) — never treat ok:true+error as a spec`,
+      },
     };
   }
-  const spec = parseExpandedSpecJson(res.text);
-  return spec === null ? null : { ok: true, spec };
+  const obj = parseSpecReplyObject(res.text);
+  if (obj === null) return { kind: "nonconforming", violations: ["reply is not a JSON object"] };
+  const violations = expandedSpecViolations(obj);
+  if (violations.length > 0) return { kind: "nonconforming", violations };
+  return { kind: "spec", spec: normalizeExpandedSpec(obj) };
 }
 
 export async function expandBrief(
@@ -290,14 +419,24 @@ export async function expandBrief(
   }
   const user = expansionPrompt(brief, policies, lessons);
   const first = await expansionCall(user);
-  if (first !== null && !first.ok) return first; // provider failure — not the unparseable class
-  if (first !== null && first.ok) return first;
-  // fixes/129 (research/99 §2): unparseable-expansion repair class — ONE
-  // bounded re-prompt, then an honest refusal. The model saw only prose /
-  // wrong JSON; re-send the full prompt + the strict envelope line once.
+  if (first.kind === "failure") return first.result; // provider failure — not the repair class
+  if (first.kind === "spec") return { ok: true, spec: first.spec };
+  // fixes/129 (research/99 §2): the non-conforming-envelope repair class — ONE
+  // bounded re-prompt, then an honest, CODED refusal. The model saw only prose,
+  // wrong JSON, or a partial six-key object; re-send the full prompt + the
+  // strict envelope line once. A reply missing a machine-checked field — or
+  // carrying a non-string/blank element in one — takes this path too, so a
+  // partial spec is never accepted and no malformed element silently becomes
+  // a `[]` default.
   const repaired = await expansionCall(`${user}\n\n${EXPANSION_REPAIR_LINE}`);
-  if (repaired !== null) return repaired;
-  return { ok: false, reason: "error", error: "model returned an unparseable expansion payload" };
+  if (repaired.kind === "failure") return repaired.result;
+  if (repaired.kind === "spec") return { ok: true, spec: repaired.spec };
+  return {
+    ok: false,
+    reason: "error",
+    code: "RT_E_VALIDATION",
+    error: `model returned a non-conforming expansion payload: ${repaired.violations.join("; ")}`,
+  };
 }
 
 /**

@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import {
   applyPolicies,
   expandBrief,
+  expandedSpecViolations,
   parseExpandedSpecJson,
   rankBriefLessons,
   lessonLinesForBrief,
@@ -77,6 +78,28 @@ function expandedViaFetch(
   }) as typeof fetch;
 }
 
+/** Serve one model reply per request (the last one repeats), recording every
+ *  real request body so a test can assert exactly what crossed the wire. */
+function sequencedFetch(replies: unknown[]): {
+  fetch: typeof globalThis.fetch;
+  bodies: () => Array<Record<string, unknown>>;
+} {
+  const bodies: Array<Record<string, unknown>> = [];
+  let i = 0;
+  // Explicit annotation on a NON-shadowing local: naming this `fetch` made the
+  // return type's `typeof fetch` resolve to the local being declared (TS7022).
+  const stub: typeof globalThis.fetch = async (
+    _url: unknown,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    const reply = replies[Math.min(i, replies.length - 1)];
+    i += 1;
+    return okResponse(modelReply(reply));
+  };
+  return { fetch: stub, bodies: () => bodies };
+}
+
 // ---------------------------------------------------------------------------
 // parseExpandedSpecJson — pure parser/normalizer
 // ---------------------------------------------------------------------------
@@ -110,6 +133,101 @@ describe("parseExpandedSpecJson", () => {
     assert.equal(parseExpandedSpecJson("[1, 2, 3]"), null);
     assert.equal(parseExpandedSpecJson('{"edgeCases": ["a"]}'), null);
     assert.equal(parseExpandedSpecJson(""), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// expandedSpecViolations — the strict, deterministic envelope check
+// ---------------------------------------------------------------------------
+
+describe("expandedSpecViolations — deterministic envelope check", () => {
+  it("returns [] for a conforming six-key spec object", () => {
+    assert.deepEqual(expandedSpecViolations(FULL_SPEC), []);
+  });
+
+  it("names every missing key in canonical order, deterministically", () => {
+    assert.deepEqual(expandedSpecViolations({ requirements: ["x"] }), [
+      'missing key "edgeCases"',
+      'missing key "errorHandling"',
+      'missing key "typeSignatures"',
+      'missing key "dataFlow"',
+      'missing key "negativeConstraints"',
+    ]);
+  });
+
+  it("flags an empty requirements list and a malformed (non-array) field", () => {
+    assert.deepEqual(
+      expandedSpecViolations({ ...FULL_SPEC, requirements: [], edgeCases: "nope" }),
+      ['"requirements" has no usable entries', '"edgeCases" is not an array'],
+    );
+  });
+
+  it("rejects non-objects and junk deterministically", () => {
+    for (const value of [null, undefined, 42, "text", [FULL_SPEC]]) {
+      assert.deepEqual(expandedSpecViolations(value), ["reply is not a JSON object"]);
+    }
+  });
+
+  it("names a non-string/blank element by index (the silent-default class this lane closes)", () => {
+    // verifier-B Case A: six arrays, five of them containing only wrong-typed
+    // elements — HEAD accepted this and silently defaulted them to [].
+    assert.deepEqual(
+      expandedSpecViolations({
+        requirements: ["Track delivery deadlines per order."],
+        edgeCases: [42, null, { nested: true }],
+        errorHandling: [{}],
+        typeSignatures: [null],
+        dataFlow: [[]],
+        negativeConstraints: [true],
+      }),
+      [
+        '"edgeCases" has non-string or blank entries at index 0, 1, 2',
+        '"errorHandling" has non-string or blank entries at index 0',
+        '"typeSignatures" has non-string or blank entries at index 0',
+        '"dataFlow" has non-string or blank entries at index 0',
+        '"negativeConstraints" has non-string or blank entries at index 0',
+      ],
+    );
+  });
+
+  it("rejects a nested-object element — no key is an array of objects", () => {
+    // verifier-B Case D: every one of the six keys is a STRING array
+    // (Project.implementationSpec), so an object element is a type violation.
+    assert.deepEqual(
+      expandedSpecViolations({ ...FULL_SPEC, typeSignatures: [{ signature: { nested: ["x"] } }] }),
+      ['"typeSignatures" has non-string or blank entries at index 0'],
+    );
+  });
+
+  it("tolerates extra top-level keys (the persisted record carries provenance keys)", () => {
+    // Decision, pinned: the six keys are a MINIMUM shape, not an exact set —
+    // codegen.server.ts re-validates the persisted implementationSpec (which
+    // carries source/briefHash/createdAt) with this same function, so a
+    // forbidden-extras rule would strand every cached spec.
+    assert.deepEqual(
+      expandedSpecViolations({ ...FULL_SPEC, evilExtra: { deeply: { wrong: 1 } } }),
+      [],
+    );
+  });
+
+  it("allows an explicit [] on the five non-requirements keys but not on requirements", () => {
+    const emptyOk = {
+      requirements: ["Ship it."],
+      edgeCases: [],
+      errorHandling: [],
+      typeSignatures: [],
+      dataFlow: [],
+      negativeConstraints: [],
+    };
+    assert.deepEqual(
+      expandedSpecViolations(emptyOk),
+      [],
+      "explicit [] is the model's stated answer, not a dropped element",
+    );
+    assert.deepEqual(
+      expandedSpecViolations({ ...emptyOk, requirements: [] }),
+      ['"requirements" has no usable entries'],
+    );
   });
 });
 
@@ -279,7 +397,7 @@ describe("expandBrief", () => {
     assert.ok(userContent.includes("Build a fleet healthcheck tool"));
   });
 
-  it("returns an honest error (never a fabricated spec) on unparseable model JSON", async () => {
+  it("returns a CODED error (never a fabricated spec) on unparseable model JSON", async () => {
     process.env[KEY] = "sk-test";
     globalThis.fetch = (async () =>
       okResponse({
@@ -290,18 +408,21 @@ describe("expandBrief", () => {
     assert.deepEqual(res, {
       ok: false,
       reason: "error",
-      error: "model returned an unparseable expansion payload",
+      code: "RT_E_VALIDATION",
+      error: "model returned a non-conforming expansion payload: reply is not a JSON object",
     });
   });
 
-  it("returns an honest error when the model omits requirements entirely", async () => {
+  it("returns a coded error when the model omits requirements entirely", async () => {
     process.env[KEY] = "sk-test";
     globalThis.fetch = expandedViaFetch({ edgeCases: ["x"], negativeConstraints: [] });
     const res = await expandBrief("Build a fleet healthcheck tool");
     assert.equal(res.ok, false);
     if (res.ok) return;
     assert.equal(res.reason, "error");
-    assert.match(res.error ?? "", /unparseable expansion payload/);
+    assert.equal(res.code, "RT_E_VALIDATION");
+    assert.match(res.error ?? "", /non-conforming expansion payload/);
+    assert.match(res.error ?? "", /missing key "requirements"/);
   });
 
   it("propagates a rejected backend as an honest error result", async () => {
@@ -322,6 +443,116 @@ describe("expandBrief", () => {
     assert.equal(res.ok, true);
     if (!res.ok) return;
     assert.equal("error" in res, false, "ok:true must not carry error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// expandBrief — strict spec-envelope validation (never defaults)
+// ---------------------------------------------------------------------------
+// The spec graph is the input to plan/oracle generation, so a reply that omits
+// a machine-checked field must be REFUSED with a coded reason after ONE bounded
+// repair — never accepted with `[]` defaults.
+
+describe("expandBrief — strict spec-envelope validation", () => {
+  const PARTIAL = { requirements: ["Track delivery deadlines per order."] };
+
+  it("refuses a partial spec after ONE bounded repair re-prompt, coded RT_E_VALIDATION", async () => {
+    process.env[KEY] = "sk-test";
+    const seq = sequencedFetch([PARTIAL, PARTIAL]);
+    globalThis.fetch = seq.fetch;
+    const res = await expandBrief("Build a fleet healthcheck tool");
+    assert.equal(res.ok, false);
+    if (res.ok) return;
+    assert.equal(res.reason, "error");
+    assert.equal(res.code, "RT_E_VALIDATION");
+    assert.match(res.error ?? "", /non-conforming expansion payload/);
+    assert.match(res.error ?? "", /missing key "typeSignatures"/);
+    assert.match(res.error ?? "", /missing key "dataFlow"/);
+    assert.equal(seq.bodies().length, 2, "exactly one bounded repair re-prompt");
+    // Item 1 audit pin: BOTH the first and the repair call request JSON mode
+    // over the real body (json:true -> response_format json_object).
+    for (const body of seq.bodies()) {
+      assert.deepEqual(body.response_format, { type: "json_object" }, "json mode on every envelope call");
+    }
+    const repairUser =
+      (seq.bodies()[1]!.messages as Array<{ content?: string }> | undefined)?.find((m) =>
+        m.content?.includes("Brief:"),
+      )?.content ?? "";
+    assert.ok(
+      repairUser.includes("Your previous reply was not a valid expansion payload"),
+      "the repair call re-sends the strict envelope line",
+    );
+  });
+
+  it("accepts the conforming repair reply and returns it (2 calls, no defaults)", async () => {
+    process.env[KEY] = "sk-test";
+    const seq = sequencedFetch([PARTIAL, FULL_SPEC]);
+    globalThis.fetch = seq.fetch;
+    const res = await expandBrief("Build a fleet healthcheck tool");
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.deepEqual(res.spec, FULL_SPEC, "the conforming repair reply is used, not a defaulted first reply");
+    assert.equal(seq.bodies().length, 2, "exactly one repair re-prompt then success");
+  });
+
+  it("names the malformed field when a key is present but not an array", async () => {
+    process.env[KEY] = "sk-test";
+    const bad = { ...FULL_SPEC, typeSignatures: "createOrder(): Order" };
+    globalThis.fetch = sequencedFetch([bad, bad]).fetch;
+    const res = await expandBrief("Build a fleet healthcheck tool");
+    assert.equal(res.ok, false);
+    if (res.ok) return;
+    assert.equal(res.code, "RT_E_VALIDATION");
+    assert.match(res.error ?? "", /"typeSignatures" is not an array/);
+  });
+
+  it("refuses verifier-B's Case A after ONE repair (element junk never silently defaults)", async () => {
+    process.env[KEY] = "sk-test";
+    const caseA = {
+      requirements: ["Track delivery deadlines per order."],
+      edgeCases: [42, null, { nested: true }],
+      errorHandling: [{}],
+      typeSignatures: [null],
+      dataFlow: [[]],
+      negativeConstraints: [true],
+    };
+    const seq = sequencedFetch([caseA, caseA]);
+    globalThis.fetch = seq.fetch;
+    const res = await expandBrief("Build a fleet healthcheck tool");
+    assert.equal(res.ok, false);
+    if (res.ok) return;
+    assert.equal(res.code, "RT_E_VALIDATION");
+    assert.match(res.error ?? "", /"edgeCases" has non-string or blank entries at index 0, 1, 2/);
+    assert.match(res.error ?? "", /"negativeConstraints" has non-string or blank entries at index 0/);
+    assert.equal(seq.bodies().length, 2, "exactly one bounded repair re-prompt");
+  });
+
+  it("accepts a conforming reply that REPAIRS Case A (2 calls, no defaults)", async () => {
+    process.env[KEY] = "sk-test";
+    const caseA = {
+      requirements: ["Track delivery deadlines per order."],
+      edgeCases: [42, null, { nested: true }],
+      errorHandling: [{}],
+      typeSignatures: [null],
+      dataFlow: [[]],
+      negativeConstraints: [true],
+    };
+    const seq = sequencedFetch([caseA, FULL_SPEC]);
+    globalThis.fetch = seq.fetch;
+    const res = await expandBrief("Build a fleet healthcheck tool");
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.deepEqual(res.spec, FULL_SPEC, "the conforming repair is used, not element junk normalized to []");
+    assert.equal(seq.bodies().length, 2);
+  });
+
+  it("does not repair a conforming first reply (exactly one call)", async () => {
+    process.env[KEY] = "sk-test";
+    const seq = sequencedFetch([FULL_SPEC]);
+    globalThis.fetch = seq.fetch;
+    const res = await expandBrief("Build a fleet healthcheck tool");
+    assert.equal(res.ok, true);
+    assert.equal(seq.bodies().length, 1, "a conforming reply never triggers a repair call");
   });
 });
 

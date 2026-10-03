@@ -2420,10 +2420,11 @@ export type P6JourneyCycleContext = {
 
 /** fixes/153 (P2): deps.synthesisRefusal cap — the bounded refusal excerpt a
  *  refused cycle feeds the next (the refusal class — RT_E_* code · first
- *  clause — plus the first ~200 chars of the model's reason, mirroring the
- *  1500-char treeFailure tail cap: a long/hostile reason can never blow the
- *  next cycle's prompt budget). */
-const P6_JOURNEY_REFUSAL_MAX = 200;
+ *  clause — plus the model's reason, up to this cap, mirroring the 1500-char
+ *  treeFailure tail cap: a long/hostile reason can never blow the next cycle's
+ *  prompt budget). Raised 200 → 1200 by the 339 wave so the oracle/case reason
+ *  reaches the next cycle instead of being clipped out. */
+const P6_JOURNEY_REFUSAL_MAX = 1200;
 
 /** fixes/147 (E2) + fixes/153 (P2) + fixes/328 F1: map a journey cycle's
  *  context onto engine.liveLayer's additive P6 deps (LiveLayerDeps) — which
@@ -2443,7 +2444,7 @@ export type P6CycleLiveDepsShape = {
   treeFailure?: string;
   /** Bounded refusal context from the previous cycle (fixes/153 P2). Present
    *  ONLY when the previous cycle's synthesis refused — the refusal class
-   *  (RT_E_* code) + first ~200 chars of the model's reason. */
+   *  (RT_E_* code) + the model's reason, up to P6_JOURNEY_REFUSAL_MAX (1200). */
   synthesisRefusal?: string;
   /** T-107.1 (216r · W7-L1): the opt-in patch (str_replace) repair level —
    *  set ONLY by `repairCycleLiveDeps` (the repair drivers). `p6CycleLiveDeps`

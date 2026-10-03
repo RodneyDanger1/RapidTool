@@ -119,6 +119,7 @@
 // Run: node --experimental-strip-types --test src/lib/codegen.server.test.ts
 // ---------------------------------------------------------------------------
 import { deriveTypeSignatures, fnv1a } from "./algorithms.ts";
+import { exportedNamesOf } from "./algo-tools.ts";
 import { briefNounHits, identifierHits, maskLiteralsAndComments } from "./sandbox.ts";
 import { applyStrReplace, type PatchRequest } from "./patch.ts";
 import {
@@ -127,7 +128,7 @@ import {
   isDeepSeekConfigured,
   type DeepSeekCompleteOptions,
 } from "./deepseek.server.ts";
-import { expandBrief, EXPAND_LESSON_RANK_LIMIT, lessonLinesForBrief, type ExpandBriefResult } from "./prompt-engine.ts";
+import { expandBrief, expandedSpecViolations, EXPAND_LESSON_RANK_LIMIT, lessonLinesForBrief, type ExpandBriefResult } from "./prompt-engine.ts";
 import { selectLessons, type RankableLessonRow } from "./knowledge.ts";
 import { verifyAndFixServer, type VerifyOutcome } from "./verify.server.ts";
 import type { ErrorCode } from "./errors.ts";
@@ -1143,13 +1144,39 @@ function withGateRepairContext(user: string, gateRepair?: string): string {
  *  cycle's refusal class (RT_E_* code) + the model's OWN recorded reason — NOT
  *  a new requirement, so the model corrects the stated cause rather than
  *  inventing scope. Deterministic + whitespace-collapsed; absent/blank ⇒ the
- *  prompt is byte-identical to the legacy text. */
-const P6_SYNTHESIS_REFUSAL_CONTEXT_MAX = 200;
+ *  prompt is byte-identical to the legacy text.
+ *  W52/339-2: the reader cap was 200 — one TENTH of the refusal budget, so the
+ *  failing case + the harness/sanitizer's own reason (which ride past char 200
+ *  of a multi-case verify evidence) never reached the next cycle. Raised to the
+ *  documented P6_REFUSAL_DETAIL_MAX budget so cycle N+1 sees the same recorded
+ *  failure the operator does. */
+const P6_SYNTHESIS_REFUSAL_CONTEXT_MAX = 1200;
 function withSynthesisRefusalContext(user: string, synthesisRefusal?: string): string {
   const t = typeof synthesisRefusal === "string" ? synthesisRefusal.replace(/\s+/g, " ").trim() : "";
   if (!t) return user;
   return user +
     `\n\nP6 PREVIOUS-REFUSAL CONTEXT (the previous synthesis cycle was REFUSED — this is the refusal class and the model's own recorded reason, NOT a new requirement; correct the stated cause and return a valid envelope):\n${t.slice(0, P6_SYNTHESIS_REFUSAL_CONTEXT_MAX)}`;
+}
+
+/** W52/339-2 PREP-3 READER: the PRIMARY-prompt reader for `deps.treeFailure`.
+ *  The journey already supplies the previous cycle's recorded failure on this
+ *  seam — the tree-run failure tail on a red tree-run, or the codegen refusal
+ *  detail when a cycle produced no tree at all (headless driveP6Journey's
+ *  `treeTail`). Until now that context reached only the bounded REPAIR
+ *  re-prompts (repairTreeFailureTail), so a repair cycle's PRIMARY synthesis —
+ *  which re-emits the whole module/tree BEFORE any repair class is even
+ *  detected — re-synthesized blind to the failure it was invoked to fix, and
+ *  the bounded loop could repeat the same red cycle. This is the reader: the
+ *  failure (failing file / failing oracle case + its first not-ok reason) rides
+ *  the primary prompt as ONE bounded, whitespace-collapsed block. Recorded
+ *  evidence only — it adds no requirement the brief never had. Absent/blank ⇒
+ *  the prompt stays byte-identical to the legacy text. */
+const P6_TREE_FAILURE_CONTEXT_MAX = 1200;
+function withTreeFailureContext(user: string, treeFailure?: string): string {
+  const t = typeof treeFailure === "string" ? treeFailure.replace(/\s+/g, " ").trim() : "";
+  if (!t) return user;
+  return user +
+    `\n\nP6 PREVIOUS-CYCLE FAILURE CONTEXT (the prior cycle's recorded tree-run/oracle failure — the failing file or oracle case and its first not-ok reason; repair the stated cause with real working code; this is recorded evidence, NOT a new requirement):\n${t.slice(0, P6_TREE_FAILURE_CONTEXT_MAX)}`;
 }
 
 /** Repair re-prompt after an unparseable envelope (audit-88 bounded-retry pattern). */
@@ -3119,6 +3146,39 @@ export function missingSignatureNames(
   return [...new Set(signatureNames)].filter((n) => !claimed.has(n));
 }
 
+/**
+ * W52/339-2 (THE NAME-BINDING GAP, in-file half): the oracle-case generation
+ * contract is the module's REAL top-level export surface, not the plan's
+ * signature list. The machine oracle is asked to reference "the contract
+ * function names" (verify.server.ts buildOracleCasesPrompt) and its vacuity
+ * gate grades against that same list; passing the PLANNED names let the
+ * generated cases name identifiers the emitted module never binds (the keyed
+ * run's `case-2: error ReferenceError: computeMean is not defined`). This is
+ * the measured inventory — `exportedNamesOf` reads the actual export syntax of
+ * the module bytes (ESM exports, `module.exports.x =`, `module.exports = {…}`)
+ * — so the oracle is grounded on what really exists. Deterministic, no LLM,
+ * sorted/deduped by the helper; an unreadable/empty surface falls back to the
+ * validated claimed exports (never a fabricated name).
+ *
+ * NOTE (honest scope): grounding the CONTRACT removes one source of invented
+ * names but cannot by itself prevent a model from inventing one from the
+ * brief's nouns — the enforcement ("validate every called identifier against
+ * the inventory BEFORE the case set is committed") lives in
+ * verify.server.ts generateCases/runCases, which this lane does not own; the
+ * exact shape is STOP-and-REPORTed in fixes/339_2_oracle-generation.md.
+ */
+export function oracleContractNames(module: string, claimedExports: readonly string[]): string[] {
+  const measured = exportedNamesOf(typeof module === "string" ? module : "");
+  if (measured.length > 0) return measured;
+  return [
+    ...new Set(
+      (Array.isArray(claimedExports) ? claimedExports : []).filter(
+        (e): e is string => typeof e === "string" && e.trim().length > 0,
+      ),
+    ),
+  ];
+}
+
 export type ModuleValidation =
   | { ok: true; exports: string[] }
   | { ok: false; code: ErrorCode; error: string };
@@ -3457,6 +3517,40 @@ const defaultDeps: P6SynthesisDeps = {
   verify: (source, brief, opts) => verifyAndFixServer(source, brief, opts),
 };
 
+/**
+ * W52/339-2: the `p6.synthesis.refused` detail budget. The previous 160-char
+ * hard slice cut the harness/sanitizer's OWN reason out of the surfaced
+ * refusal: a verify-failure evidence reads
+ * `machine-run cases still failing after 3 iterations: case-1: …; case-2: …
+ * (one or more case expressions failed the harness safety check)` and the
+ * sanitizer's reason + the offending case id ride the END, so a 160-char
+ * head-only cut left only an unactionable "case payload rejected by harness
+ * safety check" for BOTH the operator and the next cycle's synthesis prompt
+ * (withSynthesisRefusalContext). A generous, documented cap keeps the whole
+ * recorded evidence; anything longer is elided in the MIDDLE (head + tail
+ * preserved, with a visible marker) so the code/first failing cases AND the
+ * terminal reason always survive. Event name / RT_E_* contract unchanged.
+ */
+export const P6_REFUSAL_DETAIL_MAX = 1200;
+
+/** Head+tail bound with a visible middle elision marker (never a silent
+ *  head-only cut): the result never exceeds `max` chars, and both ends are
+ *  preserved. Pure + deterministic. */
+export function boundedRefusalDetail(detail: string, max = P6_REFUSAL_DETAIL_MAX): string {
+  const clean = typeof detail === "string" && detail.trim() ? detail.trim() : "unknown";
+  if (clean.length <= max) return clean;
+  const markerLen = ` …[elided ${clean.length} chars]… `.length;
+  const keep = Math.max(0, max - markerLen);
+  const head = Math.ceil(keep * 0.6);
+  const tail = keep - head;
+  const elided = clean.length - keep;
+  return (
+    clean.slice(0, head) +
+    ` …[elided ${elided} chars]… ` +
+    (tail > 0 ? clean.slice(clean.length - tail) : "")
+  );
+}
+
 /** Append the honest refusal trail — the deterministic floor stands; never a fabricated pass. */
 function refuse(project: Project, code: ErrorCode, detail: string): Project {
   const clean = typeof detail === "string" && detail.trim() ? detail.trim() : "unknown";
@@ -3469,7 +3563,7 @@ function refuse(project: Project, code: ErrorCode, detail: string): Project {
         phase: 6 as PhaseId,
         level: "warn" as const,
         event: "p6.synthesis.refused",
-        detail: `${code} · ${clean.slice(0, 160)}`,
+        detail: `${code} · ${boundedRefusalDetail(clean)}`,
       },
     ].slice(-200),
   };
@@ -3862,8 +3956,10 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
     existing &&
     typeof existing === "object" &&
     existing.briefHash === briefHash &&
-    Array.isArray(existing.requirements) &&
-    existing.requirements.length > 0
+    // 339-4: reuse only a spec whose six-key envelope is conformant. The old
+    // requirements-only guard reused a pre-lane persisted spec whose other
+    // five keys were absent at runtime; expandedSpecViolations names them.
+    expandedSpecViolations(existing).length === 0
       ? existing
       : null;
   let spec = specFields;
@@ -3886,7 +3982,7 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
     if (!expanded.ok) {
       return refuse(
         project,
-        expanded.reason === "not-configured" ? "RT_E_LLM_NOT_CONFIGURED" : "RT_E_LLM_REJECTED",
+        expanded.reason === "not-configured" ? "RT_E_LLM_NOT_CONFIGURED" : (expanded.code ?? "RT_E_LLM_REJECTED"),
         `expandBrief failed: ${expanded.reason === "error" ? expanded.error ?? "error" : "not-configured"}`,
       );
     }
@@ -3973,9 +4069,12 @@ async function synthesizeSingleModule(
   );
   // R10-f01 (W39 Z2): project.contracts rides the prompt — the model used to
   // write the module body blind to the A6 data contract (G3's wire).
-  const user = withSynthesisRefusalContext(
-    withGateRepairContext(p6SynthesisUserPrompt(brief, specRecord, lessonLines, project.contracts), gateRepair),
-    synthesisRefusal,
+  const user = withTreeFailureContext(
+    withSynthesisRefusalContext(
+      withGateRepairContext(p6SynthesisUserPrompt(brief, specRecord, lessonLines, project.contracts), gateRepair),
+      synthesisRefusal,
+    ),
+    treeFailure,
   );
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
@@ -4188,7 +4287,13 @@ async function synthesizeSingleModule(
       fit = reFit;
     }
   }
-  const outcome = await verify(envelope.module, brief, { maxIterations: 3, signatureNames });
+  // W52/339-2: bind the machine oracle's contract to the module's MEASURED
+  // export surface (not the plan's signature list) so its generated cases are
+  // grounded in names the module really binds.
+  const outcome = await verify(envelope.module, brief, {
+    maxIterations: 3,
+    signatureNames: oracleContractNames(envelope.module, envelope.exports),
+  });
   if (outcome.status !== "passed") {
     return refuse(withAttemptLogs(project, attemptLogs), codeForVerifyStatus(outcome.status), outcome.evidence || `verify ${outcome.status}`);
   }
@@ -4356,9 +4461,12 @@ async function synthesizeChunkedTree(
     );
     // R10-f01 (W39 Z2): the same project-level contract block on every chunk.
     // W52/338-1: `treeSpec` carries the reconciled (spec-driven) signature set.
-    const user = withSynthesisRefusalContext(
-      withGateRepairContext(p6SynthesisChunkUserPrompt(brief, treeSpec, chunk.signatures, prior, lessonLines, project.contracts), gateRepair),
-      synthesisRefusal,
+    const user = withTreeFailureContext(
+      withSynthesisRefusalContext(
+        withGateRepairContext(p6SynthesisChunkUserPrompt(brief, treeSpec, chunk.signatures, prior, lessonLines, project.contracts), gateRepair),
+        synthesisRefusal,
+      ),
+      treeFailure,
     );
     // T-107.1 (216r): per-chunk patch-repair sink — the chunk plan's path IS
     // the emitted tree file's path; absent when the level is off (legacy).
