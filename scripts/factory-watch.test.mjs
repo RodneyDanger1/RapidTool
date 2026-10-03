@@ -37,11 +37,14 @@ import { test } from "node:test";
 import {
   briefHash,
   classifyDrive,
+  deliveryEvidence,
+  deliveryProved,
   emitDelivered,
   nameForBrief,
   normalizeQueue,
   planItem,
   slugify,
+  treeVerified,
 } from "./factory-watch.mjs";
 
 const SCRIPT_PATH = fileURLToPath(new URL("./factory-watch.mjs", import.meta.url));
@@ -181,6 +184,103 @@ test("emitDelivered — only a real commit or the idempotent noop proves a deliv
     "a failed emit is never a delivery",
   );
   assert.equal(emitDelivered({ ok: true }, 0), false, "a commit-less emit is not a delivery");
+});
+
+test("deliveryProved — a commit alone is NOT a delivery; the emitted tree must re-run green", () => {
+  // A real `emit --run` envelope: green tree (parse + specs + entry smoke), the
+  // project's declared scripts execution state, and the landed commit.
+  const greenTree = {
+    ok: true,
+    dir: "emitted",
+    compile: { ok: true, checked: 1, passed: 1, failed: 0 },
+    tests: [{ file: "tests/oracle.spec.ts", run: "pass", tests: { pass: 1, fail: 0 } }],
+    run: { kind: "library", run: "skip", detail: "no entry to smoke" },
+    declaredScriptsVerified: true,
+  };
+  const committed = {
+    ok: true,
+    git: { committed: true, noop: false, commit: { hash: "abc123" } },
+    treeRun: greenTree,
+    declaredScriptsVerified: true,
+    tested: { promoted: true, label: "tested", evidenceHash: "ev1dence" },
+  };
+  assert.equal(
+    deliveryProved(committed, 0, true),
+    true,
+    "a committed + tree-run-green emit IS a verified delivery",
+  );
+
+  // THE regression: the pre-change proof (commit + .git, no tree evidence) must
+  // no longer count — "delivered" carried a commit, never a re-run verdict.
+  assert.equal(
+    deliveryProved({ ok: true, git: { committed: true, noop: false } }, 0, true),
+    false,
+    "a commit with no tree-run evidence is not a verified delivery",
+  );
+  // The idempotent re-emit (`noop`) is still a delivery IF the tree re-ran green.
+  assert.equal(
+    deliveryProved(
+      { ok: true, git: { committed: false, noop: true }, treeRun: greenTree },
+      0,
+      true,
+    ),
+    true,
+    "the idempotent noop re-delivery stays green",
+  );
+
+  // A red tree never delivers, even with a commit and a .git on disk.
+  assert.equal(
+    deliveryProved(
+      {
+        ok: false,
+        code: "RT_E_TREE_RUN_FAILED",
+        git: { committed: true },
+        treeRun: { ok: false, error: "spec failed" },
+      },
+      1,
+      true,
+    ),
+    false,
+    "a red tree must not deliver",
+  );
+  // A green tree that was never committed is not a delivery.
+  assert.equal(
+    deliveryProved(
+      { ok: true, git: { committed: false, noop: false }, treeRun: greenTree },
+      0,
+      true,
+    ),
+    false,
+  );
+  // A green tree with no `.git` on disk is not a delivery.
+  assert.equal(
+    deliveryProved({ ok: true, git: { committed: true }, treeRun: greenTree }, 0, false),
+    false,
+  );
+
+  assert.equal(treeVerified(committed), true);
+  assert.equal(treeVerified({ ok: true, git: { committed: true } }), false);
+
+  // The evidence persisted into the delivery record names the tree verdict.
+  const ev = deliveryEvidence(committed);
+  assert.equal(ev.treeRun.ok, true);
+  assert.equal(ev.treeRun.declaredScriptsVerified, true);
+  assert.deepEqual(ev.treeRun.specs, { total: 1, passed: 1 });
+  assert.equal(ev.evidenceHash, "ev1dence");
+});
+
+test("factory-watch's deliver step re-executes the tree (`--run`) and gates on its verdict", () => {
+  const src = readFileSync(SCRIPT_PATH, "utf8");
+  assert.match(
+    src,
+    /\["emit",\s*"--project",\s*projectFile,\s*"--out",\s*emitDir,\s*"--run",\s*"--git"\]/,
+    "the deliver step must emit --run --git (a commit is not evidence the tree was re-executed)",
+  );
+  assert.match(
+    src,
+    /deliveryProved\(/,
+    "the deliver step must gate on deliveryProved (the tree verdict), not on the commit alone",
+  );
 });
 
 test("intake helpers — slug/name/hash/queue normalization", () => {

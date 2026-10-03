@@ -3,10 +3,13 @@
 //
 // Zero-dep decision math for the wild loop. HONEST CONSUMER MAP (fixes/346):
 // `heartbeatLagClass` + `HEARTBEAT_TICKS_PER_PERSIST` are consumed by the
-// client heartbeat probe. `watchdogDecision` / `shouldAutopause` /
-// `requiresHumanResume` / `boundedStepWatch` have NO production consumer yet —
-// the store wild driver (`store.ts` `startWildRun`) does not wrap
-// `engine.wildStep` with them (STOP-and-REPORTed to that owner). They are
+// client heartbeat probe. `requiresHumanResume` and `shouldAutopause` (and
+// `watchdogDecision`, which `shouldAutopause` calls) are consumed by the store
+// wild driver's resume branch (`store.ts` `startWildRun`) — a stalled run whose
+// latch requires a human, or whose recorded step elapsed crossed the 2×
+// pause-on-resolve tier, cannot silently re-enter the loop. `boundedStepWatch`
+// still has NO production consumer: its legitimate home is the per-step wrap of
+// `engine.wildStep`, which no driver performs yet (fixes/110 PA-02), so it is
 // exercised only by `watchdog.test.ts` until that wiring lands. The ENGINE is
 // untouched (purity): a driver wraps engine.wildStep with these predicates.
 //
@@ -14,7 +17,7 @@
 // awaited promise from the same tab; run while the main thread is blocked.
 // Detection is post-hoc (interval lag) and prevention is pause-on-resolve —
 // the design's "never abandon, never auto-resume" contract lives here as
-// `requiresHumanResume` (unwired, above).
+// `requiresHumanResume` (wired at the store resume branch, fixes/346 P2-6).
 //
 // EXPORT SURFACE (compile against these — do not rename):
 //   watchdogDecision · shouldAutopause · heartbeatLagClass ·
@@ -42,7 +45,11 @@ export function watchdogDecision(elapsedMs: number, budgetMs: number): 0 | 1 | 2
   return 0;
 }
 
-/** Pause-on-resolve trigger: the step resolved at ≥ 2× budget (§5.2 tier 2). */
+/**
+ * Pause-on-resolve trigger: the step resolved at ≥ 2× budget (§5.2 tier 2).
+ * Also read by the store resume gate (fixes/346 P2-6): a stall latch whose
+ * recorded step elapsed is at/over this tier is treated as requiring a human.
+ */
 export function shouldAutopause(elapsedMs: number, budgetMs: number): boolean {
   return watchdogDecision(elapsedMs, budgetMs) === 2;
 }
@@ -59,10 +66,10 @@ export function heartbeatLagClass(lagMs: number): "ok" | "warn" | "critical" {
  * Never-auto-resume invariant (§5.2/§5.5): an auto-pause or a main-thread
  * stall is ended ONLY by a human/agent act (toggleWildPause / CLI resume).
  *
- * fixes/346: no production consumer yet — the store wild driver must call this
- * at its resume decision (`store.ts` `startWildRun`, STOP-and-REPORTed). Pinned
- * by `watchdog.test.ts`; honest about being unwired rather than claiming a
- * driver it does not have.
+ * fixes/346 P2-6: consumed by the store wild driver's resume branch
+ * (`store.ts` `startWildRun`) — a latch that requires a human blocks silent
+ * re-entry until it is explicitly cleared. Pinned by `watchdog.test.ts` and
+ * `store.test.ts`.
  */
 export function requiresHumanResume(stall: StallLatch): boolean {
   return stall !== null && (stall.class === "step-timeout" || stall.class === "mainthread-stall");

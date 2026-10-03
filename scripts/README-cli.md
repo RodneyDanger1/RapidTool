@@ -1023,7 +1023,8 @@ verbs below are REAL drives wired through the same `runUntilGate` loop the origi
   whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`); only a
   `forceHuman` gate, or any red DoD gate, still parks (exit 2) — never a fake completion.
   The multi-brief wrapper that drains an intake directory and then delivers each
-  completed project (`emit --git`) is [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs).
+  completed project (`emit --run --git` — the tree is re-executed before it is
+  committed) is [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs).
 
 The earlier `run --unattended` / `gate --unattended` flags remain as the one-shot form of the
 same drive (`--unattended` forces autopilot + live on those verbs). Neither verb is the wild
@@ -1044,12 +1045,18 @@ scheduler-facing story was missing (fixes/344 F-18): **ONE bounded tick** that
 drains a brief intake and, per brief, runs the real CLI verbs
 
 ```
-create  →  unattended (machine seat)  →  emit --git (per-project dir)
+create  →  unattended (machine seat)  →  emit --run --git (per-project dir)
 ```
+
+The deliver step **re-executes the emitted tree** (`emit --run`: per-file parse +
+every emitted spec + the kind-entry smoke) and claims a delivery only when that
+tree-run is green *and* the commit lands — a commit alone is never evidence the
+artifact was built or tested.
 
 It is the only "walk away and it ships" path in the repo, and it is honest about
 the boundary: it delivers only a project whose drive reaches a clean terminal
-seal, and it reports every other outcome with the CLI's own coded reason.
+seal **and** whose emitted tree re-runs green, and it reports every other outcome
+with the CLI's own coded reason.
 
 **Intake / workspace.** Exactly one of:
 
@@ -1074,16 +1081,21 @@ writes beside the project (`<dir>/.rapidtool/checkpoint.json`). A brief already
 the item is reported as `changed` and left for a human — never silently re-run.
 A corrupt state file is refused, never overwritten.
 
-**Never invents success.** Delivery is claimed only after the `emit --git`
-envelope proves a real commit (`committed: true`, or the idempotent
-`noop: true` with a real `.git` on disk). Every other terminal is reported with
-its code and left for a human:
+**Never invents success.** Delivery is claimed only after the `emit --run --git`
+envelope proves BOTH a real commit (`committed: true`, or the idempotent
+`noop: true` with a real `.git` on disk) AND a green tree-run verdict
+(`treeRun.ok: true` — the emitted tree was re-executed at delivery time, not
+merely committed). The persisted `delivery` record carries that verdict's
+evidence (`treeRun.ok`, `declaredScriptsVerified`, the spec tally, and the minted
+tree-test `evidenceHash` when `--run` promoted one). Every other terminal is
+reported with its code and left for a human:
 
 - `parked` — exit 2 from `unattended`: the machine seat is exhausted at a
   `forceHuman` gate (or a `blocked` project). A person must `approve`/`reject`.
 - `stalled` — exit 1: a hard DoD block (`RT_E_GATE_PENDING`), a red-gate complete
   seal (`RT_E_GATES_FAILED` — a red seal is never a clean 0), a checkpoint
-  refusal, or a delivery refusal (`RT_E_GIT_UNAVAILABLE`, `RT_E_FOREIGN_FILES`, …).
+  refusal, or a delivery refusal (`RT_E_GIT_UNAVAILABLE`, `RT_E_FOREIGN_FILES`,
+  `RT_E_TREE_RUN_FAILED` — a red re-run at delivery time — …).
 - `failed` — a runtime/backend failure (exit 3/4), retried on the next tick until
   the bounded attempt cap, then left for a human.
 

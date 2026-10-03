@@ -1792,6 +1792,21 @@ describe("345 L1-F2 — behaviouralOracleExpression classifier", () => {
   for (const e of shapeOnly) {
     it(`shape-only: ${e}`, () => assert.equal(behaviouralOracleExpression(e), false, e));
   }
+  // 346 oracle-lane numeric-literal parity (tree lane `hasModuleRead` /
+  // `isConcreteOperand`). Before the fix a numeric literal's suffix read as a
+  // module identifier (`1n` → `n`, `1e3` → `e3`, `0x1` → `x1`, `1_000` →
+  // `_000`), so a literal-only tautology was "behavioural" while the genuine
+  // `m.n === 1e3` was not.
+  it("numeric-literal-only forms are shape-only, never behavioural", () => {
+    for (const e of ["1n === 2", "1e3 === 2", "0x1 === 2", "1_000 === 2", "0b101 === 2", "0o7 === 1"]) {
+      assert.equal(behaviouralOracleExpression(e), false, e);
+    }
+  });
+  it("a module read tied to a numeric literal (bigint/exponent/hex/underscore) is behavioural", () => {
+    for (const e of ["m.n === 1n", "m.width === 1e3", "count === 1_000", "m.mask === 0xff"]) {
+      assert.equal(behaviouralOracleExpression(e), true, e);
+    }
+  });
   it("hostile input is shape-only, never a crash", () => {
     for (const junk of [null, undefined, 42, "", "   ", {}]) {
       assert.equal(behaviouralOracleExpression(junk), false, JSON.stringify(junk));

@@ -28,7 +28,12 @@ import { exportProjectJson, importProject as parseProjectJson } from "./io.ts";
 import { validateReport, applyReportResult, reportGateDelta, type ReportApplyReason } from "./report-intake.ts";
 import { interpretFeedback } from "./llm-tasks.ts";
 import { verifyAndFix, applyVerifyOutcome } from "./verify.ts";
-import { releaseWildStart, reportRt, tryStartWild } from "./rt-client.ts";
+import { peekStall, releaseWildStart, reportRt, tryStartWild } from "./rt-client.ts";
+// fixes/346 P2-6: the watchdog resume seams now have a production consumer — the
+// store wild driver's resume branch refuses a silent re-entry when the stall
+// latch requires an explicit human act (or crossed the 2× pause-on-resolve tier).
+import { requiresHumanResume, shouldAutopause } from "./watchdog.ts";
+import { WILD_STEP_BUDGET_MS } from "./rt-events.ts";
 // A1-12 (346 E4): the console asks the ONE seat policy for the truthful verdict
 // on a browser human-seat claim (it has no out-of-band token), so the ledger can
 // record what the bytes actually support instead of a bare human stamp.
@@ -1478,6 +1483,28 @@ export const useRapid = create<RapidState>()(
               stoppedReason: null,
               error: "A wild run is already active.",
               code: "RT_E_PHASE_ILLEGAL",
+            };
+          }
+          // fixes/346 P2-6: never auto-resume a stalled run. A stall latch that
+          // requires a human act (step-timeout / mainthread-stall), or whose
+          // recorded step elapsed crossed the 2× pause-on-resolve tier, blocks
+          // silent re-entry until that latch is explicitly cleared (a human
+          // resume). An absent latch — or a recoverable step-overdue latch, or
+          // one owned by another project — leaves the PA-01 path byte-identical.
+          const stallLatch = peekStall();
+          if (
+            stallLatch !== null &&
+            (stallLatch.projectId === null || stallLatch.projectId === id) &&
+            (requiresHumanResume(stallLatch) ||
+              shouldAutopause(stallLatch.stepElapsedMs, WILD_STEP_BUDGET_MS))
+          ) {
+            return {
+              ok: false,
+              ran: 0,
+              stoppedReason: null,
+              error:
+                "Wild run is stalled and requires an explicit human resume — clear the stall latch before re-entering the loop.",
+              code: "RT_E_GATE_PENDING",
             };
           }
           // fall through: resumed run — the started block below re-stamps the

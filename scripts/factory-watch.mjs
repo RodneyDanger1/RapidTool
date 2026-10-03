@@ -10,8 +10,10 @@
 //                    seat only: unattended passes machineGates, so a stock
 //                    HITL gate whose DoD passes is cleared through the ledgered
 //                    machine actor; a forceHuman gate or a red DoD gate parks)
-//   3. deliver     — `emit --project <file> --out <dir> --git` (one
-//                    Conventional-Commits commit per emitted tree)
+//   3. deliver     — `emit --project <file> --out <dir> --run --git`: the
+//                    emitted tree is RE-EXECUTED (`--run` = parse + specs +
+//                    entry smoke) and a delivery is claimed only when that
+//                    tree-run is green AND the Conventional-Commits commit lands
 //
 // WHAT IT IS NOT: a daemon. There is no scheduler/queue in-product; a host hook
 // (Windows Task Scheduler / cron) invokes THIS script on a cadence (see
@@ -24,8 +26,10 @@
 //     after every step, so a killed process resumes rather than restarts — and a
 //     brief whose bytes changed since it was recorded is reported, never
 //     silently re-run.
-//   · Delivery is claimed ONLY after the `emit --git` envelope proves a real
-//     commit (committed:true or the idempotent noop:true with a .git on disk).
+//   · Delivery is claimed ONLY after the `emit --run --git` envelope proves BOTH
+//     a real commit (committed:true or the idempotent noop:true with a .git on
+//     disk) AND a GREEN tree-run verdict (`treeRun.ok:true`) — a commit alone is
+//     never evidence the emitted tree was re-executed/verified.
 //   · A stall is a first-class outcome: `parked` (a human gate / blocked, exit 2)
 //     and `stalled` (a hard DoD block or red-gate seal, exit 1) are terminal and
 //     are reported with the CLI's own coded reason; the item is LEFT FOR A HUMAN.
@@ -268,6 +272,48 @@ export function emitDelivered(envelope, exitCode) {
   const git = envelope.git;
   if (!git || git.ok === false || typeof git !== "object") return false;
   return git.committed === true || git.noop === true;
+}
+
+/**
+ * The tree-verification half of a delivery proof: the `emit --run` envelope must
+ * carry a GREEN TreeRunOutcome — the emitted tree was re-executed at delivery
+ * time (parse + every emitted spec + the kind-entry smoke), not merely committed.
+ * `--run`'s `ok:true` already folds in the project's own declared `typecheck`/
+ * `build`/`test` when they resolve (a red one makes `ok:false`). Pure.
+ */
+export function treeVerified(envelope) {
+  const tree = envelope?.treeRun;
+  return !!tree && typeof tree === "object" && tree.ok === true;
+}
+
+/**
+ * Whether an `emit --run --git` envelope PROVES a VERIFIED delivery: a real
+ * commit (or the idempotent noop) AND a green tree-run verdict AND a real `.git`
+ * on disk. A commit alone never counts. Pure.
+ */
+export function deliveryProved(envelope, exitCode, gitDirExists) {
+  return emitDelivered(envelope, exitCode) && gitDirExists === true && treeVerified(envelope);
+}
+
+/**
+ * The compact tree-run evidence persisted into `entry.delivery` — the verdict
+ * that was RE-EXECUTED, its declared-script state, its spec tally, and the minted
+ * tree-test evidence hash when `emit --run` promoted one. Pure.
+ */
+export function deliveryEvidence(envelope) {
+  const tree = envelope?.treeRun ?? null;
+  const tests = Array.isArray(tree?.tests) ? tree.tests : [];
+  const entry = tree?.run;
+  const hash = envelope?.tested?.evidenceHash;
+  return {
+    treeRun: {
+      ok: tree?.ok === true,
+      declaredScriptsVerified: tree?.declaredScriptsVerified === true,
+      specs: { total: tests.length, passed: tests.filter((t) => t?.run === "pass").length },
+      entry: entry ? { kind: entry.kind ?? null, run: entry.run ?? null } : null,
+    },
+    evidenceHash: typeof hash === "string" && hash ? hash : null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -650,19 +696,24 @@ function main() {
     entry.status = "driving";
     commitState(statePath, state, dirtySlugs);
 
-    // --- Step 3: deliver — emit --git into the per-project dir ---
+    // --- Step 3: deliver — emit --run --git: re-execute the tree, then commit ---
     const emitted = runCli(
-      ["emit", "--project", projectFile, "--out", emitDir, "--git"],
+      ["emit", "--project", projectFile, "--out", emitDir, "--run", "--git"],
       timeoutMs,
     );
     const gitDir = join(emitDir, ".git");
-    const proved = emitDelivered(emitted.envelope, emitted.exitCode) && existsSync(gitDir);
+    const proved = deliveryProved(emitted.envelope, emitted.exitCode, existsSync(gitDir));
     if (!proved) {
       entry.status = "stalled";
       entry.code = emitted.envelope?.code ?? (emitted.timedOut ? "RT_E_ABORTED" : "RT_E_INTERNAL");
       entry.reason =
         emitted.envelope?.error ??
-        `emit --git did not prove a delivery (exit ${emitted.exitCode})${emitted.envelope?.ok === true ? " — no commit and no .git on disk" : ""}`;
+        `emit --run --git did not prove a verified delivery (exit ${emitted.exitCode})` +
+          (emitted.envelope?.ok === true
+            ? treeVerified(emitted.envelope)
+              ? " — no commit and no .git on disk"
+              : " — the emitted tree-run was not green (the tree was not re-executed clean)"
+            : "");
       entry.needsHuman = true;
       commitState(statePath, state, dirtySlugs);
       results.push(row(entry, "deliver-failed"));
@@ -679,6 +730,8 @@ function main() {
       committed: emitted.envelope.git.committed === true,
       noop: emitted.envelope.git.noop === true,
       commit: emitted.envelope.git.commit ?? null,
+      verified: true,
+      ...deliveryEvidence(emitted.envelope),
     };
     commitState(statePath, state, dirtySlugs);
     results.push(row(entry, "delivered"));

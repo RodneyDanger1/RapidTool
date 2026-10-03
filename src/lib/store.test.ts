@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dedupeMemoryIds, emptyProject, hydrateProject } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
-import { RT_COALESCE_MS, shouldCoalesce, type RtEvent } from "./rt-events.ts";
+import { RT_COALESCE_MS, shouldCoalesce, WILD_STEP_BUDGET_MS, type RtEvent } from "./rt-events.ts";
 import type { Artifact, ChatLogRow, HitlRequest, JsonLog, PhaseId, Project, WildParkInfo, WildPlan } from "./types.ts";
 
 class MemoryStorage {
@@ -55,6 +55,8 @@ const {
   reconcileCrossTabProjects,
   windowArtifacts,
 } = await import("./store.ts");
+// fixes/346 P2-6: the stall-latch seams the store resume gate now reads.
+const { clearStall, peekStall, setStallLatch } = await import("./rt-client.ts");
 // Let the initial rehydration (which seeds the demo project on empty storage) settle
 // before the first test; beforeEach wipes state for every test regardless.
 await new Promise((r) => setTimeout(r, 10));
@@ -2627,4 +2629,119 @@ test("A1-12: a console approve records an unattested human decision, never the t
   assert.ok(seatRow, "the console decision records its seat provenance on the ledger");
   assert.match(String(seatRow?.detail), /human-seat-unverified/, "the seat policy's unverified verdict is recorded");
   assert.match(String(seatRow?.detail), /no out-of-band RT_HUMAN_SEAT_TOKEN delivery seam/);
+});
+
+// ---------------------------------------------------------------------------
+// 346 P2-6 — the store resume branch is the production consumer of the
+// watchdog resume seams. A stall latch that requires a human blocks a silent
+// re-entry; an absent (or recoverable, or other-project) latch leaves the
+// PA-01 path byte-identical.
+// ---------------------------------------------------------------------------
+
+/** Drive a keyless run until it parks paused — the PA-01 resume shape. */
+async function parkRun(id: string): Promise<void> {
+  const first = await useRapid.getState().startWildRun(id);
+  assert.equal(first.ok, true, "the keyless driver starts (precondition)");
+  assert.equal(current(id).wildRun?.pause, true, "the keyless driver parks the run paused");
+}
+
+function resumeLogCount(id: string): number {
+  return current(id).logs.filter((l) => l.event === "wild.resume").length;
+}
+
+test("346 P2-6: a requires-human stall latch blocks the silent resume; clearing it is the explicit resume", async () => {
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "";
+  try {
+    const p = install(seedProject());
+    useRapid.getState().setWildMode(p.id, true);
+    await parkRun(p.id);
+    const before = resumeLogCount(p.id);
+    setStallLatch({ projectId: p.id, since: 1, stepElapsedMs: 5, class: "step-timeout" });
+    const blocked = await useRapid.getState().startWildRun(p.id);
+    assert.equal(blocked.ok, false, "a stalled run must not silently re-enter the loop");
+    assert.equal(blocked.code, "RT_E_GATE_PENDING");
+    assert.equal(resumeLogCount(p.id), before, "the refused attempt writes no wild.resume row");
+    assert.equal(current(p.id).wildRun?.pause, true, "the run stays parked");
+    // The explicit human act: clear the latch, then resume.
+    clearStall();
+    const resumed = await useRapid.getState().startWildRun(p.id);
+    assert.equal(resumed.ok, true, "clearing the stall is the explicit human resume");
+    assert.ok(resumeLogCount(p.id) > before, "the cleared latch lets the PA-01 resume path run");
+  } finally {
+    clearStall();
+    process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+test("346 P2-6: with no stall latch the PA-01 resume path is byte-identical", async () => {
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "";
+  try {
+    const p = install(seedProject());
+    useRapid.getState().setWildMode(p.id, true);
+    await parkRun(p.id);
+    assert.equal(peekStall(), null, "no stall latch is present");
+    const before = resumeLogCount(p.id);
+    const resumed = await useRapid.getState().startWildRun(p.id);
+    assert.equal(resumed.ok, true, "a paused run with no latch still resumes");
+    assert.ok(resumeLogCount(p.id) > before, "the resume is recorded exactly as before");
+  } finally {
+    clearStall();
+    process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+test("346 P2-6: a recoverable step-overdue latch (below the 2× tier) does not block the resume", async () => {
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "";
+  try {
+    const p = install(seedProject());
+    useRapid.getState().setWildMode(p.id, true);
+    await parkRun(p.id);
+    setStallLatch({ projectId: p.id, since: 1, stepElapsedMs: WILD_STEP_BUDGET_MS, class: "step-overdue" });
+    const resumed = await useRapid.getState().startWildRun(p.id);
+    assert.equal(resumed.ok, true, "an overdue-but-not-frozen latch is not a human-required stall");
+  } finally {
+    clearStall();
+    process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+test("346 P2-6: a latch whose elapsed crossed the 2× pause-on-resolve tier blocks resume (shouldAutopause)", async () => {
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "";
+  try {
+    const p = install(seedProject());
+    useRapid.getState().setWildMode(p.id, true);
+    await parkRun(p.id);
+    setStallLatch({
+      projectId: p.id,
+      since: 1,
+      stepElapsedMs: WILD_STEP_BUDGET_MS * 2,
+      class: "step-overdue",
+    });
+    const blocked = await useRapid.getState().startWildRun(p.id);
+    assert.equal(blocked.ok, false, "a latch past the auto-pause tier is a human-required stall");
+    assert.equal(blocked.code, "RT_E_GATE_PENDING");
+  } finally {
+    clearStall();
+    process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+test("346 P2-6: a stall latch owned by another project does not block this project's resume", async () => {
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "";
+  try {
+    const p = install(seedProject());
+    useRapid.getState().setWildMode(p.id, true);
+    await parkRun(p.id);
+    setStallLatch({ projectId: "some-other-build", since: 1, stepElapsedMs: 5, class: "step-timeout" });
+    const resumed = await useRapid.getState().startWildRun(p.id);
+    assert.equal(resumed.ok, true, "another project's stall is not this project's gate");
+  } finally {
+    clearStall();
+    process.env.DEEPSEEK_API_KEY = savedKey;
+  }
 });

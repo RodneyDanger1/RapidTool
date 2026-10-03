@@ -1463,6 +1463,15 @@ function maskOracleComparable(code: string): string {
   return out.replace(/\s+/g, " ").trim();
 }
 
+/** A JS numeric literal — decimal (with exponent / `_` separators), hex, octal,
+ *  binary, bigint, signed, or leading-dot. 346 parity: the tree lane
+ *  (`compile-check.server.ts` NUMERIC_LITERAL_RE) recognizes the FULL grammar,
+ *  so the oracle lane must too — a bare `\d+` both minted a literal-only probe
+ *  as behavioural (`1n === 2` read `n` as a module read) and red-flagged a
+ *  genuine read tied to one (`m.n === 1e3`). */
+const ORACLE_NUMERIC_LITERAL_RE =
+  /^[-+]?(?:0[xX][0-9a-fA-F][0-9a-fA-F_]*|0[oO][0-7][0-7_]*|0[bB][01][01_]*|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][-+]?\d[\d_]*)?|\.\d[\d_]*(?:[eE][-+]?\d[\d_]*)?)n?$/;
+
 /** True when an operand is a concrete expected value: a string literal
  *  (masked to the marker), a number, or a boolean. `null`/`undefined`/`void 0`
  *  are deliberately NOT concrete — a presence check against them is the exact
@@ -1471,16 +1480,25 @@ function maskOracleComparable(code: string): string {
 function isConcreteExpectedToken(raw: string): boolean {
   const t = raw.trim().replace(/^\(+/, "").replace(/\)+$/, "").trim();
   if (t === ORACLE_STRING_LEAF) return true;
-  if (/^[-+]?\d+(?:\.\d+)?$/.test(t)) return true;
+  if (ORACLE_NUMERIC_LITERAL_RE.test(t)) return true;
   return t === "true" || t === "false";
 }
 
 /** True when `side` reads a name that could be the module under test (an
  *  identifier that is not a language keyword/literal). Property names and
- *  calls both count — `mean([1,2,3])` and `result.ok` are both module reads. */
+ *  calls both count — `mean([1,2,3])` and `result.ok` are both module reads.
+ *
+ *  346 parity (tree lane `hasModuleRead`): an identifier directly preceded by a
+ *  digit is a numeric literal's suffix, not a binding — `1n` (`n`), `1e3`
+ *  (`e3`), `0x1` (`x1`), `1_000` (`_000`). Without this the literal-only
+ *  `1n === 2` read `n` as a module read. A real identifier can never be
+ *  immediately preceded by a digit in valid JS, so this hides no read. */
 function hasOracleModuleRead(side: string): boolean {
   for (const m of side.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
-    if (!ORACLE_NON_MODULE_WORDS.has(m[0])) return true;
+    if (ORACLE_NON_MODULE_WORDS.has(m[0])) continue;
+    const prev = m.index > 0 ? side[m.index - 1]! : "";
+    if (prev >= "0" && prev <= "9") continue; // numeric-literal suffix
+    return true;
   }
   return false;
 }
