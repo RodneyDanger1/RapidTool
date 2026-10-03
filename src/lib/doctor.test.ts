@@ -673,6 +673,246 @@ describe("W52 · 338-3 — the factory claim is wired to REAL signals", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// W53 · 340-2 (doctor-truth) — name the DELIBERATE human door, never fake it
+//
+// The factory flag is the AND of five conjuncts, one of which (human-approved
+// fixtures) is human-only by design (338-4: the machine drafts the bar it is
+// graded against). A machine-complete run therefore reads `false` truthfully,
+// but with no way to tell "the machine did its part; a human must accept the
+// bar" from a real defect. `awaitingHumanAcceptance` derives that distinction
+// from the SAME evidence `gaps` is built from — the record's own
+// `fixtureAcceptanceState` — and never moves the latch.
+// ---------------------------------------------------------------------------
+
+describe("W53 · 340-2 — the human-acceptance door is named, not guessed", () => {
+  const twoRealJobs = () =>
+    inventoryFromJobSources([
+      { path: "src/jobs/board.ts", source: "export function createBoard() { return { id: 'b1' }; }" },
+      { path: "src/jobs/column.ts", source: "export function addColumn() { return { id: 'c1' }; }" },
+    ]);
+  /** The keyless deterministic P6 template (W45/331-4) — a leftover in the
+   *  classifier, not a real job. Mirrors the shape pinned in the 331-4 suite. */
+  const KEYLESS_TEMPLATE = [
+    'const JOBS = ["flip"];',
+    'const REJECTION = "";',
+    "function synthesize(spec) {",
+    '  if (spec.phase < 0 || spec.phase > 12) throw new Error("invalid phase");',
+    "  return { ok: true, name: spec.name, job: spec.job };",
+    "}",
+    "function test_no_skip() {}",
+  ].join("\n");
+  const record = (fixtures?: unknown) =>
+    fixtures === undefined
+      ? { ...ov9Project() }
+      : { ...ov9Project(), acceptanceFixtures: fixtures };
+
+  it("fail-closed: no acceptance state ⇒ awaitingHumanAcceptance false and the latch unmoved", () => {
+    for (const claim of [factoryClaim(), factoryClaim(RAPIDTOOL_FACTORY_EVIDENCE), doctorFactory({})]) {
+      assert.equal(claim.awaitingHumanAcceptance, false, "absent state is never 'awaiting a human'");
+      assert.equal(claim.autonomousSoftwareFactory, false);
+    }
+  });
+
+  it("(a) a machine-complete-but-unaccepted run is distinguishable ON THE RECORD", () => {
+    const ev = evidenceFromJobInventory(twoRealJobs(), {
+      project: record([{ id: "fx-1", approval: "pending" }]),
+    });
+    assert.equal(ev.leftoverJobsAreReexportsOrStubs, false);
+    assert.equal(ev.realMultiJobProduct, true);
+    assert.equal(ev.productComplete, true);
+    assert.equal(ev.humanFixtures, false, "a pending case is not an accepted set");
+    assert.equal(ev.acceptance?.state, "pending", "the record's own state is read, not guessed");
+    const claim = factoryClaim(ev, {});
+    assert.equal(claim.autonomousSoftwareFactory, false);
+    assert.equal(
+      claim.awaitingHumanAcceptance,
+      true,
+      "the sole remaining reason is the deliberate human door",
+    );
+    assert.deepEqual(claim.gaps, [FACTORY_GAP.fixtures]);
+  });
+
+  it("(a') the signal is NOT hand-fed: an extra.acceptance is ignored at runtime", () => {
+    const untyped = {
+      acceptance: { state: "pending", total: 1, approved: 0, pending: 1, decidedBy: "undecided" },
+    } as never;
+    const ev = evidenceFromJobInventory(twoRealJobs(), untyped);
+    assert.equal(ev.acceptance, undefined, "no project ⇒ no live state; the hand-passed one is not read");
+    assert.equal(factoryClaim(ev, {}).awaitingHumanAcceptance, false);
+  });
+
+  it("an absent bar (no-fixtures) is a defect, NOT awaiting a human", () => {
+    const ev = evidenceFromJobInventory(twoRealJobs(), { project: ov9Project() });
+    assert.equal(ev.acceptance?.state, "no-fixtures");
+    assert.equal(ev.humanFixtures, false);
+    assert.equal(ev.productComplete, true, "the machine half is complete — only the bar is absent");
+    const claim = factoryClaim(ev, {});
+    assert.equal(
+      claim.awaitingHumanAcceptance,
+      false,
+      "nothing was drafted: an absent bar is not a human keeping the machine waiting",
+    );
+    assert.ok(claim.gaps.includes(FACTORY_GAP.fixtures), "the fixtures gap still stands");
+  });
+
+  it("machine-decided / unattributed / unreadable / stale / garbled are all NOT awaiting", () => {
+    const cases: Array<[string, unknown]> = [
+      ["machine-decided", [{ id: "fx-1", approval: "approved", decidedBy: "autopilot" }]],
+      ["unattributed", [{ id: "fx-1", approval: "approved" }]],
+      ["unreadable", "not-a-list"],
+    ];
+    for (const [label, fixtures] of cases) {
+      const ev = evidenceFromJobInventory(twoRealJobs(), { project: record(fixtures) });
+      assert.notEqual(ev.acceptance?.state, "pending", label);
+      const claim = factoryClaim(ev, {});
+      assert.equal(claim.awaitingHumanAcceptance, false, `${label} is a defect, not a human door`);
+      assert.equal(claim.autonomousSoftwareFactory, false);
+    }
+    // A stale set (brief hash mismatch) has no LIVE decision state ⇒ fail closed.
+    const stale = evidenceFromJobInventory(twoRealJobs(), {
+      project: {
+        ...ov9Project(),
+        brief: "a live brief",
+        acceptanceBriefHash: "a-different-brief",
+        acceptanceFixtures: [{ id: "fx-1", approval: "pending" }],
+      },
+    });
+    assert.equal(stale.acceptance, undefined, "a stale set can never be reported as awaiting a human");
+    assert.equal(factoryClaim(stale, {}).awaitingHumanAcceptance, false);
+    // A garbled hand-fed state is never read as pending.
+    const garbled = factoryClaim({
+      leftoverJobsAreReexportsOrStubs: false,
+      humanFixtures: false,
+      realMultiJobProduct: true,
+      productComplete: true,
+      acceptance: "pending" as never,
+    });
+    assert.equal(garbled.awaitingHumanAcceptance, false);
+  });
+
+  it("(b) a stubbed/reexport tree is NOT reported as awaiting-human even with a pending record", () => {
+    const stubbed = inventoryFromJobSources([
+      { path: "src/jobs/board.ts", source: 'throw new Error("TODO(E-15) stub: implement board");' },
+      { path: "src/jobs/column.ts", source: 'export { run } from "./board.ts";' },
+    ]);
+    const ev = evidenceFromJobInventory(stubbed, {
+      project: record([{ id: "fx-1", approval: "pending" }]),
+    });
+    assert.equal(ev.acceptance?.state, "pending", "the record really is waiting…");
+    assert.equal(ev.leftoverJobsAreReexportsOrStubs, true);
+    const claim = factoryClaim(ev, {});
+    assert.equal(
+      claim.awaitingHumanAcceptance,
+      false,
+      "…but a leftover tree is a real defect, not the deliberate human door",
+    );
+    assert.ok(claim.gaps.includes(FACTORY_GAP.leftover));
+    // The keyless deterministic template is the same leftover class.
+    const template = inventoryFromJobSources([{ path: "src/jobs/flip.ts", source: KEYLESS_TEMPLATE }]);
+    const tclaim = factoryClaim(
+      evidenceFromJobInventory(template, { project: record([{ id: "fx-1", approval: "pending" }]) }),
+      {},
+    );
+    assert.equal(tclaim.awaitingHumanAcceptance, false);
+    assert.equal(tclaim.autonomousSoftwareFactory, false);
+  });
+
+  it("(c) a genuinely complete+approved record needs no door flag; the human stamp is still required", () => {
+    const approved = evidenceFromJobInventory(twoRealJobs(), {
+      project: record([{ id: "fx-1", approval: "approved", decidedBy: "human" }]),
+    });
+    assert.equal(approved.humanFixtures, true);
+    assert.equal(approved.acceptance?.state, "human-approved");
+    const fired = factoryClaim(approved, {});
+    assert.equal(fired.autonomousSoftwareFactory, true, "every signal genuinely met");
+    assert.equal(fired.awaitingHumanAcceptance, false, "not awaiting: the stamp is present");
+    assert.deepEqual(fired.gaps, []);
+    // Teeth: drop ONLY the human stamp → the latch falls and the door is named.
+    const pend = factoryClaim(
+      evidenceFromJobInventory(twoRealJobs(), { project: record([{ id: "fx-1", approval: "pending" }]) }),
+      {},
+    );
+    assert.equal(pend.autonomousSoftwareFactory, false, "the human stamp is still required");
+    assert.equal(pend.awaitingHumanAcceptance, true);
+  });
+
+  it("awaiting never flips the flag: a full machine-complete bag with human false stays un-latched", () => {
+    const claim = factoryClaim({
+      leftoverJobsAreReexportsOrStubs: false,
+      humanFixtures: false,
+      realMultiJobProduct: true,
+      productComplete: true,
+      acceptance: { state: "pending", total: 1, approved: 0, pending: 1, decidedBy: "undecided" },
+    });
+    assert.equal(claim.awaitingHumanAcceptance, true);
+    assert.equal(claim.autonomousSoftwareFactory, false);
+    assert.deepEqual(claim.gaps, [FACTORY_GAP.fixtures]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W53 · 340-2 — the census gap names the single-real-module state honestly
+//
+// "no real multi-job product" reads as "nothing real was produced", but a
+// scanned tree with one real module and zero leftovers HAS a real product whose
+// shape is a single entry module — the legitimate shape of a library/service
+// brief. The text now names that state (a BREADTH fact) without weakening the
+// flag: `realMultiJobProduct` still requires ≥2 real jobs, zero stubs/reexports,
+// and the classifier is untouched.
+// ---------------------------------------------------------------------------
+
+describe("W53 · 340-2 — the census gap names the single-real-module state", () => {
+  it("a measured single-real-module census is named precisely, distinct from leftover stubs", () => {
+    const inv = inventoryFromJobSources([
+      { path: "src/jobs/entry.ts", source: "export function entry() { return 1; }" },
+    ]);
+    assert.deepEqual([inv.stubs, inv.reexports, inv.real], [0, 0, 1]);
+    const ev = evidenceFromJobInventory(inv, { project: ov9Project() });
+    assert.equal(ev.leftoverJobsAreReexportsOrStubs, false, "no leftovers — this is not a stub tree");
+    assert.equal(ev.realMultiJobProduct, false, "one module is NOT a multi-job product");
+    const claim = factoryClaim(ev, {});
+    assert.ok(claim.gaps.includes(FACTORY_GAP.singleJob), "the single-entry-module state is named");
+    assert.ok(!claim.gaps.includes(FACTORY_GAP.product), "not the misleading 'no real product' text");
+    assert.ok(!claim.gaps.includes(FACTORY_GAP.leftover), "and not the leftover-stub text");
+    // No loosening: an approved human set still cannot fire on one real job.
+    const approved = evidenceFromJobInventory(inv, {
+      project: {
+        ...ov9Project(),
+        acceptanceFixtures: [{ id: "fx-1", approval: "approved", decidedBy: "human" }],
+      },
+    });
+    assert.equal(factoryClaim(approved, {}).autonomousSoftwareFactory, false, "≥2 real jobs still required");
+  });
+
+  it("an UNMEASURED census keeps the fail-closed default wording", () => {
+    const claim = factoryClaim(evidenceFromProjectRecord(ov9Project()), {});
+    assert.ok(claim.gaps.includes(FACTORY_GAP.product));
+    assert.ok(!claim.gaps.includes(FACTORY_GAP.singleJob));
+  });
+
+  it("a leftover (or garbled) census keeps the default wording — no false precision", () => {
+    const withReexport = inventoryFromJobSources([
+      { path: "src/jobs/entry.ts", source: "export function entry() { return 1; }" },
+      { path: "src/jobs/bridge.ts", source: 'export { entry } from "./entry.ts";' },
+    ]);
+    assert.deepEqual([withReexport.stubs, withReexport.reexports, withReexport.real], [0, 1, 1]);
+    const claim = factoryClaim(evidenceFromJobInventory(withReexport, { project: ov9Project() }), {});
+    assert.ok(claim.gaps.includes(FACTORY_GAP.product));
+    assert.ok(!claim.gaps.includes(FACTORY_GAP.singleJob));
+    // Garbled inventory values fail closed to the default text.
+    const garbled = factoryClaim({
+      leftoverJobsAreReexportsOrStubs: false,
+      realMultiJobProduct: false,
+      productComplete: false,
+      humanFixtures: false,
+      inventory: { stubs: "0", reexports: 0, real: 1 } as never,
+    });
+    assert.ok(garbled.gaps.includes(FACTORY_GAP.product));
+    assert.ok(!garbled.gaps.includes(FACTORY_GAP.singleJob));
+  });
+});
+
 describe("W46 · 332-2 (L1/AW45-c06) — doctor spend reads a persisted run slice", () => {
   it("a persisted run slice reports its real tokens + calls, cost stays null (no catalog)", () => {
     const spend = doctorSpend({ promptTokens: 60000, completionTokens: 17654, calls: 12 });

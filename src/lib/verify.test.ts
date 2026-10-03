@@ -7,6 +7,7 @@ import {
   sanitizeOracleExpression,
   undefinedCaseIdentifiers,
   lintFailures,
+  ESM_MODULE_UNSUPPORTED_REASON,
   NO_CALLABLE_EXPORTS_REASON,
   stripTypeAnnotationsForHarness,
 } from "./verify.server.ts";
@@ -354,6 +355,60 @@ describe("runCases safety guards (no runner needed)", () => {
   });
 });
 
+// 340-3: the manual headless seam (headless.verifyGeneratedSource) can hand
+// runCases a materialized ESM tree entry (a barrel of `export * from …`).
+// `new Function` cannot parse `import`/`export`, and the barrel's re-export
+// targets are NOT in `generatedSource`, so the honest outcome is a coded
+// refusal naming ESM — never the opaque "source failed to compile in the
+// harness" marker that named the wrong cause.
+describe("340-3 — runCases refuses a module the CommonJS harness cannot execute", () => {
+  it("refuses an ESM tree barrel with the coded ESM reason, not a compile marker", async () => {
+    const res = await runCases(
+      'export * from "./generated/chunk-0.ts";\nexport * from "./generated/chunk-1.ts";\n',
+      [{ id: "c1", expression: "x === 1" }],
+    );
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, ESM_MODULE_UNSUPPORTED_REASON);
+    assert.match(res.compileError ?? "", /RT_E_RUNNER_FAILED/, "the refusal is coded");
+    assert.doesNotMatch(
+      res.compileError ?? "",
+      /failed to compile in the harness/,
+      "the misleading compile-marker cause is replaced by the real one",
+    );
+  });
+
+  it("refuses a plain ESM module (`export const`) the same way", async () => {
+    const res = await runCases("export const x = 1;\n", [{ id: "c1", expression: "x === 1" }]);
+    assert.equal(res.pass, false);
+    assert.equal(res.compileError, ESM_MODULE_UNSUPPORTED_REASON);
+  });
+
+  it("control: a CJS module and a typed TS CJS module are never falsely refused", { skip: !available }, async () => {
+    const cjs = await runCases("exports.add = (a, b) => a + b;", [
+      { id: "c1", expression: "add(2,3) === 5" },
+    ]);
+    assert.equal(cjs.pass, true, JSON.stringify(cjs));
+    const typed = await runCases(
+      "function mean(values: number[]): number { return values[0]; }\nmodule.exports.mean = mean;\n",
+      [{ id: "c1", expression: "mean([7]) === 7" }],
+    );
+    assert.equal(typed.pass, true, JSON.stringify(typed));
+    assert.notEqual(typed.compileError, ESM_MODULE_UNSUPPORTED_REASON);
+  });
+
+  it("control: ESM keywords in regex/string/object-key data are not a refusal (no false positive)", { skip: !available }, async () => {
+    for (const src of [
+      "const re = /^export const x/;\nexports.x = re.source.length;\n", // regex literal content
+      'const s = "export default function";\nexports.x = s.length;\n', // string data
+      "const o = {\nexport: 1\n};\nexports.x = o.export;\n", // object-literal key
+      "exports.load = async () => import('node:path');\n", // dynamic import is valid CJS
+    ]) {
+      const res = await runCases(src, [{ id: "c1", expression: "x > 0" }]);
+      assert.notEqual(res.compileError, ESM_MODULE_UNSUPPORTED_REASON, src);
+    }
+  });
+});
+
 describe("generateCases", () => {
   it("returns not-configured without a key (never fabricates cases)", async () => {
     const prev = process.env.DEEPSEEK_API_KEY;
@@ -555,6 +610,10 @@ describe("foreign-shape guards (W40 N1)", () => {
 // DIFFERENT verified outcomes whose concatenation is equal (("ab","c") vs
 // ("a","bc") → "abc") mint the same evidenceHash, and the second — a genuinely
 // different machine-verified source — is dropped as a "duplicate" of the first.
+//
+// 340-3: both outcomes carry the SAME non-empty case set and a non-empty
+// finalSource, so the ONLY inputs that differ are still source and evidence —
+// the pin keeps its teeth now that a genuine `passed` mint requires both.
 // ---------------------------------------------------------------------------
 
 describe("applyVerifyOutcome — the evidence hash is boundary-safe", () => {
@@ -565,6 +624,7 @@ describe("applyVerifyOutcome — the evidence hash is boundary-safe", () => {
       iterations: 1,
       evidence: "DEF",
       finalSource: "abc",
+      cases: [{ id: "case-1", expression: "add(2,3) === 5" }],
     });
     assert.equal(first.generatedSource, "abc");
     assert.equal((first.lastTest as { label?: string } | null)?.label, "tested", "the first verdict stamps tested");
@@ -576,6 +636,7 @@ describe("applyVerifyOutcome — the evidence hash is boundary-safe", () => {
       iterations: 1,
       evidence: "EF",
       finalSource: "abcD",
+      cases: [{ id: "case-1", expression: "add(2,3) === 5" }],
     });
     assert.notEqual(second, first, "a different verified outcome is not a duplicate");
     assert.equal(second.generatedSource, "abcD", "the second verified source must be applied, not swallowed");

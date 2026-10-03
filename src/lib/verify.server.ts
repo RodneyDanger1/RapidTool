@@ -687,9 +687,12 @@ function formatLintSummary(findings: LintFailure[]): string {
  * stripper, which CAN rewrite them — e.g. `export const g = f(a < b, c > (d));`
  * comes back as `export const g = f(a          (d));`. That is not a false pass:
  * the child harness compiles __SRC with the SAME `new Function`, so a source
- * this guard refused can never run there either — `runCases` reports the honest
- * `source failed to compile in the harness`, never a mutation pass. The
- * byte-identical guarantee covers exactly the sources the JS parser accepts.
+ * this guard refused can never run there either, never a mutation pass. 340-3:
+ * `runCases` now names the cause for statement-level `import`/`export` up front
+ * (`esmModuleUnsupportedReason` → ESM_MODULE_UNSUPPORTED_REASON); a top-level
+ * `await` (no ESM statement) still reaches the harness's honest
+ * `source failed to compile in the harness` marker. The byte-identical
+ * guarantee covers exactly the sources the JS parser accepts.
  */
 export function stripTypeAnnotationsForHarness(source: string): string {
   try {
@@ -783,6 +786,55 @@ export const NO_CALLABLE_EXPORTS_REASON =
 export const NO_EXPORT_REFERENCE_REASON =
   "no oracle case references an exported callable name — machine verification is vacuous";
 
+/**
+ * 340-3: the honest coded refusal for a module the CommonJS harness cannot
+ * execute. `buildHarness` compiles __SRC with `new Function` (a JS function
+ * body), so a static `import`/`export` statement is a SyntaxError there — and
+ * the manual headless seam (headless.verifyGeneratedSource) feeds a materialized
+ * ESM tree ENTRY (a barrel of `export * from "./generated/chunk-N.ts"` lines)
+ * straight into runCases. No in-process transform can bind that barrel
+ * honestly: its re-export targets are not part of `generatedSource`, so
+ * lowering it would require inventing the sibling modules it cannot see. The
+ * refusal names the real cause instead of the opaque "source failed to compile
+ * in the harness". RT_E_RUNNER_FAILED is the runner-family code (errors.ts).
+ */
+export const ESM_MODULE_UNSUPPORTED_REASON =
+  "module uses ES-module import/export syntax — the bounded CommonJS harness (new Function) cannot execute it (RT_E_RUNNER_FAILED); verify a materialized tree with the tree-run path, not the single-module harness";
+
+/**
+ * 340-3: statement-level ESM syntax in `code` (already stripped of strings and
+ * comments, which keeps a data mention like 'export default' inert). Anchored
+ * at a statement boundary (`^` line start, or after `;`/`{`/`}`) so a regex
+ * literal (`/= import x/`) or an object-literal key (`{ export: 1 }`) is NOT
+ * mistaken for module syntax, and `exports.x =` / `module.exports` are never
+ * flagged. Dynamic `import(...)` is legal CommonJS and is excluded.
+ */
+const ESM_STATEMENT_RE =
+  /(?:^|[;{}])\s*(?:export\s*(?:\{|\*|default\b|(?:async\s+)?function\b|class\b|const\b|let\b|var\b)|import\s*(?!\())/m;
+
+/**
+ * 340-3: the honest refusal reason when `source` is an ES module the harness
+ * cannot run, else null. The gate is the harness's OWN compiler: the exact
+ * bytes `buildHarness` would embed (after stripTypeAnnotationsForHarness) are
+ * parsed with `new Function` first, so a module the harness CAN run — including
+ * a typed TypeScript CJS module, which the stripper lowers — is never flagged;
+ * only a non-compilable source that also carries statement-level ESM syntax is
+ * refused. Pure; never throws.
+ */
+export function esmModuleUnsupportedReason(source: string): string | null {
+  if (typeof source !== "string" || !source.trim()) return null;
+  const harnessSource = stripTypeAnnotationsForHarness(source);
+  try {
+    new Function(harnessSource);
+    return null; // the harness compiles it — never an ESM refusal
+  } catch {
+    // Not compilable as a function body; ESM syntax below names the cause.
+  }
+  return ESM_STATEMENT_RE.test(stripStringsAndComments(harnessSource))
+    ? ESM_MODULE_UNSUPPORTED_REASON
+    : null;
+}
+
 /** The case id at `index`, with runCases' own `case-N` fallback. Pure. */
 function caseIdAt(cases: readonly unknown[], index: number): string {
   const c = cases[index];
@@ -833,6 +885,13 @@ export async function runCases(
   // hostile expressions could otherwise print forged ORACLE_RESULT lines.
   if (!Array.isArray(cases) || cases.length === 0) {
     return { pass: false, results: [], compileError: "no cases to run" };
+  }
+  // 340-3: a module the CommonJS harness cannot compile is refused up front with
+  // the real cause (ESM import/export), never the opaque compile-fail marker —
+  // the headless seam can hand runCases a materialized ESM tree entry.
+  const esmReason = esmModuleUnsupportedReason(source);
+  if (esmReason !== null) {
+    return { pass: false, results: [], compileError: esmReason };
   }
   const validated: { id: string; expression: string }[] = [];
   let rejection: { index: number; reason: string; expression: unknown } | null = null;
@@ -1620,6 +1679,21 @@ export async function verifyAndFixServer(
       : MAX_ITERATIONS;
   if (!isDeepSeekConfigured()) {
     return { status: "not-configured", iterations: 0, evidence: "no DEEPSEEK_API_KEY server-side" };
+  }
+  // 340-3: structural refusal BEFORE any case generation — a module the
+  // CommonJS harness cannot compile (a materialized ESM tree entry, whose
+  // `export * from …` targets are not in this source) must not spend a keyed
+  // case-generation call or a fix loop. The coded reason rides the evidence;
+  // the unanchored refusal is visible via gatedFailureMint like every other
+  // pre-run refusal.
+  const esmReason = esmModuleUnsupportedReason(source);
+  if (esmReason !== null) {
+    return {
+      status: "error",
+      iterations: 0,
+      evidence: esmReason,
+      ...gatedFailureMint([], esmReason, 0, "RT_E_RUNNER_FAILED"),
+    };
   }
   // E-08 (A4-b): seed the generator with the project's A7 oracle rows (seed
   // text + pinned id list are passed as parameters — this module never

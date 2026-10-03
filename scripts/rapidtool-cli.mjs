@@ -1989,7 +1989,7 @@ async function main() {
             ...(typeof redTree === "string" ? { redTree } : {}),
           });
           if (!res.ok) {
-            respond({ ok: false, error: res.error, code: res.code ?? "RT_E_VALIDATION", foreign: res.foreign }, 1);
+            respond({ ok: false, error: res.error, code: res.code ?? "RT_E_VALIDATION", foreign: res.foreign, ...(res.quarantineFailed ? { quarantineFailed: res.quarantineFailed, judgingSkipped: res.judgingSkipped } : {}) }, 1);
             return;
           }
           const payload = {
@@ -1999,6 +1999,7 @@ async function main() {
             moduleEmbedded: res.moduleEmbedded,
             summary: res.summary,
           };
+          if (Array.isArray(res.quarantined)) { payload.quarantined = res.quarantined; payload.quarantineDir = res.quarantineDir; if (res.quarantineMissing?.length) payload.quarantineMissing = res.quarantineMissing; }
           // W14-L2 (OV-15): under --red-tree banner the emitted tree carries the
           // unmissable README banner — say so on the envelope too, so an agent
           // driver can never read this as a quietly-clean emit.

@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import ts from "typescript";
 import { exportProjectJson, slugName } from "./io.ts";
 import { inventoryFromJobSources } from "./doctor.ts";
 import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
@@ -1513,5 +1514,227 @@ describe("W52 / 338-5 — game tsconfig resolves the emitted .tsx ui node", () =
       compilerOptions: Record<string, unknown>;
     };
     assert.equal(web.compilerOptions.jsx, "react-jsx");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 340-6 (A3-f07 / W-14) — the DEFAULT emitted-UI generator.
+//
+// Pre-fix the default webapp shell rendered a name-dump (`generated exports
+// (N): …`) behind an open A3-f07 marker. These pins hold the replacement to
+// the W-14 bar: ≥2 real domain fields + ≥1 interaction bound to a GENUINELY
+// exported function, byte-deterministic, parseable, and honest (never
+// fabricated) when there is nothing real to bind.
+// ---------------------------------------------------------------------------
+describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interaction)", () => {
+  /** The emitted entry module the shell's `generated` namespace actually imports. */
+  function importedEntryBody(result: ScaffoldResult, uiPath: string, uiBody: string): string {
+    const m = uiBody.match(/import \* as generated from "([^"]+)";/);
+    assert.ok(m, "the real UI carries the generated-entry import");
+    const parts = uiPath.split("/");
+    parts.pop();
+    for (const seg of m![1]!.split("/")) {
+      if (seg === ".") continue;
+      if (seg === "..") parts.pop();
+      else parts.push(seg);
+    }
+    return bodyOf(result, parts.join("/"));
+  }
+
+  /** Syntax-only parse pin (typescript transpileModule), mirroring compile-check.server. */
+  function assertParsesTsx(label: string, source: string): void {
+    const out = ts.transpileModule(source, {
+      fileName: "console.tsx",
+      reportDiagnostics: true,
+      compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    });
+    const diags = (out.diagnostics ?? []).filter((d) => d.category !== ts.DiagnosticCategory.Message);
+    assert.equal(
+      diags.length,
+      0,
+      `${label}: emitted UI must parse — ${diags
+        .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))
+        .join("; ")}`,
+    );
+  }
+
+  const recordedSpec = (typeSignatures: string[]): NonNullable<Project["implementationSpec"]> => ({
+    requirements: ["Record and dispatch service jobs"],
+    edgeCases: ["unknown customer"],
+    errorHandling: ["reject a missing id"],
+    typeSignatures,
+    dataFlow: ["customer -> request -> dispatch"],
+    negativeConstraints: ["never dispatch an anonymous request"],
+    source: "prompt-verb",
+    briefHash: "h-3406",
+    createdAt: 0,
+  });
+
+  it("binds ≥2 spec-derived fields + an interaction to a real generated export", () => {
+    const sig =
+      "createRequest(customerId: string, priority: number): { customerId: string; priority: number }";
+    const p: Project = {
+      ...primed(),
+      implementationSpec: recordedSpec([sig]),
+      generatedSource:
+        "export function createRequest(customerId: string, priority: number): { customerId: string; priority: number } {\n" +
+        "  return { customerId, priority };\n" +
+        "}\n",
+    };
+    const result = scaffoldProject(p);
+    const ui = bodyOf(result, "src/ui/console.tsx");
+
+    // ≥2 REAL fields, derived from the recorded spec's parameters.
+    for (const field of ["customerId", "priority"]) {
+      assert.ok(sig.includes(field), `premise: ${field} is a recorded spec parameter`);
+      assert.ok(ui.includes(`name="${field}"`), `UI input bound to the real field ${field}`);
+      assert.ok(ui.includes(`htmlFor="rt-${field}"`), `UI label bound to ${field}`);
+    }
+    // ≥1 REAL interaction calling a name the generated module really exports.
+    assert.ok(ui.includes("onSubmit={onSubmit}"), "a real form handler is wired");
+    assert.ok(/generated\.createRequest\(/.test(ui), "the handler calls the generated export");
+    const entry = importedEntryBody(result, "src/ui/console.tsx", ui);
+    assert.ok(
+      /export\s+(?:async\s+)?function\s+createRequest\b/.test(entry),
+      "the called name is a genuine export of the emitted entry module",
+    );
+    // No fabricated field can sneak in: every input name maps to a recorded value.
+    for (const m of ui.matchAll(/name="([^"]+)"/g)) {
+      assert.ok(sig.includes(m[1]!), `emitted input ${m[1]} maps to a recorded spec value`);
+    }
+    assertParsesTsx("spec-derived UI", ui);
+  });
+
+  it("the real engine fixture binds the generated function's own fields (no name-dump)", () => {
+    const result = scaffoldProject(fullRun());
+    const ui = bodyOf(result, "src/ui/console.tsx");
+    assert.ok(!ui.includes("generated exports ("), "the name-dump is gone");
+    assert.ok(/generated\.synthesize\(/.test(ui), "the handler calls the real generated export");
+    const inputs = [...ui.matchAll(/name="([^"]+)"/g)].map((m) => m[1]!);
+    assert.ok(inputs.length >= 2, `≥2 domain inputs (got ${inputs.length})`);
+    assert.ok(
+      inputs.includes("name") && inputs.includes("job"),
+      "fields are the generated function's own parameter keys",
+    );
+    const entry = importedEntryBody(result, "src/ui/console.tsx", ui);
+    for (const m of ui.matchAll(/generated\.([A-Za-z_$][A-Za-z0-9_$]*)\(/g)) {
+      assert.ok(
+        new RegExp(
+          `export\\s*\\{[^}]*\\b${m[1]}\\b|export\\s+(?:async\\s+)?function\\s+${m[1]}\\b`,
+        ).test(entry),
+        `called name ${m[1]} is exported by the emitted entry`,
+      );
+    }
+    assertParsesTsx("fixture UI", ui);
+  });
+
+  it("tree mode binds the tree ENTRY module's real exports too", () => {
+    const p: Project = {
+      ...primed(),
+      implementationSpec: recordedSpec([
+        "planRoute(origin: string, destination: string): { origin: string; destination: string }",
+      ]),
+      generatedSource: "",
+      generatedTree: [
+        {
+          path: "src/jobs/plan.ts",
+          source: "export function planRoute(origin: string, destination: string) {\n  return { origin, destination };\n}\n",
+          hash: "h-plan",
+          attempt: 0,
+        },
+      ],
+    };
+    const result = scaffoldProject(p);
+    const ui = bodyOf(result, "src/ui/console.tsx");
+    assert.ok(/import \* as generated from "\.\.\/jobs\/plan\.ts";/.test(ui), "imports the computed tree entry");
+    assert.ok(/generated\.planRoute\(/.test(ui), "calls the tree entry's real export");
+    for (const field of ["origin", "destination"]) {
+      assert.ok(ui.includes(`name="${field}"`), `input bound to the tree field ${field}`);
+    }
+    const entry = importedEntryBody(result, "src/ui/console.tsx", ui);
+    assert.ok(/export function planRoute\b/.test(entry), "the called name is exported by the tree entry");
+    assertParsesTsx("tree UI", ui);
+  });
+
+  it("no generated module ⇒ the honest no-module panel (nothing fabricated)", () => {
+    const ui = bodyOf(scaffoldProject(primed()), "src/ui/console.tsx");
+    assert.ok(ui.includes("no generated module yet"), "the honest no-module notice survives");
+    assert.ok(!ui.includes("<input"), "no fabricated input without a generated module");
+    assert.ok(!ui.includes("onSubmit="), "no fabricated interaction without a generated module");
+  });
+
+  it("a generated module with nothing bindable ⇒ honest panel, never a fake call", () => {
+    const graph: SpecGraph = {
+      nodes: [
+        { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" },
+        { id: "job-0", file: "src/jobs/main.ts", purpose: 'Implement job "main" against the contract', dependsOn: [], owner: "implementer" },
+      ],
+      order: ["ui", "job-0"],
+    };
+    const base: Project = {
+      ...seedProject({ name: "Bare" }),
+      lattice: null,
+      contracts: null,
+      implementationSpec: null,
+      specGraph: graph,
+    };
+    // Module exists but exports no callable.
+    const noCallable = scaffoldProject({ ...base, generatedSource: 'export const VERSION = "1.0.0";\n' });
+    const ui1 = bodyOf(noCallable, "src/ui/console.tsx");
+    assert.match(ui1, /exports no callable/, "states the module exports no callable function");
+    assert.ok(!/<input|onSubmit=/.test(ui1), "no fabricated interaction without a callable");
+    // Callable exists but the project records no real domain fields.
+    const noFields = scaffoldProject({
+      ...base,
+      generatedSource: 'export function ping(): string { return "pong"; }\n',
+    });
+    const ui2 = bodyOf(noFields, "src/ui/console.tsx");
+    assert.match(ui2, /fewer than two bindable domain fields/, "names the missing real fields");
+    assert.ok(!/generated\.ping\(/.test(ui2), "never calls a function it cannot bind fields to");
+    assert.ok(!/<input|onSubmit=/.test(ui2), "no fabricated form without real fields");
+  });
+
+  it("is byte-deterministic across two builds (UI included)", () => {
+    const p: Project = {
+      ...primed(),
+      implementationSpec: recordedSpec(["createRequest(customerId: string, priority: number): void"]),
+      generatedSource:
+        "export function createRequest(customerId: string, priority: number): void {\n  void customerId;\n  void priority;\n}\n",
+    };
+    const a = scaffoldProject(p);
+    const b = scaffoldProject(p);
+    assert.deepEqual(a, b, "same project ⇒ byte-identical emission");
+    assert.equal(bodyOf(a, "src/ui/console.tsx"), bodyOf(b, "src/ui/console.tsx"));
+  });
+
+  it("the parse pin has teeth (a malformed shell is caught)", () => {
+    const out = ts.transpileModule("export function Console() { return (<main>}", {
+      fileName: "console.tsx",
+      reportDiagnostics: true,
+      compilerOptions: { jsx: ts.JsxEmit.ReactJSX },
+    });
+    assert.ok((out.diagnostics ?? []).length > 0, "a malformed UI must yield a parse diagnostic");
+  });
+
+  it("a caller-supplied UiGenerationHook still overrides the default (contract intact)", () => {
+    const result = scaffoldProject(fullRun(), {
+      uiGeneration: () => ["  return (", "    <main>", '      <h1>{"hook"}</h1>', "    </main>", "  );"],
+    });
+    const ui = bodyOf(result, "src/ui/console.tsx");
+    assert.ok(ui.includes('<h1>{"hook"}</h1>'), "the caller hook's lines landed");
+    assert.ok(!ui.includes("onSubmit="), "the default generator did not also run");
+    assert.deepEqual(result.ok ? result.uiGeneration : undefined, {
+      hook: "caller",
+      applied: true,
+      uiPath: "src/ui/console.tsx",
+    });
+    // A null return keeps the (now real) default generator.
+    const kept = scaffoldProject(fullRun(), { uiGeneration: () => null });
+    assert.match(bodyOf(kept, "src/ui/console.tsx"), /generated\.synthesize\(/, "null keeps the default");
+    assert.deepEqual(kept.ok ? kept.uiGeneration : undefined, {
+      hook: "default-generator",
+      applied: false,
+      uiPath: "src/ui/console.tsx",
+    });
   });
 });

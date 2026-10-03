@@ -42,6 +42,7 @@ import {
   treeRunFailureFiles,
   wildPauseRun,
   wildResumeRun,
+  wildStartHeadless,
   wildStartRun,
   wildStopRun,
   withCommonJsExports,
@@ -55,7 +56,8 @@ import { evaluatePolicy } from "./policy.ts";
 import { recordSessionSpend, resetSessionBudget, sessionTokenBudget } from "./token-ledger.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
 import { fnv1a } from "./algorithms.ts";
-import type { PhaseId, Project } from "./types.ts";
+import type { PhaseId, Project, WildPlan } from "./types.ts";
+import type { WildReviewer } from "./engine.ts";
 import type { RtEventSeed } from "./rt-events.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 import { TREE_ENTRY_PATH } from "./codegen.server.ts";
@@ -2741,6 +2743,93 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
     }
   });
 
+  it("W53 · 340-2: doctor --tree surfaces awaitingHumanAcceptance — machine-complete but unaccepted vs. a leftover tree", () => {
+    // One real archived record, two trees. The record is the same arch-complete
+    // keyed shape the 338-3 test closes the product bar on, but its fixture set
+    // is drafted-and-PENDING: the ONE deliberate human door, not a defect.
+    const record = {
+      name: "wired",
+      brief: "a board tool",
+      lattice: { domain: "boards", jobs: ["board", "column"], entities: [], constraints: [], nodes: [], complexity: 2 },
+      phases: [],
+      implementationSpec: {
+        requirements: ["Board shows cards by status"],
+        edgeCases: [],
+        errorHandling: [],
+        typeSignatures: [
+          "export function createBoard(name: string): Board",
+          "export function addColumn(board: Board, title: string): Column",
+        ],
+        dataFlow: [],
+        negativeConstraints: [],
+        source: "p6",
+        briefHash: "wired",
+        createdAt: 1,
+      },
+      generatedTree: [
+        {
+          path: "src/domain/board.ts",
+          source: "export type Board = { id: string };\nexport function createBoard(name: string): Board { return { id: name }; }\n",
+          hash: "h1",
+          attempt: 0,
+        },
+        {
+          path: "src/domain/column.ts",
+          source: "export type Column = { id: string };\nexport function addColumn(board: Board, title: string): Column { return { id: title }; }\n",
+          hash: "h2",
+          attempt: 0,
+        },
+      ],
+      acceptanceFixtures: [{ id: "fx-1", approval: "pending" }],
+    };
+    const build = (jobs: Array<[string, string]>) => {
+      const dir = tempDir();
+      const jobsDir = join(dir, "src", "jobs");
+      mkdirSync(jobsDir, { recursive: true });
+      for (const [name, source] of jobs) writeFileSync(join(jobsDir, name), source);
+      const recordDir = join(dir, ".rapidtool");
+      mkdirSync(recordDir, { recursive: true });
+      writeFileSync(join(recordDir, "project.json"), JSON.stringify(record));
+      return dir;
+    };
+    const realDir = build([
+      ["board.ts", "export function createBoard() { return { id: 'b1' }; }\n"],
+      ["column.ts", "export function addColumn() { return { id: 'c1' }; }\n"],
+    ]);
+    const leftoverDir = build([
+      ["board.ts", "export function createBoard() {\n  throw new Error('TODO(E-15) stub: implement board');\n}\n"],
+      ["column.ts", "export { addColumn } from './board.ts';\n"],
+    ]);
+    try {
+      const a = runCli(["doctor", "--tree", realDir]);
+      assert.equal(a.code, 0, JSON.stringify(a.json));
+      const fa = (a.json as { factory: {
+        autonomousSoftwareFactory: boolean;
+        awaitingHumanAcceptance: boolean;
+        gaps: string[];
+        inventory: { real: number } | null;
+      } }).factory;
+      assert.equal(fa.inventory?.real, 2);
+      assert.equal(fa.autonomousSoftwareFactory, false, "the human stamp is still required");
+      assert.equal(fa.awaitingHumanAcceptance, true, "the sole remaining reason is the deliberate human door");
+      assert.deepEqual(fa.gaps, ['no human-approved fixtures (decidedBy:"human")']);
+
+      const b = runCli(["doctor", "--tree", leftoverDir]);
+      assert.equal(b.code, 0, JSON.stringify(b.json));
+      const fb = (b.json as { factory: {
+        autonomousSoftwareFactory: boolean;
+        awaitingHumanAcceptance: boolean;
+        gaps: string[];
+      } }).factory;
+      assert.equal(fb.autonomousSoftwareFactory, false);
+      assert.equal(fb.awaitingHumanAcceptance, false, "a leftover tree is a real defect, not the human door");
+      assert.ok(fb.gaps.some((g) => g.includes("leftover jobs")));
+    } finally {
+      rmSync(realDir, { recursive: true, force: true });
+      rmSync(leftoverDir, { recursive: true, force: true });
+    }
+  });
+
   it("W52 · 338-3: doctor --project derives productComplete/humanFixtures but keeps the census gaps (fail-closed)", () => {
     const dir = tempDir();
     try {
@@ -2922,7 +3011,7 @@ describe("A7 emitProject wipes ghost specs and refuses foreign files", () => {
     }
   });
 
-  it("refuses foreign leftover without --force; keeps it with force", async () => {
+  it("refuses foreign leftover without --force; quarantines it with force", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rt-emit-"));
     try {
       const p = createProject({ brief: FIXTURE_BRIEF, name: "EmitForeign" });
@@ -2939,8 +3028,10 @@ describe("A7 emitProject wipes ghost specs and refuses foreign files", () => {
       const forced = await emitProject(p, dir, { force: true });
       assert.equal(forced.ok, true, forced.ok ? "" : forced.error);
       if (forced.ok) {
-        assert.ok(forced.survivors.includes("NOTES.md"));
-        assert.equal(existsSync(join(dir, "NOTES.md")), true);
+        // R11-f08: a forced emit MOVES the foreign file aside (never in place).
+        assert.ok(forced.quarantined.includes("NOTES.md"));
+        assert.equal(existsSync(join(dir, "NOTES.md")), false);
+        assert.equal(forced.survivors.length, 0, "nothing survives in place");
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -2967,6 +3058,66 @@ describe("A7 emitProject wipes ghost specs and refuses foreign files", () => {
       const res = await emitProject(p, dir);
       assert.equal(res.ok, true, res.ok ? "" : res.error);
       assert.equal(existsSync(join(dir, ".rapidtool-emit.lock")), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R11-f08 (in-engine lift) — a forced emit MOVES the foreign files aside into
+// `<dir>/.rapidtool-quarantine/<stamp>/` and reports them, so EVERY forced
+// caller (not just the CLI) quarantines and no later tree-run judges bytes the
+// factory never authored. A failed move refuses the emit (`ok:false`,
+// RT_E_FOREIGN_FILES) with `judgingSkipped`, so the CLI's --verify-kind/--check/
+// --run legs cannot mint `tested` over a still-mixed tree.
+// ---------------------------------------------------------------------------
+describe("R11-f08 — emitProject quarantines forced foreign files (in-engine lift)", () => {
+  it("moves forced foreign files into .rapidtool-quarantine/<stamp>/ (recoverable, never deleted)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-emit-q-"));
+    try {
+      const p = createProject({ brief: FIXTURE_BRIEF, name: "EmitQuarantine" });
+      const first = await emitProject(p, dir);
+      assert.equal(first.ok, true, first.ok ? "" : first.error);
+      writeFileSync(join(dir, "NOTES.md"), "user notes");
+      writeFileSync(join(dir, "scratch.txt"), "scratch");
+      const forced = await emitProject(p, dir, { force: true });
+      assert.equal(forced.ok, true, forced.ok ? "" : forced.error);
+      if (!forced.ok) return;
+      assert.deepEqual(forced.quarantined, ["NOTES.md", "scratch.txt"]);
+      assert.ok(forced.quarantineDir, "the quarantine dir is reported");
+      assert.equal(forced.survivors.length, 0, "nothing is left in place");
+      assert.equal(existsSync(join(dir, "NOTES.md")), false);
+      assert.equal(
+        readFileSync(join(forced.quarantineDir!, "NOTES.md"), "utf8"),
+        "user notes",
+        "quarantine means recoverable — the bytes move, they are not deleted",
+      );
+      // A repeat forced emit never re-judges the quarantine as foreign leftovers.
+      const again = await emitProject(p, dir, { force: true });
+      assert.equal(again.ok, true, again.ok ? "" : again.error);
+      if (again.ok) assert.equal(again.quarantined.length, 0, "the quarantine dir is skipped by the emit walk");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a failed quarantine move refuses the emit and suppresses judging", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-emit-qf-"));
+    try {
+      const p = createProject({ brief: FIXTURE_BRIEF, name: "EmitQuarantineFail" });
+      const first = await emitProject(p, dir);
+      assert.equal(first.ok, true, first.ok ? "" : first.error);
+      writeFileSync(join(dir, "NOTES.md"), "user notes");
+      // `.rapidtool-quarantine` exists as a FILE, so the quarantine mkdir fails.
+      writeFileSync(join(dir, ".rapidtool-quarantine"), "not a directory");
+      const forced = await emitProject(p, dir, { force: true });
+      assert.equal(forced.ok, false, "a failed move must refuse, never report a mixed tree as emitted");
+      if (forced.ok) return;
+      assert.equal(forced.code, "RT_E_FOREIGN_FILES");
+      assert.ok(forced.foreign?.includes("NOTES.md"), "the still-in-place foreign file is named");
+      assert.match(String(forced.judgingSkipped), /did not run/, "judging is suppressed over the mixed tree");
+      assert.equal(existsSync(join(dir, "NOTES.md")), true, "the failed move leaves the file in place");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -3389,6 +3540,119 @@ describe("312 D2 — wildStartRun threads the caller's onEvent sink (B-02)", () 
       rows.some((r) => r.event === "wild.step_ok" || r.event === "wild.step_paused" || r.event === "wild.step_error"),
       `the step's terminal row must reach the caller's sink (got: ${rows.map((r) => r.event).join(", ") || "<none>"})`,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R13-f02 — the classifier/pause half. A real planner plan is REVIEWED by the
+// Auto-Review classifier and the run PARKS before the first mutation (a real
+// park state + `wild.plan_review` ledger row), so "no execution without an
+// approved plan" is machine state, not a note. The reviewer is the existing
+// injectable seam (no keyed call in tests).
+// ---------------------------------------------------------------------------
+describe("R13-f02 — planner rows are reviewed and the run parks before the first mutation", () => {
+  const plannerPlan = (): WildPlan => ({
+    goal: "deliver the brief",
+    steps: [
+      { id: "s1", action: "draft the core module", why: "the brief's evidence row requires it" },
+      { id: "s2", action: "verify the module", why: "machine-verification is the P6 bar" },
+    ],
+    source: "planner",
+    plannedAt: 1,
+    note: "planner rows (test)",
+  });
+
+  it("reviews the rows with the classifier and parks before any step mutates", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "PlanReview" });
+    const seeded: Project = { ...base, wildPlan: plannerPlan() };
+    const seen: Project[] = [];
+    const reviewer: WildReviewer = async (ctx) => {
+      seen.push(ctx.project);
+      return {
+        ok: true,
+        verdict: "approve",
+        feedback: "The plan's steps are concrete, ordered, and grounded in the brief's evidence.",
+        model: "test-reviewer",
+      };
+    };
+    const res = await wildStartRun(seeded, { maxSteps: 4, reviewer });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(res.outcome, "paused", "a planner plan parks the run before execution");
+    assert.equal(res.steps, 0, "no step may mutate before the plan is reviewed");
+    assert.equal(res.project.wildRun?.pause, true);
+    assert.ok(res.project.wildRun?.park, "the pause carries a real park record");
+    assert.equal(res.project.wildRun?.park?.unlock, "human-gate");
+    assert.equal(res.project.wildRun?.park?.code, "RT_E_GATE_PENDING");
+    assert.ok(
+      (res.project.logs ?? []).some((l) => l.event === "wild.plan_review"),
+      "the review lands a ledger row",
+    );
+    assert.ok((res.project.logs ?? []).some((l) => l.event === "wild.paused_plan"), "the park lands a ledger row");
+    assert.equal(seen.length, 1, "the classifier is called exactly once for the plan");
+    assert.deepEqual(
+      seen[0]?.wildPlan?.steps.map((s) => s.id),
+      ["s1", "s2"],
+      "the review context carries the planner rows",
+    );
+  });
+
+  it("does not re-review a stored plan once the review row exists (idempotent)", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "PlanReviewIdem" });
+    const seeded: Project = { ...base, wildPlan: plannerPlan() };
+    const first = await wildStartRun(seeded, {
+      maxSteps: 2,
+      reviewer: async () => ({
+        ok: true,
+        verdict: "approve",
+        feedback: "The plan's steps are concrete and grounded in the brief's evidence.",
+        model: "test",
+      }),
+    });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+    let calls = 0;
+    const counting: WildReviewer = async () => {
+      calls += 1;
+      return { ok: true, verdict: "approve", feedback: "no re-review should reach here", model: "test" };
+    };
+    const step = await wildStartHeadless(first.project, { maxSteps: 1, reviewer: counting });
+    assert.equal(step.ok, true);
+    assert.equal(calls, 0, "a plan whose review row exists is never re-reviewed");
+  });
+
+  it("keyless (no reviewer): still parks, with an honest not-configured review row", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "PlanReviewKeyless" });
+    const seeded: Project = { ...base, wildPlan: plannerPlan() };
+    const res = await wildStartRun(seeded, { maxSteps: 2 });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(res.outcome, "paused");
+    assert.equal(res.steps, 0);
+    assert.equal(res.project.wildRun?.pause, true);
+    const row = (res.project.logs ?? []).find((l) => l.event === "wild.plan_review");
+    assert.ok(row, "a keyless host records the honest not-configured review row");
+    assert.match(String(row?.detail), /not configured/i);
+  });
+
+  it("a classifier REJECT still parks and never executes the plan", async () => {
+    const base = createProject({ brief: FIXTURE_BRIEF, name: "PlanReviewReject" });
+    const seeded: Project = { ...base, wildPlan: plannerPlan() };
+    const res = await wildStartRun(seeded, {
+      maxSteps: 2,
+      reviewer: async () => ({
+        ok: true,
+        verdict: "reject",
+        feedback: "Step s2 cannot be verified from the brief; the plan omits the evidence row.",
+        model: "test",
+      }),
+    });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(res.outcome, "paused");
+    assert.equal(res.steps, 0);
+    const row = (res.project.logs ?? []).find((l) => l.event === "wild.plan_review");
+    assert.match(String(row?.detail), /reject/i);
   });
 });
 

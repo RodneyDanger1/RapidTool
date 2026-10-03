@@ -170,6 +170,30 @@ export function buildWildReviewPrompt(ctx: WildReviewContext): string {
       "Steering: if any recorded rejection exists, this review MUST judge whether the re-run addresses its note — a re-approval that ignores a recorded rejection is a rubber stamp.",
     );
   }
+  // R13-f02 (340-5): the PLAN review routes through THIS production prompt
+  // (`engine.reviewWildPlan` → the reviewer seam → `wildClassifierReview`), so
+  // without the rows the classifier judges an absent plan and the review is
+  // vacuous. Render only the STORED planner rows — one line per row, capped with
+  // a named elision; an absent/empty plan adds nothing (byte-identical legacy
+  // prompt). Rows come from `project.wildPlan` verbatim, never invented.
+  const PLAN_STEP_CAP = 12;
+  const storedPlan = p.wildPlan;
+  const planSteps =
+    storedPlan && storedPlan.source === "planner" && Array.isArray(storedPlan.steps) ? storedPlan.steps : [];
+  const oneLine = (s: string): string => String(s ?? "").replace(/\s+/g, " ").trim();
+  const planOmitted = Math.max(0, planSteps.length - PLAN_STEP_CAP);
+  const planLines =
+    planSteps.length > 0
+      ? [
+          `Plan under review (${planSteps.length} step(s)):`,
+          ...planSteps
+            .slice(0, PLAN_STEP_CAP)
+            .map((s) => `- ${oneLine(s.id)}: ${oneLine(s.action)} — ${oneLine(s.why)}`),
+          ...(planOmitted > 0
+            ? [`… (${planOmitted} further step(s) omitted — the prompt shows at most ${PLAN_STEP_CAP})`]
+            : []),
+        ]
+      : [];
   return [
     `Project: ${p.name}`,
     `Domain: ${p.domain}`,
@@ -177,6 +201,7 @@ export function buildWildReviewPrompt(ctx: WildReviewContext): string {
     ``,
     `Phase under review: ${def.code} ${def.title} — ${def.summary}`,
     `Review reason: ${ctx.reason === "gate" ? "an approval gate is open for this phase" : "this phase just executed; decide whether the loop may leave it"}`,
+    ...(planLines.length > 0 ? ["", ...planLines] : []),
     ``,
     // Blinded judge (185-U8): do NOT inject a pre-chewed PASS/FAIL DoD machine
     // verdict. The model must weigh unmet criteria + artifacts itself.

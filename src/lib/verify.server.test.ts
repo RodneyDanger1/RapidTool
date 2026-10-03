@@ -29,6 +29,7 @@ import assert from "node:assert/strict";
 import {
   buildOracleCasesPrompt,
   droppedPinnedOracleIds,
+  ESM_MODULE_UNSUPPORTED_REASON,
   generateCases,
   NO_CALLABLE_EXPORTS_REASON,
   NO_EXPORT_REFERENCE_REASON,
@@ -1374,14 +1375,14 @@ describe("338-6 — a harvested lesson changes the P6 expansion input", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 339-6 — the `tested` mint is airtight: a hollow "passed" envelope (a
-// present-but-empty case set, or no evidence text) is REFUSED at the client
-// seam, never stamped tested. verify.server.ts's genuine runner pass always
-// carries the non-empty case set it evaluated and a non-empty evidence string;
-// anything else is a fabrication path that maker-score M4 / judgment.ts read
-// as machine proof (they check the label + hash, not the detail dod.ts checks).
-// An ABSENT `cases` field stays accepted — the legacy envelope shape the
-// 337-3 hash test in verify.test.ts pins (lane 339-1).
+// 339-6 + 340-3 — the `tested` mint is airtight: a hollow "passed" envelope is
+// REFUSED at the client seam, never stamped tested. verify.server.ts's genuine
+// runner pass always carries the non-empty case set it evaluated, a non-empty
+// evidence string, AND the finalSource it ran; anything else is a fabrication
+// path that maker-score M4 / judgment.ts read as machine proof (they check the
+// label + hash, not the detail dod.ts checks). 340-3 closed the last two
+// shapes: an ABSENT `cases` field (the 337-3 fixtures now carry a real case
+// set) and a pass with no verified finalSource.
 // ---------------------------------------------------------------------------
 describe("339-6 — a hollow 'passed' outcome never mints tested", () => {
   const base = {
@@ -1391,6 +1392,28 @@ describe("339-6 — a hollow 'passed' outcome never mints tested", () => {
   };
   const testedLabel = (p: Project): string | null =>
     (p.lastTest as { label?: string } | null)?.label ?? null;
+
+  it("an ABSENT `cases` field mints no tested label (340-3: the last hollow-pass path)", () => {
+    const p = seedProject();
+    const q = applyVerifyOutcome(p, {
+      ...base,
+      evidence: "1/1 machine-run cases passed on iteration 1",
+    });
+    assert.equal(testedLabel(q), null, "a pass that never names the cases it ran is not a runner pass");
+    assert.equal(q, p, "a refused hollow verdict changes no state");
+  });
+
+  it("a pass with no verified final source mints no tested label (340-3 sibling)", () => {
+    const p = seedProject();
+    const q = applyVerifyOutcome(p, {
+      ...base,
+      evidence: "1/1 machine-run cases passed on iteration 1",
+      cases: [{ id: "c1", expression: "add(2,3) === 5" }],
+      finalSource: "   ",
+    });
+    assert.equal(testedLabel(q), null, "a pass naming no verified bytes cannot converge generatedSource");
+    assert.equal(q, p, "a refused hollow verdict changes no state");
+  });
 
   it("a present-but-empty case set (`cases: []`) mints no tested label", () => {
     const p = seedProject();
@@ -1434,5 +1457,51 @@ describe("339-6 — a hollow 'passed' outcome never mints tested", () => {
     });
     assert.ok(q && typeof q === "object", "applyVerifyOutcome returned a project, never threw");
     assert.ok((q.logs ?? []).some((l) => l.event === "verify.fail"), "the failed verdict is still recorded");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 340-3 — the manual Oracle/CLI seam (headless.verifyGeneratedSource) can hand
+// verifyAndFixServer a materialized ESM tree entry (`export * from …`). The
+// CommonJS harness cannot compile it, so the honest outcome is a coded error
+// refusal naming ESM — returned BEFORE any keyed case generation or fix loop.
+// ---------------------------------------------------------------------------
+describe("340-3 — an ESM module is refused before any keyed work", () => {
+  it("returns status error with the coded ESM reason and touches no model wire", async () => {
+    const restoreKey = withFakeKey();
+    const realFetch = globalThis.fetch;
+    let called = 0;
+    globalThis.fetch = (async () => {
+      called++;
+      throw new Error("no keyed call may run for a module the harness cannot execute");
+    }) as typeof fetch;
+    try {
+      const outcome = await verifyAndFixServer('export * from "./generated/chunk-0.ts";\n', BRIEF);
+      assert.equal(outcome.status, "error");
+      assert.equal(outcome.iterations, 0, "no machine run was minted");
+      assert.equal(outcome.evidence, ESM_MODULE_UNSUPPORTED_REASON);
+      assert.match(outcome.evidence, /RT_E_RUNNER_FAILED/, "the refusal is coded");
+      assert.equal(outcome.lesson, undefined, "an unanchored pre-run refusal mints no lesson row");
+      assert.equal(called, 0, "the structural refusal precedes case generation");
+    } finally {
+      globalThis.fetch = realFetch;
+      restoreKey();
+    }
+  });
+
+  it("control: a CJS module still reaches case generation (no false ESM refusal)", async () => {
+    const restoreKey = withFakeKey();
+    const mock = mockChat([allPinned]);
+    try {
+      const outcome = await verifyAndFixServer(SOURCE, BRIEF, {
+        seeds: SEEDS,
+        pinnedOracleIds: ORACLE_IDS,
+      });
+      assert.notEqual(outcome.evidence, ESM_MODULE_UNSUPPORTED_REASON);
+      assert.equal(mock.calls.length > 0, true, "generation was attempted for a CJS module");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
   });
 });

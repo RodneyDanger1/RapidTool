@@ -531,3 +531,58 @@ describe("A2 (325) — review-prompt budget closure B2/B3", () => {
     assert.equal(short.includes(`Brief: ${shortBrief}…`), false, "no gratuitous ellipsis");
   });
 });
+
+// ---------------------------------------------------------------------------
+// R13-f02 (340-5 · headless-gov resume): the plan review must SEE the plan in
+// production. `engine.reviewWildPlan` routes through THIS production prompt
+// (`buildWildReviewPrompt` → `wildClassifierReview`), so the STORED planner
+// rows are rendered — one line per row, capped with a named elision; an
+// absent/empty plan leaves the prompt byte-identical (legacy).
+// ---------------------------------------------------------------------------
+describe("R13-f02 (340-5) — stored planner rows reach the production review prompt", () => {
+  const plan = (steps: { id: string; action: string; why: string }[], source: "planner" | "empty" = "planner") => ({
+    goal: "deliver the brief",
+    steps,
+    source,
+    plannedAt: 1,
+    note: "planner rows (test)",
+  });
+  const withPlan = (
+    base: WildReviewContext,
+    steps: { id: string; action: string; why: string }[],
+    source: "planner" | "empty" = "planner",
+  ): WildReviewContext => ({ ...base, project: { ...base.project, wildPlan: plan(steps, source) } });
+
+  it("(a) a stored planner plan appears in the built prompt, one line per row", () => {
+    const ctx = withPlan(reviewCtx(), [
+      { id: "s1", action: "draft the core module", why: "the brief's evidence row requires it" },
+      { id: "s2", action: "verify the module", why: "machine-verification is the P6 bar" },
+    ]);
+    const prompt = buildWildReviewPrompt(ctx);
+    assert.match(prompt, /Plan under review \(2 step\(s\)\):/);
+    assert.ok(prompt.includes("- s1: draft the core module — the brief's evidence row requires it"), "row 1 verbatim");
+    assert.ok(prompt.includes("- s2: verify the module — machine-verification is the P6 bar"), "row 2 verbatim");
+    const section = prompt.split("Plan under review (2 step(s)):\n")[1].split("\n\nUnmet DoD criteria:")[0];
+    assert.equal(section.split("\n").length, 2, "exactly one line per row, no invented prose");
+  });
+
+  it("(b) absent or empty plan leaves the prompt byte-identical (legacy control)", () => {
+    const base = reviewCtx();
+    const legacy = buildWildReviewPrompt(base);
+    assert.equal(buildWildReviewPrompt({ ...base, project: { ...base.project } }), legacy, "absent plan");
+    assert.equal(buildWildReviewPrompt(withPlan(base, [], "empty")), legacy, "empty shell plan");
+    assert.equal(buildWildReviewPrompt(withPlan(base, [], "planner")), legacy, "planner plan with no rows");
+    assert.equal(legacy.includes("Plan under review"), false, "the legacy prompt carries no plan section");
+  });
+
+  it("(c) the row cap is enforced with a visible elision marker", () => {
+    const steps = Array.from({ length: 15 }, (_, i) => ({ id: `s${i + 1}`, action: `action ${i + 1}`, why: `why ${i + 1}` }));
+    const prompt = buildWildReviewPrompt(withPlan(reviewCtx(), steps));
+    assert.ok(prompt.includes("- s12: action 12 — why 12"), "row 12 is the last one inside the 12-row cap");
+    assert.equal(prompt.includes("- s13:"), false, "row 13 beyond the cap is not shown");
+    assert.ok(
+      prompt.includes("… (3 further step(s) omitted — the prompt shows at most 12)"),
+      "the elision names the omitted count and the cap",
+    );
+  });
+});

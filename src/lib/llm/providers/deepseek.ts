@@ -38,6 +38,10 @@
 import { appendFileSync } from "node:fs";
 import type { LlmModel, LlmResult } from "../../llm.ts";
 import { classifyError } from "../../errors.ts";
+// T5.7: the deterministic cassette seam. `wrapWithActiveCassette` is the
+// identity when RAPIDTOOL_CASSETTE_MODE is unset/"off" (see its doc), so the
+// default call path is unchanged.
+import { wrapWithActiveCassette } from "../../cassette.ts";
 // W45·331-1 (Keywright): the one-shot transport (undici's TLS handle races the
 // CLI's in-tick process.exit on Node 24/Windows) and the key-source provenance
 // a rejected 401 names.
@@ -742,12 +746,22 @@ function tapLlmCall(record: LlmCallTapRecord): void {
  * The provider entry point (unchanged signature + behavior). `completeDeepSeekInner`
  * computes the result; this wrapper forwards it untouched and, when a tap is
  * installed, appends ONE record for the call (success or refusal).
+ *
+ * T5.7: the real wire call is routed through the env-armed cassette. With
+ * `RAPIDTOOL_CASSETTE_MODE` unset/"off" the transport returned is
+ * `completeDeepSeekInner` itself — the pre-cassette path, byte-identical.
+ * `record` tapes the served envelope; `replay` serves from the tape and never
+ * reaches `completeDeepSeekInner`.
  */
 export async function completeDeepSeek(
   prompt: string,
   opts: DeepSeekCompleteOptions = {},
 ): Promise<LlmResult> {
-  const res = await completeDeepSeekInner(prompt, opts);
+  // 340-4: the family id is folded into the tape key, so a DeepSeek tape can
+  // never serve the OpenAI-compatible family (and vice versa) for a same
+  // model-id string. Mirrors the registry's LlmProviderId member "deepseek".
+  const transport = await wrapWithActiveCassette(completeDeepSeekInner, "deepseek");
+  const res = await transport(prompt, opts);
   const record: LlmCallTapRecord = {
     at: Date.now(),
     ok: res.ok === true,

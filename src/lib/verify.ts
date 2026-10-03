@@ -161,19 +161,30 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
   // W40 N1 (H1 leftover): a junk outcome (null/non-object/statusless) is the
   // same no-state-change path as not-configured — never deref a foreign shape.
   if (!outcome || typeof outcome.status !== "string" || outcome.status === "not-configured") return project;
-  // 339-6: a `passed` status is a CLAIM; only a genuine runner pass may mint
-  // `tested`. verify.server.ts's runner always returns the evidence of the run
-  // — a non-empty evidence string AND the non-empty case set it evaluated. An
-  // envelope claiming "passed" with a present-but-EMPTY case set, or with no
-  // evidence text, is hollow: it is refused on this same no-state-change path
-  // (never a fabricated verdict) instead of stamping a `tested` label that
-  // maker-score M4 / judgment.ts read as machine proof (they check label+hash,
-  // not the detail dod.ts p6-verified checks). An ABSENT `cases` field stays
-  // accepted: it is the legacy envelope shape verify.test.ts's 337-3 hash test
-  // pins (lane 339-1).
+  // 339-6 + 340-3: a `passed` status is a CLAIM; only a genuine runner pass may
+  // mint `tested`. verify.server.ts's runner always returns the evidence of the
+  // run — a non-empty evidence string, the non-empty case set it evaluated, AND
+  // the finalSource it executed. An envelope claiming "passed" with an ABSENT or
+  // empty `cases` field, with no evidence text, or with no final source is
+  // hollow: it is refused on this same no-state-change path (never a fabricated
+  // verdict) instead of stamping a `tested` label that maker-score M4 /
+  // judgment.ts read as machine proof (they check label+hash, not the detail
+  // dod.ts p6-verified checks). The case set is required because runCases() is
+  // refuse-to-run on zero cases, and the finalSource because convergence is
+  // impossible without the bytes the harness actually ran.
   const evidence = typeof outcome.evidence === "string" ? outcome.evidence : "";
-  const emptyCaseSet = Array.isArray(outcome.cases) && outcome.cases.length === 0;
-  if (outcome.status === "passed" && (evidence.trim().length === 0 || emptyCaseSet)) return project;
+  const caseSet = Array.isArray(outcome.cases) ? outcome.cases : null;
+  const hasFinalSource =
+    typeof outcome.finalSource === "string" && outcome.finalSource.trim().length > 0;
+  if (
+    outcome.status === "passed" &&
+    (evidence.trim().length === 0 ||
+      caseSet === null ||
+      caseSet.length === 0 ||
+      !hasFinalSource)
+  ) {
+    return project;
+  }
   const passed = outcome.status === "passed";
   const now = Date.now();
   // The hash must separate its two inputs: concatenating finalSource+evidence

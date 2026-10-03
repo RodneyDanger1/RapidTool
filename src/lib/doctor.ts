@@ -12,11 +12,19 @@
  * RapidTool-now does not meet that bar. Do not invent flip/record/show/publish
  * job bodies to fake it. Sandbox is always false (no Docker claim).
  *
+ * W53 · 340-2: because the fixture conjunct is human-only by design (338-4), a
+ * machine-complete run still reads `false` — truthfully. `awaitingHumanAcceptance`
+ * names that one deliberate door separately, derived from the SAME evidence, so
+ * an operator can tell "the machine did its part; a human must accept the bar"
+ * apart from a real defect. It never flips `autonomousSoftwareFactory` and never
+ * mints a human stamp.
+ *
  * 185-H1: this envelope has no `ok`/`error` pair — never dual-channel.
  *
  * Client-safe: sandbox-policy + token-ledger + the pure p6-arch trace seam
  * (dod.ts — no node:fs anywhere in its graph; the console store already
- * bundles it). OV-9 (W18-L1): productComplete is DERIVED from real project
+ * bundles it) + the pure acceptance-state reader (fixtures.ts — no node: imports,
+ * no IO). OV-9 (W18-L1): productComplete is DERIVED from real project
  * state (`productCompleteFromProject`) — never read from a caller's flag.
  *
  * OV-1 (W23 · L4, fixes/262): the provider ENV selection (`RAPIDTOOL_PROVIDER`)
@@ -38,6 +46,7 @@ import type { TokenLedger, TokenPrices, TokenSpend } from "./token-ledger.ts";
 // pure p6-arch trace the phase-6 gate reads (dod.ts, no node:fs in its graph).
 import { archProductComplete, archTrace } from "./dod.ts";
 import { fnv1a } from "./algorithms.ts";
+import { fixtureAcceptanceState, type FixtureAcceptanceState } from "./fixtures.ts";
 import type { Project } from "./types.ts";
 // W6-L3 provider surfacing: TYPE-ONLY import — erased at compile, so the
 // client-safe runtime surface (sandbox-policy + token-ledger) is unchanged.
@@ -47,6 +56,13 @@ import type { RapidToolModelRole } from "./llm/providers/registry.ts";
 export type FactoryEvidence = {
   leftoverJobsAreReexportsOrStubs?: boolean;
   humanFixtures?: boolean;
+  /** W53 · 340-2: the project's LIVE acceptance-decision state, derived from the
+   *  record through `fixtures.fixtureAcceptanceState` (never hand-fed). It is
+   *  what lets `awaitingHumanAcceptance` name the deliberate human door
+   *  (`pending`) instead of guessing from the boolean: `no-fixtures` /
+   *  `machine-decided` / `unattributed` / `unreadable` are defects, not a human
+   *  keeping the machine waiting. Absent ⇒ the signal fails closed. */
+  acceptance?: FixtureAcceptanceState;
   realMultiJobProduct?: boolean;
   /** OV-9: derived — `productCompleteFromProject` over the project's own tree
    *  bytes. Never read from a caller's flag. */
@@ -58,6 +74,13 @@ export type FactoryEvidence = {
 
 export type DoctorFactory = {
   autonomousSoftwareFactory: boolean;
+  /** W53 · 340-2: true only when every MACHINE-fixable conjunct is satisfied and
+   *  the sole remaining factory gap is the deliberate human acceptance stamp
+   *  (`acceptance.state === "pending"`). Derived from the same evidence `gaps`
+   *  is; it never flips `autonomousSoftwareFactory` (that stays the full AND)
+   *  and never mints a human stamp. False whenever the state is absent, garbled,
+   *  already machine-decided, or any other gap also stands. */
+  awaitingHumanAcceptance: boolean;
   leftoverJobsAreReexportsOrStubs: boolean;
   chatHasSlashToolsOnly: boolean;
   runnerIsSandbox: false;
@@ -292,6 +315,37 @@ export function productCompleteFromProject(project: unknown): boolean {
 }
 
 /**
+ * The project's acceptance record is stale for the live brief? Same stale-set
+ * rule the accepted-set reader applies (io/hydrate pending-ify): a recorded
+ * `acceptanceBriefHash` that mismatches `fnv1a(brief)` belongs to a different
+ * brief. Shared by `humanFixturesFromProject` and `liveAcceptanceState` so the
+ * two readers of the same record use ONE staleness rule.
+ */
+function acceptanceRecordIsStale(p: { acceptanceBriefHash?: unknown; brief?: unknown }): boolean {
+  return (
+    typeof p.acceptanceBriefHash === "string" &&
+    typeof p.brief === "string" &&
+    p.acceptanceBriefHash !== String(fnv1a(p.brief))
+  );
+}
+
+/**
+ * W53 · 340-2: the project's LIVE acceptance-decision state — the same record
+ * `humanFixturesFromProject` reads, through the acceptance module's ONE
+ * derivation (`fixtures.fixtureAcceptanceState`). `undefined` when there is no
+ * object to read or the record is stale for the live brief, so a stale set can
+ * never be reported as "awaiting a human" (fail-closed). This is the input that
+ * makes `awaitingHumanAcceptance` name the state rather than guess it from the
+ * boolean.
+ */
+function liveAcceptanceState(project: unknown): FixtureAcceptanceState | undefined {
+  if (!project || typeof project !== "object" || Array.isArray(project)) return undefined;
+  const p = project as { acceptanceFixtures?: unknown; acceptanceBriefHash?: unknown; brief?: unknown };
+  if (acceptanceRecordIsStale(p)) return undefined;
+  return fixtureAcceptanceState(p.acceptanceFixtures);
+}
+
+/**
  * W52 · 338-3: the ONE producer of the factory's `humanFixtures` evidence —
  * DERIVED from the project's own acceptance record, never a caller's flag. The
  * bar is the acceptance gate's own (`brief-fixtures.fixtureApprovalGate`): at
@@ -308,9 +362,7 @@ export function humanFixturesFromProject(project: unknown): boolean {
   const p = project as { acceptanceFixtures?: unknown; acceptanceBriefHash?: unknown; brief?: unknown };
   const rows = Array.isArray(p.acceptanceFixtures) ? p.acceptanceFixtures : [];
   if (rows.length === 0) return false;
-  if (typeof p.acceptanceBriefHash === "string" && typeof p.brief === "string") {
-    if (p.acceptanceBriefHash !== String(fnv1a(p.brief))) return false;
-  }
+  if (acceptanceRecordIsStale(p)) return false;
   let humanApproved = false;
   for (const row of rows) {
     if (!row || typeof row !== "object" || Array.isArray(row)) return false;
@@ -327,13 +379,16 @@ export function humanFixturesFromProject(project: unknown): boolean {
  * scan). `productComplete` + `humanFixtures` are DERIVED from the record;
  * the two inventory-derived fields stay FAIL-CLOSED (leftover true / realMulti
  * false) because no tree was scanned — an unmeasured census is never reported
- * as a real multi-job product, and the gaps name exactly that.
+ * as a real multi-job product, and the gaps name exactly that. W53 · 340-2:
+ * the live `acceptance` state is derived from the same record, so the awaiting
+ * signal can read it without a tree.
  */
 export function evidenceFromProjectRecord(project: unknown): FactoryEvidence {
   return {
     leftoverJobsAreReexportsOrStubs: true,
     realMultiJobProduct: false,
     humanFixtures: humanFixturesFromProject(project),
+    acceptance: liveAcceptanceState(project),
     productComplete: productCompleteFromProject(project),
     chatHasSlashToolsOnly: true,
   };
@@ -351,10 +406,14 @@ export function evidenceFromProjectRecord(project: unknown): FactoryEvidence {
  * project record handed under `project` (`humanFixturesFromProject`) — an
  * explicit `humanFixtures:true` in `extra` is still honored, but the field is
  * no longer unmintable: a genuinely human-approved fixture set closes the gap.
+ * W53 · 340-2: `acceptance` is DERIVED from `extra.project` like `productComplete`
+ * — it is not in the `extra` type and a hand-passed value is ignored at runtime,
+ * so the awaiting signal can never be handed in.
  */
 export function evidenceFromJobInventory(
   inv: JobInventory,
-  extra?: Omit<Partial<FactoryEvidence>, "productComplete" | "inventory"> & ProductStateEvidence,
+  extra?: Omit<Partial<FactoryEvidence>, "productComplete" | "inventory" | "acceptance"> &
+    ProductStateEvidence,
 ): FactoryEvidence {
   const leftover = inv.stubs + inv.reexports > 0 || inv.real === 0;
   const realMulti = inv.real >= 2 && inv.stubs === 0 && inv.reexports === 0;
@@ -362,6 +421,7 @@ export function evidenceFromJobInventory(
     leftoverJobsAreReexportsOrStubs: leftover,
     realMultiJobProduct: realMulti,
     humanFixtures: extra?.humanFixtures === true || humanFixturesFromProject(extra?.project),
+    acceptance: liveAcceptanceState(extra?.project),
     productComplete: productCompleteFromProject(extra?.project) && realMulti && !leftover,
     chatHasSlashToolsOnly: extra?.chatHasSlashToolsOnly !== false,
     isolation: extra?.isolation,
@@ -382,8 +442,40 @@ export const FACTORY_GAP = {
   leftover: "leftover jobs are reexports or TODO(E-15) stubs — not a multi-job product",
   fixtures: 'no human-approved fixtures (decidedBy:"human")',
   product: "no real multi-job product",
+  /** W53 · 340-2: a SCANNED tree whose bytes carry exactly one real module and
+   *  no leftovers. That is a real product whose shape is a single entry module
+   *  — legitimate for a library/service brief — and the remaining fact is the
+   *  bar's BREADTH requirement (≥2 real jobs), distinct from leftover stubs. */
+  singleJob:
+    "single real job module with no stubs/reexports — the bar requires a multi-job product (≥2 real jobs); one entry module is a legitimate library/service shape, which is not the same failure as leftover stubs",
   complete: "product-complete bar not met (skip≠green; stubs≠complete)",
 } as const;
+
+/**
+ * W53 · 340-2: which job-census gap stands — the broad fail-closed default
+ * (`FACTORY_GAP.product`), or the precisely-named single-real-module state.
+ *
+ * The flag's EVIDENCE requirement is untouched: `realMultiJobProduct` still
+ * needs ≥2 real jobs with zero stubs/reexports (no loosening), and the
+ * stub/reexport classifier is unchanged. Only the operator-facing wording
+ * distinguishes "a real product that happens to be one entry module" from
+ * "no real product". An unmeasured or garbled census fails closed to the
+ * broad default.
+ */
+function productGapOf(evidence: FactoryEvidence): string {
+  const inv = evidence.inventory;
+  if (
+    inv &&
+    typeof inv === "object" &&
+    !Array.isArray(inv) &&
+    inv.stubs === 0 &&
+    inv.reexports === 0 &&
+    inv.real === 1
+  ) {
+    return FACTORY_GAP.singleJob;
+  }
+  return FACTORY_GAP.product;
+}
 
 function gapsOf(evidence: FactoryEvidence): string[] {
   const leftover = evidence.leftoverJobsAreReexportsOrStubs !== false;
@@ -393,7 +485,7 @@ function gapsOf(evidence: FactoryEvidence): string[] {
   const gaps: string[] = [];
   if (leftover) gaps.push(FACTORY_GAP.leftover);
   if (!human) gaps.push(FACTORY_GAP.fixtures);
-  if (!real) gaps.push(FACTORY_GAP.product);
+  if (!real) gaps.push(productGapOf(evidence));
   if (!complete) gaps.push(FACTORY_GAP.complete);
   return gaps;
 }
@@ -415,18 +507,31 @@ export function factoryClaim(
   spend?: TokenSpend | TokenLedger | null,
 ): DoctorFactory {
   const leftover = evidence.leftoverJobsAreReexportsOrStubs !== false;
+  const human = evidence.humanFixtures === true;
+  const real = evidence.realMultiJobProduct === true;
+  const complete = evidence.productComplete === true;
   const isolation = coerceIsolationClaim(evidence.isolation);
   const gaps = gapsOf(evidence);
   const autonomousSoftwareFactory =
+    leftover === false && human === true && real === true && complete === true &&
+    isolation.sandbox === false && gaps.length === 0;
+  // W53 · 340-2: the ONE deliberate door, named without touching the latch.
+  // `human === false` is exactly what keeps `autonomousSoftwareFactory` false
+  // here, so these conjuncts say: every machine-fixable term is met AND the only
+  // unmet term is the human stamp AND the record really is WAITING (`pending`).
+  // A `no-fixtures`/`machine-decided`/`unattributed`/`unreadable`/absent state
+  // is a defect, never "awaiting a human" — fail-closed.
+  const awaitingHumanAcceptance =
     leftover === false &&
-    evidence.humanFixtures === true &&
-    evidence.realMultiJobProduct === true &&
-    evidence.productComplete === true &&
+    real === true &&
+    complete === true &&
     isolation.sandbox === false &&
-    gaps.length === 0;
+    human === false &&
+    evidence.acceptance?.state === "pending";
   const cap = tokenCapFromEnv(env);
   return {
     autonomousSoftwareFactory,
+    awaitingHumanAcceptance,
     leftoverJobsAreReexportsOrStubs: leftover,
     chatHasSlashToolsOnly: evidence.chatHasSlashToolsOnly !== false,
     runnerIsSandbox: false,
@@ -448,8 +553,9 @@ export function factoryClaim(
  * the last assertable path). It is derived from real project state: pass the
  * project object / parsed `.rapidtool/project.json` as `project` and the bar is
  * computed there; without that state the complete gap always stands
- * (fail-closed). humanFixtures still rides the blob's field truth — its
- * producer belongs to T5.2-A.
+ * (fail-closed). W52 · 338-3: humanFixtures is DERIVED from the record
+ * (`humanFixturesFromProject`); W53 · 340-2: the live `acceptance` state is
+ * derived the same way, and neither is read from the blob.
  *
  * OV-41 (W23 · L4): `spend` is NOT read from the blob — a raw claim can no
  * more mint a dollar figure than it can a capability. The honest
@@ -463,12 +569,13 @@ export function coerceFactoryClaim(raw?: unknown, project?: unknown): DoctorFact
     ? {
         leftoverJobsAreReexportsOrStubs: blob.leftoverJobsAreReexportsOrStubs === false ? false : true,
         humanFixtures: blob.humanFixtures === true || humanFixturesFromProject(project),
+        acceptance: liveAcceptanceState(project),
         realMultiJobProduct: blob.realMultiJobProduct === true,
         productComplete: productCompleteFromProject(project),
         chatHasSlashToolsOnly: blob.chatHasSlashToolsOnly !== false,
         isolation: blob.isolation,
       }
-    : { ...RAPIDTOOL_FACTORY_EVIDENCE, productComplete: productCompleteFromProject(project), humanFixtures: humanFixturesFromProject(project) };
+    : { ...RAPIDTOOL_FACTORY_EVIDENCE, productComplete: productCompleteFromProject(project), humanFixtures: humanFixturesFromProject(project), acceptance: liveAcceptanceState(project) };
   return factoryClaim(evidence);
 }
 

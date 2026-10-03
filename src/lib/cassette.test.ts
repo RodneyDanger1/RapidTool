@@ -19,28 +19,36 @@
 //      cassette (the mechanical basis of "keyless `npm run eval` stays
 //      byte-identical": the eval driver cannot see this module).
 //
-// COLLISION_A/B: "collision-probe-30159" and "collision-probe-533074" are a
+// COLLISION_A/B: "collision-probe-411962" and "collision-probe-1413200" are a
 // genuine FNV-1a-32 collision pair on this module's key surface (both key
-// "3138489782"). Found by a 1e6-probe search on 2026-09-24 — the observed
-// birthday rate was 52-142 collisions per 1e6 strings, so the collision guard
-// is not theoretical. Both literals are pure-function inputs; they stay valid
-// as long as `fnv1a` + `canonicalJson` stay byte-stable.
+// "1673658087"). Re-derived 2026-10-03 after the v2 key added the provider
+// family field — the old pair (found 2026-09-24) no longer collided once the
+// hashed bytes changed. Found by a 4e6-probe search; the observed birthday
+// rate stays ~50-150 collisions per 1e6 strings, so the collision guard is not
+// theoretical. Both literals are pure-function inputs; they stay valid as long
+// as `fnv1a` + `canonicalJson` stay byte-stable.
 // ---------------------------------------------------------------------------
 
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { fnv1a } from "./algorithms.ts";
+import { completeDeepSeek } from "./deepseek.server.ts";
 import { ERROR_CODES } from "./errors.ts";
+import { completeOpenAiCompatible, XAI_SPEC } from "./llm/providers/openai-compatible.ts";
 import { ARTIFACT_PRODUCERS, coerceArtifactProvenance } from "./io.ts";
 import {
   CASSETTE_MISS_CODE,
   CASSETTE_MODE_ENV,
   CASSETTE_TAPE_ENV,
   CASSETTE_VERSION,
+  activeCassette,
   canonicalJson,
+  canonicalResponseJson,
   canonicalizeRequest,
   canonRequest,
   cassetteKey,
@@ -49,11 +57,14 @@ import {
   createFileCassetteStore,
   createMemoryCassetteStore,
   provenanceForServed,
+  resetActiveCassette,
+  responseHash,
   selectCassette,
   type CanonicalRequest,
   type CassetteEntry,
   type CassetteRequest,
   type CassetteTransport,
+  wrapWithActiveCassette,
 } from "./cassette.ts";
 import type { LlmResult } from "./llm.ts";
 
@@ -88,7 +99,7 @@ const forbiddenTransport: CassetteTransport = async (prompt) => {
 
 function entryBody(req: CassetteRequest, response: LlmResult = envelope(req.prompt)): Omit<CassetteEntry, "provenance"> {
   const request = canonicalizeRequest(req);
-  return { key: String(fnv1a(canonicalJson(request))), request, response };
+  return { key: String(fnv1a(canonicalJson(request))), request, response, responseHash: responseHash(response) };
 }
 
 function tapeText(entries: unknown[], extra: Record<string, unknown> = {}): string {
@@ -133,13 +144,13 @@ describe("cassetteKey — the hash key", () => {
     };
     assert.equal(
       canonRequest(req),
-      '{"prompt":"W19-L6 cassette key sample","model":"deepseek-v4-flash","system":"sys","maxTokens":64,"json":true,"thinking":"off","history":[{"role":"user","content":"hi"}]}',
+      '{"provider":null,"prompt":"W19-L6 cassette key sample","model":"deepseek-v4-flash","system":"sys","maxTokens":64,"json":true,"thinking":"off","history":[{"role":"user","content":"hi"}]}',
     );
-    assert.equal(cassetteKey(req), "1844731533");
+    assert.equal(cassetteKey(req), "2643817931");
   });
 
   it("pins the literal keys for the two canonical-alias variants", () => {
-    assert.equal(cassetteKey({ prompt: "hello world", model: "deepseek-v4-flash", json: true }), "775478552");
+    assert.equal(cassetteKey({ prompt: "hello world", model: "deepseek-v4-flash", json: true }), "3530000090");
     // json:true and json absent are DIFFERENT requests (json mode changes the body).
     assert.notEqual(
       cassetteKey({ prompt: "hello world", model: "deepseek-v4-flash" }),
@@ -182,11 +193,43 @@ describe("cassetteKey — the hash key", () => {
       maxTokens: canonical.maxTokens,
       system: canonical.system,
       model: canonical.model,
+      provider: canonical.provider,
       prompt: canonical.prompt,
       // An unknown sibling key a future tape might carry: tolerated + ignored.
       extra: "ignored",
     } as CanonicalRequest;
     assert.equal(canonicalJson(scrambled), canonicalJson(canonical));
+  });
+
+  it("includes the provider family in the key: same bytes for same family, different for another", () => {
+    const base: CassetteRequest = { prompt: "family key probe", model: "shared-model" };
+    assert.notEqual(
+      cassetteKey({ ...base, provider: "deepseek" }),
+      cassetteKey({ ...base, provider: "xai" }),
+      "two families must not share a key for the same model-id string",
+    );
+    assert.equal(cassetteKey({ ...base, provider: "deepseek" }), cassetteKey({ ...base, provider: "deepseek" }));
+    assert.notEqual(cassetteKey({ ...base, provider: "deepseek" }), cassetteKey(base));
+  });
+
+  it("keeps transport seams out of the key (they are HOW, not WHAT)", () => {
+    // The canonical projection carries ONLY the declared request fields, so no
+    // transport seam (fetch/sleep/random/timeoutMs) can ever enter the hash.
+    const canon = canonRequest({ prompt: "seam probe", provider: "deepseek" });
+    for (const seam of ["fetch", "sleep", "random", "timeoutMs"]) {
+      assert.equal(canon.includes(seam), false, `${seam} must not be part of the canonical key`);
+    }
+    assert.equal(canon, JSON.stringify(canonicalizeRequest({ prompt: "seam probe", provider: "deepseek" })));
+  });
+
+  it("responseHash binds the response bytes — deterministic and sensitive to a swap", () => {
+    const a: LlmResult = { ok: true, text: "A", model: "m" };
+    const b: LlmResult = { ok: true, text: "B", model: "m" };
+    assert.equal(responseHash(a), responseHash({ ok: true, text: "A", model: "m" }));
+    assert.equal(responseHash(a), String(fnv1a(canonicalResponseJson(a))));
+    assert.notEqual(responseHash(a), responseHash(b));
+    const refusal: LlmResult = { ok: false, reason: "error", code: "RT_E_LLM_TIMEOUT", error: "x" };
+    assert.notEqual(responseHash(refusal), responseHash(a));
   });
 });
 
@@ -211,6 +254,7 @@ describe("record → replay round-trip", () => {
     assert.equal(entries.length, 2);
     const e0 = entries[0];
     assert.equal(e0.key, cassetteKey({ prompt: "hello world", model: "deepseek-v4-flash", json: true }));
+    assert.equal(e0.responseHash, responseHash(e0.response), "the entry binds its response");
     assert.equal(e0.provenance?.producer, "model");
     assert.equal(e0.provenance?.model, "deepseek-v4-flash");
     assert.equal(e0.provenance?.timestamp, FIXED_NOW);
@@ -488,16 +532,16 @@ describe("a tape miss is a coded refusal", () => {
   });
 
   it("refuses instead of serving the wrong envelope on a REAL FNV-1a key collision", async () => {
-    // COLLISION_A and COLLISION_B share key "3138489782" (see file header).
-    const A: CassetteRequest = { prompt: "collision-probe-30159" };
-    const B: CassetteRequest = { prompt: "collision-probe-533074" };
-    assert.equal(cassetteKey(A), "3138489782");
-    assert.equal(cassetteKey(B), "3138489782");
+    // COLLISION_A and COLLISION_B share key "1673658087" (see file header).
+    const A: CassetteRequest = { prompt: "collision-probe-411962" };
+    const B: CassetteRequest = { prompt: "collision-probe-1413200" };
+    assert.equal(cassetteKey(A), "1673658087");
+    assert.equal(cassetteKey(B), "1673658087");
     assert.notEqual(canonRequest(A), canonRequest(B));
 
     const aEnvelope = envelope("A-ANSWER");
     const store = createMemoryCassetteStore(
-      tapeText([{ ...entryBody(A, aEnvelope), provenance: { producer: "model", model: aEnvelope.ok ? aEnvelope.model : "?", timestamp: FIXED_NOW, inputHash: "3138489782" } }]),
+      tapeText([{ ...entryBody(A, aEnvelope), provenance: { producer: "model", model: aEnvelope.ok ? aEnvelope.model : "?", timestamp: FIXED_NOW, inputHash: "1673658087" } }]),
     );
     const rep = unwrap(await createCassette({ mode: "replay", store }));
     const res = await rep.wrap(forbiddenTransport)(B.prompt, {});
@@ -536,10 +580,62 @@ describe("corrupt or tampered tapes are refused at load", () => {
     assert.match(res.error, /version 99 is not supported/);
   });
 
+  it("refuses a v1 (pre-binding) tape with a re-record reason — no silent weak guarantee", async () => {
+    const res = await loadRefusal(JSON.stringify({ version: 1, entries: [] }, null, 2) + "\n");
+    assert.equal(res.code, "RT_E_VALIDATION");
+    assert.match(res.error, /version 1 is not supported/);
+    assert.match(res.error, /re-record/);
+  });
+
+  it("refuses a v2 entry that lacks responseHash (never serves an unbound response)", async () => {
+    const bound = entryBody({ prompt: "unbound response" });
+    const unbound = { key: bound.key, request: bound.request, response: bound.response };
+    const res = await loadRefusal(tapeText([unbound]));
+    assert.equal(res.code, "RT_E_VALIDATION");
+    assert.match(res.error, /no responseHash/);
+    assert.match(res.error, /re-record/);
+  });
+
+  it("refuses a responseHash that does not match its response (tampered response hash)", async () => {
+    const entry = entryBody({ prompt: "hash mismatch" });
+    const res = await loadRefusal(tapeText([{ ...entry, responseHash: "12345" }]));
+    assert.match(res.error, /responseHash .* does not match its response/);
+  });
+
   it("refuses an entry whose key does not match its request (tampered tape)", async () => {
     const entry = entryBody({ prompt: "tampered" });
     const res = await loadRefusal(tapeText([{ ...entry, key: "12345" }]));
     assert.match(res.error, /does not match its request/);
+  });
+
+  it("Hole 1: a response swapped under an intact key/request fails closed at load (never served)", async () => {
+    // Reproduces verifier A's tamper.response: key + request stay byte-identical,
+    // only the served envelope is replaced. The tape MUST refuse at load.
+    const store = createMemoryCassetteStore();
+    const rec = unwrap(await createCassette({ mode: "record", store, now: () => FIXED_NOW }));
+    await rec.wrap(liveTransport([]))("bound-response probe", { model: "deepseek-v4-flash" });
+    const tape = JSON.parse((await store.read()) ?? "{}") as {
+      entries: Array<{ response: LlmResult }>;
+    };
+    assert.equal(tape.entries.length, 1);
+    tape.entries[0].response = { ok: true, text: "TAMPERED-RESPONSE", model: "attacker-model" };
+    const res = await loadRefusal(JSON.stringify(tape, null, 2) + "\n");
+    assert.equal(res.code, "RT_E_VALIDATION");
+    assert.match(res.error, /response/i);
+  });
+
+  it("Hole 1 (serve-time): an entry mutated after load is refused, never served", async () => {
+    const store = createMemoryCassetteStore();
+    const rec = unwrap(await createCassette({ mode: "record", store, now: () => FIXED_NOW }));
+    await rec.wrap(liveTransport([]))("serve-time probe", {});
+    const rep = unwrap(await createCassette({ mode: "replay", store }));
+    rep.entries()[0].response = { ok: true, text: "MUTATED-IN-MEMORY", model: "attacker" };
+    const res = await rep.wrap(forbiddenTransport)("serve-time probe", {});
+    assert.equal(res.ok, false);
+    if (!res.ok) {
+      assert.equal(res.code, CASSETTE_MISS_CODE);
+      assert.equal(JSON.stringify(res).includes("MUTATED-IN-MEMORY"), false, "a re-hashed envelope must never be served");
+    }
   });
 
   it("refuses a malformed request or response row", async () => {
@@ -657,16 +753,21 @@ describe("T5.4 provenance consumption", () => {
     assert.equal(coerceArtifactProvenance({ producer: "model", timestamp: FIXED_NOW, inputHash: key }), null);
   });
 
-  it("declares the shipped tape format version", () => {
-    assert.equal(CASSETTE_VERSION, 1);
+  it("declares the shipped tape format version (v2: responseHash + family key)", () => {
+    assert.equal(CASSETTE_VERSION, 2);
   });
 });
 
-describe("off by default: nothing in the pipeline is wired to the cassette", () => {
+describe("the cassette is wired ONLY at the provider seam", () => {
   const ROOT = new URL("../../", import.meta.url);
-  const ALLOWED = new Set(["src/lib/cassette.ts", "src/lib/cassette.test.ts"]);
+  const ALLOWED = new Set([
+    "src/lib/cassette.ts",
+    "src/lib/cassette.test.ts",
+    "src/lib/llm/providers/deepseek.ts",
+    "src/lib/llm/providers/openai-compatible.ts",
+  ]);
 
-  it("no module imports src/lib/cassette.ts (the keyless eval cannot see it)", () => {
+  it("only the two provider entry points import src/lib/cassette.ts (off by default)", () => {
     const hits: string[] = [];
     for (const dir of ["src", "scripts"]) {
       for (const rel of readdirSync(new URL(dir + "/", ROOT), { recursive: true }) as string[]) {
@@ -679,11 +780,381 @@ describe("off by default: nothing in the pipeline is wired to the cassette", () 
         if (/cassette\.ts|["'`]\.\/cassette["'`]/.test(text)) hits.push(repoRel);
       }
     }
-    assert.deepEqual(hits, [], `the cassette must stay unwired (off by default); unwire or update this pin: ${hits.join(", ")}`);
+    assert.deepEqual(hits, [], `the cassette must be wired at the named seam only; update this pin: ${hits.join(", ")}`);
+  });
+
+  it("the seam is exactly the two provider entry points (no silent third importer)", () => {
+    const expected = [
+      "src/lib/llm/providers/deepseek.ts",
+      "src/lib/llm/providers/openai-compatible.ts",
+    ];
+    const actual: string[] = [];
+    for (const repoRel of expected) {
+      const text = readFileSync(new URL(repoRel, ROOT), "utf8");
+      if (/cassette\.ts/.test(text)) actual.push(repoRel);
+    }
+    assert.deepEqual(actual, expected, "both providers must cross the cassette seam");
   });
 
   it("scripts/run-eval.mjs carries no cassette mode at all", () => {
     const evalDriver = readFileSync(new URL("scripts/run-eval.mjs", ROOT), "utf8");
     assert.equal(/cassette/i.test(evalDriver), false, "the eval driver must not know about the cassette");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. T5.7 wiring — the REAL provider seam obeys RAPIDTOOL_CASSETTE_MODE.
+//
+// These drive `completeDeepSeek`, the live provider entry every call path
+// funnels through (registry role dispatch, the explicit-provider path, direct
+// importers, the eval driver), with an injected stub `fetch` — no network, no
+// real key. Unset/"off" MUST stay live; "record" MUST tape the wire envelope
+// under the canonical key; "replay" MUST serve from the tape with the stub
+// fetch never called; a miss MUST be a coded refusal, never fabricated text.
+// ---------------------------------------------------------------------------
+
+const FAKE_KEY = "cassette-test-key-not-real";
+
+function okWireResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      model: "deepseek-flash",
+      choices: [{ message: { content: "STABLE-REPLAY-TEXT" } }],
+      usage: { prompt_tokens: 7, completion_tokens: 3 },
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
+describe("provider seam wiring (T5.7)", () => {
+  let savedMode: string | undefined;
+  let savedTape: string | undefined;
+  let savedKey: string | undefined;
+  let savedXaiKey: string | undefined;
+
+  beforeEach(() => {
+    savedMode = process.env[CASSETTE_MODE_ENV];
+    savedTape = process.env[CASSETTE_TAPE_ENV];
+    savedKey = process.env.DEEPSEEK_API_KEY;
+    savedXaiKey = process.env.XAI_API_KEY;
+    delete process.env[CASSETTE_MODE_ENV];
+    delete process.env[CASSETTE_TAPE_ENV];
+    delete process.env.XAI_API_KEY;
+    process.env.DEEPSEEK_API_KEY = FAKE_KEY;
+  });
+
+  afterEach(() => {
+    restoreEnv(CASSETTE_MODE_ENV, savedMode);
+    restoreEnv(CASSETTE_TAPE_ENV, savedTape);
+    restoreEnv("DEEPSEEK_API_KEY", savedKey);
+    restoreEnv("XAI_API_KEY", savedXaiKey);
+  });
+
+  it("unset mode: the provider stays live and creates no tape", async () => {
+    let calls = 0;
+    const res = await completeDeepSeek("off probe", {
+      model: "deepseek-v4-flash",
+      fetch: async () => {
+        calls += 1;
+        return okWireResponse();
+      },
+    });
+    assert.equal(calls, 1);
+    assert.equal(res.ok, true);
+    if (res.ok) assert.equal(res.text, "STABLE-REPLAY-TEXT");
+  });
+
+  it("record: the served envelope lands on the tape under the canonical key", async () => {
+    await withTmpDir(async (dir) => {
+      const tape = join(dir, "tape.json");
+      process.env[CASSETTE_MODE_ENV] = "record";
+      process.env[CASSETTE_TAPE_ENV] = tape;
+      let calls = 0;
+      const res = await completeDeepSeek("record probe", {
+        model: "deepseek-v4-flash",
+        system: "sys",
+        maxTokens: 64,
+        json: true,
+        fetch: async () => {
+          calls += 1;
+          return okWireResponse();
+        },
+      });
+      assert.equal(calls, 1);
+      assert.equal(res.ok, true);
+      const parsed = JSON.parse(readFileSync(tape, "utf8")) as { version: number; entries: CassetteEntry[] };
+      assert.equal(parsed.version, CASSETTE_VERSION);
+      assert.equal(parsed.entries.length, 1);
+      assert.equal(
+        parsed.entries[0].key,
+        cassetteKey({ prompt: "record probe", model: "deepseek-v4-flash", system: "sys", maxTokens: 64, json: true, provider: "deepseek" }),
+      );
+      assert.equal(parsed.entries[0].responseHash, responseHash(parsed.entries[0].response));
+      assert.equal(parsed.entries[0].provenance?.producer, "model");
+    });
+  });
+
+  it("replay: serves from the tape and NEVER calls the transport", async () => {
+    await withTmpDir(async (dir) => {
+      const tape = join(dir, "tape.json");
+      process.env[CASSETTE_MODE_ENV] = "record";
+      process.env[CASSETTE_TAPE_ENV] = tape;
+      const recorded = await completeDeepSeek("replay probe", {
+        model: "deepseek-v4-flash",
+        fetch: async () => okWireResponse(),
+      });
+      assert.equal(recorded.ok, true);
+
+      // Replay is keyless by design: drop the key so a live fallback would be
+      // the honest `not-configured` envelope, not the recorded result.
+      delete process.env.DEEPSEEK_API_KEY;
+      process.env[CASSETTE_MODE_ENV] = "replay";
+      let calls = 0;
+      const replayed = await completeDeepSeek("replay probe", {
+        model: "deepseek-v4-flash",
+        fetch: async () => {
+          calls += 1;
+          throw new Error("replay must not touch the network");
+        },
+      });
+      assert.equal(calls, 0, "the replayed call must not reach the transport");
+      assert.deepEqual(replayed, recorded);
+    });
+  });
+
+  it("replay miss: a coded refusal with no network and no fabricated text", async () => {
+    await withTmpDir(async (dir) => {
+      const tape = join(dir, "missing", "tape.json");
+      process.env[CASSETTE_MODE_ENV] = "replay";
+      process.env[CASSETTE_TAPE_ENV] = tape;
+      let calls = 0;
+      const res = await completeDeepSeek("unrecorded probe", {
+        model: "deepseek-v4-flash",
+        fetch: async () => {
+          calls += 1;
+          return okWireResponse();
+        },
+      });
+      assert.equal(calls, 0);
+      assert.equal(res.ok, false);
+      if (res.ok) throw new Error("unreachable");
+      assert.equal(res.code, CASSETTE_MISS_CODE);
+      assert.equal("text" in res, false);
+    });
+  });
+
+  it("Hole 2: a tape cannot serve across provider families (same-family hit, cross-family miss)", async () => {
+    await withTmpDir(async (dir) => {
+      const tape = join(dir, "tape.json");
+      process.env[CASSETTE_MODE_ENV] = "record";
+      process.env[CASSETTE_TAPE_ENV] = tape;
+      delete process.env.XAI_API_KEY;
+      const recorded = await completeDeepSeek("family probe", {
+        model: "deepseek-v4-flash",
+        fetch: async () => okWireResponse(),
+      });
+      assert.equal(recorded.ok, true);
+
+      // Replay is keyless by design: drop the DeepSeek key so a live fallback
+      // would be `not-configured`, not the recorded result.
+      delete process.env.DEEPSEEK_API_KEY;
+      process.env[CASSETTE_MODE_ENV] = "replay";
+
+      let crossCalls = 0;
+      const cross = await completeOpenAiCompatible(XAI_SPEC, ["deepseek-v4-flash"], "family probe", {
+        model: "deepseek-v4-flash",
+        fetch: async () => {
+          crossCalls += 1;
+          throw new Error("a cross-family replay must never touch the transport");
+        },
+      });
+      assert.equal(crossCalls, 0);
+      assert.equal(cross.ok, false, "a deepseek tape must not be served to the xAI family");
+      if (!cross.ok) {
+        assert.equal(cross.code, CASSETTE_MISS_CODE);
+        assert.equal("text" in cross, false);
+      }
+
+      // Same-family replay still HITS the recorded entry.
+      let sameCalls = 0;
+      const same = await completeDeepSeek("family probe", {
+        model: "deepseek-v4-flash",
+        fetch: async () => {
+          sameCalls += 1;
+          throw new Error("the same-family replay must not touch the transport");
+        },
+      });
+      assert.equal(sameCalls, 0);
+      assert.deepEqual(same, recorded);
+    });
+  });
+
+  it("record adds no wire fields: the request body bytes match an unarmed call", async () => {
+    await withTmpDir(async (dir) => {
+      const capture = async (): Promise<string> => {
+        const seen: { body: string } = { body: "" };
+        await completeDeepSeek("byte-identity probe", {
+          model: "deepseek-v4-flash",
+          system: "sys",
+          maxTokens: 64,
+          json: true,
+          thinking: false,
+          fetch: async (_url, init) => {
+            seen.body = String(init?.body);
+            return okWireResponse();
+          },
+        });
+        return seen.body;
+      };
+      delete process.env[CASSETTE_MODE_ENV];
+      delete process.env[CASSETTE_TAPE_ENV];
+      const offBody = await capture();
+      process.env[CASSETTE_MODE_ENV] = "record";
+      process.env[CASSETTE_TAPE_ENV] = join(dir, "identity.json");
+      const recordBody = await capture();
+      assert.ok(offBody.length > 0);
+      assert.equal(recordBody, offBody, "record mode must not add request fields");
+    });
+  });
+
+  it("two processes: record then replay return identical request + result bytes", async () => {
+    await withTmpDir(async (dir) => {
+      const tape = join(dir, "tape.json");
+      const script = join(dir, "child.mjs");
+      writeFileSync(script, CHILD_SOURCE, "utf8");
+      const root = fileURLToPath(new URL("../../", import.meta.url));
+      const prompt = "two-process probe";
+      const run = (mode: "record" | "replay") => {
+        const out = execFileSync(process.execPath, ["--experimental-strip-types", script, root, mode, tape, prompt], {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            RAPIDTOOL_CASSETTE_MODE: mode,
+            RAPIDTOOL_CASSETTE_TAPE: tape,
+            DEEPSEEK_API_KEY: FAKE_KEY,
+          },
+        });
+        return JSON.parse(out) as {
+          networkCalls: number;
+          wireBody: string | null;
+          res: LlmResult;
+          canon: string;
+        };
+      };
+      const rec = run("record");
+      const rep = run("replay");
+
+      assert.equal(rec.networkCalls, 1, "the record process must make exactly one wire call");
+      assert.equal(rep.networkCalls, 0, "the replay process must never call the transport");
+      assert.equal(rec.res.ok, true);
+      assert.equal(rep.canon, rec.canon, "canonical request bytes must be identical across the two processes");
+      assert.deepEqual(rep.res, rec.res, "the returned result must be byte-identical across the two processes");
+
+      const parsed = JSON.parse(readFileSync(tape, "utf8")) as { version: number; entries: CassetteEntry[] };
+      assert.equal(parsed.version, CASSETTE_VERSION);
+      assert.equal(parsed.entries.length, 1);
+      assert.equal(canonicalJson(parsed.entries[0].request), rec.canon);
+      assert.deepEqual(parsed.entries[0].response, rec.res);
+      assert.equal(parsed.entries[0].provenance?.producer, "model");
+
+      assert.ok(rec.wireBody && rec.wireBody.length > 0);
+      const wire = JSON.parse(rec.wireBody as string) as Record<string, unknown>;
+      for (const key of Object.keys(wire)) assert.equal(/cassette/i.test(key), false);
+      assert.equal(wire.model, "deepseek-v4-flash");
+    });
+  });
+});
+
+// A self-contained child process: it imports the REAL provider + cassette
+// modules from the repo root, arms the cassette from argv, and drives one
+// `completeDeepSeek` call with an injected stub fetch. stdout is one JSON
+// object — the parent asserts identity across the record and replay runs.
+const CHILD_SOURCE = `
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const [root, mode, tape, prompt] = process.argv.slice(2);
+process.env.RAPIDTOOL_CASSETTE_MODE = mode;
+process.env.RAPIDTOOL_CASSETTE_TAPE = tape;
+process.env.DEEPSEEK_API_KEY = "cassette-test-key-not-real";
+
+const deepseek = await import(pathToFileURL(join(root, "src", "lib", "llm", "providers", "deepseek.ts")).href);
+const cassette = await import(pathToFileURL(join(root, "src", "lib", "cassette.ts")).href);
+
+const opts = { model: "deepseek-v4-flash", system: "sys", maxTokens: 64, json: true };
+let networkCalls = 0;
+let wireBody = null;
+opts.fetch = async (_url, init) => {
+  networkCalls += 1;
+  wireBody = typeof init?.body === "string" ? init.body : null;
+  if (mode === "replay") throw new Error("replay must not touch the network");
+  return new Response(JSON.stringify({
+    model: "deepseek-flash",
+    choices: [{ message: { content: "STABLE-REPLAY-TEXT" } }],
+    usage: { prompt_tokens: 7, completion_tokens: 3 },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+};
+
+const res = await deepseek.completeDeepSeek(prompt, opts);
+process.stdout.write(JSON.stringify({
+  networkCalls,
+  wireBody,
+  res,
+  canon: cassette.canonRequest({ prompt, provider: "deepseek", ...opts }),
+}));
+`;
+
+// ---------------------------------------------------------------------------
+// 8. The activation seam itself: identity when inert, loud refusal when armed
+//    but invalid, cached by (mode, tapePath).
+// ---------------------------------------------------------------------------
+
+describe("activeCassette / wrapWithActiveCassette", () => {
+  afterEach(() => resetActiveCassette());
+
+  it("unset/blank/off yields null and wrap returns the SAME transport (identity)", async () => {
+    assert.equal(await activeCassette({}), null);
+    assert.equal(await activeCassette({ [CASSETTE_MODE_ENV]: "off" }), null);
+    assert.equal(await activeCassette({ [CASSETTE_MODE_ENV]: "   " }), null);
+    const transport: CassetteTransport = async () => ({ ok: true, text: "x", model: "m" });
+    assert.equal(await wrapWithActiveCassette(transport, "deepseek", {}), transport);
+    resetActiveCassette();
+    assert.equal(await wrapWithActiveCassette(transport, "deepseek", { [CASSETTE_MODE_ENV]: "off" }), transport);
+  });
+
+  it("armed-but-invalid never silently goes live: one coded refusal per call", async () => {
+    let called = 0;
+    const transport: CassetteTransport = async () => {
+      called += 1;
+      return { ok: true, text: "live", model: "m" };
+    };
+    const wrapped = await wrapWithActiveCassette(transport, "deepseek", { [CASSETTE_MODE_ENV]: "replay" });
+    const res = await wrapped("anything", {});
+    assert.equal(called, 0, "a misconfigured cassette must not fall back to live traffic");
+    assert.equal(res.ok, false);
+    if (res.ok) throw new Error("unreachable");
+    assert.equal(res.code, "RT_E_VALIDATION");
+    assert.match(res.error ?? "", new RegExp(CASSETTE_TAPE_ENV));
+
+    resetActiveCassette();
+    const bad = await activeCassette({ [CASSETTE_MODE_ENV]: "recrod", [CASSETTE_TAPE_ENV]: "/nowhere/tape.json" });
+    assert.equal(bad?.ok, false);
+  });
+
+  it("caches by (mode, tapePath); resetActiveCassette drops the cache", async () => {
+    await withTmpDir(async (dir) => {
+      const env = { [CASSETTE_MODE_ENV]: "replay", [CASSETTE_TAPE_ENV]: join(dir, "tape.json") };
+      const first = await activeCassette(env);
+      const second = await activeCassette(env);
+      assert.equal(first, second, "the same signature must reuse the cached cassette");
+      resetActiveCassette();
+      const third = await activeCassette(env);
+      assert.notEqual(first, third);
+    });
   });
 });

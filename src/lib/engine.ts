@@ -3896,8 +3896,8 @@ export function readWildPlan(project: Project): WildPlan {
     source: "empty",
     plannedAt: null,
     note:
-      "no planner plan on this record yet (TODO(R13-f02): generation runs keyed at wild start — " +
-      "headless.generateWildPlan; classifier review + pause-before-first-mutation remain)",
+      "no planner plan on this record yet (R13-f02: generation runs keyed at wild start — " +
+      "headless.generateWildPlan; the run runs a classifier plan review and parks before the first mutation)",
   };
 }
 
@@ -4339,6 +4339,42 @@ async function resolveWildReview(
     };
   }
   return { kind: "error", error: res.error ?? "Auto-Review classifier failed" };
+}
+
+/**
+ * R13-f02 — the PLAN review: hand the stored planner rows to the Auto-Review
+ * reviewer seam BEFORE the first mutation. Routes through the SAME timeout and
+ * honesty checks as a phase review, but as a `"gate"` review, so a plan verdict
+ * can only come from the classifier — never the deterministic DoD floor (an
+ * "advance"-only fallback), i.e. a machine-synthesized approval of rows no
+ * model judged is impossible.
+ *
+ * The reviewer receives the review context, whose `project.wildPlan` IS the
+ * plan under review. The production prompt (`buildWildReviewPrompt`,
+ * wild-mode.server.ts) renders the stored planner rows (one line per row, cap
+ * + named elision), so the production classifier SEES them; the injected
+ * reviewer seam reads the rows directly from the context too.
+ *
+ * Unconfigured / error / timeout return honestly; the CALLER (headless) still
+ * parks the run, because an unreviewed plan must not execute.
+ */
+export type WildPlanReview =
+  | { ok: true; verdict: "approve" | "reject"; feedback: string }
+  | { ok: false; reason: "not-configured" | "error"; error: string; code?: ErrorCode };
+
+export async function reviewWildPlan(
+  project: Project,
+  reviewer: WildReviewer,
+  timeoutMs: number = WILD_REVIEW_TIMEOUT_MS,
+): Promise<WildPlanReview> {
+  const decision = await resolveWildReview(reviewer, project, project.currentPhase, "gate", timeoutMs);
+  if (decision.kind === "verdict") {
+    return { ok: true, verdict: decision.verdict, feedback: decision.feedback };
+  }
+  if (decision.kind === "unconfigured-gate") {
+    return { ok: false, reason: "not-configured", error: "Auto-Review classifier not configured", code: "RT_E_LLM_NOT_CONFIGURED" };
+  }
+  return { ok: false, reason: "error", error: decision.error, ...(decision.code ? { code: decision.code } : {}) };
 }
 
 /** 313 D1 — clamp a caller-supplied retry bound: absent ⇒ the default

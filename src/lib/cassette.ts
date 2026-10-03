@@ -7,7 +7,11 @@
 // re-calls the API on every run (103:176). A tape turns one real entry into a
 // deterministic fixture, keyed by the canonical input hash (the same FNV-1a
 // the repo uses for every evidence hash — 217c §T5.7 anchor; `fnv1a` from
-// `./algorithms.ts`).
+// `./algorithms.ts`). An entry binds BOTH halves of the exchange: `key`
+// (the request) and `responseHash` (the served envelope), so swapping either
+// fails closed at load. The canonical request also carries the provider FAMILY
+// id, so one family's tape cannot be served to another (see `cassetteKey` and
+// the T5.7 wiring note below).
 //
 // DOCTRINE (mirrors `./llm/providers/mock.ts`, the landed injection half of
 // the same row — a mock LLM *is* a replay fixture):
@@ -18,7 +22,10 @@
 //   2. NEVER fabrication. A tape miss (no entry) or a hash-collision guard
 //      trip is a CODED refusal (`CASSETTE_MISS_CODE`) carrying the key — no
 //      text, no template, no "sensible default" envelope. A recorded refusal
-//      envelope replays as that same refusal.
+//      envelope replays as that same refusal. A load-time integrity failure
+//      (unsupported version; `key`↔`request` mismatch; missing/mismatched
+//      `responseHash`) is a coded `RT_E_VALIDATION` refusal — the whole tape is
+//      rejected, so no unbound envelope is ever served.
 //   3. NEVER a silent replacement. Replay stamps T5.4 provenance with
 //      `producer: "replay"` (fixes/249 declared the vocabulary; "replay" was
 //      reserved for exactly this lane) so a downstream artifact says it came
@@ -42,12 +49,14 @@
 // content. Write them under a run directory, never into `src/` (217c blast
 // radius note). The tape file is created only at an explicit path.
 //
-// NOT in this module (separable remainders, 217c §T5.7 items 4-5): wiring the
-// wrapper into `llm/providers/registry.ts` `callModel`, the run-eval
-// `--record`/`--replay` flags, CLI flags, and the README note. Nothing in the
-// pipeline imports this module today, so the keyless `npm run eval` leg and
-// every existing suite are byte-identical by construction (pinned by
-// `cassette.test.ts`'s wiring scan).
+// NOT in this module (separable remainders, 217c §T5.7 items 4-5): the run-eval
+// `--record`/`--replay` flags, CLI flags, and the README note. The wrapper IS
+// wired into the two provider entry points (`llm/providers/deepseek.ts`
+// `completeDeepSeek` and `llm/providers/openai-compatible.ts`
+// `completeOpenAiCompatible`, see the T5.7 wiring note below); with the mode
+// unset/"off" that seam is the identity transport, so the keyless `npm run
+// eval` leg and every existing suite stay byte-identical by construction
+// (pinned by `cassette.test.ts`'s wiring scan).
 // ---------------------------------------------------------------------------
 
 import { fnv1a } from "./algorithms.ts";
@@ -72,8 +81,16 @@ export const CASSETTE_MODE_ENV = "RAPIDTOOL_CASSETTE_MODE";
 /** Env half of explicit selection: the tape file the mode reads/writes. */
 export const CASSETTE_TAPE_ENV = "RAPIDTOOL_CASSETTE_TAPE";
 
-/** The tape's on-disk format version (a mismatched tape fails closed at load). */
-export const CASSETTE_VERSION = 1;
+/**
+ * The tape's on-disk format version. A mismatched tape fails closed at load.
+ *
+ * v2 (340-4): entries carry a `responseHash` binding the served envelope, and
+ * the canonical request carries the provider FAMILY id, so a response swapped
+ * under an intact key/request is refused and one family's tape cannot be served
+ * to another. v1 tapes lack both bindings; they are refused with a
+ * "re-record" reason rather than served under a weaker guarantee.
+ */
+export const CASSETTE_VERSION = 2;
 
 /**
  * The coded refusal a tape miss returns.
@@ -99,9 +116,17 @@ export type CassetteMessage = { role: "user" | "assistant"; content: string };
  * The semantic request subset the tape is keyed by. Deliberately EXCLUDES
  * transport seams (`fetch`/`sleep`/`random`/`timeoutMs`): they change HOW a
  * call is made, never WHAT is asked, so a tape recorded under one set of test
- * seams replays under another.
+ * seams replays under another. `provider` is the exception that is INCLUDED:
+ * the family id is WHAT is asked (whose bytes), so it stays in the key.
  */
 export type CassetteRequest = {
+  /**
+   * The provider FAMILY id the call was issued through (e.g. "deepseek", "xai").
+   * Part of the canonical key so a tape recorded by one family cannot be served
+   * to another for the same model-id string (340-4). `null` when a caller uses
+   * the cassette directly without naming a family.
+   */
+  provider?: string;
   prompt: string;
   /** The resolved model id the call was issued for (opts.model), if any. */
   model?: string;
@@ -124,6 +149,7 @@ export type CassetteRequest = {
  * two caller inputs the provider would send as different bytes.
  */
 export type CanonicalRequest = {
+  provider: string | null;
   prompt: string;
   model: string | null;
   system: string | null;
@@ -136,6 +162,7 @@ export type CanonicalRequest = {
 /** Project a caller request onto the canonical form (pure; field order fixed). */
 export function canonicalizeRequest(req: CassetteRequest): CanonicalRequest {
   return {
+    provider: req.provider ?? null,
     prompt: req.prompt,
     model: req.model ?? null,
     system: req.system ?? null,
@@ -154,6 +181,7 @@ export function canonicalizeRequest(req: CassetteRequest): CanonicalRequest {
  */
 export function canonicalJson(c: CanonicalRequest): string {
   return JSON.stringify({
+    provider: c.provider,
     prompt: c.prompt,
     model: c.model,
     system: c.system,
@@ -169,7 +197,11 @@ export function canonRequest(req: CassetteRequest): string {
   return canonicalJson(canonicalizeRequest(req));
 }
 
-/** The tape's lookup key: FNV-1a (32-bit, stringified) of the canonical request. */
+/**
+ * The tape's lookup key: FNV-1a (32-bit, stringified) of the canonical request
+ * — which includes the provider FAMILY id, so a tape recorded by one family
+ * does not serve another family's call (340-4).
+ */
 export function cassetteKey(req: CassetteRequest): string {
   return String(fnv1a(canonRequest(req)));
 }
@@ -184,8 +216,18 @@ export type CassetteEntry = {
   key: string;
   /** The canonical request, stored verbatim (collision guard + inspection). */
   request: CanonicalRequest;
-  /** The envelope exactly as the live transport returned it. */
+  /**
+   * The served envelope, normalized by `copyEnvelope` (every known field kept
+   * verbatim, unknown sibling keys dropped) — the same shape the live call
+   * returned, minus fields this module cannot round-trip.
+   */
   response: LlmResult;
+  /**
+   * Stringified FNV-1a of `canonicalResponseJson(response)` — the RESPONSE half
+   * of the integrity binding, verified at load (340-4). Without it a swapped
+   * envelope under an intact key/request would be served verbatim.
+   */
+  responseHash: string;
   /** T5.4 stamp minted at record time (producer "model"); absent on refusals. */
   provenance?: ArtifactProvenance;
 };
@@ -324,6 +366,7 @@ export function copyUsage(u: unknown, { strict = false } = {}): LlmUsage | null 
 
 function validateCanonicalRequest(v: unknown): CanonicalRequest | null {
   if (!isPlainObject(v)) return null;
+  if (v.provider !== null && (typeof v.provider !== "string" || v.provider.trim().length === 0)) return null;
   if (typeof v.prompt !== "string") return null;
   if (v.model !== null && typeof v.model !== "string") return null;
   if (v.system !== null && typeof v.system !== "string") return null;
@@ -339,6 +382,7 @@ function validateCanonicalRequest(v: unknown): CanonicalRequest | null {
     history.push({ role: m.role, content: m.content });
   }
   return {
+    provider: v.provider,
     prompt: v.prompt,
     model: v.model,
     system: v.system,
@@ -413,7 +457,9 @@ function parseTape(text: string | null, label: string): TapeParse {
   if (raw.version !== CASSETTE_VERSION) {
     return {
       ok: false,
-      error: `${label}: tape version ${String(raw.version)} is not supported (this build reads/writes version ${CASSETTE_VERSION})`,
+      error:
+        `${label}: tape version ${String(raw.version)} is not supported (this build reads/writes version ` +
+        `${CASSETTE_VERSION}); re-record the tape with this build.`,
     };
   }
   if (typeof raw.label !== "undefined" && typeof raw.label !== "string") {
@@ -430,12 +476,31 @@ function parseTape(text: string | null, label: string): TapeParse {
     if (request === null) return { ok: false, error: `${where} has a malformed request` };
     const response = validateResponse(row.response);
     if (response === null) return { ok: false, error: `${where} has a malformed response envelope` };
-    // Integrity: the key must be the hash of the request it rides with. A tape
-    // where they disagree is tampered/corrupt — fail closed rather than serve
-    // an unverifiable envelope.
+    // Integrity, half 1: the key must be the hash of the request it rides with.
+    // A tape where they disagree is tampered/corrupt — fail closed rather than
+    // serve an unverifiable envelope.
     const expected = String(fnv1a(canonicalJson(request)));
     if (row.key !== expected) {
       return { ok: false, error: `${where} key ${row.key} does not match its request (expected ${expected})` };
+    }
+    // Integrity, half 2 (340-4): the response must match its own stored hash.
+    // Without this, a swapped envelope under an intact key/request is served
+    // verbatim. An entry that predates the binding (or a hand-written tape
+    // without it) is refused with a "re-record" reason, never served weak.
+    if (typeof row.responseHash !== "string" || row.responseHash.trim().length === 0) {
+      return {
+        ok: false,
+        error:
+          `${where} has no responseHash — this build binds request AND response (version ${CASSETTE_VERSION}); ` +
+          `re-record the tape with this build.`,
+      };
+    }
+    const expectedResponse = responseHash(response);
+    if (row.responseHash !== expectedResponse) {
+      return {
+        ok: false,
+        error: `${where} responseHash ${row.responseHash} does not match its response (expected ${expectedResponse})`,
+      };
     }
     let provenance: ArtifactProvenance | undefined;
     if (row.provenance !== undefined) {
@@ -445,7 +510,7 @@ function parseTape(text: string | null, label: string): TapeParse {
       if (stamp === null) return { ok: false, error: `${where} carries a provenance block the T5.4 validator refuses` };
       provenance = stamp;
     }
-    entries.push({ key: row.key, request, response, ...(provenance ? { provenance } : {}) });
+    entries.push({ key: row.key, request, response, responseHash: row.responseHash, ...(provenance ? { provenance } : {}) });
   }
   return {
     ok: true,
@@ -485,9 +550,11 @@ export type Cassette = {
   /**
    * Wrap a transport. "off" returns the transport ITSELF (identity — provably
    * inert); "record" calls through and persists what came back; "replay"
-   * serves from the tape or returns a coded refusal.
+   * serves from the tape or returns a coded refusal. `provider` names the
+   * FAMILY the wrapped transport belongs to and is folded into the key, so one
+   * family's tape cannot serve another (omit it for an in-process cassette).
    */
-  wrap(transport: CassetteTransport): CassetteTransport;
+  wrap(transport: CassetteTransport, provider?: string): CassetteTransport;
   /** Every call the cassette handled, in order. */
   served(): readonly CassetteServedCall[];
   /** The T5.4 stamp of served call `index` (default: the last), or null. */
@@ -533,6 +600,26 @@ function copyEnvelope(env: LlmResult): LlmResult {
     ...(env.code !== undefined ? { code: env.code } : {}),
     ...(usage ? { usage } : {}),
   };
+}
+
+/**
+ * Stable, field-ordered stringify of a response envelope — the exact bytes
+ * `responseHash` hashes. `copyEnvelope` rebuilds every arm with fixed key
+ * order, so equal envelopes always stringify identically no matter how the live
+ * transport or a parsed tape happened to order its keys.
+ */
+export function canonicalResponseJson(res: LlmResult): string {
+  return JSON.stringify(copyEnvelope(res));
+}
+
+/**
+ * The tape's response binding (340-4): FNV-1a of the canonical response bytes,
+ * stringified exactly like `cassetteKey`. Recorded into `CassetteEntry.
+ * responseHash` and re-derived at load — a response swapped under an intact
+ * key/request fails closed.
+ */
+export function responseHash(res: LlmResult): string {
+  return String(fnv1a(canonicalResponseJson(res)));
 }
 
 /**
@@ -616,10 +703,12 @@ export async function createCassette(init: CassetteInit): Promise<CassetteInitRe
 
   const run = async (
     transport: CassetteTransport,
+    provider: string | null,
     prompt: string,
     opts: DeepSeekCompleteOptions | undefined,
   ): Promise<LlmResult> => {
     const request = canonicalizeRequest({
+      provider: provider ?? undefined,
       prompt,
       model: opts?.model,
       system: opts?.system,
@@ -644,10 +733,12 @@ export async function createCassette(init: CassetteInit): Promise<CassetteInitRe
           "key collision: a different recorded request already owns this key — the tape keeps the first and cannot represent both";
       } else if (!existing) {
         const provenance = provenanceForServed("record", live, key, at);
+        const stored = copyEnvelope(live);
         tape.entries.push({
           key,
           request,
-          response: copyEnvelope(live),
+          response: stored,
+          responseHash: responseHash(stored),
           ...(provenance ? { provenance } : {}),
         });
         await store.write(serializeTape(tape));
@@ -684,6 +775,20 @@ export async function createCassette(init: CassetteInit): Promise<CassetteInitRe
       log.push({ index: log.length, key, mode: "replay", request, response: copyEnvelope(refusal), provenance: null });
       return refusal;
     }
+    // Integrity re-check at serve time (340-4): the load path already refuses a
+    // mismatch, so this only catches an entry mutated in memory after load.
+    // Either way the guarantee is literal: an envelope that does not match its
+    // recorded responseHash is never served.
+    if (entry.responseHash !== responseHash(entry.response)) {
+      const refusal = missRefusal(
+        "the stored response does not match its recorded responseHash — refusing rather than serving it",
+        key,
+        request,
+        tapePath,
+      );
+      log.push({ index: log.length, key, mode: "replay", request, response: copyEnvelope(refusal), provenance: null });
+      return refusal;
+    }
     const served = copyEnvelope(entry.response);
     log.push({
       index: log.length,
@@ -703,7 +808,7 @@ export async function createCassette(init: CassetteInit): Promise<CassetteInitRe
       tapePath,
       entries: () => tape.entries.slice(),
       size: () => tape.entries.length,
-      wrap: (transport) => (prompt, opts) => run(transport, prompt, opts),
+      wrap: (transport, provider) => (prompt, opts) => run(transport, provider ?? null, prompt, opts),
       served: () => log.slice(),
       provenanceFor: (index?: number) => {
         const i = index ?? log.length - 1;
@@ -770,4 +875,90 @@ export async function selectCassette(
     };
   }
   return createCassette({ mode: value, tapePath, ...(deps.now ? { now: deps.now } : {}) });
+}
+
+// ---------------------------------------------------------------------------
+// T5.7 wiring — process-wide activation for the provider seam
+//
+// The deterministic replayer above was inert by construction (zero non-test
+// consumers). This is the ONE place that arms it: the provider entry points
+// (`llm/providers/deepseek.ts` `completeDeepSeek` and `llm/providers/
+// openai-compatible.ts` `completeOpenAiCompatible`) wrap their real wire call
+// through `wrapWithActiveCassette` below. Wrapping the PROVIDER FUNCTION — not
+// `callModel` — is deliberate: registry `callModel` is only one of several
+// callers (direct `completeDeepSeek` importers, the explicit-provider path and
+// the eval driver all bypass it), so the provider function is the funnel every
+// traffic path actually crosses; it is also the seam `mock.ts` mirrors. Both
+// providers are covered.
+//
+// OFF BY DEFAULT, PROVABLY: an unset/blank/"off" mode returns the transport
+// ITSELF (identity), so the provider's call path is exactly the pre-cassette
+// one. An armed-but-invalid env (a sloppy mode, or a mode with no tape path)
+// never silently un-arms: the wrapper yields one coded refusal per call.
+//
+// The canonical key INCLUDES the provider FAMILY id (`provider`), so a tape
+// recorded by one family cannot be served to another for a same model-id
+// string (340-4 — the old provider-agnostic key conflated families). Transport
+// seams (`fetch`/`sleep`/`random`/`timeoutMs`) stay OUT of the key: they are
+// HOW, not WHAT.
+// ---------------------------------------------------------------------------
+
+let activeCache: { signature: string; promise: Promise<CassetteInitResult> } | null = null;
+
+/** Drop the cached activation (tests, or an explicit re-arm after an env change). */
+export function resetActiveCassette(): void {
+  activeCache = null;
+}
+
+/**
+ * Resolve the env-armed cassette ONCE per process, cached by its
+ * (mode, tapePath) signature. `null` = nothing armed: the fast inert path with
+ * no I/O and no tape. A changed signature builds a fresh cassette, so a driver
+ * that flips mode/path mid-process gets the cassette it asked for. The cassette
+ * is cached (not rebuilt per call) so a `record` run keeps ONE in-memory tape
+ * and sequential calls accumulate entries instead of read-modify-writing.
+ */
+export async function activeCassette(
+  env: Record<string, string | undefined> = process.env,
+): Promise<CassetteInitResult | null> {
+  const rawMode = env[CASSETTE_MODE_ENV];
+  const mode = typeof rawMode === "string" ? rawMode.trim() : "";
+  if (mode === "" || mode === "off") return null;
+  const rawTape = env[CASSETTE_TAPE_ENV];
+  const tape = typeof rawTape === "string" ? rawTape.trim() : "";
+  const signature = `${mode}\u0000${tape}`;
+  if (activeCache && activeCache.signature === signature) return activeCache.promise;
+  const promise = selectCassette({ env });
+  activeCache = { signature, promise };
+  return promise;
+}
+
+/**
+ * Wrap a provider transport through the env-armed cassette:
+ *   - nothing armed  ⇒ the transport ITSELF (identity — byte-identical);
+ *   - "record"/"replay" ⇒ the cassette's wrapping transport keyed by `provider`;
+ *   - armed-but-invalid ⇒ a transport returning ONE coded refusal, so a sloppy
+ *     env can never quietly fall back to live traffic.
+ *
+ * `provider` is the FAMILY id of the transport (the caller's own id, e.g.
+ * "deepseek"/"xai") — it is folded into the tape key so a tape cannot serve
+ * across families.
+ */
+export async function wrapWithActiveCassette(
+  transport: CassetteTransport,
+  provider: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<CassetteTransport> {
+  const init = await activeCassette(env);
+  if (init === null) return transport;
+  if (!init.ok) {
+    const { code, error } = init;
+    return async () => ({
+      ok: false,
+      reason: "error",
+      code,
+      error: `${CASSETTE_MODE_ENV} is set but the cassette refused to arm — ${error}`,
+    });
+  }
+  return init.cassette.wrap(transport, provider);
 }

@@ -578,9 +578,9 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
   },
   RT_E_MCP_DISABLED: {
     meaning:
-      "F1 (R8-f11 / R13-f06): the MCP runtime client is owner-gated and DISABLED by default — no child process was spawned and zero network I/O was performed (the shell is discovery-first and inert until the owner's trust decision).",
+      "F1 (R8-f11 / R13-f06): the MCP runtime client is owner-gated and DISABLED by default — no child process is spawned and zero network I/O is performed until the owner sets RAPIDTOOL_MCP_ENABLED=1. The JSON-RPC 2.0 stdio transport itself is implemented (src/lib/mcp.server.ts, 340-1); the trust gate, not a missing transport, is why nothing runs.",
     agentAction:
-      "Do not simulate MCP discovery or fabricate tool lists: wait for the owner's trust decision, then set RAPIDTOOL_MCP_ENABLED=1 (once the JSON-RPC 2.0 stdio transport lands, TODO(R8-f11)) and re-run the read-only tools/list discovery.",
+      "Do not simulate MCP discovery or fabricate tool lists: wait for the owner's trust decision, then set RAPIDTOOL_MCP_ENABLED=1 and re-run the read-only tools/list discovery (the stdio transport is implemented — src/lib/mcp.server.ts, see fixes/340_1_mcp.md).",
   },
   RT_E_PATH_KIND_MISMATCH: {
     meaning:

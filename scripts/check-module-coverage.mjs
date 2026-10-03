@@ -88,6 +88,9 @@ export const COVERAGE_ALLOWLIST = {
     "NO CONSUMER: a barrel with ZERO importers (it only re-exports the dormant multiplayer/p2p.ts). Proposed for deletion.",
   "src/lib/multiplayer/p2p.ts":
     "DORMANT by design (its own HONESTY header): no `/api/rtc` relay ships and no live consumer exists (its only importer is the dead multiplayer/index.ts barrel). Its WebRTC paths need RTCPeerConnection and `import.meta.env`, so no node test can drive them. Proposed: keep only as the relay contract, or remove.",
+  // --- 340-1 (F1): a spawned TEST FIXTURE, not a library module ---
+  "src/lib/mcp/stub-server.ts":
+    "SPAWNED TEST FIXTURE (not production code, by its own header): src/lib/mcp.server.test.ts starts it as a REAL child process over stdio to exercise the MCP client's handshake / tools-list / tools-call / timeout / malformed-reply paths. No import-based test can reach it — importing the file would start a stdin server inside the test runner. No module under src/ or scripts/ imports it; the app bundle never includes it.",
 };
 
 const SPEC_RE = /\b(?:from|import|require)\s*\(?\s*["']([^"']+)["']/g;

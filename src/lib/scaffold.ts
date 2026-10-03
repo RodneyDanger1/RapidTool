@@ -87,14 +87,13 @@ export type ProjectKind = "webapp" | "cli-tool" | "library" | "game" | "service"
 export type ScaffoldFile = { path: string; body: string };
 
 /**
- * fixes/277 (A3-f07 / W-14 · W-27-C W-28b): the emitted-UI generation seam.
- * Today the webapp shell's UI is a name-dump (`generated exports (N): names`
- * — A3-f07) and machine UI generation does not exist; this hook is the stage's
- * home. A caller MAY supply a `uiGeneration` hook (via `ScaffoldOptions`); it
+ * fixes/277 / 340-6 (A3-f07 / W-14 · W-27-C W-28b): the emitted-UI generation
+ * seam. A caller MAY supply a `uiGeneration` hook (via `ScaffoldOptions`); it
  * receives the emit context and returns replacement source lines for the
  * emitted shell's generated-substance body, or `null` to keep the default.
- * The DEFAULT hook (`defaultUiGeneration` below) is the current name-dump —
- * a no-op that reproduces the pre-277 bytes exactly.
+ * The DEFAULT hook (`defaultUiGeneration` below) is a real, deterministic
+ * generator over the project's own spec + the generated module's exported
+ * surface (see its own contract); a caller hook still overrides it wholesale.
  */
 export type UiGenerationRequest = {
   project: Project;
@@ -108,10 +107,10 @@ export type UiGenerationRequest = {
 export type UiGenerationHook = (request: UiGenerationRequest) => string[] | null;
 
 /** Optional inputs to `scaffoldProject` (additive; an omitted hook keeps the
- *  default UI name-dump). The README's declared-scripts banner is emitted
+ *  default UI generator). The README's declared-scripts banner is emitted
  *  unconditionally — see `declaredScriptsBanner`. */
 export type ScaffoldOptions = {
-  /** A3-f07: the emitted-UI generation hook (default = the name-dump). */
+  /** A3-f07: the emitted-UI generation hook (default = `defaultUiGeneration`). */
   uiGeneration?: UiGenerationHook;
 };
 
@@ -145,14 +144,14 @@ export type ScaffoldResult =
       redTree?: true;
       partial?: true;
       /**
-       * fixes/277 (A3-f07): which UI-generation path produced the emitted
-       * webapp shell — the default name-dump, or a caller-supplied hook whose
-       * lines were applied. Absent when the emission carried no webapp UI node
-       * (no name-dump was generated, so there is nothing to report).
+       * fixes/277 / 340-6 (A3-f07): which UI-generation path produced the
+       * emitted webapp shell — the default generator, or a caller-supplied
+       * hook whose lines were applied. Absent when the emission carried no
+       * webapp UI node (nothing was generated, so there is nothing to report).
        */
       uiGeneration?: {
-        hook: "default-name-dump" | "caller";
-        /** true when a caller hook's lines replaced the name-dump this emit. */
+        hook: "default-generator" | "caller";
+        /** true when a caller hook's lines replaced the default this emit. */
         applied: boolean;
         /** The emitted ui module path the hook's lines landed in. */
         uiPath: string;
@@ -1256,14 +1255,260 @@ function emitJobModule(
   return lines.join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// 340-6 (A3-f07 / W-14): the DEFAULT emitted-UI generator.
+//
+// A real, deterministic renderer over the project's OWN bytes — no model call,
+// no new dependency. INPUTS: project.implementationSpec (typeSignatures, …),
+// project.contracts (A6 entities/fields), project.lattice (brief nouns), and
+// the generated ENTRY module's REAL exported surface, parsed from the exact
+// source the emitter writes (the tree entry file, or generatedSource plus its
+// template export tail — never a guessed name). BAR (W-14): the emitted
+// Console() references ≥2 real domain fields and wires a form interaction to a
+// GENUINELY exported function of that module; a module exporting no callable,
+// or a project with <2 real fields, yields the honest "nothing to bind" panel
+// instead of fabricated fields. DETERMINISM: every list is project-ordered, so
+// the same project emits the same bytes. A caller-supplied UiGenerationHook
+// still wins (a non-null return replaces this body; null keeps it); the
+// surrounding imports/export wrapper stays scaffold-owned.
+// ---------------------------------------------------------------------------
+
+/** One rendered form input, mapped to a real recorded/spec value. */
+type UiField = { id: string; label: string; type: string };
+
+/** A callable the generated entry module really exports. */
+type UiCallable = {
+  name: string;
+  params: { name: string; type: string; rest: boolean }[];
+  /** Keys of a single object-literal parameter default (`spec = { a, b }`). */
+  objectKeys: { name: string; type: string }[] | null;
+};
+
+/** TS primitive param types that take a scalar argument, not an object. */
+const UI_PRIMITIVE_TYPE = /^(string|number|boolean|bigint|symbol)$/i;
+
+/** Top-level comma split of a function header's parameter text. */
+function uiParamParts(text: string): string[] {
+  return splitTopLevel(text, ",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
+/** Parse one parameter declaration (name, type, rest, and any default value). */
+function uiParseParam(
+  raw: string,
+): { name: string; type: string; rest: boolean; defaultText: string | null } | null {
+  const rest = raw.startsWith("...");
+  const body = (rest ? raw.slice(3) : raw).trim();
+  const eq = /^([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*([\s\S]+)$/.exec(body);
+  if (eq) return { name: eq[1]!, type: "", rest, defaultText: eq[2]!.trim() };
+  const m = /^([A-Za-z_$][A-Za-z0-9_$]*)(\?)?\s*(?::\s*([\s\S]+))?$/.exec(body);
+  if (!m) return null;
+  return { name: m[1]!, type: (m[3] ?? "").trim(), rest, defaultText: null };
+}
+
 /**
- * fixes/277 (A3-f07 / W-14): the DEFAULT emitted-UI generation — the current
- * name-dump, byte-identical to the pre-277 shell. TODO(A3-f07): machine UI
- * generation does not exist (the webapp UI is deliberately never
- * machine-generated); when it lands it replaces THIS body behind the same
- * UiGenerationHook contract and must clear the ≥2-domain-field / interaction
- * bar (W-14) before any claim moves. Today a caller-supplied hook may return
- * replacement body lines; null ⇒ this default is used.
+ * Top-level `{ a, b: c }` keys of an object-literal default, with a type
+ * inferred from each value literal (null when the default is not an object
+ * literal). Reads the generated function's own field names — never invented.
+ */
+function uiObjectLiteralKeys(defaultText: string): { name: string; type: string }[] | null {
+  const text = defaultText.trim();
+  if (!text.startsWith("{") || !text.endsWith("}")) return null;
+  const keys: { name: string; type: string }[] = [];
+  for (const part of splitTopLevel(text.slice(1, -1), ",")) {
+    const m = /^([A-Za-z_$][A-Za-z0-9_$]*)\s*(?::\s*([\s\S]+))?$/.exec(part.trim());
+    if (!m || keys.some((k) => k.name === m[1]!)) continue;
+    const value = (m[2] ?? "").trim();
+    const type = /^-?\d/.test(value) ? "number" : /^(true|false)$/.test(value) ? "boolean" : "string";
+    keys.push({ name: m[1]!, type });
+  }
+  return keys.length > 0 ? keys : null;
+}
+
+/** Content between a `(` at `open` and its matching `)` (quote/nesting aware). */
+function uiReadParen(text: string, open: number): string {
+  if (text[open] !== "(") return "";
+  let depth = 0;
+  let quote = "";
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quote) {
+      if (ch === "\\") i++;
+      else if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") quote = ch;
+    else if (ch === "(") depth++;
+    else if (ch === ")") {
+      depth--;
+      if (depth === 0) return text.slice(open + 1, i);
+    }
+  }
+  return "";
+}
+
+/**
+ * The functions a generated module body really exports, in source order:
+ * `export function f`, `export const f = (…) =>`/`= function`, and declared
+ * functions re-exported through `export { f }`. A binding that cannot be tied
+ * to a function declaration is never returned, so a caller can never emit a
+ * call to a name the module does not export.
+ */
+function uiExportedCallables(source: string): UiCallable[] {
+  const text = String(source ?? "");
+  const declared = new Map<string, string>(); // declared function -> params text
+  for (const m of text.matchAll(/^function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/gm)) {
+    declared.set(m[1]!, uiReadParen(text, m.index! + m[0].length - 1));
+  }
+  const calls = new Map<string, string>(); // exported name -> params text
+  for (const m of text.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/gm)) {
+    calls.set(m[1]!, uiReadParen(text, m.index! + m[0].length - 1));
+  }
+  for (const m of text.matchAll(
+    /^export\s+(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?(?:\(([^)]*)\)|function\s*\(([^)]*)\))/gm,
+  )) {
+    calls.set(m[1]!, m[2] ?? m[3] ?? "");
+  }
+  for (const m of text.matchAll(/^export\s*\{([^}]*)\}/gm)) {
+    for (const part of m[1]!.split(",")) {
+      const p = part.trim();
+      if (!p) continue;
+      const as = /^([A-Za-z_$][A-Za-z0-9_$]*)\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(p);
+      const local = as ? as[1]! : p;
+      const exported = as ? as[2]! : p;
+      if (declared.has(local)) calls.set(exported, declared.get(local)!);
+    }
+  }
+  const out: UiCallable[] = [];
+  for (const [name, paramsText] of calls) {
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) || out.some((c) => c.name === name)) continue;
+    const params: UiCallable["params"] = [];
+    let objectKeys: UiCallable["objectKeys"] = null;
+    for (const part of uiParamParts(paramsText)) {
+      const parsed = uiParseParam(part);
+      if (!parsed) continue;
+      params.push({ name: parsed.name, type: parsed.type, rest: parsed.rest });
+      if (parsed.defaultText) objectKeys = uiObjectLiteralKeys(parsed.defaultText) ?? objectKeys;
+    }
+    out.push({ name, params, objectKeys });
+  }
+  return out;
+}
+
+/**
+ * The generated ENTRY source the emitted shell imports — mirroring
+ * scaffoldProject's own entry resolution (the tree ENTRY file, else the
+ * generatedSource host with its template export tail). Null when this emit
+ * writes no generated module at all. Kept in lock-step with the emit path so a
+ * parsed export always names something the imported module really has.
+ */
+function uiGeneratedEntrySource(project: Project): string | null {
+  const graph = project.specGraph;
+  const nodes = (graph?.nodes ?? []).filter((n) => n && typeof n.file === "string");
+  const order = (graph?.order ?? []).filter((id, i, all) => all.indexOf(id) === i);
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const ordered: { node: (typeof nodes)[number]; index: number }[] = [];
+  for (const id of order) {
+    const node = byId.get(id);
+    if (node) ordered.push({ node, index: ordered.length });
+  }
+  for (const n of nodes) {
+    if (!ordered.some((o) => o.node.id === n.id)) ordered.push({ node: n, index: ordered.length });
+  }
+  const jobEntry = ordered.find((o) => o.node.id.startsWith("job-"));
+  const rolePath = jobEntry
+    ? safeNodePath(jobEntry.node.file, jobEntry.node.id, jobEntry.index)
+    : "src/generated.ts";
+
+  const rawTree = Array.isArray(project.generatedTree) ? project.generatedTree : [];
+  const accepted: { path: string; source: string }[] = [];
+  const seen = new Set<string>();
+  for (const row of rawTree) {
+    if (row === null || typeof row !== "object") continue;
+    const pathRaw = (row as { path?: unknown }).path;
+    const source = (row as { source?: unknown }).source;
+    const hash = (row as { hash?: unknown }).hash;
+    if (typeof source !== "string" || typeof hash !== "string") continue;
+    if (treePathRefusal(pathRaw) !== null) continue;
+    const path = pathRaw as string;
+    if (seen.has(path)) continue;
+    seen.add(path);
+    accepted.push({ path, source });
+  }
+  accepted.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  if (accepted.length > 0) {
+    const byPath = new Map(accepted.map((f) => [f.path, f]));
+    const entry = byPath.get(rolePath) ?? byPath.get("src/generated.ts") ?? accepted[0];
+    return entry ? entry.source : null;
+  }
+  const generated = (project.generatedSource ?? "").trim();
+  if (!generated) return null;
+  return isTemplateModule(generated) ? `${generated}\n${TEMPLATE_EXPORT_TAIL}` : generated;
+}
+
+/**
+ * Real domain fields for the emitted form, in deterministic priority order:
+ * the callable's own surface (object-literal keys, else its parameters), then
+ * the recorded typeSignatures' parameters, the A6 contract entity fields, and
+ * the lattice's brief nouns. Never invented; deduped and capped.
+ */
+function uiDomainFields(
+  project: Project,
+  callable: UiCallable,
+  shape: "object" | "positional" | "none",
+): UiField[] {
+  const fields: UiField[] = [];
+  const seen = new Set<string>();
+  const push = (id: string, label: string, type: string): void => {
+    const clean = ident(id);
+    if (!clean || seen.has(clean)) return;
+    seen.add(clean);
+    fields.push({ id: clean, label, type });
+  };
+
+  if (shape === "positional") {
+    for (const p of callable.params) if (!p.rest) push(p.name, p.name, p.type);
+    return fields;
+  }
+  if (callable.objectKeys) {
+    for (const key of callable.objectKeys) push(key.name, key.name, key.type);
+    return fields;
+  }
+  for (const p of callable.params) if (!p.rest) push(p.name, p.name, p.type);
+
+  const spec = project.implementationSpec;
+  const sigs = spec && Array.isArray(spec.typeSignatures) ? spec.typeSignatures : [];
+  for (const raw of sigs) {
+    const m = /^[^(]*\(([\s\S]*)\)/.exec(String(raw ?? ""));
+    if (!m) continue;
+    for (const part of uiParamParts(m[1]!)) {
+      const p = uiParseParam(part);
+      if (p && !p.rest) push(p.name, p.name, p.type);
+    }
+  }
+  const entities =
+    project.contracts && Array.isArray(project.contracts.entities) ? project.contracts.entities : [];
+  for (const ent of entities) {
+    for (const f of Array.isArray(ent?.fields) ? ent.fields : []) {
+      const name = String(f?.name ?? "");
+      if (name) push(`${ent.name}_${name}`, `${ent.name} · ${name}`, String(f?.type ?? ""));
+    }
+  }
+  const latEntities =
+    project.lattice && Array.isArray(project.lattice.entities) ? project.lattice.entities : [];
+  for (const name of latEntities) push(String(name), String(name), "string");
+  return fields.slice(0, 4);
+}
+
+/**
+ * fixes/277 / 340-6 (A3-f07 / W-14): the DEFAULT emitted-UI generation. Null
+ * generatedNamespace ⇒ the honest no-module panel (byte-identical to the
+ * pre-277 shell). Otherwise a real generator over project.implementationSpec,
+ * project.contracts, project.lattice and the generated module's genuinely
+ * exported surface — a form bound to ≥2 real domain fields, submitting into a
+ * real exported function, or the honest "nothing to bind" panel when either is
+ * absent. A caller-supplied hook still overrides this behind the same contract.
  */
 const defaultUiGeneration = ({
   project,
@@ -1282,17 +1527,90 @@ const defaultUiGeneration = ({
       `  );`,
     ];
   }
-  // TODO(A3-f07) at this line: the name-dump is the stage's current output — a
-  // real generator (interactions, ≥2 domain fields per W-14) replaces it here.
-  return [
-    `  const exported = Object.keys(generated);`,
+  const entrySource = uiGeneratedEntrySource(project);
+  const callables = entrySource === null ? [] : uiExportedCallables(entrySource);
+  // Prefer a callable whose own surface can carry ≥2 real fields.
+  const callable =
+    callables.find((c) => (c.objectKeys?.length ?? 0) >= 2 || c.params.filter((p) => !p.rest).length >= 2) ??
+    callables[0] ??
+    null;
+  const shape: "object" | "positional" | "none" = !callable
+    ? "none"
+    : callable.objectKeys
+      ? "object"
+      : callable.params.length === 0
+        ? "none"
+        : callable.params.length === 1
+          ? UI_PRIMITIVE_TYPE.test(callable.params[0]!.type)
+            ? "positional"
+            : "object"
+          : "positional";
+  const fields = callable ? uiDomainFields(project, callable, shape) : [];
+  if (!callable || fields.length < 2) {
+    const reason = !callable
+      ? "generated module exports no callable function"
+      : `generated module exposes fewer than two bindable domain fields (found ${fields.length})`;
+    return [
+      `  const notice = ${jstr(`shell — ${reason}; nothing to wire yet`)};`,
+      `  return (`,
+      `    <main>`,
+      `      <h1>{${jstr(prose(project.name))}}</h1>`,
+      `      <p>{notice}</p>`,
+      `    </main>`,
+      `  );`,
+    ];
+  }
+
+  const coerce = (f: UiField): string => {
+    const t = f.type.toLowerCase();
+    if (/\bnumber\b|\bint(eger)?\b|\bfloat\b|\bdecimal\b|\bdouble\b/.test(t)) {
+      return `Number(data.get(${jstr(f.id)}) ?? "")`;
+    }
+    if (/\bbool(ean)?\b/.test(t)) return `String(data.get(${jstr(f.id)}) ?? "") === "true"`;
+    return `String(data.get(${jstr(f.id)}) ?? "")`;
+  };
+  const callLines: string[] =
+    shape === "none"
+      ? [`    const result = generated.${callable.name}();`]
+      : shape === "object"
+        ? [
+            `    const result = generated.${callable.name}({`,
+            ...fields.map((f) => `      ${f.id}: ${coerce(f)},`),
+            `    });`,
+          ]
+        : [
+            `    const result = generated.${callable.name}(`,
+            ...fields.map((f) => `      ${coerce(f)},`),
+            `    );`,
+          ];
+
+  const body: string[] = [
+    `  const onSubmit = (event: { preventDefault: () => void; currentTarget: HTMLFormElement }) => {`,
+    `    event.preventDefault();`,
+    `    const data = new FormData(event.currentTarget);`,
+    ...callLines,
+    `    const output = event.currentTarget.querySelector("output");`,
+    `    if (output) output.textContent = String(JSON.stringify(result));`,
+    `  };`,
     `  return (`,
     `    <main>`,
     `      <h1>{${jstr(prose(project.name))}}</h1>`,
-    `      <p>generated exports ({exported.length}): {exported.join(", ") || "(none)"}</p>`,
+    `      <form onSubmit={onSubmit}>`,
+  ];
+  for (const f of fields) {
+    body.push(
+      `        <label htmlFor=${jstr(`rt-${f.id}`)}>{${jstr(f.label)}}</label>`,
+      `        <input id=${jstr(`rt-${f.id}`)} name=${jstr(f.id)} defaultValue="" />`,
+    );
+  }
+  body.push(
+    `        <button type="submit">{${jstr(`Run ${callable.name}`)}}</button>`,
+    `        <output />`,
+    `      </form>`,
     `    </main>`,
     `  );`,
-  ];
+  );
+  return body;
 };
 
 /**
@@ -1306,9 +1624,11 @@ const defaultUiGeneration = ({
  * dangling specifier in every tree-mode webapp). `genEntry === null` ⇒ no
  * generated substance at all ⇒ no generated import in the shell.
  *
- * fixes/277 (A3-f07): the webapp branch's generated-substance body is produced
- * by the `uiGeneration` hook (the single call point) — default = the
- * name-dump, byte-identical to the pre-277 shell.
+ * fixes/277 / 340-6 (A3-f07): the webapp branch's generated-substance body is
+ * produced by the `uiGeneration` hook (the single call point); the default is
+ * the real generator in `defaultUiGeneration` above (≥2 spec/export-derived
+ * fields + an interaction bound to a genuinely exported function, or the
+ * honest "nothing to bind" panel).
  */
 function emitUi(
   node: { file: string; purpose: string },
@@ -1322,12 +1642,12 @@ function emitUi(
       ? [`import * as generated from ${jstr(tsImportPath(dirOf(genEntry.from), genEntry.path))};`, ""]
       : [];
     // fixes/277 (A3-f07): THE single uiGeneration call point. The hook
-    // (caller-supplied via ScaffoldOptions, or the default name-dump above)
+    // (caller-supplied via ScaffoldOptions, or the default generator above)
     // returns the shell's generated-substance body lines ONLY — the
     // surrounding imports/export wrapper stay scaffold-owned so a hook can
     // never break the emitted module's shape.
     // fixes/277 (A3-f07): the hook contract — a `null` return keeps the
-    // default name-dump (which is total: it never returns null), so the
+    // default generator (which is total: it never returns null), so the
     // spread below always receives string[] (R3-f03 break fix: the hook's
     // declared `string[] | null` return must be coalesced, never spread raw).
     const uiRequest: UiGenerationRequest = {
@@ -3330,7 +3650,7 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
 
   // fixes/277 (A3-f07): resolve the emitted-UI generation hook for this emit —
   // the caller's hook (ScaffoldOptions.uiGeneration) with the default
-  // name-dump as the fallback — and track whether a caller's lines actually
+  // generator as the fallback — and track whether a caller's lines actually
   // landed (the `uiGeneration` record on the result below). The wrapper
   // always returns string[] (the default is total), satisfying the hook
   // contract's `null` ("keep the default") without changing emitUi's own
@@ -3732,8 +4052,9 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
     let body: string;
     if (treeMode) {
       // fixes/144 (M2): a path a tree file owns was emitted by the tree pass
-      // above — never double-push. src/ui keeps its honest contract-level
-      // shell (the webapp/game UI is never machine-generated — g6 delta);
+      // above — never double-push. An uncovered ui node is rebuilt by emitUi
+      // (340-6: the webapp body is generated from the entry's real exports;
+      // the game/service shells stay honest contract-level stubs);
       // every other uncovered graph node becomes a thin re-export of the tree
       // ENTRY module so the promised module surface still materializes and
       // resolves to real generated code (never a TODO stub beside it).
@@ -3924,12 +4245,12 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
   const warnings = [...treeRefusals, ...unmaterialisedWarnings];
   // fixes/277 (A3-f07): the UI-generation record — present only when a webapp
   // UI shell was actually emitted this run (the hook ran); `applied` is true
-  // when a caller hook's lines replaced the default name-dump. Absent for
+  // when a caller hook's lines replaced the default generator. Absent for
   // every other kind/path, so existing consumers keep byte-identical output.
   const uiGenerationRecord =
     uiHookRan && uiPath !== null
       ? {
-          hook: uiHookApplied ? ("caller" as const) : ("default-name-dump" as const),
+          hook: uiHookApplied ? ("caller" as const) : ("default-generator" as const),
           applied: uiHookApplied,
           uiPath,
         }

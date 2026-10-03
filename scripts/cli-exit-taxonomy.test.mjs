@@ -2440,3 +2440,93 @@ test("W49 · 335-4 / 338-2: a fresh tree is now VERIFIED (exit 0, no unverified 
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// R11-f08 (340-5 · headless-gov resume): the emit arm must FORWARD the emit
+// result's quarantine report. With the move lifted into `emitProject`,
+// `res.survivors` is always empty and the CLI's own move block never fires —
+// so the envelope carries `quarantined`/`quarantineDir` from an ok forced
+// emit, and `quarantineFailed` + `judgingSkipped` from a failed move. Driven
+// end-to-end against a real temp emit dir; no keyed calls.
+// ---------------------------------------------------------------------------
+const RT3405_BRIEF =
+  "A small internal tool that reconciles invoice line items for a three-person accounting team.";
+
+function rt3405CreateProject(cwd, env, proj) {
+  const created = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", CLI_PATH, "create", "--brief", RT3405_BRIEF, "--name", "Quarantine", "--out", proj],
+    { cwd, env, encoding: "utf8", timeout: 120_000 },
+  );
+  assert.equal(created.status, 0, `fixture create failed.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+}
+
+test("R11-f08 (340-5): a forced emit with foreign files forwards quarantined + quarantineDir", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-quarantine-ok-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  try {
+    const proj = join(cwd, "q.json");
+    rt3405CreateProject(cwd, env, proj);
+
+    const tree = join(cwd, "tree");
+    mkdirSync(tree, { recursive: true });
+    writeFileSync(join(tree, "CONTAMINANT.txt"), "not authored by the factory\n");
+
+    const emitted = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "emit", "--project", proj, "--out", tree, "--force"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(emitted.status, 0, `forced emit must succeed.\nstdout: ${emitted.stdout}\nstderr: ${emitted.stderr}`);
+    const envelope = JSON.parse(emitted.stdout);
+    assert.equal(envelope.ok, true);
+    assert.deepEqual(envelope.quarantined, ["CONTAMINANT.txt"], "the moved rel path is reported on the envelope");
+    assert.equal(typeof envelope.quarantineDir, "string");
+    assert.ok(envelope.quarantineDir.length > 0, "the quarantine stamp dir is reported");
+    assert.equal(existsSync(join(tree, "CONTAMINANT.txt")), false, "the foreign file left the tree (never judged again)");
+    assert.equal(existsSync(join(envelope.quarantineDir, "CONTAMINANT.txt")), true, "recoverable under the quarantine dir");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("R11-f08 (340-5): a failed quarantine move surfaces quarantineFailed + judgingSkipped (ok:false)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-quarantine-fail-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  try {
+    const proj = join(cwd, "q.json");
+    rt3405CreateProject(cwd, env, proj);
+
+    const tree = join(cwd, "tree");
+    mkdirSync(tree, { recursive: true });
+    writeFileSync(join(tree, "CONTAMINANT.txt"), "not authored by the factory\n");
+    // Force the move to fail: `.rapidtool-quarantine` is a FILE, so the
+    // quarantine mkdir/copy cannot create `<stamp>/` inside it (ENOTDIR).
+    writeFileSync(join(tree, ".rapidtool-quarantine"), "blocker\n");
+
+    const emitted = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "emit", "--project", proj, "--out", tree, "--force"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(
+      emitted.status,
+      1,
+      `a failed quarantine move must refuse (exit 1).\nstdout: ${emitted.stdout}\nstderr: ${emitted.stderr}`,
+    );
+    const envelope = JSON.parse(emitted.stdout);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.code, "RT_E_FOREIGN_FILES");
+    assert.ok(Array.isArray(envelope.quarantineFailed), "quarantineFailed is forwarded");
+    assert.ok(
+      envelope.quarantineFailed.some((f) => f.path === "CONTAMINANT.txt"),
+      "the failure names the still-in-place path",
+    );
+    assert.match(String(envelope.judgingSkipped), /did not run/, "judgingSkipped is forwarded verbatim");
+    assert.equal(existsSync(join(tree, "CONTAMINANT.txt")), true, "the foreign file is still in place — never dropped");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

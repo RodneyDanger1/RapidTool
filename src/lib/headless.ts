@@ -41,6 +41,7 @@ import {
   unlockRetry,
   withLiveDegradeRows,
 } from "./engine.ts";
+import type { WildReviewer } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
 import { failedGates, hardDodBlockInto, hardDodMessage, recordGateInto, runGate } from "./dod.ts";
 import { approvedAcceptanceFixtures } from "./brief-fixtures.ts";
@@ -67,6 +68,7 @@ import { fileURLToPath } from "node:url";
 // the bare-Node host where the wild loop runs; null (keyless) keeps the engine's
 // existing default byte-identical.
 import { createNodeWildReviewer } from "./wild-review.ts";
+import type { QuarantineFailure } from "./quarantine.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 import type {
   ArtifactKind,
@@ -1999,8 +2001,19 @@ export type EmitProjectResult = {
   moduleEmbedded: boolean;
   /** A7: leftover files deleted this emit (ghost specs + byte-identical extras). */
   wiped: string[];
-  /** A7: leftover files kept because `--force` (foreign user files). */
+  /** A7: leftover files kept because `--force` (foreign user files). R11-f08:
+   *  a forced emit no longer KEEPS them — it quarantines them (below), so this
+   *  is always empty on a successful emit (kept for envelope compatibility). */
   survivors: string[];
+  /** R11-f08: emit-dir-relative foreign files MOVED into quarantine this emit
+   *  (`<dir>/.rapidtool-quarantine/<stamp>/<rel>`). Empty when nothing was
+   *  foreign. Recoverable, never deleted. */
+  quarantined: string[];
+  /** R11-f08: `<dir>/.rapidtool-quarantine/<stamp>` — null when nothing moved. */
+  quarantineDir: string | null;
+  /** R11-f08: requested foreign paths that were already gone (unreachable on
+   *  the emit path — reported, never a silent drop). */
+  quarantineMissing?: string[];
   /** 216 (T-07 / F-07): true when the emitted `README.md` carries the red-tree
    *  banner — the artifact's own declaration that the phase rail below it is a
    *  RECORD, not a passing build (`redTree: "banner"` policy only). */
@@ -2014,6 +2027,11 @@ export type EmitProjectResult = {
   error: string;
   code?: string;
   foreign?: string[];
+  /** R11-f08: moves that threw — the tree still holds these files. */
+  quarantineFailed?: QuarantineFailure[];
+  /** R11-f08: set when a failed quarantine move suppressed a caller's judging
+   *  legs (`--verify-kind`/`--check`/`--run`) — the tree is still mixed. */
+  judgingSkipped?: string;
   /** 216 (T-07 / F-07): the uncleared red-tree trail behind an
    *  `RT_E_TREE_RUN_FAILED` refusal. */
   redTree?: RedTreeRef | null;
@@ -2338,6 +2356,36 @@ export async function emitProject(
       }
     }
     const moduleEmbedded = files.some((f) => f.body.includes(emitProjectInput.generatedSource ?? ""));
+    // R11-f08 (lifted from the CLI's emit arm): a forced emit MOVES the
+    // foreign files aside into `<target>/.rapidtool-quarantine/<stamp>/` and
+    // reports them — so EVERY forced caller quarantines, not just the CLI, and
+    // a later tree-run never judges bytes the factory never authored (A1-f07).
+    // A failed move means the tree is STILL mixed, so the emit refuses
+    // (`ok:false`, RT_E_FOREIGN_FILES) and names `judgingSkipped`: a caller
+    // must not run its judging legs and mint `tested` over that tree.
+    let quarantined: string[] = [];
+    let quarantineDir: string | null = null;
+    let quarantineMissing: string[] = [];
+    if (opts.force === true && foreign.length > 0) {
+      const q = await import("./quarantine.ts");
+      const moved = await q.quarantineFiles(target, foreign);
+      quarantined = moved.moved;
+      quarantineDir = moved.quarantineDir;
+      quarantineMissing = moved.missing;
+      if (!moved.ok) {
+        return {
+          ok: false,
+          error:
+            "emit: forced foreign files could not be quarantined — " +
+            moved.failed.map((f) => `${f.path} (${f.error})`).join(", "),
+          code: "RT_E_FOREIGN_FILES",
+          foreign: moved.failed.map((f) => f.path),
+          quarantineFailed: moved.failed,
+          judgingSkipped:
+            "foreign files could not be quarantined — --verify-kind/--check/--run did not run (the tree is still mixed; R11-f08 · A1-f07)",
+        };
+      }
+    }
     return {
       ok: true,
       dir: target,
@@ -2345,7 +2393,12 @@ export async function emitProject(
       summary: result.summary,
       moduleEmbedded,
       wiped,
-      survivors: opts.force === true ? foreign : [],
+      // R11-f08: the foreign files no longer survive in place — they moved
+      // into quarantine (reported below). Kept for envelope compatibility.
+      survivors: [],
+      quarantined,
+      quarantineDir,
+      ...(quarantineMissing.length > 0 ? { quarantineMissing } : {}),
       // 216 (T-07): absent under the `probe` policy (the trail was never
       // consulted); `false`/`null` when the trail was read and is not red.
       ...(trail === null
@@ -4289,6 +4342,11 @@ export type DoctorStatus = {
    *  210: field-truth via doctor.factoryClaim — never a hardcoded true flip. */
   factory: {
     autonomousSoftwareFactory: boolean;
+    /** W53 · 340-2: true only when every machine-fixable conjunct is met and the
+     *  sole remaining gap is the deliberate human acceptance stamp. Derived from
+     *  the same evidence as `autonomousSoftwareFactory`; it never flips that
+     *  latch and never mints a human stamp. Fail-closed. */
+    awaitingHumanAcceptance: boolean;
     leftoverJobsAreReexportsOrStubs: boolean;
     chatHasSlashToolsOnly: boolean;
     runnerIsSandbox: false;
@@ -4773,6 +4831,7 @@ export async function doctorStatus(opts?: {
   // 214: optional treeDir scan computes leftover/real from actual job files.
   let factory: DoctorStatus["factory"] = {
     autonomousSoftwareFactory: false,
+    awaitingHumanAcceptance: false,
     leftoverJobsAreReexportsOrStubs: true,
     chatHasSlashToolsOnly: true,
     runnerIsSandbox: false,
@@ -4819,6 +4878,7 @@ export async function doctorStatus(opts?: {
     }
     factory = {
       autonomousSoftwareFactory: claim.autonomousSoftwareFactory,
+      awaitingHumanAcceptance: claim.awaitingHumanAcceptance,
       leftoverJobsAreReexportsOrStubs: claim.leftoverJobsAreReexportsOrStubs,
       chatHasSlashToolsOnly: claim.chatHasSlashToolsOnly,
       runnerIsSandbox: false,
@@ -5035,9 +5095,9 @@ export type WildStartShape =
  * import keeps planning.ts (server-only: deepseek.server) out of any static
  * graph.
  *
- * TODO(R13-f02): classifier review of the rows + pause-before-first-mutation
- * unless an auto-plan policy approves — the POLICY layer only; generation is
- * real here.
+ * Generation is real here; the classifier review of these rows and the
+ * pause-before-first-mutation live in `stageWildPlan` (below), which the wild
+ * start/step paths run right after this attaches a plan.
  */
 export async function generateWildPlan(project: Project): Promise<WildPlan> {
   // W36 N2 (fixes/281): F3-01 residue closed — engine.readWildPlan IS the single source for the
@@ -5075,8 +5135,8 @@ export async function generateWildPlan(project: Project): Promise<WildPlan> {
         source: "planner",
         plannedAt: Date.now(),
         note:
-          "planner rows (R13-f02 minimal: generation only) — classifier review + " +
-          "pause-before-mutation remain TODO(R13-f02)",
+          "planner rows (R13-f02) — the wild run runs a classifier plan review " +
+          "and parks before the first mutation (stageWildPlan)",
       };
     }
     const why =
@@ -5120,6 +5180,69 @@ async function attachWildPlan(project: Project): Promise<Project> {
   };
 }
 
+/**
+ * R13-f02 — review the planner rows and PARK before the first mutation.
+ *
+ * Runs right after `attachWildPlan` on both wild start/step paths. When the
+ * record carries a real planner plan with no `wild.plan_review` row yet, the
+ * rows are judged through the injectable Auto-Review reviewer seam
+ * (`engine.reviewWildPlan`) and the run parks — `wildRun.pause` + a park
+ * record + the `wild.plan_review` / `wild.paused_plan` ledger rows — BEFORE
+ * any step can mutate. The pause IS the "no execution without an approved
+ * plan" gate; a human resume executes it. `staged:true` tells the caller to
+ * stop before its loop. Idempotent: once the review row exists the stored
+ * plan is never re-reviewed (a resume proceeds).
+ */
+async function stageWildPlan(
+  project: Project,
+  reviewer: WildReviewer | null,
+): Promise<{ project: Project; staged: boolean }> {
+  const plan = project.wildPlan;
+  if (!plan || plan.source !== "planner" || !Array.isArray(plan.steps) || plan.steps.length === 0) {
+    return { project, staged: false };
+  }
+  const logs = Array.isArray(project.logs) ? project.logs : [];
+  if (logs.some((r) => r?.event === "wild.plan_review")) return { project, staged: false };
+  const { reviewWildPlan, wildLog, wildPause } = await import("./engine.ts");
+  const phase = project.currentPhase;
+  let reviewed: Project;
+  if (reviewer === null) {
+    reviewed = wildLog(
+      project,
+      phase,
+      "warn",
+      "wild.plan_review",
+      `wild.plan (${plan.steps.length} row(s)) could not be reviewed — Auto-Review classifier not configured; parked for human review (R13-f02).`,
+    );
+  } else {
+    const verdict = await reviewWildPlan(project, reviewer);
+    reviewed = verdict.ok
+      ? wildLog(
+          project,
+          phase,
+          "info",
+          "wild.plan_review",
+          `wild.plan (${plan.steps.length} row(s)) review (classifier): ${verdict.verdict} — ${verdict.feedback.slice(0, 300)}`,
+        )
+      : wildLog(
+          project,
+          phase,
+          "warn",
+          "wild.plan_review",
+          `wild.plan (${plan.steps.length} row(s)) review failed (${verdict.reason}): ${verdict.error.slice(0, 300)} — parked for human review (R13-f02).`,
+        );
+  }
+  const parked = wildPause(
+    reviewed,
+    phase,
+    "warn",
+    "wild.paused_plan",
+    `wild.plan reviewed; execution parked before the first mutation — ${plan.steps.length} row(s). Approve to execute (R13-f02).`,
+    { code: "RT_E_GATE_PENDING", unlock: "human-gate" },
+  );
+  return { project: parked, staged: true };
+}
+
 /** 316 H3 (315 V2 finding #1): the P6 execution edge threaded into every
  *  wild step this module drives — the SAME `runP6Edge` seam run/gate execute
  *  through (W-02: keyed synthesis + the tree-run mint; keyless ⇒ the
@@ -5155,6 +5278,10 @@ export async function wildStartHeadless(
     /** 316 H3: injection seam for the P6 edge (mirrors the engine's
      *  `p6Edge`); production callers omit it — see `p6EdgeForWildStep`. */
     p6Edge?: (p: Project) => Promise<Project>;
+    /** R13-f02: injection seam for the Auto-Review classifier that reviews a
+     *  stored planner plan (tests); production omits it — `createNodeWildReviewer`
+     *  binds the Node-side classifier, null keyless. */
+    reviewer?: WildReviewer;
   } = {},
 ): Promise<WildStartShape> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 24, 1), 48);
@@ -5171,13 +5298,25 @@ export async function wildStartHeadless(
   // R14-f01 (W33 lane F1): bind the reviewer once per macro-run — bare Node +
   // key ⇒ the classifier actually verdicts; null ⇒ the engine default (the
   // keyless runs keep their exact bytes).
-  const reviewer = await createNodeWildReviewer();
+  const reviewer = opts.reviewer ?? (await createNodeWildReviewer());
   // 316 H3: resolve the P6 edge ONCE per macro-run (keyed ⇒ the real
   // runP6Edge; keyless with no injected seam ⇒ undefined — nothing threaded).
   const p6Edge = p6EdgeForWildStep(opts);
   // R13-f02 (W33 lane L2): a keyed host plans before the loop advances; keyless
   // ⇒ attachWildPlan returns the project unchanged (no field, no log row).
   let current = await attachWildPlan(project);
+  // R13-f02: review the planner rows and park before the first mutation.
+  const staged = await stageWildPlan(current, reviewer);
+  current = staged.project;
+  if (staged.staged) {
+    return {
+      ok: true,
+      project: foldInvocationEvidence(current, spendBaseline),
+      outcome: "paused",
+      steps: 0,
+      note: "Plan review parked the run before the first mutation (R13-f02).",
+    };
+  }
   let steps = 0;
   let outcome = "advanced";
   let lastError: string | undefined;
@@ -5337,6 +5476,10 @@ export async function wildStartRun(
     /** 316 H3: injection seam for the P6 edge (mirrors the engine's
      *  `p6Edge`); production callers omit it — see `p6EdgeForWildStep`. */
     p6Edge?: (p: Project) => Promise<Project>;
+    /** R13-f02: injection seam for the Auto-Review classifier that reviews a
+     *  planner plan (tests); production omits it — `createNodeWildReviewer`
+     *  binds the Node-side classifier, null keyless. */
+    reviewer?: WildReviewer;
   } = {},
 ): Promise<WildLifecycleShape> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 24, 1), 48);
@@ -5361,7 +5504,7 @@ export async function wildStartRun(
   const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
   // R14-f01 (W33 lane F1): bind the Node-side Auto-Review classifier once for
   // the whole driven run (bare Node + key); null keeps the engine default.
-  const reviewer = await createNodeWildReviewer();
+  const reviewer = opts.reviewer ?? (await createNodeWildReviewer());
   // 316 H3: resolve the P6 edge ONCE for the whole driven run (keyed ⇒ the
   // real runP6Edge; keyless with no injected seam ⇒ undefined).
   const p6Edge = p6EdgeForWildStep(opts);
@@ -5389,6 +5532,19 @@ export async function wildStartRun(
   // R13-f02 (W33 lane L2): plan-before-execute for the keyed journey (keyless ⇒
   // unchanged bytes — see attachWildPlan).
   current = await attachWildPlan(current);
+  // R13-f02: review the planner rows and park before the first mutation.
+  const staged = await stageWildPlan(current, reviewer);
+  current = staged.project;
+  if (staged.staged) {
+    return {
+      ok: true,
+      project: foldInvocationEvidence(current, spendBaseline),
+      changed: true,
+      outcome: "paused",
+      steps: 0,
+      note: "Plan review parked the run before the first mutation (R13-f02).",
+    };
+  }
   let steps = 0;
   let outcome = "advanced";
   let lastError: string | undefined;

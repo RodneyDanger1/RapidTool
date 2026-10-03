@@ -62,6 +62,9 @@
 import { cutMarked, jitteredBackoffDelayMs } from "./deepseek.ts";
 import type { DeepSeekCompleteOptions, DeepSeekMessage } from "./deepseek.ts";
 import { classifyError } from "../../errors.ts";
+// T5.7: same provider-seam cassette wiring as `./deepseek.ts` (identity when
+// RAPIDTOOL_CASSETTE_MODE is unset/"off").
+import { wrapWithActiveCassette } from "../../cassette.ts";
 import type { ErrorCode } from "../../errors.ts";
 import type { LlmResult } from "../../llm.ts";
 import type { LlmProviderDescriptor, LlmProviderId } from "./registry.ts";
@@ -373,12 +376,12 @@ type OpenAiChatBody = {
 };
 
 /**
- * Complete one prompt through an OpenAI-compatible family. The model id must be
+ * The wire body of an OpenAI-compatible completion. The model id must be
  * one of `requestModelIds` — the ids a probe read back for THIS family. There
  * is no default model and no substitution: a missing/blank/unverified id is a
  * coded `RT_E_VALIDATION` refusal BEFORE any network I/O.
  */
-export async function completeOpenAiCompatible(
+async function completeOpenAiCompatibleInner(
   spec: OpenAiCompatibleSpec,
   requestModelIds: readonly string[],
   prompt: string,
@@ -600,6 +603,29 @@ export async function completeOpenAiCompatible(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Provider entry point (signature + behavior unchanged). T5.7 wires the
+ * cassette seam around the real wire call: with `RAPIDTOOL_CASSETTE_MODE`
+ * unset/"off" the transport returned is `completeOpenAiCompatibleInner` itself
+ * — byte-identical; `record` tapes the served envelope; `replay` serves from
+ * the tape and never reaches the transport.
+ */
+export async function completeOpenAiCompatible(
+  spec: OpenAiCompatibleSpec,
+  requestModelIds: readonly string[],
+  prompt: string,
+  opts: DeepSeekCompleteOptions = {},
+): Promise<LlmResult> {
+  // 340-4: the family id (spec.id — the registry's LlmProviderId) is folded
+  // into the tape key, so this family can never be served another family's
+  // recorded bytes for a same model-id string.
+  const transport = await wrapWithActiveCassette(
+    (p, o) => completeOpenAiCompatibleInner(spec, requestModelIds, p, o ?? {}),
+    spec.id,
+  );
+  return transport(prompt, opts);
 }
 
 /** Re-exported for callers that forward a registry history array verbatim. */
