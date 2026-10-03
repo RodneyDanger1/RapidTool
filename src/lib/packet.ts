@@ -353,11 +353,16 @@ function compiledAtFor(project: Project): string {
  * `compiled_at` stamp can only move with TIME-bearing inputs (createdAt,
  * logs[].ts, decisions[].decidedAt — H-05: never a wall clock), so content-only
  * inputs (operator notes, artifacts, memory rows) change the packet bytes
- * without moving the stamp. This FNV-1a fold covers the SAME inputs the
- * compile reads, PLUS those content-only inputs, in the project's own stored
- * order (the same order the packet renders them — deterministic; never
- * sorted and never re-derived from a clock): createdAt, logs[].ts,
- * decisions[].decidedAt, notes, artifacts (id/phase/kind/title/body), memory
+ * without moving the stamp. 341-3: `brief` is folded too — it is the primary
+ * content-only input the compile reads, and a brief edit changed the Mission
+ * section while leaving `input_hash` untouched, so the fingerprint claimed a
+ * completeness it did not have. The fold covers the time-bearing inputs the
+ * compile reads (createdAt, logs[].ts, decisions[].decidedAt) PLUS the
+ * content-only inputs (brief, notes, artifacts, memory) whose edits change the
+ * bytes without moving the stamp, in the project's own stored order
+ * (deterministic; never sorted and never re-derived from a clock):
+ * createdAt, logs[].ts, decisions[].decidedAt, brief, notes, artifacts
+ * (id/phase/kind/title/body), memory
  * (id/kind/phase/score/text — the fields the Ranked-memory section renders;
  * the documented-telemetry counters `counterEvidence`/`reproducedCount` are
  * excluded, mirroring types.ts's "never part of any content fingerprint").
@@ -384,6 +389,12 @@ export function packetInputHash(project: Project): string {
   for (const row of Array.isArray(src.logs) ? src.logs : []) rows.push(`log:${ms(row?.ts)}`);
   for (const d of Array.isArray(src.decisions) ? src.decisions : [])
     rows.push(`decision:${ms(d?.decidedAt)}`);
+  // 341-3: the brief is folded with the compile's own coercion (string passes,
+  // null/undefined → "", anything else String()-ed) so a brief edit moves the
+  // fingerprint without ever throwing on a foreign payload.
+  const briefText =
+    typeof src.brief === "string" ? src.brief : src.brief == null ? "" : String(src.brief);
+  rows.push(`brief:${briefText}`);
   rows.push(`notes:${src.notes ?? ""}`);
   for (const a of Array.isArray(src.artifacts) ? src.artifacts : []) {
     // The sealed packet artifact is the compile's output, not an input (see above).
@@ -759,15 +770,25 @@ export function compileAgentPacket(
   }
   // R2-f05 (fixes/327 L5): a null artifact row, or a row with no `body`, used
   // to throw at `a.kind`/`a.body.length` out of the compile (wipe chain).
-  const artifacts = artifactRows
-    .filter((a) => a?.kind !== "packet")
-    .slice(-8)
+  // 341-3: the section also states the CENSUS — how many rows are on record vs.
+  // how many the ≤8 window renders — because a reader could not otherwise tell
+  // a complete list from a trimmed one. The packet's own row is excluded from
+  // both the count and the window (the same bookkeeping exclusion phaseCoverage
+  // applies); with no rows on record the line is omitted so the "(none yet)"
+  // form stays byte-identical.
+  const nonPacketArtifacts = artifactRows.filter((a) => a?.kind !== "packet");
+  const renderedArtifacts = nonPacketArtifacts.slice(-8);
+  const artifacts = renderedArtifacts
     .map((a) => {
       const body = str(a?.body);
       const text = body.length > 900 ? `${body.slice(0, 900)}…` : body;
       return `### P${a?.phase ?? "?"} · ${str(a?.title)}\n${text}`;
     })
     .join("\n\n");
+  const artifactCensus =
+    nonPacketArtifacts.length > 0
+      ? `Census: ${nonPacketArtifacts.length} artifact row(s) recorded — the newest ${renderedArtifacts.length} render below (window ≤ 8; the packet's own row is excluded).`
+      : "";
   // M-06: live research citations survive outside the trimmed-artifact window.
   // H43-P2-5 (fixes/106): the packet view renders only the 5 NEWEST corpus
   // entries (5 items each) — an N-run project used to print <= 5N source
@@ -1108,6 +1129,7 @@ export function compileAgentPacket(
     ...(spend ? packetSpendSection(spend) : []),
     ``,
     `## Artifacts (trimmed)`,
+    ...(artifactCensus ? [artifactCensus] : []),
     artifacts || "(none yet)",
     ``,
     researchSources

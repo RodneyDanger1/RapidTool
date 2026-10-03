@@ -81,10 +81,14 @@ import {
   proseLineHits,
   reconcilePlanTypeSignatures,
   bindSignaturesToJobTargets,
+  defaultTreeTypecheck,
+  typecheckOffenderPaths,
+  P6_TYPECHECK_REPAIR_MAX_CHUNKS,
   type AsyncUnawaitedUse,
   type ChunkPriorFile,
   type EnvelopeReadFailure,
   type P6SynthesisDeps,
+  type P6TreeTypecheckVerdict,
 } from "./codegen.server.ts";
 import { p6CycleLiveDeps } from "./headless.ts";
 import { applyPhaseResult, emptyProject } from "./engine.ts";
@@ -2742,6 +2746,209 @@ describe("liveP6Synthesis kind-scoped tree trigger (fixes/148 F1)", () => {
     assert.equal(tree.length, 2, "≤8 kind-absent → barrel + one chunk file (FM-01)");
     assert.equal(tree[0]!.path, TREE_ENTRY_PATH);
     assert.ok(chunk.includes("function createBoard("), "the verified module's bytes live in the chunk file");
+  });
+});
+
+// --- fixes/341-1: the PRE-SEAL self-typecheck gate ---------------------------
+// The measured keyed defect: a cli-tool tree was sealed while failing its OWN
+// declared `npm run typecheck` (TS2749 TextDecoder-as-type + TS2440 import/
+// local conflict) because neither P6 path ran the compiler. These tests pin the
+// gate: the REAL compiler seam catches the class and refuses/repairs; a
+// deterministic seam pins the bounded-repair ROUTING without spawning tsc.
+
+describe("fixes/341-1 pre-seal self-typecheck gate", () => {
+  /** A fully-typed kanban module whose ONLY tsc error is the measured class:
+   *  `TextDecoder` used as a type under the cli-tool tsconfig (lib ES2022 +
+   *  @types/node, no DOM) ⇒ TS2749. The KANBAN vocabulary keeps tree-level
+   *  brief-fit green. */
+  const KANBAN_TC_BAD = [
+    "function createBoard(name: string): { id: string; name: string; columns: unknown[] } {",
+    '  if (name === "") { throw new Error("name required"); }',
+    '  return { id: "b-" + name, name: name, columns: [] };',
+    "}",
+    "function addColumn(board: { columns: unknown[] }, columns: unknown[]): { columns: unknown[] } {",
+    "  board.columns = columns;",
+    "  return board;",
+    "}",
+    "function dragCard(cards: unknown[]): unknown[] {",
+    "  const dec: TextDecoder = new TextDecoder();",
+    "  return cards;",
+    "}",
+    "function kanbanBoard(columns: unknown[]): { columns: unknown[] } {",
+    "  return { columns: columns };",
+    "}",
+    "module.exports.createBoard = createBoard;",
+    "module.exports.addColumn = addColumn;",
+    "module.exports.dragCard = dragCard;",
+    "module.exports.kanbanBoard = kanbanBoard;",
+  ].join("\n");
+
+  /** A declared kind (⇒ the chunked path) with the declared-job nodes dropped,
+   *  so routing is isolated and the tree is one chunk. */
+  function tcBase(): Project {
+    const base = { ...p6Base(), kind: "tool" as const };
+    base.specGraph = {
+      nodes: (base.specGraph?.nodes ?? []).filter((n) => !String(n.id).startsWith("job-")),
+    } as Project["specGraph"];
+    return base;
+  }
+
+  /** Injected LLM seam + the REAL gate (the RED case genuinely runs tsc). */
+  function tcRealDeps(moduleSrc: string) {
+    const calls: string[] = [];
+    const prompts: string[] = [];
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      calls.push("complete");
+      prompts.push(prompt);
+      return {
+        ok: true,
+        text: JSON.stringify({ ...KANBAN_ENVELOPE, module: moduleSrc }),
+        model: "deepseek-v4-flash",
+      };
+    };
+    const expand = async () => ({ ok: true as const, spec: KANBAN_SPEC });
+    const verify = async () => ({
+      status: "passed" as const,
+      iterations: 0,
+      evidence: "unused",
+      finalSource: "",
+      cases: [],
+    });
+    const deps: Partial<P6SynthesisDeps> = { complete, expand, verify, typecheckTree: defaultTreeTypecheck };
+    return { calls, prompts, deps };
+  }
+
+  it("BEFORE (the measured defect): with the gate absent the same type-red tree IS sealed", async () => {
+    const f = tcRealDeps(KANBAN_TC_BAD);
+    // The legacy deps: injected LLM+verify seams with NO typecheckTree ⇒ the
+    // gate is null ⇒ exactly the pre-fix behavior.
+    const legacy: Partial<P6SynthesisDeps> = {
+      complete: f.deps.complete!,
+      expand: f.deps.expand!,
+      verify: f.deps.verify!,
+    };
+    const q = await liveP6Synthesis(tcBase(), legacy);
+    assert.ok(
+      q.artifacts.some((a) => a.kind === "code" && a.title.includes("Generated source tree")),
+      "the legacy path seals the tree",
+    );
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "no refusal on the legacy path");
+    // ...and the sealed artifact really is type-red: the SAME real compiler
+    // seam the gate uses reds it. This is the measured defect in miniature.
+    const verdict = await defaultTreeTypecheck(q);
+    assert.equal(verdict.run, "fail", "the sealed legacy tree fails its OWN declared typecheck");
+    assert.match(verdict.detail ?? "", /TS2749|TextDecoder/);
+  });
+
+  it("a PARTIAL seam injection (complete only) does NOT silently disable the gate", async () => {
+    // The opt-out is EXACTLY "the caller replaced both real pipeline seams".
+    // Pre-fix, defining `complete` alone nulled the gate (codegen.server.ts:
+    // 4135), so a caller with a custom LLM seam silently lost the real
+    // typecheck. Here only complete+expand are replaced (`verify` defaults and
+    // the chunked path never calls it); the real gate must stay live.
+    const f = tcRealDeps(KANBAN_TC_BAD);
+    const partial: Partial<P6SynthesisDeps> = { complete: f.deps.complete!, expand: f.deps.expand! };
+    const q = await liveP6Synthesis(tcBase(), partial);
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal, "the real gate stays live under a partial seam injection");
+    assert.match(refusal!.detail, /TS2749|TextDecoder/, "the real tsc caught the measured class");
+    assert.ok(
+      !q.artifacts.some((a) => a.kind === "code" && a.title.includes("Generated source tree")),
+      "no sealed tree for the type-red candidate",
+    );
+  });
+
+  it("RED: the REAL compiler gate catches the measured TS2749 class and REFUSES, never seals", async () => {
+    const f = tcRealDeps(KANBAN_TC_BAD);
+    const q = await liveP6Synthesis(tcBase(), f.deps);
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal, "a tree failing its own typecheck is refused, never sealed");
+    assert.match(refusal!.detail, /RT_E_VALIDATION/);
+    assert.match(refusal!.detail, /TS2749|TextDecoder/, "the REAL tsc named the measured class");
+    assert.ok(
+      !q.artifacts.some((a) => a.kind === "code" && a.title.includes("Generated source tree")),
+      "no sealed tree artifact for a type-red tree",
+    );
+    assert.notEqual((q.lastTest as { label?: string } | null)?.label, "tested", "never a false tested");
+    // The bounded repair round ran (re-synthesis of the compiler-named chunk).
+    assert.ok(f.calls.filter((c) => c === "complete").length >= 2, "one bounded repair re-synthesis fired");
+    assert.ok(
+      f.prompts.some((p) => p.includes("fails its OWN declared `npm run typecheck`")),
+      "the compiler's report reached the repair re-prompt as tree-failure context",
+    );
+  });
+
+  it("GREEN: a red self-typecheck routes into ONE bounded repair round and seals after it converges", async () => {
+    let tcCalls = 0;
+    const seam = async (): Promise<P6TreeTypecheckVerdict> => {
+      tcCalls += 1;
+      return tcCalls === 1
+        ? {
+            run: "fail",
+            detail: `${TREE_CHUNK0_RELOCATED_PATH}(10,12): error TS2749: 'TextDecoder' refers to a value, but is being used as a type here.`,
+            files: [TREE_CHUNK0_RELOCATED_PATH],
+          }
+        : { run: "pass" };
+    };
+    const f = tcRealDeps(KANBAN_MODULE);
+    const q = await liveP6Synthesis(tcBase(), { ...f.deps, typecheckTree: seam });
+    assert.equal(tcCalls, 2, "the gate re-ran the typecheck after the bounded repair");
+    assert.equal(f.calls.filter((c) => c === "complete").length, 2, "exactly one repair re-synthesis");
+    assert.ok(
+      q.artifacts.some((a) => a.kind === "code" && a.title.includes("Generated source tree")),
+      "the tree is sealed only after the typecheck goes green",
+    );
+    assert.ok(
+      f.prompts.some((p) => p.includes("'TextDecoder' refers to a value")),
+      "the tsc tail rode the repair prompt",
+    );
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "a converged repair is not a refusal");
+  });
+
+  it("SKIP is honest non-verification: it seals (as treeRun's own skip does) and logs the skip", async () => {
+    const f = tcRealDeps(KANBAN_MODULE);
+    const q = await liveP6Synthesis(
+      tcBase(),
+      { ...f.deps, typecheckTree: async () => ({ run: "skip" as const, detail: "no node_modules/.bin/tsc" }) },
+    );
+    assert.ok(
+      q.artifacts.some((a) => a.kind === "code" && a.title.includes("Generated source tree")),
+      "a skip does not block the seal",
+    );
+    const skipped = q.logs.find((l) => l.event === "p6.tree.typecheck.skipped");
+    assert.ok(skipped, "the skip is recorded, never silent");
+    assert.match(skipped!.detail, /unverified|no node_modules/);
+  });
+
+  it("a verdict that names no synthesized chunk is refused, not guessed at", async () => {
+    const f = tcRealDeps(KANBAN_MODULE);
+    const q = await liveP6Synthesis(
+      tcBase(),
+      {
+        ...f.deps,
+        typecheckTree: async () => ({
+          run: "fail" as const,
+          detail: "tests/oracle.spec.ts(1,1): error TS2307: Cannot find module './x'.",
+        }),
+      },
+    );
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal, "a non-chunk offender is refused");
+    assert.match(refusal!.detail, /no synthesized chunk maps/);
+  });
+
+  it("typecheckOffenderPaths parses tsc rows (POSIX + Windows) deterministically", () => {
+    assert.deepEqual(
+      typecheckOffenderPaths(
+        "src/a.ts(10,5): error TS2749: x\n  src\\b\\c.ts(1,1): error TS2440: y\nsrc/a.ts(2,2): error TS1: dup",
+      ),
+      ["src/a.ts", "src/b/c.ts"],
+    );
+    assert.deepEqual(typecheckOffenderPaths(undefined), []);
+  });
+
+  it("the bounded repair round is capped", () => {
+    assert.ok(P6_TYPECHECK_REPAIR_MAX_CHUNKS >= 1 && P6_TYPECHECK_REPAIR_MAX_CHUNKS <= 8);
   });
 });
 

@@ -1031,30 +1031,6 @@ export async function runCases(
 }
 
 /**
- * Extract the function names a typeSignature list demands (codegen.server.ts
- * `signatureFunctionNames` parity — duplicated here so verify.server.ts never
- * has to import a module that imports it back). Deterministic, no LLM.
- */
-export function oracleSignatureFunctionNames(typeSignatures: readonly string[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of typeSignatures ?? []) {
-    if (typeof raw !== "string") continue;
-    const line = raw.trim();
-    let m = /^function\s+([A-Za-z_$][\w$]*)\s*\(/.exec(line);
-    if (!m) m = /^(?:export\s+)?(?:declare\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/.exec(line);
-    if (!m) m = /^([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\s*\(/.exec(line);
-    if (!m) continue;
-    const name = m[1];
-    if (!seen.has(name)) {
-      seen.add(name);
-      out.push(name);
-    }
-  }
-  return out;
-}
-
-/**
  * T-02 (109 C-01, second half): identifiers a case text actually CALLS — a
  * name (optionally followed by spaces) immediately before an open paren in
  * the case source.

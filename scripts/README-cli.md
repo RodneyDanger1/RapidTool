@@ -73,6 +73,8 @@ own location, and resolves `.env` (see "API key resolution") relative to the
 
 ## API key resolution (DEEPSEEK_API_KEY)
 
+`scripts/run-eval.mjs` (keyed mode) declares the checkout's `<ROOT>/.env` via `RAPIDTOOL_LLM_ENV_FILE`, so the eval driver resolves the same key as the keyed verbs below (341-2).
+
 Keyed verbs (`crew`, `verify`, `prompt`, `chat`, `create`'s `enforceDod` default,
 … ) resolve the key from TWO sources, in this order (W45 · 331-1):
 
@@ -297,7 +299,9 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs resume --project build
 # 36. unattended (W-47 — REAL, W36): the scheduler-facing drive — re-enters from a checkpoint
 #     when one exists (crash recovery), else starts from the named project file; autopilot +
 #     live until parked. NOT a daemon: a host hook (Windows Task Scheduler / cron) invokes it
-#     on a cadence; stock HITL gates still park for a human BY DESIGN (exit 2).
+#     on a cadence. 341-6: it passes machineGates, so a stock HITL gate (P4/P5/P8/P9) whose DoD
+#     passes is cleared through the ledgered machine actor (`approve --seat autopilot`) — only a
+#     forceHuman gate, or any red DoD gate, still parks (exit 2).
 node --experimental-strip-types scripts/rapidtool-cli.mjs unattended --project build.json
 ```
 

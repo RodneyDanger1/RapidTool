@@ -17,7 +17,7 @@
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs run     --project build.json [--live]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs gate    --project build.json [--autopilot] [--live]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs resume    --project build.json [--autopilot] [--live]   # T-107.7: re-enter from the per-phase checkpoint (prints the snapshot age; never a silent resume)
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs unattended --project build.json                         # W-47: scheduler-facing drive — resumes from a checkpoint when present, else starts from the file; autopilot + live until parked (stock HITL gates still park; exit 2)
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs unattended --project build.json                         # W-47: scheduler-facing drive — resumes from a checkpoint when present, else starts from the file; autopilot + live; a stock HITL gate whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`), so only a forceHuman gate (or any red DoD gate) still parks (exit 2)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs approve --project build.json (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed (314 F5 / K2)
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs reject  --project build.json --note "..."
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs retry   --project build.json                  # unlock a rejected/blocked phase
@@ -1137,9 +1137,11 @@ async function main() {
         // journey headless to completion unattended — autopilot ON (machine
         // gates only) + live ON (P6 through the shared runP6Edge seam; keyless
         // ⇒ the honest deterministic floor). It is NOT a daemon: a host
-        // scheduler (Windows Task Scheduler / cron) invokes it on a cadence —
-        // and stock HITL gates (P4/P5/P8/P9) still park for a human by design,
-        // so a parked exit (2) is the honest outcome, never a fake completion.
+        // scheduler (Windows Task Scheduler / cron) invokes it on a cadence.
+        // 341-6: the unattended arms pass `machineGates: true`, so a stock HITL
+        // gate (P4/P5/P8/P9) whose DoD passes is cleared through the ledgered
+        // machine actor — a genuine human gate (forceHuman) or a red DoD gate
+        // still parks (exit 2), never a fake completion.
         const unattended = flag(args, "unattended");
         const autopilot = unattended ? true : cmd === "gate" ? flag(args, "autopilot") : false;
         const live = unattended ? true : flag(args, "live");
@@ -1155,6 +1157,9 @@ async function main() {
           // T-107.7 (W33 lane L2): the per-phase commit writes the bounded
           // checkpoint beside the project dir; a complete seal clears it.
           checkpointDir: dirname(resolve(path)),
+          // 341-6: only the --unattended arm opts into stock-gate clearing; the
+          // interactive `gate --autopilot` path stays byte-identical.
+          ...(unattended ? { machineGates: true } : {}),
           ...(proven.present ? { proven: proven.rows } : {}),
         });
         // M6-04 (312 · E2's owed half; landed 316 · I4): the save goes through
@@ -1349,8 +1354,11 @@ async function main() {
       // Scheduler / cron re-invocation resumes instead of restarting), else start
       // from the named project file; drive autopilot + live until parked. NOT a
       // daemon: no scheduler/queue in-product — an external hook invokes this verb
-      // on a cadence. Stock HITL gates (P4/P5/P8/P9) still park for a human BY
-      // DESIGN: exit 2 is the honest outcome, never a fake completion.
+      // on a cadence. 341-6: this verb passes `machineGates: true`, so a stock
+      // HITL gate (P4/P5/P8/P9) whose DoD passes is cleared through the ledgered
+      // machine actor (approve --seat autopilot's actor) — a genuine human gate
+      // (forceHuman) or a red DoD gate still parks: exit 2 is then the honest
+      // outcome, never a fake completion.
       case "unattended": {
         // 316 H3 (315 V2 finding #4): same silent-absorb class — the seal is
         // a wild-run concept; the pointer refusal rides the ONE pre-dispatch
@@ -1437,6 +1445,7 @@ async function main() {
         const res = await h.runUntilGate(project, {
           autopilot: true,
           live: true,
+          machineGates: true,
           checkpointDir: t.dir,
           ...(proven.present ? { proven: proven.rows } : {}),
         });
@@ -4923,7 +4932,7 @@ const USAGE = {
     run: "run --project <file.json> [--live] [--unattended] [--knowledge <store.json>]   # advance one phase; --unattended = autopilot+live forced until parked (the scheduler-facing twin is the `unattended` verb); --knowledge seeds the P6 expansion with human-accepted cross-project lesson rows (proven), same store->rows resolver as `packet`",
     gate: "gate --project <file.json> [--autopilot] [--live] [--unattended] [--knowledge <store.json>]  # advance until parked; --unattended forces autopilot+live; --knowledge as on run",
     resume: "resume --project <file.json|dir> [--autopilot] [--live]  # T-107.7: read the per-phase checkpoint written beside the project dir by run/gate, admit it (identity + mode + integer phase sanity), hydrate it, and re-enter the drive at the recorded phase; prints the snapshot age — exit taxonomy identical to gate (2 = parked). Never a silent resume",
-    unattended: "unattended --project <file.json|dir> [--knowledge <store.json>]  # W-47: scheduler-facing drive — re-enter from a checkpoint when one exists (crash recovery), else start from the named project file; autopilot + live until parked; NOT a daemon (a host hook — Windows Task Scheduler / cron — invokes it on a cadence); stock HITL gates still park for a human by design (exit 2); --knowledge as on run/gate",
+    unattended: "unattended --project <file.json|dir> [--knowledge <store.json>]  # W-47: scheduler-facing drive — re-enter from a checkpoint when one exists (crash recovery), else start from the named project file; autopilot + live; a stock HITL gate (P4/P5/P8/P9) whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`), so only a forceHuman gate (or any red DoD gate) still parks (exit 2); NOT a daemon (a host hook — Windows Task Scheduler / cron — invokes it on a cadence); --knowledge as on run/gate",
     approve: "approve --project <file.json> (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed, name exactly one: --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY); --seat autopilot = explicit MACHINE attribution (`decidedBy:\"autopilot\"`, seat harness; works non-TTY — the documented agent door for a parked gate); --agent-seal is REFUSED here (RT_E_VALIDATION) — the seal is a wild-run concept: `wild --start|--resume --agent-seal`",
     reject: "reject --project <file.json> --note <text> (--i-am-human | --seat autopilot)   # the seat is never guessed, name exactly one: --seat autopilot = explicit MACHINE attribution (works non-TTY — the documented agent door for rejecting a parked gate); --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY)",
     retry: "retry --project <file.json>                  # unlock a rejected/blocked phase",

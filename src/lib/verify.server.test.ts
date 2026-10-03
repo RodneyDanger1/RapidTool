@@ -1505,3 +1505,21 @@ describe("340-3 — an ESM module is refused before any keyed work", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 341-3 — wiring audit: the 340-3 "named, not closed" dead duplicate is gone.
+// `oracleSignatureFunctionNames` duplicated codegen.server.ts's
+// `signatureFunctionNames` and had ZERO call sites repo-wide (not even tests);
+// codegen.server.ts owns the live helper and every caller threads the derived
+// names in, so the verify-side copy was a declared helper nothing evaluated.
+// ---------------------------------------------------------------------------
+describe("341-3 — no dead oracle-signature duplicate is exported", () => {
+  it("verify.server.ts no longer exports `oracleSignatureFunctionNames`", async () => {
+    const mod = await import("./verify.server.ts");
+    assert.equal(
+      "oracleSignatureFunctionNames" in mod,
+      false,
+      "the dead duplicate stays removed (codegen.server.ts owns signatureFunctionNames)",
+    );
+  });
+});

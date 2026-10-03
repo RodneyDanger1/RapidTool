@@ -59,7 +59,7 @@
  * contract stays `../../llm.ts`). No `node:fs`, no import-time env read.
  */
 
-import { cutMarked, jitteredBackoffDelayMs } from "./deepseek.ts";
+import { cutMarked, isInsufficientFundsText, jitteredBackoffDelayMs } from "./deepseek.ts";
 import type { DeepSeekCompleteOptions, DeepSeekMessage } from "./deepseek.ts";
 import { classifyError } from "../../errors.ts";
 // T5.7: same provider-seam cassette wiring as `./deepseek.ts` (identity when
@@ -507,11 +507,13 @@ async function completeOpenAiCompatibleInner(
       // HTTP 402 / "Insufficient Balance" is its own class — a broke wallet is
       // not a generic refusal (RT_E_LLM_REJECTED, whose doc says "check the
       // key or the parameters") and not our session budget
-      // (RT_E_BUDGET_EXHAUSTED). The vendor text comes from the SAME
-      // describeError() string the refusal already carried, so the message
-      // stays byte-identical; only the code changes for the 402 class.
+      // (RT_E_BUDGET_EXHAUSTED). The text half is the SAME widened classifier
+      // the DeepSeek adapter uses (`isInsufficientFundsText`, deepseek.ts —
+      // G3/W41, fixes/285): one regex, both families, so a gateway riding
+      // `insufficient_funds`/`insufficient_quota` on any status still reads as
+      // the wallet class. Message stays byte-identical; only the code changes.
       const refusalText = await describeError(spec.label, res);
-      const noBalance = res.status === 402 || /insufficient balance/i.test(refusalText);
+      const noBalance = res.status === 402 || isInsufficientFundsText(refusalText);
       // W45·331-1: a rejected credential is its own class; name the key's
       // source (a declared `.env` path, else the process environment), tail-only.
       const keyRejected = res.status === 401;

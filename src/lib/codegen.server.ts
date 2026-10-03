@@ -118,6 +118,9 @@
 //
 // Run: node --experimental-strip-types --test src/lib/codegen.server.test.ts
 // ---------------------------------------------------------------------------
+import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { deriveTypeSignatures, fnv1a } from "./algorithms.ts";
 import { exportedNamesOf } from "./algo-tools.ts";
 import { briefNounHits, identifierHits, maskLiteralsAndComments } from "./sandbox.ts";
@@ -143,6 +146,11 @@ import {
 // table; this module consumes it (single source — no literal fork).
 import { P6_PHASE_MAX_MS } from "./rt-events.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
+// fixes/341-1: the real declared-`typecheck` runner (the tree-run's own
+// compiler seam) + the pure scaffold emitter the pre-seal gate materializes
+// the candidate tree with. RUNTIME imports: the gate genuinely runs `tsc`.
+import { typecheckDir, type TreeProjectScriptVerdict } from "./compile-check.server.ts";
+import { scaffoldProject } from "./scaffold.ts";
 import type { Artifact, ArtifactKind, DataContract, GeneratedTreeFile, JsonLog, ModelRoute, PhaseId, Project } from "./types.ts";
 // T5.4 (W18 LANE 5): the artifact-provenance shape + vocabulary live in io.ts
 // (the serialization boundary that validates and round-trips them). TYPE-ONLY
@@ -3321,6 +3329,26 @@ export function briefFitSatisfied(brief: string, source: string): { ok: boolean;
 
 // --- live synthesis ----------------------------------------------------------
 
+/**
+ * fixes/341-1 (emitted-product integrity): one self-typecheck verdict for the
+ * CANDIDATE emitted tree — the real `tsc` verdict of the project's OWN
+ * declared `typecheck` script over a scratch materialization of the tree about
+ * to be sealed. `"skip"` is honest non-verification (no declared script / an
+ * un-runnable toolchain), never a pass — mirroring `treeRun`'s own declared-
+ * script contract. `files` are the compiler-named offender paths (POSIX,
+ * relative to the emitted root), used to route the bounded repair.
+ */
+export type P6TreeTypecheckVerdict = {
+  run: "pass" | "fail" | "skip";
+  detail?: string;
+  files?: string[];
+};
+
+/** fixes/341-1: the injectable self-typecheck seam (default =
+ *  `defaultTreeTypecheck`, the real `tsc` run; tests inject deterministic
+ *  verdicts and the RED/GREEN cases inject the real default explicitly). */
+export type P6TreeTypecheck = (project: Project) => Promise<P6TreeTypecheckVerdict>;
+
 export type P6SynthesisDeps = {
   complete: (prompt: string, opts?: DeepSeekCompleteOptions) => Promise<LlmResult>;
   /** Brief expansion seam. The optional `lessons` argument carries the
@@ -3368,6 +3396,19 @@ export type P6SynthesisDeps = {
    *  `opts.proven`. Absent/empty ⇒ each site passes `proven: undefined` and
    *  produces byte-identical legacy prompts (the additive-field discipline). */
   proven?: readonly RankableLessonRow[];
+  /** fixes/341-1 (the measured P6 defect): the PRE-SEAL self-typecheck gate.
+   *  Before a synthesized tree is accepted/sealed, the candidate emitted tree
+   *  is materialized into a scratch dir and its OWN declared `typecheck` runs
+   *  through the real compiler seam (`compile-check.server.ts typecheckDir`).
+   *  A red verdict routes into the existing bounded per-chunk repair (or a
+   *  coded partial refusal) — a type-red tree is never sealed. The default is
+   *  the real `defaultTreeTypecheck`; it is disabled ONLY when a caller
+   *  REPLACES the real pipeline by injecting BOTH `complete` and `verify`
+   *  (that caller must pass this seam explicitly to opt back into the real
+   *  gate; unit tests inject a deterministic verdict). Injecting a single seam
+   *  does NOT disable the gate.
+   */
+  typecheckTree?: P6TreeTypecheck;
 };
 
 /** Number of expandBrief attempts on a transient/timeout failure (backoff). */
@@ -3516,6 +3557,179 @@ const defaultDeps: P6SynthesisDeps = {
     expandBriefWithBackoff(brief, (b) => expandBrief(b, undefined, lessons)),
   verify: (source, brief, opts) => verifyAndFixServer(source, brief, opts),
 };
+
+/** fixes/341-1: scratch-dir prefix for the pre-seal self-typecheck (never the
+ *  subject; deleted on every exit path). */
+const P6_TYPECHECK_SCRATCH_PREFIX = "rt-p6-typecheck-";
+/** fixes/341-1: the most compiler-named chunk files ONE bounded repair round
+ *  re-synthesizes before the tree is refused. */
+export const P6_TYPECHECK_REPAIR_MAX_CHUNKS = 3;
+
+/**
+ * fixes/341-1: the file paths a `tsc` / declared-typecheck tail names — the
+ * compiler's `path(line,col): error TSxxxx:` rows (POSIX or Windows
+ * separators, optional leading whitespace). Deduped, declaration order kept,
+ * capped. Pure + deterministic.
+ */
+export function typecheckOffenderPaths(detail: string | undefined): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of String(detail ?? "").split("\n")) {
+    const m = /^\s*(.+?\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs))\s*\(\d+,\d+\)\s*:/.exec(raw);
+    if (!m) continue;
+    const p = m[1]!.trim().replace(/\\/g, "/");
+    if (!p || seen.has(p)) continue;
+    seen.add(p);
+    out.push(p);
+    if (out.length >= 16) break;
+  }
+  return out;
+}
+
+/**
+ * fixes/341-1 (the measured P6 defect): the REAL pre-seal self-typecheck. The
+ * chunked/single-module synthesis used to seal a tree that failed its OWN
+ * advertised `typecheck` (measured keyed cli-tool: TS2749 `TextDecoder` used
+ * as a type + TS2440 import/local conflict, while `compile.failed=0`, the
+ * oracle passed and the entry smoke passed) because NEITHER P6 path ran the
+ * compiler — `parseVerdictForSource` is syntax-only and `verifyAndFixServer`
+ * compiles with `new Function` (JS-only). This seam materializes the CANDIDATE
+ * emitted project into a scratch dir (the pure `scaffoldProject` emitter — the
+ * exact bytes the tree-run later judges) and runs its OWN declared `typecheck`
+ * through the real compiler seam (`compile-check.server.ts typecheckDir`).
+ * A red verdict must never be sealed; a `skip` (absent/un-runnable toolchain)
+ * is honest non-verification, mirroring the tree-run's own skip contract.
+ */
+export async function defaultTreeTypecheck(project: Project): Promise<P6TreeTypecheckVerdict> {
+  let files: { path: string; body: string }[];
+  try {
+    const scaffold = scaffoldProject(project);
+    if (!scaffold.ok) {
+      return { run: "fail", detail: `scaffold refused the candidate tree before its declared typecheck: ${scaffold.error}` };
+    }
+    files = scaffold.files;
+  } catch (err) {
+    return {
+      run: "fail",
+      detail: `scaffold threw before the candidate tree's declared typecheck: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  const dir = mkdtempSync(join(tmpdir(), P6_TYPECHECK_SCRATCH_PREFIX));
+  const linked = join(dir, "node_modules");
+  try {
+    for (const f of files) {
+      const abs = join(dir, f.path);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, f.body);
+    }
+    const verdict: TreeProjectScriptVerdict = await typecheckDir(dir);
+    if (verdict.run === "pass") return { run: "pass" };
+    if (verdict.run === "skip") {
+      return {
+        run: "skip",
+        detail:
+          verdict.note ??
+          "the declared typecheck script was not executed (absent or un-runnable toolchain) — the tree's typing is UNVERIFIED, not a pass",
+      };
+    }
+    const detail =
+      [verdict.detail, verdict.note].filter((s): s is string => typeof s === "string" && s.trim().length > 0).join(" · ").trim() ||
+      `the declared typecheck script ${verdict.run === "fail" ? "exited non-zero" : verdict.run}`;
+    return { run: "fail", detail, files: typecheckOffenderPaths(verdict.detail) };
+  } catch (err) {
+    return {
+      run: "fail",
+      detail: `self-typecheck harness error: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  } finally {
+    // The scratch carries a junction to the repo's own node_modules (or the
+    // subject's). Unlink it FIRST so recursive removal can never chase it.
+    try {
+      if (existsSync(linked)) unlinkSync(linked);
+    } catch {
+      /* best-effort: rmSync below still unlinks a junction, never its target */
+    }
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best-effort temp cleanup (Windows locks) */
+    }
+  }
+}
+
+/**
+ * fixes/341-1: run the self-typecheck seam against the CANDIDATE project the
+ * tree is about to be sealed as (generatedTree/generatedSource exactly as
+ * `treeUpgraded` would set them). Fail-closed on a missing/malformed verdict
+ * and on a seam throw: a gate that cannot answer never seals.
+ */
+async function runTreeSelfTypecheck(
+  project: Project,
+  materialized: { files: readonly ImportableTreeFile[]; entrySource: string },
+  typecheck: P6TreeTypecheck,
+): Promise<P6TreeTypecheckVerdict> {
+  const candidate: Project = {
+    ...project,
+    generatedTree: materialized.files.map((f) => toGeneratedTreeFile(f.path, f.source)),
+    generatedSource: materialized.entrySource,
+  };
+  try {
+    const verdict = await typecheck(candidate);
+    if (!verdict || (verdict.run !== "pass" && verdict.run !== "fail" && verdict.run !== "skip")) {
+      return { run: "fail", detail: "the self-typecheck seam returned no usable verdict — fail closed" };
+    }
+    return verdict;
+  } catch (err) {
+    return { run: "fail", detail: `self-typecheck seam threw: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/** fixes/341-1: the emitted path a raw accepted chunk lands at after
+ *  `materializeImportableTree` (which relocates a chunk emitted at the tree
+ *  ENTRY path to `src/generated/chunk-0*.ts`). Mirrors that relocation exactly
+ *  so a compiler-named file maps back to its accepted chunk. */
+function materializedPathForAccepted(accepted: readonly { path: string }[], i: number): string {
+  if (i === 0 && accepted[0]?.path === TREE_ENTRY_PATH) {
+    const taken = new Set(accepted.map((f) => f.path));
+    let p = TREE_CHUNK0_RELOCATED_PATH;
+    if (taken.has(p)) {
+      let n = 2;
+      while (taken.has(`src/generated/chunk-0-${n}.ts`)) n += 1;
+      p = `src/generated/chunk-0-${n}.ts`;
+    }
+    return p;
+  }
+  return accepted[i]?.path ?? "";
+}
+
+/** fixes/341-1: the accepted-chunk indices the self-typecheck verdict names —
+ *  from the seam's `files`, else the detail's own compiler rows. Capped at
+ *  `P6_TYPECHECK_REPAIR_MAX_CHUNKS` so one bounded round stays bounded. */
+function typecheckOffenderIndices(
+  verdict: P6TreeTypecheckVerdict,
+  accepted: readonly { path: string }[],
+): number[] {
+  const paths = new Set<string>((verdict.files ?? []).map((p) => String(p).replace(/\\/g, "/")));
+  for (const p of typecheckOffenderPaths(verdict.detail)) paths.add(p);
+  const out: number[] = [];
+  for (let i = 0; i < accepted.length; i++) {
+    if (paths.has(materializedPathForAccepted(accepted, i))) out.push(i);
+    if (out.length >= P6_TYPECHECK_REPAIR_MAX_CHUNKS) break;
+  }
+  return out;
+}
+
+/** fixes/341-1: the bounded tree-failure context handed to a typecheck repair
+ *  re-prompt — the compiler's own report, header first (the existing
+ *  `withTreeFailureContext` reader normalizes + bounds it downstream). */
+function typecheckRepairContext(verdict: P6TreeTypecheckVerdict): string {
+  return (
+    "the candidate emitted tree fails its OWN declared `npm run typecheck` — " +
+    "fix the type error(s) WITHOUT restructuring the tree (the compiler report follows):\n" +
+    String(verdict.detail ?? "").replace(/\s+/g, " ").trim()
+  ).slice(0, 3000);
+}
+
 
 /**
  * W52/339-2: the `p6.synthesis.refused` detail budget. The previous 160-char
@@ -3913,6 +4127,19 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   const complete = deps?.complete ?? defaultDeps.complete;
   const expand = deps?.expand ?? defaultDeps.expand;
   const verify = deps?.verify ?? defaultDeps.verify;
+  // fixes/341-1: the PRE-SEAL self-typecheck gate. It is part of the REAL
+  // synthesis pipeline, so it is live unless the caller has replaced BOTH real
+  // pipeline seams (`complete` AND `verify`) — production (engine.liveLayer
+  // forwards only the failure-context fields, never an LLM/verify seam) always
+  // gates, and a PARTIAL injection (only one seam) does NOT silently disable
+  // the gate. A caller that replaces both seams owns that pipeline and must
+  // pass `typecheckTree` explicitly to opt into the real gate (the unit tests
+  // inject a deterministic verdict; the RED/GREEN tests pass
+  // `defaultTreeTypecheck` explicitly). Only the both-seams-replaced shape
+  // yields the null/legacy behavior.
+  const typecheck: P6TreeTypecheck | null =
+    deps?.typecheckTree ??
+    (deps?.complete !== undefined && deps?.verify !== undefined ? null : defaultTreeTypecheck);
   // M3-2: the optional tree-run failure context rides every bounded repair
   // re-prompt of THIS synthesis when the caller supplied it (defensively
   // normalized at the prompt builders; absent ⇒ byte-identical legacy text).
@@ -4017,14 +4244,14 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   const chunkGroups = chunkTypeSignatures(specRecord.typeSignatures);
   if (singleModuleLibraryKind(project) && chunkGroups.length <= 1) {
     return synthesizeSingleModule(project, brief, specRecord, signatureNames, complete, verify, treeFailure,
-      patchRepairs, gateRepair, synthesisRefusal, proven);
+      patchRepairs, gateRepair, synthesisRefusal, proven, typecheck);
   }
   // fixes/216k (105 TA-15, W6-L1): the chunked driver computes its own
   // chunk→file plan (treeChunkPlan) and consumption order (orderTreeChunks)
   // INSIDE — the caller no longer passes a flat grouping. Job-keyed chunks land
   // at their spec-graph `src/jobs/*.ts` paths; a job-less graph keeps the
   // pre-216k index-keyed mapping byte-for-byte (treeChunkPlan's legacy branch).
-  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair, synthesisRefusal, proven);
+  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair, synthesisRefusal, proven, typecheck);
 }
 
 /**
@@ -4060,6 +4287,11 @@ async function synthesizeSingleModule(
   /** T4 (112 §4.4 / 216g): the caller's resolved cross-project proven rows,
    *  ranked with the memory lessons; absent/empty ⇒ legacy prompt bytes. */
   proven?: readonly RankableLessonRow[],
+  /** fixes/341-1: the PRE-SEAL self-typecheck gate (null ⇒ legacy, no gate).
+   *  The single-module path covers library/service products, whose emitted ESM
+   *  tree is judged by the same declared `typecheck`; a red verdict refuses the
+   *  seal (never a machine-run-green but type-red `tested` artifact). */
+  typecheck: P6TreeTypecheck | null = null,
 ): Promise<Project> {
   // --- Step 2 (legacy): synthesis (one call + one bounded repair re-prompt) --
   const lessonLines = lessonLinesForBrief(
@@ -4332,8 +4564,36 @@ async function synthesizeSingleModule(
   const materialized = materializeImportableTree([
     { path: TREE_ENTRY_PATH, source: finalModule, exports: envelope.exports, reqTrace: envelope.reqTrace },
   ]);
+  // fixes/341-1: the same PRE-SEAL self-typecheck the chunked path applies.
+  // The single-module path is the library/service product lane; its
+  // machine-run harness compiles with `new Function` (JS-only), so a stripped
+  // type error (TS2749/TS2440 class) never fails it. A red declared
+  // `typecheck` here refuses the seal outright (the machine-verified `up` is
+  // discarded) — the bounded re-synthesis loop lives at the caller
+  // (headless's P6 journey), which re-runs this path with the refusal context.
+  const skipTypecheckLogs: JsonLog[] = [];
+  if (typecheck !== null) {
+    const verdict = await runTreeSelfTypecheck(project, materialized, typecheck);
+    if (verdict.run === "fail") {
+      return refuse(
+        withAttemptLogs(project, attemptLogs),
+        "RT_E_VALIDATION",
+        `the emitted module fails its OWN declared \`typecheck\` — refusing to seal a machine-run-green but type-red artifact: ${verdict.detail ?? "no detail"}`,
+      );
+    }
+    if (verdict.run === "skip") {
+      skipTypecheckLogs.push({
+        ts: Date.now(),
+        phase: 6 as PhaseId,
+        level: "warn",
+        event: "p6.tree.typecheck.skipped",
+        detail: `chunk 1/1 · ${verdict.detail ?? "declared typecheck not executed (unverified, not a pass)"}`,
+      });
+    }
+  }
   return {
     ...up,
+    ...(skipTypecheckLogs.length > 0 ? { logs: [...(up.logs ?? []), ...skipTypecheckLogs].slice(-200) } : {}),
     generatedSource: materialized.entrySource,
     generatedTree: materialized.files.map((f) => toGeneratedTreeFile(f.path, f.source)),
   };
@@ -4381,6 +4641,11 @@ async function synthesizeChunkedTree(
   /** T4 (112 §4.4 / 216g): the caller's resolved cross-project proven rows,
    *  ranked with the memory lessons on every chunk; absent/empty ⇒ legacy. */
   proven?: readonly RankableLessonRow[],
+  /** fixes/341-1: the PRE-SEAL self-typecheck gate (null ⇒ legacy, no gate).
+   *  A red verdict gets ONE bounded repair round over the compiler-named chunks
+   *  (re-synthesized with the compiler's tail as tree-failure context) and, if
+   *  still red, an honest partial refusal — never a sealed red tree. */
+  typecheck: P6TreeTypecheck | null = null,
 ): Promise<Project> {
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
@@ -4537,7 +4802,114 @@ async function synthesizeChunkedTree(
       servedModel,
     );
   }
-  const materialized = materializeImportableTree(accepted);
+  let materialized = materializeImportableTree(accepted);
+  // fixes/341-1: the PRE-SEAL self-typecheck gate — the measured defect was a
+  // keyed cli-tool tree sealed while failing its OWN declared `typecheck`
+  // (TS2749/TS2440, compile.failed=0, oracle+entry pass). A red verdict gets
+  // ONE bounded repair round over the compiler-named chunks; still red (or no
+  // chunk maps to the named file) ⇒ an honest partial refusal, never a seal.
+  if (typecheck !== null) {
+    const first = await runTreeSelfTypecheck(project, materialized, typecheck);
+    if (first.run === "fail") {
+      const offenders = typecheckOffenderIndices(first, accepted);
+      const context = typecheckRepairContext(first);
+      let repairedAny = false;
+      for (const i of offenders) {
+        const chunk = plan[i]!;
+        const priorForI = accepted.slice(0, i).map((f) => ({
+          path: f.path,
+          exports: [...f.exports],
+          reqTrace: { ...f.reqTrace },
+          asyncExports: asyncExportNames(f.source, f.exports),
+        }));
+        const repairLessons = lessonLinesForBrief(
+          brief,
+          selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
+          { limit: EXPAND_LESSON_RANK_LIMIT, proven },
+        );
+        const repairUser = withTreeFailureContext(
+          withSynthesisRefusalContext(
+            withGateRepairContext(
+              p6SynthesisChunkUserPrompt(brief, treeSpec, chunk.signatures, priorForI, repairLessons, project.contracts),
+              gateRepair,
+            ),
+            synthesisRefusal,
+          ),
+          context,
+        );
+        const repairPatch: PatchRepairOptions | undefined = patchRepairs
+          ? { path: chunk.path, log: (entry) => pushAttemptLog(attemptLogs, entry) }
+          : undefined;
+        const repaired = await synthesizeChunkEnvelope(
+          complete,
+          repairUser,
+          opts,
+          signatureFunctionNames(chunk.signatures),
+          context,
+          repairPatch,
+          (attempt, res) =>
+            pushAttemptLog(
+              attemptLogs,
+              synthAttemptLogEntry({ chunkIndex: i, chunkTotal: plan.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
+            ),
+          (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, chunk.path)),
+          priorForI,
+        );
+        if (!repaired.ok) {
+          return partialTreeRefuse(
+            withAttemptLogs(project, attemptLogs),
+            accepted,
+            i,
+            plan.length,
+            "RT_E_VALIDATION",
+            `emitted tree fails its OWN declared \`typecheck\` and the bounded repair of chunk ${i + 1}/${plan.length} did not land (${repaired.code}: ${repaired.error}) — ${first.detail ?? ""}`,
+            servedModel,
+          );
+        }
+        accepted[i] = {
+          path: chunk.path,
+          source: repaired.envelope.module,
+          exports: [...repaired.envelope.exports],
+          reqTrace: { ...repaired.envelope.reqTrace },
+        };
+        if (servedModel === null) servedModel = repaired.servedModel;
+        repairedAny = true;
+      }
+      if (repairedAny) {
+        materialized = materializeImportableTree(accepted);
+        const second = await runTreeSelfTypecheck(project, materialized, typecheck);
+        if (second.run === "fail") {
+          return partialTreeRefuse(
+            withAttemptLogs(project, attemptLogs),
+            accepted,
+            -1,
+            plan.length,
+            "RT_E_VALIDATION",
+            `emitted tree still fails its OWN declared \`typecheck\` after one bounded repair round — ${second.detail ?? ""}`,
+            servedModel,
+          );
+        }
+      } else {
+        return partialTreeRefuse(
+          withAttemptLogs(project, attemptLogs),
+          accepted,
+          -1,
+          plan.length,
+          "RT_E_VALIDATION",
+          `emitted tree fails its OWN declared \`typecheck\` but no synthesized chunk maps to the compiler-named file(s) — ${first.detail ?? ""}`,
+          servedModel,
+        );
+      }
+    } else if (first.run === "skip") {
+      pushAttemptLog(attemptLogs, {
+        ts: Date.now(),
+        phase: 6 as PhaseId,
+        level: "warn",
+        event: "p6.tree.typecheck.skipped",
+        detail: `tree ${plan.length}/${plan.length} chunks · ${first.detail ?? "declared typecheck not executed (unverified, not a pass)"}`,
+      });
+    }
+  }
   return treeUpgraded(
     withAttemptLogs(project, attemptLogs),
     treeSpec,

@@ -4377,6 +4377,73 @@ export async function reviewWildPlan(
   return { ok: false, reason: "error", error: decision.error, ...(decision.code ? { code: decision.code } : {}) };
 }
 
+/**
+ * R13-f02 — review the planner rows and PARK before the first mutation.
+ *
+ * The ONE staging site for both real wild drivers (headless `wildStartRun`/
+ * `wildStartHeadless` and the console store's `startWildRun`). It lives in
+ * engine.ts — not headless.ts — because the console driver is client-safe and
+ * cannot import headless (node:fs). When the record carries a real planner plan
+ * with no `wild.plan_review` row yet, the rows are judged through the
+ * injectable Auto-Review reviewer seam (`reviewWildPlan`) and the run parks —
+ * `wildRun.pause` + a park record + the `wild.plan_review` / `wild.paused_plan`
+ * ledger rows — BEFORE any step can mutate. The pause IS the "no execution
+ * without an approved plan" gate; a human resume executes it. `staged:true`
+ * tells the caller to stop before its loop. Idempotent: once the review row
+ * exists the stored plan is never re-reviewed (a resume proceeds).
+ *
+ * `reviewer === null` (keyless host / browser) still parks with an honest
+ * "not configured" review row — an unreviewed plan never executes.
+ */
+export async function stageWildPlan(
+  project: Project,
+  reviewer: WildReviewer | null,
+): Promise<{ project: Project; staged: boolean }> {
+  const plan = project.wildPlan;
+  if (!plan || plan.source !== "planner" || !Array.isArray(plan.steps) || plan.steps.length === 0) {
+    return { project, staged: false };
+  }
+  const logs = Array.isArray(project.logs) ? project.logs : [];
+  if (logs.some((r) => r?.event === "wild.plan_review")) return { project, staged: false };
+  const phase = project.currentPhase;
+  let reviewed: Project;
+  if (reviewer === null) {
+    reviewed = wildLog(
+      project,
+      phase,
+      "warn",
+      "wild.plan_review",
+      `wild.plan (${plan.steps.length} row(s)) could not be reviewed — Auto-Review classifier not configured; parked for human review (R13-f02).`,
+    );
+  } else {
+    const verdict = await reviewWildPlan(project, reviewer);
+    reviewed = verdict.ok
+      ? wildLog(
+          project,
+          phase,
+          "info",
+          "wild.plan_review",
+          `wild.plan (${plan.steps.length} row(s)) review (classifier): ${verdict.verdict} — ${verdict.feedback.slice(0, 300)}`,
+        )
+      : wildLog(
+          project,
+          phase,
+          "warn",
+          "wild.plan_review",
+          `wild.plan (${plan.steps.length} row(s)) review failed (${verdict.reason}): ${verdict.error.slice(0, 300)} — parked for human review (R13-f02).`,
+        );
+  }
+  const parked = wildPause(
+    reviewed,
+    phase,
+    "warn",
+    "wild.paused_plan",
+    `wild.plan reviewed; execution parked before the first mutation — ${plan.steps.length} row(s). Approve to execute (R13-f02).`,
+    { code: "RT_E_GATE_PENDING", unlock: "human-gate" },
+  );
+  return { project: parked, staged: true };
+}
+
 /** 313 D1 — clamp a caller-supplied retry bound: absent ⇒ the default
  *  (`WILD_REVIEW_MAX_RETRIES`); a finite number ≥ 0 floors to an integer
  *  bound (0 = no retry, exactly the plain resolver); negative/NaN/non-numeric

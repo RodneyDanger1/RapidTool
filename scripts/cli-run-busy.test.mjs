@@ -293,7 +293,10 @@ test("FIX-2c — a stale checkpoint is ignored WITH a notice: an approve-advance
     assert.equal(afterApprove.currentPhase, 5, "harness precondition: the file advanced to P5");
     assert.equal(afterApprove.status, "running");
 
-    // The stale snapshot must not be consumed — and must not be silent.
+    // The stale snapshot must not be consumed — and must not be silent. 341-6:
+    // the `unattended` arm now clears the stock gates (machineGates:true), so it
+    // drives from the FILE (P5) to P12 and seals with the keyless advisory P6
+    // red (the documented exit 1) — the supersession notice is what this leg pins.
     const unatt = spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, "unattended", "--project", proj], {
       cwd,
       env,
@@ -302,8 +305,8 @@ test("FIX-2c — a stale checkpoint is ignored WITH a notice: an approve-advance
     });
     assert.equal(
       unatt.status,
-      2,
-      `unattended must park (exit 2) driving from the file.\nstdout: ${unatt.stdout}\nstderr: ${unatt.stderr}`,
+      1,
+      `unattended must drive from the file (keyless P6 red ⇒ exit 1).\nstdout: ${unatt.stdout}\nstderr: ${unatt.stderr}`,
     );
     const json = JSON.parse(unatt.stdout);
     assert.equal(json.exit_code, unatt.status, "the envelope's exit_code must equal the process exit");
@@ -317,7 +320,9 @@ test("FIX-2c — a stale checkpoint is ignored WITH a notice: an approve-advance
       `the reason names the snapshot's re-entry phase: ${json.checkpoint?.reason}`,
     );
     const onDisk = JSON.parse(readFileSync(proj, "utf8"));
-    assert.equal(onDisk.currentPhase, 5, "the file is never rewound (pre-fix it fell back to 4/awaiting_hitl)");
+    assert.notEqual(onDisk.currentPhase, 4, "the file is never rewound (pre-fix it fell back to 4/awaiting_hitl)");
+    assert.equal(onDisk.currentPhase, 12, "the drive continued forward from the file's P5 to the seal");
+    assert.equal(onDisk.status, "complete");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

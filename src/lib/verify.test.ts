@@ -644,6 +644,111 @@ describe("applyVerifyOutcome — the evidence hash is boundary-safe", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 341-3 (evidence -> delivery) — the three 340-wave spine residuals, closed.
+//   1. `withCommonJsExports` bound only `/^function NAME(/` — an `async function`
+//      or generator declaration was left unbound, so the harness measured zero
+//      callables and refused `NO_CALLABLE_EXPORTS` even though the module HAS a
+//      callable API. Honest refusal, but an under-covering transform; closed by
+//      matching the async/generator declaration forms too.
+//   2. `applyVerifyOutcome` accepted a non-empty-but-JUNK `cases` array
+//      (`[null, 42, {}]`) and still minted `tested` — a foreign envelope with no
+//      runnable expression minted machine proof (verifier B, 340-8 §2 holes).
+//   3. `VerifyOutcome.lint` was produced by verify.server.ts and never read by
+//      any consumer — the structured findings died after the evidence summary.
+// ---------------------------------------------------------------------------
+
+describe("341-3 — withCommonJsExports covers async + generator declarations", () => {
+  it("binds an `async function` declaration (was an honest NO_CALLABLE_EXPORTS refusal)", () => {
+    const out = withCommonJsExports("async function loadData() { return 1; }");
+    assert.ok(
+      out.includes("module.exports.loadData = loadData;"),
+      `the async declaration is bound (got ${JSON.stringify(out)})`,
+    );
+  });
+
+  it("binds a generator and an async generator declaration", () => {
+    const out = withCommonJsExports(
+      "function* stream() { yield 1; }\nasync function* drain() { yield 2; }",
+    );
+    assert.ok(out.includes("module.exports.stream = stream;"), "the generator is bound");
+    assert.ok(out.includes("module.exports.drain = drain;"), "the async generator is bound");
+  });
+
+  it("control: a plain declaration still binds and an existing CJS export stays a no-op", () => {
+    assert.ok(withCommonJsExports("function f() {}").includes("module.exports.f = f;"));
+    const already = "exports.f = function f() {};";
+    assert.equal(withCommonJsExports(already), already, "an exporting module is untouched");
+  });
+
+  it("an async-only module becomes machine-runnable (the transform unblocks the harness)", { skip: !available }, async () => {
+    const bound = withCommonJsExports("async function loadData() { return 1; }");
+    const run = await runCases(bound, [{ id: "c1", expression: "typeof loadData === 'function'" }]);
+    assert.equal(run.pass, true, run.compileError ?? "expected a machine pass");
+  });
+});
+
+describe("341-3 — a junk-but-non-empty case set cannot mint tested", () => {
+  const testedLabel = (p: ReturnType<typeof seedProject>): string | null =>
+    (p.lastTest as { label?: string } | null)?.label ?? null;
+
+  it("refuses `cases: [null, 42, {}]` — no case carries a runnable expression", () => {
+    const p = seedProject();
+    const q = applyVerifyOutcome(p, {
+      status: "passed",
+      iterations: 1,
+      evidence: "1/1 machine-run cases passed on iteration 1",
+      finalSource: "exports.add = (a, b) => a + b;",
+      cases: [null, 42, {}],
+    });
+    assert.equal(testedLabel(q), null, "a junk case set is not a runner pass");
+    assert.equal(q, p, "a refused hollow verdict changes no state");
+  });
+
+  it("control: one well-formed case in the set still mints", () => {
+    const p = seedProject();
+    const q = applyVerifyOutcome(p, {
+      status: "passed",
+      iterations: 1,
+      evidence: "1/1 machine-run cases passed on iteration 1",
+      finalSource: "exports.add = (a, b) => a + b;",
+      cases: [{ id: "c1", expression: "add(2,3) === 5" }],
+    });
+    assert.equal(testedLabel(q), "tested");
+  });
+});
+
+describe("341-3 — the produced `lint` field reaches the delivered verify artifact", () => {
+  it("renders the structured findings into the artifact body (advisory — the pass still mints)", () => {
+    const p = seedProject();
+    const q = applyVerifyOutcome(p, {
+      status: "passed",
+      iterations: 1,
+      evidence: "1/1 machine-run cases passed on iteration 1; lint advisory: no-var x2",
+      finalSource: "exports.add = (a, b) => a + b;",
+      cases: [{ id: "c1", expression: "add(2,3) === 5" }],
+      lint: [
+        {
+          rule: "no-var",
+          severity: "warning",
+          occurrences: 2,
+          firstLine: 5,
+          message: "`var` declaration(s) — prefer const/let (block-scoped)",
+        },
+      ],
+    });
+    assert.equal(
+      (q.lastTest as { label?: string } | null)?.label,
+      "tested",
+      "lint is advisory; a lint-bearing pass still mints",
+    );
+    const artifact = (q.artifacts ?? []).find((a) => String(a.kind) === "verify");
+    assert.ok(artifact, "the verify artifact exists");
+    assert.ok(artifact.body.includes("no-var"), `the rule reaches the artifact (got ${artifact.body})`);
+    assert.ok(artifact.body.includes("L5"), "the first offending line reaches the artifact");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 338-6 — the evidence hash must cover every input that changes the verdict.
 // 337-3 separated the source/evidence boundary; the ORACLE CASE SET is the
 // other runCases() input, and it was not committed: two outcomes with the same

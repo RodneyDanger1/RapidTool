@@ -896,6 +896,23 @@ test("F2-03: input_hash folds artifacts + memory content; telemetry counters are
   assert.equal(packetInputHash(p), h3, "telemetry-only mutation leaves input_hash stable");
 });
 
+test("341-3: a brief edit moves input_hash while compiled_at stays put (the folded content input)", () => {
+  const a = makeProject();
+  const b: Project = { ...a, brief: `${a.brief} — offline-first dispatch` };
+  const outA = compileAgentPacket(a);
+  const outB = compileAgentPacket(b);
+  assert.notEqual(
+    parseSystemJson(outB).input_hash,
+    parseSystemJson(outA).input_hash,
+    "a brief change is a content input and must move input_hash",
+  );
+  assert.equal(
+    parseSystemJson(outB).compiled_at,
+    parseSystemJson(outA).compiled_at,
+    "the brief edit is content-only — the time-derived stamp must not move",
+  );
+});
+
 // ---------------------------------------------------------------------------
 // W16 L4 (OV-14) — the packet half of the skip≠complete proof. The P6 reqTrace
 // artifact is the production carrier of the p6-arch verdict (engine
@@ -1502,4 +1519,45 @@ test("339-5: the packet renders the RED criterion's state (dod.ts 339-3), not th
     false,
     "the state line stays in the prose DoD checklist, not the machine envelope",
   );
+});
+
+// ---------------------------------------------------------------------------
+// 341-3 (evidence -> delivery) — the persisted artifact CENSUS. The
+// `## Artifacts` section listed the newest ≤8 bodies under a "(trimmed)"
+// heading but never stated how many rows are on record, so an unattended
+// continuation could not tell a complete list from a window. The section now
+// opens with an explicit count (and the packet's own row stays excluded, the
+// same bookkeeping exclusion phaseCoverage applies).
+// ---------------------------------------------------------------------------
+test("341-3: the packet states the persisted artifact census, not only trimmed bodies", () => {
+  const p = makeProject();
+  p.artifacts = [
+    { id: "a1", phase: 3, kind: "gate", title: "DoD gate - P3", body: "verdict: PASS" },
+    { id: "a2", phase: 5, kind: "docs", title: "Validation", body: "hitl contract" },
+    { id: "a3", phase: 6, kind: "docs", title: "Codegen", body: "floor module" },
+  ];
+  const out = compileAgentPacket(p);
+  const start = out.indexOf("## Artifacts (trimmed)");
+  assert.ok(start >= 0, "the artifacts section renders");
+  const section = out.slice(start, out.indexOf("## Required output schema"));
+  assert.match(
+    section,
+    /Census: 3 artifact row\(s\) recorded/,
+    `the census names the real row count (got ${JSON.stringify(section.split("\n")[1])})`,
+  );
+  assert.equal(
+    section.includes("packet row") || section.includes("packet's own row"),
+    true,
+    "the census names the bookkeeping exclusion",
+  );
+});
+
+test("341-3 control: a project with no artifact rows keeps the honest '(none yet)' form", () => {
+  const p = makeProject();
+  p.artifacts = [];
+  const out = compileAgentPacket(p);
+  const start = out.indexOf("## Artifacts (trimmed)");
+  const section = out.slice(start, out.indexOf("## Required output schema"));
+  assert.equal(section.includes("Census:"), false, "no census line without rows");
+  assert.ok(section.includes("(none yet)"), "the empty form is unchanged");
 });

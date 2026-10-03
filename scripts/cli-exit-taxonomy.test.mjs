@@ -2026,15 +2026,17 @@ test("330 Switchboard (T4) — `run`/`gate`/`unattended --knowledge`: accepted s
     );
     assert.equal(saved.status, 0, `store fixture save failed.\nstdout: ${saved.stdout}\nstderr: ${saved.stderr}`);
 
-    // Accepted on all three drive verbs (parked exit 2, or 0 mid-run — never a
-    // knowledge-specific refusal).
+    // Accepted on all three drive verbs (parked exit 2, 0 mid-run, or — for the
+    // 341-6 `unattended` arm, which now drives the whole journey through the
+    // machine gates — the documented complete-with-failed-gates exit 1 on the
+    // keyless advisory floor; never a knowledge-specific refusal).
     for (const verb of ["run", "gate", "unattended"]) {
       const res = spawnSync(
         process.execPath,
         ["--experimental-strip-types", CLI_PATH, verb, "--project", proj, "--knowledge", store],
         { cwd, env, encoding: "utf8", timeout: 180_000 },
       );
-      assert.ok(res.status === 0 || res.status === 2, `${verb} --knowledge <store> must be accepted: exit ${res.status}\n${res.stdout}`);
+      assert.ok(res.status === 0 || res.status === 1 || res.status === 2, `${verb} --knowledge <store> must be accepted: exit ${res.status}\n${res.stdout}`);
       const json = JSON.parse(res.stdout);
       assert.ok(
         !String(json.error).includes("cannot seed proven lessons"),
@@ -2526,6 +2528,81 @@ test("R11-f08 (340-5): a failed quarantine move surfaces quarantineFailed + judg
     );
     assert.match(String(envelope.judgingSkipped), /did not run/, "judgingSkipped is forwarded verbatim");
     assert.equal(existsSync(join(tree, "CONTAMINANT.txt")), true, "the foreign file is still in place — never dropped");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 341-6 (autonomy loop, BEHAVIORAL spawn). The scheduler verb `unattended` was
+// not self-sufficient: it parked at the P4 stock HITL gate on every
+// re-invocation (`steps:0`) because the arm passed `autopilot:true` with no
+// machine-gate override. The arm now passes `machineGates:true`, so a SINGLE
+// keyless `unattended` clears P4/P5/P8/P9 through the ledgered autopilot actor
+// and seals complete. The keyless advisory floor leaves the P6
+// brief-conformance gate red, so the documented outcome is complete + exit 1
+// RT_E_GATES_FAILED - never a fake clean 0. The interactive `gate --autopilot`
+// path must still park (machineGates is unattended-only).
+// ---------------------------------------------------------------------------
+test("341-6 - a SINGLE keyless `unattended` clears the stock gates via the machine actor and seals complete; `gate --autopilot` still parks", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-unattended3416-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  try {
+    const brief =
+      "A TypeScript statistics library: compute mean, median, percentile and standard deviation over arrays of numbers; validate inputs and reject empty arrays.";
+    const proj = join(cwd, "auto3416.json");
+    const created = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "create", "--brief", brief, "--name", "Auto3416", "--out", proj],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created.status, 0, `create must exit 0.\nstdout: ${created.stdout}\nstderr: ${created.stderr}`);
+    assert.equal(JSON.parse(created.stdout).enforceDod, false, "keyless create is advisory");
+
+    const res = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "unattended", "--project", proj],
+      { cwd, env, encoding: "utf8", timeout: 300_000 },
+    );
+    assert.ok(!/(^|\n)\s+at\s/.test(res.stderr ?? ""), `unattended must never print a Node stack:\n${res.stderr}`);
+    const json = JSON.parse(res.stdout);
+    assert.equal(json.summary.status, "complete", "ONE unattended invocation drives to P12 complete");
+    assert.equal(json.summary.currentPhase, 12);
+    assert.equal(json.steps, 13, "P0-P12 all moved in the single invocation");
+    assert.equal(res.status, 1, "keyless advisory floor leaves P6 red -> documented complete-with-failed-gates exit 1");
+    assert.equal(json.code, "RT_E_GATES_FAILED");
+    assert.equal(json.sealedWithFailures, true);
+
+    const saved = JSON.parse(readFileSync(proj, "utf8"));
+    const stock = saved.decisions.filter((d) => [4, 5, 8, 9].includes(d.phase));
+    assert.equal(stock.length, 4, "every stock HITL gate was cleared");
+    for (const d of stock) {
+      assert.equal(d.decision, "approve");
+      assert.equal(d.decidedBy, "autopilot", "a machine-cleared gate never stamps a human");
+      assert.equal(d.decidedVia?.label, "autopilot/harness");
+    }
+    assert.equal(saved.decisions.some((d) => d.decidedBy === "human"), false, "no human stamp anywhere");
+
+    // Default path: a plain `gate --autopilot` on a fresh project still parks at
+    // the P4 stock gate with zero decisions (machineGates is unattended-only).
+    const proj2 = join(cwd, "gate3416.json");
+    const created2 = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "create", "--brief", brief, "--name", "Gate3416", "--out", proj2],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(created2.status, 0, created2.stderr);
+    const g = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "gate", "--project", proj2, "--autopilot"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(g.status, 2, `gate --autopilot must park (exit 2).\nstdout: ${g.stdout}\nstderr: ${g.stderr}`);
+    const gj = JSON.parse(g.stdout);
+    assert.equal(gj.summary.status, "awaiting_hitl");
+    assert.equal(gj.summary.currentPhase, 4);
+    assert.equal(JSON.parse(readFileSync(proj2, "utf8")).decisions.length, 0, "the default gate path mints no approval row");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

@@ -1446,6 +1446,55 @@ async function runProjectScript(
   };
 }
 
+/**
+ * fixes/341-1 (emitted-product integrity): run ONLY the emitted tree's OWN
+ * declared `typecheck` script over an ALREADY-MATERIALIZED dir — the exact
+ * resolution/execution seam `treeRun`'s project leg uses (`runProjectScript`),
+ * with no copy and no spec/entry/build legs. The caller owns the scratch dir;
+ * when that dir carries no `node_modules/`, the repo's own installed root is
+ * linked in (junction) so the declared `tsc` genuinely executes offline,
+ * exactly as `treeRun` does. A `skip` (no declared script, or an un-runnable
+ * tool) is NEVER a pass. Read-only over a subject tree: the only writes are
+ * the optional junction and the child's own output.
+ *
+ * This is the real-compiler seam P6's pre-seal gate consumes; a syntax-only
+ * check (`parseVerdictForSource`/typescript `transpileModule`) does NOT catch
+ * a type error like TS2749 ("'TextDecoder' refers to a value, but is being
+ * used as a type here") or TS2440 (import/local declaration conflict).
+ */
+export async function typecheckDir(
+  dir: string,
+  opts: { timeoutMs?: number; linkSharedToolchain?: boolean } = {},
+): Promise<TreeProjectScriptVerdict> {
+  const timeoutMs =
+    typeof opts.timeoutMs === "number" && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_RUN_TIMEOUT_MS;
+  let root: string;
+  try {
+    root = resolve(dir);
+    if (!statSync(root).isDirectory()) {
+      return { script: "typecheck", run: "error", detail: `typecheckDir: not a directory: ${dir}` };
+    }
+  } catch {
+    return { script: "typecheck", run: "error", detail: `typecheckDir: dir not readable: ${dir}` };
+  }
+  if (opts.linkSharedToolchain !== false && !existsSync(join(root, "node_modules"))) {
+    const shared = sharedToolchainRoot();
+    if (shared) {
+      try {
+        symlinkSync(shared, join(root, "node_modules"), "junction");
+      } catch {
+        /* honest fallback: runProjectScript reports the un-runnable toolchain as a skip */
+      }
+    }
+  }
+  const pkg = readJsonIfAny(root, "package.json");
+  const scripts =
+    pkg && typeof pkg.scripts === "object" && pkg.scripts !== null
+      ? (pkg.scripts as Record<string, unknown>)
+      : null;
+  return runProjectScript(root, "typecheck", scripts, timeoutMs);
+}
+
 /** 216 (T-18) + 217d: the project leg — resolve + run the declared
  *  `typecheck`/`test`/`build` scripts in the temp copy, and classify the
  *  results for the tree verdict: `red` = at least one declared script ran

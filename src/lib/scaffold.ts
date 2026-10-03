@@ -159,8 +159,12 @@ export type ScaffoldResult =
     }
   | { ok: false; error: string };
 
-/** Register order matters: the first kind whose keyword matches wins. */
-const KIND_ORDER: ProjectKind[] = ["webapp", "cli-tool", "library", "game", "service"];
+/** Register order matters: the first kind whose keyword matches wins. The
+ *  explicit delivery-kind nouns (library/sdk/package…) are checked FIRST so
+ *  this inference agrees with engine.uiKindOf (see projectKindOf's doc): a
+ *  brief that names a library must not be captured by a generic surface noun
+ *  such as "board"/"dashboard". */
+const KIND_ORDER: ProjectKind[] = ["library", "webapp", "cli-tool", "game", "service"];
 
 const KIND_LABEL: Record<ProjectKind, string> = {
   webapp: "web app",
@@ -170,11 +174,13 @@ const KIND_LABEL: Record<ProjectKind, string> = {
   service: "service",
 };
 
-/** E-15 #1 keyword scoring table (ui/dashboard/board/desk/portal → webapp; …). */
+/** E-15 #1 keyword scoring table (ui/dashboard/board/desk/portal → webapp; …).
+ *  The library row mirrors engine.uiKindOf's library vocabulary exactly, so the
+ *  two resolvers cannot disagree on which briefs are libraries. */
 const KIND_KEYWORDS: Record<ProjectKind, string[]> = {
   webapp: ["ui", "dashboard", "board", "desk", "portal"],
   "cli-tool": ["parse", "convert", "cli", "agent", "script"],
-  library: ["sdk", "package", "library"],
+  library: ["library", "package", "sdk", "npm", "module", "statistics"],
   game: ["game", "play", "level", "arcade"],
   service: ["api", "service", "webhook", "worker"],
 };
@@ -525,6 +531,18 @@ function mdLine(raw: string, cap = 200): string {
 // projectKindOf maps it onto this module's 5-way scaffold taxonomy (declared
 // kind always wins), then falls back to register keyword inference over
 // brief/domain/jobs (E-15 #1) and finally to "webapp".
+//
+// fixes/341-1: the inference order must AGREE with engine.uiKindOf (engine.ts
+// :192), which is the classifier that ran FIRST and decided the P6 generated
+// module's shape. uiKindOf resolves every explicit delivery-kind noun
+// (library/sdk/package/npm/module/statistics) BEFORE any UI-bearing token, and
+// leaves Project.kind ABSENT for a library brief — the signal codegen's
+// singleModuleLibraryKind reads to take the library module path. So scaffold
+// checking webapp first made "a kanban board library" classify webapp here (the
+// "board" surface noun won) while the generated module was library-shaped; the
+// emitted webapp UI then bound a form to a library API — a type error the
+// pre-seal typecheck gate refuses with no repairable chunk. Library is checked
+// first here too, so the two resolvers decide the same kind for the same brief.
 export function projectKindOf(project: Project): ProjectKind {
   if (project.kind === "game") return "game";
   if (project.kind === "app") return "webapp";
@@ -1276,6 +1294,10 @@ function emitJobModule(
 /** One rendered form input, mapped to a real recorded/spec value. */
 type UiField = { id: string; label: string; type: string };
 
+/** Hard cap on rendered form fields — the generator's documented bound; the
+ *  W-14 bar only needs ≥2, and every call site returns at most this many. */
+const UI_FIELD_CAP = 4;
+
 /** A callable the generated entry module really exports. */
 type UiCallable = {
   name: string;
@@ -1286,6 +1308,21 @@ type UiCallable = {
 
 /** TS primitive param types that take a scalar argument, not an object. */
 const UI_PRIMITIVE_TYPE = /^(string|number|boolean|bigint|symbol)$/i;
+
+/**
+ * fixes/341-1: parameter types a FormData string can be soundly coerced to —
+ * exactly the targets `defaultUiGeneration.coerce` produces (String/Number/
+ * boolean). A domain-typed param (e.g. `board: Board`) is NOT here: the
+ * emitted `String(data.get(...))` argument is not assignable to it, so a form
+ * must never be bound to such a callable. Empty/any/unknown accept anything.
+ */
+const UI_FORM_BINDABLE_TYPE =
+  /^(string|number|boolean|int|integer|float|double|decimal|any|unknown)$/i;
+
+function uiFormBindableParam(type: string): boolean {
+  const t = type.trim();
+  return t === "" || UI_FORM_BINDABLE_TYPE.test(t);
+}
 
 /** Top-level comma split of a function header's parameter text. */
 function uiParamParts(text: string): string[] {
@@ -1397,11 +1434,68 @@ function uiExportedCallables(source: string): UiCallable[] {
 }
 
 /**
+ * 341-1: the keyed chunked synthesis materialises its entry as an ESM BARREL
+ * of `export * from "./x.ts"` lines (codegen `materializeImportableTree`), so
+ * the callables the shell may call are real exports of the imported namespace
+ * yet appear nowhere in the entry's own bytes — a scan of the entry source
+ * alone finds none, and the generator fell back to the honest (but
+ * under-delivering) "no callable" panel for the exact shape a real keyed tree
+ * produces. Follow the entry's `export *` specifiers over the accepted tree
+ * files (deduped, cycle-safe, bounded) so the discovered callables name names
+ * the imported barrel genuinely re-exports.
+ */
+function uiFollowStarExports(
+  entry: { path: string; source: string },
+  byPath: Map<string, { path: string; source: string }>,
+): string {
+  const seen = new Set<string>([entry.path]);
+  const queue: { path: string; source: string }[] = [entry];
+  let out = entry.source;
+  let appended = 0;
+  while (queue.length > 0 && appended < 24) {
+    const cur = queue.shift()!;
+    const fromDir = dirOf(cur.path);
+    for (const m of cur.source.matchAll(/^[ \t]*export\s+\*\s+from\s+["']([^"']+)["']/gm)) {
+      const target = uiResolveTreeSpecifier(fromDir, m[1]!, byPath);
+      if (target === null || seen.has(target.path)) continue;
+      seen.add(target.path);
+      out = `${out}\n${target.source}`;
+      queue.push(target);
+      appended += 1;
+    }
+  }
+  return out;
+}
+
+/** Resolve one tree-relative ESM specifier to an accepted emitted file (POSIX
+ *  path); null on an absolute/unsafe specifier or a file the tree lacks. */
+function uiResolveTreeSpecifier(
+  fromDir: string,
+  spec: string,
+  byPath: Map<string, { path: string; source: string }>,
+): { path: string; source: string } | null {
+  if (typeof spec !== "string" || spec.startsWith("/") || /^[A-Za-z]:/.test(spec)) return null;
+  const segs = fromDir.split("/").filter((s) => s && s !== ".");
+  for (const part of spec.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (segs.length === 0) return null;
+      segs.pop();
+      continue;
+    }
+    segs.push(part);
+  }
+  return byPath.get(segs.join("/")) ?? null;
+}
+
+/**
  * The generated ENTRY source the emitted shell imports — mirroring
  * scaffoldProject's own entry resolution (the tree ENTRY file, else the
  * generatedSource host with its template export tail). Null when this emit
  * writes no generated module at all. Kept in lock-step with the emit path so a
- * parsed export always names something the imported module really has.
+ * parsed export always names something the imported module really has; a tree
+ * ENTRY that is an `export *` barrel is expanded over the accepted tree files
+ * (341-1) so its re-exported callables are discoverable.
  */
 function uiGeneratedEntrySource(project: Project): string | null {
   const graph = project.specGraph;
@@ -1440,7 +1534,7 @@ function uiGeneratedEntrySource(project: Project): string | null {
   if (accepted.length > 0) {
     const byPath = new Map(accepted.map((f) => [f.path, f]));
     const entry = byPath.get(rolePath) ?? byPath.get("src/generated.ts") ?? accepted[0];
-    return entry ? entry.source : null;
+    return entry ? uiFollowStarExports(entry, byPath) : null;
   }
   const generated = (project.generatedSource ?? "").trim();
   if (!generated) return null;
@@ -1469,11 +1563,11 @@ function uiDomainFields(
 
   if (shape === "positional") {
     for (const p of callable.params) if (!p.rest) push(p.name, p.name, p.type);
-    return fields;
+    return fields.slice(0, UI_FIELD_CAP);
   }
   if (callable.objectKeys) {
     for (const key of callable.objectKeys) push(key.name, key.name, key.type);
-    return fields;
+    return fields.slice(0, UI_FIELD_CAP);
   }
   for (const p of callable.params) if (!p.rest) push(p.name, p.name, p.type);
 
@@ -1498,7 +1592,7 @@ function uiDomainFields(
   const latEntities =
     project.lattice && Array.isArray(project.lattice.entities) ? project.lattice.entities : [];
   for (const name of latEntities) push(String(name), String(name), "string");
-  return fields.slice(0, 4);
+  return fields.slice(0, UI_FIELD_CAP);
 }
 
 /**
@@ -1546,10 +1640,26 @@ const defaultUiGeneration = ({
             : "object"
           : "positional";
   const fields = callable ? uiDomainFields(project, callable, shape) : [];
-  if (!callable || fields.length < 2) {
+  // fixes/341-1: the synthesized arguments must be assignable to the
+  // callable's REAL parameter types. A positional form supplies one coerced
+  // primitive per param, so every non-rest param must be primitive-coercible;
+  // an object binding is sound only for a single param carrying its own
+  // object-literal default (the emitted literal mirrors the inferred type) —
+  // fields invented from the spec against an explicitly-typed object param are
+  // a guess, and a guessed arg is a compile error the pre-seal gate refuses
+  // with no repairable chunk. When the binding cannot be proven sound, emit the
+  // honest "nothing to bind" panel instead of fabricating a call.
+  const bindable =
+    callable !== null &&
+    (shape === "object"
+      ? callable.params.length === 1 && callable.objectKeys !== null
+      : callable.params.every((p) => p.rest || uiFormBindableParam(p.type)));
+  if (!callable || fields.length < 2 || !bindable) {
     const reason = !callable
       ? "generated module exports no callable function"
-      : `generated module exposes fewer than two bindable domain fields (found ${fields.length})`;
+      : !bindable
+        ? `generated export ${callable.name} takes a parameter a form cannot supply`
+        : `generated module exposes fewer than two bindable domain fields (found ${fields.length})`;
     return [
       `  const notice = ${jstr(`shell — ${reason}; nothing to wire yet`)};`,
       `  return (`,

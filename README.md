@@ -200,7 +200,7 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
 | Lesson loop: failure signatures, refusal rows, accrual | ✅ wired+pinned | 112 T1/T2 (Waves 3–4); `knowledge.ts`/`engine.ts`/`verify.server.ts` |
 | Assertion-gap lint (tautology detection repo-wide) | ✅ | `scripts/check-assertion-gaps.mjs`; wired into `gate.sh`; 0 findings |
 | `str_replace` patch primitive (unique-match + graded fuzzy) | ✅ core | `src/lib/patch.ts` (25 test blocks today). **Not yet wired into P6/repair — carried past W6 (see `remainingwaves.md`)** |
-| One-seam policy engine (default-deny approvals) | ✅ core | `src/lib/policy.ts` (28 test blocks today). **Routing wired in W5** (all 3 sites, seats byte-identical; bypass pins → W6-L2) |
+| One-seam policy engine (default-deny approvals) | ✅ core | `src/lib/policy.ts` (33 test blocks today). **Routing wired in W5** (all 3 sites, seats byte-identical; bypass pins → W6-L2) |
 | UI: console, phase rail, HITL dock, runtime log, **command palette (⌘K)**, typed timeline | ✅ | `console.tsx` + `cmd-palette.tsx` + `runtime-timeline-pane.tsx` |
 | Headless CLI: 39 verbs, JSON output, doctor, eval harness + the read-only `eval` scorecard verb | ✅ | `scripts/rapidtool-cli.mjs`; `README-cli.md` (doc-contract tested) |
 | Stability gate with flake detection | ✅ | `bash scripts/gate.sh [--double]` (first green run 2026-09-16) |

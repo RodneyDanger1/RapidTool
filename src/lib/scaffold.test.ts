@@ -60,6 +60,19 @@ describe("projectKindOf (E-15 kind mapping + inference)", () => {
     );
     assert.equal(projectKindOf(primed({ brief: "Webhook worker API for billing" })), "service");
   });
+
+  it("341-1: a brief naming a library is not captured by a surface noun (agrees with engine.uiKindOf)", () => {
+    // "board" is a webapp keyword and previously won over "library" because
+    // webapp was checked first — while engine.uiKindOf resolved library and the
+    // P6 module came out library-shaped (kind left absent). RED before the
+    // precedence fix: this asserted "webapp".
+    assert.equal(
+      projectKindOf(primed({ brief: "A kanban board library exposing a typed board client" })),
+      "library",
+    );
+    // The surface-noun rule still holds when no delivery kind is named.
+    assert.equal(projectKindOf(primed({ brief: "A kanban board for dispatch teams" })), "webapp");
+  });
 });
 
 describe("scaffoldProject — file-tree shape per kind", () => {
@@ -1654,6 +1667,77 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     const entry = importedEntryBody(result, "src/ui/console.tsx", ui);
     assert.ok(/export function planRoute\b/.test(entry), "the called name is exported by the tree entry");
     assertParsesTsx("tree UI", ui);
+  });
+
+  it("341-1: follows the codegen entry BARREL's `export *` re-exports (the real chunked-tree shape)", () => {
+    // The keyed chunked synthesis materialises its entry as an ESM barrel of
+    // `export * from "./x.ts"` lines (codegen.materializeImportableTree), so the
+    // callables the shell can call are NOT declared in the barrel's own bytes.
+    // A generator that scans only the entry file emits its honest (but
+    // under-delivering) "no callable" panel for the exact shape the keyed tree
+    // produces. RED before the fix.
+    const p: Project = {
+      ...primed(),
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./jobs/plan.ts";\n', hash: "h-barrel", attempt: 0 },
+        {
+          path: "src/jobs/plan.ts",
+          source: "export function planRoute(origin: string, destination: string) {\n  return { origin, destination };\n}\n",
+          hash: "h-plan",
+          attempt: 0,
+        },
+      ],
+    };
+    const result = scaffoldProject(p);
+    const ui = bodyOf(result, "src/ui/console.tsx");
+    assert.ok(/import \* as generated from "\.\.\/generated\.ts";/.test(ui), "imports the barrel entry");
+    assert.ok(/generated\.planRoute\(/.test(ui), "calls a name the barrel genuinely re-exports");
+    for (const field of ["origin", "destination"]) {
+      assert.ok(ui.includes(`name="${field}"`), `input bound to the re-exported field ${field}`);
+    }
+    // The called name must still be a genuine export of the imported entry: the
+    // barrel's own `export *` line plus the re-exported file's real declaration.
+    const entry = importedEntryBody(result, "src/ui/console.tsx", ui);
+    assert.ok(/export\s+\*\s+from\s+"\.\/jobs\/plan\.ts"/.test(entry), "entry is the barrel");
+    assertParsesTsx("barrel UI", ui);
+  });
+
+  it("341-1: the documented field cap holds on every shape (a 6-param callable renders ≤4 inputs)", () => {
+    // uiDomainFields' doc claims "deduped and capped"; the pre-fix positional and
+    // object-literal branches returned the full list, so only the spec/contract/
+    // lattice fallback was capped. RED before the fix (6 inputs), GREEN after (4).
+    const p: Project = {
+      ...primed(),
+      implementationSpec: null,
+      generatedSource:
+        "export function wide(a: string, b: string, c: string, d: string, e: string, f: string): void {\n" +
+        "  void [a, b, c, d, e, f];\n" +
+        "}\n",
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    const inputs = [...ui.matchAll(/<input id="rt-[^"]+" name="([^"]+)"/g)].map((m) => m[1]!);
+    assert.equal(inputs.length, 4, `the documented cap bounds the form (got ${inputs.length}: ${inputs.join(",")})`);
+    assert.deepEqual(inputs, ["a", "b", "c", "d"], "the first four real params are the ones bound");
+    assertParsesTsx("capped UI", ui);
+  });
+
+  it("341-1: never binds a form to a callable whose param a form cannot supply", () => {
+    // The webapp shell is emitted for a webapp brief; a generated export taking
+    // a domain object (Board) cannot be fed by FormData strings. The pre-fix
+    // generator emitted `generated.createBoard(String(...), String(...))` — a
+    // TS2345 the pre-seal typecheck gate then refused with no repairable chunk.
+    const p: Project = {
+      ...primed(),
+      generatedSource:
+        "interface Board { id: string; title: string }\n" +
+        "export function createBoard(name: string, board: Board): void {\n  void name;\n  void board;\n}\n",
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.ok(!/generated\.createBoard\(/.test(ui), "no fabricated call with a String(...) board arg");
+    assert.ok(!ui.includes("<input") && !ui.includes("onSubmit="), "no form bound to an unbindable callable");
+    assert.match(ui, /cannot supply|nothing to wire/, "the honest panel states why");
+    assertParsesTsx("unbindable UI", ui);
   });
 
   it("no generated module ⇒ the honest no-module panel (nothing fabricated)", () => {

@@ -27,6 +27,9 @@ import {
   type MakerScoreCard,
 } from "./maker-score.ts";
 import { fixtureAcceptanceState } from "./fixtures.ts";
+// W55 · 341-5: the engine's own pre-acceptance bar, for a live parity check
+// against p6BriefFitPasses (the comment claims "verbatim"; this proves it).
+import { briefFitSatisfied } from "./codegen.server.ts";
 import type { Project } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 
@@ -563,6 +566,38 @@ describe("M4 machine-verifiable", () => {
 
   test("absent lastTest scores 0", () => {
     assert.equal(m4MachineVerifiable(input()).score, 0);
+  });
+
+  // -------------------------------------------------------------------------
+  // W55 · 341-5: M4's doc claims "the p6-verified probe semantics, dod.ts", but
+  // it checked only label + hash — dod's probe ALSO requires ok === true and a
+  // non-empty detail (dod.ts:693-703, pinned by dod.test.ts:90,95). M4 is now
+  // that probe exactly: one record, one verdict, no two stories.
+  // -------------------------------------------------------------------------
+  test("341-5: M4 IS the dod p6-verified probe — ok:false or an empty/absent detail cannot score, hash or not", () => {
+    const noOk = project({ lastTest: { ok: false, detail: "x", label: "tested", evidenceHash: "h" } });
+    assert.equal(m4MachineVerifiable(input({ project: noOk })).score, 0, "p6-verified requires lastTest.ok === true");
+    const noDetail = project({ lastTest: { ok: true, detail: "", label: "tested", evidenceHash: "h" } });
+    assert.equal(m4MachineVerifiable(input({ project: noDetail })).score, 0, "p6-verified requires a non-empty detail");
+    const absentDetail = project({ lastTest: { ok: true, label: "tested", evidenceHash: "h" } });
+    assert.equal(m4MachineVerifiable(input({ project: absentDetail })).score, 0, "an absent detail is not a verdict");
+    const full = project({ lastTest: { ok: true, detail: "verify pass", label: "tested", evidenceHash: "h" } });
+    assert.equal(m4MachineVerifiable(input({ project: full })).score, 1, "the full p6-verified shape still scores");
+  });
+
+  // -------------------------------------------------------------------------
+  // W55 · 341-5: the 0.35 brief-fit bar was recalibrated on the engine sites
+  // (322 X1) and maker-score.ts claimed "verbatim" parity. Prove it against the
+  // codegen pre-acceptance function directly (the third engine site), not just
+  // by a shared literal — a future drift on either side reds this.
+  // -------------------------------------------------------------------------
+  test("341-5: p6BriefFitPasses is byte-parity with codegen's briefFitSatisfied across the whole boundary", () => {
+    const nouns = "aurora basalt cipher dune ember fjord glade harbor isle juniper kestrel lagoon mesa nimbus orchid peak quarry ridge summit tundra".split(" ");
+    const brief = nouns.join(" ");
+    for (let k = 0; k <= nouns.length; k++) {
+      const src = nouns.slice(0, k).map((n) => `const ${n} = 0;`).join("\n");
+      assert.equal(p6BriefFitPasses(brief, src), briefFitSatisfied(brief, src).ok, `parity at k=${k} (0.35 bar)`);
+    }
   });
 });
 

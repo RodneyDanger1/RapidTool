@@ -28,9 +28,10 @@
  *      `resolveExplicitProvider`).
  *
  * Not here (deliberately): env-based provider routing for `callModel`
- * (`RAPIDTOOL_PROVIDER`, research/multiagent/101_provider_integration.md §4)
- * — that scheme is a later wave's; this module gives it the mock it needs
- * without pre-empting its semantics.
+ * (`RAPIDTOOL_PROVIDER`, research/multiagent/101_provider_integration.md §4) —
+ * that scheme LANDED (OV-1, W23-L4) and this mock stays absent from `PROVIDERS`,
+ * so env selection can never reach it; selecting the mock always takes an
+ * explicit act.
  */
 
 import type { ErrorCode } from "../../errors.ts";

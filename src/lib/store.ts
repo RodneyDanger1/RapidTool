@@ -9,6 +9,7 @@ import {
   readWildPlan,
   rejectHitl,
   runP6Real,
+  stageWildPlan,
   stampPacket,
   unlockRetry,
   wildLog,
@@ -1349,6 +1350,15 @@ export const useRapid = create<RapidState>()(
           // keyless ⇒ null ⇒ wildStep's existing default path, byte-identical.
           const reviewer = await createNodeWildReviewer();
           let cur = withStartLog;
+          // R13-f02 (341-6): the console driver stages the plan review too —
+          // a stored planner plan is judged (reviewer) and the run parks
+          // BEFORE the first mutation, exactly as headless's wild drivers do.
+          // No planner plan ⇒ byte-identical (staged:false, no write).
+          const staged = await stageWildPlan(cur, reviewer);
+          if (staged.staged) {
+            commitWild(staged.project, null);
+            return { ok: true, ran: 0, stoppedReason: "paused", note: "RT_E_GATE_PENDING" };
+          }
           for (let step = 0; step < 20; step++) {
             const prev = cur; // the generation this step is computed from
             // 308 B-02: the wild-step telemetry was dead in production — every

@@ -38,10 +38,11 @@
  * below; unknown id ⇒ coded RT_E_VALIDATION refusal, never a silent default;
  * unset ⇒ source:"default" ⇒ the byte-identical deepseek path), and the doctor
  * surfaces the resolved provider/model honestly (doctor.ts `envSelection` —
- * "cloud-by-default, keyless floor"). Still deliberately deferred (step 2 /
- * later waves): failover, `RAPIDTOOL_FALLBACK_PROVIDERS` / autodetect, and
- * per-call telemetry — all specified in
- * research/multiagent/101_provider_integration.md §4. (F2 · W19-L5, fixes/252,
+ * "cloud-by-default, keyless floor"). The failover CHAIN now resolves
+ * (`RAPIDTOOL_FALLBACK_PROVIDERS`, the R13-f09 block below) but stays
+ * deliberately UNARMED: cross-family ROUTING is what remains deferred, along
+ * with autodetect (101 §4); per-call telemetry LANDED as the provider call tap
+ * (`./deepseek.ts` `setLlmCallTap`, W23-L1 fixes/262). (F2 · W19-L5, fixes/252,
  * landed the PROBE half beside the providers — `./probe.ts` — and registers
  * the probed `xai` candidate; with OV-1 landed, a verified family becomes
  * env-selectable once a probe has read its ids back.)

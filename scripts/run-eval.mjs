@@ -125,6 +125,13 @@ import {
 // event names (guardrail checked at emit time).
 import { isKnownRtEvent } from "../src/lib/rt-events.ts";
 import { appendRtLine, makeCliRow, resolveLogDir } from "../src/lib/runtime-log.server.ts";
+// W45·331-1 (Keywright): the provider key resolver the driver declares the
+// checkout's `.env` to, and the provider's own one-shot transport. The probes
+// below must record HTTP status over `oneShotFetch` — not undici's global
+// `fetch` — because the driver ends in an in-tick `process.exit()`, which races
+// an undici TLS teardown handle into a libuv abort on Node 24/Windows.
+import { resolveProcessKey } from "../src/lib/llm/providers/key-source.server.ts";
+import { oneShotFetch } from "../src/lib/llm/providers/one-shot-fetch.server.ts";
 
 // W44 · A1 + parent completion (fixes/318_a1_oracle.md · T5.4): THE bounded
 // run-level emitter — run start + run end + the top-catch crash row, ≤3 rows
@@ -202,7 +209,13 @@ const GRADER_DIR = process.env.EVAL_GRADER_DIR ? resolve(process.env.EVAL_GRADER
 
 const JOURNEY_BUDGET = 3;
 const KEYED = process.argv.includes("--keyed");
-const KEYED_OK = KEYED && Boolean(process.env.DEEPSEEK_API_KEY);
+/** Whether a USABLE key resolves. Recomputed at the top of main() AFTER the
+ *  checkout's `.env` is declared to the provider's key resolver (W45·331-1):
+ *  a workspace whose only key lives in `.env` must run keyed — the raw process
+ *  read alone missed it and every keyed call 401'd on a stale ambient value.
+ *  The module-level initial value keeps the crash tombstone honest if main()
+ *  never reached that point. */
+let keyedOk = KEYED && Boolean(process.env.DEEPSEEK_API_KEY);
 const EVAL_ALL = process.argv.includes("--all");
 const LIMIT_ARG = process.argv.find((a) => a.startsWith("--limit="));
 const EVAL_LIMIT = LIMIT_ARG ? Number(LIMIT_ARG.slice("--limit=".length)) : NaN;
@@ -1586,7 +1599,7 @@ export async function probeP6Reachability({ fetchImpl = null, wire = true, timeo
       ? ds.DEEPSEEK_MODELS.flash
       : null;
   if (out.configured && wire !== false && ds && typeof ds.completeDeepSeek === "function") {
-    const baseFetch = fetchImpl ?? globalThis.fetch;
+    const baseFetch = fetchImpl ?? oneShotFetch;
     const recordingFetch = async (input, init) => {
       const res = await baseFetch(input, init);
       try {
@@ -1695,7 +1708,12 @@ export async function probeFundedness({ fetchImpl = null, timeoutMs = 20_000 } =
       : null;
   out.requestedModel = requestedModel;
   const statuses = [];
-  const baseFetch = fetchImpl ?? globalThis.fetch;
+  // W45·331-1: the SAME one-shot seam as `probeP6Reachability` above. A probe
+  // that defaults to undici's global `fetch` races its TLS teardown handle into
+  // the driver's in-tick `process.exit()` (libuv abort on Node 24/Windows) —
+  // this probe runs in the keyed flow (`main()` → `probeFundedness({})`), so it
+  // must not reintroduce that handle.
+  const baseFetch = fetchImpl ?? oneShotFetch;
   const recordingFetch = async (input, init) => {
     const res = await baseFetch(input, init);
     try {
@@ -2996,6 +3014,18 @@ export function keyedRunDecision({ mode, meanOfNine } = {}) {
 // ---------------------------------------------------------------------------
 
 async function main() {
+  // W45·331-1 (Keywright) wiring for the driver: declare the checkout's `.env`
+  // to the provider's key resolver BEFORE any keyed probe or entry — the SAME
+  // seam the CLI and scripts/with-app-env.mjs use. Without it the driver read a
+  // stale machine-scope DEEPSEEK_API_KEY (the repo `.env` key was never
+  // consulted), every keyed call 401'd, and the coded RT_E_LLM_KEY_SHADOWED
+  // notice never fired. Keyless runs never read a key (byte-identical). Only a
+  // PATH crosses here — never a secret.
+  if (KEYED) {
+    const envFilePath = join(ROOT, ".env");
+    if (existsSync(envFilePath)) process.env.RAPIDTOOL_LLM_ENV_FILE = envFilePath;
+    keyedOk = resolveProcessKey("DEEPSEEK_API_KEY").effective !== null;
+  }
   // OV-35(a) — standalone probe mode: run the reachability probe and exit (no
   // corpus walk, no entries). Works keyless (dummy key) and keyed.
   if (process.argv.includes("--preflight")) {
@@ -3013,14 +3043,14 @@ async function main() {
     console.error(outRefusal.message);
     process.exit(2);
   }
-  const mode = KEYED_OK ? "keyed" : "keyless";
-  console.log(`rapidtool eval · mode=${mode}${KEYED && !KEYED_OK ? " (--keyed requested but DEEPSEEK_API_KEY unset — falling back to keyless)" : ""} · corpus=${CORPUS_DIR}`);
+  const mode = keyedOk ? "keyed" : "keyless";
+  console.log(`rapidtool eval · mode=${mode}${KEYED && !keyedOk ? " (--keyed requested but no usable DEEPSEEK_API_KEY resolved — falling back to keyless)" : ""} · corpus=${CORPUS_DIR}`);
   console.log(`out: ${OUT_DIR} (${OUT_EXPLICIT ? "--out / EVAL_OUT_DIR" : "default"})`);
   console.log(
     `graders: run-side acceptance bars under ${GRADER_DIR} (read by this driver only — never emitted into a project tree) · trials=${TRIALS}` +
       (TRIALS !== TRIALS_REQUESTED ? ` (--trials=${TRIALS_REQUESTED} invalid or over max ${MAX_TRIALS} → ${TRIALS})` : ""),
   );
-  for (const notice of keylessSkipNotices({ keyedRequested: KEYED, hasKey: Boolean(process.env.DEEPSEEK_API_KEY) })) {
+  for (const notice of keylessSkipNotices({ keyedRequested: KEYED, hasKey: keyedOk })) {
     console.log(`note: ${notice}`);
   }
   if (TRIALS < 2) {
@@ -3102,7 +3132,7 @@ async function main() {
   // class, not a quality reading (227 §2a). Keyless legs never probe (no
   // network, byte-identical).
   let preflight = null;
-  if (KEYED_OK) {
+  if (keyedOk) {
     preflight = await probeP6Reachability({});
     for (const line of formatPreflightLines(preflight)) console.log(line);
     if (!preflight.ok) {
@@ -3120,7 +3150,7 @@ async function main() {
   // (unaskable: auth/network/timeout) is REPORTED and proceeds — never
   // guessed into a pass or a fail. The key VALUE never enters the output.
   let fundedness = null;
-  if (KEYED_OK) {
+  if (keyedOk) {
     fundedness = await probeFundedness({});
     // W24/B2 (fixes/263): the ONE renderer (`formatFundednessLines`) — the
     // old inline copy had already drifted from it and the helper was a dead
@@ -3158,7 +3188,7 @@ async function main() {
   // `llmEvidenceFromCallRecords`'s own contract forbids. Installed once per
   // process, before any scored trial can make a keyed call.
   let tapInstalled = false;
-  if (KEYED_OK) {
+  if (keyedOk) {
     tapInstalled = await installLlmCallTap();
     console.log(
       tapInstalled
@@ -3314,7 +3344,7 @@ if (isMainModule) {
       // (kill mid-write) that readers then misread as "the previous run".
       writeJsonAtomic(RESULTS_PATH, {
         generatedAt: new Date().toISOString(),
-        mode: KEYED_OK ? "keyed" : "keyless",
+        mode: keyedOk ? "keyed" : "keyless",
         entries: [],
         error: e instanceof Error ? e.message : String(e),
       });
@@ -3327,7 +3357,7 @@ if (isMainModule) {
       event: "eval.run_error",
       message: `eval driver crashed · ${e instanceof Error ? e.message : String(e)}`,
       capture: "run-eval.mjs:3225",
-      payload: { mode: KEYED_OK ? "keyed" : "keyless" },
+      payload: { mode: keyedOk ? "keyed" : "keyless" },
     });
     console.error(`eval driver crashed: ${e instanceof Error ? e.stack : String(e)}`);
     process.exit(0);

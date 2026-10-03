@@ -403,16 +403,18 @@ export function evidenceFromProjectRecord(project: unknown): FactoryEvidence {
  * `productComplete` key is not in the type and is ignored at runtime). The 214
  * census cross-gate stays: stubs/reexports seen in the scan, or fewer than two
  * real jobs, refuse the bar. W52 · 338-3: `humanFixtures` is DERIVED from the
- * project record handed under `project` (`humanFixturesFromProject`) — an
- * explicit `humanFixtures:true` in `extra` is still honored, but the field is
- * no longer unmintable: a genuinely human-approved fixture set closes the gap.
+ * project record handed under `project` (`humanFixturesFromProject`) — a
+ * genuinely human-approved fixture set closes the gap. W55 · 341-5:
+ * `humanFixtures` is also OMITTED from the `extra` type and ignored at runtime,
+ * so a caller can no longer mint the one conjunct 338-4 reserved for a real
+ * human stamp by passing `{humanFixtures:true}` (the pre-fix forge).
  * W53 · 340-2: `acceptance` is DERIVED from `extra.project` like `productComplete`
  * — it is not in the `extra` type and a hand-passed value is ignored at runtime,
  * so the awaiting signal can never be handed in.
  */
 export function evidenceFromJobInventory(
   inv: JobInventory,
-  extra?: Omit<Partial<FactoryEvidence>, "productComplete" | "inventory" | "acceptance"> &
+  extra?: Omit<Partial<FactoryEvidence>, "productComplete" | "inventory" | "acceptance" | "humanFixtures"> &
     ProductStateEvidence,
 ): FactoryEvidence {
   const leftover = inv.stubs + inv.reexports > 0 || inv.real === 0;
@@ -420,7 +422,7 @@ export function evidenceFromJobInventory(
   return {
     leftoverJobsAreReexportsOrStubs: leftover,
     realMultiJobProduct: realMulti,
-    humanFixtures: extra?.humanFixtures === true || humanFixturesFromProject(extra?.project),
+    humanFixtures: humanFixturesFromProject(extra?.project),
     acceptance: liveAcceptanceState(extra?.project),
     productComplete: productCompleteFromProject(extra?.project) && realMulti && !leftover,
     chatHasSlashToolsOnly: extra?.chatHasSlashToolsOnly !== false,
@@ -554,8 +556,11 @@ export function factoryClaim(
  * project object / parsed `.rapidtool/project.json` as `project` and the bar is
  * computed there; without that state the complete gap always stands
  * (fail-closed). W52 · 338-3: humanFixtures is DERIVED from the record
- * (`humanFixturesFromProject`); W53 · 340-2: the live `acceptance` state is
- * derived the same way, and neither is read from the blob.
+ * (`humanFixturesFromProject`); W55 · 341-5: the blob's own `humanFixtures`
+ * flag is IGNORED — pre-fix it ORed straight into the evidence and let a raw
+ * claim mint the one conjunct 338-4 reserved for a real human stamp.
+ * W53 · 340-2: the live `acceptance` state is derived the same way, and none
+ * of these three is read from the blob.
  *
  * OV-41 (W23 · L4): `spend` is NOT read from the blob — a raw claim can no
  * more mint a dollar figure than it can a capability. The honest
@@ -568,7 +573,7 @@ export function coerceFactoryClaim(raw?: unknown, project?: unknown): DoctorFact
   const evidence: FactoryEvidence = blob
     ? {
         leftoverJobsAreReexportsOrStubs: blob.leftoverJobsAreReexportsOrStubs === false ? false : true,
-        humanFixtures: blob.humanFixtures === true || humanFixturesFromProject(project),
+        humanFixtures: humanFixturesFromProject(project),
         acceptance: liveAcceptanceState(project),
         realMultiJobProduct: blob.realMultiJobProduct === true,
         productComplete: productCompleteFromProject(project),

@@ -21,8 +21,9 @@
  *   M2 runs       — precomputed treeRun outcome ok (compile-check treeRun).
  *   M3 iterates   — P6 journey outcome converged, or derived from the recorded
  *                   P6 gate (phases[6].gate.passed) + lastTest.
- *   M4 verifiable — lastTest.label === "tested" AND an evidenceHash exists
- *                   (the p6-verified probe semantics, dod.ts).
+ *   M4 verifiable — the p6-verified probe semantics (dod.ts): lastTest.label
+ *                   === "tested" AND ok === true AND a non-empty detail AND an
+ *                   evidenceHash exists.
  *   M5 honest     — no red gate record, OR every red gate surfaced loudly
  *                   (sealedWithFailures flag / census log / warn gate.verdict);
  *                   0 when a red gate hides under a clean seal.
@@ -355,8 +356,10 @@ function phaseRecord(project: Project, id: number) {
   return (project.phases ?? []).find((p) => p && p.id === id) ?? null;
 }
 
-function lastTestEvidence(project: Project): { label?: string; ok?: boolean; evidenceHash?: string } | null {
-  const lt = project.lastTest as { label?: string; ok?: boolean; evidenceHash?: string } | null;
+function lastTestEvidence(
+  project: Project,
+): { label?: string; ok?: boolean; detail?: string; evidenceHash?: string } | null {
+  const lt = project.lastTest as { label?: string; ok?: boolean; detail?: string; evidenceHash?: string } | null;
   if (!lt || typeof lt !== "object") return null;
   return lt;
 }
@@ -529,20 +532,32 @@ export function m3Iterates(input: MakerScoreInput): MakerCriterion {
   return { score: 0, evidence: `no iteration convergence: ${why}` };
 }
 
-/** M4 machine-verifiable — p6-verified semantics: lastTest.label === "tested"
- *  plus a real evidenceHash. */
+/** M4 machine-verifiable — EXACTLY dod.ts's p6-verified probe (dod.ts:693-703):
+ *  lastTest.label === "tested" AND ok === true AND a non-empty detail AND a
+ *  non-empty evidenceHash. W55 · 341-5: pre-fix this read only label + hash, so
+ *  a hollow `{ok:false, label:"tested", evidenceHash:"h"}` record scored 1 while
+ *  the P6 gate's own probe refused it — the comment claimed parity the bytes did
+ *  not have. One record, one verdict. */
 export function m4MachineVerifiable(input: MakerScoreInput): MakerCriterion {
   const lt = lastTestEvidence(input.project);
-  const tested = lt && lt.label === "tested";
+  const tested = lt !== null && lt.label === "tested";
+  const ok = tested && lt!.ok === true;
+  const detailed = ok && typeof lt!.detail === "string" && lt!.detail.length > 0;
   const hashed =
-    tested && typeof lt!.evidenceHash === "string" && (lt!.evidenceHash as string).length > 0;
-  if (tested && hashed) {
+    detailed && typeof lt!.evidenceHash === "string" && (lt!.evidenceHash as string).length > 0;
+  if (hashed) {
     return { score: 1, evidence: `lastTest "tested" + evidenceHash ${(lt!.evidenceHash as string).slice(0, 8)}` };
   }
-  return {
-    score: 0,
-    evidence: `machine verification missing: lastTest ${lt ? `label="${lt.label ?? "unlabeled"}"${typeof lt.evidenceHash === "string" && lt.evidenceHash ? " + hash" : " + NO evidenceHash"}` : "absent"}`,
-  };
+  const why = !lt
+    ? "absent"
+    : !tested
+      ? `label="${lt.label ?? "unlabeled"}"`
+      : !ok
+        ? 'label="tested" but ok≠true'
+        : !detailed
+          ? 'label="tested" + ok but NO detail'
+          : 'label="tested" + ok + detail but NO evidenceHash';
+  return { score: 0, evidence: `machine verification missing: lastTest ${why}` };
 }
 
 /** M5 honest — a red gate record must never hide under a clean-looking seal. */

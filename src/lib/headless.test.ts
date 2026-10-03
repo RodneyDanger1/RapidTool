@@ -404,6 +404,55 @@ describe("runUntilGate", () => {
     assert.equal(res.project.decisions.length, 0);
   });
 
+  // 341-6 (autonomy loop): the opt-in machine-gate door. Default (no
+  // machineGates) must stay byte-identical; with machineGates:true a STOCK
+  // HITL gate (P4/P5/P8/P9) whose post-approval DoD passes is cleared through
+  // the SAME ledgered machine actor `approve --seat autopilot` uses.
+  it("341-6: machineGates:true clears a stock HITL gate through the harness actor", async () => {
+    const p = createProject({ brief: FIXTURE_BRIEF });
+    const res = await runUntilGate(p, { autopilot: true, machineGates: true, maxSteps: 5 });
+    // P0–P4 = the first five edge moves; at P4 the machine door must have
+    // cleared the stock gate, so the run is running at P5, not parked at P4.
+    assert.notEqual(res.project.status, "awaiting_hitl");
+    assert.equal(res.project.currentPhase, 5);
+    const row = res.project.decisions.at(-1);
+    assert.equal(row?.phase, 4);
+    assert.equal(row?.decision, "approve");
+    assert.equal(row?.decidedBy, "autopilot", "a machine-cleared stock gate never stamps a human");
+    assert.equal(row?.decidedVia?.label, "autopilot/harness", "the row carries the harness seat provenance");
+  });
+
+  it("341-6: the stock park is NOT cleared without machineGates (default path)", async () => {
+    const p = createProject({ brief: FIXTURE_BRIEF });
+    const res = await runUntilGate(p, { autopilot: true, maxSteps: 5 });
+    assert.equal(res.project.status, "awaiting_hitl");
+    assert.equal(res.project.currentPhase, 4);
+    assert.equal(res.project.decisions.length, 0, "the default path mints no approval row");
+  });
+
+  it("341-6: machineGates:true NEVER clears a forceHuman gate", async () => {
+    // A real stock park (P4) flipped human-only: the forceHuman guard must win
+    // over the stock-gate door.
+    const base = (await runUntilGate(createProject({ brief: FIXTURE_BRIEF }))).project;
+    assert.equal(base.currentPhase, 4);
+    const p: Project = { ...base, hitl: { ...base.hitl!, forceHuman: true } };
+    const res = await runUntilGate(p, { autopilot: true, machineGates: true, maxSteps: 1 });
+    assert.equal(res.project.status, "awaiting_hitl", "a forceHuman gate must stay parked");
+    assert.ok(res.project.hitl, "forceHuman gate must remain open");
+    assert.equal(res.project.decisions.length, 0, "no machine approval may be minted over a forceHuman gate");
+  });
+
+  it("341-6: machineGates:true NEVER clears a red-DoD stock gate", async () => {
+    // Drive a real keyless run to the P4 stock park, then strike the P4
+    // security artifact so the post-approval gate is genuinely red.
+    let p = (await runUntilGate(createProject({ brief: FIXTURE_BRIEF }))).project;
+    assert.equal(p.currentPhase, 4);
+    p = { ...p, artifacts: (p.artifacts ?? []).filter((a) => !(a.phase === 4 && a.kind === "security")) };
+    const res = await runUntilGate(p, { autopilot: true, machineGates: true, maxSteps: 1 });
+    assert.equal(res.project.status, "awaiting_hitl", "a red stock gate must stay parked");
+    assert.equal(res.project.decisions.length, 0, "no machine approval may be minted over a red gate");
+  });
+
   it("a single maxSteps=1 step advances exactly one phase", async () => {
     const p = createProject({ brief: FIXTURE_BRIEF });
     const res = await runUntilGate(p, { maxSteps: 1 });
@@ -1314,6 +1363,67 @@ describe("W45 — emitted entry round-trips through repair; the failing file is 
     const files = treeRunFailureFiles(specFail);
     assert.ok(files.includes("src/main.ts"), "the failing entry is named");
     assert.equal(files.includes("tests/oracle.spec.ts"), false, "the scaffold-owned oracle spec is never a repair target");
+    // 341-1: a red DECLARED script (typecheck/test/build) names its offender
+    // files in the toolchain tail — a typecheck-only red must still yield a
+    // repair target, or the cycle aims at nothing.
+    const typecheckFail: TreeRunOutcome = {
+      ...specFail,
+      tests: [],
+      run: { kind: "headless", entry: "src/main.ts", run: "pass", detail: "" },
+      project: {
+        ok: false,
+        typecheck: {
+          script: "typecheck",
+          run: "fail",
+          detail:
+            "src/generated/chunk-0.ts(9,14): error TS2749: 'TextDecoder' refers to a value, but is being used as a type here.\n" +
+            "src/jobs/convert.ts(1,2): error TS2440: Import declaration conflicts with local declaration of 'convert'.",
+        },
+        test: { script: "test", run: "pass" },
+      },
+    };
+    const tf = treeRunFailureFiles(typecheckFail);
+    assert.ok(tf.includes("src/generated/chunk-0.ts"), "the compiler-named offender is a repair target");
+    assert.ok(tf.includes("src/jobs/convert.ts"), "every compiler-named offender is named");
+    assert.equal(tf.includes("tests/oracle.spec.ts"), false, "the oracle spec stays excluded on a script red");
+  });
+
+  it("341-6: treeRunFailureFiles rejects an unsafe-path SUFFIX / absolute / `..` row and keeps the legit compiler row", () => {
+    // Verifier A hole: the offender regex anchors on the first alnum, so it
+    // captured only a SUFFIX of a Windows-separated reserved row or an
+    // absolute path (root stripped), and admitted a `..` traversal. Every
+    // captured token must start at a real boundary (not a path char, `/`, `\`
+    // or drive `:`) and carry no `..` segment; the legitimate compiler row
+    // `src/jobs/convert.ts(1,2): error …` survives.
+    const unsafe: TreeRunOutcome = {
+      ok: false,
+      dir: "",
+      compile: emptyCompile,
+      tests: [],
+      run: { kind: "ui-shell", run: "skip", detail: "UI shell — not executable headless" },
+      core: undefined,
+      error: "red",
+      project: {
+        ok: false,
+        typecheck: {
+          script: "typecheck",
+          run: "fail",
+          detail:
+            "tests\\oracle.spec.ts(1,1): error TS1005: reserved, Windows-separated\n" +
+            "/etc/secret.ts(2,2): error TS1005: absolute POSIX\n" +
+            "C:\\tmp\\x.ts(3,3): error TS1005: absolute Windows\n" +
+            "src/../../secret.ts(4,4): error TS1005: traversal\n" +
+            "src/jobs/convert.ts(1,2): error TS2440: conflicts",
+        },
+        test: { script: "test", run: "pass" },
+      },
+    };
+    const files = treeRunFailureFiles(unsafe);
+    assert.deepEqual(
+      files,
+      ["src/jobs/convert.ts"],
+      `only the boundary-anchored, traversal-free compiler row is a repair target: ${JSON.stringify(files)}`,
+    );
   });
 
   it("repairCycleLiveDeps: folds repairTargets into the treeFailure directive (and only then)", () => {

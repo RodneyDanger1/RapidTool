@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { SUPPLY_CHAIN_AUDIT_COMMAND, compileCheckDir, installToolFor, parseVerdictForSource, supplyChainFloorFor, treeRun, treeSubstanceOf, treeVerdictHash, verifyKindDir } from "./compile-check.server.ts";
+import { SUPPLY_CHAIN_AUDIT_COMMAND, compileCheckDir, installToolFor, parseVerdictForSource, supplyChainFloorFor, treeRun, treeSubstanceOf, treeVerdictHash, typecheckDir, verifyKindDir } from "./compile-check.server.ts";
 import { inventoryFromJobSources } from "./doctor.ts";
 import { collectJobSources } from "./headless.ts";
 import { scrubbedEnv } from "./node-runner.server.ts";
@@ -2167,6 +2167,104 @@ describe("W49 / 335-3 — a RED kind entry carries a top-level error and the dec
       const broken = await treeRunAsConsumer(dir);
       assert.equal(broken.run!.entry, "src/main.ts");
       assert.equal(broken.ok, false, "a corrupted cli entry can never read ok:true");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// --- fixes/341-1: typecheckDir - the single declared-script compiler seam ----
+// The PRE-SEAL self-typecheck gate consumes this real compiler seam: it runs
+// ONLY the tree's OWN declared `typecheck` over an already-materialized dir.
+
+describe("fixes/341-1 typecheckDir - the declared `typecheck` seam", () => {
+  it("a tree with no package.json scripts is an honest skip, never a pass", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "src/a.ts", "export const a = 1;\n");
+      const v = await typecheckDir(dir, { linkSharedToolchain: false });
+      assert.equal(v.script, "typecheck");
+      assert.equal(v.run, "skip");
+      assert.ok(v.note && /no .*scripts/.test(v.note), "the reason is named");
+      assert.notEqual(v.run, "pass");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a declared typecheck with no resolvable toolchain skips with the UNVERIFIED reason", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "x", type: "module", scripts: { typecheck: "tsc --noEmit" } }));
+      write(dir, "src/a.ts", "export const a = 1;\n");
+      const v = await typecheckDir(dir, { linkSharedToolchain: false });
+      assert.equal(v.run, "skip");
+      assert.ok(v.note && /UNVERIFIED/.test(v.note));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a REAL tsc run reds on the measured TS2749 class (TextDecoder value-as-type)", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "x", type: "module", scripts: { typecheck: "tsc --noEmit" } }));
+      write(
+        dir,
+        "tsconfig.json",
+        JSON.stringify({
+          compilerOptions: {
+            target: "ES2022",
+            lib: ["ES2022"],
+            module: "ESNext",
+            moduleResolution: "bundler",
+            allowImportingTsExtensions: true,
+            isolatedModules: true,
+            strict: true,
+            noEmit: true,
+            skipLibCheck: true,
+            types: ["node"],
+          },
+          include: ["src"],
+        }),
+      );
+      write(dir, "src/a.ts", "export function f(): unknown {\n  const dec: TextDecoder = new TextDecoder();\n  return dec;\n}\n");
+      const v = await typecheckDir(dir);
+      assert.equal(v.run, "fail", `expected a red tsc verdict: ${JSON.stringify(v)}`);
+      assert.equal(v.executed, true);
+      assert.match(v.detail ?? "", /TS2749|TextDecoder/, "the compiler named the real type error");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a REAL tsc run passes a typed module (no fabricated failure)", async () => {
+    const dir = tempDir();
+    try {
+      write(dir, "package.json", JSON.stringify({ name: "x", type: "module", scripts: { typecheck: "tsc --noEmit" } }));
+      write(
+        dir,
+        "tsconfig.json",
+        JSON.stringify({
+          compilerOptions: {
+            target: "ES2022",
+            lib: ["ES2022"],
+            module: "ESNext",
+            moduleResolution: "bundler",
+            allowImportingTsExtensions: true,
+            isolatedModules: true,
+            strict: true,
+            noEmit: true,
+            skipLibCheck: true,
+            types: ["node"],
+          },
+          include: ["src"],
+        }),
+      );
+      write(dir, "src/a.ts", "export function add(a: number, b: number): number {\n  return a + b;\n}\n");
+      const v = await typecheckDir(dir);
+      assert.equal(v.run, "pass", `expected a green tsc verdict: ${JSON.stringify(v)}`);
+      assert.equal(v.exitCode, 0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

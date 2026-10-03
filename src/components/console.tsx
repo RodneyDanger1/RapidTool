@@ -7252,12 +7252,20 @@ function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void
  * the copy names are ones that exist on disk (the in-session Resume above, the
  * CLI verbs).
  *
- * Truth sources (verified on disk at W36 N3; log `fixes/281_n3_ui.md`):
- *  - plan — `Project.wildPlan` (types.ts:172-183). While the planner is unwired
- *    (R13-f02) `engine.readWildPlan` returns the honest empty shape
+ * Truth sources (re-verified on disk for W54 341-4; log `fixes/341_4_console.md`):
+ *  - plan — `Project.wildPlan` (types.ts:172-183). The planner + classifier
+ *    review are real on the server-side headless/CLI wild path (R13-f02:
+ *    `headless.generateWildPlan` → `attachWildPlan` → `stageWildPlan`, which
+ *    parks at the `wild.plan_review` row before the first mutation); the
+ *    console's store driver (`store.startWildRun`) stages a stored plan through
+ *    the SAME `stageWildPlan` seam (engine.ts's one staging site for both real
+ *    wild drivers), so a stored planner plan is reviewed and parks before the
+ *    first mutation — browser reviewer null ⇒ the honest "not configured"
+ *    review row; no stored planner plan stages nothing (staged: false).
+ *    `engine.readWildPlan` returns a stored plan when the record carries one,
+ *    else the honest empty shape
  *    (`steps: []`, `source: "empty"`, a note naming the row); steps are never
- *    invented. This card renders a stored plan when the record carries one,
- *    else the honest absence line.
+ *    invented.
  *  - checkpoint/resume — `checkpoint.server.ts` is SERVER-ONLY (node:fs; atomic,
  *    corrupt-safe, `RT_E_CHECKPOINT_MISSING` when absent / `RT_E_VALIDATION` on
  *    junk), so the console has no read seam yet: this card shows the
@@ -7267,7 +7275,10 @@ function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void
  *    but has NO throw site today, so the row names the real verb + its real
  *    limits and does not cite the unthrown code as a live refusal (W-47).
  *  - stream — T5.1 shell: one-shot transport, no `--stream`, no console pane.
- *  - cassette — T5.7 shell: library on disk, zero wire points.
+ *  - cassette — T5.7 340-4: WIRED at the provider seam (`deepseek.ts` /
+ *    `openai-compatible.ts`). `RAPIDTOOL_CASSETTE_MODE=record|replay` +
+ *    `RAPIDTOOL_CASSETTE_TAPE` arm it; unset/off is inert. No console control
+ *    and no run-eval/CLI flags yet.
  *  - seat — S4's `seat.ts` never landed (nothing on disk, no registry code);
  *    the approval dock's policy-fallback text is today's only seat surface.
  *  - isolation — R13-f04: no isolator; the local runner is bounded, NOT an OS
@@ -7317,11 +7328,14 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           ) : (
             <p
               className="mt-0.5 text-xs text-muted"
-              title="R13-f02: the planner is not wired — engine.readWildPlan returns an honest empty plan (steps: [], source: 'empty') with a note naming the row. Steps are never invented."
+              title="R13-f02: planning + classifier review are real on the server-side headless/CLI wild path (generateWildPlan → attachWildPlan → stageWildPlan, which parks at the wild.plan_review row before the first mutation). The console's store driver (store.startWildRun) stages a stored plan through that SAME stageWildPlan seam — engine.ts's one staging site for both real wild drivers — so a record carrying a planner plan is reviewed and parks at the plan review before the first mutation (the browser reviewer is null, so the row is the honest 'Auto-Review classifier not configured' review); no stored planner plan stages nothing (staged: false, no write). engine.readWildPlan returns the honest empty shape (steps: [], source: 'empty') — steps are never invented."
             >
-              no plan on record — the planner is not wired yet; the wired reader returns an honest
-              empty plan (<span className="font-mono">source: &quot;empty&quot;</span>), never
-              invented steps.
+              no plan on record — the reader finds no planner plan to stage, so a console start
+              carries none (plan generation runs on the keyed server-side headless/CLI path, not
+              in the browser); when a stored planner plan IS on the record the console driver
+              reviews it and parks at the plan review before the first mutation. The reader returns
+              an honest empty plan (<span className="font-mono">source: &quot;empty&quot;</span>),
+              never invented steps.
             </p>
           )}
         </li>
@@ -7343,10 +7357,11 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           </p>
           <p
             className="mt-0.5 text-xs text-muted"
-            title="W-47: there is no scheduler/daemon/queue in this product. `unattended --project` is the scheduler-facing CLI drive (it re-enters from the run checkpoint when one exists, else starts from the file, and drives autopilot+live until parked — a stock HITL gate still parks with exit 2). The console has no schedule control. End-to-end unattended completion stays blocked while W-01 (keyed wild P6 seam) and W-02 (mint reachability) are unlanded keyed."
+            title="W-47: there is no scheduler/daemon/queue in this product. `unattended --project` is the scheduler-facing CLI drive (it re-enters from the run checkpoint when one exists, else starts from the file, and drives autopilot+live until parked). 341-6: it passes machineGates: true, so a stock HITL gate (P4/P5/P8/P9) whose DoD passes is cleared through the ledgered machine actor — only a forceHuman gate or a red DoD gate still parks (exit 2), never a fake completion. The console has no schedule control."
           >
             no in-product scheduler — the CLI <span className="font-mono">unattended</span> verb
-            resumes from a checkpoint when an external hook invokes it; stock HITL gates still park
+            resumes from a checkpoint when an external hook invokes it and clears stock HITL gates
+            through the machine actor; only a forceHuman or red DoD gate parks
           </p>
         </li>
         <li>
@@ -7366,9 +7381,11 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           </p>
           <p
             className="mt-0.5 text-xs text-muted"
-            title="T5.7: cassette.ts is built and tested but has zero wire points — no callModel wrapper, no run-eval --record/--replay, no CLI flags. No recorded runs exist yet; a replay can never pass as live."
+            title="T5.7 (340-4): cassette.ts is wired at the provider seam (deepseek.ts / openai-compatible.ts). RAPIDTOOL_CASSETTE_MODE=record|replay plus RAPIDTOOL_CASSETTE_TAPE arms it; unset/off is inert and byte-identical. A replay miss, a tampered tape, or a cross-family tape is a coded refusal with no text, and a replayed call is never marked live. There is no console control and no run-eval/CLI --record/--replay flag yet, so a driver must set the env."
           >
-            library only — no wire points; recording is not available
+            wired at the provider seam — arm it with{" "}
+            <span className="font-mono">RAPIDTOOL_CASSETTE_MODE</span> +{" "}
+            <span className="font-mono">RAPIDTOOL_CASSETTE_TAPE</span>; no console control yet
           </p>
         </li>
         <li>

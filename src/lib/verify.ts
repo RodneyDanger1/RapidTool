@@ -92,8 +92,10 @@ export async function verifyAndFix(
 /**
  * Shape of the whole-project verify outcome (moved here from headless.ts —
  * headless re-exports it). Structurally a superset-tolerant view of
- * verify.server's VerifyOutcome; consumers that need lint/typed cases use
- * VerifyOutcome directly.
+ * verify.server's VerifyOutcome. 341-3: the B4 `lint` block the server
+ * produces is now part of this view too — applyVerifyOutcome renders it into
+ * the verify artifact body, so the produced field has a real consumer rather
+ * than dying after the one-line evidence summary.
  */
 export type VerifyOutcomeShape = {
   status: "passed" | "failed" | "not-configured" | "error";
@@ -101,6 +103,9 @@ export type VerifyOutcomeShape = {
   evidence: string;
   finalSource?: string;
   cases?: unknown[];
+  /** B4 lint-advisory findings (verify.server.ts's LintFailure[], structurally).
+   *  ADVISORY ONLY — never gates or weakens a machine pass. */
+  lint?: VerifyOutcome["lint"];
   /** L3 (failed/error) or L4 (passed) lesson row minted by verify.server.ts's
    *  outcome seam — applyVerifyOutcome appends it to project memory. */
   lesson?: MemoryEntry;
@@ -113,18 +118,34 @@ export type VerifyOutcomeShape = {
 
 /**
  * audit-46 export binding: appends guarded CommonJS export assignments for the
- * source's top-level functions so verify.server's oracle harness (which binds
- * expressions via `with(exports)`) can actually call them. No-op when the
- * source already exports or declares no top-level functions.
+ * source's top-level function declarations so verify.server's oracle harness
+ * (which binds expressions via `with(exports)`) can actually call them. No-op
+ * when the source already ASSIGNS `module.exports` or declares no top-level
+ * function declaration. (The `module.exports` guard does not detect the
+ * `exports.x = …` style; if such a source also declares a function, the
+ * appended `module.exports` alias is redundant but harmless — the harness
+ * folds both CJS styles onto one exports object.)
+ *
+ * 341-3: the declaration forms covered are the FUNCTION-DECLARATION family —
+ * plain, `async`, generator (`function*`), and async generator — each also
+ * optionally preceded by `export` (an ESM source still refuses upstream in
+ * `esmModuleUnsupportedReason`; binding it here never fabricates a pass). What
+ * is deliberately NOT covered: `const f = () => {}` / `const f = function(){}`
+ * function-VALUES and class declarations. Those still yield an honest
+ * `NO_CALLABLE_EXPORTS` refusal rather than a guessed binding — a bounded text
+ * transform cannot distinguish a function value from any other initializer, and
+ * a wrong binding would assert an export the module never declared.
  */
 export function withCommonJsExports(source: string): string {
   // W40 N1 (H1 leftover): a non-string source has no top-level functions to
   // bind — the honest transform result is the empty source, never a crash.
   if (typeof source !== "string") return "";
-  const fns = [...source.matchAll(/^function\s+([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
+  const fns = [
+    ...source.matchAll(/^(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/gm),
+  ].map((m) => m[1]);
   const unique = [...new Set(fns)];
   if (unique.length === 0) return source; // not a function-module source — honest no-op
-  if (/module\.exports/.test(source)) return source; // already exports — no-op
+  if (/module\.exports/.test(source)) return source; // already assigns module.exports — no-op
   const block = unique
     .map((f) => `if (typeof module !== "undefined" && module.exports) module.exports.${f} = ${f};`)
     .join("\n");
@@ -171,16 +192,31 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
   // judgment.ts read as machine proof (they check label+hash, not the detail
   // dod.ts p6-verified checks). The case set is required because runCases() is
   // refuse-to-run on zero cases, and the finalSource because convergence is
-  // impossible without the bytes the harness actually ran.
+  // impossible without the bytes the harness actually ran. 341-3 (verifier B,
+  // 340-8 §2): the case set must also carry at least ONE runnable expression —
+  // a non-empty-but-junk `[null, 42, {}]` is not a case set, and minting
+  // `tested` from it is machine proof for a run that never happened.
   const evidence = typeof outcome.evidence === "string" ? outcome.evidence : "";
   const caseSet = Array.isArray(outcome.cases) ? outcome.cases : null;
   const hasFinalSource =
     typeof outcome.finalSource === "string" && outcome.finalSource.trim().length > 0;
+  const hasRunnableCase =
+    caseSet !== null &&
+    caseSet.some((c) => {
+      const row = c as { expression?: unknown } | null | undefined;
+      return (
+        !!row &&
+        typeof row === "object" &&
+        typeof row.expression === "string" &&
+        row.expression.trim().length > 0
+      );
+    });
   if (
     outcome.status === "passed" &&
     (evidence.trim().length === 0 ||
       caseSet === null ||
       caseSet.length === 0 ||
+      !hasRunnableCase ||
       !hasFinalSource)
   ) {
     return project;
@@ -228,12 +264,25 @@ export function applyVerifyOutcome(project: Project, outcome: VerifyOutcomeShape
     const expression = typeof row.expression === "string" ? row.expression : "";
     caseLines.push(`- ${id}: ${expression}`);
   }
+  // 341-3: the B4 lint block verify.server.ts produces gets its reader here —
+  // the structured findings (rule/occurrences/first line/message) render into
+  // the verify artifact, so the produced field reaches the delivered packet
+  // instead of dying after the one-line evidence summary. ADVISORY: this never
+  // blocks or weakens the mint above (a lint-bearing pass is still a pass).
+  const lintRows: string[] = [];
+  for (const f of Array.isArray(outcome.lint) ? outcome.lint : []) {
+    if (!f || typeof f !== "object" || typeof f.rule !== "string") continue;
+    const occurrences = typeof f.occurrences === "number" ? f.occurrences : 1;
+    const at = typeof f.firstLine === "number" ? `L${f.firstLine}` : "line ?";
+    lintRows.push(`- ${f.rule} ×${occurrences} @${at} — ${typeof f.message === "string" ? f.message : ""}`);
+  }
   const body = [
     `# Verify outcome — ${passed ? "PASSED (machine-run)" : outcome.status.toUpperCase()}`,
     "",
     evidence || "(no evidence text)",
     `Iterations: ${typeof outcome.iterations === "number" ? outcome.iterations : 0}`,
     ...(caseLines.length > 0 ? ["", "Cases:", ...caseLines] : []),
+    ...(lintRows.length > 0 ? ["", "Lint advisory (non-blocking):", ...lintRows] : []),
   ].join("\n");
   const artifact: Artifact = {
     id: `verify-${outcome.status}-${evidenceHash.slice(0, 8)}`,

@@ -37,6 +37,7 @@ import {
   rejectHitl,
   researchQueryFor,
   sealHonesty,
+  stageWildPlan,
   stampPacket,
   unlockRetry,
   withLiveDegradeRows,
@@ -658,6 +659,49 @@ function deniedGateLog(project: Project): Project | null {
   };
 }
 
+/**
+ * 341-6 (autonomy loop): the opt-in MACHINE-GATE door. `canAutopilot` refuses
+ * every stock HITL gate (P4/P5/P8/P9) by design, so the single `unattended`
+ * verb parked at P4 forever (`steps:0` on every re-invocation). With
+ * `machineGates` enabled a stock gate may be cleared, but ONLY when it is not
+ * human-only (`forceHuman`) and the phase's DoD gate passes once the machine
+ * approval is applied — never a red gate, never a human-only gate. Returns the
+ * approved project through the SAME `approve`/`HARNESS_APPROVE_ACTOR` path the
+ * CLI's `approve --seat autopilot` door uses (so the ledger row names the
+ * machine actor), or null when the gate must stay parked.
+ *
+ * The P4/P5/P8/P9 DoD includes an "approved — decision ledger records the
+ * approver" criterion that is necessarily unmet while the gate is OPEN, so the
+ * pass check runs against the would-be approval result: a genuinely red
+ * artifact/validation gate stays red and the park survives.
+ *
+ * Tightness: unlike `canAutopilot`, this door does NOT consult
+ * `schedule.tightness`. `canAutopilot`'s `< 7.2` guard gates the IMPLICIT
+ * autopilot auto-approval (a caller can set `autopilot:true` with no operator
+ * decision). This door is the EXPLICIT machine-seat door — enabled only by the
+ * scheduler-facing `unattended` / `--unattended` arms — and it routes through
+ * the exact `approve`/`HARNESS_APPROVE_ACTOR` path the documented
+ * `approve --seat autopilot` door uses, which has never consulted tightness.
+ * Adding the guard here would make the two machine doors disagree (the CLI
+ * approve would still clear the same gate) without adding protection; the
+ * `forceHuman` and red-DoD refusals above are the real policy floor.
+ */
+function machineApproveGate(
+  project: Project,
+  autopilot: boolean,
+  machineGates: boolean,
+): Project | null {
+  if (!autopilot || !machineGates) return null;
+  const gate = project.hitl;
+  if (!gate || gate.phase !== project.currentPhase) return null;
+  if (gate.forceHuman) return null; // human-only by policy — never cleared
+  if (!(STOCK_HITL as readonly number[]).includes(gate.phase)) return null;
+  const rec = project.phases.find((p) => p.id === gate.phase);
+  if (!rec || rec.startedAt == null) return null; // not a gate a real run opened
+  const approved = approve(project, { actor: HARNESS_APPROVE_ACTOR });
+  return runGate(approved, gate.phase).pass ? approved : null;
+}
+
 function advanceTo(project: Project, next: PhaseId): Project {
   return {
     ...project,
@@ -675,6 +719,8 @@ async function runReady(
   p6Deps?: Partial<P6JourneyDeps>,
   /** T4 (112 §4.4 / 216g): caller-supplied proven lesson rows for P6. */
   proven?: readonly RankableLessonRow[],
+  /** 341-6: opt-in stock-gate clearing (see `machineApproveGate`). */
+  machineGates = false,
 ): Promise<{ project: Project; stopped: boolean; error?: string; dodBlocked?: boolean }> {
   if (!priorsSealed(project.phases, phase)) {
     return { project, error: `Cannot enter P${phase} — prior phases are not sealed.`, stopped: true };
@@ -688,13 +734,14 @@ async function runReady(
     status: "running" as const,
   };
   const updated = await runPhase(running, phase, { live, p6Deps, proven });
-  return finishPhase(updated, phase, autopilot);
+  return finishPhase(updated, phase, autopilot, machineGates);
 }
 
 function finishPhase(
   updated: Project,
   phase: PhaseId,
   autopilot: boolean,
+  machineGates = false,
 ): { project: Project; stopped: boolean; error?: string; dodBlocked?: boolean } {
   let p = updated;
   // E-02 (DoD gate parity with store.finishPhase): record the machine-checkable
@@ -729,6 +776,10 @@ function finishPhase(
     // record its DoD gate now (the call above no-op'd while awaiting_hitl), so
     // the artifact + gate.verdict log exist exactly as for human approvals.
     p = recordGateInto(p, phase);
+  } else {
+    // 341-6: opt-in stock-gate clearing (default off ⇒ byte-identical).
+    const machined = machineApproveGate(p, autopilot, machineGates);
+    if (machined) p = machined;
   }
   return {
     project: p,
@@ -744,6 +795,8 @@ async function advanceOnce(
   p6Deps?: Partial<P6JourneyDeps>,
   /** T4 (112 §4.4 / 216g): caller-supplied proven lesson rows for P6. */
   proven?: readonly RankableLessonRow[],
+  /** 341-6: opt-in stock-gate clearing (see `machineApproveGate`). */
+  machineGates = false,
 ): Promise<{ project: Project; stopped: boolean; error?: string; dodBlocked?: boolean }> {
   const phase = project.currentPhase;
   const rec = project.phases.find((p) => p.id === phase);
@@ -760,6 +813,10 @@ async function advanceOnce(
       // are recordGateInto's).
       return { project: recordGateInto(approved, phase), stopped: false };
     }
+    // 341-6: opt-in stock-gate clearing (default off ⇒ byte-identical). The
+    // approved project already carries its recorded gate (approve() does it).
+    const machined = machineApproveGate(project, autopilot, machineGates);
+    if (machined) return { project: machined, stopped: false };
     // E-20 parity (headless): when autopilot is ON but the parked gate's DoD
     // is unmet, persist the autopilot.gate_denied trail (same exclusions as
     // the store) and say WHY in the event — the park stays a 0-progress stop.
@@ -795,10 +852,10 @@ async function advanceOnce(
     if (!priorsSealed(project.phases, next)) {
       return { project, error: `P${phase} must stay sealed.`, stopped: true };
     }
-    return runReady(advanceTo(project, next), next, autopilot, live, p6Deps, proven);
+    return runReady(advanceTo(project, next), next, autopilot, live, p6Deps, proven, machineGates);
   }
   if (rec.status === "complete") return { project, error: "Pipeline complete.", stopped: true };
-  return runReady(project, phase, autopilot, live, p6Deps, proven);
+  return runReady(project, phase, autopilot, live, p6Deps, proven, machineGates);
 }
 
 /** Why a run/gate invocation ended (F-02/F-04 closure — store's stoppedReason
@@ -1110,10 +1167,17 @@ export async function runUntilGate(
      *  (`clearRunCheckpoint`). Absent (browser/console path, in-process
      *  callers) ⇒ no-op: no dir, no write, byte-identical runs. */
     checkpointDir?: string;
+    /** 341-6 (autonomy loop): opt-in machine-gate clearing. When true (and
+     *  `autopilot`), a STOCK HITL gate (P4/P5/P8/P9) that is not `forceHuman`
+     *  and whose DoD gate passes after the machine approval is cleared through
+     *  `approve(…, HARNESS_APPROVE_ACTOR)` — the same ledgered actor the CLI
+     *  `approve --seat autopilot` door uses. Default false ⇒ byte-identical. */
+    machineGates?: boolean;
   } = {},
 ): Promise<RunResult> {
   const autopilot = Boolean(opts.autopilot);
   const live = Boolean(opts.live);
+  const machineGates = Boolean(opts.machineGates);
   const maxSteps =
     typeof opts.maxSteps === "number" && opts.maxSteps > 0 ? Math.floor(opts.maxSteps) : 40;
   // W46 · 332-2 (L1 / AW45-c06): the run's cost must survive the process. Each
@@ -1135,7 +1199,7 @@ export async function runUntilGate(
   while (iterations < maxSteps) {
     iterations += 1;
     const before = p;
-    const r = await advanceOnce(p, autopilot, live, opts.p6Deps, opts.proven);
+    const r = await advanceOnce(p, autopilot, live, opts.p6Deps, opts.proven, machineGates);
     p = r.project;
     if (r.error) events.push(r.error);
     if (r.dodBlocked) dodBlocked = true;
@@ -2707,7 +2771,9 @@ function treeRunFailureTail(o: TreeRunOutcome): string {
  *  tree-run NAMES as its failing subject. The generated-core LOAD failure
  *  (`o.core`, the UI-shell shape) is read EXPLICITLY — it is distinct from the
  *  per-spec test failure shape (`o.tests`) and from the emitted project's own
- *  `npm run` leg — plus non-pass compile rows and a non-pass entry smoke. Used
+ *  `npm run` leg — plus non-pass compile rows, a non-pass entry smoke, and the
+ *  offender files a red DECLARED script (typecheck/test/build) names in its
+ *  toolchain tail. Used
  *  by `repairTreeDir` to (a) put the named file into the repair directive so a
  *  cycle can target it and (b) surface it as an explicit refusal when a cycle
  *  does not address it, so a failing file is never silently skipped.
@@ -2717,6 +2783,10 @@ export function treeRunFailureFiles(o: TreeRunOutcome): string[] {
   const add = (p: unknown): void => {
     if (typeof p !== "string" || p.length === 0) return;
     if (p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) return;
+    // A `..` segment escapes the emitted tree — never a repair target. Kept in
+    // the shared guard so every caller (core entry, compile rows, spec, script
+    // tail) benefits, not only the regex-tail path below.
+    if (p.split("/").includes("..")) return;
     // The scaffold-owned oracle spec is never a repair target: telling the
     // model to "fix" the acceptance contract invites editing the test to pass
     // instead of fixing the product. Its failure is still in the tail.
@@ -2728,6 +2798,23 @@ export function treeRunFailureFiles(o: TreeRunOutcome): string[] {
   if (o.run && o.run.run !== "pass" && o.run.run !== "skip") add(o.run.entry);
   const spec = (o.tests ?? []).find((t) => t.run !== "pass");
   if (spec) add(spec.file);
+  // 341-1: a red DECLARED script (typecheck/test/build) names its offender
+  // files in the toolchain tail as `path(line,col): error …`. Without this the
+  // repair directive gets no target on a typecheck-only red (a compiler-only
+  // failure has no compile-row/entry/spec row to name), so the cycle cannot
+  // aim at the file the compiler blamed. The regex requires a real boundary
+  // before the path — not a path char, `/`, `\` or drive `:` — so a SUFFIX of
+  // a Windows-separated or absolute path (`tests\oracle.spec.ts`, `/etc/x.ts`,
+  // `C:\tmp\x.ts`) is never captured in the first place; `add` still filters
+  // reserved / absolute / `..` tokens.
+  for (const v of [o.project?.typecheck, o.project?.test, o.project?.build]) {
+    if (!v || v.run === "pass" || v.run === "skip") continue;
+    for (const m of (v.detail ?? "").matchAll(
+      /(?<![\w@./:\\-])([A-Za-z0-9_@][A-Za-z0-9_@./-]*\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs))\(\d+,\d+\):/g,
+    )) {
+      add(m[1]);
+    }
+  }
   return out;
 }
 
@@ -5178,69 +5265,6 @@ async function attachWildPlan(project: Project): Promise<Project> {
       },
     ].slice(-200),
   };
-}
-
-/**
- * R13-f02 — review the planner rows and PARK before the first mutation.
- *
- * Runs right after `attachWildPlan` on both wild start/step paths. When the
- * record carries a real planner plan with no `wild.plan_review` row yet, the
- * rows are judged through the injectable Auto-Review reviewer seam
- * (`engine.reviewWildPlan`) and the run parks — `wildRun.pause` + a park
- * record + the `wild.plan_review` / `wild.paused_plan` ledger rows — BEFORE
- * any step can mutate. The pause IS the "no execution without an approved
- * plan" gate; a human resume executes it. `staged:true` tells the caller to
- * stop before its loop. Idempotent: once the review row exists the stored
- * plan is never re-reviewed (a resume proceeds).
- */
-async function stageWildPlan(
-  project: Project,
-  reviewer: WildReviewer | null,
-): Promise<{ project: Project; staged: boolean }> {
-  const plan = project.wildPlan;
-  if (!plan || plan.source !== "planner" || !Array.isArray(plan.steps) || plan.steps.length === 0) {
-    return { project, staged: false };
-  }
-  const logs = Array.isArray(project.logs) ? project.logs : [];
-  if (logs.some((r) => r?.event === "wild.plan_review")) return { project, staged: false };
-  const { reviewWildPlan, wildLog, wildPause } = await import("./engine.ts");
-  const phase = project.currentPhase;
-  let reviewed: Project;
-  if (reviewer === null) {
-    reviewed = wildLog(
-      project,
-      phase,
-      "warn",
-      "wild.plan_review",
-      `wild.plan (${plan.steps.length} row(s)) could not be reviewed — Auto-Review classifier not configured; parked for human review (R13-f02).`,
-    );
-  } else {
-    const verdict = await reviewWildPlan(project, reviewer);
-    reviewed = verdict.ok
-      ? wildLog(
-          project,
-          phase,
-          "info",
-          "wild.plan_review",
-          `wild.plan (${plan.steps.length} row(s)) review (classifier): ${verdict.verdict} — ${verdict.feedback.slice(0, 300)}`,
-        )
-      : wildLog(
-          project,
-          phase,
-          "warn",
-          "wild.plan_review",
-          `wild.plan (${plan.steps.length} row(s)) review failed (${verdict.reason}): ${verdict.error.slice(0, 300)} — parked for human review (R13-f02).`,
-        );
-  }
-  const parked = wildPause(
-    reviewed,
-    phase,
-    "warn",
-    "wild.paused_plan",
-    `wild.plan reviewed; execution parked before the first mutation — ${plan.steps.length} row(s). Approve to execute (R13-f02).`,
-    { code: "RT_E_GATE_PENDING", unlock: "human-gate" },
-  );
-  return { project: parked, staged: true };
 }
 
 /** 316 H3 (315 V2 finding #1): the P6 execution edge threaded into every

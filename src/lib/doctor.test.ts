@@ -560,7 +560,10 @@ describe("OV-9 — productComplete derives from real project state", () => {
     assert.ok(claim.gaps.includes(FACTORY_GAP.complete), "the complete gap stands");
 
     // Same through the coercion boundary: a raw blob claiming the whole field
-    // truth cannot mint product-complete without real project state.
+    // truth cannot mint product-complete without real project state. W55 · 341-5:
+    // it cannot mint the human stamp either — the blob's `humanFixtures` is
+    // ignored, so the fixtures gap stands until the project's OWN record carries
+    // the stamp.
     const blob = {
       autonomousSoftwareFactory: true,
       leftoverJobsAreReexportsOrStubs: false,
@@ -570,11 +573,20 @@ describe("OV-9 — productComplete derives from real project state", () => {
     };
     const coerced = coerceFactoryClaim(blob);
     assert.equal(coerced.autonomousSoftwareFactory, false);
-    assert.deepEqual(coerced.gaps, [FACTORY_GAP.complete], "only the unminted probe refuses");
+    assert.deepEqual(coerced.gaps, [FACTORY_GAP.fixtures, FACTORY_GAP.complete], "the blob mints neither the human stamp nor productComplete");
     // Handed the REAL state the same blob derives the bar honestly: still false
-    // for a floor export, and closed only by the arch-complete project.
+    // for a floor export; the arch-complete project closes `complete` but NOT
+    // `fixtures` (no human record on it).
     assert.ok(coerceFactoryClaim(blob, readRealExport("real-estate-crm")).gaps.includes(FACTORY_GAP.complete));
-    assert.deepEqual(coerceFactoryClaim(blob, ov9Project()).gaps, []);
+    assert.deepEqual(coerceFactoryClaim(blob, ov9Project()).gaps, [FACTORY_GAP.fixtures]);
+    // A project that genuinely carries the human-approved record closes it.
+    assert.deepEqual(
+      coerceFactoryClaim(blob, {
+        ...ov9Project(),
+        acceptanceFixtures: [{ id: "fx-1", approval: "approved", decidedBy: "human" }],
+      }).gaps,
+      [],
+    );
   });
 
   it("the 214 census cross-gate is unchanged: a complete project over a leftover census still refuses", () => {
@@ -910,6 +922,108 @@ describe("W53 · 340-2 — the census gap names the single-real-module state", (
     });
     assert.ok(garbled.gaps.includes(FACTORY_GAP.product));
     assert.ok(!garbled.gaps.includes(FACTORY_GAP.singleJob));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W55 · 341-5 (governance) — the factory latch's human conjunct is NOT
+// forgeable. `coerceFactoryClaim` read `humanFixtures:true` straight off an
+// untrusted blob and `evidenceFromJobInventory` honored an `extra.humanFixtures`
+// flag; both let a caller mint the one conjunct 338-4 reserved for a real human
+// stamp. The human term is now DERIVED from the project's own acceptance record
+// in every untrusted seam, fail-closed. The internal `factoryClaim(evidence)`
+// builder still reads the typed field — it IS the latch's definition.
+// ---------------------------------------------------------------------------
+
+describe("W55 · 341-5 — the factory latch cannot be forged through a hand-fed fixture flag", () => {
+  const FORGE_BLOB = {
+    autonomousSoftwareFactory: true,
+    leftoverJobsAreReexportsOrStubs: false,
+    humanFixtures: true,
+    realMultiJobProduct: true,
+    productComplete: true,
+    isolation: { sandbox: false },
+  } as const;
+  const withHumanStamp = (p: Project): Project =>
+    ({
+      ...p,
+      acceptanceFixtures: [{ id: "fx-1", approval: "approved", decidedBy: "human" }],
+    }) as unknown as Project;
+
+  it("coerceFactoryClaim: a hostile blob's humanFixtures:true cannot lift the latch without a real record", () => {
+    // RED pre-fix: the blob's humanFixtures:true minted the latch (gaps []).
+    const coerced = coerceFactoryClaim(FORGE_BLOB, ov9Project());
+    assert.equal(coerced.autonomousSoftwareFactory, false, "no human record ⇒ no latch, the blob flag is ignored");
+    assert.ok(coerced.gaps.includes(FACTORY_GAP.fixtures), "the fixtures gap stands");
+    // Control: the SAME blob + the project's own human-approved record closes it
+    // through the DERIVED path — the fix narrows the input, not the bar.
+    const real = coerceFactoryClaim(FORGE_BLOB, withHumanStamp(ov9Project()));
+    assert.equal(real.autonomousSoftwareFactory, true, "a genuine human stamp still closes the latch");
+    assert.deepEqual(real.gaps, []);
+  });
+
+  it("evidenceFromJobInventory: an untyped extra.humanFixtures is ignored; only the record derives the term", () => {
+    const inv = inventoryFromJobSources([
+      { path: "src/jobs/board.ts", source: "export function createBoard() { return 1; }" },
+      { path: "src/jobs/column.ts", source: "export function addColumn() { return 2; }" },
+    ]);
+    // RED pre-fix: the hand-fed flag minted the human conjunct over a real census.
+    const ev = evidenceFromJobInventory(inv, { project: ov9Project(), humanFixtures: true } as never);
+    assert.equal(ev.humanFixtures, false, "the hand-fed flag is not read at runtime");
+    assert.equal(factoryClaim(ev, {}).autonomousSoftwareFactory, false);
+    // Control: the derived record still closes it.
+    const green = evidenceFromJobInventory(inv, { project: withHumanStamp(ov9Project()) });
+    assert.equal(green.humanFixtures, true);
+    assert.equal(factoryClaim(green, {}).autonomousSoftwareFactory, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W55 · 341-5 — gap provenance: every FACTORY_GAP constant must have a real
+// producer (bytes → evidence → `gapsOf`/`productGapOf`) AND be surfaced on the
+// `claim.gaps` array the consumer (`headless.doctorStatus` → CLI `doctor`)
+// reads. A constant that cannot be reached, or is never surfaced, is a defect.
+// ---------------------------------------------------------------------------
+
+describe("W55 · 341-5 — every factory gap has a byte-derived producer and is surfaced", () => {
+  const twoRealJobs = () =>
+    inventoryFromJobSources([
+      { path: "src/jobs/board.ts", source: "export function createBoard() { return 1; }" },
+      { path: "src/jobs/column.ts", source: "export function addColumn() { return 2; }" },
+    ]);
+  const stubOnly = () =>
+    inventoryFromJobSources([{ path: "src/jobs/x.ts", source: 'throw new Error("TODO(E-15) stub: implement x");' }]);
+  const reexportOnly = () =>
+    inventoryFromJobSources([
+      { path: "src/jobs/a.ts", source: 'export { runA } from "./core.ts";' },
+      { path: "src/jobs/b.ts", source: 'export { runB } from "./core.ts";' },
+    ]);
+  const singleReal = () =>
+    inventoryFromJobSources([{ path: "src/jobs/entry.ts", source: "export function entry() { return 1; }" }]);
+
+  it("each FACTORY_GAP constant is produced from scanned/derived bytes and rides the consumed gaps[]", () => {
+    const rows = [
+      { gap: FACTORY_GAP.leftover, claim: factoryClaim(evidenceFromJobInventory(stubOnly()), {}) },
+      { gap: FACTORY_GAP.fixtures, claim: factoryClaim(evidenceFromJobInventory(twoRealJobs(), { project: ov9Project() }), {}) },
+      { gap: FACTORY_GAP.product, claim: factoryClaim(evidenceFromJobInventory(reexportOnly()), {}) },
+      { gap: FACTORY_GAP.singleJob, claim: factoryClaim(evidenceFromJobInventory(singleReal(), { project: ov9Project() }), {}) },
+      { gap: FACTORY_GAP.complete, claim: factoryClaim(evidenceFromJobInventory(twoRealJobs(), { project: ov9Project([]) }), {}) },
+    ];
+    for (const { gap, claim } of rows) {
+      assert.equal(typeof gap, "string", "a consumer renders the gap text");
+      assert.ok(gap.length > 0);
+      assert.ok(Array.isArray(claim.gaps) && claim.gaps.every((g) => typeof g === "string"), "gaps is the string[] the CLI surfaces");
+      assert.ok(claim.gaps.includes(gap), `produced and surfaced: ${gap}`);
+    }
+  });
+
+  it("FACTORY_GAP carries no duplicate or orphan text (every value is one of the produced constants)", () => {
+    const values = Object.values(FACTORY_GAP);
+    assert.equal(new Set(values).size, values.length, "no two gaps share text");
+    assert.deepEqual(
+      [...values].sort(),
+      [FACTORY_GAP.leftover, FACTORY_GAP.fixtures, FACTORY_GAP.product, FACTORY_GAP.singleJob, FACTORY_GAP.complete].sort(),
+    );
   });
 });
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { completeDeepSeek } from "./deepseek.ts";
-import { completeOpenAiCompatible, XAI_SPEC } from "./openai-compatible.ts";
+import { completeOpenAiCompatible, createOpenAiCompatibleProvider, XAI_SPEC } from "./openai-compatible.ts";
 import { KEY_REJECTED_CODE, setActiveKeySource } from "./key-resolution.ts";
 
 const KEY = "DEEPSEEK_API_KEY";
@@ -86,5 +86,37 @@ describe("W45 331-1 F3 — a rejected credential maps to its own code", () => {
       assert.match(res.error ?? "", /key source/);
       assert.match(res.error ?? "", /19b3/);
     }
+  });
+
+  it("R4-f01 parity: a wallet phrase on a NON-402 status maps to NO_BALANCE on BOTH families", async () => {
+    // The G3 (fixes/285) classifier is ONE regex — deepseek.ts
+    // `isInsufficientFundsText`. A gateway can ride the wallet phrase on any
+    // status, so both adapters must classify `insufficient_funds`/`quota` as
+    // the wallet class, not a generic refusal. 400/403 are terminal (one call).
+    for (const phrase of ["insufficient_funds", "insufficient quota"]) {
+      const ds = await completeDeepSeek("hi", {
+        fetch: (async () => jsonResponse({ error: { message: phrase } }, 400)) as typeof fetch,
+      });
+      assert.equal(ds.ok, false);
+      if (!ds.ok) assert.equal(ds.code, "RT_E_LLM_NO_BALANCE", `deepseek must classify "${phrase}"`);
+    }
+    process.env.XAI_API_KEY = "xai-ffffffffffffffffffffffffffff19b3";
+    const provider = createOpenAiCompatibleProvider(XAI_SPEC, ["probe-model-id"]);
+    for (const phrase of ["insufficient_funds", "insufficient quota"]) {
+      const xai = await provider.complete("hi", {
+        model: "probe-model-id" as never,
+        fetch: (async () => jsonResponse({ error: { message: phrase } }, 400)) as typeof fetch,
+      });
+      assert.equal(xai.ok, false);
+      if (!xai.ok) assert.equal(xai.code, "RT_E_LLM_NO_BALANCE", `xai must classify "${phrase}"`);
+    }
+    // Negative control: a non-wallet "insufficient" phrase (permissions) is
+    // NOT the wallet class — the shared regex stays narrow.
+    const neg = await provider.complete("hi", {
+      model: "probe-model-id" as never,
+      fetch: (async () => jsonResponse({ error: { message: "insufficient permissions" } }, 403)) as typeof fetch,
+    });
+    assert.equal(neg.ok, false);
+    if (!neg.ok) assert.equal(neg.code, "RT_E_LLM_REJECTED");
   });
 });

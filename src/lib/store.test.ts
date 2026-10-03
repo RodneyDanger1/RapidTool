@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { dedupeMemoryIds, emptyProject, hydrateProject } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
 import { RT_COALESCE_MS, shouldCoalesce, type RtEvent } from "./rt-events.ts";
-import type { Artifact, ChatLogRow, HitlRequest, JsonLog, PhaseId, Project, WildParkInfo } from "./types.ts";
+import type { Artifact, ChatLogRow, HitlRequest, JsonLog, PhaseId, Project, WildParkInfo, WildPlan } from "./types.ts";
 
 class MemoryStorage {
   private m = new Map<string, string>();
@@ -1032,6 +1032,41 @@ test("S2: startWildRun drives deterministically and parks honestly when the clas
     assert.ok(after.logs.some((l) => l.event === "wild.start"), "wild.start ledgered");
     assert.ok(after.logs.some((l) => l.event === "wild.paused_classifier"), "pause reason ledgered");
     assert.ok(after.logs.some((l) => l.event === "wild.exec"), "deterministic floor executions ledgered");
+  } finally {
+    process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+test("341-6: a stored planner plan parks the console wild driver for review before any mutation (R13-f02)", async () => {
+  // The console driver is the OTHER real wild driver (headless is the bare-Node
+  // one). A record carrying a planner plan must park for review BEFORE the
+  // first mutation, exactly as headless's wildStartRun does.
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = ""; // keyless ⇒ the reviewer seam resolves null (no keyed call)
+  try {
+    const plan: WildPlan = {
+      goal: "deliver the brief",
+      steps: [
+        { id: "s1", action: "draft the core module", why: "the brief requires it" },
+        { id: "s2", action: "verify the module", why: "machine-verification is the P6 bar" },
+      ],
+      source: "planner",
+      plannedAt: 1,
+      note: "planner rows (341-6 test)",
+    };
+    const p = install(seedProject({ wildMode: true, wildPlan: plan }));
+    const res = await useRapid.getState().startWildRun(p.id);
+    assert.equal(res.ok, true);
+    assert.equal(res.stoppedReason, "paused", "the plan review parks before any step");
+    assert.equal(res.ran, 0, "no step may run before the plan review");
+    const after = current(p.id);
+    assert.equal(after.wildRun?.pause, true);
+    assert.equal(after.wildRun?.park?.code, "RT_E_GATE_PENDING", "the park is the real review gate");
+    assert.equal(after.wildRun?.park?.unlock, "human-gate");
+    assert.ok(after.logs.some((l) => l.event === "wild.plan_review"), "the review lands a ledger row");
+    assert.ok(after.logs.some((l) => l.event === "wild.paused_plan"), "the park lands a ledger row");
+    assert.ok(!after.logs.some((l) => l.event === "wild.exec"), "NO mutation may precede the plan review");
+    assert.equal(after.currentPhase, p.currentPhase, "the cursor did not move");
   } finally {
     process.env.DEEPSEEK_API_KEY = savedKey;
   }
