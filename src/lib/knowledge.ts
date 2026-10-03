@@ -327,21 +327,81 @@ function assertValidNewEntry(input: NewKnowledgeEntry): void {
   }
 }
 
-/** Collapse a candidate entry to its fingerprint string (deterministic). */
+/**
+ * fixes/346 A2-F7 — injective content-address encoding.
+ *
+ * Joining fields with a bare delimiter is not injective: a hostile field that
+ * CONTAINS the delimiter lets two distinct tuples hash to the same address,
+ * silently merging two rows. Escape the delimiter (and the escape char itself)
+ * inside every field before joining, so the join can be decoded unambiguously.
+ * Ordinary text carries none of these control chars and is byte-identical, so
+ * existing row ids do not churn; only a field that literally contains a
+ * delimiter/escape char changes. `\u0001` is the escape introducer:
+ *   `\u0001e` → the escape char, `\u0001n` → NUL, `\u0001p` → `|`, `\u0001c` → `,`.
+ */
+const ADDRESS_ESCAPE = "\u0001";
+
+function addressEscapeTag(delimiter: string): string {
+  if (delimiter === "\u0000") return "n";
+  if (delimiter === "|") return "p";
+  if (delimiter === ",") return "c";
+  return `x${delimiter.charCodeAt(0).toString(16)}`;
+}
+
+/** Escape `field` for each delimiter (plus the escape char) so a join is injective. */
+function encodeAddressField(field: string, delimiters: readonly string[]): string {
+  let out = field.split(ADDRESS_ESCAPE).join(`${ADDRESS_ESCAPE}e`);
+  for (const d of delimiters) {
+    out = out.split(d).join(`${ADDRESS_ESCAPE}${addressEscapeTag(d)}`);
+  }
+  return out;
+}
+
+/** Reverse `encodeAddressField` (unknown tags pass through unchanged). */
+function decodeAddressField(encoded: string): string {
+  let out = "";
+  for (let i = 0; i < encoded.length; i++) {
+    const ch = encoded[i];
+    if (ch === ADDRESS_ESCAPE && i + 1 < encoded.length) {
+      const tag = encoded[++i];
+      out += tag === "e" ? ADDRESS_ESCAPE : tag === "n" ? "\u0000" : tag === "p" ? "|" : tag === "c" ? "," : tag;
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/** Escape each ELEMENT for the reserved delimiters, THEN join with `,`. Escaping
+ *  AFTER the join is the V1-refuted A2-F7 defect: `["a,b"]` and `["a","b"]`
+ *  collapse to one string (and normal multi-tag joins churn because the join
+ *  commas themselves get escaped). Per-element escaping is injective and leaves
+ *  delimiter-free lists byte-identical to the legacy `join(",")`. */
+function encodeAddressList(items: readonly string[], delimiters: readonly string[]): string {
+  return items.map((item) => encodeAddressField(item, delimiters)).join(",");
+}
+
+/** Collapse a candidate entry to its fingerprint string (deterministic AND
+ *  injective — fixes/346 A2-F7: every field is escaped for the NUL join, and
+ *  every tags/supersedes ELEMENT for the `,` join before joining, so no field
+ *  or list element can shift another; delimiter-free content is byte-identical
+ *  to the legacy NUL join). */
 function fingerprint(e: NewKnowledgeEntry): string {
   return [
-    e.project,
-    e.kind,
-    e.title,
-    [...e.tags].sort().join(","),
-    e.body,
-    e.sourcePath ?? "",
+    encodeAddressField(e.project, ["\u0000"]),
+    encodeAddressField(e.kind, ["\u0000"]),
+    encodeAddressField(e.title, ["\u0000"]),
+    encodeAddressList([...e.tags].sort(), ["\u0000", ","]),
+    encodeAddressField(e.body, ["\u0000"]),
+    encodeAddressField(e.sourcePath ?? "", ["\u0000"]),
     // Supersede declarations are content (a superseding row is a DIFFERENT row
     // from the plain fix). Absent field = empty string = the legacy hash, so
     // pre-loop rows fingerprint identically. Telemetry (counterEvidence /
     // supersededBy) deliberately stays OUT — idempotent re-save of the same
     // content must still resolve to the same row.
-    e.supersedes && e.supersedes.length > 0 ? [...e.supersedes].sort().join(",") : "",
+    e.supersedes && e.supersedes.length > 0
+      ? encodeAddressList([...e.supersedes].sort(), ["\u0000", ","])
+      : "",
   ].join("\u0000");
 }
 
@@ -923,11 +983,16 @@ export function failureSignature(record: FailureRecord): string {
   }
   anchors.sort();
   const tail = anchors.length > 0 ? "" : canonicalText(record?.detailTail);
+  // fixes/346 A2-F7: escape every field's own delimiter so the `|` join cannot
+  // be shifted by a hostile kind/class/anchor; anchors additionally escape the
+  // `,` inner join. Delimiter-free fields (the normal case) are byte-identical.
   return [
-    kind,
+    encodeAddressField(kind, ["|"]),
     `p${phase}`,
-    cls || "none",
-    anchors.length > 0 ? `anchors:${anchors.join(",")}` : `tail:${tail}`,
+    encodeAddressField(cls || "none", ["|"]),
+    anchors.length > 0
+      ? `anchors:${anchors.map((a) => encodeAddressField(a, [",", "|"])).join(",")}`
+      : `tail:${encodeAddressField(tail, ["|"])}`,
   ].join("|");
 }
 
@@ -947,7 +1012,9 @@ function probeTagsFromSignature(signature: string): string[] {
   if (!seg) return [];
   const out: string[] = [];
   for (const raw of seg.slice("anchors:".length).split(",")) {
-    const id = raw.trim();
+    // fixes/346 A2-F7: anchors are delimiter-escaped in the signature; decode
+    // back to the real id. A legacy/delimiter-free signature decodes unchanged.
+    const id = decodeAddressField(raw).trim();
     if (id) out.push(`probe:${id}`);
   }
   return out;

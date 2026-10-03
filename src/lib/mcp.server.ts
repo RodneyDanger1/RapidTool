@@ -14,6 +14,13 @@
  *     remedy text. It NEVER simulates discovery and NEVER fabricates a tool list.
  *   - The client never invents a tool: `callTool` refuses a name the server did
  *     not list, and refuses a listed tool that was not advertised read-only.
+ *   - TRUST BOUNDARY (fixes/346 A2-F8): `annotations.readOnlyHint` is the
+ *     SERVER'S OWN claim, not an enforced property. The gate below checks that
+ *     the server advertised read-only; it cannot stop a lying server from
+ *     performing writes and reporting them as a read-only call. The feature is
+ *     owner-gated OFF by default (`RAPIDTOOL_MCP_ENABLED`), and the owner's
+ *     trust decision is what makes a configured server trustworthy — RapidTool
+ *     adds no capability it cannot verify (no OS-level write interception).
  *   - The four named refusal conditions — an unparseable line, an unsolicited
  *     id, a duplicate id, and an oversized frame — fail the WHOLE client: each
  *     sets a STICKY fault and rejects every in-flight request, and every later
@@ -85,7 +92,9 @@ export interface McpServerInfo {
 export interface McpToolInfo {
   name: string;
   description: string | null;
-  /** True ONLY when the server advertised `annotations.readOnlyHint === true`. */
+  /** True ONLY when the server advertised `annotations.readOnlyHint === true`.
+   *  This is the server's SELF-DECLARATION, not an enforced property (fixes/346
+   *  A2-F8): a lying server can still write. Owner-gated by design. */
   readOnly: boolean;
 }
 
@@ -468,6 +477,10 @@ class StdioMcpClient implements McpClient {
       }
       // Re-list at call time: the "listed + read-only" guarantee is checked
       // against what the server actually advertised, never a fabricated cache.
+      // fixes/346 A2-F8: `readOnly` is the server's SELF-DECLARED
+      // `annotations.readOnlyHint` — this gate cannot enforce read-only
+      // behavior against a lying server; it only refuses a tool that did not
+      // even claim it. The owner enables MCP, so the owner owns that trust.
       const listed = await this.listTools();
       if (!listed.ok) return listed;
       const tool = listed.tools.find((t) => t.name === name);

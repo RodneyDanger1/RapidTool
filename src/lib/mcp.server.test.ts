@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   MCP_ARGS_ENV,
@@ -601,5 +602,18 @@ describe("342-5 — doctorMcp: the honest doctor surface (the MCP client's consu
     assert.equal(mcp.refusal, null);
     assert.equal(mcp.tools?.length, 3);
     assert.match(mcp.line, /3 tool/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/346 A2-F8 — the read-only gate is documented as the SERVER'S OWN claim,
+// not an enforced boundary. Static guard: the honesty note must stay in source.
+// ---------------------------------------------------------------------------
+describe("fixes/346 A2-F8 — the MCP read-only trust boundary is stated honestly", () => {
+  it("the module documents that readOnlyHint is a self-declaration and the feature is owner-gated", () => {
+    const src = readFileSync(new URL("./mcp.server.ts", import.meta.url), "utf8");
+    assert.match(src, /SELF-DECLARATION|SELF-DECLARED/, "must name the declaration as self-asserted");
+    assert.match(src, /lying server/i, "must state a lying server can write");
+    assert.match(src, /owner-gated/i, "must state the feature is owner-gated");
   });
 });

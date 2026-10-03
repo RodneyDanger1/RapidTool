@@ -21,6 +21,12 @@ import type { ResearchResult } from "./research.ts";
 // W40·N4: the shared knob sanitizer (this file used to carry its own copy —
 // byte-identical to websearch.server.ts's, one shape with two homes).
 import { boundedInt } from "./bounded-int.ts";
+// fixes/346 A2-F5: the one-shot transport (undici's TLS teardown handle races the
+// CLI's deliberate in-tick `process.exit()` on Node 24/Windows — 327-L2 crash
+// class). `tavilySearch` is reached from the CLI (`headless.ts` probeTavily), so
+// the default transport must be the seam. A test that replaces the global
+// `fetch` still intercepts (`oneShotFetch` defers to a replaced reference).
+import { oneShotFetch } from "./llm/providers/one-shot-fetch.server.ts";
 
 export const TAVILY_BASE_URL = "https://api.tavily.com";
 
@@ -81,7 +87,7 @@ async function postWithRetry(url: string, init: RequestInit): Promise<Response> 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(500 * 2 ** attempt);
     try {
-      response = await fetch(url, init);
+      response = await oneShotFetch(url, init);
     } catch (err) {
       // Timeout abort: report immediately — retrying would double the latency
       // the caller already paid for.

@@ -47,6 +47,7 @@ import {
   wildStartRun,
   wildStopRun,
   withCommonJsExports,
+  verifyGeneratedSource,
 } from "./headless.ts";
 import type { ApproveActor, P6JourneyCycleContext } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
@@ -3232,6 +3233,22 @@ describe("A7 emitProject wipes ghost specs and refuses foreign files", () => {
     }
   });
 
+  // 346 E1 · L1-F4: `String.prototype.includes("")` is always true, so a
+  // project with NO generated module (generatedSource "") reported
+  // `moduleEmbedded: true` — an operator-facing claim the bytes do not support.
+  it("L1-F4: a project with no generated module reports moduleEmbedded false", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-emit-"));
+    try {
+      const p = createProject({ brief: FIXTURE_BRIEF, name: "EmitNoModule" });
+      assert.equal(p.generatedSource, "", "precondition: no generated module on disk");
+      const res = await emitProject(p, dir);
+      assert.equal(res.ok, true, res.ok ? "" : res.error);
+      if (res.ok) assert.equal(res.moduleEmbedded, false, "no module bytes were emitted to embed");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("refuses foreign leftover without --force; quarantines it with force", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rt-emit-"));
     try {
@@ -4736,6 +4753,56 @@ describe("landEmittedTree — real emitted tree → committed delivery (fixes/34
       assert.equal(repoHead(), before, "the RapidTool repo HEAD sha must be unchanged");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 E1 · A1-04: verifyGeneratedSource must FEED the project's A7 oracle rows
+// to the case-generation seam (rendered `oracleToCaseSeeds()` block + pinned
+// ids). Before this the call passed neither, so a returned case list that
+// dropped a pinned row was silently accepted — E-08 was declared but dormant.
+// ---------------------------------------------------------------------------
+describe("346 E1 A1-04 - verifyGeneratedSource feeds the A7 oracle seeds", () => {
+  it("seeds the case-generation prompt with the project's oracle rows (E-08 pin)", async () => {
+    const p = createProject({ brief: FIXTURE_BRIEF, name: "SeedFeed" });
+    p.generatedSource = "exports.dispatch = (a, b) => a + b;";
+    const ids = p.oracle.map((o) => o.id);
+    assert.ok(ids.length > 0, "precondition: the project carries A7 rows");
+
+    const prompts: string[] = [];
+    const realFetch = globalThis.fetch;
+    const reply = (payload: unknown): Response =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(payload) } }],
+          model: "deepseek-v4-flash",
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      const body =
+        init && typeof init.body === "string"
+          ? (JSON.parse(init.body) as { messages?: { role: string; content: string }[] })
+          : null;
+      const user = (body?.messages ?? []).filter((m) => m.role === "user");
+      prompts.push(user.length > 0 ? user[user.length - 1]!.content : "");
+      return reply({ cases: ids.map((id, i) => ({ id, expression: `dispatch(${i}, 2) === ${i + 2}` })) });
+    }) as typeof fetch;
+
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "sk-346-a104-dummy-not-real";
+    try {
+      const outcome = await verifyGeneratedSource(p);
+      assert.ok(prompts.length >= 1, "the case-generation call reached the transport");
+      assert.match(prompts[0]!, /PINNED A7 ORACLE ROWS \(E-08\)/, "the E-08 seed header is present");
+      for (const id of ids) assert.ok(prompts[0]!.includes(`# ${id} `), `the prompt carries the seed line for ${id}`);
+      assert.equal(outcome.status, "passed", outcome.evidence);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
     }
   });
 });

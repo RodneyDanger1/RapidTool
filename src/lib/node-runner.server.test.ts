@@ -81,6 +81,36 @@ describe("redactSecrets (174-15)", () => {
       else process.env.DEEPSEEK_API_KEY = prev;
     }
   });
+
+  it("fixes/346 A2-F6: redacts xai- and tvly- vendor key shapes", () => {
+    const xai = "xai-" + "a".repeat(40);
+    assert.equal(redactSecrets(`cfg ${xai} done`), "cfg [secret-hidden] done");
+    const tvly = "tvly-" + "b".repeat(40);
+    assert.equal(redactSecrets(`key=${tvly}`), "key=[secret-hidden]");
+  });
+
+  it("fixes/346 A2-F6: redacts XAI_API_KEY / TAVILY_API_KEY values when present", () => {
+    const prevXai = process.env.XAI_API_KEY;
+    const prevTvly = process.env.TAVILY_API_KEY;
+    const xaiProbe = "test-xai-key-value-not-live";
+    const tvlyProbe = "test-tavily-key-value-not-live";
+    try {
+      process.env.XAI_API_KEY = xaiProbe;
+      process.env.TAVILY_API_KEY = tvlyProbe;
+      assert.equal(redactSecrets(`a=${xaiProbe} b=${tvlyProbe}`), "a=[secret-hidden] b=[secret-hidden]");
+    } finally {
+      if (prevXai === undefined) delete process.env.XAI_API_KEY;
+      else process.env.XAI_API_KEY = prevXai;
+      if (prevTvly === undefined) delete process.env.TAVILY_API_KEY;
+      else process.env.TAVILY_API_KEY = prevTvly;
+    }
+  });
+
+  it("fixes/346 A2-F6: does NOT over-match hyphenated/short lookalikes", () => {
+    for (const safe of ["xai-based-tool", "tvly-dev", "xai-short", "tvly-x", "prefix-xai-abcdef"]) {
+      assert.strictEqual(redactSecrets(safe), safe, `${safe} is prose, not a key`);
+    }
+  });
 });
 
 describe("scrubbedEnv unchanged (B4 / 174-5)", () => {

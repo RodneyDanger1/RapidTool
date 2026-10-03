@@ -43,7 +43,11 @@ import {
   persistStorageHealth,
   staleEmitStep,
   useRapid,
+  windowArtifacts,
 } from "@/lib/store";
+// L3-04 (346 E4): read the persisted run spend so the console can surface cost
+// honestly (or state that no spend was recorded).
+import { isMeasuredSpend, normalizeLedger, totalTokens } from "@/lib/token-ledger";
 import { BRIEF_TEMPLATES } from "@/lib/templates";
 import { estimateTokens } from "@/lib/algorithms";
 import { DOD } from "@/lib/dod";
@@ -1828,6 +1832,13 @@ export function HomeScreen() {
           header (shell) mounted and lands one `ui.pane_crash` row. */}
       <PaneBoundary label="Home screen">
       <main id="main-content" className="mx-auto grid max-w-6xl gap-10 px-5 py-10 lg:grid-cols-[1.15fr_0.85fr] lg:py-16">
+        {/* 346 E4 · L3-07 / L3-02: the store's recovery + cross-tab notices are
+            shown on the first screen so a corrupt store or a merged edit is
+            never silent (the route may land here before any run screen). */}
+        <div className="lg:col-span-2">
+          <PersistRecoveryNotice />
+          <CrossTabNotice />
+        </div>
         <section>
           <p className="font-mono text-xs tracking-widest text-accent uppercase">Governed delivery</p>
           <h1 className="mt-3 max-w-xl text-4xl font-medium leading-tight tracking-tight text-fg sm:text-5xl">
@@ -2033,6 +2044,16 @@ export function RunScreen({ id }: { id: string }) {
   const [copied, setCopied] = useState(false);
   const [copiedHandoff, setCopiedHandoff] = useState(false);
   const [tab, setTab] = useState<RunTab>("artifacts");
+  /** L3-05/L3-03 (346 E4): every `Tabs.Content` used to be forceMounted, so all
+   *  eleven panes mounted (and their server fetches fired) on load even when the
+   *  user never opened them. Track the panes that have been ACTIVATED and mount
+   *  a pane's body only then; once visited it stays mounted (the original
+   *  forceMount intent for live streams). The active pane is always mounted. */
+  const [visitedTabs, setVisitedTabs] = useState<ReadonlySet<RunTab>>(() => new Set<RunTab>(["artifacts"]));
+  useEffect(() => {
+    setVisitedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  }, [tab]);
+  const paneMounted = (t: RunTab) => t === tab || visitedTabs.has(t);
   /** 111 TASK-05 "More panels" disclosure. A tab in the advanced tier forces
    *  the tier open while it is the active panel, so collapsing the section can
    *  never hide the trigger of the panel currently on screen. */
@@ -2533,7 +2554,14 @@ export function RunScreen({ id }: { id: string }) {
     }
     const res = ingestReport(projectId, raw);
     if (!res.ok) setError(codedFailureText(res.error ?? "Report rejected.", res.code));
-    else {
+    else if (res.applied === false) {
+      // L3-06 (346 E4): the store reported a no-op (idempotent duplicate). Say
+      // so — a success notice here claimed an ingest that never landed. The
+      // draft is kept so the operator can see what was already applied.
+      setNotice(
+        `Report already ingested — nothing changed${res.reason ? ` (${res.reason})` : ""}.`,
+      );
+    } else {
       setNotice("Agent report ingested — artifacts marked “[agent report]”.");
       setReportDraft("");
       setReportOpen(false);
@@ -2978,6 +3006,7 @@ export function RunScreen({ id }: { id: string }) {
           >
             ≈{tokenEst.tokensEst} tok (est)
           </span>
+          <SpendChip project={project} />
           {lastSaved !== null ? (
             <span
               className="rounded-sm border border-border px-2 py-1 text-faint"
@@ -3462,6 +3491,9 @@ export function RunScreen({ id }: { id: string }) {
               </AlertDialog.Portal>
             </AlertDialog.Root>
 
+            {/* 346 E4 · L3-07 / L3-02: persist recovery + cross-tab merge notices. */}
+            <PersistRecoveryNotice />
+            <CrossTabNotice />
             {error ? (
               <p role="alert" className="rt-alert rt-alert-err mt-3 [overflow-wrap:anywhere]">
                 {error}
@@ -3652,7 +3684,10 @@ export function RunScreen({ id }: { id: string }) {
               ) : null}
             </div>
 
-            {/* forceMount keeps every panel mounted so future live streams survive tab switches. */}
+            {/* forceMount keeps a VISITED panel mounted so future live streams
+                survive tab switches; the expensive panes' bodies are gated on
+                `paneMounted` so an unopened pane never mounts or fetches
+                (L3-05/L3-03, 346 E4 — see the vault block below). */}
             <Tabs.Content value="artifacts" forceMount className="data-[state=inactive]:hidden">
               <div className="flex gap-2 px-5 pt-3">
                 <input
@@ -3885,34 +3920,45 @@ export function RunScreen({ id }: { id: string }) {
               ) : null}
             </Tabs.Content>
 
+            {/* L3-05/L3-03 (346 E4): these panes are the expensive ones — vault
+                builds its note index, fixtures/chat POST a server fn on mount,
+                runtime polls the ring, design/diagram render generated HTML/SVG.
+                Their bodies mount only once the pane has been ACTIVATED (see
+                `paneMounted` above), so a load that never opens them fires no
+                fetch and renders no DOM. forceMount keeps a visited pane alive
+                across later switches. */}
             <Tabs.Content value="vault" forceMount className="data-[state=inactive]:hidden">
-              <VaultPane project={project} />
+              {paneMounted("vault") ? <VaultPane project={project} /> : null}
             </Tabs.Content>
 
             <Tabs.Content value="fixtures" forceMount className="data-[state=inactive]:hidden">
-              <FixturesPanel />
+              {paneMounted("fixtures") ? <FixturesPanel /> : null}
             </Tabs.Content>
 
             <Tabs.Content value="runtime" forceMount className="data-[state=inactive]:hidden">
-              <RuntimeLogPane project={project} />
-              {/* 216m · 111 TASK-11: typed timeline sibling. Additive — the raw
-                  ring list above renders byte-identically; this pane collapses to
-                  a one-line honest summary and expands to paired rows (starts
-                  with finishes), with the raw NDJSON reachable in a disclosure
-                  and via one-click copy. No store reads, no new data source. */}
-              <RuntimeTimelinePane />
+              {paneMounted("runtime") ? (
+                <>
+                  <RuntimeLogPane project={project} />
+                  {/* 216m · 111 TASK-11: typed timeline sibling. Additive — the raw
+                      ring list above renders byte-identically; this pane collapses to
+                      a one-line honest summary and expands to paired rows (starts
+                      with finishes), with the raw NDJSON reachable in a disclosure
+                      and via one-click copy. No store reads, no new data source. */}
+                  <RuntimeTimelinePane />
+                </>
+              ) : null}
             </Tabs.Content>
 
             <Tabs.Content value="design" forceMount className="data-[state=inactive]:hidden">
-              <DesignPane project={project} />
+              {paneMounted("design") ? <DesignPane project={project} /> : null}
             </Tabs.Content>
 
             <Tabs.Content value="diagram" forceMount className="data-[state=inactive]:hidden">
-              <DiagramPane project={project} />
+              {paneMounted("diagram") ? <DiagramPane project={project} /> : null}
             </Tabs.Content>
 
             <Tabs.Content value="chat" forceMount className="data-[state=inactive]:hidden">
-              <ChatPane project={project} />
+              {paneMounted("chat") ? <ChatPane project={project} /> : null}
             </Tabs.Content>
           </Tabs.Root>
             </>
@@ -4565,6 +4611,11 @@ function BlockedGuidanceBlock({ project }: { project: Project }) {
   );
 }
 
+/** L3-10 (346 E4): how many artifact rows the pane renders before the "show
+ *  older" control (and how many it reveals per activation). */
+const ARTIFACT_WINDOW_INITIAL = 100;
+const ARTIFACT_WINDOW_STEP = 100;
+
 function ArtifactPane({
   artifacts,
   active,
@@ -4581,6 +4632,11 @@ function ArtifactPane({
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const copyTs = useRef(0);
+  // L3-10 (346 E4): bound the rendered list. A large build carries hundreds of
+  // artifacts and one <button> per row is linear DOM cost; the newest window is
+  // shown (the pane's default selection is the newest artifact) and older rows
+  // stay reachable behind ONE "show older" control.
+  const [windowCap, setWindowCap] = useState(ARTIFACT_WINDOW_INITIAL);
 
   function copyArtifact(art: Artifact) {
     const my = ++copyTs.current;
@@ -4607,10 +4663,24 @@ function ArtifactPane({
       </div>
     );
   }
+  const shown = windowArtifacts(artifacts, windowCap);
   return (
     <div className="grid min-h-[280px] md:grid-cols-[200px_minmax(0,1fr)]">
       <ul className="scroll-thin max-h-[60vh] overflow-y-auto border-b border-line md:border-r md:border-b-0">
-        {artifacts.map((a) => (
+        {shown.hiddenOlder > 0 ? (
+          <li>
+            <button
+              type="button"
+              onClick={() => setWindowCap((c) => c + ARTIFACT_WINDOW_STEP)}
+              aria-label={`Show ${Math.min(shown.hiddenOlder, ARTIFACT_WINDOW_STEP)} older artifacts (${shown.hiddenOlder} currently hidden)`}
+              className="w-full border-b border-line px-4 py-2.5 text-left text-xs text-muted hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
+              Show {Math.min(shown.hiddenOlder, ARTIFACT_WINDOW_STEP)} older ·{" "}
+              {shown.hiddenOlder} hidden
+            </button>
+          </li>
+        ) : null}
+        {shown.rows.map((a) => (
           <li key={a.id}>
             <button
               type="button"
@@ -6719,13 +6789,19 @@ function ChatPane({ project }: { project: Project }) {
         )}
         {busy ? (
           <div className="chat-row chat-row-assistant">
-            <div className="chat-bubble chat-thinking">
+            {/* L3-11 (346 E4): announce the pending reply to assistive tech. The
+                live region's text is stable (the per-second counter is hidden),
+                so a screen reader hears "thinking…" once, not every tick. */}
+            <div className="chat-bubble chat-thinking" role="status" aria-live="polite">
               <span className="inline-flex items-center gap-1.5 font-mono text-xs text-muted">
                 <span
                   aria-hidden="true"
                   className="chat-thinking-dot h-2 w-2 inline-block rounded-full bg-current"
                 />
-                thinking… {elapsedSec}s
+                thinking…{" "}
+                <span aria-hidden="true" className="tabular-nums">
+                  {elapsedSec}s
+                </span>
               </span>
               <span className="mt-1 block font-mono text-xs text-faint">
                 one-shot reply — flash answers usually land &lt;20s; timeouts
@@ -7060,6 +7136,89 @@ function StatusChip({
     >
       {label}
     </span>
+  );
+}
+
+/** L3-04 (346 E4): the run's recorded token spend. `Project.tokenUsage` is
+ *  written by the CLI/headless run path (`headless.accumulateSpend`); the
+ *  browser console's run path has NO metering seam, so a console-driven run
+ *  records nothing — said plainly here rather than implied. Measured spend (an
+ *  imported or CLI-produced record) renders as a chip; absence renders an
+ *  honest "not recorded" chip (never a fabricated zero). */
+function SpendChip({ project }: { project: Project }) {
+  const spend = project.tokenUsage;
+  if (isMeasuredSpend(spend)) {
+    const total = totalTokens(normalizeLedger(spend));
+    const calls =
+      typeof spend.calls === "number" && Number.isFinite(spend.calls) ? spend.calls : null;
+    return (
+      <span
+        className="rounded-sm border border-border px-2 py-1 tabular-nums text-ok"
+        title={`Recorded run spend (persisted Project.tokenUsage): prompt + completion tokens${
+          calls !== null ? ` over ${calls} call(s)` : ""
+        }. Written by the CLI/headless run path.`}
+      >
+        spent {total.toLocaleString()} tok
+        {calls !== null ? ` · ${calls} call${calls === 1 ? "" : "s"}` : ""}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="rounded-sm border border-border px-2 py-1 text-faint"
+      title="No measured run spend is recorded on this build. The browser console's run path has no token-metering seam, so a console-driven run records none; a CLI run or an imported CLI record carries Project.tokenUsage and shows here."
+    >
+      spend not recorded
+    </span>
+  );
+}
+
+/** L3-07 (346 E4): a persisted blob this build could not read was rescued
+ *  instead of being lost silently. Rendered on the Home and Run screens; the
+ *  rescue copy is named so the operator can hand it to a build that can read it. */
+function PersistRecoveryNotice() {
+  const { persistRecovery, dismissPersistRecovery } = useRapid();
+  if (!persistRecovery) return null;
+  return (
+    <div role="alert" className="rt-alert rt-alert-err mt-3 [overflow-wrap:anywhere]">
+      <p className="font-medium">
+        Saved builds could not be read — a rescue copy was kept before recovery.
+      </p>
+      <p className="mt-1 font-mono text-xs leading-relaxed">
+        The blob at rapidtool.v4 was unreadable, so its raw bytes were preserved under{" "}
+        {persistRecovery.rescueKey} and the store re-seeded. Export or hand that copy to a build
+        that can read it — the clean re-seed overwrote the original.
+      </p>
+      <button
+        type="button"
+        onClick={dismissPersistRecovery}
+        className="mt-2 inline-flex min-h-9 items-center rounded-md border border-border px-3 text-xs text-fg hover:border-accent/40 focus-visible:ring-2 focus-visible:ring-accent/40"
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
+/** L3-02 (346 E4): another tab's newer edits were merged into this one, so a
+ *  write here did not clobber them. Shown only when operator/engine scalars
+ *  (name/notes/status/phase) actually drifted. */
+function CrossTabNotice() {
+  const { crossTabNotice, dismissCrossTabNotice } = useRapid();
+  if (!crossTabNotice) return null;
+  return (
+    <p role="status" aria-live="polite" className="rt-alert rt-alert-ok mt-3 [overflow-wrap:anywhere]">
+      Another tab changed {crossTabNotice.adopted} build
+      {crossTabNotice.adopted === 1 ? "" : "s"} ({crossTabNotice.drifted.slice(0, 3).join(", ")}
+      {crossTabNotice.drifted.length > 3 ? ", …" : ""}) — your edits were merged, not overwritten.
+      <button
+        type="button"
+        onClick={dismissCrossTabNotice}
+        className="ml-2 inline-flex min-h-7 items-center rounded-sm border border-border px-2 text-2xs text-fg hover:border-accent/40 focus-visible:ring-2 focus-visible:ring-accent/40"
+      >
+        Dismiss
+      </button>
+    </p>
   );
 }
 
@@ -7482,9 +7641,10 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           </p>
           <p
             className="mt-0.5 text-xs text-muted"
-            title="R8-f09: console approvals record decidedBy 'human' with no seat token; the planned seat seam (S4 seat.ts / a delivery code) is not on disk (TODO S4). Today's real seat path is the CLI's out-of-band token; the approval dock names the policy fallback."
+            title="R8-f09 / A1-12: the browser console IS the designed human surface, but it has no out-of-band RT_HUMAN_SEAT_TOKEN delivery seam, so a console approval is recorded as an UNATTESTED human decision — the seat policy's verdict (deny, human-seat-unverified) is written to the ledger as a hitl.console_decision row, never a token-verified human claim. The planned seat seam (S4 seat.ts / a delivery code) is not on disk (TODO S4); the CLI's out-of-band token remains the only verified human seat."
           >
-            no console delivery seam yet — the CLI carries the out-of-band token.
+            console approvals are recorded as unattested human decisions (no token path);
+            the CLI carries the verified out-of-band seat.
           </p>
         </li>
         <li>

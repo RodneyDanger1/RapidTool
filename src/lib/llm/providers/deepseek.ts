@@ -100,7 +100,13 @@ export const DEEPSEEK_LONG_TIMEOUT_MS = 90_000;
 
 // Transient statuses get a bounded exponential-backoff retry (§6). 401/402 are
 // config/billing errors and are NOT retried.
-const RETRYABLE_STATUS = new Set([429, 500, 503]);
+//
+// fixes/346 A2-F4: ONE shared transient set for both provider families. 502/504
+// are gateway-class errors that are transient by nature — the OpenAI-compatible
+// family already retried them, so DeepSeek treating them as terminal was an
+// avoidable asymmetry (a wasted synthesis attempt). `openai-compatible.ts`
+// imports this exact constant, so the two adapters can never drift apart.
+export const TRANSIENT_RETRY_STATUS: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
 const MAX_ATTEMPTS = 3;
 
 // fixes/152 (factory steal #1 — OpenHands retry_mixin.py): the retry policy
@@ -260,7 +266,7 @@ const defaultDeps: DeepSeekFetchDeps = {
 
 /**
  * fixes/152 (factory steal #1): bounded full-jitter retry over the transient
- * set (429/500/503 + network errors). Every attempt past the first sleeps
+ * set (`TRANSIENT_RETRY_STATUS` + network errors). Every attempt past the first sleeps
  * `jitteredBackoffDelayMs(attempt)`; an AbortError (the caller's absolute
  * deadline fired) is NEVER retried. After MAX_ATTEMPTS the outcome is honest:
  * the last retryable HTTP response is handed back for status mapping, or the
@@ -280,7 +286,7 @@ async function postWithRetry(
     try {
       const response = await deps.fetch(url, init);
       lastResponse = response;
-      if (!RETRYABLE_STATUS.has(response.status)) {
+      if (!TRANSIENT_RETRY_STATUS.has(response.status)) {
         return { response, attempts: attempt + 1 };
       }
     } catch (err) {

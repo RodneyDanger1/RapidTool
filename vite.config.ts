@@ -12,6 +12,26 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
 
+/**
+ * F-15 (fixes/344): the dev/preview port, overridable by `PORT` — the explicit
+ * escape hatch for concurrent agent lanes that would otherwise collide on the
+ * fixed 8080/8081. The defaults stand (8080 dev / 8081 preview) and
+ * `strictPort` is KEPT: the bound port stays a hard contract (a lane that sets
+ * PORT fails loudly if ITS port is taken rather than silently drifting). A
+ * non-integer / out-of-range PORT is ignored, never bound.
+ *
+ * Caveat, stated honestly: `src/lib/auth/server.ts` pins its dev trusted
+ * origins to :8080, so a dev server on a non-default PORT serves the app but
+ * cross-origin auth callbacks will not match. Override PORT for parallel
+ * non-auth lanes (the default app env is `VITE_AUTH_ENABLED=false`), not as a
+ * general production knob.
+ */
+function resolvePort(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 && n <= 65535 ? n : fallback;
+}
+
 /** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
 function hasGlobbedMigrations(root: string): boolean {
   try {
@@ -149,8 +169,10 @@ function authPopupPlugin(): Plugin {
 // panel/iframe cases (the sandbox proxy reaches this port over the network):
 // set `RAPIDTOOL_BIND_ALL=1` in the environment, e.g.
 //   RAPIDTOOL_BIND_ALL=1 npm run dev
-// Port 8080 + strictPort stay byte-identical on both paths — only the
-// interface changes. The `npm run dev` script no longer passes `--host
+// The DEFAULT port (8080 dev / 8081 preview) + strictPort stay byte-identical
+// on both paths — only the interface changes; F-15 (fixes/344) adds the
+// `PORT` override so concurrent lanes can pick distinct ports (see resolvePort).
+// The `npm run dev` script no longer passes `--host
 // 0.0.0.0` (it used to override this block); the opt-in env is the ONLY way
 // back onto the LAN. Preview (`npm run preview`) was already loopback-only.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
@@ -158,12 +180,12 @@ function authPopupPlugin(): Plugin {
 export default defineConfig(({ command, isPreview }) => ({
   server: {
     host: process.env.RAPIDTOOL_BIND_ALL === "1" ? "0.0.0.0" : "127.0.0.1",
-    port: 8080,
+    port: resolvePort(process.env.PORT, 8080),
     strictPort: true,
   },
   preview: {
     host: "127.0.0.1",
-    port: 8081,
+    port: resolvePort(process.env.PORT, 8081),
     strictPort: true,
   },
   resolve: { tsconfigPaths: true },

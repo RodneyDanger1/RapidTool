@@ -245,21 +245,28 @@ export function scrubbedEnv(): NodeJS.ProcessEnv {
  *   - `sk-or-…`, `sk-proj-…`, then `sk-…` (longer prefixes first)
  *   - `Bearer eyJ…` JWTs
  *   - `sk_live_…` (underscore live-secret shape; hyphen `sk-` does not match it)
- *   - the live `process.env.DEEPSEEK_API_KEY` value when set (never log the key)
+ *   - fixes/346 A2-F6: `xai-…` (the OpenAI-compatible family) and `tvly-…`
+ *     (Tavily) vendor prefixes — alphanumeric bodies only, ≥16 chars, so a
+ *     hyphenated prose lookalike (`xai-based`, `tvly-dev`) is left intact
+ *   - the live provider key env values when set (`DEEPSEEK_API_KEY`,
+ *     `XAI_API_KEY`, `TAVILY_API_KEY`) — never log a key
  *
  * This is NOT a sandbox and does not weaken scrubbedEnv (env allowlist is
- * separate). Pure-ish: only reads DEEPSEEK_API_KEY from the parent env.
+ * separate). Pure-ish: only reads those env values from the parent env.
  */
 export function redactSecrets(text: string): string {
   if (typeof text !== "string") return text as unknown as string;
   if (text.length === 0) return text;
+
   let out = text;
 
-  // Exact env value first (may be shorter than 40; still never echo it).
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (typeof apiKey === "string" && apiKey.length > 0) {
-    // split/join — never build a RegExp from the key (metachar-safe).
-    out = out.split(apiKey).join("[secret-hidden]");
+  // Exact env values first (may be shorter than the shape floor; still never
+  // echo them). split/join — never build a RegExp from a key (metachar-safe).
+  for (const name of ["DEEPSEEK_API_KEY", "XAI_API_KEY", "TAVILY_API_KEY"]) {
+    const apiKey = process.env[name];
+    if (typeof apiKey === "string" && apiKey.length > 0) {
+      out = out.split(apiKey).join("[secret-hidden]");
+    }
   }
 
   // Longer prefixes first so `sk-or-` / `sk-proj-` are not double-hit by `sk-`.
@@ -272,6 +279,10 @@ export function redactSecrets(text: string): string {
   out = out.replace(/\bBearer\s+eyJ[A-Za-z0-9_+=/.-]{33,}/g, "[secret-hidden]");
   // Underscore live-secret shape (sk_live_ = 8 → ≥32 more). Distinct from hyphen sk-.
   out = out.replace(/\bsk_live_[A-Za-z0-9]{32,}/g, "[secret-hidden]");
+  // fixes/346 A2-F6: vendor key prefixes absent from ordinary prose. Alnum-only
+  // bodies (not `-`/`_`) so a hyphenated lookalike stays byte-identical.
+  out = out.replace(/\bxai-[A-Za-z0-9]{16,}/g, "[secret-hidden]");
+  out = out.replace(/\btvly-[A-Za-z0-9]{16,}/g, "[secret-hidden]");
 
   return out;
 }

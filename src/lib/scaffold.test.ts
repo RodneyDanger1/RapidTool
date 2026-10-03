@@ -14,6 +14,7 @@ import { DEPLOY_HONESTY_STAMP, deployNotes, deplyNotes, projectKindOf, scaffoldP
 import type { ScaffoldFile, ScaffoldResult } from "./scaffold.ts";
 import { deliveryKindOf, withDeliveryKind } from "./engine.ts";
 import { compileFixtureAssertion, fixtureMatchHelperSource } from "./brief-fixtures.ts";
+import { specSourceHasBehaviouralAssert } from "./compile-check.server.ts";
 
 /** A fully engine-run project (real lattice, spec graph, contracts, oracle, P6 module). */
 const fullRun = (over: Partial<Project> = {}) => runHeadless(seedProject(over), ALL_PHASES);
@@ -463,6 +464,27 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
     assert.ok(
       !/^\s+\(jm_\w+\[first\][^\n]*\);\s*$/m.test(spec),
       "no bare, un-awaited probe call survives",
+    );
+  });
+
+  it("346 E1 item 2: the tree-job row carries a behavioural assertion (a shape-only surface cannot earn tested)", () => {
+    const result = scaffoldProject({
+      ...fullRun(),
+      generatedTree: [
+        {
+          path: "src/jobs/dispatch.ts",
+          source: "export async function dispatchOrder() { return { ok: true }; }\n",
+          hash: "h-dispatch-ok",
+          attempt: 0,
+        },
+      ],
+    });
+    const spec = bodyOf(result, "tests/oracle.spec.ts");
+    assert.match(spec, /assert\.equal\(__jobOutcomeOk, true,/, "the emitted row asserts the call outcome");
+    assert.match(spec, /Number\.isNaN\(__jobResult\)/, "a NaN stub return (the L1-F2 shape) fails the row");
+    assert.ok(
+      specSourceHasBehaviouralAssert(spec),
+      "the emitted spec must carry ≥1 behavioural assertion, not only typeof/length probes",
     );
   });
 

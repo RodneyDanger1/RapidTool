@@ -359,13 +359,14 @@ describe("token-ledger — TokenBudget seam (T-107.6)", () => {
     assert.equal(b.ledger.calls, 0);
   });
 
-  it("recordBudgetSpend refuses a malformed budget with RT_E_VALIDATION prose", () => {
+  it("recordBudgetSpend refuses a malformed budget with RT_E_VALIDATION prose AND a coded error (A1-08)", () => {
     try {
       recordBudgetSpend(null as never, { promptTokens: 1, completionTokens: 1 });
       assert.fail("expected throw");
     } catch (err) {
       assert.ok(err instanceof Error);
       assert.match((err as Error).message, /RT_E_VALIDATION/);
+      assert.equal((err as Error & { code?: string }).code, "RT_E_VALIDATION");
     }
   });
 });

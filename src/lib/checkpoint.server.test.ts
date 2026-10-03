@@ -240,6 +240,28 @@ describe("checkpoint.server — the §A1 hardening pins (W36 N2)", () => {
     if (ok.ok) assert.equal(ok.savedAt, 12345, "savedAt surfaced so the CLI prints the snapshot age");
   });
 
+  it("fixes/346: checkpointAdmits validates savedAt itself — absent/\"x\"/NaN/negative/out-of-range fail closed", () => {
+    const base: RunCheckpoint = {
+      version: CHECKPOINT_VERSION,
+      savedAt: 12345,
+      run: { phase: 1, step: 0, mode: "keyless" },
+      project: fixtureProject("p-saved"),
+    };
+    const ask = { projectId: "p-saved", mode: "keyless" as const };
+    for (const bad of ["x", null, undefined, Number.NaN, Number.POSITIVE_INFINITY, -1, 1e300] as unknown[]) {
+      const res = checkpointAdmits(
+        { ...base, savedAt: bad as number },
+        ask,
+      );
+      assert.equal(res.ok, false, `savedAt=${String(bad)} must be refused at the resume gate`);
+      if (!res.ok) assert.equal(res.code, "RT_E_VALIDATION");
+    }
+    // Control: a finite, in-range timestamp is admitted and surfaced.
+    const good = checkpointAdmits(base, ask);
+    assert.equal(good.ok, true);
+    if (good.ok) assert.equal(good.savedAt, 12345);
+  });
+
   it("A1-08: clear sweeps stale staging (legacy fixed name + pid-suffixed)", () => {
     const dir = tempDir();
     try {

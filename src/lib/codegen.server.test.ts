@@ -93,7 +93,7 @@ import {
 } from "./codegen.server.ts";
 import { p6CycleLiveDeps } from "./headless.ts";
 import { applyPhaseResult, deliveryKindOf, emptyProject, withDeliveryKind } from "./engine.ts";
-import { runGate, archTrace } from "./dod.ts";
+import { runGate, archTrace, oracleToCaseSeeds } from "./dod.ts";
 import { buildPhase6Module } from "./sandbox.ts";
 import { briefNounHits, maskLiteralsAndComments } from "./sandbox.ts";
 import { fnv1a } from "./algorithms.ts";
@@ -628,6 +628,35 @@ describe("liveP6Synthesis (T4/T5 — fixes/97 P0-01 Part B)", () => {
     assert.ok(!q.artifacts.some((a) => a.title.includes("placeholder")), "placeholder artifact replaced");
     assert.ok(q.logs.some((l) => l.event === "p6.synthesis"));
     assert.deepEqual(calls, ["expand", "complete", "verify"]);
+  });
+
+  // 346 E1 · A1-04 (E-08 was declared but DORMANT): the P6 single-module verify
+  // call must FEED the project's A7 oracle rows to the seam — the rendered
+  // `oracleToCaseSeeds()` block plus the pinned ids — so a returned case list
+  // that drops a pinned row is genuinely refused (a seeded run, not a claim).
+  it("346 E1 A1-04: feeds the verify seam the A7 oracle seeds + pinned ids", async () => {
+    const base = p6Base();
+    assert.ok(base.oracle.length > 0, "precondition: A7 rows exist by P6");
+    let seen: { seeds?: string; pinnedOracleIds?: readonly string[] } | undefined;
+    const { deps } = fakeDeps();
+    const verify = async (
+      _source: string,
+      _brief: string,
+      opts?: { seeds?: string; pinnedOracleIds?: readonly string[] },
+    ): Promise<VerifyOutcome> => {
+      seen = opts;
+      return {
+        status: "passed",
+        iterations: 1,
+        evidence: "3/3 machine-run cases passed on iteration 1",
+        finalSource: KANBAN_MODULE,
+        cases: [{ id: "case-1", expression: "typeof createBoard === 'function'" }],
+      };
+    };
+    await liveP6Synthesis(base, { ...deps, verify });
+    assert.ok(seen, "the verify seam received its options");
+    assert.equal(seen!.seeds, oracleToCaseSeeds(base.oracle), "the rendered A7 seed block is fed");
+    assert.deepEqual(seen!.pinnedOracleIds, base.oracle.map((o) => o.id), "every pinned A7 id is fed");
   });
 
   // 337-3 Trust: the tested stamp's evidenceHash is fnv1a(finalModule +
@@ -5549,6 +5578,26 @@ describe("W48/334-1c tree-run mint evidence folds the declared-script state", ()
     const uh = (unverified.lastTest as { evidenceHash?: string } | null)?.evidenceHash;
     assert.ok(vh && uh, "both states still mint a tested verdict");
     assert.notEqual(vh, uh, "the P6 DoD's proof artifact distinguishes the toolchain states");
+  });
+
+  // 346 E1 · item 2 (L1-F2 residual): a passing spec that is SHAPE-ONLY
+  // (behavioural:false) executed assertions but proved nothing about behaviour,
+  // so it must not carry the "tested" evidence alone. Legacy verdicts without
+  // the field keep counting (pinned byte-parity).
+  it("a shape-only passing spec does not count as executed evidence", () => {
+    const behaviouralSpec = outcome().tests[0]!;
+    const legacy = outcome();
+    assert.equal(treeRunTestedEvidence(legacy).executed, true, "a verdict without the field stays legacy-counted");
+
+    const onlyShape = outcome({
+      tests: [{ ...behaviouralSpec, behavioural: false }],
+    });
+    assert.equal(treeRunTestedEvidence(onlyShape).executed, false, "shape-only cannot certify tested");
+
+    const mixed = outcome({
+      tests: [{ ...behaviouralSpec, behavioural: false }, { ...behaviouralSpec, file: "tests/b.spec.ts", behavioural: true }],
+    });
+    assert.equal(treeRunTestedEvidence(mixed).executed, true, "one behavioural spec is enough");
   });
 });
 

@@ -59,7 +59,12 @@
  * contract stays `../../llm.ts`). No `node:fs`, no import-time env read.
  */
 
-import { cutMarked, isInsufficientFundsText, jitteredBackoffDelayMs } from "./deepseek.ts";
+import {
+  TRANSIENT_RETRY_STATUS,
+  cutMarked,
+  isInsufficientFundsText,
+  jitteredBackoffDelayMs,
+} from "./deepseek.ts";
 import type { DeepSeekCompleteOptions, DeepSeekMessage } from "./deepseek.ts";
 import { classifyError } from "../../errors.ts";
 // T5.7: same provider-seam cassette wiring as `./deepseek.ts` (identity when
@@ -270,8 +275,8 @@ export const OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_MS = 30_000;
 
 // 101 §4.5 failover matrix: 429 and ≥500 are transient (retry ×N); 400/401/402/
 // 404/413/422 are terminal (a malformed request or a key problem is not solved
-// by retrying).
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+// by retrying). fixes/346 A2-F4: the set is the ONE shared constant the DeepSeek
+// adapter also uses, so the two families can never disagree on 502/504.
 const MAX_ATTEMPTS = 3;
 
 function isAbortError(err: unknown): boolean {
@@ -305,7 +310,7 @@ async function getResponseWithRetry(
     try {
       const response = await deps.fetch(url, init);
       lastResponse = response;
-      if (!RETRYABLE_STATUS.has(response.status)) return { response, attempts: attempt + 1 };
+      if (!TRANSIENT_RETRY_STATUS.has(response.status)) return { response, attempts: attempt + 1 };
     } catch (err) {
       if (isAbortError(err)) throw err;
       lastNetworkError = err;

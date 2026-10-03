@@ -46,6 +46,7 @@ import {
   LESSON_CENSUS_CAP,
 } from "./knowledge.ts";
 import { seedProject } from "./testing/fixtures.ts";
+import { fnv1a } from "./algorithms.ts";
 import type { HitlDecision, IntentLattice, JsonLog, MemoryEntry, PhaseId } from "./types.ts";
 
 function tempStorePath(): string {
@@ -943,6 +944,106 @@ describe("216g / 112 T1 — deterministic failure-signature ids (no per-run fork
       failureSignature({ kind: "gate-unmet", phase: 6, anchors: ["thing.ts"] }),
       "anchors are canonicalized to basenames without line refs",
     );
+  });
+
+  // fixes/346 A2-F7 — the content addresses are INJECTIVE: no delimiter a
+  // hostile field can carry may collide two distinct rows/records.
+  it("a NUL inside a field cannot collide two distinct knowledge rows", () => {
+    const file = tempStorePath();
+    try {
+      const store = new KnowledgeStore(file);
+      // Under the old NUL join, a NUL shifted across the title|tags boundary
+      // (`title "a" + tags ["\0b"]`) stringified the same as
+      // (`title "a\0" + tags ["b"]`) → the second save was silently swallowed.
+      const a: NewKnowledgeEntry = { ...BASE, tags: ["\u0000b"], title: "a", body: "one" };
+      const b: NewKnowledgeEntry = { ...BASE, tags: ["b"], title: "a\u0000", body: "one" };
+      const ra = store.savePattern(a);
+      const rb = store.savePattern(b);
+      assert.equal(ra.appended, true);
+      assert.equal(rb.appended, true, "distinct field tuples must not share an id");
+      assert.notEqual(ra.entry.id, rb.entry.id);
+      assert.equal(store.entries().length, 2);
+      // Idempotence is preserved: re-saving A returns A.
+      assert.equal(store.savePattern(a).entry.id, ra.entry.id);
+    } finally {
+      cleanup(file);
+    }
+  });
+
+  it("failureSignature: anchors ['a,b'] and ['a','b'] are distinct, and the probe tag round-trips", () => {
+    const one = failureSignature({ kind: "gate-unmet", phase: 6, anchors: ["a,b"] });
+    const two = failureSignature({ kind: "gate-unmet", phase: 6, anchors: ["a", "b"] });
+    assert.notEqual(one, two, "a comma inside an anchor id must not forge a two-anchor signature");
+
+    const outcome = failureLessonFromRecord({ kind: "verify-failed", phase: 6, anchors: ["a,b"] });
+    assert.equal(outcome.refused, false, "an anchored record yields a lesson row");
+    if (outcome.refused === false) {
+      assert.deepEqual(
+        (outcome.lesson.tags ?? []).filter((t) => t.startsWith("probe:")),
+        ["probe:a,b"],
+        "the escaped anchor decodes back to its real id",
+      );
+    }
+  });
+
+  // V1 refutation (fixes/346 A2-F7): the tags/supersedes join escaped AFTER the
+  // join, so a comma INSIDE one element collided with two elements. Escaping
+  // must happen per element, before the join.
+  it("a comma INSIDE a tag element cannot collide with two tag elements", () => {
+    const file = tempStorePath();
+    try {
+      const store = new KnowledgeStore(file);
+      const oneElement: NewKnowledgeEntry = { ...BASE, tags: ["a,b"] };
+      const twoElements: NewKnowledgeEntry = { ...BASE, tags: ["a", "b"] };
+      const r1 = store.savePattern(oneElement);
+      const r2 = store.savePattern(twoElements);
+      assert.equal(r1.appended, true);
+      assert.equal(r2.appended, true, "['a,b'] and ['a','b'] must not share an id");
+      assert.notEqual(r1.entry.id, r2.entry.id, "the comma must not merge two distinct tag lists");
+      assert.equal(store.entries().length, 2, "both distinct rows are persisted");
+      assert.deepEqual(r1.entry.tags, ["a,b"], "the single element's real text is returned");
+      assert.deepEqual(r2.entry.tags, ["a", "b"], "the two-element list's real tags are returned");
+    } finally {
+      cleanup(file);
+    }
+  });
+
+  it("a pipe INSIDE an anchor element cannot forge a two-anchor signature", () => {
+    const one = failureSignature({ kind: "gate-unmet", phase: 6, anchors: ["a|b"] });
+    const two = failureSignature({ kind: "gate-unmet", phase: 6, anchors: ["a", "b"] });
+    assert.notEqual(one, two, "a pipe inside an anchor must not shift the signature's field boundaries");
+    const outcome = failureLessonFromRecord({ kind: "verify-failed", phase: 6, anchors: ["a|b"] });
+    assert.equal(outcome.refused, false);
+    if (outcome.refused === false) {
+      assert.deepEqual(
+        (outcome.lesson.tags ?? []).filter((t) => t.startsWith("probe:")),
+        ["probe:a|b"],
+        "the pipe-bearing anchor round-trips through the probe tag",
+      );
+    }
+  });
+
+  it("delimiter-free input fingerprints byte-identically to the legacy NUL join", () => {
+    const e: NewKnowledgeEntry = { ...BASE };
+    // The pre-fixes/346 formula: a plain NUL join of the (tag-joined) fields.
+    const legacy = [
+      e.project,
+      e.kind,
+      e.title,
+      [...e.tags].sort().join(","),
+      e.body,
+      e.sourcePath ?? "",
+      "",
+    ].join("\u0000");
+    const expectedId = `K${fnv1a(legacy).toString(16).padStart(8, "0")}`;
+    const file = tempStorePath();
+    try {
+      const store = new KnowledgeStore(file);
+      const saved = store.savePattern(e);
+      assert.equal(saved.entry.id, expectedId, "no row-id churn for delimiter-free content");
+    } finally {
+      cleanup(file);
+    }
   });
 
   it("the class builders route their id through the signature: recurrence maps to ONE row", () => {

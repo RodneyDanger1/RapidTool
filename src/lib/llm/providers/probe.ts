@@ -33,6 +33,12 @@
 import { classifyError } from "../../errors.ts";
 import type { ErrorCode } from "../../errors.ts";
 import type { LlmProviderDescriptor } from "./registry.ts";
+// fixes/346 A2-F5: the probe is reachable from the CLI (`doctor` / a keyed run)
+// and its network leg must not leave an undici TLS teardown handle racing the
+// CLI's in-tick `process.exit()` (327-L2 crash class). Route the default
+// transport through the one-shot seam; an injected `opts.fetch` still wins, and
+// `oneShotFetch` defers to a replaced global `fetch` (the test seam).
+import { oneShotFetch } from "./one-shot-fetch.server.ts";
 
 /** Hard cap on a probe's network budget — 101 §4.6: "timeout 3 s (matches
  *  probeTavily's 3 s cap)". */
@@ -172,7 +178,7 @@ export async function probeProviderModels(
   }
 
   const timeoutMs = resolveProbeTimeoutMs(opts.timeoutMs);
-  const fetchImpl = opts.fetch ?? ((...args) => fetch(...args));
+  const fetchImpl = opts.fetch ?? oneShotFetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

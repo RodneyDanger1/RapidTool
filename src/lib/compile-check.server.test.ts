@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { SUPPLY_CHAIN_AUDIT_COMMAND, compileCheckDir, installToolFor, parseVerdictForSource, supplyChainFloorFor, treeRun, treeSubstanceOf, treeVerdictHash, typecheckDir, verifyKindDir } from "./compile-check.server.ts";
+import { SUPPLY_CHAIN_AUDIT_COMMAND, compileCheckDir, installToolFor, parseVerdictForSource, specExitIsGreen, specSourceHasBehaviouralAssert, supplyChainFloorFor, treeRun, treeSubstanceOf, treeVerdictHash, typecheckDir, verifyKindDir } from "./compile-check.server.ts";
 import { inventoryFromJobSources } from "./doctor.ts";
 import { collectJobSources } from "./headless.ts";
 import { scrubbedEnv } from "./node-runner.server.ts";
@@ -2265,6 +2265,104 @@ describe("fixes/341-1 typecheckDir - the declared `typecheck` seam", () => {
       const v = await typecheckDir(dir);
       assert.equal(v.run, "pass", `expected a green tsc verdict: ${JSON.stringify(v)}`);
       assert.equal(v.exitCode, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 E1 - L1-F3: a zero exit status is not, by itself, green. If TAP reported
+// failing or cancelled tests, the spec must not be read as a pass - defense in
+// depth for any producer that masks a failure behind a zero exit code.
+// ---------------------------------------------------------------------------
+describe("346 E1 L1-F3 - specExitIsGreen requires a clean TAP summary, not just exit 0", () => {
+  const clean = { fail: 0, cancelled: 0 };
+  it("exit 0 plus a clean summary is green", () => {
+    assert.equal(specExitIsGreen(0, clean), true);
+  });
+  it("exit 0 with a failing test is NOT green", () => {
+    assert.equal(specExitIsGreen(0, { fail: 1, cancelled: 0 }), false);
+  });
+  it("exit 0 with a cancelled test is NOT green", () => {
+    assert.equal(specExitIsGreen(0, { fail: 0, cancelled: 1 }), false);
+  });
+  it("a non-zero exit or an absent summary is NOT green", () => {
+    assert.equal(specExitIsGreen(1, clean), false);
+    assert.equal(specExitIsGreen(0, null), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 E1 · item 2 (L1-F2 residual): a spec whose only assertions are shape
+// probes certifies nothing about behaviour, so it must not be a behavioural
+// pass — and a tree-run built on it must not mint `tested`.
+// ---------------------------------------------------------------------------
+describe("346 E1 item 2 - a shape-only spec is not a behavioural pass", () => {
+  it("classifies shape-only assertions as non-behavioural; value/outcome checks as behavioural", () => {
+    const shapeOnly = [
+      `test("shape only", () => {`,
+      `  const ns = { a: () => 1 };`,
+      `  const names = Object.keys(ns);`,
+      `  assert.ok(names.length > 0);`,
+      `  assert.equal(typeof ns.a, "function");`,
+      `  assert.ok(Array.isArray(names));`,
+      `  assert.ok(ns.a !== undefined);`,
+      `  assert.ok(ns.a);`,
+      `});`,
+    ].join("\n");
+    assert.equal(specSourceHasBehaviouralAssert(shapeOnly), false);
+    assert.equal(specSourceHasBehaviouralAssert(`test("x", () => { assert.equal(add(1, 1), 2); });`), true);
+    assert.equal(specSourceHasBehaviouralAssert(`test("x", () => { assert.equal(flag, true); });`), true);
+    assert.equal(specSourceHasBehaviouralAssert(`test("x", () => { assert.throws(() => f(), /boom/); });`), true);
+    assert.equal(specSourceHasBehaviouralAssert(`test("x", () => { assert.ok(Object.keys(ns).length > 0); });`), false);
+    assert.equal(specSourceHasBehaviouralAssert(`// assert.equal(x, 1)`), false);
+    assert.equal(specSourceHasBehaviouralAssert(``), false);
+  });
+
+  it("treeRun refuses a spec that only asserts shape (no behavioral assertion ran)", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(
+        dir,
+        [
+          `import { test } from "node:test";`,
+          `import assert from "node:assert/strict";`,
+          `import * as m from "../src/main.ts";`,
+          `test("shape only", () => {`,
+          `  assert.ok(Object.keys(m).length > 0);`,
+          `  assert.equal(typeof m.boot, "function");`,
+          `});`,
+          ``,
+        ].join("\n"),
+      );
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.tests[0]!.run, "fail");
+      assert.equal(r.tests[0]!.behavioural, false);
+      assert.equal(r.tests[0]!.detail, "no behavioral assertion ran");
+      assert.equal(r.ok, false, "a shape-only tree is not green");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a genuinely behavioural spec still passes and is marked behavioural", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(
+        dir,
+        [
+          `import { test } from "node:test";`,
+          `import assert from "node:assert/strict";`,
+          `import * as m from "../src/main.ts";`,
+          `test("behavioural", () => { assert.equal(m.boot(), "ok"); });`,
+          ``,
+        ].join("\n"),
+      );
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.tests[0]!.run, "pass");
+      assert.equal(r.tests[0]!.behavioural, true);
+      assert.equal(r.ok, true, "a real behavioural tree stays green");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

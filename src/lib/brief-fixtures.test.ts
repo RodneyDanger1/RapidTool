@@ -19,6 +19,7 @@ import {
   coerceAcceptanceFixtures,
   compileFixtureAssertion,
   fixtureMatchHelperSource,
+  fixtureShapeValueIsVacuous,
   approvedAcceptanceFixtures,
   draftTypedLiterals,
   mergeDraftedFixtures,
@@ -696,5 +697,60 @@ describe("A1-01 — placeholder sentinels are not substantive fixtures", () => {
       !helper.includes("<draft>") && !helper.includes("<any>"),
       "the emitted matcher must have no sentinel escape hatch",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 E1 (L1-F5): an EMPTY shape value (`{}` / `[]`) is not a sentinel, so the
+// A1-01 placeholder scan missed it — yet `__fxPartialMatch(actual, {})` is true
+// for ANY object (Object.keys of an empty expectation trivially `.every`). Such
+// a row asserts only "returns an object"; it is rejected at the same seam the
+// placeholder rule uses (case predicate + compile red-card).
+// ---------------------------------------------------------------------------
+
+describe("346 E1 L1-F5 — an empty expect.shape is near-vacuous and refused", () => {
+  function emptyShapeCase(): BriefFixtureCase {
+    return {
+      id: "orc-empty",
+      requirementId: "orc-empty",
+      capability: "record",
+      name: "job.record.happy",
+      given: { address: "1 Main St" },
+      expect: { kind: "shape", value: {} },
+      kind: "pure",
+      source: "human",
+      approval: "approved",
+      decidedBy: "human",
+      target: "createProperty",
+    };
+  }
+
+  it("fixtureShapeValueIsVacuous recognises only an empty object/array", () => {
+    assert.equal(fixtureShapeValueIsVacuous({}), true);
+    assert.equal(fixtureShapeValueIsVacuous([]), true);
+    assert.equal(fixtureShapeValueIsVacuous({ id: "p-1" }), false);
+    assert.equal(fixtureShapeValueIsVacuous([1]), false);
+    assert.equal(fixtureShapeValueIsVacuous("x"), false);
+    assert.equal(fixtureShapeValueIsVacuous(null), false);
+  });
+
+  it("the approval gate refuses a fully-approved empty-shape bar", () => {
+    const gate = fixtureApprovalGate([emptyShapeCase()]);
+    assert.equal(gate.ok, false, "an empty-shape row asserts nothing real");
+    assert.deepEqual(gate.placeholderIds, ["orc-empty"]);
+  });
+
+  it("approvedAcceptanceFixtures and compileFixtureAssertion refuse it", () => {
+    assert.equal(approvedAcceptanceFixtures([emptyShapeCase()]), null, "never emits a vacuous bar");
+    const compiled = compileFixtureAssertion(emptyShapeCase());
+    assert.equal(compiled.ok, false, "an empty shape must never compile to a vacuous assertion");
+    if (!compiled.ok) assert.match(compiled.reason, /empty/i);
+  });
+
+  it("a non-empty shape still compiles (real behavioural row unaffected)", () => {
+    const real = { ...emptyShapeCase(), expect: { kind: "shape" as const, value: { id: "p-1" } } };
+    assert.equal(fixtureShapeValueIsVacuous((real.expect as { value: unknown }).value), false);
+    assert.equal(compileFixtureAssertion(real).ok, true);
+    assert.equal(approvedAcceptanceFixtures([real])?.length, 1);
   });
 });

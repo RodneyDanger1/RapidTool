@@ -343,6 +343,11 @@ export function clearCheckpoint(projectDir: string): { ok: true } | { ok: false;
   }
 }
 
+/** ECMAScript time-value ceiling (±8.64e15 ms): beyond it `new Date(x)` is
+ *  invalid, so a `savedAt` outside the range cannot be rendered as a snapshot
+ *  age. fixes/346: the boundary `checkpointAdmits` validates against. */
+const MAX_ECMA_TIME_VALUE = 8.64e15;
+
 /**
  * The resume gate: a snapshot may only be re-entered when its run coordinates are sane AND its
  * identity + mode still match the request. `savedAt` is surfaced on admission so the caller can
@@ -405,5 +410,23 @@ export function checkpointAdmits(
       error: `checkpoint: mode mismatch (saved ${checkpoint.run.mode}, asked ${String(asked.mode)})`,
     };
   }
-  return { ok: true, savedAt: checkpoint.savedAt };
+  // fixes/346: `savedAt` is surfaced to the caller (to print the snapshot age),
+  // so a non-finite / absent / out-of-range value must fail closed HERE too.
+  // The reader's `isRunCheckpoint` finite guard only protects the file-read
+  // path; this export accepts a foreign object directly, so absent / "x" / NaN
+  // all used to be admitted and surface a bogus age.
+  const savedAt = (checkpoint as unknown as { savedAt?: unknown }).savedAt;
+  if (
+    typeof savedAt !== "number" ||
+    !Number.isFinite(savedAt) ||
+    savedAt < 0 ||
+    savedAt > MAX_ECMA_TIME_VALUE
+  ) {
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error: `checkpoint: savedAt ${String(savedAt)} is not a finite in-range timestamp — refusing this re-entry point`,
+    };
+  }
+  return { ok: true, savedAt };
 }

@@ -1,16 +1,20 @@
 // ---------------------------------------------------------------------------
 // watchdog.ts — pure wild-loop freeze-class decisions (fixes/109 §5).
 //
-// Zero-dep decision math shared by the store driver (startWildRun), the
-// headless wild macro (wildStartRun) and the client heartbeat probe. The
-// ENGINE is untouched (purity): drivers wrap engine.wildStep with these
-// predicates + boundedStepWatch.
+// Zero-dep decision math for the wild loop. HONEST CONSUMER MAP (fixes/346):
+// `heartbeatLagClass` + `HEARTBEAT_TICKS_PER_PERSIST` are consumed by the
+// client heartbeat probe. `watchdogDecision` / `shouldAutopause` /
+// `requiresHumanResume` / `boundedStepWatch` have NO production consumer yet —
+// the store wild driver (`store.ts` `startWildRun`) does not wrap
+// `engine.wildStep` with them (STOP-and-REPORTed to that owner). They are
+// exercised only by `watchdog.test.ts` until that wiring lands. The ENGINE is
+// untouched (purity): a driver wraps engine.wildStep with these predicates.
 //
 // What a watchdog CANNOT do (honest bounds, §5.1): cancel an in-flight
 // awaited promise from the same tab; run while the main thread is blocked.
 // Detection is post-hoc (interval lag) and prevention is pause-on-resolve —
 // the design's "never abandon, never auto-resume" contract lives here as
-// `requiresHumanResume`.
+// `requiresHumanResume` (unwired, above).
 //
 // EXPORT SURFACE (compile against these — do not rename):
 //   watchdogDecision · shouldAutopause · heartbeatLagClass ·
@@ -54,6 +58,11 @@ export function heartbeatLagClass(lagMs: number): "ok" | "warn" | "critical" {
 /**
  * Never-auto-resume invariant (§5.2/§5.5): an auto-pause or a main-thread
  * stall is ended ONLY by a human/agent act (toggleWildPause / CLI resume).
+ *
+ * fixes/346: no production consumer yet — the store wild driver must call this
+ * at its resume decision (`store.ts` `startWildRun`, STOP-and-REPORTed). Pinned
+ * by `watchdog.test.ts`; honest about being unwired rather than claiming a
+ * driver it does not have.
  */
 export function requiresHumanResume(stall: StallLatch): boolean {
   return stall !== null && (stall.class === "step-timeout" || stall.class === "mainthread-stall");

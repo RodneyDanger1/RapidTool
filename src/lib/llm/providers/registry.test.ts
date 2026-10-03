@@ -24,7 +24,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  FALLBACK_PROVIDERS_ENV_VAR,
   KNOWN_MODEL_IDS,
   PROVIDERS,
   RAPIDTOOL_MODEL_ROLES,
@@ -37,7 +36,12 @@ import {
   resolveRoleModel,
   roleModelEnvKey,
 } from "./registry.ts";
-import { DEEPSEEK_BASE_URL, DEEPSEEK_MODELS, completeDeepSeek } from "./deepseek.ts";
+import {
+  DEEPSEEK_BASE_URL,
+  DEEPSEEK_MODELS,
+  TRANSIENT_RETRY_STATUS,
+  completeDeepSeek,
+} from "./deepseek.ts";
 import {
   XAI_API_KEY_ENV,
   XAI_BASE_URL,
@@ -1110,72 +1114,46 @@ describe("registry — second family: the live-probed candidate (F2 · W19-L5)",
 });
 
 // ---------------------------------------------------------------------------
-// R13-f09 / 342-5 — the failover chain stays UNARMED, and the refusal names the
-// exact missing piece (derived from the registry's own descriptors). These make
-// the honesty load-bearing: a chain naming the only registered second family
-// cannot be armed because that family has no verified request ids AND there is
-// no registration seam to add them, while the only dispatchable family is the
-// one every role tier already routes to.
+// fixes/346 A2-F2 — the un-armed failover shell was DELETED. The pins for that
+// deletion live in `registry-failover.test.ts` (the switch is inert; no chain
+// resolver is exported). Nothing here re-asserts a chain that no longer exists.
 // ---------------------------------------------------------------------------
 
-describe("R13-f09 / 342-5 — the chain resolves but cannot be honestly armed", () => {
-  it("the only registered second family (xai) is a CANDIDATE with 0 ids — a chain naming it refuses with the exact gap", async () => {
-    const restore = withCleanLlmEnv({ [FALLBACK_PROVIDERS_ENV_VAR]: "xai" });
+// ---------------------------------------------------------------------------
+// fixes/346 A2-F4 — ONE shared transient-retry set for both provider families.
+// ---------------------------------------------------------------------------
+describe("fixes/346 A2-F4 — the transient-retry set is unified", () => {
+  it("exports the wider transient set: 429/500/502/503/504", () => {
+    assert.deepEqual([...TRANSIENT_RETRY_STATUS].sort((a, b) => a - b), [429, 500, 502, 503, 504]);
+  });
+
+  it("DeepSeek now RETRIES a transient 502/504 (was terminal) and succeeds on attempt 3", async () => {
+    const restore = withEnv({ [KEY]: "test-deepseek-key-never-logged" });
     const calls: Captured[] = [];
+    const statuses = [502, 504, 200];
+    let i = 0;
+    const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const status = statuses[Math.min(i++, statuses.length - 1)]!;
+      return status === 200
+        ? chatResponse("recovered")
+        : new Response(JSON.stringify({ error: { message: "gateway" } }), {
+            status,
+            headers: { "content-type": "application/json" },
+          });
+    }) as typeof fetch;
     try {
-      const res = await callModel("main", "hello", { fetch: capturingFetch(calls) });
-      assert.equal(res.ok, false);
-      if (!res.ok) {
-        assert.equal(res.reason, "error");
-        assert.equal(res.code, "RT_E_VALIDATION");
-        assert.match(res.error ?? "", /NOT ARMED/);
-        assert.match(res.error ?? "", /"xai" is a CANDIDATE with 0 verified request ids/);
-        assert.match(
-          res.error ?? "",
-          /REGISTERS/,
-          "the refusal names the registration seam as the missing piece — a generic promise is an over-claim",
-        );
-        assert.match(res.error ?? "", /RAPIDTOOL_FALLBACK_PROVIDERS/);
-      }
-      assert.equal(calls.length, 0, "no request may leave while the chain is unarmed");
-    } finally {
-      restore();
-    }
-  });
-
-  it("a chain naming only the role-tier family (deepseek) refuses — a same-family retry is not failover", async () => {
-    const restore = withCleanLlmEnv({ [FALLBACK_PROVIDERS_ENV_VAR]: "deepseek" });
-    const calls: Captured[] = [];
-    try {
-      const res = await callModel("main", "hello", { fetch: capturingFetch(calls) });
-      assert.equal(res.ok, false);
-      if (!res.ok) {
-        assert.equal(res.code, "RT_E_VALIDATION");
-        assert.match(res.error ?? "", /SAME family the primary routes to/);
-      }
-      assert.equal(calls.length, 0);
-    } finally {
-      restore();
-    }
-  });
-
-  it("the gap is DERIVED from the registry bytes: xai stays empty and every role routes to deepseek", () => {
-    const xai = getProvider("xai");
-    assert.ok(xai, "the probed family is registered");
-    assert.deepEqual([...xai!.requestModelIds], [], "a candidate never carries an unprobed id");
-    for (const role of RAPIDTOOL_MODEL_ROLES) {
-      assert.equal(ROLE_TIERS[role].provider, "deepseek", `${role} routes to the only dispatchable family`);
-    }
-  });
-
-  it("an unset chain keeps the single-provider keyless floor byte-identical", async () => {
-    const restore = withCleanLlmEnv();
-    try {
-      const res = await callModel("main", "hello");
-      assert.equal(res.ok, false);
-      if (!res.ok) assert.equal(res.code, "RT_E_LLM_NOT_CONFIGURED");
+      const res = await completeDeepSeek("hello", {
+        model: DEEPSEEK_MODELS.flash,
+        fetch: fetchImpl,
+        sleep: async () => {},
+        random: () => 0,
+      });
+      assert.equal(res.ok, true, "502/504 are transient and must be retried, not terminal");
+      assert.equal(calls.length, 3, "two transient statuses retried, then the call succeeds");
     } finally {
       restore();
     }
   });
 });
+

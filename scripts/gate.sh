@@ -22,6 +22,26 @@
 #           legs so a flake anywhere is caught. A test that fails BOTH runs
 #           is a hard failure (exit 1), not a flake.
 #
+# --quarantine  BOUNDED, HONEST quarantine for the known load-sensitive
+#           child-spawn class (fixes/344 F-20). When a test whose EXACT name is
+#           in KNOWN_LOAD_FLAKES fails, it is re-run ALONE (its own file, a
+#           --test-name-pattern for that one name) and, only if the isolated run
+#           shows that test's own `ok N - <name>` line with `# fail 0`, it is
+#           reported under `quarantined` (with the reason) instead of forcing a
+#           red gate. This is NOT flake laundering: it is bounded (one isolated
+#           re-run), the failure must reproduce as green in isolation, the
+#           allowlist is explicit and named, and it is LOUD (verdict
+#           `quarantined[]` + stderr). A second failure, or any test NOT on the
+#           allowlist, stays a hard red. Default OFF — without the flag the
+#           candidates are still diagnosed and reported, but the exit code is
+#           unchanged. Follow-up: root-cause the spawn-starvation race (see
+#           fixes/346_e3_orchestrator.md §F-20) and delete the allowlist.
+#
+# Format gate (fixes/344 F-16): `prettier --check src scripts` is NOT a gate
+#           here — measured 2026-10-03: 244 files drift, and scripts/gate.sh
+#           itself has no inferable parser. A red formatter gate would be a
+#           permanent red. `npm run format:check` is the scoped, honest check.
+#
 # Exit codes:
 #   0  every gate green (skips are allowed and reported, never silently)
 #   1  a gate hard-failed (a test failed both runs, or typecheck/lint/gaps/build red)
@@ -39,10 +59,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)" || exit 2
 cd "$ROOT" || exit 2
 
 DOUBLE=0
+QUARANTINE=0
 for arg in "$@"; do
   case "$arg" in
     --double) DOUBLE=1 ;;
-    *) printf 'usage: scripts/gate.sh [--double]\n' >&2; exit 2 ;;
+    --quarantine) QUARANTINE=1 ;;
+    *) printf 'usage: scripts/gate.sh [--double] [--quarantine]\n' >&2; exit 2 ;;
   esac
 done
 
@@ -106,12 +128,14 @@ node - \
   "$WINTMP/typecheck.log" "$WINTMP/lint.log" \
   "$WINTMP/testsScripts.log" "$WINTMP/testsLib.log" \
   "$LOGS2_SCRIPTS" "$LOGS2_LIB" \
-  "$WINTMP/build.log" <<'NODE'
+  "$WINTMP/build.log" "$QUARANTINE" <<'NODE'
 const fs = require("node:fs");
+const { spawnSync } = require("node:child_process");
 // Script comes from stdin (`node -`), so argv = [node, "-", ...args].
-const [resultsPath, startMs, doubleStr, tclog, lintlog, s1, l1, s2, l2, bldlog] =
+const [resultsPath, startMs, doubleStr, tclog, lintlog, s1, l1, s2, l2, bldlog, quarantineStr] =
   process.argv.slice(2);
 const double = doubleStr === "1";
+const quarantine = quarantineStr === "1";
 
 const map = new Map();
 for (const line of fs.readFileSync(resultsPath, "utf8").trim().split("\n")) {
@@ -194,16 +218,104 @@ for (const [id, log1, log2] of [["testsScripts", s1, s2], ["testsLib", l1, l2]])
   }
 }
 
+// fixes/344 F-20 — the known load-sensitive child-spawn class. EXACT leaf test
+// names (node --test reports the leaf name); each maps to its file + reason.
+// The allowlist is deliberate and small; delete an entry once its race is fixed.
+const KNOWN_LOAD_FLAKES = new Map([
+  [
+    "settles when a pipe-holding grandchild outlives the child (no 'close' hang)",
+    {
+      file: "src/lib/exec.test.ts",
+      reason:
+        "child-spawn starvation: under parallel suite load the grandchild's pipe release / kill-grace settlement can exceed the wall-clock assertion",
+    },
+  ],
+  [
+    "does not delay a normal run whose pipes close promptly",
+    {
+      file: "src/lib/exec.test.ts",
+      reason:
+        "child-spawn starvation: the prompt-close bound (CLOSE_GRACE_MS*4) can be crossed by spawn latency alone under load",
+    },
+  ],
+  [
+    "commits a fresh emitted tree with feat(<slug>): <brief>, then a second land is a clean no-op",
+    {
+      file: "src/lib/headless.test.ts",
+      reason:
+        "git-spawn starvation: spawnSync git can return null status under CPU contention, failing the commit-count assertions",
+    },
+  ],
+  [
+    "a foreign file added after emit is left untracked and reported (not silently committed)",
+    {
+      file: "src/lib/headless.test.ts",
+      reason: "git-spawn starvation: spawnSync git can return null status under CPU contention",
+    },
+  ],
+]);
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ONE isolated re-run of a single named test. Green ONLY when that test's own
+// `ok N - <name>` line appears AND the summary says `# fail 0` — a filtered run
+// that matches nothing exits 0 (the no-op pattern trap), which is never green.
+function isolatedRetryGreen(name, file) {
+  // A spawn problem must NEVER break the verdict program: the conservative
+  // answer is "not green" (the gate stays red), never a crash.
+  try {
+    const injected = process.env.GATE_QUARANTINE_RUNNER;
+    const runner = process.execPath;
+    const args = injected
+      ? [injected, file, name]
+      : [
+          ...(file.endsWith(".ts") ? ["--experimental-strip-types"] : []),
+          "--test",
+          "--test-reporter=tap",
+          file,
+          "--test-name-pattern",
+          escapeRegex(name),
+        ];
+    const r = spawnSync(runner, args, { encoding: "utf8", timeout: 300000, maxBuffer: 64 * 1024 * 1024 });
+    const out = `${r.stdout || ""}${r.stderr || ""}`;
+    const okLine = new RegExp("^[ \\t]*ok [0-9]+ - " + escapeRegex(name) + "\\s*$", "m");
+    return r.status === 0 && okLine.test(out) && /^# fail 0$/m.test(out);
+  } catch {
+    return false;
+  }
+}
+
+const quarantineCandidates = hardFails
+  .filter((n) => KNOWN_LOAD_FLAKES.has(n))
+  .map((n) => {
+    const info = KNOWN_LOAD_FLAKES.get(n);
+    return { name: n, file: info.file, reason: info.reason, isolated: isolatedRetryGreen(n, info.file) };
+  });
+const quarantined = quarantine ? quarantineCandidates.filter((q) => q.isolated) : [];
+const quarantinedNames = new Set(quarantined.map((q) => q.name));
+const effectiveHardFails = hardFails.filter((n) => !quarantinedNames.has(n));
+// A leg whose ONLY failures are quarantined counts as relieved (single mode;
+// --double's disagreement path already owns flakes).
+const relieved = new Set();
+if (!double) {
+  for (const [id, log1] of [["testsScripts", s1], ["testsLib", l1]]) {
+    const fails = legStats(log1).failNames;
+    if (fails.length > 0 && fails.every((n) => quarantinedNames.has(n))) relieved.add(id);
+  }
+}
+
 let code = 0;
-if (hardFails.length > 0) code = 1;
+if (effectiveHardFails.length > 0) code = 1;
 else if (flakes.length > 0) code = 3;
 else if (
   !(
     gates.typecheck.ok &&
     gates.lint.ok &&
     gates.assertionGaps.ok &&
-    gates.testsScripts.ok &&
-    gates.testsLib.ok &&
+    (gates.testsScripts.ok || relieved.has("testsScripts")) &&
+    (gates.testsLib.ok || relieved.has("testsLib")) &&
     gates.build.ok
   )
 )
@@ -213,12 +325,28 @@ const verdict = {
   ok: code === 0,
   double,
   flakes: [...new Set(flakes)],
-  hardFails: [...new Set(hardFails)],
+  hardFails: [...new Set(effectiveHardFails)],
+  quarantined,
+  quarantineCandidates,
   skips: (gates.testsScripts ? gates.testsScripts.skipped : 0) +
          (gates.testsLib ? gates.testsLib.skipped : 0),
   wallMs: Date.now() - Number(startMs),
   gates,
 };
+// fixes/344 F-20: LOUD diagnosis on stderr (stdout stays JSON-only) — a known
+// load-flake candidate is always named, with its isolated re-run verdict.
+if (quarantineCandidates.length > 0) {
+  const lines = quarantineCandidates.map(
+    (q) => `  - ${q.name} (${q.file}) — isolated re-run ${q.isolated ? "GREEN" : "RED"}: ${q.reason}`,
+  );
+  fs.writeSync(
+    2,
+    `\n[gate] known load-flake candidate(s):\n${lines.join("\n")}\n` +
+      (quarantine
+        ? `[gate] quarantined ${quarantined.length} of ${quarantineCandidates.length} (--quarantine)\n`
+        : "[gate] none quarantined — pass --quarantine to accept an isolated-GREEN candidate\n"),
+  );
+}
 // fs.writeSync + exitCode (not process.exit): on Windows, process.exit can
 // truncate a pending async stdout-pipe write, which would drop the verdict.
 fs.writeSync(process.stdout.fd, JSON.stringify(verdict) + "\n");

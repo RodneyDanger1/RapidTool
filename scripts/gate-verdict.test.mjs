@@ -61,7 +61,7 @@ function extractVerdictProgram() {
 // (the program defaults a MISSING exit to 1, so a partial results file would
 // silently pin a red pre-state).
 // ---------------------------------------------------------------------------
-function runVerdict({ exits, double = false, logs = {} }) {
+function runVerdict({ exits, double = false, logs = {}, quarantine = false, env = {} }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-verdict-"));
   const row = (id, code) => `${id}.exit\t${code}\n${id}.ms\t1`;
   const resultsPath = path.join(dir, "results");
@@ -101,8 +101,9 @@ function runVerdict({ exits, double = false, logs = {} }) {
       s2,
       l2,
       buildLog,
+      quarantine ? "1" : "0",
     ],
-    { input: program, encoding: "utf8" },
+    { input: program, encoding: "utf8", env: { ...process.env, ...env } },
   );
   assert.equal(res.error, undefined, `spawn failed: ${res.error}`);
   let verdict = null;
@@ -208,6 +209,89 @@ test("E: --double, leg crashed in run 1 with no TAP names → exit 1 (never 3)",
 // empty leg. Named `F` because the letter `E` above already owns the
 // --double crash case (F-H11); the two guards are independent.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// G/H/I · fixes/344 F-20 — the bounded, honest load-flake quarantine.
+//
+// The known child-spawn class is allowlisted by EXACT test name. An isolated
+// re-run is injected here via GATE_QUARANTINE_RUNNER (a tiny node script) so the
+// classification is deterministic across hosts; the production default spawns
+// the real test file. The contract: quarantine ONLY an isolated-GREEN candidate,
+// ONLY with --quarantine, and always LOUDLY (verdict.quarantined + candidates).
+// ---------------------------------------------------------------------------
+const FLAKE = "settles when a pipe-holding grandchild outlives the child (no 'close' hang)";
+const FLAKE_TAP = `TAP version 13\nnot ok 1 - ${FLAKE}\n# fail 1\n`;
+
+function quarantineEnv(mode) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-quar-"));
+  const runner = path.join(dir, "fake-runner.mjs");
+  fs.writeFileSync(
+    runner,
+    [
+      "const name = process.argv[3];",
+      'if ((process.env.FAKE_QUARANTINE_MODE ?? "green") === "green") {',
+      "  process.stdout.write(`TAP version 13\\nok 1 - ${name}\\n# pass 1\\n# fail 0\\n`);",
+      "} else {",
+      "  process.stdout.write(`TAP version 13\\nnot ok 1 - ${name}\\n# pass 0\\n# fail 1\\n`);",
+      "  process.exitCode = 1;",
+      "}",
+    ].join("\n"),
+    "utf8",
+  );
+  return { GATE_QUARANTINE_RUNNER: runner, FAKE_QUARANTINE_MODE: mode };
+}
+
+test("G: an allowlisted load-flake GREEN in isolation is quarantined (loud) — exit 0 with --quarantine", () => {
+  const { status, verdict } = runVerdict({
+    exits: { testsLib: 1 },
+    logs: { "testsLib.log": FLAKE_TAP },
+    quarantine: true,
+    env: quarantineEnv("green"),
+  });
+  assert.equal(status, 0, "an isolated-green known flake is relieved only under --quarantine");
+  assert.equal(verdict.ok, true);
+  assert.deepEqual(verdict.hardFails, [], "the quarantined name leaves hardFails");
+  assert.equal(verdict.quarantined.length, 1, "the quarantine is LOUD in the verdict");
+  assert.equal(verdict.quarantined[0].name, FLAKE);
+  assert.equal(verdict.quarantined[0].isolated, true);
+  assert.match(String(verdict.quarantined[0].reason), /spawn starvation/);
+});
+
+test("G2: without --quarantine the same isolated-green candidate stays a hard fail (default unchanged)", () => {
+  const { status, verdict } = runVerdict({
+    exits: { testsLib: 1 },
+    logs: { "testsLib.log": FLAKE_TAP },
+    env: quarantineEnv("green"),
+  });
+  assert.equal(status, 1, "the default gate is byte-for-byte unchanged");
+  assert.ok(verdict.hardFails.includes(FLAKE));
+  assert.deepEqual(verdict.quarantined, []);
+  assert.equal(verdict.quarantineCandidates[0].isolated, true, "the diagnosis is still reported");
+});
+
+test("H: an allowlisted flake RED in isolation is never quarantined (no laundering)", () => {
+  const { status, verdict } = runVerdict({
+    exits: { testsLib: 1 },
+    logs: { "testsLib.log": FLAKE_TAP },
+    quarantine: true,
+    env: quarantineEnv("red"),
+  });
+  assert.equal(status, 1, "a test that fails in isolation is a real red");
+  assert.ok(verdict.hardFails.includes(FLAKE));
+  assert.deepEqual(verdict.quarantined, []);
+});
+
+test("I: a test NOT on the allowlist is never quarantined", () => {
+  const { status, verdict } = runVerdict({
+    exits: { testsLib: 1 },
+    logs: { "testsLib.log": TAP_RED },
+    quarantine: true,
+    env: quarantineEnv("green"),
+  });
+  assert.equal(status, 1);
+  assert.ok(verdict.hardFails.includes("some failing test"));
+  assert.deepEqual(verdict.quarantineCandidates, [], "only allowlisted names are ever candidates");
+});
+
 test("F: exit-0 leg with zero '# pass' lines → ok:false, exit 1 (no green off an empty leg)", () => {
   const { status, verdict } = runVerdict({
     exits: {},

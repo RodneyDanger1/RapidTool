@@ -503,6 +503,21 @@ paths and is **not** exposed here; any other value is rejected with
 *emit with `redTree:"banner"` to ship the unmissable banner* — reachable from
 the CLI.
 
+`--git` lands the freshly emitted tree as **one git delivery** (fixes/343_3 · 343-3
+§6): `git init` when the directory is not already inside a work tree, then ONE
+Conventional-Commits commit — `feat(<slug>): <first requirement, else the brief's
+first line>` — staged from the **emitted manifest only** (`add -- <files>`). A
+foreign file is reported on `git.foreign[]` and left untracked, never committed;
+the RapidTool host repo is structurally refused, and re-emitting an identical tree
+is an idempotent `git.noop: true` / `committed: false` (never an empty commit).
+Unlike the human-seat-gated `gitLandInit/Commit/ReadBack`, the delivery tail is
+machine-callable by design, guarded structurally (it requires the emitted record
+`.rapidtool/project.json` and refuses any path that is not a RapidTool emission).
+A landed delivery returns `ok: true` with `git: { dir, message, committed, noop,
+commit, files, foreign }`; a refusal flips the envelope to `ok: false` + its coded
+reason (`RT_E_GIT_UNAVAILABLE`, `RT_E_FOREIGN_FILES`, …) and exit 1 — **the emitted
+tree still exists on disk**, so the failure is in delivery, never in the build.
+
 `--force` admits an emit into a folder that already holds foreign files — without it the
 emit is refused (`RT_E_FOREIGN_FILES`, exit 1, the `foreign` list on the envelope); with it
 the foreign files are moved **aside** into `<dir>/.rapidtool-quarantine/<stamp>/` —
@@ -1007,6 +1022,8 @@ verbs below are REAL drives wired through the same `runUntilGate` loop the origi
   (it resumes instead of restarting). 341-6: it passes `machineGates`, so a stock HITL gate (P4/P5/P8/P9)
   whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`); only a
   `forceHuman` gate, or any red DoD gate, still parks (exit 2) — never a fake completion.
+  The multi-brief wrapper that drains an intake directory and then delivers each
+  completed project (`emit --git`) is [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs).
 
 The earlier `run --unattended` / `gate --unattended` flags remain as the one-shot form of the
 same drive (`--unattended` forces autopilot + live on those verbs). Neither verb is the wild
@@ -1018,6 +1035,109 @@ lifecycle: `wild --resume` is the wild-mode pause/resume action, unrelated to ru
 > wild drivers and parks at `wild.plan_review` before the first mutation — `engine.ts:4398`,
 > `store.ts:1357`, `headless.ts:5365/5592`; the browser reviewer is null and records the honest
 > "not configured" review.)*
+
+## The walk-away factory (`scripts/factory-watch.mjs`)
+
+`unattended` drives ONE project to a terminal state; it is explicitly **not a
+daemon**. `scripts/factory-watch.mjs` is the multi-brief orchestrator the
+scheduler-facing story was missing (fixes/344 F-18): **ONE bounded tick** that
+drains a brief intake and, per brief, runs the real CLI verbs
+
+```
+create  →  unattended (machine seat)  →  emit --git (per-project dir)
+```
+
+It is the only "walk away and it ships" path in the repo, and it is honest about
+the boundary: it delivers only a project whose drive reaches a clean terminal
+seal, and it reports every other outcome with the CLI's own coded reason.
+
+**Intake / workspace.** Exactly one of:
+
+- `--intake <dir>` — a directory of brief files (`*.md` / `*.txt` / `*.brief`),
+  sorted; each file is one brief. A leading `name:` front-matter scalar names the
+  project, else the file stem does. The CLI's own `--brief @<path>` handling
+  unwraps a corpus fixture's `brief:` front-matter scalar.
+- `--queue <file.json>` — `[{ "name": ..., "brief": "<prose>" | "@<path>" }]`
+  (also `{ "briefs": [...] }`).
+
+`--work <dir>` is **required** — the factory workspace: it holds
+`<work>/state/factory-state.json` (the durable checkpoint) and a per-project
+directory `<work>/<slug>/` with `build.json` + `emitted/`. `--limit N` bounds the
+briefs that do work in one tick; `--dry-run` plans and writes nothing; `--retry`
+re-attempts a parked/stalled item (an explicit human decision).
+
+**Checkpoint, resume, idempotence.** The factory persists the state after every
+step, so a killed process **resumes rather than restarts** — a `driving` item
+re-enters `unattended`, which itself resumes from the phase checkpoint the drive
+writes beside the project (`<dir>/.rapidtool/checkpoint.json`). A brief already
+`delivered` is **skipped**. If a brief's bytes changed under an existing record,
+the item is reported as `changed` and left for a human — never silently re-run.
+A corrupt state file is refused, never overwritten.
+
+**Never invents success.** Delivery is claimed only after the `emit --git`
+envelope proves a real commit (`committed: true`, or the idempotent
+`noop: true` with a real `.git` on disk). Every other terminal is reported with
+its code and left for a human:
+
+- `parked` — exit 2 from `unattended`: the machine seat is exhausted at a
+  `forceHuman` gate (or a `blocked` project). A person must `approve`/`reject`.
+- `stalled` — exit 1: a hard DoD block (`RT_E_GATE_PENDING`), a red-gate complete
+  seal (`RT_E_GATES_FAILED` — a red seal is never a clean 0), a checkpoint
+  refusal, or a delivery refusal (`RT_E_GIT_UNAVAILABLE`, `RT_E_FOREIGN_FILES`, …).
+- `failed` — a runtime/backend failure (exit 3/4), retried on the next tick until
+  the bounded attempt cap, then left for a human.
+
+**Honest limits (do not claim these are automated).** The factory does not repair
+a red gate and does not clear a `forceHuman` gate. A **keyless** drive is the
+deterministic floor, which cannot synthesise a brief-conformant module, so it
+seals with the P6 DoD gate red and is reported `stalled` — keyless walk-away
+therefore does **not** deliver; it produces an honest, coded stall for a human.
+A keyed drive defaults DoD enforcement ON and may still miss the P6 DoD (the
+synthesis is not guaranteed), which is likewise reported, never papered over.
+The human follow-up for a stalled project is the repair loop (`tree-run` /
+`repair --dir`) or a re-drive with `--retry` after a fix.
+
+**Exit codes.** `0` every processed item is delivered (or was already);
+`2` at least one item parked/changed and none stalled/failed; `1` a stall or
+failure (or a usage error); `4` an unexpected factory-internal failure.
+
+```bash
+# one tick by hand
+node scripts/factory-watch.mjs --intake "C:\briefs" --work "C:\factory"
+# or via the npm script
+npm run factory -- --intake "C:\briefs" --work "C:\factory" --limit 3
+```
+
+### Host-hook recipe (Windows Task Scheduler / cron)
+
+The factory is a **bounded tick**, not a daemon — schedule it. Each run is
+idempotent, so a missed tick simply does the work on the next one.
+
+**Windows Task Scheduler** (every 30 minutes; adjust paths; `cmd /c` +
+quoted `cd /d` because the repo path contains a space):
+
+```
+schtasks /Create /TN "RapidToolFactory" /SC MINUTE /MO 30 /RL LIMITED /F ^
+  /TR "cmd /c cd /d \"C:\Users\me\Desktop\RapidTool Main\" && npm run factory -- --intake \"C:\briefs\" --work \"C:\factory\" >> \"C:\factory\tick.log\" 2>&1"
+```
+
+Run it once immediately with `schtasks /Run /TN "RapidToolFactory"`; delete with
+`schtasks /Delete /TN "RapidToolFactory" /F`.
+
+**cron** (POSIX host):
+
+```
+*/30 * * * * cd "/srv/rapidtool" && npm run factory -- --intake /srv/briefs --work /srv/factory >> /var/log/rt-factory.log 2>&1
+```
+
+The key resolution is the CLI's own (repo `.env` wins over the process env): a
+keyed hook must run the command from the repo root (as above) so the funded
+`.env` key applies; a keyless hook sets a **present-but-blank** `DEEPSEEK_API_KEY`
+(the process env's keyless disable) so the deterministic floor runs. Measured
+provider usage from a tick can be captured with the provider's opt-in log — set
+`RAPIDTOOL_LLM_USAGE_LOG=<file>` in the hook's environment; the factory forwards
+its environment to every child, and each completed provider call appends one
+JSON line (model + token counts, never a prompt or key).
 
 ## Agent contract (exit codes + stdout purity)
 

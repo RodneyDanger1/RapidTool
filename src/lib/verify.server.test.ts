@@ -34,6 +34,8 @@ import {
   generateCases,
   NO_CALLABLE_EXPORTS_REASON,
   NO_EXPORT_REFERENCE_REASON,
+  VERDICT_CHANNEL_FAILED_REASON,
+  verdictChannelFailed,
   oracleBriefGrounded,
   oracleHasBehaviouralCase,
   parseOracleCases,
@@ -1812,5 +1814,27 @@ describe("345 L1-F2 — behaviouralOracleExpression classifier", () => {
       true,
     );
     assert.equal(oracleHasBehaviouralCase([{ id: "a", expression: "typeof f === 'function'" }]), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 E1 · L2-X4: a verdict-channel delivery/read failure produced an empty
+// authenticated channel, which fell through to `callables === ""` and was
+// mislabeled NO_CALLABLE_EXPORTS_REASON ("module exports no callable names").
+// The real cause — no fd-3/nonce evidence at all — must be classified honestly
+// with its own coded reason (AGENTS.md contract #4).
+// ---------------------------------------------------------------------------
+describe("346 E1 L2-X4 — a verdict-channel failure is not a module defect", () => {
+  it("only an entirely empty authenticated channel is a channel failure", () => {
+    assert.equal(verdictChannelFailed(false, false), true, "no HARNESS_EXPORTS and no HARNESS_COMPILE");
+    assert.equal(verdictChannelFailed(true, false), false, "exports marker arrived");
+    assert.equal(verdictChannelFailed(false, true), false, "compile-fail marker arrived");
+    assert.equal(verdictChannelFailed(true, true), false);
+  });
+
+  it("the reason is distinct from the no-callable-exports reason and carries a code", () => {
+    assert.match(VERDICT_CHANNEL_FAILED_REASON, /verdict channel/i);
+    assert.match(VERDICT_CHANNEL_FAILED_REASON, /RT_E_RUNNER_FAILED/, "the refusal is coded");
+    assert.notEqual(VERDICT_CHANNEL_FAILED_REASON, NO_CALLABLE_EXPORTS_REASON);
   });
 });

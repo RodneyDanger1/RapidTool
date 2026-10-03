@@ -165,6 +165,9 @@ import type { TreeRunOutcome } from "./compile-check.server.ts";
 // the candidate tree with. RUNTIME imports: the gate genuinely runs `tsc`.
 import { typecheckDir, type TreeProjectScriptVerdict } from "./compile-check.server.ts";
 import { scaffoldProject } from "./scaffold.ts";
+// 346 E1 · A1-04: the E-08 oracle-pinning seam's pure renderer (verify.server.ts
+// consumes the rendered string + pinned ids — it never imports dod.ts itself).
+import { oracleToCaseSeeds } from "./dod.ts";
 import type { Artifact, ArtifactKind, DataContract, GeneratedTreeFile, JsonLog, ModelRoute, PhaseId, Project } from "./types.ts";
 // T5.4 (W18 LANE 5): the artifact-provenance shape + vocabulary live in io.ts
 // (the serialization boundary that validates and round-trips them). TYPE-ONLY
@@ -3426,7 +3429,15 @@ export type P6SynthesisDeps = {
   verify: (
     source: string,
     brief: string,
-    opts?: { maxIterations?: number; signatureNames?: readonly string[] },
+    opts?: {
+      maxIterations?: number;
+      signatureNames?: readonly string[];
+      /** E-08 (A4-b): the rendered `oracleToCaseSeeds(project.oracle)` block. */
+      seeds?: string;
+      /** E-08 (A4-b): the pinned A7 oracle ids — a returned case list dropping
+       *  one is refused (346 E1 · A1-04 wires these through to the seam). */
+      pinnedOracleIds?: readonly string[];
+    },
   ) => Promise<VerifyOutcome>;
   /** fixes/144 (M3-2): optional tree-run failure context (failing file path +
    *  first not-ok tail — bounded ~1500 chars) supplied by the M4 journey
@@ -4678,6 +4689,12 @@ async function synthesizeSingleModule(
   const outcome = await verify(envelope.module, brief, {
     maxIterations: 3,
     signatureNames: oracleContractNames(envelope.module, envelope.exports),
+    // 346 E1 · A1-04 (E-08 live): feed the project's A7 oracle rows so a case
+    // list that drops a pinned row is refused — a seeded run, not a claim.
+    seeds: oracleToCaseSeeds(Array.isArray(project.oracle) ? project.oracle : []),
+    pinnedOracleIds: (Array.isArray(project.oracle) ? project.oracle : [])
+      .map((o) => o?.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0),
   });
   if (outcome.status !== "passed") {
     return refuse(withAttemptLogs(project, attemptLogs), codeForVerifyStatus(outcome.status), outcome.evidence || `verify ${outcome.status}`);
@@ -5462,7 +5479,9 @@ function treeUpgraded(
 /** Deterministic evidence summary of a green TreeRunOutcome (rel spec paths +
  *  verdicts + counts only — never the run dir, timings or detail prose, so the
  *  fnv1a evidence hash reproduces across hosts). `executed` is the honesty
- *  gate: at least one spec file actually ran AND executed ≥1 assertion.
+ *  gate: at least one spec file actually ran, executed ≥1 assertion, AND
+ *  carried ≥1 BEHAVIOURAL assertion (346 E1 · item 2 — a shape-only spec may
+ *  not certify "tested" on its own; specs predating the field stay counted).
  *
  *  W48/334-1c: the DECLARED-SCRIPT state is decisive evidence too — a green run
  *  whose emitted `package.json` scripts (`typecheck`/`build`) never executed
@@ -5478,6 +5497,13 @@ export function treeRunTestedEvidence(o: TreeRunOutcome): {
   summary: string;
 } {
   const specs = (Array.isArray(o.tests) ? o.tests : []).filter((t) => t.run === "pass");
+  // 346 E1 (item 2): a passing spec that is SHAPE-ONLY (no behavioural
+  // assertion) executed assertions but certified nothing about behaviour, so it
+  // may not carry the "tested" evidence on its own. Specs predating the
+  // `behavioural` field are treated as legacy (counted) so the evidence of a
+  // real emitted tree is unchanged; `runSpecFile` now marks a shape-only spec
+  // `behavioural: false`.
+  const behaviouralSpecs = specs.filter((t) => t.behavioural !== false);
   const assertions = specs.reduce((n, t) => n + (t.tests?.pass ?? 0), 0);
   // F3-16 (fixes/294 N2): identify WHICH specs passed — counts alone let two
   // different trees (equal compile/spec/assertion numbers) mint the identical
@@ -5507,7 +5533,7 @@ export function treeRunTestedEvidence(o: TreeRunOutcome): {
       : []),
     ...(entrySkipped ? ["entry-skipped"] : []),
   ].join(" · ");
-  return { executed: specs.length > 0 && assertions > 0, specFiles: specs.length, assertions, summary };
+  return { executed: specs.length > 0 && assertions > 0 && behaviouralSpecs.length > 0, specFiles: specs.length, assertions, summary };
 }
 
 /**

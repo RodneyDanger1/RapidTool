@@ -318,6 +318,13 @@ export type TreeSpecVerdict = {
   tests: { pass: number; fail: number };
   /** Execution verdict of the spec under the bounded runner. */
   run: TreeRunVerdict;
+  /** 346 E1 (item 2): true when the spec's source carries at least one
+   *  BEHAVIOURAL assertion (a value/relational/call-outcome check), false when
+   *  every assertion is shape-only (`typeof … === "function"`,
+   *  `Array.isArray`, `x.length > 0`, presence-to-null). Absent on verdicts
+   *  produced before this field existed (and on non-pass verdicts). A
+   *  shape-only spec may not earn `tested` — see treeRunTestedEvidence. */
+  behavioural?: boolean;
   /** Empty on pass; the failure/error tail or skip reason on anything else. */
   detail?: string;
   durationMs?: number;
@@ -1065,6 +1072,20 @@ function parseTapSummary(tap: string): {
 }
 
 /**
+ * 346 E1 (L1-F3): a spec is a pass CANDIDATE only when the bounded runner
+ * exited 0 AND the TAP summary reported no failing and no cancelled test. A
+ * zero exit with a masked `# fail N` (a producer that sets `process.exitCode =
+ * 0`) must never be read as green — the exit status alone is not the verdict.
+ * Pure; an absent summary is never green.
+ */
+export function specExitIsGreen(
+  status: number,
+  summary: { fail: number; cancelled: number } | null,
+): boolean {
+  return status === 0 && summary !== null && summary.fail === 0 && summary.cancelled === 0;
+}
+
+/**
  * A3: Node's TAP summary counts TESTS, not assertions (`test("load", () => {})`
  * prints `# pass 1` with zero asserts). A behavioral pass requires at least one
  * `assert.*` call in the spec source. Comments AND string literals are
@@ -1074,6 +1095,107 @@ function parseTapSummary(tap: string): {
 function specSourceHasAssert(source: string): boolean {
   const stripped = maskLiteralsAndComments(typeof source === "string" ? source : "");
   return /\bassert\s*\.\s*[A-Za-z]/.test(stripped) || /\bassert\s*\(/.test(stripped);
+}
+
+/** 346 E1 (item 2): every `assert.<name>(args)` call in a masked spec source. */
+function assertCallsIn(masked: string): { name: string; args: string }[] {
+  const out: { name: string; args: string }[] = [];
+  const re = /\bassert\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(masked)) !== null) {
+    const open = m.index + m[0].length - 1;
+    let depth = 0;
+    let i = open;
+    for (; i < masked.length; i++) {
+      const ch = masked[i];
+      if (ch === "(") depth++;
+      else if (ch === ")" && --depth === 0) break;
+    }
+    out.push({ name: m[1]!, args: masked.slice(open + 1, i) });
+  }
+  return out;
+}
+
+/** Split an argument list on top-level commas (ignoring (), [], {}). */
+function splitTopLevelArgs(args: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < args.length; i++) {
+    const ch = args[i];
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if (ch === "," && depth === 0) {
+      parts.push(args.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(args.slice(start));
+  return parts;
+}
+
+/** A bare name / member read (`ep`, `ns[name]`, `out.job`) — a presence probe,
+ *  never a value constraint. Masked string leaves are blank, so they match too. */
+function isBareRead(expr: string): boolean {
+  const e = expr.trim();
+  if (!e) return true;
+  return /^[A-Za-z_$][\w$]*(?:\s*[.[][^()]*?\]?)?$/.test(e);
+}
+
+/** A type/emptiness/relational-length shape marker — proves presence, not behaviour. */
+function isShapeMarker(expr: string): boolean {
+  return (
+    /\btypeof\b/.test(expr) ||
+    /\bArray\s*\.\s*isArray\b/.test(expr) ||
+    /[!=]==?\s*(?:null|undefined|void\s+0)\b/.test(expr) ||
+    /\.length\s*(?:>=?|<=?|===|!==)\s*\d+/.test(expr)
+  );
+}
+
+const ASSERT_EQUALITY = new Set([
+  "equal",
+  "strictEqual",
+  "notEqual",
+  "notStrictEqual",
+  "deepEqual",
+  "deepStrictEqual",
+  "notDeepEqual",
+  "notDeepStrictEqual",
+]);
+
+/**
+ * 346 E1 (item 2): is this single assertion shape-only? `ok`/`assert` reject a
+ * bare presence probe or a type/length marker; the equality family is shape
+ * only when a side is a type/presence/length marker. `throws`/`rejects`/`match`
+ * observe a call outcome and are never shape-only. Pure.
+ */
+function assertionIsShapeOnly(name: string, args: string): boolean {
+  const parts = splitTopLevelArgs(args);
+  if (name === "ok" || name === "notOk") {
+    const first = parts[0] ?? "";
+    return isShapeMarker(first) || isBareRead(first);
+  }
+  if (ASSERT_EQUALITY.has(name)) {
+    if (parts.some(isShapeMarker)) return true;
+    // `equal(flag, <masked>)` — one bare read against an elided literal is not
+    // enough to call it shape-only behaviour; only a marker makes it shape.
+    return false;
+  }
+  return false;
+}
+
+/**
+ * 346 E1 (item 2): does this spec source carry at least one behavioural
+ * assertion? A spec whose every assertion is a shape/type/presence probe
+ * (`typeof x === "function"`, `Array.isArray(x)`, `names.length > 0`,
+ * `ep !== undefined`) certifies nothing about behavior, so it must not mint
+ * `tested` on its own. Pure; comments/strings are masked first so a quoted or
+ * commented assert cannot count.
+ */
+export function specSourceHasBehaviouralAssert(source: string): boolean {
+  const masked = maskLiteralsAndComments(typeof source === "string" ? source : "");
+  if (!specSourceHasAssert(masked)) return false;
+  return assertCallsIn(masked).some((c) => !assertionIsShapeOnly(c.name, c.args));
 }
 
 /** Extract a readable failure tail for the FIRST failing test from TAP
@@ -1149,7 +1271,10 @@ async function runSpecFile(
     return { ...base, tests, run: "timeout", detail: `spec killed after ${innerTimeout / 1000}s (inner --test timeout)`, durationMs: duration() };
   }
   const status = typeof env.status === "number" ? env.status : 1;
-  if (status === 0) {
+  // 346 E1 · L1-F3: exit 0 is necessary but NOT sufficient — a summary that
+  // reports a failing or cancelled test means the run was not green, whatever
+  // the exit code said.
+  if (specExitIsGreen(status, summary)) {
     // A3: TAP `# pass 1` on a load-only / empty / skip-only spec is NOT green.
     let source = "";
     try {
@@ -1157,20 +1282,28 @@ async function runSpecFile(
     } catch {
       source = "";
     }
-    const noAssert = !specSourceHasAssert(source);
+    // 346 E1 (item 2): a shape-only assertion set (`typeof … === "function"`,
+    // `Array.isArray`, `.length > 0`) certifies presence, not behaviour, so it
+    // is NOT a behavioural pass either.
+    const behavioural = specSourceHasBehaviouralAssert(source);
     const noTapPass = !summary || summary.pass === 0 || summary.tests === 0;
-    if (noAssert || noTapPass) {
+    if (!behavioural || noTapPass) {
       return {
         ...base,
         tests: { pass: 0, fail: tests.fail },
         run: "fail",
+        behavioural: false,
         detail: "no behavioral assertion ran",
         durationMs: duration(),
       };
     }
-    return { ...base, tests, run: "pass", durationMs: duration() };
+    return { ...base, tests, run: "pass", behavioural: true, durationMs: duration() };
   }
-  const tail = tapFailureTail(tap) || tap.slice(-600).trim() || `spec exited ${status}`;
+  const maskedFail =
+    status === 0 && summary && summary.fail > 0
+      ? `exit 0 but TAP reported ${summary.fail} failing test(s)`
+      : "";
+  const tail = tapFailureTail(tap) || maskedFail || tap.slice(-600).trim() || `spec exited ${status}`;
   const cancelled = summary && summary.cancelled > 0 ? ` (${summary.cancelled} cancelled)` : "";
   return { ...base, tests, run: "fail", detail: `${tail.slice(0, VERDICT_TAIL_MAX)}${cancelled}`, durationMs: duration() };
 }

@@ -38,19 +38,19 @@
  * below; unknown id ⇒ coded RT_E_VALIDATION refusal, never a silent default;
  * unset ⇒ source:"default" ⇒ the byte-identical deepseek path), and the doctor
  * surfaces the resolved provider/model honestly (doctor.ts `envSelection` —
- * "cloud-by-default, keyless floor"). The failover CHAIN now resolves
- * (`RAPIDTOOL_FALLBACK_PROVIDERS`, the R13-f09 block below) but stays
- * deliberately UNARMED — and the bytes cannot honestly arm it: the only
- * non-DeepSeek family (`xai`) is a CANDIDATE with an empty `requestModelIds`,
- * `applyProbedModels` only MINTS a verified descriptor without REGISTERING it
- * into `PROVIDERS`, and every role tier already routes to `deepseek`, so a
- * router would be a no-op or a same-family retry (`failoverArmingGap` names
- * this at the call site). Cross-family ROUTING + autodetect (101 §4) remain
- * deferred; per-call telemetry LANDED as the provider call tap
- * (`./deepseek.ts` `setLlmCallTap`, W23-L1 fixes/262). (F2 · W19-L5, fixes/252,
- * landed the PROBE half beside the providers — `./probe.ts` — and registers
- * the probed `xai` candidate; with OV-1 landed, a verified family becomes
- * env-selectable once a probe has read its ids back.)
+ * "cloud-by-default, keyless floor"). fixes/346 A2-F2: there is NO failover
+ * router and NO `RAPIDTOOL_FALLBACK_PROVIDERS` switch. The chain resolver that
+ * used to resolve-but-refuse was a dead switch that implied resilience it could
+ * not deliver — the only non-DeepSeek family (`xai`) is a CANDIDATE with an
+ * empty `requestModelIds`, `applyProbedModels` only MINTS a verified descriptor
+ * without REGISTERING it into `PROVIDERS`, and there is no served-provider
+ * provenance on `LlmResult` — so it was deleted rather than left to mislead.
+ * Cross-family ROUTING + autodetect (101 §4) remain unimplemented; per-call
+ * telemetry LANDED as the provider call tap (`./deepseek.ts` `setLlmCallTap`,
+ * W23-L1 fixes/262). (F2 · W19-L5, fixes/252, landed the PROBE half beside the
+ * providers — `./probe.ts` — and registers the probed `xai` candidate; with
+ * OV-1 landed, a verified family becomes env-selectable once a probe has read
+ * its ids back.)
  *
  * T-107.10 (W7 · L4, fixes/216t) added ONE seam here, additively: an EXPLICIT
  * provider selection (`CallModelOptions.provider` + `resolveExplicitProvider`)
@@ -283,96 +283,19 @@ export function resolveEnvProvider(
 }
 
 // ---------------------------------------------------------------------------
-// R13-f09 (W31 · T3) — `RAPIDTOOL_FALLBACK_PROVIDERS`: the failover chain,
-// RESOLVED but deliberately NOT ARMED
+// fixes/346 A2-F2 — NO failover chain.
+//
+// R13-f09 (W31 · T3) once exported `FALLBACK_PROVIDERS_ENV_VAR` +
+// `resolveFallbackChain` and refused any configured `RAPIDTOOL_FALLBACK_PROVIDERS`
+// at `callModel`. That was a switch that could only ever refuse: the only
+// non-DeepSeek family (`xai`) is an unprobed CANDIDATE, `applyProbedModels`
+// mints a verified descriptor but nothing registers it into `PROVIDERS`, and
+// `LlmResult` carries no served-provider provenance — so no router could fail
+// over to anything. It was deleted rather than left to imply resilience it did
+// not have. There is no failover; every role tiers to `deepseek` (see
+// `ROLE_TIERS`). Cross-family routing needs a funded probe + a registration
+// seam + provenance, and is tracked as a real gap, not a UI switch.
 // ---------------------------------------------------------------------------
-
-/** The ONE env var naming the failover chain: comma-separated provider ids,
- *  tried in order after the primary. Today the chain is RESOLVED (pure,
- *  testable, visible to `doctor`/tests) but NOT ARMED — see
- *  `failoverArmingGap` for the byte-derived reason. A configured chain is
- *  refused LOUDLY at the call site — never silently ignored, never a fake
- *  catch — so no caller can believe failover is on when it isn't. Unset (the
- *  default) ⇒ the single-provider path is byte-identical. */
-export const FALLBACK_PROVIDERS_ENV_VAR = "RAPIDTOOL_FALLBACK_PROVIDERS";
-
-/**
- * R13-f09 (342-5) — WHY the resolved chain still cannot be armed, derived from
- * the registry's own descriptors (never asserted). A router can only fail over
- * to a chain entry that is BOTH dispatchable (≥1 verified request id, else
- * `complete` refuses on the candidate rule) AND a different family than the
- * primary. Neither holds today:
- *   - `xai` is the only non-DeepSeek member and is a CANDIDATE with
- *     `requestModelIds: []`; `probeProviderModels` → `applyProbedModels` only
- *     MINTS a verified descriptor — NO seam REGISTERS it back into `PROVIDERS`,
- *     so `resolveFallbackChain` can never see a verified second family;
- *   - `deepseek` is dispatchable but is the family every role tier already
- *     routes to — a same-family retry, not failover.
- * Arming a router over this registry would therefore be a no-op or a
- * mislabeled retry — an over-claim. Exact missing pieces: (1) a probe-verified
- * second-family descriptor REGISTERED in `PROVIDERS` (nothing registers one
- * today); (2) the transient-class per-call router + served-provider provenance
- * (TODO(R13-f09) at `callModel`) — provenance has NO field on `LlmResult`
- * (`src/lib/llm.ts`, outside this module), so arming also needs that type
- * widened; (3) the owner's keyed evidence wave.
- */
-function failoverArmingGap(ids: readonly LlmProviderId[], primaryId: string): string {
-  return ids
-    .map((id) => {
-      const provider = getProvider(id);
-      if (!provider) return `"${id}" is not registered`;
-      const verified = provider.requestModelIds.length;
-      if (verified === 0) {
-        return `"${id}" is a CANDIDATE with 0 verified request ids (probeProviderModels → applyProbedModels MINTS a descriptor but no seam REGISTERS it in PROVIDERS)`;
-      }
-      if (provider.id === primaryId) {
-        return `"${id}" declares ${verified} verified request id(s) but is the SAME family the primary routes to — a same-family retry, not failover`;
-      }
-      return `"${id}" declares ${verified} verified request id(s) but no per-call router/provenance exists yet`;
-    })
-    .join("; ");
-}
-
-/** Parse + validate `RAPIDTOOL_FALLBACK_PROVIDERS`. Pure: no I/O. Unset/blank
- *  ⇒ the empty chain (`ok`). Unknown id or a duplicate entry ⇒ a coded
- *  `RT_E_VALIDATION` refusal naming the registered ids — explicit, never
- *  silently dropped. (`mock` stays absent from `PROVIDERS`, so it can never be
- *  chained either — the explicit-only rule of T-107.10.) */
-export function resolveFallbackChain(
-  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
-): { ok: true; ids: LlmProviderId[] } | { ok: false; code: ErrorCode; error: string } {
-  const raw = env?.[FALLBACK_PROVIDERS_ENV_VAR];
-  if (typeof raw !== "string" || !raw.trim()) return { ok: true, ids: [] };
-  const parts = raw
-    .split(",")
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-  const known = PROVIDERS.map((p) => p.id);
-  const ids: LlmProviderId[] = [];
-  for (const id of parts) {
-    const provider = getProvider(id);
-    if (!provider) {
-      return {
-        ok: false,
-        code: "RT_E_VALIDATION",
-        error:
-          `${FALLBACK_PROVIDERS_ENV_VAR}: "${id}" is not a registered provider — known: ` +
-          `${known.join(", ")}. Refusing rather than silently skipping it.`,
-      };
-    }
-    if (ids.includes(provider.id)) {
-      return {
-        ok: false,
-        code: "RT_E_VALIDATION",
-        error:
-          `${FALLBACK_PROVIDERS_ENV_VAR}: provider "${provider.id}" appears twice — the chain ` +
-          `is an ordered list of DISTINCT candidates. Refusing rather than silently de-duping it.`,
-      };
-    }
-    ids.push(provider.id);
-  }
-  return { ok: true, ids };
-}
 
 /** Successful env-selected route: the provider descriptor + the model id the
  *  registry would SEND for the role, plus which rung selected the provider. */
@@ -730,39 +653,9 @@ export async function callModel(
   if (!envSelection.ok) {
     return { ok: false, reason: "error", error: envSelection.error, code: envSelection.code };
   }
-  // R13-f09 (W31 · T3): the failover chain is resolved BEFORE any dispatch and
-  // refused while it remains unarmed — a configured chain must never be a
-  // silent no-op (that lie would outlive this wave). Unset ⇒ empty chain ⇒
-  // everything below is exactly the pre-R13-f09 path.
-  const fallbackChain = resolveFallbackChain(process.env);
-  if (!fallbackChain.ok) {
-    return { ok: false, reason: "error", error: fallbackChain.error, code: fallbackChain.code };
-  }
-  if (fallbackChain.ids.length > 0) {
-    // R13-f09 (342-5): the chain stays UNARMED. The refusal is DERIVED from the
-    // registry's own descriptors (`failoverArmingGap`) so it names the exact
-    // missing piece instead of a generic promise. TODO(R13-f09) stays open until
-    // a probe-verified second-family descriptor is REGISTERED in `PROVIDERS`
-    // (not merely minted by `applyProbedModels`) and a transient-class router +
-    // served-provider provenance are written.
-    const primaryId =
-      isModelRole(role) &&
-      (envSelection.source !== "env" || ROLE_TIERS[role].provider === envSelection.provider.id)
-        ? ROLE_TIERS[role].provider
-        : envSelection.provider.id;
-    return {
-      ok: false,
-      reason: "error",
-      error:
-        `${FALLBACK_PROVIDERS_ENV_VAR}="${fallbackChain.ids.join(",")}": the failover chain is ` +
-        `specified but NOT ARMED — ${failoverArmingGap(fallbackChain.ids, primaryId)}. ` +
-        `Exact missing pieces: (1) a probe-verified second-family descriptor REGISTERED in PROVIDERS, ` +
-        `(2) a transient-class per-call router + served-provider provenance (TODO(R13-f09) in ` +
-        `callModel), (3) the owner's keyed evidence wave. Unset ${FALLBACK_PROVIDERS_ENV_VAR} to use ` +
-        `the single-provider path — this refusal exists so no caller can believe failover is on.`,
-      code: "RT_E_VALIDATION",
-    };
-  }
+  // fixes/346 A2-F2: there is no failover chain to consult — the dead
+  // `RAPIDTOOL_FALLBACK_PROVIDERS` switch was deleted. Dispatch is
+  // single-provider: the env-selected provider or the role tier below.
   if (
     envSelection.source === "env" &&
     isModelRole(role) &&

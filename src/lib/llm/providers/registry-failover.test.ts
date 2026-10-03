@@ -1,16 +1,21 @@
 /**
- * R13-f09 (W31 · T3) — `RAPIDTOOL_FALLBACK_PROVIDERS` pins.
+ * fixes/346 A2-F2 — the un-armed failover shell is DELETED, and these pins keep
+ * it deleted.
  *
- * The failover chain RESOLVES purely (parse + validate, nothing invoked), a
- * CONFIGURED chain REFUSES at `callModel` while unarmed (never a silent
- * no-op), an INVALID chain refuses with a coded error naming the registered
- * ids, and the unset default keeps the single-provider keyless floor
- * byte-identical. No network: the refusal happens before any dispatch, and
- * the injected fetch spy proves zero calls leave.
+ * R13-f09 (W31 · T3) once exported `FALLBACK_PROVIDERS_ENV_VAR` +
+ * `resolveFallbackChain` and made `callModel` refuse any configured
+ * `RAPIDTOOL_FALLBACK_PROVIDERS`. That switch could only ever refuse (the only
+ * non-DeepSeek family is an unprobed CANDIDATE; nothing registers a probed
+ * descriptor; `LlmResult` carries no provenance), so it implied a resilience it
+ * did not have. This suite asserts the honest post-deletion contract instead:
+ * no chain resolver is exported, the env var is INERT (identical dispatch to
+ * unset), and every role still routes to the single dispatchable family. No
+ * network — the keyless floor is hit before any dispatch.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { callModel, FALLBACK_PROVIDERS_ENV_VAR, resolveFallbackChain } from "./registry.ts";
+import * as registry from "./registry.ts";
+import { callModel, getProvider, RAPIDTOOL_MODEL_ROLES, ROLE_TIERS } from "./registry.ts";
 
 function withEnv(vars: Record<string, string | undefined>): () => void {
   const saved = new Map<string, string | undefined>();
@@ -36,91 +41,52 @@ function withCleanLlmEnv(extra: Record<string, string | undefined> = {}): () => 
   });
 }
 
-describe("R13-f09 — RAPIDTOOL_FALLBACK_PROVIDERS resolves purely", () => {
-  it("unset / blank ⇒ the empty chain (ok), no refusal", () => {
-    const a = resolveFallbackChain({});
-    assert.deepEqual(a, { ok: true, ids: [] });
-    const b = resolveFallbackChain({ [FALLBACK_PROVIDERS_ENV_VAR]: "   " });
-    assert.deepEqual(b, { ok: true, ids: [] });
-    const c = resolveFallbackChain({ [FALLBACK_PROVIDERS_ENV_VAR]: ", ," });
-    assert.deepEqual(c, { ok: true, ids: [] });
-  });
+const LEGACY_SWITCH = "RAPIDTOOL_FALLBACK_PROVIDERS";
 
-  it("registered ids resolve in order (whitespace tolerated)", () => {
-    const r = resolveFallbackChain({ [FALLBACK_PROVIDERS_ENV_VAR]: " xai , deepseek " });
-    assert.ok(r.ok);
-    if (r.ok) assert.deepEqual(r.ids, ["xai", "deepseek"]);
+describe("fixes/346 A2-F2 — no un-armed failover switch is exported", () => {
+  it("the module exports neither the switch name nor a chain resolver", () => {
+    assert.equal(
+      "FALLBACK_PROVIDERS_ENV_VAR" in registry,
+      false,
+      "the dead env-var export must be gone — a switch that only refuses implies resilience",
+    );
+    assert.equal(
+      "resolveFallbackChain" in registry,
+      false,
+      "there is no chain resolver to consult; failover is not implemented",
+    );
   });
+});
 
-  it("an unknown id (incl. the explicit-only mock) is a coded refusal naming the registered ids", () => {
-    for (const bad of ["nope", "mock"]) {
-      const r = resolveFallbackChain({ [FALLBACK_PROVIDERS_ENV_VAR]: bad });
-      assert.equal(r.ok, false);
-      if (!r.ok) {
-        assert.equal(r.code, "RT_E_VALIDATION");
-        assert.match(r.error, /not a registered provider/);
-        assert.match(r.error, /deepseek/);
-        assert.match(r.error, /xai/);
-      }
+describe("fixes/346 A2-F2 — the legacy env var is inert", () => {
+  it("a configured RAPIDTOOL_FALLBACK_PROVIDERS does not change dispatch (keyless floor, not a refusal)", async () => {
+    const unset = withCleanLlmEnv();
+    let baseline: Awaited<ReturnType<typeof callModel>>;
+    try {
+      baseline = await callModel("main", "hello");
+    } finally {
+      unset();
     }
-  });
+    assert.equal(baseline.ok, false);
+    if (!baseline.ok) assert.equal(baseline.code, "RT_E_LLM_NOT_CONFIGURED");
 
-  it("a duplicate entry is a coded refusal — never silently de-duped", () => {
-    const r = resolveFallbackChain({ [FALLBACK_PROVIDERS_ENV_VAR]: "xai,xai" });
-    assert.equal(r.ok, false);
-    if (!r.ok) {
-      assert.equal(r.code, "RT_E_VALIDATION");
-      assert.match(r.error, /appears twice/);
+    const restore = withCleanLlmEnv({ [LEGACY_SWITCH]: "xai,deepseek" });
+    try {
+      const res = await callModel("main", "hello");
+      assert.deepEqual(res, baseline, "a deleted switch is not consulted — dispatch is single-provider");
+    } finally {
+      restore();
     }
   });
 });
 
-describe("R13-f09 — callModel consults the chain before any dispatch", () => {
-  it("unset chain ⇒ the keyless floor is byte-identical (RT_E_LLM_NOT_CONFIGURED)", async () => {
-    const restore = withCleanLlmEnv();
-    try {
-      const res = await callModel("main", "hello");
-      assert.equal(res.ok, false);
-      if (!res.ok) assert.equal(res.code, "RT_E_LLM_NOT_CONFIGURED");
-    } finally {
-      restore();
-    }
-  });
-
-  it("configured-but-unarmed chain ⇒ coded refusal BEFORE the wire, zero fetch calls", async () => {
-    const restore = withCleanLlmEnv({ [FALLBACK_PROVIDERS_ENV_VAR]: "xai" });
-    const calls: number[] = [];
-    try {
-      const res = await callModel("main", "hello", {
-        fetch: (async () => {
-          calls.push(1);
-          throw new Error("network must not be reached — the chain refuses pre-dispatch");
-        }) as unknown as typeof fetch,
-      });
-      assert.equal(res.ok, false);
-      if (!res.ok) {
-        assert.equal(res.code, "RT_E_VALIDATION");
-        assert.equal(res.reason, "error");
-        assert.match(res.error ?? "", /NOT ARMED/);
-        assert.match(res.error ?? "", /RAPIDTOOL_FALLBACK_PROVIDERS/);
-      }
-      assert.equal(calls.length, 0, "no request may leave while the chain is unarmed");
-    } finally {
-      restore();
-    }
-  });
-
-  it("invalid chain ⇒ the same coded refusal shape (registry ids named)", async () => {
-    const restore = withCleanLlmEnv({ [FALLBACK_PROVIDERS_ENV_VAR]: "not-a-provider" });
-    try {
-      const res = await callModel("main", "hello");
-      assert.equal(res.ok, false);
-      if (!res.ok) {
-        assert.equal(res.code, "RT_E_VALIDATION");
-        assert.match(res.error ?? "", /not a registered provider/);
-      }
-    } finally {
-      restore();
+describe("fixes/346 A2-F2 — the registry stays honestly single-provider", () => {
+  it("xai remains an unprobed CANDIDATE and every role tiers to deepseek", () => {
+    const xai = getProvider("xai");
+    assert.ok(xai, "the probed family is still registered (for the env-selectable path)");
+    assert.deepEqual([...xai!.requestModelIds], [], "a candidate never carries an unprobed id");
+    for (const role of RAPIDTOOL_MODEL_ROLES) {
+      assert.equal(ROLE_TIERS[role].provider, "deepseek", `${role} routes to the only dispatchable family`);
     }
   });
 });

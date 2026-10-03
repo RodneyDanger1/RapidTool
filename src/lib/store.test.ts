@@ -41,8 +41,20 @@ class MemoryStorage {
 (globalThis as unknown as { window: unknown }).window = globalThis;
 
 // Dynamic import: must run AFTER the polyfill so persist binds a real storage.
-const { codedFailureText, convergeRealRun, keyedRefusalSince, KEY_UNUSABLE_CODES, readLastKeyed, staleEmitStep, useRapid, persistStorageHealth } =
-  await import("./store.ts");
+const {
+  codedFailureText,
+  convergeRealRun,
+  keyedRefusalSince,
+  KEY_UNUSABLE_CODES,
+  readLastKeyed,
+  staleEmitStep,
+  useRapid,
+  persistStorageHealth,
+  applyCrossTabSnapshot,
+  mergeCrossTabProject,
+  reconcileCrossTabProjects,
+  windowArtifacts,
+} = await import("./store.ts");
 // Let the initial rehydration (which seeds the demo project on empty storage) settle
 // before the first test; beforeEach wipes state for every test regardless.
 await new Promise((r) => setTimeout(r, 10));
@@ -2439,4 +2451,180 @@ test("L3-08: launch() has a synchronous ref latch (queued clicks create ONE buil
 
 test("A3-14: the rail button clips its overflowing badge", () => {
   assert.match(CONSOLE_TSX, /rt-phase flex min-w-\[148px\] items-center gap-2 overflow-hidden/, "the phase button must carry overflow-hidden");
+});
+
+// ---------------------------------------------------------------------------
+// 346 E4 — UI/product completeness fixes (L3-02 · L3-04 · L3-05 · L3-06 ·
+// L3-07 · L3-10 · L3-11 · A1-12). Console JSX invariants are pinned as source
+// assertions (the same instrument the L3-UI guards above use), because the test
+// glob is `src/lib/**/*.test.ts` and no component is mounted.
+// ---------------------------------------------------------------------------
+
+test("L3-02: cross-tab merge adopts another tab's rename and keeps local-only rows", () => {
+  const base = emptyProject({ name: "D1 Stale", brief: BRIEF });
+  // Tab B is stale and just typed notes; tab A renamed the build in between.
+  const localB = { ...base, notes: "notes-from-B" };
+  const remoteA = { ...base, name: "RenamedByA" };
+  const merged = mergeCrossTabProject(localB, remoteA);
+  assert.equal(merged.project.name, "RenamedByA", "the other tab's rename is adopted, not reverted");
+  assert.equal(merged.project.notes, "", "the remote (newer) record owns the scalar fields");
+  assert.equal(merged.drifted, true, "the scalar drift is flagged for the notice");
+
+  const localRow: Artifact = { id: "local-only-1", phase: 0, kind: "docs", title: "B row", body: "b" };
+  const localWithRow = { ...base, artifacts: [...base.artifacts, localRow] };
+  const merged2 = mergeCrossTabProject(localWithRow, base);
+  assert.ok(
+    merged2.project.artifacts.some((a) => a.id === localRow.id),
+    "a local-only appended row survives the reconcile",
+  );
+});
+
+test("L3-02: reconcileCrossTabProjects adds new remote ids, merges shared ids, keeps local-only ids", () => {
+  const a = emptyProject({ name: "A", brief: BRIEF });
+  const b = emptyProject({ name: "B", brief: BRIEF });
+  const local = [a];
+  const remote = [{ ...a, name: "A-renamed" }, b];
+  const out = reconcileCrossTabProjects(local, remote);
+  assert.equal(out.changed, true);
+  assert.deepEqual(out.drifted, [a.id]);
+  assert.equal(out.projects.length, 2, "the remote-only project is added");
+  assert.equal(out.projects.find((p) => p.id === a.id)?.name, "A-renamed");
+});
+
+test("L3-02: applyCrossTabSnapshot commits a storage snapshot, warns on drift, ignores junk", () => {
+  const p = install(seedProject());
+  useRapid.setState({ crossTabNotice: null });
+  const raw = JSON.stringify({
+    state: { projects: [{ ...p, name: "RenamedByOtherTab" }], activeId: p.id, autopilot: false, demoSeeded: true },
+    version: 1,
+  });
+  assert.equal(applyCrossTabSnapshot(raw), true, "the snapshot commits");
+  assert.equal(current(p.id).name, "RenamedByOtherTab", "the other tab's rename is adopted");
+  const notice = useRapid.getState().crossTabNotice;
+  assert.ok(notice && notice.drifted.includes(p.id), "genuine drift raises the visible notice");
+  assert.equal(applyCrossTabSnapshot(raw), false, "re-applying an identical snapshot is a no-op");
+  assert.equal(applyCrossTabSnapshot("{ not json"), false, "an unparseable snapshot is ignored");
+  assert.equal(applyCrossTabSnapshot(null), false);
+  assert.equal(current(p.id).name, "RenamedByOtherTab", "a junk snapshot never clobbers");
+});
+
+test("L3-06: a duplicate report returns applied:false and adds no second agent.report row", () => {
+  const p = install(seedProject());
+  const report = { phase: 0, status: "complete" as const, summary: "P0 delivered" };
+  const first = useRapid.getState().ingestReport(p.id, report);
+  assert.equal(first.ok, true);
+  assert.equal(first.applied, true);
+  const firstRows = current(p.id).logs.filter((l) => l.event === "agent.report").length;
+  assert.ok(firstRows >= 1, "the first complete evidence-less report lands its intake + warn rows");
+  assert.ok(
+    current(p.id).logs.some((l) => l.event === "agent.report" && l.detail.includes("no tests_run evidence")),
+    "the evidence-less warn fires on the LANDED report",
+  );
+  const second = useRapid.getState().ingestReport(p.id, report);
+  assert.equal(second.ok, true);
+  assert.equal(second.applied, false, "the identical report is an idempotent no-op");
+  assert.equal(
+    current(p.id).logs.filter((l) => l.event === "agent.report").length,
+    firstRows,
+    "a no-op duplicate must not trail a warn row (L3-06)",
+  );
+});
+
+test("L3-07: a truncated persisted blob is rescued to .rescue and reported, not lost silently", async () => {
+  localStorage.removeItem("rapidtool.v4.rescue");
+  useRapid.setState({ projects: [], activeId: null, hydrated: false, autopilot: false, demoSeeded: false, persistRecovery: null });
+  const raw = '{"state":{"projects":[{"id":"x"';
+  localStorage.setItem("rapidtool.v4", raw);
+  await useRapid.persist.rehydrate();
+  assert.equal(useRapid.getState().hydrated, true, "hydration still completes");
+  assert.equal(localStorage.getItem("rapidtool.v4.rescue"), raw, "the raw bytes are preserved before the re-seed overwrites them");
+  const rec = useRapid.getState().persistRecovery;
+  assert.ok(rec, "a visible recovery notice is recorded");
+  assert.equal(rec?.rescueKey, "rapidtool.v4.rescue");
+  assert.equal(useRapid.getState().projects.length, 1, "the demo seed ran (storage healed)");
+});
+
+test("L3-07: a valid-JSON blob whose every project row is unrepairable is rescued, not silently dropped", async () => {
+  localStorage.removeItem("rapidtool.v4.rescue");
+  useRapid.setState({ projects: [], activeId: null, hydrated: false, autopilot: false, demoSeeded: false, persistRecovery: null });
+  const raw = JSON.stringify({
+    state: {
+      projects: [{ id: "bad", name: "Bad Build", brief: "b", phases: { 0: "x" } }],
+      activeId: "bad",
+      autopilot: false,
+      demoSeeded: true,
+    },
+    version: 1,
+  });
+  localStorage.setItem("rapidtool.v4", raw);
+  await useRapid.persist.rehydrate();
+  assert.equal(useRapid.getState().hydrated, true);
+  assert.equal(localStorage.getItem("rapidtool.v4.rescue"), raw, "the unreadable build's bytes are rescued");
+  assert.ok(useRapid.getState().persistRecovery, "the recovery is visible, not silent");
+  assert.equal(useRapid.getState().projects.length, 1, "recovered to the demo seed rather than dropping the build silently");
+});
+
+test("L3-07: partial junk entries are still filtered (good row survives) — rescue only on total loss", async () => {
+  localStorage.removeItem("rapidtool.v4.rescue");
+  const good = emptyProject({ name: "Good Build", brief: BRIEF });
+  const blob = JSON.stringify({
+    state: {
+      projects: [null, "oops", { id: "bad", phases: { 0: "x" } }, good],
+      activeId: null,
+      autopilot: false,
+      demoSeeded: true,
+    },
+    version: 0,
+  });
+  useRapid.setState({ projects: [], activeId: null, hydrated: false, demoSeeded: true, persistRecovery: null });
+  localStorage.setItem("rapidtool.v4", blob);
+  await useRapid.persist.rehydrate();
+  assert.deepEqual(
+    useRapid.getState().projects.map((p) => p.id),
+    [good.id],
+    "the well-formed entry is kept; junk entries are filtered (not a total loss)",
+  );
+  assert.equal(localStorage.getItem("rapidtool.v4.rescue"), null, "no rescue copy for a partial loss");
+});
+
+test("L3-10: windowArtifacts bounds the rendered list and reports the hidden older rows", () => {
+  const rows = Array.from({ length: 800 }, (_, i) => i);
+  const shown = windowArtifacts(rows, 100);
+  assert.equal(shown.rows.length, 100, "the render is capped");
+  assert.equal(shown.rows[0], 700, "the window keeps the NEWEST rows (the pane's default selection)");
+  assert.equal(shown.rows[shown.rows.length - 1], 799);
+  assert.equal(shown.hiddenOlder, 700);
+  assert.deepEqual(windowArtifacts(rows, 800), { rows, hiddenOlder: 0 }, "an equal cap renders everything");
+  assert.deepEqual(windowArtifacts(rows, 0), { rows, hiddenOlder: 0 }, "a non-positive cap is a no-op");
+  assert.deepEqual(windowArtifacts([1, 2], 100), { rows: [1, 2], hiddenOlder: 0 });
+});
+
+test("L3-10/L3-11/L3-03/L3-05/L3-04: the console wires the new surfaces", () => {
+  assert.match(CONSOLE_TSX, /windowArtifacts\(artifacts, windowCap\)/, "the Artifacts pane windows its list");
+  assert.match(CONSOLE_TSX, /ARTIFACT_WINDOW_INITIAL/, "a window cap constant exists");
+  assert.match(
+    CONSOLE_TSX,
+    /className="chat-bubble chat-thinking" role="status" aria-live="polite"/,
+    "the chat thinking row is a live region (L3-11)",
+  );
+  assert.match(CONSOLE_TSX, /const paneMounted = \(t: RunTab\)/, "the lazy-mount predicate exists (L3-05)");
+  assert.match(CONSOLE_TSX, /\{paneMounted\("fixtures"\) \? <FixturesPanel \/> : null\}/, "fixtures is lazily mounted");
+  assert.match(CONSOLE_TSX, /\{paneMounted\("chat"\) \? <ChatPane project=\{project\} \/> : null\}/, "chat is lazily mounted");
+  assert.match(CONSOLE_TSX, /\{paneMounted\("vault"\) \? <VaultPane project=\{project\} \/> : null\}/, "vault is lazily mounted");
+  assert.match(CONSOLE_TSX, /<SpendChip project=\{project\} \/>/, "the run spend is surfaced (L3-04)");
+  assert.match(CONSOLE_TSX, /isMeasuredSpend\(spend\)/, "spend renders only a measured slice");
+});
+
+test("A1-12: a console approve records an unattested human decision, never the token-verified seat", () => {
+  const p = install(projectAtGate(4));
+  const res = useRapid.getState().approve(p.id);
+  assert.equal(res.ok, true);
+  const after = current(p.id);
+  const d = after.decisions[after.decisions.length - 1];
+  assert.equal(d.decidedBy, "human", "the console is the designed human surface");
+  assert.ok(!/\[seat human/.test(d.note ?? ""), "the row never claims the token-verified CLI human seat");
+  const seatRow = after.logs.find((l) => l.event === "hitl.console_decision");
+  assert.ok(seatRow, "the console decision records its seat provenance on the ledger");
+  assert.match(String(seatRow?.detail), /human-seat-unverified/, "the seat policy's unverified verdict is recorded");
+  assert.match(String(seatRow?.detail), /no out-of-band RT_HUMAN_SEAT_TOKEN delivery seam/);
 });

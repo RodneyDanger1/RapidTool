@@ -573,9 +573,14 @@ export function recordBudgetSpend(
   spend: TokenSpend | null | undefined,
 ): TokenLedger {
   if (!budget || typeof budget !== "object" || !budget.ledger || typeof budget.ledger !== "object") {
-    throw new Error(
+    // fixes/346 A1-08: attach the class the message already names, so a caller
+    // can branch on `.code` instead of parsing prose (the repo's coded-refusal
+    // contract). The message stays byte-identical.
+    const err: Error & { code?: string } = new Error(
       "recordBudgetSpend: budget must be a TokenBudget with a ledger object (RT_E_VALIDATION)",
     );
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
   const next = recordSpend(budget.ledger, spend);
   budget.ledger.promptTokens = next.promptTokens;

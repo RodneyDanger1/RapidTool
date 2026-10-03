@@ -2586,11 +2586,21 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
           `  assert.ok(names.length > 0, "job module exports real names: " + names.join(", "));`,
           `  for (const n of names) assert.equal(typeof ${jm.slug}[n], "function", n + " must be a real function");`,
           `  const first = names[0] ?? "";`,
+          `  // 346 E1 (L1-F2 residual): a shape-only surface (typeof === "function")`,
+          `  // must not earn \`tested\`. Call the real function and assert a`,
+          `  // BEHAVIOURAL outcome: a usable return value, or a well-formed Error`,
+          `  // rejection. A missing cross-file binding (ReferenceError) fails`,
+          `  // outright; a NaN return (the L1-F2 stub shape) or a non-Error throw now`,
+          `  // fails too, instead of being swallowed as a pass.`,
+          `  let __jobOutcomeOk = false;`,
           `  try {`,
-          `    await (${jm.slug}[first] as (...a: unknown[]) => unknown)({ payment: 1 });`,
+          `    const __jobResult = await (${jm.slug}[first] as (...a: unknown[]) => unknown)({ payment: 1 });`,
+          `    __jobOutcomeOk = typeof __jobResult !== "number" || !Number.isNaN(__jobResult);`,
           `  } catch (e) {`,
           `    if (e instanceof ReferenceError) throw e;`,
+          `    __jobOutcomeOk = e instanceof Error;`,
           `  }`,
+          `  assert.equal(__jobOutcomeOk, true, "job module " + ${jstr(jm.path)} + " must produce a real outcome for its input (a usable return value or a well-formed Error)");`,
         );
       } else {
         lines.push(

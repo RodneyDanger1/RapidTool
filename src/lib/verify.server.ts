@@ -788,6 +788,28 @@ export const NO_CALLABLE_EXPORTS_REASON =
   "module exports no callable names — machine verification is vacuous";
 
 /**
+ * 346 E1 (L2-X4): the honest reason a run is refused when the authenticated
+ * verdict channel delivered NOTHING (no `HARNESS_EXPORTS`, no
+ * `HARNESS_COMPILE`) — a runner/fd-3/nonce failure, NOT a module defect. The
+ * old path fell through to `callables === ""` and mislabeled the channel
+ * failure `NO_CALLABLE_EXPORTS_REASON`, blaming the module for the runner's
+ * failure (AGENTS.md contract #4: every surfaced failure carries its own code).
+ * Exported so callers/tests can pin it.
+ */
+export const VERDICT_CHANNEL_FAILED_REASON =
+  "verdict channel produced no authenticated evidence — the bounded runner's fd-3/nonce channel failed, so the module's behavior was never judged (RT_E_RUNNER_FAILED)";
+
+/**
+ * 346 E1 (L2-X4): did the authenticated verdict channel deliver nothing at all?
+ * `HARNESS_EXPORTS` (module compiled) or `HARNESS_COMPILE fail` (compile threw)
+ * is emitted on every healthy run — their absence means the channel itself
+ * failed, not that the module has no callable exports. Pure.
+ */
+export function verdictChannelFailed(sawExports: boolean, sawCompile: boolean): boolean {
+  return !sawExports && !sawCompile;
+}
+
+/**
  * fixes/328 P3 (109 C-01 intersection half, owed by the 327 lane's N-4): the
  * honest reason a run is refused when the module HAS callable exports but no
  * case ever references one. The callable-inventory gate above proves the
@@ -1025,6 +1047,12 @@ export async function runCases(
   }
   if (compileMarker.startsWith("fail")) {
     return { pass: false, results, compileError: "source failed to compile in the harness" };
+  }
+  // 346 E1 (L2-X4): an ENTIRELY empty authenticated channel is a runner/fd-3
+  // failure, not a module with no callables — classify it honestly (before the
+  // `!callables` check, which would otherwise mislabel it).
+  if (verdictChannelFailed(sawExports, sawCompile)) {
+    return { pass: false, results, compileError: VERDICT_CHANNEL_FAILED_REASON };
   }
   // T-01 (109 C-01): refuse the run when the module exports no callable name.
   // Fail-closed and actionable: the previous shape let a self-contained

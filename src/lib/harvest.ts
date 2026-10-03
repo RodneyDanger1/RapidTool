@@ -33,6 +33,12 @@ import { completeDeepSeek, DEEPSEEK_MODELS, isDeepSeekConfigured } from "./deeps
 import { dualChannelFailDetail } from "./errors.ts";
 import { freeWebSearch } from "./websearch.server.ts";
 import { failureSignature, lessonRow } from "./knowledge.ts";
+// fixes/346 A2-F5: the one-shot transport for the two default fetch legs. The
+// CLI reaches harvest (via research()) and an in-tick `process.exit()` after an
+// undici `fetch` races the TLS teardown handle (327-L2 crash class). Callers
+// that inject `fetchText`/`fetchJson` are unaffected; a test replacing the
+// global `fetch` still intercepts (`oneShotFetch` defers to a replaced ref).
+import { oneShotFetch } from "./llm/providers/one-shot-fetch.server.ts";
 import type { ResearchResult } from "./research.ts";
 import type { MemoryEntry, PhaseId, Project } from "./types.ts";
 
@@ -370,7 +376,7 @@ async function defaultFetchText(url: string, o: { timeoutMs: number }): Promise<
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1, o.timeoutMs));
   try {
-    const res = await fetch(url, {
+    const res = await oneShotFetch(url, {
       headers: { "user-agent": UA_HARVEST, accept: "text/plain,text/markdown,*/*" },
       signal: controller.signal,
     });
@@ -385,7 +391,7 @@ async function defaultFetchJson(url: string, o: { timeoutMs: number }): Promise<
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1, o.timeoutMs));
   try {
-    const res = await fetch(url, {
+    const res = await oneShotFetch(url, {
       headers: { "user-agent": UA_HARVEST, accept: "application/json" },
       signal: controller.signal,
     });

@@ -29,6 +29,10 @@ import { validateReport, applyReportResult, reportGateDelta, type ReportApplyRea
 import { interpretFeedback } from "./llm-tasks.ts";
 import { verifyAndFix, applyVerifyOutcome } from "./verify.ts";
 import { releaseWildStart, reportRt, tryStartWild } from "./rt-client.ts";
+// A1-12 (346 E4): the console asks the ONE seat policy for the truthful verdict
+// on a browser human-seat claim (it has no out-of-band token), so the ledger can
+// record what the bytes actually support instead of a bare human stamp.
+import { evaluatePolicy } from "./policy.ts";
 // R14-f01 (W33 lane F1): the Node-side Auto-Review supervisor binding — null
 // on every host/key state that must keep the engine's existing default.
 import { createNodeWildReviewer } from "./wild-review.ts";
@@ -180,6 +184,16 @@ type RapidState = {
   activeId: string | null;
   hydrated: boolean;
   autopilot: boolean;
+  /** L3-07 (346 E4): a persisted blob this build could not read was rescued to
+   *  `<name>.rescue`. Set at hydration; the console renders a visible notice so
+   *  the loss is never silent. Not persisted (excluded by partialize). */
+  persistRecovery: { at: number; rescueKey: string } | null;
+  dismissPersistRecovery: () => void;
+  /** L3-02 (346 E4): the last cross-tab reconcile that adopted another tab's
+   *  newer edits — `drifted` names projects whose operator/engine scalars were
+   *  changed elsewhere (a clobber avoided). Shown as a warning; in-memory only. */
+  crossTabNotice: { at: number; adopted: number; drifted: string[] } | null;
+  dismissCrossTabNotice: () => void;
   setHydrated: (v: boolean) => void;
   setAutopilot: (v: boolean) => void;
   create: (brief: string, name?: string) => string;
@@ -874,6 +888,23 @@ const RESCUE_CHAT_CAP = CHAT_LOG_MAX_ROWS;
 /** Last fully-failed persist write (quota/blocked AND salvage failed), if any. */
 let lastPersistFailure: string | null = null;
 
+/** 346 E4 · L3-07: the pending corrupt-blob recovery notice. `useRapid` does not
+ *  exist while the persist middleware hydrates inside `create(...)`, so the
+ *  notice is stashed here and synced into the store once the binding exists. */
+let pendingPersistRecovery: { at: number; rescueKey: string } | null = null;
+/** True once the `useRapid` binding exists (create() returned). */
+let storeReady = false;
+
+/** L3-07: record that an unreadable/malformed persisted blob was rescued to
+ *  `<name>.rescue`, so a consumer can surface a visible notice instead of the
+ *  blob being lost silently. Safe to call during hydration: before the store is
+ *  bound it stashes, and the post-create sync commits the notice. */
+function notePersistRecovery(): void {
+  const notice = { at: Date.now(), rescueKey: PERSIST_RESCUE_NAME };
+  pendingPersistRecovery = notice;
+  if (storeReady) useRapid.setState({ persistRecovery: notice });
+}
+
 /** H4: surface persist-write health so tooling can warn operators that the
  *  in-memory state will NOT survive a reload (storage rejected the write). */
 export function persistStorageHealth(): { ok: boolean; lastError: string | null } {
@@ -938,13 +969,24 @@ function quotaSafePersistStorage(): PersistStorage<PersistedSlice> | undefined {
     getItem: (name) => {
       const store = currentStorage();
       if (!store) return null;
+      let raw: string | null;
       try {
-        const raw = store.getItem(name);
-        if (raw === null) return null;
+        raw = store.getItem(name);
+      } catch (err) {
+        // A read that throws is a storage fault, not a content defect — there
+        // is nothing on disk to rescue, so report and hydrate empty.
+        console.warn(`[store] persist read of "${name}" failed: ${errText(err)}`);
+        return null;
+      }
+      if (raw === null) return null;
+      try {
         return JSON.parse(raw) as StorageValue<PersistedSlice>;
       } catch {
-        // Corrupt blob: treat as empty — hydration completes, and the seed's
-        // next persist write overwrites the unreadable payload with valid JSON.
+        // L3-07 (346 E4): unparseable/truncated blob. Rescue the raw bytes
+        // BEFORE the seed's next persist write overwrites them and record a
+        // visible notice — this branch used to drop every build silently.
+        preserveUnreadableBlob();
+        notePersistRecovery();
         return null;
       }
     },
@@ -1001,7 +1043,7 @@ function quotaSafePersistStorage(): PersistStorage<PersistedSlice> | undefined {
  *  demo seed run (the seed's persist write also overwrites the corrupt blob,
  *  so the next load rehydrates cleanly). Never strands hydration. */
 function recoverFromCorruptPersistence(): void {
-  preserveUnreadableBlob();
+  if (preserveUnreadableBlob()) notePersistRecovery();
   useRapid.setState({ hydrated: true, projects: [], activeId: null, demoSeeded: false });
   useRapid.getState().seedIfEmpty();
 }
@@ -1065,19 +1107,21 @@ const PERSIST_RESCUE_MAX_CHARS = 2_000_000;
  * Best-effort by contract: an absent/blocked/quota-full storage skips the copy
  * (in-memory state is authoritative either way) and nothing here throws —
  * it runs INSIDE the hydration callback. */
-function preserveUnreadableBlob(): void {
+function preserveUnreadableBlob(): boolean {
   try {
     const store = currentStorage();
-    if (!store) return;
+    if (!store) return false;
     const raw = store.getItem(PERSIST_NAME);
-    if (raw === null || raw.length === 0 || raw.length > PERSIST_RESCUE_MAX_CHARS) return;
+    if (raw === null || raw.length === 0 || raw.length > PERSIST_RESCUE_MAX_CHARS) return false;
     store.setItem(PERSIST_RESCUE_NAME, raw);
     console.warn(
       `[store] persisted state at "${PERSIST_NAME}" was unreadable — a rescue copy is kept at ` +
         `"${PERSIST_RESCUE_NAME}" before the clean re-seed overwrites the original.`,
     );
+    return true;
   } catch {
-    /* rescue is best-effort — never let it throw out of the hydration callback */
+    // rescue is best-effort — never let it throw out of the hydration callback.
+    return false;
   }
 }
 
@@ -1119,6 +1163,14 @@ const persistOptions: PersistOptions<RapidState, PersistedSlice> = {
       recoverFromCorruptPersistence();
       return;
     }
+    // L3-07 (346 E4): a projects array whose entries are ALL unrepairable
+    // (e.g. every row's `phases` is an object) is a total loss — hydrateProject
+    // would drop them and the seed would replace the user's builds with no
+    // signal. Rescue the raw blob and recover loudly instead.
+    if (state.projects.length > 0 && !state.projects.some(isRepairableProjectEntry)) {
+      recoverFromCorruptPersistence();
+      return;
+    }
     try {
       state.setHydrated(true);
       state.seedIfEmpty();
@@ -1129,6 +1181,117 @@ const persistOptions: PersistOptions<RapidState, PersistedSlice> = {
     }
   },
 };
+
+/** L3-10 (346 E4): the Artifacts pane renders a bounded window of a long list.
+ *  A real build can carry hundreds of artifacts; one `<button>` per row is
+ *  linear DOM cost. The window keeps the NEWEST `cap` rows visible (the pane's
+ *  default selection is the newest artifact) and reports how many older rows
+ *  are hidden behind the pane's "show older" control. Pure + total: a
+ *  non-finite/≤0 cap or a shorter list returns the list unchanged. */
+export function windowArtifacts<T>(
+  rows: readonly T[],
+  cap: number,
+): { rows: T[]; hiddenOlder: number } {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!Number.isFinite(cap) || cap <= 0) return { rows: [...list], hiddenOlder: 0 };
+  const limit = Math.floor(cap);
+  if (list.length <= limit) return { rows: [...list], hiddenOlder: 0 };
+  return { rows: list.slice(list.length - limit), hiddenOlder: list.length - limit };
+}
+
+/* ---------- L3-02 (346 E4): cross-tab reconciliation ---------------------- */
+
+/** The append-only collections a cross-tab reconcile union-merges. Scalar and
+ *  engine fields take the OTHER tab's record (it is the newer writer); local
+ *  rows the remote blob lacks are preserved so a just-made edit is never lost. */
+const CROSS_TAB_ARRAY_KEYS = ["artifacts", "memory", "decisions", "logs", "chatLog"] as const;
+
+/** A stable union key for a persisted row: its `id` when it has one, else its
+ *  canonical JSON (log/chat rows carry no id). Persisted rows are JSON-safe by
+ *  construction, so `JSON.stringify` cannot throw here. */
+function crossTabRowKey(row: unknown): string {
+  if (row !== null && typeof row === "object" && typeof (row as { id?: unknown }).id === "string") {
+    return `id:${(row as { id: string }).id}`;
+  }
+  return `j:${JSON.stringify(row)}`;
+}
+
+/** Union two row arrays by key: local rows first (the tab's own history), then
+ *  remote-only rows appended. Idempotent, so the reconcile write loop settles. */
+function unionRows(local: readonly unknown[], remote: readonly unknown[]): unknown[] {
+  const out: unknown[] = [];
+  const seen = new Set<string>();
+  for (const row of [...local, ...remote]) {
+    const key = crossTabRowKey(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
+/** Scalar/engine fields whose change in another tab is genuine drift worth
+ *  warning about (a rename/notes/status/phase this tab had not seen). */
+function crossTabDrifted(local: Project, remote: Project): boolean {
+  return (
+    local.name !== remote.name ||
+    local.notes !== remote.notes ||
+    local.status !== remote.status ||
+    local.currentPhase !== remote.currentPhase
+  );
+}
+
+/** Merge one project: the remote record wins for scalar/engine fields, while
+ *  every append-only collection is union-merged so neither tab's rows are lost. */
+export function mergeCrossTabProject(
+  local: Project,
+  remote: Project,
+): { project: Project; changed: boolean; drifted: boolean } {
+  const next = { ...remote };
+  let changed = false;
+  for (const key of CROSS_TAB_ARRAY_KEYS) {
+    const localRows = (local as unknown as Record<string, unknown>)[key];
+    const remoteRows = (remote as unknown as Record<string, unknown>)[key];
+    const l = Array.isArray(localRows) ? localRows : [];
+    const r = Array.isArray(remoteRows) ? remoteRows : [];
+    const union = key === "chatLog" ? unionRows(l, r).slice(-CHAT_LOG_MAX_ROWS) : unionRows(l, r);
+    if (union.length !== r.length) changed = true;
+    (next as unknown as Record<string, unknown>)[key] = union;
+  }
+  const drifted = crossTabDrifted(local, remote);
+  return { project: next, changed: changed || drifted, drifted };
+}
+
+/** Reconcile the whole projects array against another tab's snapshot. Remote
+ *  projects are adopted (new ids added, existing ids merged); local-only
+ *  projects are kept — no deletion tombstones, so a delete in one tab does not
+ *  propagate and no local build is ever dropped. Pure + total. */
+export function reconcileCrossTabProjects(
+  local: readonly Project[],
+  remote: readonly Project[],
+): { projects: Project[]; changed: boolean; adopted: number; drifted: string[] } {
+  const localById = new Map(local.map((p) => [p.id, p]));
+  const remoteIds = new Set(remote.map((p) => p.id));
+  const projects: Project[] = [];
+  const drifted: string[] = [];
+  let changed = false;
+  for (const rp of remote) {
+    const lp = localById.get(rp.id);
+    if (!lp) {
+      projects.push(rp);
+      changed = true;
+      continue;
+    }
+    const merged = mergeCrossTabProject(lp, rp);
+    projects.push(merged.project);
+    if (merged.changed) changed = true;
+    if (merged.drifted) drifted.push(rp.id);
+  }
+  for (const lp of local) {
+    if (!remoteIds.has(lp.id)) projects.push(lp);
+  }
+  return { projects, changed, adopted: drifted.length, drifted };
+}
 
 export const useRapid = create<RapidState>()(
   persist(
@@ -1246,6 +1409,10 @@ export const useRapid = create<RapidState>()(
       hydrated: false,
       autopilot: false,
       demoSeeded: false,
+      persistRecovery: null,
+      dismissPersistRecovery: () => set({ persistRecovery: null }),
+      crossTabNotice: null,
+      dismissCrossTabNotice: () => set({ crossTabNotice: null }),
       llmStatus: { configured: false, label: "deterministic engine" },
       researchStatus: { configured: false, label: "not configured" },
       setHydrated: (v) => set({ hydrated: v }),
@@ -1858,7 +2025,10 @@ export const useRapid = create<RapidState>()(
               updated = { ...updated, logs: [...(updated.logs ?? []), ...driftRows].slice(-200) };
             }
           }
-          if (warnNoEvidence) {
+          // L3-06 (346 E4): only a report that actually LANDED can be warned
+          // about — a duplicate (applied:false) is a no-op, so trailing a
+          // "no tests_run evidence" row would count reports that were dropped.
+          if (warnNoEvidence && result.applied) {
             const warnEntry: JsonLog = {
               ts: Date.now(),
               phase: live.currentPhase,
@@ -1983,6 +2153,33 @@ export const useRapid = create<RapidState>()(
               "Overriding a FAILED P6 sandbox requires a rationale — at least 12 characters (pass { note }).",
           };
         }
+        // A1-12 (346 E4 — honesty). The browser console is the product's designed
+        // HUMAN surface, but it has no out-of-band RT_HUMAN_SEAT_TOKEN delivery
+        // seam, so the minted row must never be read as the token-verified CLI
+        // seat. Ask the ONE seat policy (`evaluatePolicy`) for the truthful
+        // verdict on that claim — without the token it DENIES — and record the
+        // verdict on the ledger as a `hitl.console_decision` row, so the human
+        // stamp is qualified by exactly what the bytes support: an unattested
+        // console human decision, not a verified human seat. (The console is
+        // still the trusted human surface by design; a seat-delivery seam that
+        // would make the claim verifiable is TODO(R8-f09) and out of this lane.)
+        const consoleVerdict = evaluatePolicy(
+          opts?.force === true ? "hitl.force" : "hitl.approve",
+          `gate:P${project.currentPhase}`,
+          { actor: { decidedBy: "human", seat: "human-cli-i-am-human" } },
+        );
+        const seatRow: JsonLog = {
+          ts: Date.now(),
+          phase: project.currentPhase,
+          level: "info",
+          event: "hitl.console_decision",
+          detail:
+            `P${project.currentPhase} approved from the browser console under the human seat` +
+            (opts?.force === true ? " (operator override with rationale)" : "") +
+            ` — the seat policy reports this claim as ${consoleVerdict.decision} (${consoleVerdict.reason}); ` +
+            `the console has no out-of-band RT_HUMAN_SEAT_TOKEN delivery seam, so this row records an ` +
+            `unattested console human decision, never a token-verified one.`,
+        };
         // Engine stamps the packet + packet artifact + A4 trace on approval (B-19); the journal
         // entry records the human actor (T2).
         const approved = approveHitl(project, {
@@ -1995,8 +2192,12 @@ export const useRapid = create<RapidState>()(
         const recorded = recordGate(approved, project.currentPhase);
         // ST-1: re-stamp AFTER the gate verdict so the packet's System JSON
         // `gate_passed` for the just-approved phase is fresh (approveHitl stamps
-        // first, before the verdict exists).
-        const updated = stampPacket(recorded);
+        // first, before the verdict exists). The seat-provenance row rides the
+        // same stamp so packet/artifact/ledger stay in sync.
+        const updated = stampPacket({
+          ...recorded,
+          logs: [...(recorded.logs ?? []), seatRow].slice(-200),
+        });
         set((s) => ({
           projects: s.projects.map((p) => (p.id === id ? updated : p)),
         }));
@@ -2231,3 +2432,49 @@ export const useRapid = create<RapidState>()(
     persistOptions,
   ),
 );
+
+storeReady = true;
+
+/** L3-02 (346 E4): apply another tab's persisted snapshot (a storage event's
+ *  newValue) to the live store. A malformed/foreign value is ignored — it never
+ *  clobbers. Returns true when a commit happened. */
+export function applyCrossTabSnapshot(raw: string | null): boolean {
+  if (!raw) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.warn("[store] cross-tab sync ignored an unparseable persisted snapshot");
+    return false;
+  }
+  const slice = (parsed as { state?: { projects?: unknown; demoSeeded?: unknown } } | null)?.state;
+  if (!slice || !Array.isArray(slice.projects)) return false;
+  const remote = slice.projects.filter(isRepairableProjectEntry);
+  if (slice.projects.length > 0 && remote.length === 0) return false;
+  const current = useRapid.getState();
+  const merged = reconcileCrossTabProjects(current.projects, remote);
+  if (!merged.changed) return false;
+  useRapid.setState({
+    projects: merged.projects,
+    demoSeeded: current.demoSeeded || slice.demoSeeded === true,
+    crossTabNotice:
+      merged.drifted.length > 0
+        ? { at: Date.now(), adopted: merged.drifted.length, drifted: merged.drifted }
+        : current.crossTabNotice,
+  });
+  return true;
+}
+
+/* L3-02 (346 E4): a `storage` event fires in every OTHER same-origin tab when
+ * one tab writes the persist key. Reconcile that snapshot so a rename/approve
+ * made in tab A is never clobbered by tab B's next write; genuine scalar drift
+ * raises a notice the console shows. Guarded for SSR/Node. */
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== PERSIST_NAME) return;
+    applyCrossTabSnapshot(event.newValue);
+  });
+}
+
+// L3-07: commit a recovery notice stashed while the store was still binding.
+if (pendingPersistRecovery) useRapid.setState({ persistRecovery: pendingPersistRecovery });

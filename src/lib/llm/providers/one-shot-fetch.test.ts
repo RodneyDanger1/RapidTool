@@ -1,5 +1,6 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { oneShotFetch } from "./one-shot-fetch.server.ts";
@@ -133,4 +134,48 @@ describe("W45 331-1 oneShotFetch (production transport)", () => {
       globalThis.fetch = real;
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/346 A2-F5 — the remaining CLI-reachable network legs route through this
+// seam. A bare global `fetch(` in these modules reintroduces undici's TLS
+// teardown race with the CLI's in-tick `process.exit()` (327-L2 crash class).
+// Static bytes guard: the modules are owned by this lane and their injected
+// fetch seams (`opts.fetch`, `opts.fetchText`/`fetchJson`) are unaffected.
+// ---------------------------------------------------------------------------
+describe("fixes/346 A2-F5 — CLI-reachable legs use the one-shot seam", () => {
+  const LEGS: Array<[string, string]> = [
+    ["tavily.server.ts", "../../tavily.server.ts"],
+    ["harvest.ts", "../../harvest.ts"],
+    ["probe.ts", "./probe.ts"],
+  ];
+  // Catches both a bare `fetch(` and an explicit global reach-through
+  // (`globalThis.fetch(` / `window.fetch(` / `self.fetch(`) — the evasion V1
+  // found in the first, looser lookbehind. `oneShotFetch(` (capital F) and the
+  // injected `opts.fetch` seam are deliberately not flagged.
+  const GLOBAL_FETCH =
+    /(?<![A-Za-z0-9_$])(?:globalThis|window|self)\.fetch\s*\(|(?<![A-Za-z0-9_$.])fetch\s*\(/;
+
+  it("the guard is falsifiable: it catches bare/global fetch( and ignores the seam", () => {
+    const samples: Array<[string, boolean]> = [
+      ["const r = await fetch(url, init);", true],
+      ["const r = await globalThis.fetch(url, init);", true],
+      ["const r = await window.fetch(url);", true],
+      ["const r = await self.fetch(url);", true],
+      ["const impl = opts.fetch ?? oneShotFetch;", false],
+      ["return oneShotFetch(url, init);", false],
+      ["const r = myFetch(url);", false],
+    ];
+    for (const [sample, caught] of samples) {
+      assert.equal(GLOBAL_FETCH.test(sample), caught, `sample: ${sample}`);
+    }
+  });
+
+  for (const [label, rel] of LEGS) {
+    it(`${label}: uses oneShotFetch and no bare/global fetch(`, () => {
+      const src = readFileSync(new URL(rel, import.meta.url), "utf8");
+      assert.match(src, /\boneShotFetch\b/, `${label} must route through the seam`);
+      assert.doesNotMatch(src, GLOBAL_FETCH, `${label} still calls a bare/global fetch(`);
+    });
+  }
 });

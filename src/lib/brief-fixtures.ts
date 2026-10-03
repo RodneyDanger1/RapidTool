@@ -677,15 +677,31 @@ export function fixtureValueIsPlaceholder(v: unknown): boolean {
   return false;
 }
 
-/** A case is placeholder-only when its given or its expect literal carries a
- *  draft sentinel — such a row asserts nothing real and can never be an
- *  acceptance bar. A real typed-literal case is unaffected. */
+/** 346 E1 (L1-F5): an EMPTY shape expectation — `{}` or `[]` — makes
+ *  `__fxPartialMatch(actual, expected)` vacuously true for ANY object (its
+ *  `Object.keys(expected).every(...)` / `.every(...)` runs over zero keys). A
+ *  non-empty shape requires at least the named keys/elements, so it is a real
+ *  partial-match. Pure. */
+export function fixtureShapeValueIsVacuous(v: unknown): boolean {
+  if (Array.isArray(v)) return v.length === 0;
+  if (v !== null && typeof v === "object") return Object.keys(v as object).length === 0;
+  return false;
+}
+
+/** A case is "placeholder-only" (asserts nothing real) when its given or its
+ *  expect literal carries a draft sentinel, OR its expect.shape value is empty
+ *  (346 E1 · L1-F5: an empty shape is vacuous, not substantive). Such a row can
+ *  never be an acceptance bar. A real typed-literal case is unaffected. */
 export function fixtureCaseIsPlaceholder(c: unknown): boolean {
   if (!c || typeof c !== "object") return false;
   const rec = c as BriefFixtureCase;
   if (fixtureValueIsPlaceholder(rec.given)) return true;
   const ex = rec.expect;
-  if (ex && typeof ex === "object" && ex.kind === "shape") return fixtureValueIsPlaceholder(ex.value);
+  if (ex && typeof ex === "object" && ex.kind === "shape") {
+    if (fixtureValueIsPlaceholder(ex.value)) return true;
+    if (fixtureShapeValueIsVacuous(ex.value)) return true;
+    return false;
+  }
   if (ex && typeof ex === "object" && ex.kind === "throws") return fixtureValueIsPlaceholder(ex.messagePattern);
   return false;
 }
@@ -703,6 +719,13 @@ export function fixturesHavePlaceholder(cases: readonly unknown[] | null | undef
  */
 export function compileFixtureAssertion(c: BriefFixtureCase): { ok: true; body: string } | { ok: false; reason: string } {
   if (!c || typeof c !== "object") return { ok: false, reason: "case is not an object" };
+  if (c.expect?.kind === "shape" && fixtureShapeValueIsVacuous(c.expect.value)) {
+    return {
+      ok: false,
+      reason:
+        "expect.shape value is empty ({} / []) — __fxPartialMatch is vacuously true for any object; supply at least one expected key or element",
+    };
+  }
   // A1-01 (fixes/344): a draft sentinel asserts nothing real. Red-card it (the
   // emitter turns a red card into a visible assert.fail) — never a vacuous
   // always-true assertion.

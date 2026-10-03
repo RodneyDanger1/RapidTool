@@ -44,7 +44,7 @@ import {
 } from "./engine.ts";
 import type { WildReviewer } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
-import { failedGates, hardDodBlockInto, hardDodMessage, recordGateInto, runGate } from "./dod.ts";
+import { failedGates, hardDodBlockInto, hardDodMessage, oracleToCaseSeeds, recordGateInto, runGate } from "./dod.ts";
 import { approvedAcceptanceFixtures } from "./brief-fixtures.ts";
 import { runSummaryLesson, templateEmissionLesson, type RankableLessonRow } from "./knowledge.ts";
 import { exportPacketText, exportProjectJson, importProject, slugName } from "./io.ts";
@@ -2454,7 +2454,10 @@ export async function emitProject(
         /* leftover already gone */
       }
     }
-    const moduleEmbedded = files.some((f) => f.body.includes(emitProjectInput.generatedSource ?? ""));
+    // 346 E1 · L1-F4: `includes("")` is always true, so a project with no
+    // generated module claimed `moduleEmbedded: true`. Require real bytes.
+    const embeddedSource = typeof emitProjectInput.generatedSource === "string" ? emitProjectInput.generatedSource : "";
+    const moduleEmbedded = embeddedSource.length > 0 && files.some((f) => f.body.includes(embeddedSource));
     // R11-f08 (lifted from the CLI's emit arm): a forced emit MOVES the
     // foreign files aside into `<target>/.rapidtool-quarantine/<stamp>/` and
     // reports them — so EVERY forced caller quarantines, not just the CLI, and
@@ -4285,8 +4288,17 @@ export async function verifyGeneratedSource(project: Project): Promise<VerifyOut
   // binds the whole run across codegen + verify (R12-f02). Unmetered (no
   // RAPIDTOOL_TOKEN_CAP) ⇒ the seam's no-op path, byte-identical.
   const { sessionTokenBudget } = await import("./token-ledger.ts");
+  // 346 E1 · A1-04 (E-08 live): seed the case-generation seam with the
+  // project's A7 oracle rows + their pinned ids, so a returned case list that
+  // drops a pinned row is refused (previously these were never passed here, so
+  // the pinning was dormant — a claimed-but-unwired gate).
+  const oracleRows = Array.isArray(project.oracle) ? project.oracle : [];
   return (await verifyAndFixServer(withCommonJsExports(source), project.brief, {
     budget: sessionTokenBudget(),
+    seeds: oracleToCaseSeeds(oracleRows),
+    pinnedOracleIds: oracleRows
+      .map((o) => o?.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0),
   })) as VerifyOutcomeShape;
 }
 
