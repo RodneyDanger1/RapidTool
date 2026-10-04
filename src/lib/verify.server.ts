@@ -1473,15 +1473,20 @@ const ORACLE_NUMERIC_LITERAL_RE =
   /^[-+]?(?:0[xX][0-9a-fA-F][0-9a-fA-F_]*|0[oO][0-7][0-7_]*|0[bB][01][01_]*|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][-+]?\d[\d_]*)?|\.\d[\d_]*(?:[eE][-+]?\d[\d_]*)?)n?$/;
 
 /** True when an operand is a concrete expected value: a string literal
- *  (masked to the marker), a number, or a boolean. `null`/`undefined`/`void 0`
- *  are deliberately NOT concrete — a presence check against them is the exact
- *  shape-only form this floor rejects. Parentheses around the operand are
- *  stripped first. Pure. */
+ *  (masked to the marker), a number, a boolean, or an object/array literal.
+ *  `null`/`undefined`/`void 0` are deliberately NOT concrete — a presence check
+ *  against them is the exact shape-only form this floor rejects. Parentheses
+ *  around the operand are stripped first. Pure.
+ *
+ *  346 cross-lane parity: object/array literals are concrete expected values in the
+ *  tree lane (`isConcreteOperand`), so the oracle lane must recognize them too
+ *  — `m.plan === {ok:true}` / `JOBS === ["a"]` tie a read to a concrete value. */
 function isConcreteExpectedToken(raw: string): boolean {
   const t = raw.trim().replace(/^\(+/, "").replace(/\)+$/, "").trim();
   if (t === ORACLE_STRING_LEAF) return true;
   if (ORACLE_NUMERIC_LITERAL_RE.test(t)) return true;
-  return t === "true" || t === "false";
+  if (t === "true" || t === "false") return true;
+  return t.startsWith("{") || t.startsWith("[");
 }
 
 /** True when `side` reads a name that could be the module under test (an
@@ -1503,14 +1508,29 @@ function hasOracleModuleRead(side: string): boolean {
   return false;
 }
 
+/** A module read on one side of a comparison: an identifier that could name the
+ *  module under test, on an operand that is NOT itself a pure literal. An object
+ *  literal's key (`{ok: 1}` carries `ok`) is a literal, not a read — mirrors the
+ *  tree lane's `operandIsModuleRead` so `{a:1} === {a:1}` stays shape-only. */
+function oracleOperandIsModuleRead(side: string): boolean {
+  return !isConcreteExpectedToken(side) && hasOracleModuleRead(side);
+}
+
 /** One `&&`/`||`-free fragment: behavioural iff it ties a module read to a
  *  concrete value via a strict comparison, or applies a relational predicate
- *  to one. A `typeof` fragment is a type check — never behavioural. Pure. */
+ *  to one. A `typeof`/`Array.isArray` fragment is a type check — never
+ *  behavioural. Pure. */
 function isBehaviouralOracleAtom(atom: string): boolean {
   const a = atom.trim();
   if (!a) return false;
   // `typeof x === 'function'` — a TYPE check, never behavioural.
   if (/\btypeof\b/.test(a)) return false;
+  // `Array.isArray(x) === true` — likewise a TYPE/shape check.
+  if (/\bArray\s*\.\s*isArray\b/.test(a)) return false;
+  // `.length > 0` / `.length >= 1` — a non-emptiness PRESENCE probe, never
+  // behavioural; a concrete bound (`=== 3`, `> 3`) is left for the branches
+  // below. Mirrors the tree lane's narrowed `isShapeMarker`.
+  if (/\.length\s*(?:>\s*0(?![\d.])|>=\s*1(?![\d.]))/.test(a)) return false;
   // A relational/numeric predicate over a module value: `median([1,2,3]) >= 2`.
   if (/(?:>=|<=|>|<)/.test(a) && hasOracleModuleRead(a)) return true;
   // A strict comparison tying a module read to a concrete expected value.
@@ -1518,8 +1538,8 @@ function isBehaviouralOracleAtom(atom: string): boolean {
   if (m) {
     const lhs = m[1] ?? "";
     const rhs = m[3] ?? "";
-    if (hasOracleModuleRead(lhs) && isConcreteExpectedToken(rhs)) return true;
-    if (hasOracleModuleRead(rhs) && isConcreteExpectedToken(lhs)) return true;
+    if (oracleOperandIsModuleRead(lhs) && isConcreteExpectedToken(rhs)) return true;
+    if (oracleOperandIsModuleRead(rhs) && isConcreteExpectedToken(lhs)) return true;
   }
   return false;
 }

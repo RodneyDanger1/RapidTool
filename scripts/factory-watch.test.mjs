@@ -11,15 +11,19 @@
 //       · classifyDrive: exit 0 is the ONLY complete path; exit 2 parks; exit 1
 //         stalls with its code; exit 3/4 is a retryable failure;
 //       · emitDelivered: ONLY a real commit (committed:true) or the idempotent
-//         noop:true counts — a refusal or a commit-less emit never does.
+//         noop:true counts — a refusal or a commit-less emit never does;
+//       · runProved/classifyDeliverFailure: the delivery-time `emit --run`
+//         verdict must be GREEN before any commit, and a failure maps to the
+//         honest `stalled` terminal.
 //
 //  B. BEHAVIORAL (keyless) — drives the REAL script over a throwaway intake and
 //     workspace with a scrubbed, keyless env (the repo convention: a present-but-
 //     blank DEEPSEEK_API_KEY forces the deterministic floor). Asserts the whole
-//     path: create → unattended (machine seat) → emit --git, a real delivery
-//     commit, a durable per-project checkpoint, and a second tick that skips
-//     (idempotent — no new commit, no project rewrite). A second fast leg covers
-//     the queue intake in --dry-run (plans, writes nothing).
+//     path: create → unattended (machine seat) → an honest stall, a durable
+//     per-project checkpoint, and a second tick that skips (idempotent). The
+//     deliver step is asserted directly (`deliverVerified`): a RED delivery-time
+//     re-run leaves NO commit, a GREEN one commits, and the idempotent re-emit is
+//     a green noop. A fast leg covers the queue intake in --dry-run (writes nothing).
 //
 // House rules honored: cwd-independent (paths via import.meta.url); every child
 // runs in a throwaway temp dir; keyless (never a keyed call); real git only
@@ -36,18 +40,22 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   briefHash,
+  classifyDeliverFailure,
   classifyDrive,
+  deliverVerified,
   deliveryEvidence,
   deliveryProved,
   emitDelivered,
   nameForBrief,
   normalizeQueue,
   planItem,
+  runProved,
   slugify,
   treeVerified,
 } from "./factory-watch.mjs";
 
 const SCRIPT_PATH = fileURLToPath(new URL("./factory-watch.mjs", import.meta.url));
+const CLI_PATH = fileURLToPath(new URL("./rapidtool-cli.mjs", import.meta.url));
 const BRIEF = "A tiny expense tracker for a small team, with CSV export.";
 
 /** Write the durable per-project checkpoint the orchestrator resumes from. */
@@ -106,6 +114,50 @@ function runFactoryAsync(args, opts = {}) {
     child.stderr.on("data", (d) => (stderr += d));
     child.on("close", (status) => resolve({ status, stdout, stderr }));
   });
+}
+
+/** Spawn a real CLI verb (keyless) for the deliver-path fixtures. */
+function runCliSync(args) {
+  return spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...args], {
+    env: keylessEnv(),
+    encoding: "utf8",
+    timeout: 600_000,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+}
+
+/** A real created project file (its emitted tree re-runs green at delivery). */
+function createProject(dir, name) {
+  const projectFile = join(dir, "build.json");
+  const res = runCliSync(["create", "--brief", BRIEF, "--name", name, "--out", projectFile]);
+  assert.equal(res.status, 0, `create failed (exit ${res.status}).\n${res.stdout}\n${res.stderr}`);
+  return projectFile;
+}
+
+/**
+ * Run `fn` with the process env forced keyless. `deliverVerified` calls the
+ * imported module's runCli, which reads process.env — so the in-process deliver
+ * path must be scrubbed exactly like a spawned child (present-but-blank key).
+ */
+function withKeylessEnv(fn) {
+  const keys = [
+    "DEEPSEEK_API_KEY",
+    "RT_HUMAN_SEAT_TOKEN",
+    "RAPIDTOOL_ACTOR",
+    "RAPIDTOOL_LOG_DIR",
+    "RAPIDTOOL_LLM_USAGE_LOG",
+  ];
+  const saved = new Map(keys.map((k) => [k, process.env[k]]));
+  process.env.DEEPSEEK_API_KEY = "";
+  for (const k of keys.slice(1)) delete process.env[k];
+  try {
+    return fn();
+  } finally {
+    for (const [k, v] of saved) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -269,17 +321,52 @@ test("deliveryProved — a commit alone is NOT a delivery; the emitted tree must
   assert.equal(ev.evidenceHash, "ev1dence");
 });
 
-test("factory-watch's deliver step re-executes the tree (`--run`) and gates on its verdict", () => {
+test("runProved / classifyDeliverFailure — a red delivery-time tree-run is a commitless `stalled`", () => {
+  const green = { ok: true, treeRun: { ok: true }, tested: { evidenceHash: "e" } };
+  assert.equal(runProved(green, 0), true, "exit 0 + ok + a green treeRun verifies a delivery");
+  assert.equal(runProved({ ok: false, treeRun: { ok: false } }, 1), false);
+  assert.equal(runProved({ ok: true, treeRun: { ok: false } }, 0), false, "a red tree never verifies");
+  assert.equal(runProved({ ok: true }, 0), false, "a run with no treeRun is not verification");
+  assert.equal(runProved(green, 1), false, "a non-zero exit is never verified");
+
+  // Either failed stage maps to the honest stall row.
+  const redRow = classifyDeliverFailure({
+    stage: "verify",
+    verified: { exitCode: 1, envelope: { code: "RT_E_TREE_RUN_FAILED", error: "typecheck red" } },
+    committed: null,
+  });
+  assert.equal(redRow.status, "stalled");
+  assert.equal(redRow.code, "RT_E_TREE_RUN_FAILED");
+  assert.equal(redRow.needsHuman, true);
+  const commitRow = classifyDeliverFailure({
+    stage: "commit",
+    verified: { exitCode: 0, envelope: { ok: true, treeRun: { ok: true } } },
+    committed: { exitCode: 1, envelope: { code: "RT_E_GIT_UNAVAILABLE", error: "no git" } },
+  });
+  assert.equal(commitRow.status, "stalled");
+  assert.equal(commitRow.code, "RT_E_GIT_UNAVAILABLE");
+});
+
+test("factory-watch's deliver step VERIFIES (`--run`) before it COMMITS (`--git`)", () => {
   const src = readFileSync(SCRIPT_PATH, "utf8");
-  assert.match(
-    src,
-    /\["emit",\s*"--project",\s*projectFile,\s*"--out",\s*emitDir,\s*"--run",\s*"--git"\]/,
-    "the deliver step must emit --run --git (a commit is not evidence the tree was re-executed)",
+  const verifyCall = src.indexOf('["emit", "--project", projectFile, "--out", emitDir, "--run"]');
+  const commitCall = src.indexOf('["emit", "--project", projectFile, "--out", emitDir, "--git"]');
+  assert.ok(verifyCall !== -1, "deliverVerified must emit --run (no commit) to verify the tree first");
+  assert.ok(commitCall !== -1, "deliverVerified must issue a separate emit --git for the commit");
+  assert.ok(
+    verifyCall < commitCall,
+    "verification must precede the commit so a red re-run leaves no commit",
   );
+  assert.equal(
+    src.includes('"--out", emitDir, "--run", "--git"'),
+    false,
+    "no combined `emit --run --git` call may remain (it committed even when --run was red)",
+  );
+  assert.match(src, /deliverVerified\(/, "main must route delivery through deliverVerified");
   assert.match(
     src,
-    /deliveryProved\(/,
-    "the deliver step must gate on deliveryProved (the tree verdict), not on the commit alone",
+    /classifyDeliverFailure\(/,
+    "a failed delivery must map through classifyDeliverFailure",
   );
 });
 
@@ -374,6 +461,78 @@ test(
       projectBytes,
       "a skipped brief is never re-created or rewritten",
     );
+  },
+);
+
+// --- Deliver ordering (the gap `emit --run --git` disclosed) ------------------
+// These drive the factory's OWN deliver seam (`deliverVerified`) with the real
+// CLI, keyless. A full tick cannot reach deliver keyless (the deterministic
+// floor always red-seals P6 at drive), so the deliver step is exercised directly
+// — still real CLI calls over real emitted bytes, never a mock.
+test(
+  "a RED delivery-time tree-run leaves NO commit (verify precedes commit)",
+  { timeout: 600_000 },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "rapidtool-factory-watch-red-"));
+    const projectFile = createProject(root, "red-tree");
+    // A real ledger edit: a generatedTree whose module does not compile, so the
+    // emitted tree genuinely re-runs RED at delivery time.
+    const project = JSON.parse(readFileSync(projectFile, "utf8"));
+    project.generatedTree = [
+      {
+        path: "src/jobs/track.ts",
+        source: "export const broken: number = ;\n",
+        hash: "deadbeef",
+        attempt: 0,
+      },
+    ];
+    writeFileSync(projectFile, `${JSON.stringify(project, null, 2)}\n`, "utf8");
+    const emitDir = join(root, "emitted");
+
+    const delivered = withKeylessEnv(() => deliverVerified(projectFile, emitDir, 600_000));
+
+    assert.equal(delivered.ok, false, "a red tree-run must never deliver");
+    assert.equal(delivered.stage, "verify", "the red verdict stops at verification");
+    assert.equal(delivered.verified.envelope.treeRun.ok, false);
+    assert.equal(delivered.verified.envelope.code, "RT_E_TREE_RUN_FAILED");
+    assert.equal(
+      existsSync(join(emitDir, ".git")),
+      false,
+      "a red delivery-time re-run must leave NO commit (.git) on disk",
+    );
+    const stall = classifyDeliverFailure(delivered);
+    assert.equal(stall.status, "stalled", "the factory records the honest stall");
+    assert.equal(stall.code, "RT_E_TREE_RUN_FAILED");
+    assert.equal(stall.needsHuman, true);
+  },
+);
+
+test(
+  "a GREEN delivery-time tree-run commits, and the idempotent re-emit stays a green noop",
+  { timeout: 900_000 },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "rapidtool-factory-watch-green-"));
+    const projectFile = createProject(root, "green-tree");
+    const emitDir = join(root, "emitted");
+
+    const first = withKeylessEnv(() => deliverVerified(projectFile, emitDir, 600_000));
+    assert.equal(
+      first.ok,
+      true,
+      `a green tree must deliver.\n${first.committed?.stdout}\n${first.committed?.stderr}`,
+    );
+    assert.equal(first.committed.envelope.git.committed, true);
+    assert.equal(first.committed.envelope.git.noop, false);
+    assert.equal(existsSync(join(emitDir, ".git")), true);
+    assert.equal(first.proof.treeRun.ok, true);
+    const ev = deliveryEvidence(first.proof);
+    assert.equal(ev.treeRun.ok, true);
+    assert.ok(typeof ev.evidenceHash === "string" && ev.evidenceHash, "the verdict evidence is kept");
+
+    const second = withKeylessEnv(() => deliverVerified(projectFile, emitDir, 600_000));
+    assert.equal(second.ok, true, "the idempotent re-delivery stays green");
+    assert.equal(second.committed.envelope.git.committed, false);
+    assert.equal(second.committed.envelope.git.noop, true, "an identical tree re-emits as a noop");
   },
 );
 

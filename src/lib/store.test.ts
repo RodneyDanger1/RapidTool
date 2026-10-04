@@ -62,7 +62,7 @@ const { clearStall, peekStall, setStallLatch } = await import("./rt-client.ts");
 await new Promise((r) => setTimeout(r, 10));
 
 beforeEach(() => {
-  useRapid.setState({ projects: [], activeId: null, hydrated: true, autopilot: false });
+  useRapid.setState({ projects: [], activeId: null, hydrated: true, autopilot: false, projectTombstones: [] });
 });
 
 const NAME = "Northwind Dispatch";
@@ -2508,6 +2508,103 @@ test("L3-02: applyCrossTabSnapshot commits a storage snapshot, warns on drift, i
   assert.equal(applyCrossTabSnapshot("{ not json"), false, "an unparseable snapshot is ignored");
   assert.equal(applyCrossTabSnapshot(null), false);
   assert.equal(current(p.id).name, "RenamedByOtherTab", "a junk snapshot never clobbers");
+});
+
+test("L3-02 (346): a cross-tab delete propagates via a tombstone and is never resurrected by a stale write", () => {
+  const p = install(seedProject());
+  useRapid.setState({ projectTombstones: [] });
+  // Tab A deleted p: its persisted snapshot lists NO projects but carries a
+  // tombstone for p's id (the delete marker the reconcile now honours).
+  const deletedRaw = JSON.stringify({
+    state: {
+      projects: [],
+      activeId: null,
+      autopilot: false,
+      demoSeeded: true,
+      projectTombstones: [{ id: p.id, at: Date.now() }],
+    },
+    version: 1,
+  });
+  assert.equal(applyCrossTabSnapshot(deletedRaw), true, "the delete snapshot commits");
+  assert.equal(
+    useRapid.getState().projects.some((x) => x.id === p.id),
+    false,
+    "the remote delete removes the project locally",
+  );
+  assert.equal(useRapid.getState().activeId, null, "activeId no longer points at the deleted project");
+  // A stale tab that never saw the delete writes the project back without a tombstone.
+  const staleRaw = JSON.stringify({
+    state: {
+      projects: [{ ...p, name: "resurrected-stale" }],
+      activeId: p.id,
+      autopilot: false,
+      demoSeeded: true,
+    },
+    version: 1,
+  });
+  assert.equal(applyCrossTabSnapshot(staleRaw), false, "the stale write is an idempotent no-op (no write loop)");
+  assert.equal(
+    useRapid.getState().projects.some((x) => x.id === p.id),
+    false,
+    "the stale write cannot resurrect the deleted project",
+  );
+});
+
+test("L3-02 (346): reconcile honours delete ids — tombstoned ids drop, local-only builds survive", () => {
+  const a = emptyProject({ name: "A", brief: BRIEF });
+  const b = emptyProject({ name: "B", brief: BRIEF });
+  const c = emptyProject({ name: "C", brief: BRIEF });
+  const out = reconcileCrossTabProjects([a, b], [a, c], [a.id]);
+  assert.equal(out.projects.some((p) => p.id === a.id), false, "the tombstoned id is removed");
+  assert.ok(out.projects.some((p) => p.id === b.id), "a local-only build is still kept");
+  assert.ok(out.projects.some((p) => p.id === c.id), "a live remote-only project is adopted");
+  assert.equal(out.changed, true);
+  const notAdopted = reconcileCrossTabProjects([], [a], [a.id]);
+  assert.equal(notAdopted.projects.length, 0, "a dead remote-only id is not adopted");
+  assert.equal(notAdopted.changed, false);
+  // Legacy: no delete ids → the pre-fix behaviour is unchanged.
+  const legacy = reconcileCrossTabProjects([a, b], [a]);
+  assert.equal(legacy.projects.length, 2, "local-only builds are kept when no tombstone is present");
+});
+
+test("L3-02 (346): mergeCrossTabProject flags a tombstoned project as deleted", () => {
+  const a = emptyProject({ name: "A", brief: BRIEF });
+  const dead = mergeCrossTabProject(a, { ...a, name: "A-renamed" }, [a.id]);
+  assert.equal(dead.deleted, true, "a tombstoned id merges as deleted");
+  const live = mergeCrossTabProject(a, { ...a, name: "A-renamed" });
+  assert.equal(live.deleted, false, "a live id merges normally");
+  assert.equal(live.project.name, "A-renamed");
+});
+
+test("L3-02 (346): remove records a bounded tombstone in the persisted snapshot", () => {
+  const p = install(seedProject());
+  useRapid.setState({ projectTombstones: [] });
+  useRapid.getState().remove(p.id);
+  const tombs = useRapid.getState().projectTombstones ?? [];
+  assert.ok(
+    tombs.some((t) => t.id === p.id),
+    "remove records a tombstone for the id",
+  );
+  for (let i = 0; i < 260; i += 1) useRapid.getState().remove(`ghost-${i}`);
+  assert.ok(
+    (useRapid.getState().projectTombstones ?? []).length <= 200,
+    "tombstones are pruned to a cap (they cannot grow without bound)",
+  );
+});
+
+test("L3-02 (346): the persisted slice omits the tombstone field when empty (legacy bytes preserved)", () => {
+  install(seedProject());
+  useRapid.setState({ projectTombstones: [] });
+  const opts = useRapid.persist.getOptions() as { partialize?: (s: unknown) => Record<string, unknown> };
+  const emptySlice = opts.partialize?.(useRapid.getState()) ?? {};
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(emptySlice, "projectTombstones"),
+    false,
+    "an empty tombstone list is not persisted — the legacy blob is byte-identical",
+  );
+  useRapid.getState().remove("tomb-persist-1");
+  const liveSlice = opts.partialize?.(useRapid.getState()) ?? {};
+  assert.ok(Array.isArray(liveSlice.projectTombstones), "a non-empty tombstone list rides the persisted snapshot");
 });
 
 test("L3-06: a duplicate report returns applied:false and adds no second agent.report row", () => {

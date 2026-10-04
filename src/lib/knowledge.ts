@@ -8,7 +8,10 @@
 //   1. Append-only — savePattern() never mutates or deletes an existing
 //      entry; it only ever grows the `entries` array. Idempotent duplicates
 //      (E-09 stance, same fingerprint as report-intake.ts) return the
-//      existing entry with appended:false instead of forking rows.
+//      existing entry with appended:false instead of forking rows. fixes/346
+//      H3: a DIFFERENT fingerprint that lands on the same 32-bit content
+//      address is a genuine id collision — REFUSED (never silently merged)
+//      and recorded on the store ledger (`IdCollision` / COLLISION_TAG).
 //   2. Atomic writes — the store is rewritten to `<file>.tmp` and renamed
 //      over the target, so a crash mid-save cannot corrupt a valid store.
 //      A store file that is already corrupt is REFUSED with a throw — the
@@ -226,19 +229,45 @@ export interface KnowledgeEntry {
 
 export type NewKnowledgeEntry = Omit<KnowledgeEntry, "id" | "savedAt">;
 
+/**
+ * fixes/346 H3 — a genuine content-address collision: two DISTINCT canonical
+ * fingerprints mint the same 32-bit FNV-1a id (`K` + 8 hex). The id format is
+ * NOT widened (that would rewrite every persisted id); the collision is
+ * surfaced instead, so a distinct row is never silently merged into the row
+ * that already holds the occupied id.
+ */
+export interface IdCollision {
+  /** The occupied content address both rows resolve to. */
+  id: string;
+  /** Canonical fingerprint of the row that already holds `id`. */
+  existingFingerprint: string;
+  /** Canonical fingerprint of the refused incoming row (≠ existing, by definition). */
+  incomingFingerprint: string;
+}
+
+/** fixes/346 H3: tags the durable collision-ledger row savePattern appends
+ *  when two distinct fingerprints collide on one id. */
+export const COLLISION_TAG = "id-collision";
+
 export interface SaveResult {
   entry: KnowledgeEntry;
-  /** false when an identical entry already existed (idempotent no-op)
-   *  OR when a lesson write was refused by shouldPromoteLesson. */
+  /** false when an identical entry already existed (idempotent no-op), when a
+   *  lesson write was refused by shouldPromoteLesson, OR when an id collision
+   *  refused a distinct row (see `collision`). */
   appended: boolean;
   /** true when a lesson-tagged save was refused (eval-gated regression /
-   *  missing maker score). Never set for non-lesson rows. Store is
-   *  append-only: refuse never deletes prior rows. */
+   *  missing maker score) or when an id collision refused a distinct row.
+   *  Store is append-only: refuse never deletes prior rows. */
   refused?: boolean;
-  /** Machine reason when refused (e.g. "eval-gated-regression"). */
+  /** Machine reason when refused ("eval-gated-regression" | "id-collision"). */
   reason?: string;
   /** RT_E_* when refused. */
   code?: ErrorCode;
+  /** fixes/346 H3: present when the incoming row's content address is already
+   *  held by a DIFFERENT fingerprint. The incoming row is refused, never
+   *  merged, and a coded collision-ledger row is appended naming both
+   *  fingerprints. Absent on the byte-identical idempotent re-save path. */
+  collision?: IdCollision;
 }
 
 export interface KnowledgeMatch {
@@ -504,16 +533,43 @@ export class KnowledgeStore {
    *  same-title lesson. Regression or missing next maker score → no append,
    *  { appended:false, refused:true, reason:"eval-gated-regression",
    *  code:"RT_E_VALIDATION" }. Non-lesson rows are byte-identical to the
-   *  pre-gate path. Never deletes rows. */
+   *  pre-gate path. Never deletes rows.
+   *
+   *  fixes/346 H3: the id is a 32-bit FNV-1a content address, so two DISTINCT
+   *  fingerprints can collide. Same-fingerprint re-save stays the ordinary
+   *  idempotent no-op; a DIFFERENT fingerprint on the occupied id is a
+   *  collision — refused (`collision` + reason "id-collision",
+   *  code RT_E_INTERNAL) and recorded on the ledger (recordIdCollision), never
+   *  silently merged into the occupied row. The non-colliding path is
+   *  byte-identical. */
   savePattern(input: NewKnowledgeEntry): SaveResult {
     assertValidNewEntry(input);
     const local = this.entries();
-    const id = `K${fnv1a(fingerprint(input)).toString(16).padStart(8, "0")}`;
+    const incomingFingerprint = fingerprint(input);
+    const id = `K${fnv1a(incomingFingerprint).toString(16).padStart(8, "0")}`;
     const base = this.mergeWithDisk(local);
     const existing = base.find((e) => e.id === id);
     if (existing) {
-      this.cache = base;
-      return { entry: existing, appended: false };
+      // Same fingerprint ⇒ the ordinary idempotent re-save (byte-identical to
+      // the legacy path). Different fingerprint ⇒ two distinct rows share this
+      // 32-bit address: refuse the incoming row loudly instead of swallowing it.
+      const existingFingerprint = fingerprint(existing);
+      if (existingFingerprint === incomingFingerprint) {
+        this.cache = base;
+        return { entry: existing, appended: false };
+      }
+      const collision: IdCollision = { id, existingFingerprint, incomingFingerprint };
+      const next = this.recordIdCollision(base, input, existing, collision);
+      this.writeStore(next);
+      this.cache = next;
+      return {
+        entry: existing,
+        appended: false,
+        refused: true,
+        reason: "id-collision",
+        code: "RT_E_INTERNAL",
+        collision,
+      };
     }
 
     if (isLessonTagged(input.tags)) {
@@ -590,6 +646,45 @@ export class KnowledgeStore {
     this.writeStore(next);
     this.cache = next;
     return { entry, appended: true };
+  }
+
+  /**
+   * fixes/346 H3: append the durable collision-ledger row. A normal `note`
+   * entry, tagged COLLISION_TAG and content-addressed like any other row, so
+   * repeated collisions of the same pair map to ONE ledger row (idempotent —
+   * the row is skipped when its address is already present). The INPUT row is
+   * never appended (the refusal envelope says so); this row records the event
+   * so a collision can never be silently dropped even if the caller ignores
+   * the return value. The body names the collision: the shared id, the
+   * occupied row, and the two distinct canonical fingerprints (which carry the
+   * refused row's content, so its bytes are traceable from the ledger).
+   */
+  private recordIdCollision(
+    base: KnowledgeEntry[],
+    input: NewKnowledgeEntry,
+    existing: KnowledgeEntry,
+    collision: IdCollision,
+  ): KnowledgeEntry[] {
+    const row: NewKnowledgeEntry = {
+      project: input.project,
+      kind: "note",
+      title: `ID collision on ${collision.id}`,
+      tags: [COLLISION_TAG],
+      body:
+        `id ${collision.id} already addresses project "${existing.project}" title "${existing.title}" ` +
+        `(fingerprint ${collision.existingFingerprint}); refused incoming project "${input.project}" ` +
+        `title "${input.title}" (fingerprint ${collision.incomingFingerprint}) — the incoming row was ` +
+        `NOT appended. Distinguish a field and re-save.`,
+      sourcePath: `collision:${collision.id}`,
+    };
+    const ledger: KnowledgeEntry = {
+      ...row,
+      tags: [...row.tags].sort(),
+      id: `K${fnv1a(fingerprint(row)).toString(16).padStart(8, "0")}`,
+      savedAt: new Date().toISOString(),
+    };
+    if (base.some((e) => e.id === ledger.id)) return base;
+    return [...base, ledger];
   }
 
   private writeStore(entries: KnowledgeEntry[]): void {

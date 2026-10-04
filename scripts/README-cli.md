@@ -518,6 +518,13 @@ commit, files, foreign }`; a refusal flips the envelope to `ok: false` + its cod
 reason (`RT_E_GIT_UNAVAILABLE`, `RT_E_FOREIGN_FILES`, …) and exit 1 — **the emitted
 tree still exists on disk**, so the failure is in delivery, never in the build.
 
+> **Ordering caveat (`emit --run --git`).** The `--git` tail runs independently of
+> the `--run` verdict: a RED tree-run still lands the commit (the envelope is
+> `ok:false` + `RT_E_TREE_RUN_FAILED`, yet `git.committed` is real). To require a
+> verified tree before committing, run `emit --run` first and issue `emit --git`
+> only on a green verdict — exactly what the deliver step in
+> [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs) does.
+
 `--force` admits an emit into a folder that already holds foreign files — without it the
 emit is refused (`RT_E_FOREIGN_FILES`, exit 1, the `foreign` list on the envelope); with it
 the foreign files are moved **aside** into `<dir>/.rapidtool-quarantine/<stamp>/` —
@@ -1023,8 +1030,9 @@ verbs below are REAL drives wired through the same `runUntilGate` loop the origi
   whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`); only a
   `forceHuman` gate, or any red DoD gate, still parks (exit 2) — never a fake completion.
   The multi-brief wrapper that drains an intake directory and then delivers each
-  completed project (`emit --run --git` — the tree is re-executed before it is
-  committed) is [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs).
+  completed project (it VERIFIES with `emit --run`, then COMMITS with a separate
+  `emit --git` only on a green verdict) is
+  [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs).
 
 The earlier `run --unattended` / `gate --unattended` flags remain as the one-shot form of the
 same drive (`--unattended` forces autopilot + live on those verbs). Neither verb is the wild
@@ -1045,13 +1053,14 @@ scheduler-facing story was missing (fixes/344 F-18): **ONE bounded tick** that
 drains a brief intake and, per brief, runs the real CLI verbs
 
 ```
-create  →  unattended (machine seat)  →  emit --run --git (per-project dir)
+create  →  unattended (machine seat)  →  emit --run (verify)  →  emit --git (commit)
 ```
 
-The deliver step **re-executes the emitted tree** (`emit --run`: per-file parse +
-every emitted spec + the kind-entry smoke) and claims a delivery only when that
-tree-run is green *and* the commit lands — a commit alone is never evidence the
-artifact was built or tested.
+The deliver step **re-executes the emitted tree first** (`emit --run`: per-file
+parse + every emitted spec + the kind-entry smoke). Only a GREEN tree-run reaches
+the separate `emit --git` commit, so a red delivery-time re-run leaves **no
+commit** on disk — a commit alone is never evidence the artifact was built or
+tested, and a red tree's commit never exists.
 
 It is the only "walk away and it ships" path in the repo, and it is honest about
 the boundary: it delivers only a project whose drive reaches a clean terminal
@@ -1081,14 +1090,16 @@ writes beside the project (`<dir>/.rapidtool/checkpoint.json`). A brief already
 the item is reported as `changed` and left for a human — never silently re-run.
 A corrupt state file is refused, never overwritten.
 
-**Never invents success.** Delivery is claimed only after the `emit --run --git`
-envelope proves BOTH a real commit (`committed: true`, or the idempotent
-`noop: true` with a real `.git` on disk) AND a green tree-run verdict
-(`treeRun.ok: true` — the emitted tree was re-executed at delivery time, not
-merely committed). The persisted `delivery` record carries that verdict's
-evidence (`treeRun.ok`, `declaredScriptsVerified`, the spec tally, and the minted
-tree-test `evidenceHash` when `--run` promoted one). Every other terminal is
-reported with its code and left for a human:
+**Never invents success.** Delivery is claimed only after TWO real calls prove it:
+`emit --run` re-runs the emitted tree GREEN (`treeRun.ok: true` — the tree was
+re-executed at delivery time, not merely committed), and ONLY THEN the separate
+`emit --git` lands a real commit (`committed: true`, or the idempotent
+`noop: true` with a real `.git` on disk). Verification precedes the commit: a RED
+delivery-time re-run stops before `--git` and leaves **no commit** on disk. The
+persisted `delivery` record carries that verdict's evidence (`treeRun.ok`,
+`declaredScriptsVerified`, the spec tally, and the minted tree-test `evidenceHash`
+when `--run` promoted one). Every other terminal is reported with its code and
+left for a human:
 
 - `parked` — exit 2 from `unattended`: the machine seat is exhausted at a
   `forceHuman` gate (or a `blocked` project). A person must `approve`/`reject`.

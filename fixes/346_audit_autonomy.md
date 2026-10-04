@@ -66,3 +66,30 @@ same wave (`factory-watch.mjs`), and the suite is now 10/10 on both runtimes.
 Keyed behaviour was not reproduced (mandate: 0 keyed calls). Keyed log claims (a real delivery commit
 `976afe8`, a keyed `RT_E_GATE_PENDING` stall, keyed multi-job substance) are unverified here. The full
 gate was not run by the auditor (run centrally). The tree moved under the auditor (parallel lanes).
+
+---
+
+## Re-audit (HEAD `100504c`, same day) — verdict still FALSE; three rows moved
+
+- **Row 5 (`requiresHumanResume`/`shouldAutopause` unwired) → CHANGED, mostly closed.** The store resume
+  branch (`store.ts:35` import, gate at `:1485-1508`) now refuses a silent re-entry with a coded
+  `RT_E_GATE_PENDING`; `watchdog.ts:6-10,20` documents the real consumer. Residual: `boundedStepWatch`
+  (`watchdog.ts:93`) still has no production consumer.
+- **Row 9 (tree/oracle behavioural asymmetry) → CHANGED, parity closed.** `verify.server.ts:1466,1480,1496`
+  plus the tree mirror. The probe stays deliberately modest (row-specific cases remain `generateCases`'s job).
+- **Row 10 ("delivered" proves a commit, not a verified artifact) → CHANGED, mostly closed.** The deliver
+  step re-executes (`factory-watch.mjs`) and requires `treeRun.ok === true` with persisted evidence.
+  **Residual confirmed:** the CLI `emit` arm runs `--git` unconditionally after a red `--run`
+  (`rapidtool-cli.mjs:2228-2245`; `headless.landEmittedTree` never consults the verdict), so a direct
+  `emit --run --git` on a red tree still lands a commit. An earlier follow-up agent fixed this at the
+  *factory* level (verify-then-commit), so the orchestrator never commits a red tree; the CLI-level guard
+  remains the open item.
+
+Unchanged rows (evidence re-derived): 1 no autonomy · 2 keyless never delivers · 3 keyed P6 stall
+(log claim) · 4 no isolation · 6 cross-family failover · 7 console run records no spend · 8 human
+acceptance stamp · 11 P7–P12 linear.
+
+**Revised remaining work:** P0-1 definitional bar (machine-verifiable acceptance or stop asserting);
+P0-2 keyed P6 reliability; **P0-3 CLI-level emit ordering guard**; P1-4 isolation boundary; P1-5
+console-run spend metering; P2-6 finish the watchdog wiring (`boundedStepWatch`); P2-7 cross-family
+failover (keyed); P2-8 P7–P12 coverage.

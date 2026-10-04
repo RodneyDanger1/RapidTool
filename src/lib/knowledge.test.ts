@@ -44,6 +44,7 @@ import {
   LESSON_OUTCOME_LABEL,
   LESSON_OUTCOME_MIN_N,
   LESSON_CENSUS_CAP,
+  COLLISION_TAG,
 } from "./knowledge.ts";
 import { seedProject } from "./testing/fixtures.ts";
 import { fnv1a } from "./algorithms.ts";
@@ -1571,5 +1572,125 @@ describe("F3 (221 §F3 — W18) — lessonOutcomeReport: cross-run learning meas
       [],
       "junk logs tolerated",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/346 H3 — 32-bit FNV-1a content-address collision detection.
+//
+// savePattern mints ids as `K` + fnv1a(fingerprint), a 32-bit address, so two
+// DISTINCT fingerprints can collide (birthday: ~0.4% over ~6k rows). Pre-fix,
+// a colliding save found the occupied id and returned
+// {entry: existing, appended:false} — silently swallowing the second distinct
+// row, the same silent-merge class A2-F7 closed at the delimiter level.
+//
+// This pin INJECTS a REAL, controlled collision instead of waiting for a
+// birthday hit: COLLIDE_A/B differ only in `body`, their canonical
+// fingerprints are distinct, but both hash to 0xb5c3b61c — so both addresses
+// are Kb5c3b61c. The pair is a genuine fnv1a collision on this module's
+// fingerprint surface (the house idiom pinned in cassette.test.ts /
+// algorithms.test.ts); the pinned id literal is the tripwire — if `fnv1a` or
+// `fingerprint` changes, the first assertion fails loudly.
+// ---------------------------------------------------------------------------
+describe("fixes/346 H3 — id-collision detection (fail loud, never silently merge)", () => {
+  const COLLIDE_BASE: NewKnowledgeEntry = {
+    project: "collide",
+    kind: "pattern",
+    title: "collision probe",
+    tags: ["probe"],
+    sourcePath: "src/lib/collide.ts",
+    body: "collision probe 439599",
+  };
+  const COLLIDE_A: NewKnowledgeEntry = { ...COLLIDE_BASE, body: "collision probe 439599" };
+  const COLLIDE_B: NewKnowledgeEntry = { ...COLLIDE_BASE, body: "collision probe 622382" };
+  const COLLIDE_ID = "Kb5c3b61c";
+
+  it("a REAL fingerprint collision refuses the second distinct row and records a coded ledger row", () => {
+    const file = tempStorePath();
+    try {
+      const store = new KnowledgeStore(file);
+
+      const a = store.savePattern(COLLIDE_A);
+      assert.equal(a.appended, true);
+      assert.equal(a.entry.id, COLLIDE_ID, "tripwire: the pinned pair must still address Kb5c3b61c");
+      assert.equal(a.collision, undefined, "the ordinary save surfaces no collision");
+
+      // Pre-fix this returned {entry: a.entry, appended:false} with no flag and
+      // wrote nothing — the distinct row was silently swallowed. Post-fix it is
+      // REFUSED and the collision is surfaced.
+      const b = store.savePattern(COLLIDE_B);
+      assert.equal(b.appended, false, "the colliding row is never appended under the occupied id");
+      assert.equal(b.refused, true);
+      assert.equal(b.reason, "id-collision");
+      assert.equal(b.code, "RT_E_INTERNAL");
+      assert.ok(b.collision, "the collision is surfaced on the result");
+      assert.equal(b.collision!.id, COLLIDE_ID);
+      assert.equal(b.entry.id, COLLIDE_ID, "the envelope surfaces the occupied row");
+      assert.notEqual(
+        b.collision!.existingFingerprint,
+        b.collision!.incomingFingerprint,
+        "the two fingerprints are genuinely distinct (not an idempotent re-save)",
+      );
+      assert.equal(b.collision!.incomingFingerprint.includes("622382"), true, "the incoming fingerprint is the second row's");
+      assert.equal(b.collision!.existingFingerprint.includes("439599"), true, "the existing fingerprint is the first row's");
+
+      // The refusal is recorded durably: a coded collision-ledger row names the
+      // shared id, the occupied row, and BOTH distinct fingerprints.
+      const ledger = store.entries().filter((e) => e.tags.includes(COLLISION_TAG));
+      assert.equal(ledger.length, 1, "exactly one collision-ledger row is appended");
+      const row = ledger[0]!;
+      assert.equal(row.kind, "note");
+      assert.equal(row.title, `ID collision on ${COLLIDE_ID}`);
+      assert.equal(row.sourcePath, `collision:${COLLIDE_ID}`);
+      assert.ok(row.body.includes(`id ${COLLIDE_ID} already addresses`));
+      assert.ok(row.body.includes(b.collision!.existingFingerprint), "ledger names the occupied fingerprint");
+      assert.ok(row.body.includes(b.collision!.incomingFingerprint), "ledger names the refused fingerprint");
+
+      // The occupied row is byte-intact — the incoming content was NOT merged.
+      const occupied = store.entries().find((e) => e.id === COLLIDE_ID)!;
+      assert.equal(occupied.body, COLLIDE_A.body);
+      assert.equal(occupied.title, COLLIDE_A.title);
+      assert.equal(store.count(), 2, "occupied row + one ledger row; the second row is not silently merged");
+
+      // Idempotent re-save of the ORIGINAL row is unchanged: no append, no collision.
+      const reA = store.savePattern(COLLIDE_A);
+      assert.equal(reA.appended, false);
+      assert.equal(reA.refused, undefined);
+      assert.equal(reA.collision, undefined, "a same-fingerprint re-save is not a collision");
+
+      // Re-attempting the SAME collision does not fork the ledger (content-addressed).
+      const b2 = store.savePattern(COLLIDE_B);
+      assert.equal(b2.refused, true);
+      assert.equal(b2.collision!.id, COLLIDE_ID);
+      assert.equal(store.count(), 2, "the collision-ledger row is idempotent");
+
+      // Persisted: a fresh store over the same file sees row + ledger.
+      const reloaded = new KnowledgeStore(file);
+      assert.equal(reloaded.entries().filter((e) => e.tags.includes(COLLISION_TAG)).length, 1);
+      assert.equal(reloaded.entries().find((e) => e.id === COLLIDE_ID)!.body, COLLIDE_A.body);
+    } finally {
+      cleanup(file);
+    }
+  });
+
+  it("the ordinary distinct-row path and idempotent re-save never false-positive a collision", () => {
+    const file = tempStorePath();
+    try {
+      const store = new KnowledgeStore(file);
+      const first = store.savePattern(BASE);
+      const second = store.savePattern({ ...BASE, title: "Second pattern", tags: ["zod", "react"] });
+      assert.equal(first.appended, true);
+      assert.equal(second.appended, true);
+      assert.equal(first.collision, undefined);
+      assert.equal(second.collision, undefined);
+      assert.notEqual(first.entry.id, second.entry.id);
+      const dup = store.savePattern({ ...BASE, title: "Debounce watcher events" });
+      assert.equal(dup.appended, false);
+      assert.equal(dup.collision, undefined, "idempotent re-save stays a plain no-op");
+      assert.equal(store.entries().filter((e) => e.tags.includes(COLLISION_TAG)).length, 0);
+      assert.equal(store.count(), 2);
+    } finally {
+      cleanup(file);
+    }
   });
 });

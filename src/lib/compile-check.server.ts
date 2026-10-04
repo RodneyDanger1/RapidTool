@@ -1135,20 +1135,27 @@ function splitTopLevelArgs(args: string): string[] {
 }
 
 /** A bare name / member read (`ep`, `ns[name]`, `out.job`) — a presence probe,
- *  never a value constraint. Masked string leaves are blank, so they match too. */
+ *  never a value constraint. Masked string leaves are blank, so they match too.
+ *  The member/index groups are anchored to a single `.name` / `[…]` step each, so
+ *  an OPERATOR (`m.plan.length === 3`, `names.length > 3`) is never swallowed as
+ *  if it were part of the path — that over-match made every paren-free
+ *  comparison in `assert.ok(…)` read as a bare presence probe. 346 cross-lane. */
 function isBareRead(expr: string): boolean {
   const e = expr.trim();
   if (!e) return true;
-  return /^[A-Za-z_$][\w$]*(?:\s*[.[][^()]*?\]?)?$/.test(e);
+  return /^[A-Za-z_$][\w$]*(?:\s*(?:\.[A-Za-z_$][\w$]*|\[[^\]]*\]))*$/.test(e);
 }
 
-/** A type/emptiness/relational-length shape marker — proves presence, not behaviour. */
+/** A type/emptiness shape marker — proves presence, not behaviour. The `.length`
+ *  clause is deliberately NARROW (`> 0` / `>= 1`, the non-emptiness probes): a
+ *  `.length` tied to a concrete bound (`plan().length === 3`, `names.length > 3`)
+ *  constrains behaviour and is NOT a shape marker. 346 cross-lane parity. */
 function isShapeMarker(expr: string): boolean {
   return (
     /\btypeof\b/.test(expr) ||
     /\bArray\s*\.\s*isArray\b/.test(expr) ||
     /[!=]==?\s*(?:null|undefined|void\s+0)\b/.test(expr) ||
-    /\.length\s*(?:>=?|<=?|===|!==)\s*\d+/.test(expr)
+    /\.length\s*(?:>\s*0(?![\d.])|>=\s*1(?![\d.]))/.test(expr)
   );
 }
 

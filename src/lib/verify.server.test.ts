@@ -46,6 +46,9 @@ import {
   verifyAndFixServer,
 } from "./verify.server.ts";
 import type { VerifyCase } from "./verify.server.ts";
+// 346 cross-lane: the tree-lane assertion floor, exercised head-to-head against
+// behaviouralOracleExpression over one shared corpus (cross-lane parity pin).
+import { specSourceHasBehaviouralAssert } from "./compile-check.server.ts";
 import { runnerAvailable } from "./node-runner.server.ts";
 import { createTokenBudget, emptyLedger } from "./token-ledger.ts";
 import { oracleToCaseSeeds } from "./dod.ts";
@@ -1829,6 +1832,127 @@ describe("345 L1-F2 — behaviouralOracleExpression classifier", () => {
       true,
     );
     assert.equal(oracleHasBehaviouralCase([{ id: "a", expression: "typeof f === 'function'" }]), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 cross-lane — the tree-lane assertion floor in emitted specs
+//
+// The tree lane floors assertions in emitted spec files
+// (`compile-check.server.ts` `specSourceHasBehaviouralAssert`) and the oracle
+// lane floors machine-run case expressions (`verify.server.ts`
+// `behaviouralOracleExpression`). They must agree on the documented rule: a form
+// is behavioural iff a module read is tied to a concrete expected value (a
+// string/number/boolean/object/array literal) or carries a relational predicate
+// over a module read; literal-only tautologies, typeof, Array.isArray, presence
+// probes (null/undefined/void 0, `.length > 0`) and no-module-read forms are NOT.
+//
+// The assert form ↔ expression form mapping is explicit:
+//   equality family  assert.equal(a, b) / assert.deepEqual(a, b)  ↔  a === b
+//   ok / notOk       assert.ok(<expr>)                            ↔  <expr>
+// (deepEqual over an object/array literal maps to a strict comparison of the
+// same operands — the shapes differ, the classification does not.)
+// Call-outcome forms (`throws`/`rejects`/`match`) have NO boolean-expression
+// counterpart in the oracle grammar (a throw is not a value); that boundary is
+// recorded by the last test rather than silently dropped.
+// ---------------------------------------------------------------------------
+describe("346 cross-lane — tree-lane/oracle-lane behavioural parity over one corpus", () => {
+  const wrap = (assertion: string): string => `test("x", () => { ${assertion} });`;
+
+  type ParityRow = {
+    id: string;
+    category: string;
+    assertion: string;
+    /** Oracle equivalent; null = the oracle grammar has no counterpart (recorded). */
+    expression: string | null;
+    expected: boolean;
+  };
+
+  const corpus: ParityRow[] = [
+    // concrete-value comparisons (string/number/boolean/object/array/base/exp/sep)
+    { id: "A1", category: "concrete · string", assertion: `assert.strictEqual(m.name, "ok")`, expression: `m.name === "ok"`, expected: true },
+    { id: "A2", category: "concrete · number", assertion: `assert.equal(add(1,1), 2)`, expression: `add(1,1) === 2`, expected: true },
+    { id: "A3", category: "concrete · boolean", assertion: `assert.strictEqual(flag, true)`, expression: `flag === true`, expected: true },
+    { id: "A4", category: "concrete · object", assertion: `assert.deepEqual(m.plan, {ok:true})`, expression: `m.plan === {ok: true}`, expected: true },
+    { id: "A5", category: "concrete · array", assertion: `assert.deepEqual(JOBS, ["a"])`, expression: `JOBS === ["a"]`, expected: true },
+    { id: "A6", category: "concrete · hex", assertion: `assert.strictEqual(m.mask, 0xff)`, expression: `m.mask === 0xff`, expected: true },
+    { id: "A7", category: "concrete · bigint", assertion: `assert.strictEqual(m.n, 1n)`, expression: `m.n === 1n`, expected: true },
+    { id: "A8", category: "concrete · exponent", assertion: `assert.strictEqual(m.width, 1e3)`, expression: `m.width === 1e3`, expected: true },
+    { id: "A9", category: "concrete · underscore", assertion: `assert.strictEqual(count, 1_000)`, expression: `count === 1_000`, expected: true },
+    // presence probes
+    { id: "B1", category: "presence · null", assertion: `assert.equal(x, null)`, expression: `x === null`, expected: false },
+    { id: "B2", category: "presence · undefined", assertion: `assert.equal(x, undefined)`, expression: `x === undefined`, expected: false },
+    { id: "B3", category: "presence · void 0", assertion: `assert.ok(boardAdd(1) === void 0)`, expression: `boardAdd(1) === void 0`, expected: false },
+    { id: "B4", category: "presence · !== undefined", assertion: `assert.ok(x !== undefined)`, expression: `x !== undefined`, expected: false },
+    // typeof / Array.isArray
+    { id: "C1", category: "typeof · equal", assertion: `assert.equal(typeof x, "function")`, expression: `typeof x === "function"`, expected: false },
+    { id: "C2", category: "typeof · ok", assertion: `assert.ok(typeof x === "function")`, expression: `typeof x === "function"`, expected: false },
+    { id: "D1", category: "Array.isArray · ok", assertion: `assert.ok(Array.isArray(x))`, expression: `Array.isArray(x)`, expected: false },
+    { id: "D2", category: "Array.isArray · equal", assertion: `assert.strictEqual(Array.isArray(x), true)`, expression: `Array.isArray(x) === true`, expected: false },
+    // .length operands / relational length
+    { id: "E1", category: "length · operand", assertion: `assert.equal(m.plan.length, 3)`, expression: `m.plan.length === 3`, expected: true },
+    { id: "E2", category: "length · ok equality", assertion: `assert.ok(m.plan.length === 3)`, expression: `m.plan.length === 3`, expected: true },
+    { id: "E3", category: "length · emptiness probe", assertion: `assert.ok(names.length > 0)`, expression: `names.length > 0`, expected: false },
+    { id: "E4", category: "length · relational", assertion: `assert.ok(names.length > 3)`, expression: `names.length > 3`, expected: true },
+    { id: "E5", category: "length · keys emptiness", assertion: `assert.ok(Object.keys(ns).length > 0)`, expression: `Object.keys(ns).length > 0`, expected: false },
+    // literal-only tautologies
+    { id: "F1", category: "tautology · numbers", assertion: `assert.equal(1, 1)`, expression: `1 === 1`, expected: false },
+    { id: "F2", category: "tautology · booleans", assertion: `assert.equal(true, true)`, expression: `true === true`, expected: false },
+    { id: "F3", category: "tautology · objects", assertion: `assert.deepEqual({a:1}, {a:1})`, expression: `{a:1} === {a:1}`, expected: false },
+    { id: "F4", category: "tautology · ok", assertion: `assert.ok(1 === 1)`, expression: `1 === 1`, expected: false },
+    // two reads, no concrete expected value
+    { id: "F5", category: "two-reads · equal", assertion: `assert.equal(a, b)`, expression: `a === b`, expected: false },
+    { id: "F6", category: "two-reads · strict", assertion: `assert.strictEqual(a, b)`, expression: `a === b`, expected: false },
+    { id: "F7", category: "two-reads · notStrict", assertion: `assert.notStrictEqual(a, b)`, expression: `a !== b`, expected: false },
+    // relational predicate over a module value
+    { id: "G1", category: "relational · module", assertion: `assert.ok(median([1,2,3]) >= 2)`, expression: `median([1,2,3]) >= 2`, expected: true },
+    // declaration(s); final
+    { id: "I1", category: "declaration · final", assertion: `const nums = [1,2,3]; assert.equal(mean(nums), 2)`, expression: `const nums = [1,2,3]; mean(nums) === 2`, expected: true },
+    { id: "I2", category: "declaration · literal", assertion: `const a = 1; assert.equal(a, 1)`, expression: `const a = 1; a === 1`, expected: true },
+    // numeric-literal suffixes are not module reads; the literals are concrete
+    { id: "J1", category: "numeric · bigint tautology", assertion: `assert.equal(1n, 2)`, expression: `1n === 2`, expected: false },
+    { id: "J2", category: "numeric · hex tautology", assertion: `assert.equal(0x1, 2)`, expression: `0x1 === 2`, expected: false },
+    { id: "J3", category: "numeric · binary tautology", assertion: `assert.equal(0b101, 2)`, expression: `0b101 === 2`, expected: false },
+    { id: "J4", category: "numeric · octal tautology", assertion: `assert.equal(0o7, 8)`, expression: `0o7 === 8`, expected: false },
+    { id: "J5", category: "numeric · exponent tautology", assertion: `assert.equal(1e3, 2)`, expression: `1e3 === 2`, expected: false },
+    { id: "J6", category: "numeric · separator tautology", assertion: `assert.equal(1_000, 2)`, expression: `1_000 === 2`, expected: false },
+    { id: "J7", category: "numeric · bigint ok", assertion: `assert.ok(1n === 2)`, expression: `1n === 2`, expected: false },
+    { id: "J8", category: "numeric · negative bigint", assertion: `assert.strictEqual(-1n, 2)`, expression: `-1n === 2`, expected: false },
+  ];
+
+  for (const row of corpus) {
+    it(`${row.id} ${row.category}`, () => {
+      assert.equal(
+        specSourceHasBehaviouralAssert(wrap(row.assertion)),
+        row.expected,
+        `tree lane: ${row.assertion}`,
+      );
+      if (row.expression !== null) {
+        assert.equal(
+          behaviouralOracleExpression(row.expression),
+          row.expected,
+          `oracle lane: ${row.expression}`,
+        );
+      }
+    });
+  }
+
+  it("records the call-outcome boundary rather than skipping it", () => {
+    // The tree lane's call-outcome clauses are behavioural by rule (the assertion
+    // observes a throw/rejection/match, not a value).
+    for (const assertion of [
+      `assert.throws(() => f(), /boom/)`,
+      `assert.rejects(p(), /nope/)`,
+      `assert.match(m.render(), /^ok/)`,
+    ]) {
+      assert.equal(specSourceHasBehaviouralAssert(wrap(assertion)), true, assertion);
+    }
+    // The oracle grammar has no call-outcome atom: a case is a boolean EXPRESSION
+    // over the exports, and "this call throws" is not a value — the closest form
+    // (the bare call) constrains nothing and stays shape-only. Recorded, not hidden.
+    for (const expression of [`f()`, `p()`, `m.render()`]) {
+      assert.equal(behaviouralOracleExpression(expression), false, expression);
+    }
   });
 });
 

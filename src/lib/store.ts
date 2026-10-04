@@ -199,6 +199,10 @@ type RapidState = {
    *  changed elsewhere (a clobber avoided). Shown as a warning; in-memory only. */
   crossTabNotice: { at: number; adopted: number; drifted: string[] } | null;
   dismissCrossTabNotice: () => void;
+  /** L3-02 (346): project-deletion tombstones (the delete markers a cross-tab
+   *  reconcile honours). Persisted, so a delete in one tab propagates to the
+   *  others and a stale write cannot resurrect the project. Bounded. */
+  projectTombstones: CrossTabTombstone[];
   setHydrated: (v: boolean) => void;
   setAutopilot: (v: boolean) => void;
   create: (brief: string, name?: string) => string;
@@ -868,8 +872,12 @@ async function advanceOnceAsync(
  * hydration, or (c) grow memory without bound.
  */
 
-/** The persisted slice — exactly what partialize() writes to storage. */
-type PersistedSlice = Pick<RapidState, "projects" | "activeId" | "autopilot" | "demoSeeded">;
+/** The persisted slice — exactly what partialize() writes to storage. The
+ *  tombstone list is written ONLY when non-empty, so a legacy blob with no
+ *  deletion is byte-identical to before. */
+type PersistedSlice = Pick<RapidState, "projects" | "activeId" | "autopilot" | "demoSeeded"> & {
+  projectTombstones?: CrossTabTombstone[];
+};
 
 /**
  * H4: the quota-salvage write's caps. They bound logs/chatLog — the two
@@ -1049,7 +1057,7 @@ function quotaSafePersistStorage(): PersistStorage<PersistedSlice> | undefined {
  *  so the next load rehydrates cleanly). Never strands hydration. */
 function recoverFromCorruptPersistence(): void {
   if (preserveUnreadableBlob()) notePersistRecovery();
-  useRapid.setState({ hydrated: true, projects: [], activeId: null, demoSeeded: false });
+  useRapid.setState({ hydrated: true, projects: [], activeId: null, demoSeeded: false, projectTombstones: [] });
   useRapid.getState().seedIfEmpty();
 }
 
@@ -1156,6 +1164,10 @@ const persistOptions: PersistOptions<RapidState, PersistedSlice> = {
     activeId: s.activeId,
     autopilot: s.autopilot,
     demoSeeded: s.demoSeeded,
+    // Omit when empty so the legacy persisted blob is byte-identical.
+    ...(Array.isArray(s.projectTombstones) && s.projectTombstones.length > 0
+      ? { projectTombstones: s.projectTombstones }
+      : {}),
   }),
   onRehydrateStorage: () => (state, error) => {
     // H4: the previous code only handled a JSON PARSE error. A VALID-JSON
@@ -1253,12 +1265,87 @@ function crossTabDrifted(local: Project, remote: Project): boolean {
   );
 }
 
+/** L3-02 (346): a project-deletion tombstone. `at` orders deletions so the set
+ *  can be pruned deterministically; `id` is the deleted project id. */
+export type CrossTabTombstone = { id: string; at: number };
+
+/** Cap so tombstones cannot grow without bound. Oldest deletions are dropped
+ *  first, so a tab stale by more than this many deletes may resurrect one — the
+ *  finite bound that keeps the marker list bounded. */
+const CROSS_TAB_TOMBSTONE_CAP = 200;
+
+/** Deterministic union of two tombstone lists: dedupe by id (earliest deletion
+ *  wins), sort oldest-first, keep the newest CAP. Idempotent — re-merging the
+ *  same lists yields the identical array, so the reconcile write loop settles. */
+function unionTombstones(
+  local: readonly CrossTabTombstone[],
+  remote: readonly CrossTabTombstone[],
+): CrossTabTombstone[] {
+  const byId = new Map<string, number>();
+  for (const t of [...(local ?? []), ...(remote ?? [])]) {
+    if (!t || typeof t.id !== "string" || t.id.length === 0) continue;
+    const at = typeof t.at === "number" && Number.isFinite(t.at) ? t.at : 0;
+    const prev = byId.get(t.id);
+    if (prev === undefined || at < prev) byId.set(t.id, at);
+  }
+  return [...byId.entries()]
+    .map(([id, at]) => ({ id, at }))
+    .sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .slice(-CROSS_TAB_TOMBSTONE_CAP);
+}
+
+/** Read tombstones off an untrusted persisted snapshot; junk rows are dropped. */
+function readTombstones(raw: unknown): CrossTabTombstone[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CrossTabTombstone[] = [];
+  for (const t of raw) {
+    if (t === null || typeof t !== "object") continue;
+    const id = (t as { id?: unknown }).id;
+    if (typeof id !== "string" || id.length === 0) continue;
+    const at = (t as { at?: unknown }).at;
+    out.push({ id, at: typeof at === "number" && Number.isFinite(at) ? at : 0 });
+  }
+  return out;
+}
+
+/** Value-equality for two union-sorted tombstone lists (change detection). */
+function tombstonesEqual(a: readonly CrossTabTombstone[], b: readonly CrossTabTombstone[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (a[i].id !== b[i].id || a[i].at !== b[i].at) return false;
+  return true;
+}
+
+/** Record a deletion (idempotent: an id already present returns the SAME array
+ *  reference, so a redundant remove is a no-op). */
+function addTombstone(list: readonly CrossTabTombstone[], id: string): CrossTabTombstone[] {
+  if (typeof id !== "string" || id.length === 0) return list as CrossTabTombstone[];
+  if ((list ?? []).some((t) => t.id === id)) return list as CrossTabTombstone[];
+  return unionTombstones(list ?? [], [{ id, at: Date.now() }]);
+}
+
+/** Clear tombstones for ids a tab has just (re)created. */
+function clearTombstones(list: readonly CrossTabTombstone[], ids: readonly string[]): CrossTabTombstone[] {
+  const drop = new Set(ids);
+  const kept = (list ?? []).filter((t) => !drop.has(t.id));
+  return kept.length === (list ?? []).length ? (list as CrossTabTombstone[]) : kept;
+}
+
+/** The set of deleted ids (defensive against junk in an untrusted caller). */
+function deletedIdSet(ids: readonly string[]): Set<string> {
+  return new Set((ids ?? []).filter((id): id is string => typeof id === "string" && id.length > 0));
+}
+
 /** Merge one project: the remote record wins for scalar/engine fields, while
- *  every append-only collection is union-merged so neither tab's rows are lost. */
+ *  every append-only collection is union-merged so neither tab's rows are lost.
+ *  A tombstoned id (`deletedIds`) merges as deleted — the caller drops it. */
 export function mergeCrossTabProject(
   local: Project,
   remote: Project,
-): { project: Project; changed: boolean; drifted: boolean } {
+  deletedIds: readonly string[] = [],
+): { project: Project; changed: boolean; drifted: boolean; deleted: boolean } {
+  if (deletedIdSet(deletedIds).has(local.id)) {
+    return { project: remote, changed: false, drifted: false, deleted: true };
+  }
   const next = { ...remote };
   let changed = false;
   for (const key of CROSS_TAB_ARRAY_KEYS) {
@@ -1271,17 +1358,22 @@ export function mergeCrossTabProject(
     (next as unknown as Record<string, unknown>)[key] = union;
   }
   const drifted = crossTabDrifted(local, remote);
-  return { project: next, changed: changed || drifted, drifted };
+  return { project: next, changed: changed || drifted, drifted, deleted: false };
 }
 
 /** Reconcile the whole projects array against another tab's snapshot. Remote
  *  projects are adopted (new ids added, existing ids merged); local-only
- *  projects are kept — no deletion tombstones, so a delete in one tab does not
- *  propagate and no local build is ever dropped. Pure + total. */
+ *  projects are kept UNLESS their id is tombstoned. A tombstone (`deletedIds`,
+ *  an id deleted in the remote snapshot or held locally) removes the project
+ *  locally and keeps it removed even when a later stale snapshot lists it
+ *  again — no ping-pong resurrection. With no tombstone the behaviour is the
+ *  legacy one byte-for-byte. Pure + total. */
 export function reconcileCrossTabProjects(
   local: readonly Project[],
   remote: readonly Project[],
+  deletedIds: readonly string[] = [],
 ): { projects: Project[]; changed: boolean; adopted: number; drifted: string[] } {
+  const dead = deletedIdSet(deletedIds);
   const localById = new Map(local.map((p) => [p.id, p]));
   const remoteIds = new Set(remote.map((p) => p.id));
   const projects: Project[] = [];
@@ -1290,17 +1382,27 @@ export function reconcileCrossTabProjects(
   for (const rp of remote) {
     const lp = localById.get(rp.id);
     if (!lp) {
+      if (dead.has(rp.id)) continue; // a dead id is never (re)adopted
       projects.push(rp);
       changed = true;
       continue;
     }
-    const merged = mergeCrossTabProject(lp, rp);
+    const merged = mergeCrossTabProject(lp, rp, deletedIds);
+    if (merged.deleted) {
+      changed = true; // tombstoned id present on both sides → dropped
+      continue;
+    }
     projects.push(merged.project);
     if (merged.changed) changed = true;
     if (merged.drifted) drifted.push(rp.id);
   }
   for (const lp of local) {
-    if (!remoteIds.has(lp.id)) projects.push(lp);
+    if (remoteIds.has(lp.id)) continue;
+    if (dead.has(lp.id)) {
+      changed = true; // the tombstoned local-only project is removed
+      continue;
+    }
+    projects.push(lp);
   }
   return { projects, changed, adopted: drifted.length, drifted };
 }
@@ -1310,6 +1412,7 @@ export const useRapid = create<RapidState>()(
     (set, get) => ({
       projects: [],
       activeId: null,
+      projectTombstones: [],
       // PB-03 (E-13 seam): live-research deepening via engine.deepenResearch —
       // commits through the store so the console affordance actually works.
       deepenResearch: async (id: string, phase: PhaseId) =>
@@ -1756,6 +1859,7 @@ export const useRapid = create<RapidState>()(
           projects: [project, ...s.projects],
           activeId: project.id,
           demoSeeded: true,
+          projectTombstones: clearTombstones(s.projectTombstones, [project.id]),
         }));
         return project.id;
       },
@@ -2312,6 +2416,8 @@ export const useRapid = create<RapidState>()(
         set((s) => ({
           projects: s.projects.filter((p) => p.id !== id),
           activeId: s.activeId === id ? null : s.activeId,
+          // L3-02 (346): persist a delete marker so the deletion crosses tabs.
+          projectTombstones: addTombstone(s.projectTombstones, id),
         })),
       clone: (id) => {
         const project = byId(get().projects, id);
@@ -2361,7 +2467,12 @@ export const useRapid = create<RapidState>()(
             },
           ].slice(-200);
         }
-        set((s) => ({ projects: [copy, ...s.projects], activeId: copy.id, demoSeeded: true }));
+        set((s) => ({
+          projects: [copy, ...s.projects],
+          activeId: copy.id,
+          demoSeeded: true,
+          projectTombstones: clearTombstones(s.projectTombstones, [copy.id]),
+        }));
         return copy.id;
       },
       rename: (id, name) => {
@@ -2429,6 +2540,7 @@ export const useRapid = create<RapidState>()(
               : [project, ...s.projects],
             activeId: project.id,
             demoSeeded: true,
+            projectTombstones: clearTombstones(s.projectTombstones, [project.id]),
           };
         });
         return { ok: true, id: project.id, name: project.name, replaced };
@@ -2471,7 +2583,13 @@ storeReady = true;
 
 /** L3-02 (346 E4): apply another tab's persisted snapshot (a storage event's
  *  newValue) to the live store. A malformed/foreign value is ignored — it never
- *  clobbers. Returns true when a commit happened. */
+ *  clobbers. Returns true when a commit happened.
+ *
+ *  L3-02 (346): the snapshot's delete markers are union-merged with the ones
+ *  this tab already holds and passed to the reconcile. The marker is STICKY:
+ *  a tombstoned project is removed locally AND rides this tab's next write, so
+ *  a stale tab cannot resurrect it and re-applying the same snapshot is a
+ *  no-op (no write loop). */
 export function applyCrossTabSnapshot(raw: string | null): boolean {
   if (!raw) return false;
   let parsed: unknown;
@@ -2481,15 +2599,31 @@ export function applyCrossTabSnapshot(raw: string | null): boolean {
     console.warn("[store] cross-tab sync ignored an unparseable persisted snapshot");
     return false;
   }
-  const slice = (parsed as { state?: { projects?: unknown; demoSeeded?: unknown } } | null)?.state;
+  const slice = (parsed as {
+    state?: { projects?: unknown; demoSeeded?: unknown; projectTombstones?: unknown };
+  } | null)?.state;
   if (!slice || !Array.isArray(slice.projects)) return false;
   const remote = slice.projects.filter(isRepairableProjectEntry);
   if (slice.projects.length > 0 && remote.length === 0) return false;
   const current = useRapid.getState();
-  const merged = reconcileCrossTabProjects(current.projects, remote);
-  if (!merged.changed) return false;
+  const localTombstones = Array.isArray(current.projectTombstones) ? current.projectTombstones : [];
+  const tombstones = unionTombstones(localTombstones, readTombstones(slice.projectTombstones));
+  const merged = reconcileCrossTabProjects(
+    current.projects,
+    remote,
+    tombstones.map((t) => t.id),
+  );
+  const tombsChanged = !tombstonesEqual(tombstones, localTombstones);
+  if (!merged.changed && !tombsChanged) return false;
+  // A deleted active project must not leave the UI pointing at nothing.
+  const activeId =
+    current.activeId !== null && merged.projects.some((p) => p.id === current.activeId)
+      ? current.activeId
+      : null;
   useRapid.setState({
     projects: merged.projects,
+    projectTombstones: tombstones,
+    activeId,
     demoSeeded: current.demoSeeded || slice.demoSeeded === true,
     crossTabNotice:
       merged.drifted.length > 0
@@ -2502,7 +2636,8 @@ export function applyCrossTabSnapshot(raw: string | null): boolean {
 /* L3-02 (346 E4): a `storage` event fires in every OTHER same-origin tab when
  * one tab writes the persist key. Reconcile that snapshot so a rename/approve
  * made in tab A is never clobbered by tab B's next write; genuine scalar drift
- * raises a notice the console shows. Guarded for SSR/Node. */
+ * raises a notice the console shows, and a delete marker (L3-02 346) propagates
+ * the deletion. Guarded for SSR/Node. */
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("storage", (event) => {
     if (event.key !== PERSIST_NAME) return;
