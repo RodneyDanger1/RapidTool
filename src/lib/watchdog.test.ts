@@ -103,6 +103,21 @@ test("boundedStepWatch: a step that outlives 2× budget fires overdue then timeo
   assert.ok(shouldAutopause(elapsedMs, 30), "watchdog would auto-pause on this elapsed");
 });
 
+test("the wild-step wrap's tiers are the pure decision boundaries: 1× warns, 2× parks (346 P2-6)", () => {
+  // `engine.wildStep` configures the wrap with autopauseMs = 2×budgetMs and
+  // parks only when the step RESOLVES at/after `shouldAutopause`'s tier. Both
+  // the tier-1 overdue row and the tier-2 timeout row fire while the step is
+  // still pending (see the two timed `boundedStepWatch` tests above); these are
+  // the exact boundaries the wrap's `onTimeout`/pause decision reduce to, so a
+  // sub-2× resolve warns without ever parking. No clock: pure math, no flake.
+  const B = 20; // a representative stepBudgetMs
+  assert.equal(shouldAutopause(B, B), false, "the 1× overdue tier never parks");
+  assert.equal(shouldAutopause(B * 2 - 1, B), false, "just under 2× stays running");
+  assert.equal(shouldAutopause(B * 2, B), true, "exactly 2× is the pause-on-resolve tier");
+  assert.equal(watchdogDecision(B, B), 1, "1× is the overdue warn tier");
+  assert.equal(watchdogDecision(B * 2, B), 2, "2× is the timeout tier");
+});
+
 test("boundedStepWatch: a rejected step still clears timers (no stray callbacks)", async () => {
   const calls: string[] = [];
   await assert.rejects(

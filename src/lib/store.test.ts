@@ -46,6 +46,7 @@ const {
   convergeRealRun,
   keyedRefusalSince,
   KEY_UNUSABLE_CODES,
+  measuredSpendFromUsage,
   readLastKeyed,
   staleEmitStep,
   useRapid,
@@ -2726,6 +2727,154 @@ test("A1-12: a console approve records an unattested human decision, never the t
   assert.ok(seatRow, "the console decision records its seat provenance on the ledger");
   assert.match(String(seatRow?.detail), /human-seat-unverified/, "the seat policy's unverified verdict is recorded");
   assert.match(String(seatRow?.detail), /no out-of-band RT_HUMAN_SEAT_TOKEN delivery seam/);
+});
+
+// ---------------------------------------------------------------------------
+// 346 P1-5 (L2) — the console spend tap. A real server-fn envelope's measured
+// usage folds into Project.tokenUsage; an absent/foreign envelope writes
+// NOTHING (no fabricated zero — the SpendChip keeps saying "spend not
+// recorded").
+// ---------------------------------------------------------------------------
+
+test("P1-5: measuredSpendFromUsage maps a REAL usage envelope to a one-call slice; junk is null", () => {
+  assert.deepEqual(
+    measuredSpendFromUsage({ promptTokens: 3210, completionTokens: 654, cachedPromptTokens: 100 }),
+    { promptTokens: 3210, completionTokens: 654, calls: 1, cachedPromptTokens: 100 },
+  );
+  // A legacy 2-key envelope stays 2-key (no invented cache field, still one call).
+  assert.deepEqual(measuredSpendFromUsage({ promptTokens: 7, completionTokens: 8 }), {
+    promptTokens: 7,
+    completionTokens: 8,
+    calls: 1,
+  });
+  for (const junk of [
+    undefined,
+    null,
+    {},
+    "nope",
+    { promptTokens: "1", completionTokens: 2 },
+    { promptTokens: 1 },
+    { promptTokens: -1, completionTokens: 2 },
+    { promptTokens: Number.NaN, completionTokens: 2 },
+    { promptTokens: 1, completionTokens: Number.POSITIVE_INFINITY },
+  ]) {
+    assert.equal(measuredSpendFromUsage(junk), null, `junk ${JSON.stringify(junk)} must not map`);
+  }
+});
+
+test("P1-5: recordSpend writes measured spend and accumulates; nothing measured writes nothing", () => {
+  const p = install(seedProject());
+  // Absent/foreign usage is a NO-OP — the slot stays absent, so the chip keeps
+  // its honest "spend not recorded".
+  assert.equal(useRapid.getState().recordSpend(p.id, undefined), false);
+  assert.equal(useRapid.getState().recordSpend(p.id, {}), false);
+  assert.equal(useRapid.getState().recordSpend(p.id, { promptTokens: "x", completionTokens: 1 }), false);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(current(p.id), "tokenUsage"),
+    false,
+    "no measurement ⇒ no tokenUsage key at all (never a fabricated zero)",
+  );
+  // A real measured call writes the slice.
+  assert.equal(
+    useRapid.getState().recordSpend(p.id, { promptTokens: 1234, completionTokens: 567, cachedPromptTokens: 100 }),
+    true,
+  );
+  assert.deepEqual(current(p.id).tokenUsage, {
+    promptTokens: 1234,
+    completionTokens: 567,
+    calls: 1,
+    cachedPromptTokens: 100,
+  });
+  // A second measured call accumulates (calls increments once per call).
+  assert.equal(useRapid.getState().recordSpend(p.id, { promptTokens: 10, completionTokens: 20 }), true);
+  assert.deepEqual(current(p.id).tokenUsage, {
+    promptTokens: 1244,
+    completionTokens: 587,
+    calls: 2,
+    cachedPromptTokens: 100,
+  });
+  // An unknown id is a refused no-op, never a write.
+  assert.equal(useRapid.getState().recordSpend("ghost", { promptTokens: 1, completionTokens: 1 }), false);
+});
+
+test("P1-5: the chat server-fn envelope carries the provider's REAL measured usage (no fabrication)", async () => {
+  const { chatOnceServer } = await import("./chat.server.ts");
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  const savedFetch = globalThis.fetch;
+  process.env.DEEPSEEK_API_KEY = "sk-p1-5-pin";
+  let seenUrl = "";
+  globalThis.fetch = (async (input: unknown) => {
+    seenUrl = String(input);
+    return new Response(
+      JSON.stringify({
+        model: "deepseek-flash",
+        choices: [{ message: { role: "assistant", content: "Grounded reply." } }],
+        usage: { prompt_tokens: 3210, completion_tokens: 654, prompt_cache_hit_tokens: 100 },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
+  try {
+    const res = await chatOnceServer(seedProject(), "What phase are we on?");
+    assert.match(seenUrl, /api\.deepseek\.com/, "the call reached the provider endpoint (stubbed here)");
+    assert.equal(res.ok, true);
+    if (res.ok) {
+      assert.deepEqual(res.usage, {
+        promptTokens: 3210,
+        completionTokens: 654,
+        cachedPromptTokens: 100,
+      });
+    }
+    // End to end: the envelope's usage folds into the project the chip reads.
+    const p = install(seedProject());
+    const wrote = useRapid.getState().recordSpend(p.id, res.ok ? res.usage : undefined);
+    assert.equal(wrote, true, "the measured server envelope is recorded");
+    assert.equal(current(p.id).tokenUsage?.promptTokens, 3210);
+    assert.equal(current(p.id).tokenUsage?.completionTokens, 654);
+    assert.equal(current(p.id).tokenUsage?.calls, 1);
+  } finally {
+    globalThis.fetch = savedFetch;
+    if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+test("P1-5: the console folds a measured chat reply into the store and updates the SpendChip copy", () => {
+  assert.match(
+    CONSOLE_TSX,
+    /useRapid\.getState\(\)\.recordSpend\(project\.id, res\.usage\)/,
+    "a successful chat reply's measured usage is recorded",
+  );
+  assert.match(CONSOLE_TSX, /res\.ok && res\.usage/, "recording is gated on a present measured usage");
+  assert.match(CONSOLE_TSX, /if \(isMeasuredSpend\(spend\)\)/, "the chip still renders measured spend");
+  assert.match(CONSOLE_TSX, /spend not recorded/, "the honest absence copy is preserved");
+});
+
+test("L3-12 (346 L2): the Fixtures pane names the REAL failure cause; a transport failure is never mislabelled", () => {
+  // Before: `ok:false` unconditionally rendered "corpus dir unreadable", so a
+  // failed server-fn transport (fixtures.review.ts's catch) read as an
+  // unreadable directory — a false cause on the error surface. The pane now
+  // derives the cause from the reported problems and carries an error tone.
+  assert.doesNotMatch(
+    CONSOLE_TSX,
+    /<p className="mt-2 text-xs text-muted">corpus dir unreadable — see the problems above\.<\/p>/,
+    "the unconditional corpus-dir copy is gone",
+  );
+  assert.match(
+    CONSOLE_TSX,
+    /fixtures review unavailable — see the problem above\./,
+    "a transport failure is named as such",
+  );
+  assert.match(
+    CONSOLE_TSX,
+    /\/corpus dir unreadable\/i\.test\(String\(p\)\)/,
+    "the cause is read from the reported problems, not hardcoded",
+  );
+  assert.match(
+    CONSOLE_TSX,
+    /<p role="status" className="mt-2 text-xs text-warn">/,
+    "the failure carries a real error-state signal",
+  );
 });
 
 // ---------------------------------------------------------------------------

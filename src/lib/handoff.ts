@@ -42,6 +42,24 @@ function text(v: unknown): string {
   return String(v);
 }
 
+/**
+ * 346 L3 (A1-12): the recorded token-path truth for a decision, rendered
+ * honestly. A `tokenPath:false` row is NOT necessarily a machine seat — the
+ * browser console (346) is an UNATTESTED human seat with no out-of-band token
+ * path, and calling it a "machine seat" would be a false provenance read.
+ * Branch on the recorded label: only `human/console` gets the console clause;
+ * every other `tokenPath:false` row keeps the byte-identical machine wording.
+ * A `human/…` label that is not the console implies an inconsistent row (the
+ * CLI human seat always carries the token path) — render it as unverified,
+ * never as a machine seat.
+ */
+function tokenPathClause(via: { tokenPath: boolean; label: string }): string {
+  if (via.tokenPath) return "out-of-band token path verified";
+  if (via.label === "human/console") return "unattested console human seat — no out-of-band token";
+  if (via.label.startsWith("human/")) return "human seat — token path not verified";
+  return "machine seat — no token path claimed";
+}
+
 export function phaseHandoff(project: Project, phase: PhaseId): string {
   const def = phaseDef(phase);
 
@@ -149,11 +167,7 @@ export function phaseHandoff(project: Project, phase: PhaseId): string {
     const via = lastDecision.decidedVia;
     const actor = via?.label ? text(via.label) : text(lastDecision.decidedBy);
     const viaClause = via
-      ? ` · via ${text(via.action)} on ${text(via.resource)}${
-          via.tokenPath
-            ? " (out-of-band token path verified)"
-            : " (machine seat — no token path claimed)"
-        }`
+      ? ` · via ${text(via.action)} on ${text(via.resource)} (${tokenPathClause(via)})`
       : "";
     // Hostile/missing stamps degrade to no timestamp, never a throw (the
     // never-throw prompt contract at the top of this file); the ms value is

@@ -13,9 +13,13 @@
 //   • reason "error"          + code RT_E_RUNNER_FAILED (the runner itself
 //     failed: spawn / kill) or RT_E_INTERNAL (the server round-trip broke).
 //
-// This is a bounded runner, NOT a security sandbox — see node-runner.server.ts
-// for the honest boundary. The `runner` option is dependency injection for
-// tests only; production callers must never pass it.
+// fixes/346 P1-4: the production path runs generated code with `isolation:
+// "strict"` (generatedRunOptions) — a REAL resource/process bound via Node's
+// Permission Model (fs-write confinement to the scratch dir, subprocess/worker/
+// addon denial, V8 heap cap). It is still NOT a security sandbox: no network
+// denial, no OS-job isolation — see node-runner.server.ts for the honest
+// boundary. The `runner` option is dependency injection for tests only;
+// production callers must never pass it.
 // ---------------------------------------------------------------------------
 import { createServerFn } from "@tanstack/react-start";
 
@@ -38,6 +42,23 @@ export type ExecResult =
 
 export type RunnerFn = (code: string, opts?: { timeoutMs?: number }) => Promise<ExecResult>;
 
+/**
+ * fixes/346 P1-4: the runner options the GENERATED-CODE path sends. Model-built
+ * code (`engine` P6 → `runCode`) is untrusted, so it is always run with the real
+ * resource/process bound: `isolation:"strict"` engages Node's Permission Model
+ * (fs writes confined to the per-run scratch dir, child_process /
+ * worker_threads / native addons denied) plus a V8 heap cap. Exported so this
+ * policy is PINNED by test rather than implied by a call site. A host without
+ * the Permission Model flag degrades honestly (the runner records
+ * `bound.mechanism:"none"`), never pretending to confine.
+ */
+export function generatedRunOptions(timeoutMs?: number): {
+  timeoutMs?: number;
+  isolation: "strict";
+} {
+  return { timeoutMs, isolation: "strict" };
+}
+
 const runServer = createServerFn({ method: "POST" })
   .validator((input: { code: string; timeoutMs?: number }) => input)
   .handler(async ({ data }) => {
@@ -52,7 +73,7 @@ const runServer = createServerFn({ method: "POST" })
         error: "local bounded runner unavailable in this environment",
       } as const;
     }
-    return runNodeBounded(data.code, { timeoutMs: data.timeoutMs });
+    return runNodeBounded(data.code, generatedRunOptions(data.timeoutMs));
   });
 
 export async function runCode(

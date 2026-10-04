@@ -177,6 +177,8 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs export --project build
 #    --git lands the emitted tree in its own directory: init when absent, then ONE
 #    Conventional-Commits commit staged from the emitted manifest only (idempotent;
 #    a foreign file is reported, never committed; the RapidTool repo is never a target);
+#    combined with --run, a RED run verdict withholds the commit (coded
+#    RT_E_TREE_RUN_FAILED; the emitted tree is still written on disk);
 #    --red-tree banner admits an uncleared red tree-run WITH the unmissable banner
 #    on the emitted README (default refuse — see the Emit section)
 node --experimental-strip-types scripts/rapidtool-cli.mjs emit --project build.json [--out emitted/] [--check] [--run] [--git] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified]
@@ -518,12 +520,16 @@ commit, files, foreign }`; a refusal flips the envelope to `ok: false` + its cod
 reason (`RT_E_GIT_UNAVAILABLE`, `RT_E_FOREIGN_FILES`, …) and exit 1 — **the emitted
 tree still exists on disk**, so the failure is in delivery, never in the build.
 
-> **Ordering caveat (`emit --run --git`).** The `--git` tail runs independently of
-> the `--run` verdict: a RED tree-run still lands the commit (the envelope is
-> `ok:false` + `RT_E_TREE_RUN_FAILED`, yet `git.committed` is real). To require a
-> verified tree before committing, run `emit --run` first and issue `emit --git`
-> only on a green verdict — exactly what the deliver step in
-> [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs) does.
+> **Ordering guard (`emit --run --git`) — W346 · P0-3.** When `--git` is combined
+> with `--run`, the just-computed run verdict gates the commit: a RED `--run`
+> verdict WITHHOLDS it — the envelope stays `ok:false` + `RT_E_TREE_RUN_FAILED`,
+> `git` reports `{ committed:false, skipped:true, reason:"tree-run-red",
+> code:"RT_E_TREE_RUN_FAILED" }` and a loud `error`, and the emitted tree is still
+> written to disk (delivery withheld, the build kept). A GREEN `--run` verdict
+> commits exactly as before. `emit --git` WITHOUT `--run` is unchanged: it cannot
+> consult a verdict it never computed, so it lands the commit as today. This is
+> the CLI-level mirror of the deliver step's verify-before-commit ordering in
+> [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs).
 
 `--force` admits an emit into a folder that already holds foreign files — without it the
 emit is refused (`RT_E_FOREIGN_FILES`, exit 1, the `foreign` list on the envelope); with it

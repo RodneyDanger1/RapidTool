@@ -92,7 +92,8 @@ export type DoctorFactory = {
   leftoverJobsAreReexportsOrStubs: boolean;
   chatHasSlashToolsOnly: boolean;
   runnerIsSandbox: false;
-  isolation: IsolationClaim;
+  /** Base non-sandbox claim + the real runner bound (fixes/346 P1-4). */
+  isolation: DoctorIsolation;
   tokenCap: number | null;
   /** OV-41 (W23-L4): the measured spend attached to this summary, read from a
    *  T-107.6 token ledger the caller hands in. Absent ledger ⇒
@@ -526,7 +527,13 @@ export function factoryClaim(
   const human = evidence.humanFixtures === true;
   const real = evidence.realMultiJobProduct === true;
   const complete = evidence.productComplete === true;
-  const isolation = coerceIsolationClaim(evidence.isolation);
+  // fixes/346 P1-4: hostile input is still coerced to the honest base claim
+  // (coerceIsolationClaim ignores raw.sandbox), and the REAL bound is derived
+  // from the runtime probe — never from the (untrusted) evidence blob.
+  const isolation: DoctorIsolation = {
+    ...coerceIsolationClaim(evidence.isolation),
+    bound: runnerBoundClaim(),
+  };
   const gaps = gapsOf(evidence);
   const autonomousSoftwareFactory =
     leftover === false && human === true && real === true && complete === true &&
@@ -606,9 +613,109 @@ export function doctorFactory(
   return factoryClaim(RAPIDTOOL_FACTORY_EVIDENCE, env, spend);
 }
 
-/** Isolation advertisement the doctor must emit (frozen non-sandbox). */
-export function doctorIsolation(): IsolationClaim {
-  return runnerIsolationClaim();
+// ---------------------------------------------------------------------------
+// fixes/346 P1-4 — the REAL runner bound, named only when it is used
+// ---------------------------------------------------------------------------
+
+/**
+ * fixes/346 P1-4: the resource/process bound the generated-code runner
+ * (`node-runner.server.ts` `opts.isolation:"strict"`, requested by
+ * `exec.generatedRunOptions`) actually applies. It is enforced by Node's
+ * Permission Model — a REAL runtime boundary — but it is NOT a Docker / bwrap /
+ * AppContainer / Windows-Job-Object security sandbox, so `isolation.sandbox`
+ * stays false. This field is what makes the doctor's isolation claim track
+ * "exactly what actually executes": a mechanism is named ONLY when the runtime
+ * really exposes it, otherwise it degrades to an honest `"none"`.
+ */
+export type RunnerBoundClaim = {
+  mechanism: "node-permission-model" | "none";
+  /** Pure capability probe: the runtime exposes the `--permission` flag. */
+  available: boolean;
+  /** True when the generated-code path actually applies the bound. */
+  enforcedOnGeneratedCode: boolean;
+  fsWriteConfined: boolean;
+  subprocessDenied: boolean;
+  heapCapMb: number | null;
+  note: string;
+};
+
+/** Doctor's isolation advertisement: the base non-sandbox claim PLUS the real
+ *  runner bound. `sandbox`/`kind`/`docker`/`bwrap` are unchanged (no Docker,
+ *  bwrap or OS sandbox exists) — the bound is a distinct, truthfully-named
+ *  facet, never a `sandbox:true` flip. */
+export type DoctorIsolation = IsolationClaim & { bound: RunnerBoundClaim };
+
+/** Mirror of `node-runner.server.ts`'s `RUNNER_STRICT_HEAP_CAP_MB` (the runner
+ *  must not import this client-safe module's graph). A drift-guard test in
+ *  `node-runner.server.test.ts` asserts the two stay equal. */
+export const RUNNER_BOUND_HEAP_CAP_MB = 512;
+
+/**
+ * Pure probe over the runtime flag set — the SAME test
+ * `node-runner.server.ts`'s `permissionModelAvailable()` runs. Kept here so the
+ * client-safe doctor can read it without a `node:` import (the H2 seam).
+ */
+export function probePermissionModel(
+  flags: { has(flag: string): boolean } | undefined = typeof process !== "undefined" &&
+    process.allowedNodeEnvironmentFlags
+    ? process.allowedNodeEnvironmentFlags
+    : undefined,
+): boolean {
+  return !!flags && typeof flags.has === "function" && flags.has("--permission");
+}
+
+/**
+ * Derive the honest runner-bound claim. `permissionAvailable` defaults to the
+ * pure probe; a caller may pass `false` to describe a host that lacks the
+ * Permission Model. Never names a mechanism that is not actually present.
+ */
+export function runnerBoundClaim(opts?: {
+  permissionAvailable?: boolean;
+  heapCapMb?: number;
+}): RunnerBoundClaim {
+  const available = opts?.permissionAvailable ?? probePermissionModel();
+  const heapCapMb =
+    typeof opts?.heapCapMb === "number" && Number.isFinite(opts.heapCapMb)
+      ? opts.heapCapMb
+      : RUNNER_BOUND_HEAP_CAP_MB;
+  if (!available) {
+    return {
+      mechanism: "none",
+      available: false,
+      enforcedOnGeneratedCode: false,
+      fsWriteConfined: false,
+      subprocessDenied: false,
+      heapCapMb: null,
+      note:
+        "the runtime does not expose Node's Permission Model flag (probe: " +
+        'process.allowedNodeEnvironmentFlags.has("--permission") === false); the generated-code runner ' +
+        "degrades to the bounded wall-clock timeout + output cap only — no filesystem or process confinement.",
+    };
+  }
+  return {
+    mechanism: "node-permission-model",
+    available: true,
+    enforcedOnGeneratedCode: true,
+    fsWriteConfined: true,
+    subprocessDenied: true,
+    heapCapMb,
+    note:
+      "generated code (exec.runCode) runs under Node's Permission Model: filesystem writes are confined to the " +
+      "per-run scratch dir, child_process / worker_threads / native addons are denied, and a V8 heap cap " +
+      `(${heapCapMb} MB) is applied. This bounds resources + process fan-out; it is NOT network denial, NOT ` +
+      "filesystem-read confinement when strict is off, NOT a Windows Job Object / Docker / bwrap / AppContainer " +
+      "boundary, and not a security sandbox.",
+  };
+}
+
+/** Stable, frozen isolation advertisement — same object identity per process
+ *  (the pre-346 contract) with the real runner bound attached. */
+let DOCTOR_ISOLATION: DoctorIsolation | null = null;
+export function doctorIsolation(): DoctorIsolation {
+  if (!DOCTOR_ISOLATION) {
+    DOCTOR_ISOLATION = Object.freeze({ ...runnerIsolationClaim(), bound: runnerBoundClaim() });
+  }
+  return DOCTOR_ISOLATION;
 }
 
 // ---------------------------------------------------------------------------

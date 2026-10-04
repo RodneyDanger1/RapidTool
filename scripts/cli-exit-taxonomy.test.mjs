@@ -2835,3 +2835,122 @@ test("343-3 — `emit --git` is wired to the delivery seam (source pin)", () => 
     "headless.ts must export the CLI-facing land wrapper",
   );
 });
+
+// ---------------------------------------------------------------------------
+// 346 P0-3 (autonomy audit re-audit, row 10 residual) — the `emit --run --git`
+// ordering guard. The `--run` leg flipped the envelope to ok:false +
+// RT_E_TREE_RUN_FAILED on a red tree, yet the `--git` tail ran UNCONDITIONALLY
+// and landed a Conventional-Commits commit over the broken tree (pre-fix repro,
+// keyless: envelope ok:false + RT_E_TREE_RUN_FAILED with git.committed:true and
+// a real .git on disk). The CLI now consults the just-computed run verdict: a
+// red `--run` verdict WITHHOLDS the commit — coded + loud, the emitted tree
+// still written. Pinned end-to-end with real keyless emits (REAL git, no mocks):
+// red + `--run --git` → NO commit; `--git` alone → unchanged (it cannot know a
+// verdict); green + `--run --git` → still commits. `process.env` is pinned to a
+// present-but-blank DEEPSEEK_API_KEY, the repo's keyless-disable convention.
+// ---------------------------------------------------------------------------
+const GIT_AVAILABLE = spawnSync("git", ["--version"], { encoding: "utf8" }).status === 0;
+
+test(
+  "346 P0-3 — `emit --run --git` withholds a commit on a RED run verdict; `--git` alone and a GREEN verdict are unchanged",
+  { skip: GIT_AVAILABLE ? false : "git is not available on this box (the delivery lane needs a real git)", timeout: 600_000 },
+  () => {
+    const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-emitgit-"));
+    const env = { ...process.env, DEEPSEEK_API_KEY: "" };
+    for (const key of ["RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+    const BRIEF = "Build a red-tree CLI emit pin: a tiny keyless project used to prove the emit --run --git ordering guard.";
+    const runNode = (argv) =>
+      spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...argv], {
+        cwd,
+        env,
+        encoding: "utf8",
+        timeout: 600_000,
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    const runEmit = (argv) => runNode(["emit", ...argv]);
+    try {
+      // --- RED fixture: a project whose generatedTree genuinely does not compile.
+      const redProj = join(cwd, "red.json");
+      const createdRed = runNode(["create", "--brief", BRIEF, "--name", "L1 Red Pin", "--out", redProj]);
+      assert.equal(createdRed.status, 0, `red fixture create failed.\n${createdRed.stdout}\n${createdRed.stderr}`);
+      const red = JSON.parse(readFileSync(redProj, "utf8"));
+      red.generatedTree = [{ path: "src/jobs/track.ts", source: "export const broken: number = ;\n", hash: "deadbeef", attempt: 0 }];
+      writeFileSync(redProj, `${JSON.stringify(red, null, 2)}\n`, "utf8");
+
+      // (1) RED + `--run --git`: the commit is WITHHELD, coded + loud, tree kept.
+      const redDir = join(cwd, "red-emitted");
+      const redRun = runEmit(["--project", redProj, "--out", redDir, "--run", "--git"]);
+      assert.ok(
+        !/(^|\n)\s+at\s/.test(redRun.stderr ?? ""),
+        `a red-tree git refusal must never print a Node stack:\n${redRun.stderr}`,
+      );
+      assert.equal(
+        redRun.status,
+        1,
+        `a red --run verdict with --git is a coded refusal at exit 1.\nstdout: ${redRun.stdout}\nstderr: ${redRun.stderr}`,
+      );
+      const rj = JSON.parse(redRun.stdout);
+      assert.equal(rj.ok, false, "a red tree is a refusal envelope");
+      assert.equal(rj.treeRun?.ok, false, "precondition: the emitted tree genuinely re-runs RED");
+      assert.equal(
+        rj.code,
+        "RT_E_TREE_RUN_FAILED",
+        "the refusal reuses the EXISTING tree-run-red code (no new code minted)",
+      );
+      assert.equal(
+        rj.git?.committed,
+        false,
+        `the commit must NOT be issued on a red --run verdict (pre-fix it was): ${JSON.stringify(rj.git)}`,
+      );
+      assert.equal(rj.git?.skipped, true, "the withheld commit is explicit on the envelope (git.skipped)");
+      assert.equal(rj.git?.reason, "tree-run-red", "the refusal names the verdict class");
+      assert.ok(
+        String(rj.git?.error).includes("no commit was issued"),
+        `the refusal must be loud about the withheld commit: ${rj.git?.error}`,
+      );
+      assert.equal(rj.exit_code, redRun.status, "the envelope's exit_code must equal the process exit");
+      assert.equal(
+        existsSync(join(redDir, ".git")),
+        false,
+        "a red --run --git must leave NO .git / NO commit on disk (the pre-fix bug landed one)",
+      );
+      assert.equal(
+        existsSync(join(redDir, "src", "jobs", "track.ts")),
+        true,
+        "the emitted tree is still written to disk (delivery withheld, the build is kept)",
+      );
+
+      // (2) RED + `--git` alone: UNCHANGED — it cannot consult a verdict it never computed.
+      const redGitDir = join(cwd, "red-git-only");
+      const redGit = runEmit(["--project", redProj, "--out", redGitDir, "--git"]);
+      assert.equal(
+        redGit.status,
+        0,
+        `emit --git WITHOUT --run must stay a clean commit.\nstdout: ${redGit.stdout}\nstderr: ${redGit.stderr}`,
+      );
+      const rgj = JSON.parse(redGit.stdout);
+      assert.equal(rgj.ok, true);
+      assert.equal(rgj.git?.committed, true, "`--git` alone is unchanged: no verdict was computed to consult");
+      assert.equal(existsSync(join(redGitDir, ".git")), true, "`--git` alone still lands the commit");
+
+      // (3) GREEN + `--run --git`: the guard must not touch a green verdict.
+      const greenProj = join(cwd, "green.json");
+      const createdGreen = runNode(["create", "--brief", BRIEF, "--name", "L1 Green Pin", "--out", greenProj]);
+      assert.equal(createdGreen.status, 0, `green fixture create failed.\n${createdGreen.stdout}\n${createdGreen.stderr}`);
+      const greenDir = join(cwd, "green-emitted");
+      const greenRun = runEmit(["--project", greenProj, "--out", greenDir, "--run", "--git"]);
+      assert.equal(
+        greenRun.status,
+        0,
+        `a green --run verdict must still commit at exit 0.\nstdout: ${greenRun.stdout}\nstderr: ${greenRun.stderr}`,
+      );
+      const gj = JSON.parse(greenRun.stdout);
+      assert.equal(gj.ok, true);
+      assert.equal(gj.treeRun?.ok, true, "precondition: the green fixture's tree genuinely runs GREEN");
+      assert.equal(gj.git?.committed, true, "a green --run --git still lands the commit");
+      assert.equal(existsSync(join(greenDir, ".git")), true, "the green tree's .git exists");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);

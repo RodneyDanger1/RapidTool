@@ -6,6 +6,7 @@ import {
   evaluatePolicy,
   isVerifiedHumanSeatToken,
   seatLabel,
+  seatTokenPath,
   type PolicyAction,
   type PolicySeat,
   type PolicyVerdict,
@@ -31,6 +32,8 @@ function reasonId(verdict: PolicyVerdict): string {
 const HARNESS: PolicySeat = { decidedBy: "autopilot", seat: "harness" };
 const AUTOPILOT: PolicySeat = { decidedBy: "autopilot", seat: "autopilot" };
 const HUMAN: PolicySeat = { decidedBy: "human", seat: "human-cli-i-am-human" };
+/** 346 L3 (A1-12): the browser console's unattested human seat. */
+const CONSOLE: PolicySeat = { decidedBy: "human", seat: "console" };
 const VERIFIED = { humanSeatToken: "tok-123", expectedHumanSeatToken: "tok-123" };
 
 const VALID_RESOURCE: Record<PolicyAction, string> = {
@@ -350,5 +353,76 @@ describe("policy — purity, determinism, totality, seat-shape compatibility", (
     assert.equal(seatLabel(AUTOPILOT), "autopilot/autopilot");
     assert.equal(seatLabel({ decidedBy: "root" }), "unknown");
     assert.equal(seatLabel(undefined), "none");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 L3 (A1-12 enforcement) — the browser console's human seat.
+//
+// The console is the product's designed human surface (344 A1) but has no
+// out-of-band RT_HUMAN_SEAT_TOKEN delivery seam, so its decision is a
+// REGISTERED, ATTRIBUTABLE, UNATTESTED human decision. The pins below fix the
+// honesty boundary: routine gate approvals are admitted under a DISTINCT reason
+// id; force / fixtures remain token-verified-human-only; and no presented token
+// (nor any `decidedVia.tokenPath`) can ever make a console decision read as
+// token-verified.
+// ---------------------------------------------------------------------------
+describe("policy — console human seat (346 A1-12 enforcement)", () => {
+  it("ALLOWS hitl.approve under the console seat, under the distinct `console-seat-unattested` id — never token-verified", () => {
+    const verdict = evaluatePolicy("hitl.approve", "gate:P4", { actor: CONSOLE });
+    assert.equal(verdict.decision, "allow");
+    assert.equal(reasonId(verdict), "console-seat-unattested");
+    assert.ok(
+      !verdict.reason.includes("human-seat-token-verified"),
+      `the console allow must never read as the token-verified seat: ${verdict.reason}`,
+    );
+  });
+
+  it("a presented token cannot UPGRADE the console seat to token-verified (the branch is checked before the token)", () => {
+    const verdict = evaluatePolicy("hitl.approve", "gate:P4", { actor: CONSOLE, ...VERIFIED });
+    assert.equal(verdict.decision, "allow");
+    assert.equal(
+      reasonId(verdict),
+      "console-seat-unattested",
+      "a console decision has no out-of-band token; presenting one must not re-label it verified",
+    );
+  });
+
+  it("seatTokenPath is true ONLY for the CLI human seat — console and every machine seat record false", () => {
+    assert.equal(seatTokenPath(HUMAN), true);
+    assert.equal(seatTokenPath(CONSOLE), false);
+    assert.equal(seatTokenPath(HARNESS), false);
+    assert.equal(seatTokenPath(AUTOPILOT), false);
+  });
+
+  it("DENIES the console seat for hitl.force and fixtures.approve, token presented or not (Rule B is token-verified-human-only)", () => {
+    const cases = [
+      ["hitl.force", "gate:P6"],
+      ["fixtures.approve", "fixtures:build.json"],
+    ] as const;
+    for (const [action, resource] of cases) {
+      for (const ctx of [{ actor: CONSOLE }, { actor: CONSOLE, ...VERIFIED }] as const) {
+        const verdict = evaluatePolicy(action, resource, ctx);
+        assert.equal(verdict.decision, "deny", `${action} must refuse the console seat`);
+        assert.equal(reasonId(verdict), "force-requires-human-seat");
+        assert.equal(verdict.fallback, "human-seat-token");
+        assert.match(verdict.reason, /console/, "the refusal names the console seat, not a generic unverified human claim");
+        assert.ok(!verdict.reason.includes("human-seat-token-verified"));
+      }
+    }
+  });
+
+  it("labels the console seat for the ledger tag (`[seat console]`)", () => {
+    assert.equal(seatLabel(CONSOLE), "human/console");
+  });
+
+  it("a hostile token-verified console claim is still denied on hitl.force (forgery control)", () => {
+    const forged = evaluatePolicy("hitl.force", "gate:P6", {
+      actor: CONSOLE,
+      humanSeatToken: "tok-123",
+      expectedHumanSeatToken: "tok-123",
+    });
+    assert.equal(forged.decision, "deny");
+    assert.equal(reasonId(forged), "force-requires-human-seat");
   });
 });

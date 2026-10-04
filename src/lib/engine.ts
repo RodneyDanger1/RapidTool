@@ -10,8 +10,13 @@ import type { ErrorCode } from "./errors.ts";
 // this adds no static edge to knowledge.ts (which engine loads lazily above).
 import type { RankableLessonRow } from "./knowledge.ts";
 import { classifyError, ERROR_CODES } from "./errors.ts";
-import { flattenStack } from "./rt-events.ts";
+import { WILD_STEP_BUDGET_MS, flattenStack } from "./rt-events.ts";
 import type { RtEventSeed } from "./rt-events.ts";
+// 346 P2-6 (finishing the watchdog wiring): `boundedStepWatch` + its pure
+// decision `shouldAutopause` wrap the wild step's phase-execution await below
+// — the LAST watchdog export without a production consumer. watchdog.ts is
+// zero-dep pure (rt-events + the StallLatch type), so this is no cycle.
+import { boundedStepWatch, shouldAutopause } from "./watchdog.ts";
 import { compileAgentPacket } from "./packet.ts";
 // 313 D1 (312 C1 design): the seat-label vocabulary for the agent-seal
 // provenance rows — policy.ts is a pure leaf (no engine import), so this pulls
@@ -4002,6 +4007,13 @@ export type WildStepOptions = {
    *  like `expandBriefWithBackoff` (500 ⇒ 500/1000/2000…). Default
    *  `WILD_REVIEW_RETRY_BACKOFF_MS`; the test seam passes ~1 to keep pins fast. */
   retryBackoffMs?: number;
+  /** 346 P2-6 — per-step watchdog budget (ms) for the `boundedStepWatch` wrap
+   *  of the phase-execution await. Default `WILD_STEP_BUDGET_MS` (the
+   *  production tier-1 boundary, derived above the P6 phase max); the
+   *  §5.2 tier-2 autopause boundary is exactly 2× this value, matching the
+   *  pure `shouldAutopause` decision. A small test value pins the wrap without
+   *  waiting the production budget; non-finite/≤0 falls back to the default. */
+  stepBudgetMs?: number;
   /** 313 D1 — test seam for the P7 live-research edge (mirrors `p6Edge`).
    *  Present ⇒ phase 7 executes through THIS function in ANY key state; absent
    *  ⇒ the production guard (keyed ⇒ `wildLiveEdge` — the same live layer the
@@ -5025,11 +5037,26 @@ function wildSummaryPayload(s: WildStepSummary): NonNullable<RtEventSeed["payloa
   };
 }
 
+/** 346 P2-6: the step budget the watchdog wrap runs with — the caller's test
+ *  seam when finite/positive, else the production `WILD_STEP_BUDGET_MS` (the
+ *  same normalize-Ms discipline settle.ts uses). */
+function normalizeStepBudgetMs(ms: number | undefined): number {
+  return typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? Math.floor(ms) : WILD_STEP_BUDGET_MS;
+}
+
 /**
  * P13 bounded autonomous step — the headless Wild Mode primitive. See the
  * section header for semantics. Never mutates its input; `opts.reviewer`
  * injects the Auto-Review classifier (tests), defaulting to the real
  * configured-only deepseek-v4-flash classifier.
+ *
+ * 346 P2-6: the phase-execution await is wrapped in `boundedStepWatch` — the
+ * watchdog's production consumer (store/headless both drive this function, so
+ * every executed step is watched). An overrun fires the tier-1 overdue and
+ * tier-2 timeout rows on the step's sink; a step that RESOLVES at/after 2×
+ * budget is the §5.2 pause-on-resolve tier and parks the run coded. The wrap
+ * never cancels the await (watchdog.ts §5.1) and never emits without a sink,
+ * so a fast step's bytes are untouched.
  */
 export async function wildStep(
   project: Project,
@@ -5250,7 +5277,58 @@ export async function wildStep(
     // browser, where keyedDeepSeekConfigured() is false) keep the exact floor
     // bytes — the picker returns null.
     const execEdge = wildExecEdgeFor(phase, opts);
-    const executed = execEdge !== null ? await execEdge(running) : applyPhaseResult(running, phase);
+    // 346 P2-6: the per-step watchdog — `boundedStepWatch`'s production
+    // consumer. The phase execution is the freeze-prone await (a keyed P6
+    // synthesis may run up to P6_PHASE_MAX_MS); the wrap observes it at the two
+    // §5.2 tiers and surfaces each as a coded row on the step's sink. The sink
+    // is optional: absent ⇒ every callback below is a no-op and the step keeps
+    // its exact bytes (DG-8). The await itself is never cancelled (§5.1 bound).
+    const stepBudgetMs = normalizeStepBudgetMs(opts?.stepBudgetMs);
+    const safeEmit = (seed: RtEventSeed): void => {
+      try {
+        emit?.(seed);
+      } catch {
+        /* telemetry never throws into the step it observes (AGENTS #7) */
+      }
+    };
+    const watched = await boundedStepWatch(
+      async () => (execEdge !== null ? await execEdge(running) : applyPhaseResult(running, phase)),
+      {
+        budgetMs: stepBudgetMs,
+        // §5.2 tier 2 is exactly 2× the budget — the same relation the pure
+        // `shouldAutopause`/`watchdogDecision` math encodes (R12-f04: the
+        // timeout tier must never trip a legal P6 step).
+        autopauseMs: stepBudgetMs * 2,
+        onOverdue: (elapsedMs: number) => {
+          safeEmit({
+            level: "warn",
+            scope: "sys",
+            event: "sys.step_overdue",
+            message: `Wild step P${phase} overdue at ${elapsedMs}ms (budget ${stepBudgetMs}ms)`,
+            capture: "src/lib/engine.ts:wildStep",
+            phase,
+            projectId: project.id,
+            runRef,
+            payload: { elapsedMs, budgetMs: stepBudgetMs, phase },
+          });
+        },
+        onTimeout: (elapsedMs: number) => {
+          safeEmit({
+            level: "error",
+            scope: "wild-step",
+            event: "wild.step_timeout",
+            message: `Wild step P${phase} at ${elapsedMs}ms ≥ 2× budget ${stepBudgetMs}ms — timeout tier`,
+            capture: "src/lib/engine.ts:wildStep",
+            code: "RT_E_LLM_TIMEOUT",
+            phase,
+            projectId: project.id,
+            runRef,
+            payload: { elapsedMs, budgetMs: stepBudgetMs, phase },
+          });
+        },
+      },
+    );
+    const executed = watched.result;
     const done = wildLog(
       executed,
       phase,
@@ -5262,6 +5340,29 @@ export async function wildStep(
           ? `P7 executed (${typeof opts?.liveEdge === "function" ? "injected edge seam" : "keyed live edge"})`
           : `P6 executed (${opts?.p6Edge ? "injected edge seam" : "keyed synthesis edge"})`,
     );
+    // 346 P2-6 pause-on-resolve (§5.2 tier 2): the timeout tier fired while the
+    // step was still pending; now that it RESOLVED at ≥ 2× budget, the run must
+    // not silently advance — park it coded (a human resumes to retry). This is
+    // the `shouldAutopause` trigger the watchdog doc names, read at the step's
+    // own resolve point.
+    if (shouldAutopause(watched.elapsedMs, stepBudgetMs)) {
+      const detail =
+        `P${phase} step resolved at ${watched.elapsedMs}ms — ≥ 2× the ${stepBudgetMs}ms wild-step budget ` +
+        `(pause-on-resolve, §5.2 tier 2); resume is a human decision.`;
+      return finishStep(
+        {
+          project: wildPause(done, phase, "error", "wild.step_timeout", detail, {
+            code: "RT_E_LLM_TIMEOUT",
+            unlock: "human-retry",
+          }),
+          outcome: "paused",
+          ran: true,
+          error: detail,
+          code: "RT_E_LLM_TIMEOUT",
+        },
+        "park",
+      );
+    }
     if (done.hitl?.phase === phase) {
       return finishStep(await wildApproveGate(done, phase, reviewer, opts), "gate");
     }

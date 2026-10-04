@@ -21,7 +21,7 @@
 // ---------------------------------------------------------------------------
 import type { Artifact, HitlDecision, OracleTest, PhaseId, Project } from "./types.ts";
 import { canonicalStem, fnv1a } from "./algorithms.ts";
-import { evaluatePolicy, seatLabel, type PolicySeat } from "./policy.ts";
+import { evaluatePolicy, seatLabel, seatTokenPath, type PolicySeat } from "./policy.ts";
 import {
   BRIEF_STOPWORDS,
   briefNounHits,
@@ -101,6 +101,15 @@ const classifyRowSeat = (row: HitlDecision): RowSeatClaim => {
   if (tag === "human-cli-i-am-human" && row.decidedBy === "human") {
     return { kind: "seat", seat: { decidedBy: "human", seat: "human-cli-i-am-human" } };
   }
+  // 346 L3 (A1-12 enforcement): the browser console's registered human seat. A
+  // `[seat console]` row is a recognized seat (never `tagged-unknown`), but its
+  // provenance must record `tokenPath:false` — the console has no out-of-band
+  // token delivery seam, so the decision can never read as token-verified (see
+  // `provenanceConsistent` / `seatTokenPath`). A row pairing the tag with
+  // `decidedBy:"autopilot"` still falls through to `tagged-unknown` (fail-closed).
+  if (tag === "console" && row.decidedBy === "human") {
+    return { kind: "seat", seat: { decidedBy: "human", seat: "console" } };
+  }
   if ((tag === "harness" || tag === "autopilot") && row.decidedBy === "autopilot") {
     return { kind: "seat", seat: { decidedBy: "autopilot", seat: tag } };
   }
@@ -119,12 +128,13 @@ const classifyRowSeat = (row: HitlDecision): RowSeatClaim => {
  * 216o (T-107.3 · P0-02 · W6-L2): when a row records `decidedVia` provenance
  * (minted by the headless approval path), the field must AGREE with what the
  * row itself claims — the seat tag's label, this gate (resource), a registered
- * action, and the token path. The seam only ever allows a human-seat allow
- * through the verified out-of-band token path, so a human-labeled row can
- * never carry `tokenPath: false` (and an autopilot row can never carry
- * `tokenPath: true`); any contradiction fails closed. A legacy row WITHOUT the
- * field (pre-216o payloads, direct `approveHitl` writers) keeps the pre-W6
- * tolerance — the check adds teeth, it never invents provenance for old rows.
+ * action, and the token path. Only the out-of-band-token-verifiable human seat
+ * has a token path (`seatTokenPath`, policy.ts), so a CLI-human row must carry
+ * `tokenPath: true`, while an autopilot row AND the unattested console human
+ * seat (346 L3 · A1-12) must carry `tokenPath: false`; any contradiction fails
+ * closed. A legacy row WITHOUT the field (pre-216o payloads, direct
+ * `approveHitl` writers) keeps the pre-W6 tolerance — the check adds teeth, it
+ * never invents provenance for old rows.
  */
 const provenanceConsistent = (row: HitlDecision, seat: PolicySeat, phase: number): boolean => {
   const via = row.decidedVia;
@@ -133,16 +143,20 @@ const provenanceConsistent = (row: HitlDecision, seat: PolicySeat, phase: number
   if (via.action !== "hitl.approve" && via.action !== "hitl.force") return false;
   if (via.label !== seatLabel(seat)) return false;
   if (typeof via.reason !== "string" || !via.reason.includes(" — ")) return false;
-  return via.tokenPath === (seat.decidedBy === "human");
+  return via.tokenPath === seatTokenPath(seat);
 };
 
 /**
  * 216o (T-107.3 · P0-02/P0-06): does this ledger row record a decision the
  * policy seam permits? A TAGGED row must be policy-consistent or it fails
- * closed: an autopilot tag passes the seam's Rule A; a human tag must carry
- * the recorded out-of-band evidence too — without it the seam denies
- * (`human-seat-unverified`, fallback `human-seat-token`) and the criterion
- * fails. A tagged row whose optional `decidedVia` provenance contradicts the
+ * closed: an autopilot tag passes the seam's Rule A; a `human-cli-i-am-human`
+ * tag must carry the recorded out-of-band evidence too — without it the seam
+ * denies (`human-seat-unverified`, fallback `human-seat-token`) and the
+ * criterion fails; a `console` tag (346 L3 · A1-12) is admitted as the seam's
+ * UNATTESTED human seat, and its optional `decidedVia` must record
+ * `tokenPath: false` (`provenanceConsistent`) or it fails closed — a console
+ * decision can never read as token-verified. A tagged row whose optional
+ * `decidedVia` provenance contradicts the
  * tag (W6-L2: wrong gate, unregistered action, forged label, impossible token
  * path) also fails closed via `provenanceConsistent`. An UNTAGGED row keeps
  * the 216 T0.8 rule (a recorded actor exists); that tolerance is deliberate:

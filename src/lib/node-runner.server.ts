@@ -8,13 +8,29 @@
 //                            on win32 so grandchildren die too);
 //   • output caps         -> maxBuffer + a manual slice of stdout/stderr;
 //   • scratch cwd          -> a fresh temp dir per run (courtesy, not a jail);
-//   • scrubbed child env   -> proxy vars emptied / NO_PROXY="*" (best-effort).
+//   • scrubbed child env   -> proxy vars emptied / NO_PROXY="*" (best-effort);
+//   • strict bound (fixes/346 P1-4) -> `opts.isolation:"strict"` runs the child
+//                            under Node's Permission Model (`--permission`,
+//                            verified present on both runtimes this repo runs:
+//                            22.23.2 and 24.15.0): filesystem writes are
+//                            confined to the per-run scratch dir, child_process
+//                            / worker_threads / native addons are DENIED, and a
+//                            V8 heap cap is applied. REAL enforcement — the
+//                            generated-code path (exec.runCode) uses it.
 //
-// What it does NOT provide (and must never be claimed): filesystem confinement
-// (the scratch cwd is a courtesy — the child can touch anything the OS user
-// can), memory/CPU rlimits, or real network denial (raw sockets bypass proxy
-// env vars). Only an OS-level boundary (Docker / WSL2 / Windows Sandbox /
-// AppContainer / VM) contains a determined adversary. Do not run untrusted
+// Platform gap (declared, not hidden): Windows Job Objects would give OS
+// kernel-enforced memory/CPU/process-count caps, but Node exposes no Job Object
+// API and reaching CreateJobObject/AssignProcessToJobObject needs a native
+// addon or a PowerShell P/Invoke helper — a large runtime dependency this repo
+// does not take. So the Permission Model is the strongest zero-dependency
+// primitive used; `permissionModelAvailable()` reports honestly when even that
+// is absent, and a strict run then degrades to timeout + output cap only.
+//
+// Still NOT provided (and must never be claimed): network denial (raw sockets
+// bypass proxy env vars, and the Permission Model does not gate network), or
+// Docker / WSL2 / Windows Job Object / AppContainer / VM isolation. When strict
+// is OFF (the legacy default) there is no filesystem confinement either. Only
+// an OS-level boundary contains a determined adversary. Do not run untrusted
 // third-party code here.
 //
 // Server-only: never import this module into a client bundle.
@@ -51,11 +67,65 @@ type NodeRunCore =
   | { ok: false; reason: "timeout"; code: "RT_E_RUNNER_FAILED"; error?: string }
   | { ok: false; reason: "error"; code: "RT_E_RUNNER_FAILED"; error?: string };
 
-export type NodeRunResult = NodeRunCore & { sandbox: false };
+/**
+ * fixes/346 P1-4: the REAL resource/process bound actually applied to a run.
+ * Present ONLY when `opts.isolation:"strict"` was requested (so the legacy
+ * envelope stays byte-identical). `mechanism:"none"` + `enforced:false` is the
+ * honest degradation when the runtime lacks the Permission Model flag — never
+ * a pretend claim.
+ */
+export type RunnerBound = {
+  mechanism: "node-permission-model" | "none";
+  /** Pure capability probe: this runtime exposes the `--permission` flag. */
+  available: boolean;
+  /** True only when the bound was APPLIED to this run. */
+  enforced: boolean;
+  fsWriteConfined: boolean;
+  subprocessDenied: boolean;
+  heapCapMb: number | null;
+};
 
-/** Stamp the honest non-sandbox advertisement on every runner envelope. */
-function withSandbox(r: NodeRunCore): NodeRunResult {
-  return { ...r, sandbox: false };
+export type NodeRunResult = NodeRunCore & { sandbox: false; bound?: RunnerBound };
+
+/** Stamp the honest non-sandbox advertisement on every runner envelope.
+ *  `bound` rides only when a strict run actually requested/enforced one. */
+function withSandbox(r: NodeRunCore, bound: RunnerBound | null = null): NodeRunResult {
+  return bound ? { ...r, sandbox: false, bound } : { ...r, sandbox: false };
+}
+
+/** fixes/346 P1-4: the flag Node exposes for its Permission Model (the
+ *  strongest zero-dependency resource/process boundary available on this
+ *  platform). Verified accepted on Node 22.23.2 AND 24.15.0. */
+export const RUNNER_PERMISSION_FLAG = "--permission";
+/** fixes/346 P1-4: V8 heap cap (MB) applied to a strict run — a REAL memory
+ *  bound against JS-heap bombs (external Buffers are not covered: declared). */
+export const RUNNER_STRICT_HEAP_CAP_MB = 512;
+
+/**
+ * fixes/346 P1-4: pure capability probe (no subprocess). Reads
+ * `process.allowedNodeEnvironmentFlags`, which lists every CLI flag the runtime
+ * knows, so a host without the Permission Model reports false and the runner
+ * degrades honestly. Never claims a bound it cannot enforce.
+ */
+export function permissionModelAvailable(
+  flags: { has(flag: string): boolean } | undefined = typeof process !== "undefined" &&
+    process.allowedNodeEnvironmentFlags
+    ? process.allowedNodeEnvironmentFlags
+    : undefined,
+): boolean {
+  return !!flags && typeof flags.has === "function" && flags.has(RUNNER_PERMISSION_FLAG);
+}
+
+/** The child-arg prefix for a strict run (flags BEFORE `-e <code>`). Exported
+ *  so the policy is observable/testable without spawning. */
+export function strictRunnerArgs(dir: string): string[] {
+  const allow = dir.replace(/\\/g, "/");
+  return [
+    RUNNER_PERMISSION_FLAG,
+    `--allow-fs-read=${allow}`,
+    `--allow-fs-write=${allow}`,
+    `--max-old-space-size=${RUNNER_STRICT_HEAP_CAP_MB}`,
+  ];
 }
 
 /**
@@ -324,19 +394,29 @@ function authenticatedVerdict(raw: string, nonce: string): string {
   return redactSecrets(lines.join("\n"));
 }
 
+export type NodeRunOptions = {
+  timeoutMs?: number;
+  /**
+   * 344 A2-F1: open a dedicated verdict channel. The child gets stdin (where
+   * the parent writes a fresh nonce) and fd 3 (where the harness writes its
+   * marker lines prefixed with that nonce). The returned ok envelope carries
+   * `verdict` — the authenticated lines, prefix stripped. Omitted ⇒ the
+   * legacy stdio (`["ignore","pipe","pipe"]`) and no `verdict` field.
+   */
+  verdictChannel?: boolean;
+  /**
+   * fixes/346 P1-4: `"strict"` engages the REAL resource/process bound (Node
+   * Permission Model: fs writes confined to the scratch dir, child_process /
+   * workers / addons denied, V8 heap cap). Omitted / `"none"` preserves the
+   * legacy timeout + output-cap behaviour byte-for-byte. The generated-code
+   * path (`exec.runCode`) always requests strict.
+   */
+  isolation?: "strict" | "none";
+};
+
 export async function runNodeBounded(
   code: string,
-  opts?: {
-    timeoutMs?: number;
-    /**
-     * 344 A2-F1: open a dedicated verdict channel. The child gets stdin (where
-     * the parent writes a fresh nonce) and fd 3 (where the harness writes its
-     * marker lines prefixed with that nonce). The returned ok envelope carries
-     * `verdict` — the authenticated lines, prefix stripped. Omitted ⇒ the
-     * legacy stdio (`["ignore","pipe","pipe"]`) and no `verdict` field.
-     */
-    verdictChannel?: boolean;
-  },
+  opts?: NodeRunOptions,
 ): Promise<NodeRunResult> {
   if (!runnerAvailable()) {
     return withSandbox({
@@ -377,6 +457,20 @@ export async function runNodeBounded(
   }
 
   const verdictChannel = opts?.verdictChannel === true;
+  // fixes/346 P1-4: the strict bound. Probed (never assumed) so an unsupported
+  // host degrades to the legacy bounds with an honest `bound` record.
+  const strict = opts?.isolation === "strict";
+  const permissionAvailable = strict ? permissionModelAvailable() : false;
+  const bound: RunnerBound | null = strict
+    ? {
+        mechanism: permissionAvailable ? "node-permission-model" : "none",
+        available: permissionAvailable,
+        enforced: permissionAvailable,
+        fsWriteConfined: permissionAvailable,
+        subprocessDenied: permissionAvailable,
+        heapCapMb: RUNNER_STRICT_HEAP_CAP_MB,
+      }
+    : null;
   const started = Date.now();
   let child: ChildProcess;
   try {
@@ -398,15 +492,25 @@ export async function runNodeBounded(
         ? ["pipe", "pipe", "pipe", "pipe"]
         : ["ignore", "pipe", "pipe"],
     } as import("node:child_process").SpawnOptions & { maxBuffer: number };
-    child = spawn(process.execPath, ["-e", code], spawnOpts);
+    // fixes/346 P1-4: a strict run prepends the Permission-Model flags + heap
+    // cap BEFORE `-e`; everything else is identical to the legacy invocation.
+    const childArgs = strict && permissionAvailable
+      ? [...strictRunnerArgs(dir), "-e", code]
+      : strict
+        ? [`--max-old-space-size=${RUNNER_STRICT_HEAP_CAP_MB}`, "-e", code]
+        : ["-e", code];
+    child = spawn(process.execPath, childArgs, spawnOpts);
   } catch (err) {
     removeScratchDir(dir, ownsScratchDir);
-    return withSandbox({
-      ok: false,
-      reason: "error",
-      code: "RT_E_RUNNER_FAILED",
-      error: `spawn failed: ${(err as Error).message}`,
-    });
+    return withSandbox(
+      {
+        ok: false,
+        reason: "error",
+        code: "RT_E_RUNNER_FAILED",
+        error: `spawn failed: ${(err as Error).message}`,
+      },
+      bound,
+    );
   }
 
   // 344 A2-F1: a fresh per-run nonce, delivered to the child ONLY on stdin. It
@@ -481,7 +585,7 @@ export async function runNodeBounded(
       if (killTimer) clearTimeout(killTimer);
       for (const t of graceTimers) clearTimeout(t);
       graceTimers.clear();
-      const advertised = withSandbox(r);
+      const advertised = withSandbox(r, bound);
       // Sync-first, best-effort cleanup: removeScratchDir is TOTAL (it swallows
       // every error — see its own docblock), so an in-use/locked scratch dir is
       // simply left for the OS temp cleaner and the caller is never blocked on a

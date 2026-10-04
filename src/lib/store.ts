@@ -51,6 +51,10 @@ import type {
   WildPlan,
 } from "./types";
 import { classifyError, type ErrorCode } from "./errors.ts";
+// P1-5 (346 L2): the persisted-run-spend arithmetic is client-safe (token-ledger
+// has no node: import). `accumulateSpend` folds ONE measured model call into
+// `Project.tokenUsage`; `SpendSlice` is that slot's shape.
+import { accumulateSpend, type SpendSlice } from "./token-ledger.ts";
 
 export type ApproveResult =
   | { ok: true }
@@ -116,6 +120,34 @@ export function keyedRefusalSince(
     return null;
   }
   return lastKeyed.code;
+}
+
+/**
+ * P1-5 (346 L2): project a model usage envelope (the `LlmUsage` a server fn
+ * returns, e.g. `chatOnceServer`'s reply) onto the ONE-CALL persisted spend
+ * slice the store folds into `Project.tokenUsage`. Returns null for an
+ * absent/foreign/malformed envelope — the caller must then write NOTHING, so an
+ * unmeasured run never gains a fabricated zero (the chip keeps saying "spend not
+ * recorded"). Pure; exported so the mapping is unit-pinned without a browser.
+ */
+export function measuredSpendFromUsage(usage: unknown): SpendSlice | null {
+  if (!usage || typeof usage !== "object") return null;
+  const u = usage as Record<string, unknown>;
+  const p = u.promptTokens;
+  const c = u.completionTokens;
+  if (typeof p !== "number" || !Number.isFinite(p) || p < 0) return null;
+  if (typeof c !== "number" || !Number.isFinite(c) || c < 0) return null;
+  const cached = u.cachedPromptTokens;
+  return {
+    promptTokens: Math.floor(p),
+    completionTokens: Math.floor(c),
+    // A completed provider call is exactly one call — this slice is the DELTA,
+    // so `accumulateSpend` adds 1 to the project's running count.
+    calls: 1,
+    ...(typeof cached === "number" && Number.isFinite(cached) && cached >= 0
+      ? { cachedPromptTokens: Math.floor(cached) }
+      : {}),
+  };
 }
 
 /**
@@ -219,6 +251,14 @@ type RapidState = {
   setNotes: (id: string, notes: string) => void;
   // P0-2: append persisted chat rows (cap 40 = CHAT_LOG_MAX_ROWS headroom).
   appendChatRows: (id: string, rows: ChatLogRow[]) => void;
+  /**
+   * P1-5 (346 L2): fold ONE measured model call's usage (the `LlmUsage` a
+   * server-fn envelope carried — today `chatOnceServer`'s reply) into the
+   * project's persisted `tokenUsage`. Returns true only when a real measured
+   * slice was written; an absent/foreign envelope is a NO-OP (false, no state
+   * change) so a run that measured nothing never gains a fabricated zero.
+   */
+  recordSpend: (id: string, usage: unknown) => boolean;
   refreshPacket: (id: string) => void;
   exportProject: (id: string) => string | null;
   importProject: (json: string) => ImportProjectResult;
@@ -2508,6 +2548,23 @@ export const useRapid = create<RapidState>()(
               : p,
           ),
         }));
+      },
+      recordSpend: (id, usage) => {
+        const slice = measuredSpendFromUsage(usage);
+        // Nothing measured → no write at all (never a fabricated zero).
+        if (slice === null) return false;
+        let wrote = false;
+        set((s) => {
+          const live = byId(s.projects, id);
+          if (!live) return s;
+          wrote = true;
+          return {
+            projects: s.projects.map((x) =>
+              x.id === id ? { ...x, tokenUsage: accumulateSpend(x.tokenUsage, slice) } : x,
+            ),
+          };
+        });
+        return wrote;
       },
       refreshPacket: (id) => {
         const project = byId(get().projects, id);

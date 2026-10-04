@@ -4,6 +4,9 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   redactSecrets,
   scrubbedEnv,
@@ -11,7 +14,15 @@ import {
   runNodeBounded,
   runnerIsolationClaim,
   clampRunnerOutput,
+  permissionModelAvailable,
+  strictRunnerArgs,
+  RUNNER_STRICT_HEAP_CAP_MB,
 } from "./node-runner.server.ts";
+import {
+  probePermissionModel,
+  runnerBoundClaim,
+  RUNNER_BOUND_HEAP_CAP_MB,
+} from "./doctor.ts";
 
 describe("redactSecrets (174-15)", () => {
   it("redacts a fake sk- key of 40+ chars", () => {
@@ -264,5 +275,119 @@ describe("runNodeBounded timeout guard (W40 K4)", () => {
     if (res.ok) return;
     assert.equal(res.reason, "timeout");
     assert.match(String(res.error), /killed after 0\.001s/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/346 P1-4 — REAL resource/process isolation (no mock products).
+//
+// `opts.isolation:"strict"` runs the child under Node's Permission Model: fs
+// writes confined to the per-run scratch dir, child_process / worker_threads /
+// native addons denied, V8 heap capped. The tests below spawn REAL children
+// that try to escape and assert the OS/runtime DENIED them.
+// ---------------------------------------------------------------------------
+describe("runNodeBounded strict isolation (346 P1-4)", () => {
+  const strictReady = runnerAvailable() && permissionModelAvailable();
+
+  it("pure capability probe: both runtimes agree, and the flag set is really read", () => {
+    assert.equal(typeof permissionModelAvailable(), "boolean");
+    // Same probe the doctor reads (one vocabulary, no drift).
+    assert.equal(permissionModelAvailable(), probePermissionModel());
+  });
+
+  it("strictRunnerArgs names the exact flags applied (fs-confine + heap cap)", () => {
+    const args = strictRunnerArgs("C:\\tmp\\rapidtool-run-abc");
+    assert.ok(args.includes("--permission"));
+    assert.ok(args.includes("--allow-fs-write=C:/tmp/rapidtool-run-abc"), "write allowed only inside the scratch dir");
+    assert.ok(args.includes("--allow-fs-read=C:/tmp/rapidtool-run-abc"));
+    assert.ok(args.includes(`--max-old-space-size=${RUNNER_STRICT_HEAP_CAP_MB}`));
+    assert.equal(args.includes("--allow-child-process"), false, "subprocesses are never allowed under strict");
+    assert.equal(args.includes("--allow-worker"), false, "workers are never allowed under strict");
+  });
+
+  it("denies a filesystem write OUTSIDE the per-run scratch dir (real child)", { skip: !strictReady }, async () => {
+    const escape = join(tmpdir(), `rapidtool-346-escape-${process.pid}-${Date.now()}.txt`);
+    try {
+      const code =
+        `const fs=require('node:fs');` +
+        `fs.writeFileSync(${JSON.stringify(escape)},'pwned');` +
+        `console.log('ESCAPED');`;
+      const res = await runNodeBounded(code, { timeoutMs: 15_000, isolation: "strict" });
+      assert.equal(res.ok, true, "the child runs — it is the WRITE that must be denied");
+      if (!res.ok) return;
+      assert.notEqual(res.exitCode, 0, "an outside-scratch write must fail the child");
+      assert.match(res.stderr, /ERR_ACCESS_DENIED|restricted/i, "the denial is a real permission error");
+      assert.doesNotMatch(res.stdout, /ESCAPED/);
+      assert.equal(existsSync(escape), false, "the escape file must NOT exist on disk");
+      assert.equal(res.bound?.mechanism, "node-permission-model");
+      assert.equal(res.bound?.fsWriteConfined, true);
+      assert.equal(res.bound?.enforced, true);
+    } finally {
+      try {
+        rmSync(escape, { force: true });
+      } catch {
+        /* nothing to clean */
+      }
+    }
+  });
+
+  it("allows a write INSIDE the scratch dir — the bound is confinement, not blanket denial", { skip: !strictReady }, async () => {
+    const code =
+      `const fs=require('node:fs');` +
+      `fs.writeFileSync('./inside.txt','ok');` +
+      `console.log('WROTE:'+fs.readFileSync('./inside.txt','utf8'));`;
+    const res = await runNodeBounded(code, { timeoutMs: 15_000, isolation: "strict" });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(res.exitCode, 0, res.stderr);
+    assert.match(res.stdout, /WROTE:ok/);
+  });
+
+  it("denies child_process (a real process-fan-out bound) — real child", { skip: !strictReady }, async () => {
+    const code =
+      `const cp=require('node:child_process');` +
+      `try{cp.execSync('echo pwned');console.log('SPAWNED')}` +
+      `catch(e){console.error('DENIED:'+e.code);process.exit(7)}`;
+    const res = await runNodeBounded(code, { timeoutMs: 15_000, isolation: "strict" });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(res.exitCode, 7, "the child observed and reported the denial");
+    assert.match(res.stderr, /ERR_ACCESS_DENIED/);
+    assert.doesNotMatch(res.stdout, /SPAWNED/);
+    assert.equal(res.bound?.subprocessDenied, true);
+  });
+
+  it("reports the applied bound on a strict envelope; legacy envelopes stay byte-identical", async () => {
+    if (!runnerAvailable()) return;
+    const strict = await runNodeBounded("console.log('strict-ok')", { timeoutMs: 15_000, isolation: "strict" });
+    assert.equal(strict.ok, true);
+    assert.ok(strict.bound, "a strict run carries its bound record");
+    assert.equal(strict.bound?.heapCapMb, RUNNER_STRICT_HEAP_CAP_MB);
+    if (!permissionModelAvailable()) {
+      assert.equal(strict.bound?.mechanism, "none", "honest degradation, never a pretend mechanism");
+      return;
+    }
+    assert.equal(strict.bound?.mechanism, "node-permission-model");
+    const legacy = await runNodeBounded("console.log('legacy-ok')", { timeoutMs: 15_000 });
+    assert.equal("bound" in legacy, false, "the legacy envelope gains NO new field");
+  });
+
+  it("degrades honestly when the platform lacks the Permission Model flag", () => {
+    const degraded = runnerBoundClaim({ permissionAvailable: false });
+    assert.equal(degraded.mechanism, "none");
+    assert.equal(degraded.enforcedOnGeneratedCode, false);
+    assert.equal(degraded.fsWriteConfined, false);
+    assert.equal(degraded.subprocessDenied, false);
+    assert.equal(degraded.heapCapMb, null);
+    assert.match(degraded.note, /--permission/);
+    const present = runnerBoundClaim({ permissionAvailable: true, heapCapMb: 128 });
+    assert.equal(present.mechanism, "node-permission-model");
+    assert.equal(present.fsWriteConfined, true);
+    assert.equal(present.subprocessDenied, true);
+    assert.equal(present.heapCapMb, 128);
+  });
+
+  it("the doctor's advertised heap cap matches the runner's (drift guard)", () => {
+    assert.equal(RUNNER_BOUND_HEAP_CAP_MB, RUNNER_STRICT_HEAP_CAP_MB);
   });
 });

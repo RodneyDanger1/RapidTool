@@ -48,6 +48,9 @@ import {
 // L3-04 (346 E4): read the persisted run spend so the console can surface cost
 // honestly (or state that no spend was recorded).
 import { isMeasuredSpend, normalizeLedger, totalTokens } from "@/lib/token-ledger";
+// P1-5 (346 L2): the measured usage shape the chat server-fn envelope carries;
+// a successful console chat reply folds it into Project.tokenUsage.
+import type { LlmUsage } from "@/lib/llm";
 import { BRIEF_TEMPLATES } from "@/lib/templates";
 import { estimateTokens } from "@/lib/algorithms";
 import { DOD } from "@/lib/dod";
@@ -538,7 +541,19 @@ function FixturesPanel() {
           run-side bar
         </p>
       ) : (
-        <p className="mt-2 text-xs text-muted">corpus dir unreadable — see the problems above.</p>
+        // L3-12 (346 L2): `ok:false` covers BOTH a genuinely unreadable corpus
+        // dir (the loader's own "corpus dir unreadable: …" problem) and a
+        // failed server-fn TRANSPORT (fixtures.review.ts's "fixtures review
+        // unavailable: …" catch). The old copy always asserted the corpus dir,
+        // so a transport failure was mislabelled; name the cause the reported
+        // problems actually carry, and give the failure a real error tone.
+        <p role="status" className="mt-2 text-xs text-warn">
+          {(Array.isArray(data.problems) ? data.problems : []).some((p) =>
+            /corpus dir unreadable/i.test(String(p)),
+          )
+            ? "corpus dir unreadable — see the problems above."
+            : "fixtures review unavailable — see the problem above."}
+        </p>
       )}
       {data.ok && data.rows.length === 0 ? (
         <p className="mt-3 text-xs text-muted">
@@ -6382,7 +6397,7 @@ function ChatMsgRow({ msg, onRetry }: { msg: ChatMsgView; onRetry?: () => void }
  * module — never trust it to keep its {ok:false} contract.
  */
 type ChatOutcome =
-  | { ok: true; reply: string; provenance?: string }
+  | { ok: true; reply: string; provenance?: string; usage?: LlmUsage }
   | { ok: false; error: string; code?: string };
 async function chatOnceSafe(
   project: Project,
@@ -6394,11 +6409,16 @@ async function chatOnceSafe(
     if (res && typeof res === "object" && (res as { ok?: unknown }).ok === true) {
       const reply = (res as { reply?: unknown }).reply;
       const provenance = (res as { provenance?: unknown }).provenance;
+      const usage = (res as { usage?: unknown }).usage;
       if (typeof reply === "string") {
         return {
           ok: true,
           reply,
           provenance: typeof provenance === "string" ? provenance : undefined,
+          // P1-5 (346 L2): carry the provider's measured usage through so `send`
+          // can record it. Structural guard only — `recordSpend` re-validates
+          // and a malformed shape is a no-op, never a fabricated zero.
+          ...(usage && typeof usage === "object" ? { usage: usage as LlmUsage } : {}),
         };
       }
       // 99 §3.2: an unparseable SUCCESS shape IS an internal serialization
@@ -6638,6 +6658,13 @@ function ChatPane({ project }: { project: Project }) {
             code: res.code ?? undefined,
           };
       setMsgs((prev) => trimTurns([...prev, turn]));
+      // P1-5 (346 L2): a successful reply carries the provider's measured usage
+      // (chatOnceServer's envelope). Fold it into the project's persisted spend
+      // so the run's SpendChip shows a real, measured cost; an envelope with no
+      // usage is a no-op (the chip keeps saying "spend not recorded").
+      if (res.ok && res.usage) {
+        useRapid.getState().recordSpend(project.id, res.usage);
+      }
       // P0-2 (99 §1.4b): persist the user row + the terminal turn in ONE atomic
       // append. Every path lands here — chatOnceSafe converts throws to error
       // rows — so a finally-persist (which would store nothing on throw) is
@@ -7140,11 +7167,11 @@ function StatusChip({
 }
 
 /** L3-04 (346 E4): the run's recorded token spend. `Project.tokenUsage` is
- *  written by the CLI/headless run path (`headless.accumulateSpend`); the
- *  browser console's run path has NO metering seam, so a console-driven run
- *  records nothing — said plainly here rather than implied. Measured spend (an
- *  imported or CLI-produced record) renders as a chip; absence renders an
- *  honest "not recorded" chip (never a fabricated zero). */
+ *  written by the CLI/headless run path (`headless.accumulateSpend`) and, since
+ *  P1-5 (346 L2), by the console's own model calls — `store.recordSpend` folds
+ *  the REAL usage a successful chat server-fn reply carries. Measured spend (a
+ *  console chat turn, an imported or CLI-produced record) renders as a chip;
+ *  absence renders an honest "not recorded" chip (never a fabricated zero). */
 function SpendChip({ project }: { project: Project }) {
   const spend = project.tokenUsage;
   if (isMeasuredSpend(spend)) {
@@ -7156,7 +7183,7 @@ function SpendChip({ project }: { project: Project }) {
         className="rounded-sm border border-border px-2 py-1 tabular-nums text-ok"
         title={`Recorded run spend (persisted Project.tokenUsage): prompt + completion tokens${
           calls !== null ? ` over ${calls} call(s)` : ""
-        }. Written by the CLI/headless run path.`}
+        }. Measured by the console's chat replies and the CLI/headless run path.`}
       >
         spent {total.toLocaleString()} tok
         {calls !== null ? ` · ${calls} call${calls === 1 ? "" : "s"}` : ""}
@@ -7166,7 +7193,7 @@ function SpendChip({ project }: { project: Project }) {
   return (
     <span
       className="rounded-sm border border-border px-2 py-1 text-faint"
-      title="No measured run spend is recorded on this build. The browser console's run path has no token-metering seam, so a console-driven run records none; a CLI run or an imported CLI record carries Project.tokenUsage and shows here."
+      title="No measured run spend is recorded on this build. A console chat turn records the provider-measured usage of its reply here; with no measured model call (keyless, or none sent) there is nothing to record — this chip never fabricates a zero. A CLI run or an imported CLI record also carries Project.tokenUsage."
     >
       spend not recorded
     </span>

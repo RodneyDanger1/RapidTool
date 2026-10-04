@@ -14,6 +14,7 @@ import { isDeepSeekConfigured, cutMarked } from "./deepseek.server.ts";
 import { callModel } from "./llm/providers/registry.ts";
 import { PHASES } from "./phases.ts";
 import { dualChannelFailDetail, type ErrorCode } from "./errors.ts";
+import type { LlmUsage } from "./llm.ts";
 import type { PhaseRecord, Project } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -32,9 +33,15 @@ export type ChatTurn = {
 
 /** Honest copilot result: grounded reply, or a typed not-configured/error failure.
  *  Every failure branch carries a machine-readable `code` (compile-enforced —
- *  fixes/102 §RT_E): no code path can surface an uncatalogued copilot failure. */
+ *  fixes/102 §RT_E): no code path can surface an uncatalogued copilot failure.
+ *
+ *  P1-5 (346 L2): a successful reply carries the provider's REAL measured
+ *  `usage` (the `LlmResult.usage` this server fn received — prompt/completion
+ *  tokens, never fabricated), so the client's spend tap can fold a
+ *  console-driven model call into `Project.tokenUsage`. ABSENT when the
+ *  provider reported none: absence is "not measured", never a zero. */
 export type ChatResult =
-  | { ok: true; reply: string; grounded: true; provenance: string }
+  | { ok: true; reply: string; grounded: true; provenance: string; usage?: LlmUsage }
   | {
       ok: false;
       reason: "not-configured" | "error";
@@ -595,6 +602,10 @@ export async function chatOnceServer(
       reply: res.text,
       grounded: true,
       provenance: chatProvenance(project, context, contextAt),
+      // P1-5 (346 L2): propagate the provider's REAL measured usage so the
+      // client can meter this call. Additive + conditional: a response with no
+      // usage keeps the byte-identical legacy envelope (no fabricated zero).
+      ...(res.usage ? { usage: res.usage } : {}),
     };
   }
   // Race / mid-flight key loss: same honest keyless envelope as the early check

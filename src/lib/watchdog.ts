@@ -8,10 +8,16 @@
 // wild driver's resume branch (`store.ts` `startWildRun`) — a stalled run whose
 // latch requires a human, or whose recorded step elapsed crossed the 2×
 // pause-on-resolve tier, cannot silently re-enter the loop. `boundedStepWatch`
-// still has NO production consumer: its legitimate home is the per-step wrap of
-// `engine.wildStep`, which no driver performs yet (fixes/110 PA-02), so it is
-// exercised only by `watchdog.test.ts` until that wiring lands. The ENGINE is
-// untouched (purity): a driver wraps engine.wildStep with these predicates.
+// is consumed by `engine.wildStep` itself (fixes/346 P2-6): the
+// phase-execution await is the wrapped step, so every step the drivers run
+// (store `startWildRun`, the headless wild loops — fixes/110 PA-02's per-step
+// wrap, landed at the engine's own step execution) is watched. An overrun fires
+// the tier-1 overdue / tier-2 timeout rows on the step's telemetry sink, and a
+// step that RESOLVES at ≥ 2× budget pauses the run coded (`shouldAutopause`).
+// The wrap only observes — it cannot cancel an in-flight await (§5.1); the rows
+// emit only when a sink is present, and the pause-on-resolve park is
+// sink-independent. A step inside budget fires neither, so a legal step keeps
+// its exact bytes.
 //
 // What a watchdog CANNOT do (honest bounds, §5.1): cancel an in-flight
 // awaited promise from the same tab; run while the main thread is blocked.
@@ -47,8 +53,10 @@ export function watchdogDecision(elapsedMs: number, budgetMs: number): 0 | 1 | 2
 
 /**
  * Pause-on-resolve trigger: the step resolved at ≥ 2× budget (§5.2 tier 2).
- * Also read by the store resume gate (fixes/346 P2-6): a stall latch whose
- * recorded step elapsed is at/over this tier is treated as requiring a human.
+ * Read by the store resume gate (fixes/346 P2-6): a stall latch whose recorded
+ * step elapsed is at/over this tier is treated as requiring a human. Also read
+ * at the engine's own step wrap (`wildStep`, fixes/346 P2-6), which parks the
+ * run when the wrapped execution resolves at this tier.
  */
 export function shouldAutopause(elapsedMs: number, budgetMs: number): boolean {
   return watchdogDecision(elapsedMs, budgetMs) === 2;

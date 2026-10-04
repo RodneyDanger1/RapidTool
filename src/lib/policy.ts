@@ -49,7 +49,25 @@
  */
 export type PolicySeat =
   | { decidedBy: "human"; seat: "human-cli-i-am-human" }
+  // 346 L3 (A1-12 enforcement): the browser console — the product's designed
+  // human surface (344 A1). A REGISTERED human seat that is UNATTESTED: the
+  // console has no out-of-band token delivery seam, so its decisions must never
+  // read as token-verified. Distinct from `human-cli-i-am-human` (which requires
+  // the out-of-band `RT_HUMAN_SEAT_TOKEN`).
+  | { decidedBy: "human"; seat: "console" }
   | { decidedBy: "autopilot"; seat: "harness" | "autopilot" | "agent-seal" };
+
+/**
+ * 346 L3 (A1-12 enforcement): the recorded token-path truth for a seat — true
+ * ONLY for the out-of-band `RT_HUMAN_SEAT_TOKEN`-verifiable human seat. The
+ * console human seat and every machine seat record `false`, so a console
+ * decision can never be read as token-verified. Exported as the ONE owner of
+ * this vocabulary: dod.ts's `provenanceConsistent` cross-checks `decidedVia`
+ * against it, so the two sites can never drift.
+ */
+export function seatTokenPath(seat: PolicySeat): boolean {
+  return seat.decidedBy === "human" && seat.seat === "human-cli-i-am-human";
+}
 
 /** The registered action ids. Anything else is default-DENY. */
 export type PolicyAction = "hitl.approve" | "hitl.force" | "tree.emit" | "repair.apply" | "fixtures.approve";
@@ -182,6 +200,11 @@ function classifySeat(actor: unknown): SeatClaim {
   if (decidedBy === "human" && seat === "human-cli-i-am-human") {
     return { kind: "seat", seat: { decidedBy: "human", seat: "human-cli-i-am-human" } };
   }
+  // 346 L3 (A1-12): the browser console's human seat — a recognized seat (so a
+  // `[seat console]` row is never `tagged-unknown`), but unattested (below).
+  if (decidedBy === "human" && seat === "console") {
+    return { kind: "seat", seat: { decidedBy: "human", seat: "console" } };
+  }
   // 313 D1 (312 C1 design): `agent-seal` is the autopilot-class seat the wild
   // agent-seal path mints — the keyed Auto-Review classifier is the approver of
   // record for the stock HITL gates, and the row's `[seat agent-seal]` tag +
@@ -229,11 +252,15 @@ function deny(reason: string, fallback: PolicyFallback): PolicyDeny {
  * Default-DENY: unknown action ⇒ deny (`fallback: "none"`); resource outside the
  * action's namespace ⇒ deny (`"none"`); missing/unrecognized seat ⇒ deny.
  *
- * Seat rule (uniform, Rule A): a claim passes iff it is the `autopilot` seat, or
- * the `human` seat presenting the out-of-band token. Rule B (`requiresHumanSeat`)
- * is `hitl.force` — a machine may never force past a human gate — and
- * `fixtures.approve` — a machine may not decide the acceptance bar it drafted and
- * is graded against (338-4); both require the verified human seat.
+ * Seat rule (uniform, Rule A): a claim passes iff it is the `autopilot` seat, the
+ * out-of-band-token-verified `human-cli-i-am-human` seat, or the UNATTESTED
+ * `console` human seat (346 L3 · A1-12: the browser console is the product's
+ * designed human surface, but has no token delivery seam — its allow carries the
+ * distinct `console-seat-unattested` reason id and never `human-seat-token-verified`).
+ * Rule B (`requiresHumanSeat`) is `hitl.force` — a machine may never force past a
+ * human gate — and `fixtures.approve` — a machine may not decide the acceptance
+ * bar it drafted and is graded against (338-4); both require the TOKEN-VERIFIED
+ * human seat specifically (the console seat is refused there too).
  *
  * Pure / deterministic / total: no I/O, no clock, no env; identical inputs give
  * deep-equal verdicts; malformed inputs deny instead of throwing.
@@ -265,6 +292,18 @@ export function evaluatePolicy(action: string, resource: string, ctx?: PolicyCtx
 
   if (rule.requiresHumanSeat) {
     if (claimed.kind === "seat" && claimed.seat.decidedBy === "human") {
+      // 346 L3 (A1-12): the console human seat is unattested — it has no
+      // out-of-band token path, so it can never satisfy a token-only action
+      // (force past a human gate / decide the acceptance bar). It is refused
+      // under the same `force-requires-human-seat` id a machine seat gets, with
+      // a clause that names the console rather than misdirecting it to present
+      // a token it cannot deliver.
+      if (claimed.seat.seat === "console") {
+        return deny(
+          `force-requires-human-seat — the unattested console human seat may never ${rule.humanGateClause ?? "force past a human gate"}; only the out-of-band-token-verified human seat may.`,
+          "human-seat-token",
+        );
+      }
       if (isVerifiedHumanSeatToken(ctx)) {
         return { decision: "allow", reason: `human-seat-token-verified — ${rawAction} on ${rawResource} under the verified human seat.` };
       }
@@ -294,6 +333,20 @@ export function evaluatePolicy(action: string, resource: string, ctx?: PolicyCtx
   if (claimed.kind === "seat") {
     if (claimed.seat.decidedBy === "autopilot") {
       return { decision: "allow", reason: `autopilot-seat — ${rawAction} on ${rawResource} under the harness's own seat.` };
+    }
+    // 346 L3 (A1-12 enforcement): the browser console's human seat. It is a
+    // human-class seat, but UNATTESTED (no out-of-band token exists for it), so
+    // it is allowed only for the non-token actions a machine seat already
+    // decides, under a DISTINCT reason id — never `human-seat-token-verified`.
+    // A presented token cannot upgrade it (this branch is checked first and
+    // never consults the token), so `decidedVia.tokenPath` stays false and the
+    // decision can never read as token-verified. Rule B above still refuses it
+    // for hitl.force / fixtures.approve.
+    if (claimed.seat.seat === "console") {
+      return {
+        decision: "allow",
+        reason: `console-seat-unattested — ${rawAction} on ${rawResource} under the browser console's human seat; the console has no out-of-band token path, so this is a recorded UNATTESTED human decision, never token-verified.`,
+      };
     }
     if (isVerifiedHumanSeatToken(ctx)) {
       return { decision: "allow", reason: `human-seat-token-verified — ${rawAction} on ${rawResource} under the verified human seat.` };

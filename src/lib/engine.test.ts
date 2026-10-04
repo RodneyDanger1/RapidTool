@@ -33,6 +33,7 @@ import assert from "node:assert/strict";
 import { approveHitl, emptyProject, databaseSchemaSql, deliveryKindOf, hydrateProject, liveLayer, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
 import { wildResumeRun } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
+import type { RtEventSeed } from "./rt-events.ts";
 import type { Project, WildParkInfo } from "./types.ts";
 
 /** An ACTIVE wild-run project parked on the P0 approval gate (wild-seal.test.ts shape). */
@@ -454,5 +455,142 @@ describe("345 F2 (A1-05) — wildStep/approveHitl guards are fail-able", () => {
       /Autopilot may not approve a forceHuman gate/,
       "no autopilot path may clear a human-only gate",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 P2-6 — `boundedStepWatch`'s production consumer. Before this wiring the
+// export had zero non-test callers (fixes/344 A3-05); now `wildStep` wraps its
+// phase-execution await in it, so store `startWildRun` and the headless wild
+// loops watch every executed step. The pins below fail without that call site:
+// a real overrun must surface a coded row AND park the run (§5.2 tier 2), while
+// a step inside budget must emit nothing new and keep its bytes.
+// ---------------------------------------------------------------------------
+describe("346 P2-6 — the wild step is watched by boundedStepWatch", () => {
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+  /** A P6-ready wild fixture: priors 0-5 sealed, cursor on a ready phase 6. */
+  function p6ReadyFixture(): Project {
+    const p = emptyProject({ name: "WatchedWild", brief: "A governed wild-loop brief with enough vocabulary." });
+    p.wildMode = true;
+    p.wildRun = {
+      active: true,
+      phase: 6,
+      startedAt: Date.now(),
+      lastAutoLog: "Wild run at P6",
+      lastAutoAt: Date.now(),
+      stoppedAt: null,
+      pause: false,
+    };
+    p.currentPhase = 6;
+    p.status = "running";
+    p.phases = p.phases.map((r) =>
+      r.id < 6 ? { ...r, status: "complete" as const } : r.id === 6 ? { ...r, status: "ready" as const } : r,
+    );
+    return p;
+  }
+
+  function recorder(): { rows: RtEventSeed[]; onEvent: (seed: RtEventSeed) => void } {
+    const rows: RtEventSeed[] = [];
+    return { rows, onEvent: (seed) => rows.push(seed) };
+  }
+
+  /** Wall-clock masks only — the same volatile set the wild-step parity pin uses. */
+  function normalize(p: Project): unknown {
+    const strip = (s: string) =>
+      s
+        .replace(/compiled_at: [^\n]+/g, "compiled_at: FIXED")
+        .replace(/project_id: [^\n]+/g, "project_id: FIXED")
+        .replace(/"compiled_at": "[^"]+"/g, '"compiled_at": "FIXED"')
+        .replace(/"project_id": "[^"]+"/g, '"project_id": "FIXED"')
+        .replace(/"input_hash": "[^"]+"/g, '"input_hash": "FIXED"');
+    return {
+      ...p,
+      id: "fixture",
+      createdAt: 0,
+      artifacts: (p.artifacts ?? []).map((a) => ({ ...a, body: strip(a.body) })),
+      logs: (p.logs ?? []).map((l) => ({ ...l, ts: 0, detail: l.event === "wild.exec" ? "FIXED" : l.detail })),
+      packet: strip(p.packet),
+      traces: (p.traces ?? []).map((a) => ({ ...a, ranAt: 0 })),
+      wildRun: p.wildRun
+        ? {
+            ...p.wildRun,
+            startedAt: 0,
+            lastAutoAt: 0,
+            park: p.wildRun.park ? { ...p.wildRun.park, at: 0 } : p.wildRun.park,
+            lastStep: p.wildRun.lastStep
+              ? {
+                  ...p.wildRun.lastStep,
+                  park: p.wildRun.lastStep.park
+                    ? { ...p.wildRun.lastStep.park, at: 0 }
+                    : p.wildRun.lastStep.park,
+                }
+              : p.wildRun.lastStep,
+          }
+        : p.wildRun,
+      phases: (p.phases ?? []).map((r) => ({
+        ...r,
+        startedAt: r.startedAt === null ? null : 0,
+        completedAt: typeof r.completedAt === "number" ? 0 : r.completedAt,
+        gate: r.gate && typeof r.gate === "object" ? { ...(r.gate as object), checkedAt: 0 } : r.gate,
+      })),
+    };
+  }
+
+  it("overrun: a step resolving at ≥ 2× budget fires the tier rows AND parks coded", async () => {
+    const r = recorder();
+    const res = await wildStep(p6ReadyFixture(), {
+      reviewer: notConfigured,
+      // Slow injected edge (any key state): resolves well past the 2× tier.
+      p6Edge: async (q) => {
+        await sleep(80);
+        return { ...q, lastTest: { ok: true, detail: "slow edge" } };
+      },
+      onEvent: r.onEvent,
+      stepBudgetMs: 20, // tier 1 = 20ms, tier 2 = 40ms
+    });
+
+    const names = r.rows.map((x) => x.event);
+    assert.ok(names.includes("sys.step_overdue"), `tier-1 overdue row fired (got: ${names.join(", ")})`);
+    assert.ok(names.includes("wild.step_timeout"), `tier-2 timeout row fired (got: ${names.join(", ")})`);
+    const timeout = r.rows.find((x) => x.event === "wild.step_timeout")!;
+    assert.equal(timeout.scope, "wild-step", "the timeout row's scope is its catalogue scope");
+    assert.equal(timeout.code, "RT_E_LLM_TIMEOUT", "the timeout row is coded");
+
+    assert.equal(res.outcome, "paused", "pause-on-resolve: an overrun must not silently advance");
+    assert.equal(res.code, "RT_E_LLM_TIMEOUT");
+    assert.equal(res.project.wildRun?.pause, true, "the run is parked");
+    assert.equal(res.project.wildRun?.park?.unlock, "human-retry", "a human resumes to retry");
+    assert.ok(
+      (res.project.logs ?? []).some((l) => l.event === "wild.step_timeout"),
+      "the park is ledgered under wild.step_timeout",
+    );
+  });
+
+  it("normal path: a fast step fires NO watchdog rows and is byte-identical across budgets", async () => {
+    const edge = async (q: Project): Promise<Project> => ({ ...q, lastTest: { ok: true, detail: "fast edge" } });
+
+    const r = recorder();
+    const within = await wildStep(p6ReadyFixture(), {
+      reviewer: notConfigured,
+      p6Edge: edge,
+      onEvent: r.onEvent,
+      stepBudgetMs: 20, // tiny, but the step resolves immediately
+    });
+    const names = r.rows.map((x) => x.event);
+    assert.ok(!names.includes("sys.step_overdue"), `no overdue row on a fast step (got: ${names.join(", ")})`);
+    assert.ok(!names.includes("wild.step_timeout"), `no timeout row on a fast step (got: ${names.join(", ")})`);
+    assert.notEqual(within.code, "RT_E_LLM_TIMEOUT", "a fast step is never paused by the watchdog");
+
+    // Control: the wrap is inert on the fast path — a different budget cannot
+    // change the produced bytes (only wall-clock fields differ; masked).
+    const large = await wildStep(p6ReadyFixture(), {
+      reviewer: notConfigured,
+      p6Edge: edge,
+      stepBudgetMs: 1_000_000,
+    });
+    assert.deepEqual(normalize(large.project), normalize(within.project), "byte-identical modulo wall-clock");
+    assert.equal(large.outcome, within.outcome);
+    assert.equal(large.code, within.code);
   });
 });

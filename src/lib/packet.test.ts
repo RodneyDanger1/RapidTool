@@ -538,7 +538,7 @@ test("T-14: fresh project System JSON carries the same census under phase_covera
   const env = parseSystemJson(p.packet);
   assert.deepEqual(
     env.phase_coverage,
-    { executed: 0, total: 13, artifacts_from_p7_p12: 0 },
+    { executed: 0, total: 13, artifacts_from_p7_p12: 0, empty_phases: [] },
     "machine consumers read the same 0-of-13 arithmetic as the rail",
   );
 });
@@ -561,7 +561,12 @@ test("T-14: a stopped 7-phase run reports 7 of 13 / 0 — never implies all 13 r
     )})`,
   );
   const env = parseSystemJson(out);
-  assert.deepEqual(env.phase_coverage, { executed: 7, total: 13, artifacts_from_p7_p12: 0 });
+  assert.deepEqual(env.phase_coverage, {
+    executed: 7,
+    total: 13,
+    artifacts_from_p7_p12: 0,
+    empty_phases: [],
+  });
 });
 
 test("T-14: a completed 13-phase run reports its real 13 of 13 / 9 — matching the artifact rows", async () => {
@@ -580,7 +585,33 @@ test("T-14: a completed 13-phase run reports its real 13 of 13 / 9 — matching 
   ).length;
   assert.equal(tail, 9, "artifact rows independently agree with the 9 the rail reports");
   const env = parseSystemJson(out);
-  assert.deepEqual(env.phase_coverage, { executed: 13, total: 13, artifacts_from_p7_p12: 9 });
+  assert.deepEqual(env.phase_coverage, {
+    executed: 13,
+    total: 13,
+    artifacts_from_p7_p12: 9,
+    empty_phases: [],
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W60/346-6 (lane 6) — a complete phase that produced NO deliverable is a silent
+// no-op; the census's `emptyPhases` must reach BOTH packet surfaces (rail line +
+// machine envelope), never stay hidden behind the tail total.
+// ---------------------------------------------------------------------------
+test("W60/346-6: a complete-but-empty phase is named in the rail line AND the envelope", () => {
+  const p = makeProject();
+  p.phases = p.phases.map((r) => (r.id === 10 ? { ...r, status: "complete" as const } : r));
+  // P10 is complete but has ONLY a bookkeeping gate row — no deliverable.
+  p.artifacts = [{ id: "g10", phase: 10, kind: "gate", title: "DoD gate — P10", body: "verdict: FAIL" }];
+  const out = compileAgentPacket(p);
+  const line = out.match(/Phase coverage: [^\n]*/)?.[0] ?? "";
+  assert.match(line, /silent no-op phase\(s\): P10/, `the rail names the silent no-op (got ${JSON.stringify(line)})`);
+  const env = parseSystemJson(out);
+  assert.deepEqual(
+    (env.phase_coverage as { empty_phases?: unknown }).empty_phases,
+    [10],
+    "the machine envelope carries the same silent-no-op list",
+  );
 });
 
 test("runPhaseAsync returns a valid deterministic result for P0 (async entry does not throw)", async () => {

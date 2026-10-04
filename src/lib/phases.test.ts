@@ -24,6 +24,7 @@ import {
   priorsSealed,
 } from "./phases.ts";
 import { approve, createProject, runUntilGate } from "./headless.ts";
+import { runGate } from "./dod.ts";
 
 // W49/335-1: a driven run must be keyless. This file is a separate node --test
 // child; clear the key so the create default is advisory (enforceDod off) and
@@ -274,6 +275,57 @@ describe("W49/335-1 driven-run tail coverage (F-11)", () => {
     assert.deepEqual(cov.emptyPhases, []);
     assert.equal(phaseCoverageLine(cov), "0 of 13 phases executed / 0 artifacts from P7–P12");
   });
+
+  // W60/346-6 (lane 6): the audit's row 11 read `canEnter` linearity as "a red
+  // P6 makes P7–P12 unreachable". The edge function is gate-blind, and the real
+  // keyless drain proves the tail RUNS and produces. Pin the census exactly.
+  it("W60/346-6: the real keyless drain's tail census is exact — 13/13 executed, 9 tail artifacts, no empty phase", async () => {
+    const done = await drain(createProject({ brief: BRIEF, name: "RentLedger" }));
+    const cov = phaseCoverage(done.phases, done.artifacts ?? []);
+    assert.equal(cov.executed, 13);
+    assert.equal(cov.tailArtifacts, 9, "P7 research + P8 ui + P9 cicd×2 + P10 edge + P11 tools + P12 docs×3");
+    assert.equal(phaseCoverageLine(cov), "13 of 13 phases executed / 9 artifacts from P7–P12");
+    assert.deepEqual(cov.emptyPhases, []);
+    const perPhase = [7, 8, 9, 10, 11, 12].map(
+      (id) =>
+        (done.artifacts ?? []).filter((a) => a.phase === id && a.kind !== "packet" && a.kind !== "gate").length,
+    );
+    assert.deepEqual(perPhase, [1, 1, 2, 1, 1, 3], "one deliverable per tail phase; P9 two, P12 three");
+  });
+
+  it("W60/346-6: an enforceDod keyless run blocks at P6 — the tail is bounded by the KEYED P6, and the census reports 7/13 / 0", async () => {
+    let p: Project = { ...createProject({ brief: BRIEF, name: "RentLedger" }), enforceDod: true };
+    let blocked = false;
+    for (let i = 0; i < 40; i++) {
+      if (p.status === "complete" || p.status === "blocked") break;
+      const r = await runUntilGate(p, { maxSteps: 1 });
+      p = r.project;
+      if (r.outcome === "dod") {
+        blocked = true;
+        break;
+      }
+      if (p.status === "awaiting_hitl") p = approve(p);
+      else if (r.stopped) break;
+    }
+    assert.equal(blocked, true, "enforceDod refuses to advance past a red gate");
+    assert.equal(p.currentPhase, 6, "the block lands on P6's edge — the tail is never entered");
+    const rec6 = p.phases.find((r) => r.id === 6);
+    assert.equal(rec6?.status, "complete", "P6 ran; its gate is red");
+    assert.equal(rec6?.gate?.passed, false, "P6's recorded gate is red");
+    const unmetIds = runGate(p, 6).unmet.map((g) => g.id);
+    assert.ok(
+      unmetIds.includes("p6-verified"),
+      "p6-verified needs a keyed machine-verified 'tested' verdict — the keyed blocker",
+    );
+    assert.ok(
+      unmetIds.includes("p6-brief-fit"),
+      "p6-brief-fit needs keyed brief-faithful identifiers — the keyless floor fails it by construction",
+    );
+    const cov = phaseCoverage(p.phases, p.artifacts ?? []);
+    assert.equal(cov.executed, 7);
+    assert.equal(cov.tailArtifacts, 0);
+    assert.equal(phaseCoverageLine(cov), "7 of 13 phases executed / 0 artifacts from P7–P12");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -353,8 +405,10 @@ describe("W51/337-1 phase bounds name PHASE_LAST (never a bare 12)", () => {
     }
   });
 
-  it("no bare-12 phase bound remains in engine.ts / headless.ts / handoff.ts", () => {
-    for (const file of ["./engine.ts", "./headless.ts", "./handoff.ts"]) {
+  it("no bare-12 phase bound remains in engine.ts / headless.ts / handoff.ts / report-intake.ts", () => {
+    // W60/346-6: report-intake.ts carries a phase ceiling (`phase > 12`); it is
+    // a graph bound like the drivers and must name PHASE_LAST, never a bare 12.
+    for (const file of ["./engine.ts", "./headless.ts", "./handoff.ts", "./report-intake.ts"]) {
       const lines = readFileSync(new URL(file, import.meta.url), "utf8").split("\n");
       lines.forEach((line, i) => {
         for (const re of BARE_PHASE_BOUND_12) {
@@ -366,5 +420,56 @@ describe("W51/337-1 phase bounds name PHASE_LAST (never a bare 12)", () => {
         }
       });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W60/346-6 (lane 6) — the silent-no-op census must reach the report. W50/336-1
+// added `PhaseCoverage.emptyPhases` precisely so a complete phase that produced
+// no deliverable is NAMED "instead of hiding it behind the tail total", but no
+// surface rendered it: the shared coverage line (the packet rail) still hid it.
+// ---------------------------------------------------------------------------
+describe("W60/346-6 — the coverage line names a silent no-op phase", () => {
+  it("a complete phase that produced no deliverable is named, never hidden behind the tail total", () => {
+    // P0–P6 each produced one deliverable; P10 completed with ONLY its
+    // bookkeeping gate row (the silent no-op the census exists to name).
+    const phases = [0, 1, 2, 3, 4, 5, 6, 10].map((id) => ({ id, status: "complete" }));
+    const rows = [
+      ...[0, 1, 2, 3, 4, 5, 6].map((id) => ({ phase: id, kind: "docs" })),
+      { phase: 10, kind: "gate" },
+    ];
+    const cov = phaseCoverage(phases, rows);
+    assert.deepEqual(cov.emptyPhases, [10], "P10 completed with no deliverable row");
+    const line = phaseCoverageLine(cov);
+    assert.match(line, /silent no-op/, "the shared coverage line names the silent no-op");
+    assert.match(line, /P10/, "the line names WHICH phase no-oped, not just a count");
+  });
+
+  it("stays byte-stable when no phase is empty (the pinned 13/13 / 9 line is untouched)", () => {
+    const cov = phaseCoverage(
+      [7, 8].map((id) => ({ id, status: "complete" })),
+      [{ phase: 7, kind: "research" }, { phase: 8, kind: "ui" }],
+    );
+    assert.deepEqual(cov.emptyPhases, []);
+    assert.equal(phaseCoverageLine(cov), "2 of 13 phases executed / 2 artifacts from P7–P12");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W60/346-6 (lane 6) — declare-or-strike: the tail-reachability claim must match
+// the bytes. `canEnter` is gate-blind (`from + 1` only) and does NOT block the
+// tail on a red P6, so the historical "reachable ONLY after a green P6" claim is
+// false; only an enforceDod driver blocks, and there the keyless block is the
+// keyed P6 gate (pinned above).
+// ---------------------------------------------------------------------------
+describe("W60/346-6 — tail reachability claim matches the bytes", () => {
+  it("phases.ts never claims the tail is reachable ONLY after a GREEN P6", () => {
+    const src = readFileSync(new URL("./phases.ts", import.meta.url), "utf8");
+    assert.equal(
+      src.includes("reachable ONLY after a green P6"),
+      false,
+      "struck: canEnter is gate-blind, so a red P6 does not make the tail unreachable",
+    );
+    assert.ok(src.includes("gate-blind"), "the corrected claim states canEnter is gate-blind");
   });
 });

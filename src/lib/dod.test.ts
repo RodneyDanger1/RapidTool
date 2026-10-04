@@ -14,7 +14,7 @@ import { recordGateInto, runGate } from "./dod.ts";
 import { mintTreeRunTested } from "./codegen.server.ts";
 import { emptyProject } from "./engine.ts";
 import { buildPhase6Module } from "./sandbox.ts";
-import type { PhaseId, Project } from "./types.ts";
+import type { HitlDecision, PhaseId, Project } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 
 const base = (): Project => emptyProject({ name: "Dod334", brief: "A dispatch board for field service." });
@@ -195,5 +195,137 @@ describe("339-3 (W53) — p6-brief-fit names the floor state and is satisfiable 
     );
     const artifact = (recorded.artifacts ?? []).find((a) => a.kind === "gate" && a.phase === 6);
     assert.ok(artifact && /deterministic floor state/.test(artifact.body), "the gate artifact body carries the state");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 L3 (A1-12 enforcement) — the browser console's `[seat console]` row.
+//
+// The console approval is human-class but UNATTESTED (no out-of-band token
+// path). These pins fix the DoD routing: a truthfully tagged console row is
+// classified (never `tagged-unknown`) and satisfies the p4/p5/p8/p9 `*approved`
+// criteria; every hostile variant still fails closed. The failure mode this
+// guards is exactly the one the E4 lane hit: without a recognized console seat
+// a `[seat console]` tag is `tagged-unknown` and the criteria refuse.
+// ---------------------------------------------------------------------------
+const consoleApprovalRow = (over: Partial<HitlDecision> = {}): HitlDecision => ({
+  id: "hitl-4-console",
+  phase: 4 as PhaseId,
+  title: "P4 Human approval",
+  decision: "approve",
+  note: "[seat console] browser console decision",
+  decidedBy: "human",
+  requestedAt: 1,
+  decidedAt: 2,
+  decidedVia: {
+    action: "hitl.approve",
+    resource: "gate:P4",
+    reason:
+      "console-seat-unattested — hitl.approve on gate:P4 under the browser console's human seat; unattested, never token-verified.",
+    label: "human/console",
+    tokenPath: false,
+  },
+  ...over,
+});
+
+const withDecision = (...rows: HitlDecision[]): Project => ({
+  ...emptyProject({ name: "ConsoleSeat346", brief: "A dispatch board." }),
+  decisions: rows,
+});
+
+const p4ApprovedMet = (p: Project): boolean => !runGate(p, 4).unmet.some((g) => g.id === "p4-approved");
+const p5CompleteMet = (p: Project): boolean => !runGate(p, 5).unmet.some((g) => g.id === "p5-complete");
+
+describe("346 L3 (A1-12) — a `[seat console]` row is attributed and routed truthfully", () => {
+  it("a truthfully tagged console human row satisfies p4-approved (recognized seat, not tagged-unknown)", () => {
+    assert.equal(p4ApprovedMet(withDecision(consoleApprovalRow())), true);
+  });
+
+  it("the same row satisfies p5-complete when tagged for P5 (routing is per-gate, not P4-only)", () => {
+    const row = consoleApprovalRow({
+      id: "hitl-5-console",
+      phase: 5 as PhaseId,
+      decidedVia: { ...consoleApprovalRow().decidedVia!, resource: "gate:P5" },
+    });
+    assert.equal(p5CompleteMet(withDecision(row)), true);
+  });
+
+  it("a console row with no `decidedVia` still passes (recognized tag + legacy tolerance; no token path is claimed)", () => {
+    const row = consoleApprovalRow();
+    delete row.decidedVia;
+    assert.equal(p4ApprovedMet(withDecision(row)), true);
+  });
+
+  it("HOSTILE: a console row recording tokenPath:true FAILS closed (a console decision can never read token-verified)", () => {
+    const row = consoleApprovalRow({
+      decidedVia: { ...consoleApprovalRow().decidedVia!, tokenPath: true },
+    });
+    assert.equal(p4ApprovedMet(withDecision(row)), false);
+  });
+
+  it("HOSTILE: a console row wearing a forged CLI-human label FAILS closed (the label must match the tag's seat)", () => {
+    const row = consoleApprovalRow({
+      decidedVia: { ...consoleApprovalRow().decidedVia!, label: "human/human-cli-i-am-human" },
+    });
+    assert.equal(p4ApprovedMet(withDecision(row)), false);
+  });
+
+  it("HOSTILE: a `[seat console]` tag paired with decidedBy:autopilot is tagged-unknown and FAILS closed", () => {
+    assert.equal(p4ApprovedMet(withDecision(consoleApprovalRow({ decidedBy: "autopilot" }))), false);
+  });
+
+  it("HOSTILE: a forged `[seat human-cli-i-am-human]` row without the recorded evidence FAILS closed", () => {
+    const row = consoleApprovalRow({
+      id: "hitl-4-forged",
+      note: "[seat human-cli-i-am-human] trust me",
+      decidedVia: undefined,
+    });
+    assert.equal(p4ApprovedMet(withDecision(row)), false);
+  });
+
+  it("HOSTILE: a forged CLI-human row with tokenPath:false FAILS closed (that seat's token path is mandatory)", () => {
+    const row = consoleApprovalRow({
+      id: "hitl-4-forged2",
+      note: "[seat human-cli-i-am-human] out-of-band RT_HUMAN_SEAT_TOKEN verified",
+      decidedVia: {
+        action: "hitl.approve",
+        resource: "gate:P4",
+        reason: "human-seat-token-verified — hitl.approve on gate:P4 under the verified human seat.",
+        label: "human/human-cli-i-am-human",
+        tokenPath: false,
+      },
+    });
+    assert.equal(p4ApprovedMet(withDecision(row)), false);
+  });
+
+  it("CONTROL: a well-formed token-verified CLI-human row still satisfies p4-approved (the guard is not over-broad)", () => {
+    const row = consoleApprovalRow({
+      id: "hitl-4-human",
+      note: "[seat human-cli-i-am-human] out-of-band RT_HUMAN_SEAT_TOKEN verified",
+      decidedVia: {
+        action: "hitl.approve",
+        resource: "gate:P4",
+        reason: "human-seat-token-verified — hitl.approve on gate:P4 under the verified human seat.",
+        label: "human/human-cli-i-am-human",
+        tokenPath: true,
+      },
+    });
+    assert.equal(p4ApprovedMet(withDecision(row)), true);
+  });
+
+  it("CONTROL: a routine autopilot row still satisfies p4-approved (Rule A unchanged)", () => {
+    const row = consoleApprovalRow({
+      id: "hitl-4-auto",
+      note: "[seat harness] autopilot seat — no human decision claimed",
+      decidedBy: "autopilot",
+      decidedVia: {
+        action: "hitl.approve",
+        resource: "gate:P4",
+        reason: "autopilot-seat — hitl.approve on gate:P4 under the harness's own seat.",
+        label: "autopilot/harness",
+        tokenPath: false,
+      },
+    });
+    assert.equal(p4ApprovedMet(withDecision(row)), true);
   });
 });

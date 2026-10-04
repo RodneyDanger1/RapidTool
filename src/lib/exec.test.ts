@@ -5,15 +5,16 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { runCode, type RunnerFn } from "./exec.ts";
+import { runCode, generatedRunOptions, type RunnerFn } from "./exec.ts";
 import {
   CLOSE_GRACE_MS,
   KILL_GRACE_MS,
   removeScratchDir,
   runNodeBounded,
   runnerAvailable,
+  permissionModelAvailable,
 } from "./node-runner.server.ts";
-import { mkdtempSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -184,6 +185,41 @@ describe("scratch-dir cleanup (node-runner)", () => {
       if (saved.TEMP === undefined) delete process.env.TEMP;
       else process.env.TEMP = saved.TEMP;
       removeScratchDir(root, true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/346 P1-4 — the generated-code path is bounded, and its policy is PINNED
+// here (not merely implied by the call site in exec.ts's server handler).
+// ---------------------------------------------------------------------------
+describe("generated-code path isolation (346 P1-4)", () => {
+  it("generatedRunOptions always requests strict isolation and forwards the timeout", () => {
+    assert.deepEqual(generatedRunOptions(), { timeoutMs: undefined, isolation: "strict" });
+    assert.deepEqual(generatedRunOptions(2500), { timeoutMs: 2500, isolation: "strict" });
+  });
+
+  it("a child run with the generated path's OWN options is fs-confined (real child)", {
+    skip: !runnerAvailable() || !permissionModelAvailable(),
+  }, async () => {
+    const escape = join(tmpdir(), `rapidtool-346-exec-escape-${process.pid}-${Date.now()}.txt`);
+    try {
+      const code =
+        `require('node:fs').writeFileSync(${JSON.stringify(escape)},'x');` +
+        `console.log('ESCAPED');`;
+      const res = await runNodeBounded(code, generatedRunOptions(15_000));
+      assert.equal(res.ok, true);
+      if (!res.ok) return;
+      assert.notEqual(res.exitCode, 0, "the generated path's options must deny the escape");
+      assert.match(res.stderr, /ERR_ACCESS_DENIED|restricted/i);
+      assert.equal(existsSync(escape), false);
+      assert.equal(res.bound?.enforced, true);
+    } finally {
+      try {
+        rmSync(escape, { force: true });
+      } catch {
+        /* nothing to clean */
+      }
     }
   });
 });

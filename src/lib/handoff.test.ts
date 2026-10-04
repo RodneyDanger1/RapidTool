@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { phaseHandoff } from "./handoff.ts";
 import { applyPhaseResult } from "./engine.ts";
 import { ALL_PHASES, runHeadless, runToGate, seedProject } from "./testing/fixtures.ts";
+import type { HitlDecision, PhaseId } from "./types.ts";
 
 const fullRun = () => runHeadless(seedProject(), ALL_PHASES);
 
@@ -240,5 +241,105 @@ describe("phaseHandoff", () => {
       row.startsWith("- [ ] Brief-conformance: required brief nouns appear as identifiers"),
       "the state line is appended to the registry criterion, not a replacement",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 L3 (A1-12) — the decision line's token-path clause.
+//
+// F2-20 renders the newest decision's seat provenance. Before this lane the
+// clause read `tokenPath:false` as "machine seat — no token path claimed",
+// which is FALSE for the browser console: it is an UNATTESTED human seat with
+// no out-of-band token path. The pins below fix the console wording and hold
+// the machine / token-verified wording byte-identical.
+// ---------------------------------------------------------------------------
+function decisionProject(via: HitlDecision["decidedVia"]): ReturnType<typeof seedProject> {
+  const decision: HitlDecision = {
+    id: "d-handoff",
+    phase: 0 as PhaseId,
+    title: "P0",
+    decision: "approve",
+    decidedBy: "human",
+    requestedAt: 1,
+    decidedAt: 2,
+    decidedVia: via,
+  };
+  return { ...seedProject(), decisions: [decision] };
+}
+
+function decisionLine(text: string): string {
+  const line = text.split("\n").find((l) => l.startsWith("Last recorded P0 decision"));
+  assert.ok(line, "the newest decision line renders");
+  return line!;
+}
+
+describe("346 L3 (A1-12) — the handoff decision line renders the console seat honestly", () => {
+  it("an unattested console decision says so — never 'machine seat'", () => {
+    const line = decisionLine(
+      phaseHandoff(
+        decisionProject({
+          action: "hitl.approve",
+          resource: "gate:P0",
+          reason: "console-seat-unattested — hitl.approve on gate:P0 under the browser console's human seat.",
+          label: "human/console",
+          tokenPath: false,
+        }),
+        0,
+      ),
+    );
+    assert.ok(
+      line.includes("(unattested console human seat — no out-of-band token)"),
+      `the console clause renders: ${JSON.stringify(line)}`,
+    );
+    assert.ok(!line.includes("machine seat"), "a console human seat is never labeled a machine seat");
+  });
+
+  it("a machine seat still renders the byte-identical wording (no regression)", () => {
+    const line = decisionLine(
+      phaseHandoff(
+        decisionProject({
+          action: "hitl.approve",
+          resource: "gate:P0",
+          reason: "autopilot-seat — hitl.approve on gate:P0 under the harness's own seat.",
+          label: "autopilot/harness",
+          tokenPath: false,
+        }),
+        0,
+      ),
+    );
+    assert.ok(line.includes("(machine seat — no token path claimed)"), `machine wording held: ${JSON.stringify(line)}`);
+  });
+
+  it("a token-verified human decision still renders the verified clause", () => {
+    const line = decisionLine(
+      phaseHandoff(
+        decisionProject({
+          action: "hitl.approve",
+          resource: "gate:P0",
+          reason: "human-seat-token-verified — hitl.approve on gate:P0 under the verified human seat.",
+          label: "human/human-cli-i-am-human",
+          tokenPath: true,
+        }),
+        0,
+      ),
+    );
+    assert.ok(line.includes("(out-of-band token path verified)"), `verified wording held: ${JSON.stringify(line)}`);
+  });
+
+  it("a contradictory human label with tokenPath:false renders as unverified, never as a machine seat", () => {
+    const line = decisionLine(
+      phaseHandoff(
+        decisionProject({
+          action: "hitl.approve",
+          resource: "gate:P0",
+          reason: "human-seat-token-verified — hitl.approve on gate:P0 under the verified human seat.",
+          label: "human/human-cli-i-am-human",
+          tokenPath: false,
+        }),
+        0,
+      ),
+    );
+    assert.ok(line.includes("(human seat — token path not verified)"), `contradiction rendered honestly: ${JSON.stringify(line)}`);
+    assert.ok(!line.includes("machine seat"), "a human label is never called a machine seat");
   });
 });

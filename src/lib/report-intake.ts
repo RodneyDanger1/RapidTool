@@ -34,6 +34,10 @@
 import { fnv1a } from "./algorithms.ts";
 import { runGate } from "./dod.ts";
 import { accrueReproducedCounts, dedupeMemoryIds, isLessonMemoryId } from "./engine.ts";
+// W60/346-6: the report phase ceiling is a GRAPH bound — name PHASE_LAST, never
+// a bare 12 (the W51/337-1 law; a phase-count change must not leave a stale
+// literal in the validator, which the driver scrub now also covers).
+import { PHASE_LAST } from "./phases.ts";
 import type { Artifact, JsonLog, MemoryEntry, PhaseId, PhaseRecord, Project } from "./types.ts";
 // 216i (112 §4.1/§4.3): the failure-record shapes for the L2 intake gate —
 // TYPE-ONLY (erased at runtime; the lazy seam below carries the value).
@@ -121,8 +125,8 @@ export function validateReport(raw: unknown, currentPhase?: number): ValidateRep
   if (!isPlainObject(raw)) return { ok: false, error: "Report must be an object." };
 
   const phase = raw.phase;
-  if (typeof phase !== "number" || !Number.isInteger(phase) || phase < 0 || phase > 12) {
-    return { ok: false, error: "Report phase must be an integer between 0 and 12." };
+  if (typeof phase !== "number" || !Number.isInteger(phase) || phase < 0 || phase > PHASE_LAST) {
+    return { ok: false, error: `Report phase must be an integer between 0 and ${PHASE_LAST}.` };
   }
 
   const status = raw.status;

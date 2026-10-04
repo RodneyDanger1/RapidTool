@@ -2127,9 +2127,16 @@ async function main() {
           // under the bounded runner + one kind-entry smoke — and appends the
           // TreeRunOutcome (compile/tests/run). Exit 1 when the tree is not
           // ok (red tree is never a clean emit — loud, never a faked pass).
+          // audit P0-3 (346 · re-audit row 10 residual): the `--git` tail below
+          // must NOT land a commit when THIS invocation's `--run` verdict is
+          // red — the run leg flips payload.ok + RT_E_TREE_RUN_FAILED, but the
+          // git leg used to run unconditionally and committed a broken tree.
+          // Capture the just-computed verdict so the git leg can consult it.
+          let runVerdict = null;
           if (!foreignLeftInPlace && flag(args, "run")) {
             const cc = await checkDriver();
             const outcome = await cc.treeRun(res.dir);
+            runVerdict = outcome;
             payload.treeRun = outcome;
             // W43 · C6/E4 (fixes/312_c6_ux · 311_sd_product K3): self-qualification —
             // a green --run must never read as "the product works" while the census
@@ -2226,22 +2233,43 @@ async function main() {
           // is coded and flips payload.ok false (exit 1) — the emitted tree
           // still exists on disk either way.
           if (flag(args, "git")) {
-            const landed = await h.landEmittedTree(project, res.dir, { files: res.files });
-            payload.git = landed.ok
-              ? {
-                  dir: landed.dir,
-                  message: landed.message,
-                  committed: landed.committed,
-                  noop: landed.noop,
-                  commit: landed.commit,
-                  files: landed.files,
-                  foreign: landed.foreign,
-                }
-              : { ok: false, reason: landed.reason, code: landed.code ?? "RT_E_INTERNAL", error: landed.error };
-            if (!landed.ok) {
+            // audit P0-3 (346): `emit --run --git` on a RED tree must NOT issue
+            // the commit. `emit --git` WITHOUT `--run` is unchanged (it cannot
+            // know a verdict); `--run --git` with a green verdict commits as
+            // before. The refusal is coded + loud and the emitted tree stays on
+            // disk (delivery is withheld, the build is not).
+            if (flag(args, "run") && runVerdict !== null && runVerdict.ok !== true) {
+              payload.git = {
+                committed: false,
+                skipped: true,
+                reason: "tree-run-red",
+                code: "RT_E_TREE_RUN_FAILED",
+                error:
+                  "git delivery refused: this invocation's --run verdict is red " +
+                  "(RT_E_TREE_RUN_FAILED) — no commit was issued and the emitted tree is kept " +
+                  "on disk; fix the tree and re-run `emit --run` to green before landing it.",
+              };
               payload.ok = false;
-              payload.code = landed.code ?? "RT_E_INTERNAL";
-              if (typeof payload.error !== "string") payload.error = landed.error;
+              payload.code = "RT_E_TREE_RUN_FAILED";
+              if (typeof payload.error !== "string") payload.error = "tree-run failed — commit withheld";
+            } else {
+              const landed = await h.landEmittedTree(project, res.dir, { files: res.files });
+              payload.git = landed.ok
+                ? {
+                    dir: landed.dir,
+                    message: landed.message,
+                    committed: landed.committed,
+                    noop: landed.noop,
+                    commit: landed.commit,
+                    files: landed.files,
+                    foreign: landed.foreign,
+                  }
+                : { ok: false, reason: landed.reason, code: landed.code ?? "RT_E_INTERNAL", error: landed.error };
+              if (!landed.ok) {
+                payload.ok = false;
+                payload.code = landed.code ?? "RT_E_INTERNAL";
+                if (typeof payload.error !== "string") payload.error = landed.error;
+              }
             }
           }
           respond(

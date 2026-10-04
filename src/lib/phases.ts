@@ -152,10 +152,13 @@ export const STOCK_HITL = [4, 5, 8, 9] as const;
 
 /**
  * T-14 (research/multiagent/106 §6, finding F-11): first id of the post-P6
- * tail. The graph is strictly linear (`canEnter` = `from + 1` only), so these
- * phases are reachable ONLY after a green P6 — in the shipped end-to-end
- * artifact census P7–P12 produced 0 artifacts while the "13-phase pipeline"
- * claim sat next to it.
+ * tail. The graph is strictly linear (`canEnter` = `from + 1` only) and the
+ * edge function is GATE-BLIND — it does NOT make the tail unreachable on a red
+ * P6. Measured on this box: the default advisory driver advances through
+ * P7–P12 after a red P6 (P6's gate fails on p6-verified/p6-brief-fit) and every
+ * tail phase writes its own artifact (9 tail artifacts). Only an `enforceDod`
+ * run blocks at P6, and there the block is those two KEYED criteria — so the
+ * tail is bounded by the keyed P6, never by `canEnter` itself.
  */
 export const PHASE_TAIL_START: PhaseId = 7;
 
@@ -190,10 +193,12 @@ export type PhaseCoverage = {
 
 /**
  * T-14 (106 §6, finding F-11): compute the honest coverage census. The graph
- * is strictly linear, so a run stopped at P6 executed 7 of 13 phases and the
- * tail P7–P12 produced 0 artifacts — every surface must say exactly that and
- * never imply all 13 ran. Pure: derived from the given records + artifact
- * rows only, and defensive against sparse/hand-built payloads:
+ * is strictly linear, so an `enforceDod` run stopped at P6 executed 7 of 13
+ * phases and the tail P7–P12 produced 0 artifacts (the default advisory driver
+ * is gate-blind and does advance the tail — see PHASE_TAIL_START) — every
+ * surface must say exactly that and never imply all 13 ran. Pure: derived from
+ * the given records + artifact rows only, and defensive against sparse/hand-built
+ * payloads:
  *
  *  - records are matched by id (like `priorsSealed`, never by array
  *    position), so an unsorted/sparse status array can not mis-count;
@@ -257,5 +262,14 @@ export function phaseCoverageLine(coverage: PhaseCoverage): string {
   const from = fromDef?.code ?? "P7";
   const to = toDef?.code ?? "P12";
   const noun = coverage.tailArtifacts === 1 ? "artifact" : "artifacts";
-  return `${coverage.executed} of ${coverage.total} phases executed / ${coverage.tailArtifacts} ${noun} from ${from}–${to}`;
+  const base = `${coverage.executed} of ${coverage.total} phases executed / ${coverage.tailArtifacts} ${noun} from ${from}–${to}`;
+  // W60/346-6: a complete phase that recorded NO deliverable is a silent no-op.
+  // `emptyPhases` exists to NAME it "instead of hiding it behind the tail total"
+  // (PhaseCoverage doc), but no surface rendered it, so the packet's ONE shared
+  // coverage line hid it. Name it here: byte-identical when no phase is empty
+  // (every pinned line stays), and explicit otherwise.
+  const empty = (Array.isArray(coverage.emptyPhases) ? coverage.emptyPhases : [])
+    .map((id) => PHASE_BY_ID.get(id)?.code ?? `P${id}`)
+    .join(", ");
+  return empty ? `${base} — silent no-op phase(s): ${empty}` : base;
 }

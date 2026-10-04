@@ -259,15 +259,21 @@ function systemJson(
         rejections: rows(p?.rejectionHistory).length,
         gate_passed: p?.gate ? ((p.gate as { passed?: unknown }).passed ?? null) : null,
       })),
-      // T-14 (106 §6, finding F-11): the honest coverage census — a run
-      // stopped at P6 executed 7 of 13 phases and the P7–P12 tail produced 0
-      // artifacts; the envelope states the real numbers so no machine consumer
-      // reads the 13-entry phase list as "all 13 ran". Same census as the
-      // "## Current edge" rail (one pure helper, one arithmetic).
+      // T-14 (106 §6, finding F-11): the honest coverage census — an enforceDod
+      // run stopped at P6 executed 7 of 13 phases and the P7–P12 tail produced 0
+      // artifacts (an advisory run advances the tail; see PHASE_TAIL_START); the
+      // envelope states the real numbers so no machine consumer reads the
+      // 13-entry phase list as "all 13 ran". Same census as the "## Current
+      // edge" rail (one pure helper, one arithmetic).
+      // W60/346-6: `empty_phases` is the census's own silent-no-op list (a
+      // complete phase that produced no deliverable) — additive key so a
+      // machine consumer sees the same naming the rail line now carries;
+      // PACKET_VERSION stays 3 (T-14 additive-key precedent).
       phase_coverage: {
         executed: coverage.executed,
         total: coverage.total,
         artifacts_from_p7_p12: coverage.tailArtifacts,
+        empty_phases: coverage.emptyPhases,
       },
       // OV-41 (W23-L4): measured spend from the T-107.6 ledger — null = no
       // measured sample (never a fabricated 0). Additive key (T-14
@@ -1030,10 +1036,11 @@ export function compileAgentPacket(
     `Status: ${project.status} · model: ${project.modelRoute}`,
     `Execution: ${sandboxClaim(sandbox)}`,
     generatedArtifactLine,
-    // T-14 (106 §6, finding F-11): honest phase coverage in the rail. The
-    // shipped end-to-end run executed 7 of 13 phases and the strictly linear
-    // graph left P7–P12 at 0 artifacts — this line reports the real census so
-    // no surface (packet, machine consumer, human reader) implies all 13 ran.
+    // T-14 (106 §6, finding F-11): honest phase coverage in the rail. An
+    // enforceDod run stopped at P6 executed 7 of 13 phases and left P7–P12 at 0
+    // artifacts; the default advisory driver (gate-blind `canEnter`) does reach
+    // the tail — see PHASE_TAIL_START. Either way this line reports the real
+    // census so no surface implies all 13 ran.
     `Phase coverage: ${phaseCoverageLine(coverage)} — strictly linear graph; unexecuted phases are not implied complete (the current edge is the only enterable phase).`,
     hitl,
     priorBlock,
