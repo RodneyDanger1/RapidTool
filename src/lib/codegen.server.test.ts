@@ -1221,14 +1221,23 @@ function chunkedDeps(opts: { failChunk?: number } = {}) {
   const spec = ledgerSpec(20);
   const groups = chunkTypeSignatures(spec.typeSignatures);
   const emitted: string[][] = [];
+  // fixes/346-S4: once a chunk refuses, the armed per-chunk resample retries the
+  // SAME primary prompt. The fake stays stubborn for that prompt so the refusal
+  // is GENUINE (both candidates rejected) and the refusal path is still exercised
+  // under the default — not recovered by an accidental second sample.
+  let failPrompt: string | null = null;
   const complete = async (prompt: string, completeOpts?: DeepSeekCompleteOptions): Promise<LlmResult> => {
     calls.push("complete");
     prompts.push(prompt);
     const isSynthesis = prompt.includes("TYPE SIGNATURES (must export");
     if (isSynthesis) {
       synthOpts.push(completeOpts ?? {});
+      if (failPrompt !== null && prompt === failPrompt) {
+        return { ok: true, text: "the model babbled prose, no json at all", model: "deepseek-v4-flash" };
+      }
       const chunkIndex = prompts.filter((p) => p.includes("TYPE SIGNATURES (must export")).length - 1;
       if (opts.failChunk === chunkIndex) {
+        failPrompt = prompt;
         return { ok: true, text: "the model babbled prose, no json at all", model: "deepseek-v4-flash" };
       }
       const names = demandedSignatureLines(prompt)
@@ -2080,7 +2089,33 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
       !q.logs.some((l) => l.event === "p6.synthesis" && l.detail.includes("Chunked synthesis:")),
       "no success log on a partial",
     );
-    assert.deepEqual(f.calls, ["expand", "complete", "complete", "complete", "complete"], "chunk 2 = synth + 1 repair");
+    // fixes/346-S4: the per-chunk resample is ARMED BY DEFAULT (2 candidates), so a
+    // genuinely-impossible chunk is attempted twice (primary + class repair, then
+    // the resample's primary + repair) before the SAME coded refusal. Refusal is
+    // never skipped — only the spend to reach it is bounded to one extra sample.
+    assert.deepEqual(
+      f.calls,
+      ["expand", "complete", "complete", "complete", "complete", "complete", "complete"],
+      "chunk 2 = synth + 1 repair, retried once by the armed resample",
+    );
+    assert.ok(
+      q.logs.some(
+        (l) => l.event === "p6.synthesis.candidates" && /chunk 3\/6 · candidates 2 · winner none/.test(String(l.detail)),
+      ),
+      "the armed resample records both rejected candidates (the honest cost of the refusal)",
+    );
+
+    // Opt-out (fixes/346-S4): an explicit candidates:1 restores the byte-identical
+    // legacy path — the same refusal, the old spend, no candidates event.
+    const g = chunkedDeps({ failChunk: 2 });
+    const legacy = await liveP6Synthesis(base, { ...g.deps, candidates: 1 });
+    assert.equal((legacy.generatedTree ?? []).length, 3, "opt-out keeps the same honest partial");
+    assert.ok(
+      legacy.logs.some((l) => l.event === "p6.synthesis.refused" && /chunk 3\/6 refused/.test(l.detail)),
+      "opt-out still refuses the same chunk with the same coded reason",
+    );
+    assert.ok(!legacy.logs.some((l) => l.event === "p6.synthesis.candidates"), "opt-out emits no per-chunk candidates event");
+    assert.deepEqual(g.calls, ["expand", "complete", "complete", "complete", "complete"], "opt-out = legacy synth + 1 repair");
   });
 
   it("chunk-0 refusal → deterministic floor stands untouched (nothing real to keep)", async () => {
@@ -2092,7 +2127,14 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
     assert.ok(refusal);
     assert.match(refusal.detail, /chunk 1\/6 refused/);
-    assert.equal(f.calls.filter((c) => c === "complete").length, 2, "chunk 0 = synth + 1 bounded repair, then stop");
+    // fixes/346-S4: armed default = primary + repair, then the resample's primary +
+    // repair, then the same coded refusal (the chunk is genuinely impossible).
+    assert.equal(f.calls.filter((c) => c === "complete").length, 4, "chunk 0 = synth + 1 repair, retried once by the armed resample, then stop");
+    // Opt-out: the byte-identical legacy spend.
+    const g = chunkedDeps({ failChunk: 0 });
+    const legacy = await liveP6Synthesis(base, { ...g.deps, candidates: 1 });
+    assert.equal(legacy.generatedTree, undefined, "opt-out refuses the first chunk too");
+    assert.equal(g.calls.filter((c) => c === "complete").length, 2, "opt-out = legacy synth + 1 repair, then stop");
   });
 
   it("deterministic: same fake inputs → identical prompts, tree files and entry", async () => {
@@ -3898,10 +3940,18 @@ describe("216f e2e refusals through liveP6Synthesis (T-09 / T-15)", () => {
       prompts.some((p) => p.includes("English prose sentences written into the module body")),
       "the PROSE repair class dispatched inside the chunked path (this is the LLM-chunk gate)",
     );
+    // fixes/346-S4: the armed per-chunk resample retries chunk 0's SAME prompt
+    // once, so it is synthesized twice before the same coded refusal. The walk
+    // still stops at chunk 0 (chunk 1 is never reached) — the refusal is genuine
+    // because the fake returns prose on every candidate.
     assert.equal(
       prompts.filter((p) => p.includes("TYPE SIGNATURES (must export")).length,
-      1,
-      "only chunk 0 ever synthesized (the refusal stopped the walk)",
+      2,
+      "only chunk 0 ever synthesized — twice: the primary + the armed resample (the refusal stopped the walk)",
+    );
+    assert.ok(
+      q.logs.some((l) => l.event === "p6.synthesis.candidates" && /chunk 1\/6 · candidates 2 · winner none/.test(String(l.detail))),
+      "the armed resample records both candidates rejected — the refusal is not silent spend",
     );
   });
 });
@@ -4843,7 +4893,10 @@ describe("217k envelope read-failure signals (G6 silent sinks)", () => {
     const f = chunkedDeps({ failChunk: 1 });
     const q = await liveP6Synthesis(base, f.deps);
     const warns = (q.logs ?? []).filter((l) => l.event === "p6.synthesis.envelope.unreadable");
-    assert.equal(warns.length, 2, "chunk 1's synthesis AND its bounded repair were unreadable → both recorded");
+    // fixes/346-S4: the armed per-chunk resample retries chunk 1's SAME prompt,
+    // so its unreadable primary + unreadable bounded repair are recorded TWICE
+    // (4 warns) before the same coded partial refusal.
+    assert.equal(warns.length, 4, "chunk 1's synthesis + bounded repair were unreadable on both candidates → all recorded");
     assert.ok(
       warns.every((w) => w.detail.startsWith("src/jobs/rent-2.ts · RT_E_LLM_REJECTED · ")),
       "the planned file path attributes the failure to the refused chunk",
@@ -5967,19 +6020,20 @@ describe("fixes/343-1 opt-in best-of-N synthesis (gate-based selection)", () => 
   };
   const GOOD_ENVELOPE = { module: KANBAN_MODULE, exports: [...KANBAN_ENVELOPE.exports] };
 
-  it("RED baseline: candidates=1 keeps the legacy single sample — a per-chunk missing-signature refusal stands", async () => {
-    const f = chunkRetryDeps([MISSING_SIG_ENVELOPE, MISSING_SIG_ENVELOPE], undefined);
+  it("OPT-OUT (=1): candidates=1 keeps the legacy single sample — a per-chunk missing-signature refusal stands", async () => {
+    const f = chunkRetryDeps([MISSING_SIG_ENVELOPE, MISSING_SIG_ENVELOPE], 1);
     const q = await liveP6Synthesis(bofBase(), f.deps);
-    assert.ok(!sealed(q), "N=1 does not recover a chunk the single sample refused");
-    assert.ok(q.logs.some((l) => l.event === "p6.synthesis.refused"), "N=1 refuses exactly as before 346-T1");
-    assert.equal(candidatesEvent(q), undefined, "N=1 emits NO per-chunk candidates event");
-    assert.equal(f.synthCalls(), 2, "N=1 = one primary + one bounded class repair");
+    assert.ok(!sealed(q), "the opt-out does not recover a chunk the single sample refused");
+    assert.ok(q.logs.some((l) => l.event === "p6.synthesis.refused"), "opt-out refuses exactly as before 346-T1");
+    assert.equal(candidatesEvent(q), undefined, "opt-out emits NO per-chunk candidates event");
+    assert.equal(f.synthCalls(), 2, "opt-out = one primary + one bounded class repair");
   });
 
-  it("GREEN: candidates>1 resamples a per-chunk validation refusal and seals the conforming candidate", async () => {
-    const f = chunkRetryDeps([MISSING_SIG_ENVELOPE, MISSING_SIG_ENVELOPE, GOOD_ENVELOPE], 2);
+  it("GREEN (DEFAULT, no env/option): the armed resample recovers a per-chunk validation refusal", async () => {
+    // fixes/346-S4: NO explicit candidates — the default must be the armed 2.
+    const f = chunkRetryDeps([MISSING_SIG_ENVELOPE, MISSING_SIG_ENVELOPE, GOOD_ENVELOPE], undefined);
     const q = await liveP6Synthesis(bofBase(), f.deps);
-    assert.ok(sealed(q), "the resampled chunk validates and the tree seals");
+    assert.ok(sealed(q), "the DEFAULT resample validates the chunk and the tree seals");
     assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "a converged resample is not a refusal");
     const ev = candidatesEvent(q);
     assert.ok(ev, "the per-chunk selection is recorded");
@@ -5990,14 +6044,14 @@ describe("fixes/343-1 opt-in best-of-N synthesis (gate-based selection)", () => 
   });
 
   it("GREEN: a chunk whose FIRST pipeline validates is never resampled (Pareto — zero extra calls)", async () => {
-    const f = chunkRetryDeps([GOOD_ENVELOPE], 2);
+    const f = chunkRetryDeps([GOOD_ENVELOPE], undefined);
     const q = await liveP6Synthesis(bofBase(), f.deps);
     assert.ok(sealed(q), "the first candidate validates");
     assert.equal(f.synthCalls(), 1, "the conforming primary pays exactly one call");
     assert.equal(candidatesEvent(q), undefined, "no retry selection is recorded when the first sample passes");
   });
 
-  it("GREEN fixes/346 T1: the fail-fast offender is resampled when candidates>1 (the second measured wall)", async () => {
+  it("GREEN fixes/346 T1: the fail-fast offender is resampled by DEFAULT (the second measured wall)", async () => {
     // A multi-chunk tree: the first accepted chunk is tsc-RED (TextDecoder used
     // as a type — the measured TS2749/TS2554/TS2339 cross-chunk-drift class), so
     // the fail-fast fires BEFORE chunk 2 and the offender must be resampled.
@@ -6026,7 +6080,8 @@ describe("fixes/343-1 opt-in best-of-N synthesis (gate-based selection)", () => 
         ? { run: "fail", detail: "src/jobs/rent.ts(1,1): error TS2749: 'TextDecoder' is used as a type.", files: ["src/jobs/rent.ts"] }
         : { run: "pass" };
     };
-    const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), { ...f.deps, complete, typecheckTree, candidates: 2 });
+    // NO explicit candidates — the DEFAULT (chunkCandidates 2, fixes/346-S4) must arm it.
+    const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), { ...f.deps, complete, typecheckTree });
     assert.equal(q.generatedTree?.length, 7, "the resampled offender cleared the prefix tsc and the full tree was synthesized");
     assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "a converged fail-fast resample is not a refusal");
     const ev = (q.logs ?? []).find((l) => l.event === "p6.synthesis.candidates" && String(l.detail).includes("fail-fast"));
@@ -6228,10 +6283,17 @@ describe("PR-28 C1-01/C1-04 — the minimum-file floor fires on the refusal path
       exports: ["notTheDemandedExport"],
       reqTrace: {},
     });
+    // fixes/346-S4: the failing chunk's primary prompt stays bad on every armed
+    // resample, so the refusal is genuine and the floor code path still fires.
+    let failPrompt: string | null = null;
     const complete = async (prompt: string): Promise<LlmResult> => {
       if (prompt.includes("TYPE SIGNATURES (must export")) {
+        if (failPrompt !== null && prompt === failPrompt) return { ok: true, text: bad, model: "deepseek-v4-flash" };
         idx += 1;
-        if (idx === failChunk) return { ok: true, text: bad, model: "deepseek-v4-flash" };
+        if (idx === failChunk) {
+          failPrompt = prompt;
+          return { ok: true, text: bad, model: "deepseek-v4-flash" };
+        }
         const names = demandedSignatureLines(prompt)
           .map((s) => signatureFunctionNames([s])[0])
           .filter((n): n is string => typeof n === "string");
@@ -6721,11 +6783,26 @@ describe("W346-A6b per-chunk fail-fast (A6/PR-13)", () => {
     assert.match(refusal!.detail, /never synthesized/);
     assert.equal(
       f.calls.filter((c) => c === "complete").length,
-      2,
-      "one primary chunk-0 call + one bounded fail-fast repair; chunks 2..N are never paid for",
+      3,
+      "one primary chunk-0 call + the armed resample's TWO bounded fail-fast repairs; chunks 2..N are never paid for",
     );
     assert.ok(q.logs.some((l) => l.event === "p6.synthesis.failfast"), "the fail-fast stop is recorded");
-    assert.ok(q.logs.some((l) => l.event === "p6.synthesis.monotonic"), "a non-improving repair is reverted");
+    // fixes/346-S4: with the resample armed the revert is recorded by the
+    // per-chunk candidates event (both offender samples rejected by the prefix
+    // tsc) rather than the N=1-only monotonic row.
+    assert.ok(
+      q.logs.some((l) => l.event === "p6.synthesis.candidates" && /\(fail-fast\) · candidates 2 · winner none/.test(String(l.detail))),
+      "the non-converging offender resample records both candidates rejected — the revert is not silent",
+    );
+
+    // Opt-out (=1): the byte-identical legacy fail-fast path — one bounded repair,
+    // the monotonic revert row, and no candidates event.
+    const g = chunkedDeps();
+    const legacy = await liveP6Synthesis(p6Base(LEDGER_BRIEF), { ...g.deps, typecheckTree: seam, candidates: 1 });
+    assert.ok(legacy.logs.some((l) => l.event === "p6.synthesis.refused" && /never synthesized/.test(l.detail)), "opt-out refuses too");
+    assert.equal(g.calls.filter((c) => c === "complete").length, 2, "opt-out = one primary + one bounded fail-fast repair");
+    assert.ok(!legacy.logs.some((l) => l.event === "p6.synthesis.candidates"), "opt-out emits no fail-fast candidates event");
+    assert.ok(legacy.logs.some((l) => l.event === "p6.synthesis.monotonic"), "opt-out keeps the legacy monotonic-revert row");
   });
 
   it("a green prefix lets every chunk synthesize (control)", async () => {

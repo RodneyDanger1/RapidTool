@@ -560,6 +560,19 @@ export function Console() {
 export default Console;
 `;
 
+/** fixes/346 (S4 default-check): the mobile-companion shape — a console that
+ *  IMPORTS the generated entry but never CALLS an export. The guard must FIRE on
+ *  this (a bare import is not wiring); it is the mutation control that pins the
+ *  detector against the shape the campaign #2 default-check tree shipped. */
+const UNWIRED_MOBILE_CONSOLE = `import * as generated from "../generated.ts";
+
+export function Console() {
+  return (<main><h1>{"Crumb & Bloom Companion"}</h1></main>);
+}
+
+export default Console;
+`;
+
 /** Create a temp dir for a scratch control; always removed. */
 function scratch(fn) {
   const dir = mkdtempSync(join(tmpdir(), "rt-campaign-ctl-"));
@@ -619,10 +632,23 @@ export async function campaignControls(root) {
         return detectUiWiring(treeDir, realGeneratedExportWiring, "flower-shop-website").length === 0;
       })
     : false;
+  // fixes/346 (S4 default-check): the mobile-companion shape — a console that
+  // imports the generated entry but never calls an export — must FIRE. This
+  // pins the detector against the shape the campaign #2 default-check tree
+  // shipped (a bare import is not wiring).
+  const uiMobileShapeFires = uiSeamPresent
+    ? scratch((d) => {
+        const treeDir = join(d, "emitted");
+        copyTree(flowerTree, treeDir);
+        writeFileSync(join(treeDir, "src", "ui", "console.tsx"), UNWIRED_MOBILE_CONSOLE);
+        return detectUiWiring(treeDir, realGeneratedExportWiring, "mobile-companion").length > 0;
+      })
+    : false;
   controls["C1-02"] = {
     fired: detectUiWiring(schedulerTree, realGeneratedExportWiring, "office-scheduler").length > 0,
     controlClean: uiSeamPresent ? uiMutation : true,
-    mutationRed: uiSeamPresent ? uiMutation : false,
+    mutationRed: uiSeamPresent ? uiMutation && uiMobileShapeFires : false,
+    mobileShapeFires: uiMobileShapeFires,
     wired: uiSeamPresent,
     seam: UI_SEAM,
     seamPending: uiSeamPresent ? null : UI_SEAM,

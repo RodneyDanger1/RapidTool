@@ -14,7 +14,9 @@ import {
   P6_SYNTH_CANDIDATES_MAX,
   P6_SYNTH_CHUNK_MAX,
   P6_SYNTH_CHUNK_MIN,
+  P6_SYNTH_CHUNK_RETRY_CANDIDATES,
   P6_SYNTH_MODULE_BUDGET,
+  resolveChunkResampleCandidates,
   resolveSynthesisCandidates,
   selectBestOfN,
 } from "./synthesis-policy.ts";
@@ -39,6 +41,30 @@ describe("fixes/343-1 resolveSynthesisCandidates (default 1 = byte-identical leg
   it("an explicit option wins over the env var", () => {
     assert.equal(resolveSynthesisCandidates(2, "4"), 2, "deps.candidates is authoritative");
     assert.equal(resolveSynthesisCandidates(1, "4"), 1, "an explicit 1 disables best-of-N under an env of 4");
+  });
+});
+
+describe("fixes/346-S4 resolveChunkResampleCandidates (ARMED default 2, opt-out 1)", () => {
+  it("absent input arms the chunk resample by default; the primary default stays 1", () => {
+    assert.equal(P6_SYNTH_CHUNK_RETRY_CANDIDATES, 2, "the armed chunk-level default");
+    assert.equal(resolveChunkResampleCandidates(undefined, undefined), 2, "no option + no env ⇒ ARMED");
+    assert.equal(resolveChunkResampleCandidates(undefined, null), 2);
+  });
+
+  it("an explicit 1 (option or env) is the opt-out to the byte-identical legacy single sample", () => {
+    assert.equal(resolveChunkResampleCandidates(1, undefined), 1, "deps.candidates:1 opts out");
+    assert.equal(resolveChunkResampleCandidates(undefined, "1"), 1, "P6_SYNTH_CANDIDATES=1 opts out");
+    assert.equal(resolveChunkResampleCandidates(1, "3"), 1, "explicit 1 wins over an env of 3");
+  });
+
+  it("respects explicit/env values, hard-caps at the max, and a hostile env stays armed", () => {
+    assert.equal(resolveChunkResampleCandidates(undefined, "2"), 2);
+    assert.equal(resolveChunkResampleCandidates(undefined, " 3 "), 3, "env is trimmed");
+    assert.equal(resolveChunkResampleCandidates(3, "4"), 3, "deps.candidates wins");
+    assert.equal(resolveChunkResampleCandidates(9), P6_SYNTH_CANDIDATES_MAX, "clamped to the cap");
+    for (const bad of ["", "abc", "2.5", "0", "-3", Number.NaN, {} as unknown]) {
+      assert.equal(resolveChunkResampleCandidates(bad, undefined), 2, `hostile ${JSON.stringify(bad)} ⇒ armed default`);
+    }
   });
 });
 

@@ -364,6 +364,7 @@ const SRC = {
   runlock: "../guards/runlock-preflight.mjs",
   campaign: "../guards/campaign-invariants.mjs",
   campaign2: "../guards/campaign2-invariants.mjs",
+  enabling: "../guards/enabling-wave-invariants.mjs",
 };
 
 const ERRORS_SRC = join(REPO_ROOT, "src", "lib", "errors.ts");
@@ -676,6 +677,14 @@ const SEAM_CHECKS = {
       "const verifiedProduct = run !== null",
       "the delivery record's verifiedProduct must be exactly the stated evidence conjunction (scripts/rapidtool-cli.mjs deliveryVerification); an honest false + reason is the designed outcome",
     ),
+
+  // --- S4-01/02/03 (fixes/346 lane S4) — the enabling-wave tourniquet --------
+  // The live seam is the REAL source the detector reads: the armed default
+  // (S4-01), the bounded resample loops (S4-02), and the re-pinned refusal
+  // coverage floor (S4-03). `mutationRed` is the guard's own control proof.
+  "S4-01": async () => enablingSeam("S4-01"),
+  "S4-02": async () => enablingSeam("S4-02"),
+  "S4-03": async () => enablingSeam("S4-03"),
 };
 
 /** Read a text file, "" on failure (never throws). @param {string} p */
@@ -784,6 +793,34 @@ async function campaign2Seam(id, file, needle, ownerInterface) {
       mutationRed: !!(c && c.mutationRed),
     },
   };
+}
+
+// --- S4 enabling-wave (fixes/346 lane S4) controls ---------------------------
+// The guard module owns the detectors + the real mutation controls; the harness
+// consumes them (it does not re-implement the bound/coverage checks).
+let ENABLING_CONTROLS;
+/** @returns {Promise<Record<string, any>|null>} */
+async function enablingControlsFor() {
+  if (ENABLING_CONTROLS !== undefined) return ENABLING_CONTROLS;
+  const mod = await importCached(SRC.enabling);
+  if (mod.__error || typeof mod.enablingWaveControls !== "function") {
+    ENABLING_CONTROLS = null;
+    return null;
+  }
+  try {
+    ENABLING_CONTROLS = await mod.enablingWaveControls();
+  } catch {
+    ENABLING_CONTROLS = null;
+  }
+  return ENABLING_CONTROLS;
+}
+
+/** @param {string} id */
+async function enablingSeam(id) {
+  const ctl = await enablingControlsFor();
+  if (!ctl || !ctl[id]) return ABSENT("enabling-wave-invariants controls unavailable for " + id);
+  const r = ctl[id];
+  return { present: true, wired: !!r.wired, mutationRed: !!r.mutationRed, evidence: { ...r } };
 }
 
 /** Evaluate a guard's live-seam (fix-presence) signal. @param {any} g @param {any} ctx */
@@ -1237,6 +1274,16 @@ DRIVERS["campaign2-verify"] = async (_ctx, g) => {
   return { fired: firedSlugs.length > 0, controlClean, evidence: { code: g.expectedCode, firedSlugs, cleanOnHonestRecord: controlClean } };
 };
 
+// S4-01/02/03 — the enabling-wave guard tool's own controls are the
+// fixture-integrity signal: each detector fires on its injected defect/mutation
+// and stays silent on the live source (the mutation is the guard's proof).
+DRIVERS["enabling-wave-invariants"] = async (_ctx, g) => {
+  const ctl = await enablingControlsFor();
+  if (!ctl || !ctl[g.id]) return { fired: false, controlClean: false, evidence: "enabling-wave-invariants controls unavailable for " + g.id };
+  const r = ctl[g.id];
+  return { fired: !!r.fired, controlClean: !!r.controlClean, evidence: { ...r } };
+};
+
 DRIVERS["arch-failclosed"] = async (ctx) => {
   const dod = await import("../../src/lib/dod.ts");
   const proj = readJsonFile(join(ctx.runRoot, "office-stock-tracker", "emitted", ".rapidtool", "project.json"));
@@ -1445,10 +1492,11 @@ export async function verifyHeldOut(cassettes, heldOut, _ctx) {
 // ---------------------------------------------------------------------------
 
 /** Pinned floor: removing a registry entry must fail the gate of record (§4.6-3).
- *  Overridable by `countFloor` in the registry (now 24 — the 15 W346 guards, the
- *  five campaign #1 residual guards C1-01/02/05/06/08, and the four campaign #2
- *  tourniquets R2-01/03/05/06). */
-export const GUARD_COUNT_FLOOR = 24;
+ *  Overridable by `countFloor` in the registry (now 27 — the 15 W346 guards, the
+ *  five campaign #1 residual guards C1-01/02/05/06/08, the four campaign #2
+ *  tourniquets R2-01/03/05/06, and the three S4 enabling-wave pins
+ *  S4-01/02/03). */
+export const GUARD_COUNT_FLOOR = 27;
 
 /**
  * Classify every guard's fix-presence into EXACTLY ONE bucket. `enforced` is the

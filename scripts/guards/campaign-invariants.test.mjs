@@ -142,6 +142,9 @@ test("campaign guards: every detector fires on its real defect AND its mutation 
     assert.ok(c, `${id} declares a control`);
     assert.equal(c.fired, true, `${id} must fire on the real campaign artifact`);
     assert.equal(c.controlClean, true, `${id} must stay silent on its clean control`);
+    if (id === "C1-02" && c.wired === true) {
+      assert.equal(c.mobileShapeFires, true, "C1-02 fires on the mobile-companion 'imports but never calls' shape (fixes/346 S4 default-check)");
+    }
     if (id === "C1-02" && c.wired === false) {
       // R2-02: the canonical seam is absent, so the mutation control cannot run
       // yet — the pin is RED and must NAME the interface (checked in the harness).

@@ -822,3 +822,14 @@ flowchart LR
 ---
 
 _End of design document (revision 2)._
+
+---
+
+## Corrections in force — appended 2026-10-05 (lane S4: default-armed chunk resample)
+
+All values re-derived from the bytes today; where this document and the bytes disagree, the bytes win.
+
+- **The chunked P6 tree's bounded validator-selected resample is DEFAULT-ON.** `resolveSynthesisCandidates` still defaults to 1 (the PRIMARY single-module best-of-N and the whole-tree pre-seal offender resample stay opt-in, byte-identical to 343-1), but the chunk-level lane resolves through a new `resolveChunkResampleCandidates(..., process.env.P6_SYNTH_CANDIDATES)` whose absent default is 2. This arms BOTH the per-chunk acceptance resample (a refused chunk is retried with the SAME primary prompt; the deterministic validator selects) and the per-chunk fail-fast offender resample (the compiler-named file is re-synthesized with the SAME compiler-informed repair prompt; the first substitution clearing the prefix tsc wins). It runs for a multi-file delivery kind ("app"/"tool"/"game") or a >8-signature spec: within `synthesizeChunkedTree` only.
+- **Opt-out.** `P6_SYNTH_CANDIDATES=1` (or `deps.candidates: 1`) restores the byte-identical legacy single-sample path for ALL FOUR seams and emits no `p6.synthesis.candidates` event. Any value >=2 (env or `deps.candidates`) is honoured, hard-capped at `P6_SYNTH_CANDIDATES_MAX` (4).
+- **Pareto.** A chunk whose first pipeline already validates is never resampled (zero extra calls). The extra spend lands only on a stochastic per-chunk refusal; a budget/not-configured refusal is terminal and is never retried.
+- **Evidence.** The refusal-path suites were re-pinned honestly (chunked tree mode, deps.treeFailure, 216f e2e, 217k, 343-1, PR-28 C1-01, W346-A6b), each keeping its genuinely-impossible refusal (both candidates rejected ? same coded reason) and adding a `candidates: 1` opt-out variant that pins the legacy call/spend. The measure that justifies the default arm is the T1 run in `testruns/tuning/TUNING.json` (opt-in) and the S4 confirmation under `testruns/default-check/` (no env override).

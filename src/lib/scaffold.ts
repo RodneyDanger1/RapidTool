@@ -1697,15 +1697,33 @@ function defaultUiShellBody(project: Project, pages: UiPage[], renderCalls: UiRe
 }
 
 /**
+ * fixes/346-S4: the simple `type NAME = RHS;` aliases declared anywhere in the
+ * scanned entry source (the barrel + every file it `export *`s). A generated
+ * render export routinely types its parameter with a local alias (`renderTabs(
+ * activeTab: TabId)` where `type TabId = string`); without resolving the alias
+ * the shell could not prove a sound argument and left the export uncalled. Only
+ * single-line aliases are read; a non-primitive RHS still yields no argument.
+ */
+function uiTypeAliases(source: string): Map<string, string> {
+  const aliases = new Map<string, string>();
+  for (const m of String(source ?? "").matchAll(/^type\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*([^\n;]+);?/gm)) {
+    const name = m[1]!;
+    if (!aliases.has(name)) aliases.set(name, m[2]!.trim());
+  }
+  return aliases;
+}
+
+/**
  * C1-02: a sound scalar literal for a render export parameter, from its own
  * declared type text — a primitive (`string`/`number`/`boolean`), the first
  * member of a literal union, `[]` for an array type, or `null` for
- * `any`/`unknown`/`null`/`undefined`. A type-alias identifier or an
- * object/function type returns null: the shell must never call a render export
- * with an argument it cannot prove assignable (the pre-seal tsc gate would
- * refuse the whole tree).
+ * `any`/`unknown`/`null`/`undefined`. A bare type-alias identifier is resolved
+ * to its declared RHS ONCE (fixes/346-S4) so a real export can still be called;
+ * an object/function type returns null: the shell must never call a render
+ * export with an argument it cannot prove assignable (the pre-seal tsc gate
+ * would refuse the whole tree).
  */
-function uiLiteralArg(type: string): string | null {
+function uiLiteralArg(type: string, aliases?: ReadonlyMap<string, string>): string | null {
   const t = String(type ?? "").trim();
   if (!t) return null;
   const parts = t.split("|").map((p) => p.trim()).filter(Boolean);
@@ -1729,16 +1747,29 @@ function uiLiteralArg(type: string): string | null {
     if (parts.includes("boolean")) return "false";
     if (parts.includes("null") || parts.includes("undefined")) return "null";
   }
+  // fixes/346-S4: resolve bare type-ALIAS members to their declared RHS and
+  // re-evaluate ONCE (no further aliasing, so a cyclic alias cannot recurse).
+  if (aliases !== undefined && aliases.size > 0) {
+    let changed = false;
+    const resolved = parts.map((p) => {
+      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(p) && aliases.has(p)) {
+        changed = true;
+        return aliases.get(p)!;
+      }
+      return p;
+    });
+    if (changed) return uiLiteralArg(resolved.join(" | "));
+  }
   return null;
 }
 
 /** C1-02: the call arguments for a render export, or null when one cannot be soundly supplied. */
-function uiRenderCallArgs(c: UiCallable): string[] | null {
+function uiRenderCallArgs(c: UiCallable, aliases?: ReadonlyMap<string, string>): string[] | null {
   if (c.async === true) return null;
   const args: string[] = [];
   for (const p of c.params) {
     if (p.rest) return null;
-    const arg = uiLiteralArg(p.type);
+    const arg = uiLiteralArg(p.type, aliases);
     if (arg === null) return null;
     args.push(arg);
   }
@@ -1773,6 +1804,9 @@ const defaultUiGeneration = ({
   }
   const entrySource = uiGeneratedEntrySource(project);
   const callables = entrySource === null ? [] : uiExportedCallables(entrySource);
+  // fixes/346-S4: the aliases the exported callables' parameter types may name —
+  // resolved so a real render export is CALLED with a sound arg, never skipped.
+  const typeAliases = entrySource === null ? new Map<string, string>() : uiTypeAliases(entrySource);
   // A4 (SYNTHSPEC P5b): a website/marketing brief — its generated entry exports
   // a `render*`/`*Page`/`get*Screen` callable — becomes a multi-section shell,
   // not a single debug form. Requiring the render export keeps the honest form
@@ -1788,7 +1822,7 @@ const defaultUiGeneration = ({
     // its page keeps the honest null node, never a fabricated argument.
     const renderCalls: UiRenderCall[] = [];
     for (const c of renderLike) {
-      const args = uiRenderCallArgs(c);
+      const args = uiRenderCallArgs(c, typeAliases);
       if (args !== null) renderCalls.push({ name: c.name, args });
     }
     const pages = uiBriefPages(project);

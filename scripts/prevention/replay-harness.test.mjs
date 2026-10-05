@@ -158,8 +158,8 @@ test("single command: the two signals are reported and the gate of record is exa
   assert.deepEqual(verdict.skipped, [], "a skip is a hard failure");
   assert.equal(verdict.guards, registry.guards.length, "every registered guard is evaluated");
   assert.ok(verdict.count >= verdict.countFloor, `count ${verdict.count} must meet the pinned floor ${verdict.countFloor}`);
-  assert.equal(verdict.countFloor, 24, "the guard-count floor is pinned at 24 (deleting a guard fails)");
-  assert.equal(verdict.guards, 24, "24 guards: 15 W346 + 5 campaign1 + 4 campaign2 tourniquets");
+  assert.equal(verdict.countFloor, 27, "the guard-count floor is pinned at 27 (deleting a guard fails)");
+  assert.equal(verdict.guards, 27, "27 guards: 15 W346 + 5 campaign1 + 4 campaign2 tourniquets + 3 S4 enabling-wave pins");
   assert.deepEqual(verdict.controlMissed, [], "every fired guard has a clean control");
   // TWO orthogonal signals on every guard.
   for (const r of verdict.detail) {
@@ -183,8 +183,9 @@ test("single command: the two signals are reported and the gate of record is exa
   assert.deepEqual([...verdict.fixPresence.enforced].sort(), allIds, "enforced ∪ pending == guards");
   assert.deepEqual([...verdict.fixPresence.pending].sort(), [], "pending is empty on the landed tree");
   assert.equal(new Set([...verdict.fixPresence.enforced, ...verdict.fixPresence.pending]).size, allIds.length, "union is exact (no duplicates)");
-  // Both orthogonal signals fire for the five campaign-2 pins.
-  for (const id of ["C1-02", "R2-01", "R2-03", "R2-05", "R2-06"]) {
+  // Both orthogonal signals fire for the five campaign-2 pins and the three
+  // S4 enabling-wave pins (default armed / bounded resample / refusal coverage).
+  for (const id of ["C1-02", "R2-01", "R2-03", "R2-05", "R2-06", "S4-01", "S4-02", "S4-03"]) {
     const r = verdict.detail.find((x) => x.id === id);
     assert.equal(r.fixtureIntegrity.fired, true, `${id} fires on its historical defect bytes`);
     assert.equal(r.fixPresence.present, true, `${id} fix is on the gate-of-record surface`);

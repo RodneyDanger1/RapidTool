@@ -2011,6 +2011,74 @@ describe("W346-A4 brief-driven website shell", () => {
     assert.ok(!/generated\.renderBadge\(/.test(ui), "never calls a render export it cannot supply args for");
     assert.ok(parsesTsx(ui), "the emitted shell parses as TSX");
   });
+
+  it("fixes/346-S4: a render export typed by a local alias (TabId = string) IS called with a sound arg", () => {
+    // The mobile-companion shape: `renderTabs(activeTab: TabId)` with a local
+    // `type TabId = string`. Before S4 the shell could not prove the alias and
+    // left the export uncalled (uiWired:false). Resolving the alias yields the
+    // honest empty string — a real call with a genuinely sound argument.
+    const p: Project = {
+      ...seedProject({ name: "Crumb & Bloom Companion", kind: "app" }),
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./generated/render-tabs.ts";\n', hash: "h0", attempt: 0 },
+        {
+          path: "src/generated/render-tabs.ts",
+          source: [
+            "type TabId = string;",
+            'const TABS: string[] = ["today", "stock"];',
+            "export function renderTabs(activeTab: TabId): string { return TABS.join(',') + activeTab; }",
+            "",
+          ].join("\n"),
+          hash: "h1",
+          attempt: 0,
+        },
+      ],
+      specGraph: {
+        nodes: [
+          { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" },
+          { id: "job-sync", file: "src/jobs/sync.ts", purpose: 'Implement job "sync" against the contract', dependsOn: [], owner: "implementer" },
+        ],
+        order: ["ui", "job-sync"],
+      },
+      lattice: { domain: "mobile", jobs: ["sync"], entities: ["Item", "Notification"], constraints: [], nodes: [], complexity: 1 },
+      contracts: { entities: [{ name: "Item", fields: [] }, { name: "Notification", fields: [] }], endpoints: [] },
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.ok(ui.includes("<section key={p.id}>"), "the multi-section shell is used");
+    assert.match(ui, /generated\.renderTabs\(""\)/, "the alias resolves to string; the real export is CALLED with a sound empty string");
+    assert.ok(parsesTsx(ui), "the emitted shell parses as TSX");
+  });
+
+  it("fixes/346-S4 control: an alias resolving to an object type is still never called (never fabricated)", () => {
+    const p: Project = {
+      ...seedProject({ name: "Stock Summary", kind: "app" }),
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./generated/render-summary.ts";\n', hash: "h0", attempt: 0 },
+        {
+          path: "src/generated/render-summary.ts",
+          source: [
+            "type Snapshot = { id: string };",
+            "export function renderSummary(snapshot: Snapshot): string { return snapshot.id; }",
+            "",
+          ].join("\n"),
+          hash: "h1",
+          attempt: 0,
+        },
+      ],
+      specGraph: {
+        nodes: [{ id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" }],
+        order: ["ui"],
+      },
+      lattice: { domain: "operations", jobs: [], entities: ["Item"], constraints: [], nodes: [], complexity: 1 },
+      contracts: { entities: [{ name: "Item", fields: [] }], endpoints: [] },
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.ok(ui.includes("<section key={p.id}>"), "the multi-shell is used");
+    assert.ok(!/generated\.renderSummary\(/.test(ui), "an alias to an object type yields no sound arg — the export is left uncalled");
+    assert.ok(parsesTsx(ui), "the emitted shell parses as TSX");
+  });
 });
 
 // ---------------------------------------------------------------------------

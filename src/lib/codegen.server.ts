@@ -153,6 +153,7 @@ import {
   candidatesLogDetail,
   P6_SYNTH_CANDIDATES_MAX,
   P6_SYNTH_CHUNK_RETRY_CANDIDATES,
+  resolveChunkResampleCandidates,
   resolveSynthesisCandidates,
   selectBestOfN,
   type CandidateEvaluation,
@@ -4464,15 +4465,19 @@ export type P6SynthesisDeps = {
    *  does NOT disable the gate.
    */
   typecheckTree?: P6TreeTypecheck;
-  /** fixes/343-1: opt-in best-of-N sample count for a unit of synthesis — the
-   *  env var `P6_SYNTH_CANDIDATES` is the production knob (this option wins
-   *  over it so a caller/test is explicit). Default 1 = today's single sample,
-   *  byte-identical; hard-capped at `P6_SYNTH_CANDIDATES_MAX` (4). When >1, the
-   *  model is resampled only while the current candidate fails the deterministic
-   *  gates (structure -> brief-fit -> pre-seal typecheck) and the first candidate
-   *  that clears them is kept; a winner is recorded in a
-   *  `p6.synthesis.candidates` event naming the count, the winner, and why every
-   *  candidate won/lost. */
+  /** fixes/343-1 + fixes/346-S4: best-of-N / bounded-resample sample count —
+   *  the env var `P6_SYNTH_CANDIDATES` is the production knob (this option wins
+   *  over it so a caller/test is explicit). It governs FOUR seams: the PRIMARY
+   *  single-module best-of-N (default 1, opt-in, byte-identical) and the
+   *  whole-tree pre-seal offender resample (default 1, opt-in), PLUS the chunked
+   *  tree's per-chunk acceptance and fail-fast offender resample (default 2 —
+   *  ARMED, fixes/346-S4, the T1-measured gain). An explicit 1 opts out of all
+   *  four to the byte-identical legacy single sample. Hard-capped at
+   *  `P6_SYNTH_CANDIDATES_MAX` (4). When >1, the model is resampled only while
+   *  the current candidate fails the deterministic gates (structure -> brief-fit
+   *  -> pre-seal typecheck) and the first candidate that clears them is kept; a
+   *  winner is recorded in a `p6.synthesis.candidates` event naming the count,
+   *  the winner, and why every candidate won/lost. */
   candidates?: number;
 };
 
@@ -5286,10 +5291,13 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   // PR-16 (I7, O-01): the previous cycle's accepted chunks. Absent/empty ⇒
   // undefined ⇒ the chunked path is byte-identical to legacy.
   const resumeAccepted = Array.isArray(deps?.resumeAccepted) && deps.resumeAccepted.length > 0 ? deps.resumeAccepted : undefined;
-  // fixes/343-1: the opt-in best-of-N sample count. `deps.candidates` wins over
-  // `P6_SYNTH_CANDIDATES`; the resolver clamps to 1..P6_SYNTH_CANDIDATES_MAX and
-  // defaults to 1, so an unset env keeps every byte and model call below legacy.
+  // fixes/343-1: the PRIMARY best-of-N / whole-tree resample count — OPT-IN
+  // (default 1, byte-identical). `deps.candidates` wins over `P6_SYNTH_CANDIDATES`.
   const candidates = resolveSynthesisCandidates(deps?.candidates, process.env.P6_SYNTH_CANDIDATES);
+  // fixes/346-S4: the chunk-level (per-chunk acceptance + fail-fast) resample
+  // count — ARMED BY DEFAULT (2, the T1-measured gain). The same explicit opt-out
+  // (`deps.candidates: 1` / `P6_SYNTH_CANDIDATES=1`) restores the legacy path.
+  const chunkCandidates = resolveChunkResampleCandidates(deps?.candidates, process.env.P6_SYNTH_CANDIDATES);
   const brief = typeof project.brief === "string" ? project.brief : "";
   if (!brief.trim() || !Array.isArray(project.phases)) return project;
 
@@ -5384,7 +5392,7 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   // INSIDE — the caller no longer passes a flat grouping. Job-keyed chunks land
   // at their spec-graph `src/jobs/*.ts` paths; a job-less graph keeps the
   // pre-216k index-keyed mapping byte-for-byte (treeChunkPlan's legacy branch).
-  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair, synthesisRefusal, proven, typecheck, candidates, resumeAccepted);
+  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair, synthesisRefusal, proven, typecheck, candidates, resumeAccepted, chunkCandidates);
 }
 
 /**
@@ -5877,6 +5885,9 @@ async function synthesizeChunkedTree(
    *  reused verbatim with NO model call; absent/empty ⇒ legacy byte-identical
    *  chunked synthesis. */
   resumeAccepted?: readonly { path: string; source: string; exports: string[] }[],
+  /** fixes/346-S4: the chunk-level (per-chunk acceptance + fail-fast offender)
+   *  resample count — ARM ON by default (2); 1 is the explicit opt-out. */
+  chunkCandidates = P6_SYNTH_CHUNK_RETRY_CANDIDATES,
 ): Promise<Project> {
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
@@ -6122,14 +6133,14 @@ async function synthesizeChunkedTree(
     // `cross-chunk duplicate declaration` (bakery-florist-orders,
     // office-stock-tracker) — at chunk 2-3 of an 8-11 chunk plan, after one
     // sample + one class repair and with no independent second attempt. When
-    // the caller opts into best-of-N (candidates > 1), resample the SAME primary
-    // prompt and keep the FIRST candidate the SAME deterministic validator
-    // accepts. Pareto: a chunk whose first pipeline already validates pays
-    // nothing; only a stochastic refusal is retried. A budget/not-configured
-    // refusal is terminal (retrying cannot help). candidates === 1 leaves every
-    // byte of this path legacy.
-    if (!synth.ok && candidates > 1 && (synth.code === "RT_E_VALIDATION" || synth.code === "RT_E_LLM_REJECTED")) {
-      const chunkRetry = Math.min(P6_SYNTH_CANDIDATES_MAX, Math.max(candidates, P6_SYNTH_CHUNK_RETRY_CANDIDATES));
+    // chunkCandidates > 1 (the default 2, fixes/346-S4), resample the SAME
+    // primary prompt and keep the FIRST candidate the SAME deterministic
+    // validator accepts. Pareto: a chunk whose first pipeline already validates
+    // pays nothing; only a stochastic refusal is retried. A budget/not-configured
+    // refusal is terminal (retrying cannot help). An explicit chunkCandidates === 1
+    // is the opt-out that leaves every byte of this path legacy.
+    if (!synth.ok && chunkCandidates > 1 && (synth.code === "RT_E_VALIDATION" || synth.code === "RT_E_LLM_REJECTED")) {
+      const chunkRetry = Math.min(P6_SYNTH_CANDIDATES_MAX, Math.max(chunkCandidates, P6_SYNTH_CHUNK_RETRY_CANDIDATES));
       const outcomes: string[] = [
         `candidate 1: rejected — ${synth.code}: ${String(synth.error ?? "").replace(/\s+/g, " ").slice(0, 160)}`,
       ];
@@ -6261,14 +6272,15 @@ async function synthesizeChunkedTree(
           // wall. With the per-chunk resample in place the tree now reaches
           // chunk 7/8 and the compiler-named offender file (TS2554/TS2339/TS7006
           // cross-chunk drift) refuses on the SINGLE repair; campaign #2's
-          // two-sample probe reverted (3→9, 2→2). When the caller opts into
-          // best-of-N, resample the SAME compiler-informed repair prompt and
-          // keep the FIRST offender whose substituted prefix clears the real
-          // tsc (strictly fewer diagnostics or green). Pareto: a converging
-          // first sample pays nothing. candidates === 1 keeps the legacy path.
+          // two-sample probe reverted (3→9, 2→2). With chunkCandidates > 1 (the
+          // default 2, fixes/346-S4), resample the SAME compiler-informed repair
+          // prompt and keep the FIRST offender whose substituted prefix clears
+          // the real tsc (strictly fewer diagnostics or green). Pareto: a
+          // converging first sample pays nothing. An explicit chunkCandidates === 1
+          // opts out to the legacy path.
           const offenderCandidates =
-            candidates > 1
-              ? Math.min(P6_SYNTH_CANDIDATES_MAX, Math.max(candidates, P6_SYNTH_CHUNK_RETRY_CANDIDATES))
+            chunkCandidates > 1
+              ? Math.min(P6_SYNTH_CANDIDATES_MAX, Math.max(chunkCandidates, P6_SYNTH_CHUNK_RETRY_CANDIDATES))
               : 1;
           let fixed = false;
           const failfastOutcomes: string[] = [];

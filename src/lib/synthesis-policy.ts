@@ -12,12 +12,24 @@
 // themselves (structure -> brief-fit -> pre-seal typecheck) stay in
 // codegen.server.ts, their single owner.
 //
-// Defaults are byte-identical to the pre-343-1 pipeline: `P6_SYNTH_CANDIDATES`
-// unset (or any value below 2) yields 1 candidate, and `selectBestOfN(1, …)`
-// produces no extra candidate.
+// Two distinct policies share the `P6_SYNTH_CANDIDATES` knob:
+//
+//   • The PRIMARY single-module best-of-N and the whole-tree pre-seal offender
+//     resample stay OPT-IN (`resolveSynthesisCandidates`, default 1) — unchanged
+//     from 343-1.
+//   • The chunked P6 tree's per-chunk + fail-fast offender resample is now ARMED
+//     BY DEFAULT (`resolveChunkResampleCandidates`, default 2, fixes/346 lane S4).
+//     The campaign #2 journals measure the dominant P6 stall as a per-chunk
+//     deterministic-validation refusal, so this is the lever T1 measured opt-in
+//     (`P6_SYNTH_CANDIDATES=2`). It is lazy/Pareto: a first sample that already
+//     clears the deterministic validator pays nothing, so the extra spend lands
+//     only on a stochastic refusal.
+//
+// The explicit OPT-OUT `P6_SYNTH_CANDIDATES=1` (or `deps.candidates: 1`) restores
+// the byte-identical legacy single-sample path for BOTH policies.
 // ---------------------------------------------------------------------------
 
-/** 1 candidate = today's single-sample path. */
+/** 1 candidate = the legacy single-sample path (primary best-of-N + whole-tree resample). */
 export const P6_SYNTH_CANDIDATES_DEFAULT = 1;
 /** Hard cap on samples per unit of synthesis — the cost-honesty bound. */
 export const P6_SYNTH_CANDIDATES_MAX = 4;
@@ -28,19 +40,20 @@ export const P6_SYNTH_CANDIDATES_MAX = 4;
  * deterministic-validation refusal (`typeSignature functions not exported` /
  * `cross-chunk duplicate declaration`) at chunk 2-3 of an 8-11 chunk plan —
  * after a single sample plus one class repair, with no independent second
- * attempt. When the caller opts into best-of-N (`P6_SYNTH_CANDIDATES` or
- * `deps.candidates` > 1), a refused chunk is resampled with the SAME primary
- * prompt up to this many total candidates, the deterministic validator being
- * the selector. A count of 1 keeps the legacy single-sample path byte-identical.
+ * attempt. This is ARMED BY DEFAULT (fixes/346 lane S4): a refused chunk is
+ * resampled with the SAME primary prompt up to this many total candidates, the
+ * deterministic validator being the selector. `P6_SYNTH_CANDIDATES=1` (or
+ * `deps.candidates: 1`) keeps the legacy single-sample path byte-identical.
  */
 export const P6_SYNTH_CHUNK_RETRY_CANDIDATES = 2;
 
 /**
- * Resolve the best-of-N count. `explicit` (a caller's `deps.candidates`) wins
- * over `env` (`P6_SYNTH_CANDIDATES`); anything non-integer, non-positive, or
- * absent falls back to {@link P6_SYNTH_CANDIDATES_DEFAULT}, and every value is
- * clamped to {@link P6_SYNTH_CANDIDATES_MAX}. Pure + deterministic — never
- * throws on a hostile env string.
+ * Resolve the primary best-of-N / whole-tree resample count. `explicit` (a
+ * caller's `deps.candidates`) wins over `env` (`P6_SYNTH_CANDIDATES`); anything
+ * non-integer, non-positive, or absent falls back to
+ * {@link P6_SYNTH_CANDIDATES_DEFAULT} (1 — the legacy single sample), and every
+ * value is clamped to {@link P6_SYNTH_CANDIDATES_MAX}. Pure + deterministic —
+ * never throws on a hostile env string.
  */
 export function resolveSynthesisCandidates(explicit?: unknown, env?: unknown): number {
   const source = explicit !== undefined && explicit !== null ? explicit : env;
@@ -53,6 +66,30 @@ export function resolveSynthesisCandidates(explicit?: unknown, env?: unknown): n
   if (!Number.isFinite(n)) return P6_SYNTH_CANDIDATES_DEFAULT;
   const whole = Math.floor(n);
   if (whole < 1) return P6_SYNTH_CANDIDATES_DEFAULT;
+  return Math.min(whole, P6_SYNTH_CANDIDATES_MAX);
+}
+
+/**
+ * Resolve the chunk-level (per-chunk acceptance + fail-fast offender) resample
+ * count. Same precedence as {@link resolveSynthesisCandidates} — an explicit
+ * `deps.candidates` wins over the `P6_SYNTH_CANDIDATES` env — but the ABSENT
+ * default is {@link P6_SYNTH_CHUNK_RETRY_CANDIDATES} (2): this is the armed-by-
+ * default lane. An explicit `1` (env or `deps.candidates`) is the opt-out and
+ * yields 1, exactly the legacy single-sample path; every other value is clamped
+ * to `1..P6_SYNTH_CANDIDATES_MAX`. Pure + deterministic — never throws.
+ */
+export function resolveChunkResampleCandidates(explicit?: unknown, env?: unknown): number {
+  const source = explicit !== undefined && explicit !== null ? explicit : env;
+  if (source === undefined || source === null) return P6_SYNTH_CHUNK_RETRY_CANDIDATES;
+  const n =
+    typeof source === "number"
+      ? source
+      : typeof source === "string" && /^\d+$/.test(source.trim())
+        ? Number(source.trim())
+        : Number.NaN;
+  if (!Number.isFinite(n)) return P6_SYNTH_CHUNK_RETRY_CANDIDATES;
+  const whole = Math.floor(n);
+  if (whole < 1) return P6_SYNTH_CHUNK_RETRY_CANDIDATES;
   return Math.min(whole, P6_SYNTH_CANDIDATES_MAX);
 }
 
