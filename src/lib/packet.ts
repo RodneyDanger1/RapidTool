@@ -1,4 +1,4 @@
-import { PHASES, phaseCoverage, phaseCoverageLine } from "./phases.ts";
+import { PHASES, PHASE_LAST, phaseCoverage, phaseCoverageLine } from "./phases.ts";
 import type { PhaseCoverage } from "./phases.ts";
 import { fnv1a, fusionRank } from "./algorithms.ts";
 import { sandboxClaim } from "./sandbox.ts";
@@ -153,7 +153,7 @@ function countIdCollisions(rows: MemoryEntry[]): number {
 /** E-11: the machine AgentReport schema the ingest seam (report-intake.ts)
  *  validates — stated here so the packet and the validator can never drift. */
 const REPORT_SCHEMA = {
-  phase: "integer 0..12 (must equal current_phase.id)",
+  phase: `integer 0..${PHASE_LAST} (must equal current_phase.id)`,
   status: '"complete" | "blocked" | "partial"',
   summary: "string (non-empty)",
   files: "string[] (optional)",
@@ -1177,7 +1177,7 @@ export function compileAgentPacket(
       ? `Verify before reporting, from the emitted tree root: run the tree's install and declared scripts in order (\`npm install\`, then \`npm run typecheck\`, then \`npm test\`) — \`npm test\` executes the emitted oracle spec (\`${oracleSpecPath}\`). Record each command you ran in the report's \`tests_run\`. A red run is not a bypass — patch and re-run.`
       : `No oracle rows are recorded for this project yet, so this edge has no runnable acceptance spec — the machine-checked DoD gate above is the exit signal.`,
     `The five markdown headings (Phase work / Files / Patch / Tests / Risks) remain the recommended structure of your artifacts' bodies for human review.`,
-    phase.id >= 12
+    phase.id >= PHASE_LAST
       ? `Next legal edge: none — pipeline complete.`
       : `Next legal edge — only P${phase.id + 1} if this phase completes`,
     ``,
@@ -1363,7 +1363,7 @@ export const exportProfiles: Record<ExportProfileId, ExportProfile> = {
         `# Claude Code handoff — ${project.name}`,
         ``,
         `## Session framing`,
-        `Resuming governed project "${project.name}" at ${edge.code} — ${edge.title} (pipeline phases 0..12). Work ONLY this edge; illegal graph jumps and unsigned deploys are forbidden by the packet.`,
+        `Resuming governed project "${project.name}" at ${edge.code} — ${edge.title} (pipeline phases 0..${PHASE_LAST}). Work ONLY this edge; illegal graph jumps and unsigned deploys are forbidden by the packet.`,
         `The packet below is the governing contract. Do not restate it — work from it.`,
         ``,
         `## Claude Code mechanics`,
@@ -1390,7 +1390,7 @@ export const exportProfiles: Record<ExportProfileId, ExportProfile> = {
         `# Cursor handoff — ${project.name}`,
         ``,
         `## Session framing`,
-        `Resuming governed project "${project.name}" at ${edge.code} — ${edge.title} (pipeline phases 0..12). Work ONLY this edge; illegal graph jumps and unsigned deploys are forbidden by the packet.`,
+        `Resuming governed project "${project.name}" at ${edge.code} — ${edge.title} (pipeline phases 0..${PHASE_LAST}). Work ONLY this edge; illegal graph jumps and unsigned deploys are forbidden by the packet.`,
         ``,
         `## Cursor mechanics`,
         `1. Paste the packet into Composer (Agent mode) as the governing context — or save it as a project rule file and @-reference it.`,
@@ -1416,7 +1416,7 @@ export const exportProfiles: Record<ExportProfileId, ExportProfile> = {
         `# Cline handoff — ${project.name}`,
         ``,
         `## Session framing`,
-        `Resuming governed project "${project.name}" at ${edge.code} — ${edge.title} (pipeline phases 0..12). Work ONLY this edge; illegal graph jumps and unsigned deploys are forbidden by the packet.`,
+        `Resuming governed project "${project.name}" at ${edge.code} — ${edge.title} (pipeline phases 0..${PHASE_LAST}). Work ONLY this edge; illegal graph jumps and unsigned deploys are forbidden by the packet.`,
         ``,
         `## Cline mechanics`,
         `1. Open Cline in the project workspace and paste the packet as the task prompt; start in Plan mode.`,
@@ -1450,7 +1450,7 @@ export const exportProfiles: Record<ExportProfileId, ExportProfile> = {
         `# Aider handoff — ${project.name}`,
         ``,
         `## Session framing`,
-        `Resuming governed project "${project.name}" at ${edge.code} — ${edge.title} (pipeline phases 0..12). Work ONLY this edge; illegal graph jumps and unsigned deploys are forbidden by the packet.`,
+        `Resuming governed project "${project.name}" at ${edge.code} — ${edge.title} (pipeline phases 0..${PHASE_LAST}). Work ONLY this edge; illegal graph jumps and unsigned deploys are forbidden by the packet.`,
         ``,
         `## Aider mechanics (file-diff scoping)`,
         `1. Start aider in the project working directory with the packet as read-only context and the scope files as the only editable set:`,
@@ -1477,7 +1477,7 @@ export const exportProfiles: Record<ExportProfileId, ExportProfile> = {
         `# Devin handoff — ${project.name}`,
         ``,
         `## Session framing`,
-        `This is a governed implementation task: "${project.name}" is at ${edge.code} — ${edge.title} (pipeline phases 0..12). Work ONLY this edge; illegal graph jumps, unsigned deploys, account creation and out-of-scope file edits are forbidden by the packet.`,
+        `This is a governed implementation task: "${project.name}" is at ${edge.code} — ${edge.title} (pipeline phases 0..${PHASE_LAST}). Work ONLY this edge; illegal graph jumps, unsigned deploys, account creation and out-of-scope file edits are forbidden by the packet.`,
         ``,
         `## Devin mechanics`,
         `1. Create the Devin session with the packet below pasted as the task description (or attach it as session knowledge, e.g. saved as rapidtool-packet.md).`,
@@ -1503,7 +1503,7 @@ export const exportProfiles: Record<ExportProfileId, ExportProfile> = {
         `# GitHub Copilot handoff — ${project.name}`,
         ``,
         `## Session framing`,
-        `Resuming governed project "${project.name}" at ${edge.code} — ${edge.title} (pipeline phases 0..12). Work ONLY this edge; illegal graph jumps and unsigned deploys are forbidden by the packet.`,
+        `Resuming governed project "${project.name}" at ${edge.code} — ${edge.title} (pipeline phases 0..${PHASE_LAST}). Work ONLY this edge; illegal graph jumps and unsigned deploys are forbidden by the packet.`,
         ``,
         `## Copilot mechanics`,
         `1. Open Copilot Chat in the repository (or start an Edit session) and paste the packet as the governing context — or keep the rules as workspace instructions (.github/copilot-instructions.md) when your repo uses them, with the packet attached per task.`,

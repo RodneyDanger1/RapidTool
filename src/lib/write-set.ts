@@ -17,6 +17,7 @@ import { dirname, isAbsolute, join, normalize, sep } from "node:path";
 // same cross-boundary pattern as db.ts → migration-plan.mjs). Lexical checks
 // cannot see symlinks; this resolves both sides on the real filesystem.
 import { physicalInside } from "../../scripts/path-safety.mjs";
+import type { ErrorCode } from "./errors.ts";
 
 /** Prior state of one relative path under the write-set root. */
 export type PathSnapshot = {
@@ -33,19 +34,27 @@ export type WriteSnapshot = Map<string, PathSnapshot>;
  */
 export function assertSafeRelPath(rel: string): string {
   if (typeof rel !== "string" || rel.length === 0) {
-    throw new Error("write-set: relative path required");
+    const err = new Error("write-set: relative path required") as Error & { code?: ErrorCode };
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
   if (rel.includes("\0")) {
-    throw new Error("write-set: path contains null byte");
+    const err = new Error("write-set: path contains null byte") as Error & { code?: ErrorCode };
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
   const unified = rel.replace(/\\/g, "/");
   if (isAbsolute(rel) || isAbsolute(unified) || /^[a-zA-Z]:\//.test(unified) || unified.startsWith("/")) {
-    throw new Error(`write-set: absolute path refused: ${rel}`);
+    const err = new Error(`write-set: absolute path refused: ${rel}`) as Error & { code?: ErrorCode };
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
   const norm = normalize(unified);
   const parts = norm.split(/[/\\]/).filter((p) => p.length > 0 && p !== ".");
   if (parts.some((p) => p === "..")) {
-    throw new Error(`write-set: path escape refused: ${rel}`);
+    const err = new Error(`write-set: path escape refused: ${rel}`) as Error & { code?: ErrorCode };
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
   // Re-join with platform sep for join(root, …) stability, keep logical rel key as given.
   return parts.join(sep);
@@ -65,7 +74,9 @@ function absOf(root: string, rel: string): string {
   const absCmp = absNorm.replace(/\\/g, "/").toLowerCase();
   const rootPrefix = rootCmp.endsWith("/") ? rootCmp : rootCmp + "/";
   if (absCmp !== rootCmp.replace(/\/$/, "") && !absCmp.startsWith(rootPrefix)) {
-    throw new Error(`write-set: path escaped root: ${rel}`);
+    const err = new Error(`write-set: path escaped root: ${rel}`) as Error & { code?: ErrorCode };
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
   // R11-f07 (S-05): the lexical checks above cannot see a symlinked parent or
   // a junctioned subtree — a path that LOOKS inside can physically land
@@ -73,7 +84,13 @@ function absOf(root: string, rel: string): string {
   // `null` (nothing along the prefix resolves — e.g. a root that does not
   // exist yet) keeps the lexical verdict, which is the pre-R11-f07 law.
   if (physicalInside(root, abs) === false) {
-    throw new Error(`write-set: path physically escaped root (symlink/junction): ${rel}`);
+    // Wrong-KIND path entity: the lexical rel looked inside but the resolved
+    // filesystem entry (symlink/junction) is a different kind than claimed.
+    const err = new Error(
+      `write-set: path physically escaped root (symlink/junction): ${rel}`,
+    ) as Error & { code?: ErrorCode };
+    err.code = "RT_E_PATH_KIND_MISMATCH";
+    throw err;
   }
   return abs;
 }

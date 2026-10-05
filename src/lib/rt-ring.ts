@@ -243,9 +243,16 @@ export function rtHydrate(raw: unknown): RtRing {
             typeof (stallRaw as { projectId?: unknown }).projectId === "string"
               ? ((stallRaw as { projectId: string }).projectId as string)
               : null,
-          since: typeof (stallRaw as { since?: unknown }).since === "number" ? (stallRaw as { since: number }).since : 0,
+          // A non-finite number (a hostile blob can spell `1e999` → Infinity)
+          // floors to 0, matching every sibling coercion here.
+          since:
+            typeof (stallRaw as { since?: unknown }).since === "number" &&
+            Number.isFinite((stallRaw as { since: number }).since)
+              ? (stallRaw as { since: number }).since
+              : 0,
           stepElapsedMs:
-            typeof (stallRaw as { stepElapsedMs?: unknown }).stepElapsedMs === "number"
+            typeof (stallRaw as { stepElapsedMs?: unknown }).stepElapsedMs === "number" &&
+            Number.isFinite((stallRaw as { stepElapsedMs: number }).stepElapsedMs)
               ? (stallRaw as { stepElapsedMs: number }).stepElapsedMs
               : 0,
           class: (() => {

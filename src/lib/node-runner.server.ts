@@ -564,11 +564,14 @@ export async function runNodeBounded(
   // `> 0`, then `setTimeout(fn, Infinity)` fires IMMEDIATELY (Node clamps
   // overflows and warns), so the run was killed on the first tick and the
   // result read "killed after Infinitys". Finite + floored + timer-bounded now.
+  // 346 C3: the floor is 1ms too — a positive sub-millisecond ask (0.5) used to
+  // floor to 0 and abort on the first tick ("killed after 0s"), i.e. a positive
+  // budget became an instant timeout (the same class probe.ts's floor closed).
   const MAX_TIMEOUT_MS = 2_147_483_647;
   const requestedMs = opts?.timeoutMs;
   const timeoutMs =
     typeof requestedMs === "number" && Number.isFinite(requestedMs) && requestedMs > 0
-      ? Math.min(Math.floor(requestedMs), MAX_TIMEOUT_MS)
+      ? Math.max(1, Math.min(Math.floor(requestedMs), MAX_TIMEOUT_MS))
       : DEFAULT_TIMEOUT_MS;
 
   let dir: string;

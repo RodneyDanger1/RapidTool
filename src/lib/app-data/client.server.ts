@@ -110,15 +110,23 @@ async function gatePost(
 ): Promise<{ status: number; json: GateJson }> {
   const base = ctx.connectorsBase;
   if (!base) {
-    throw new Error(
-      "cannot resolve gate host (missing x-forwarded-host/host on the server request); " +
-        "open the app through the gated public URL so the gate can proxy and inject credentials",
+    // Coded (RT_E_INTERNAL): the server request arrived without the host the
+    // gate resolver needs — an environment/wiring failure, not caller input.
+    throw Object.assign(
+      new Error(
+        "cannot resolve gate host (missing x-forwarded-host/host on the server request); " +
+          "open the app through the gated public URL so the gate can proxy and inject credentials",
+      ),
+      { code: "RT_E_INTERNAL" },
     );
   }
 
   if (!/^https?:\/\//i.test(base)) {
-    throw new Error(
-      `gate base must be absolute http(s) URL (got ${base}); refusing relative fetch`,
+    // Coded (RT_E_VALIDATION): the configured gate base failed the
+    // absolute-URL rule — a config-value refusal.
+    throw Object.assign(
+      new Error(`gate base must be absolute http(s) URL (got ${base}); refusing relative fetch`),
+      { code: "RT_E_VALIDATION" },
     );
   }
 

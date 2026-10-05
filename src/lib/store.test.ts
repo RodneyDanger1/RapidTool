@@ -1645,6 +1645,85 @@ test("H-06 C1: a concurrent ingestReport survives every commitWild of a wild run
   }
 });
 
+test("H-06 C3: two concurrent agent.report rows that COLLIDE on ts+event (different detail) both survive a commitWild", async () => {
+  // rebaseConcurrentEngine decided which LIVE log rows to adopt by the key
+  // `${l.ts}:${l.event}`. When `prev` (the step's input generation) already held
+  // a row with that key, EVERY live row sharing it was filtered out — so two
+  // distinct reports ingested in the same ms were both permanently lost. Inject
+  // both through the REAL seam (two ingestReport calls with Date.now frozen to
+  // the seeded row's ts) and assert both survive the next commitWild.
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  const realNow = Date.now;
+  const T = 1_700_000_000_000;
+  process.env.DEEPSEEK_API_KEY = "";
+  try {
+    const prior: JsonLog = { ts: T, phase: 0, level: "info", event: "agent.report", detail: "prior concurrent row" };
+    const p = install(seedProject({ logs: [prior] }));
+    useRapid.getState().setWildMode(p.id, true);
+    const run = useRapid.getState().startWildRun(p.id);
+    // Freeze the clock so both intakes share the prior row's `ts` — the exact
+    // collision; tests_run suppresses the separate no-evidence warn row.
+    Date.now = () => T;
+    const a = useRapid.getState().ingestReport(p.id, {
+      phase: 0,
+      status: "complete",
+      summary: "concurrent report ALPHA with distinct detail".padEnd(28, "."),
+      tests_run: [{ command: "node --test alpha", pass: true }],
+    });
+    const b = useRapid.getState().ingestReport(p.id, {
+      phase: 0,
+      status: "complete",
+      summary: "concurrent report BRAVO with distinct detail".padEnd(28, "."),
+      tests_run: [{ command: "node --test bravo", pass: true }],
+    });
+    Date.now = realNow;
+    assert.equal(a.ok && b.ok, true, "both concurrent intakes apply");
+    const res = await run;
+    assert.equal(res.ok, true);
+    const details = current(p.id).logs.filter((l) => l.event === "agent.report").map((l) => l.detail);
+    assert.equal(details.length, 3, `prior + both concurrent rows must all survive (got ${details.length})`);
+    assert.ok(details.some((d) => d.includes("ALPHA")), "the ALPHA row survived (no ts:event collapse)");
+    assert.ok(details.some((d) => d.includes("BRAVO")), "the BRAVO row survived (no ts:event collapse)");
+  } finally {
+    Date.now = realNow;
+    process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+test("H-06 C4: research rows collide as items:[] vs items:[{url:''}] — the distinct entry survives a commitWild", async () => {
+  // rebaseConcurrentEngine's researchKey joined item urls with "\n", so
+  // `items: []` and `items: [{url: ""}]` produced the identical key; a live row
+  // whose key matched a `prev` entry was dropped even when its content was
+  // distinct. Seed the empty-items row into prev and inject the blank-url row
+  // mid-run; it must be adopted.
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "";
+  try {
+    const Q = "collision probe query";
+    const priorEntry = { query: Q, provider: "tavily", items: [] };
+    const p = install(seedProject({ research: [priorEntry as never] }));
+    useRapid.getState().setWildMode(p.id, true);
+    const run = useRapid.getState().startWildRun(p.id);
+    // A concurrent writer appends the SAME query with a blank-url item — a
+    // distinct entry that the old key folded into the empty-items row.
+    const blankUrl = { query: Q, provider: "tavily", items: [{ title: "x", url: "" }] };
+    useRapid.setState((s) => ({
+      projects: s.projects.map((x) =>
+        x.id === p.id ? { ...x, research: [...(x.research ?? []), blankUrl as never] } : x,
+      ),
+    }));
+    const res = await run;
+    assert.equal(res.ok, true);
+    const rows = (current(p.id).research ?? []).filter((r) => r.query === Q);
+    assert.ok(
+      rows.some((r) => r.items.length === 1 && r.items[0]?.url === ""),
+      "the distinct blank-url research entry must survive the union",
+    );
+  } finally {
+    process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
 test("H-06 C2: a concurrent human approve is not rolled back — its decision-journal entry survives the next commitWild", async () => {
   const savedKey = process.env.DEEPSEEK_API_KEY;
   process.env.DEEPSEEK_API_KEY = "";

@@ -5,8 +5,10 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { exportProjectJson, slugName } from "./io.ts";
+import { ERROR_CODES } from "./errors.ts";
 import { inventoryFromJobSources } from "./doctor.ts";
 import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
 import type { Project, SpecGraph } from "./types.ts";
@@ -406,6 +408,28 @@ describe("scaffoldProject — generated source + artifacts placement", () => {
       /RT_E_VALIDATION · unknown endpoint GET \/v1\/example/,
       "the unknown-endpoint refusal is coded and names the unrecorded wire",
     );
+  });
+
+  // W60/346-6 C1: the emitted failure paths are SURFACED product failures. Each
+  // must carry the registered refusal code (I13) — never a bare message a tree
+  // consumer cannot classify. The `ErrorCode` annotation on the constant is the
+  // typecheck tie; this scans the emitted throw lines at runtime.
+  it("every emitted scaffold throw carries the registered refusal code (I13)", () => {
+    const src = readFileSync(new URL("./scaffold.ts", import.meta.url), "utf8");
+    const decl = /const EMITTED_REFUSAL_CODE(?::\s*ErrorCode)?\s*=\s*"([^"]+)"/.exec(src);
+    assert.ok(decl, "EMITTED_REFUSAL_CODE is declared");
+    assert.ok(
+      (ERROR_CODES as readonly string[]).includes(decl![1]!),
+      `the emitted refusal code must be registered: ${decl![1]}`,
+    );
+    const throws = src.split("\n").filter((l) => /throw new Error\(/.test(l));
+    assert.ok(throws.length >= 12, `expected >=12 emitted coded throws, found ${throws.length}`);
+    for (const l of throws) {
+      assert.ok(
+        /EMITTED_REFUSAL_CODE|emittedRefusal/.test(l),
+        `an emitted throw has no coded refusal prefix: ${l.trim()}`,
+      );
+    }
   });
 
   it("emits only the canonical TODO(E-15) stub marker in every file that mentions E-15 (fixes/147)", () => {

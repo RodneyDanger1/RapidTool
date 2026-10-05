@@ -79,6 +79,7 @@ import { BRIEF_STOPWORDS } from "./sandbox.ts";
 // through io.ts). This replaces the module's own brief-noun inference, so the two
 // resolvers cannot drift.
 import { deliveryKindOf } from "./engine.ts";
+import type { ErrorCode } from "./errors.ts";
 import {
   approvedAcceptanceFixtures,
   compileFixtureAssertion,
@@ -187,8 +188,11 @@ const MACHINE_STAMP = (id: string): string =>
  * on their guard refusals ("a validation refusal, not an opaque internal
  * error"). The emitted message shape is the refusal-log shape
  * `<RT_E code> · <reason>` (engine.ts refusalClassOf parses it).
+ *
+ * The `ErrorCode` annotation is the registry tie (invariant I13): an invented
+ * or since-removed id fails `npx tsc --noEmit` instead of riding a string.
  */
-const EMITTED_REFUSAL_CODE = "RT_E_VALIDATION";
+const EMITTED_REFUSAL_CODE: ErrorCode = "RT_E_VALIDATION";
 
 /** `<RT_E code> · <reason>` — the prefix every emitted failure path carries. */
 const emittedRefusal = (reason: string): string => `${EMITTED_REFUSAL_CODE} · ${reason}`;

@@ -1345,7 +1345,10 @@ export function benchmarkHarness(source: string, brief: string): string {
     '  new Function("exports", "module", "require", __SRC + "\\n; return exports;")(',
     "    __exports,",
     '    { exports: __exports },',
-    '    () => { throw new Error("require() is not available inside benchmarked code"); },',
+    // The embedded throw is a generated-code refusal; the code travels in the
+    // caught `__compileError` text (RT_E_VALIDATION) so the failing benchmark
+    // assertion names the machine class, not just the prose.
+    '    () => { throw new Error("require() is not available inside benchmarked code (RT_E_VALIDATION)"); },',
     "  );",
     "} catch (e) {",
     "  __compileError = String(e);",

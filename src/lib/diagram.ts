@@ -795,7 +795,9 @@ export function buildFlowDiagram(project: Project): string {
  */
 export function buildDiagram(project: Project, kind: DiagramKind): string {
   if (!DIAGRAM_KINDS.includes(kind)) {
-    throw new Error(`Unknown diagram kind: ${String(kind)}`);
+    // Coded (RT_E_VALIDATION): an unknown kind is a caller-input refusal, so
+    // the CLI/console can branch on the code rather than the message text.
+    throw Object.assign(new Error(`Unknown diagram kind: ${String(kind)}`), { code: "RT_E_VALIDATION" });
   }
   if (kind === "phases") return buildPhasesDiagram(project);
   if (kind === "architecture") return buildArchitectureDiagram(project);

@@ -151,6 +151,13 @@ describe("buildDiagram — standalone SVG shell", () => {
   it("throws on an unknown kind instead of guessing", () => {
     assert.throws(() => buildDiagram(RUN, "bogus" as never), /Unknown diagram kind: bogus/);
   });
+
+  it("codes the unknown-kind refusal RT_E_VALIDATION (message is not the machine channel)", () => {
+    assert.throws(
+      () => buildDiagram(RUN, "bogus" as never),
+      (err: unknown) => (err as { code?: string }).code === "RT_E_VALIDATION",
+    );
+  });
 });
 
 describe("buildDiagram — determinism", () => {

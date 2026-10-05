@@ -2,6 +2,12 @@ import { genericOAuthClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 import { runPreSignInSignOut, runSignOut } from "../../../scripts/sign-out-plan.mjs";
 import { GROK_PROVIDERS } from "./providers.ts";
+import {
+  popupFailureMessage,
+  waitForPopupOutcome,
+  type PopupWaitHost,
+  type PopupWaitOutcome,
+} from "./popup-wait.ts";
 
 /**
  * Better Auth client for this React SPA (browser-side).
@@ -79,9 +85,6 @@ function inLivePreview(): boolean {
   );
 }
 
-/** Message the popup posts back to the opener once sign-in completes. */
-type PopupMessage = { source: "grok-auth-popup"; token: string | null; error?: string };
-
 /**
  * Start sign-in with one upstream provider (`providerId` from `GROK_PROVIDERS`),
  * federating through the Grok auth broker.
@@ -122,9 +125,9 @@ export async function signIn(
 
   if (inLivePreview()) {
     if (!popup) throw new Error("Pop-up blocked — allow pop-ups for sign-in");
-    const token = await waitForPopupToken(popup);
-    if (!token) throw new Error("Sign-in was cancelled or failed");
-    setBearerToken(token);
+    const outcome = await waitForPopupToken(popup);
+    if (!outcome.token) throw new Error(popupFailureMessage(outcome));
+    setBearerToken(outcome.token);
     // Refresh the client session store with the bearer attached (onRequest).
     // Avoid a full iframe reload when we're already on the destination — that
     // reload was the slow "still loading after the popup closed" feeling.
@@ -171,46 +174,31 @@ function openSignInPopup(providerId: string): Window | null {
 
 /**
  * Wait for the popup's completion page to postMessage the session bearer (or
- * for the user to dismiss the popup).
+ * for the user to dismiss the popup). Bounded overall by
+ * `POPUP_WAIT_TIMEOUT_MS` — before this, a dropped `postMessage` AND a blocked
+ * `window.close()` left both the message and the `popup.closed` poll dead, so
+ * `signIn` hung forever. The settlement state machine lives in `popup-wait.ts`
+ * (unit-tested there); this adapter binds it to the real `window`.
  *
- * The message listener is bound to THIS popup's window (`event.source ===
- * popup`): with two concurrent sign-in attempts (e.g. a rapid double-click on
- * two providers) each waiter must only settle on its own popup's completion,
- * or the first completion message would settle BOTH waiters and both calls
- * would store the first provider's token.
+ * The listener is bound to THIS popup's window (`event.source === popup`): with
+ * two concurrent sign-in attempts (e.g. a rapid double-click on two providers)
+ * each waiter must only settle on its own popup's completion, or the first
+ * completion message would settle BOTH waiters and both calls would store the
+ * first provider's token.
  */
-function waitForPopupToken(popup: Window): Promise<string | null> {
-  return new Promise((resolve) => {
-    const origin = window.location.origin;
-    let settled = false;
-    let closeTimer: number | undefined;
-    const settle = (token: string | null) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve(token);
-    };
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== origin) return;
-      if (event.source !== popup) return; // only this attempt's popup may settle us
-      const data = event.data as PopupMessage | undefined;
-      if (!data || data.source !== "grok-auth-popup") return;
-      settle(data.token ?? null);
-    };
-    // Fallback when the user dismisses the popup. Grace period lets the
-    // completion page's postMessage win over a racing `popup.closed`.
-    const pollTimer = window.setInterval(() => {
-      if (!popup.closed) return;
-      window.clearInterval(pollTimer);
-      closeTimer = window.setTimeout(() => settle(null), 400);
-    }, 300);
-    function cleanup() {
-      window.clearInterval(pollTimer);
-      if (closeTimer !== undefined) window.clearTimeout(closeTimer);
-      window.removeEventListener("message", onMessage);
-    }
-    window.addEventListener("message", onMessage);
-  });
+function waitForPopupToken(popup: Window): Promise<PopupWaitOutcome> {
+  const host: PopupWaitHost = {
+    origin: window.location.origin,
+    addMessageListener: (listener) =>
+      window.addEventListener("message", listener as (ev: MessageEvent) => void),
+    removeMessageListener: (listener) =>
+      window.removeEventListener("message", listener as (ev: MessageEvent) => void),
+    setInterval: (handler, ms) => window.setInterval(handler, ms),
+    clearInterval: (id) => window.clearInterval(id),
+    setTimeout: (handler, ms) => window.setTimeout(handler, ms),
+    clearTimeout: (id) => window.clearTimeout(id),
+  };
+  return waitForPopupOutcome(popup, host);
 }
 
 /**

@@ -2233,15 +2233,27 @@ async function main() {
           // is coded and flips payload.ok false (exit 1) — the emitted tree
           // still exists on disk either way.
           if (flag(args, "git")) {
-            // audit P0-3 (346): `emit --run --git` on a RED tree must NOT issue
-            // the commit. `emit --git` WITHOUT `--run` is unchanged (it cannot
-            // know a verdict); `--run --git` with a green verdict commits as
-            // before. The refusal is coded + loud and the emitted tree stays on
-            // disk (delivery is withheld, the build is not).
-            if (flag(args, "run") && runVerdict !== null && runVerdict.ok !== true) {
-              payload.git = {
-                committed: false,
-                skipped: true,
+            // audit P0-3 (346) + L4-346 continuation: a commit is delivered
+            // ONLY when every judging leg REQUESTED in THIS invocation is green;
+            // `emit --git` ALONE is unchanged (no verdict was computed to
+            // consult). A red `--run`, a red `--check`/`--verify-kind`, or a
+            // quarantine move that left the tree MIXED (foreignLeftInPlace) all
+            // withhold the commit — coded + loud, the emitted tree still on
+            // disk (delivery is withheld, the build is not). A commit is
+            // evidence of a clean, verified tree, so a red `--check` must
+            // withhold exactly as a red `--run` does.
+            let withheld = null;
+            if (foreignLeftInPlace) {
+              withheld = {
+                reason: "foreign-files-left-in-place",
+                code: "RT_E_FOREIGN_FILES",
+                error:
+                  "git delivery refused: foreign files could not be quarantined, so the emitted " +
+                  "tree is still mixed — no commit was issued and the tree is kept on disk; resolve " +
+                  "the quarantine failure and re-emit before landing it.",
+              };
+            } else if (flag(args, "run") && runVerdict !== null && runVerdict.ok !== true) {
+              withheld = {
                 reason: "tree-run-red",
                 code: "RT_E_TREE_RUN_FAILED",
                 error:
@@ -2249,9 +2261,36 @@ async function main() {
                   "(RT_E_TREE_RUN_FAILED) — no commit was issued and the emitted tree is kept " +
                   "on disk; fix the tree and re-run `emit --run` to green before landing it.",
               };
+            } else if (flag(args, "check") && payload.check && payload.check.ok !== true) {
+              withheld = {
+                reason: "check-red",
+                code: "RT_E_CHECK_FAILED",
+                error:
+                  "git delivery refused: this invocation's --check verdict is red " +
+                  "(RT_E_CHECK_FAILED) — no commit was issued and the emitted tree is kept " +
+                  "on disk; fix the emitted files and re-run `emit --check` to green before landing it.",
+              };
+            } else if (flag(args, "verify-kind") && payload.verifyKind && payload.verifyKind.ok !== true) {
+              withheld = {
+                reason: "verify-kind-red",
+                code: "RT_E_VERIFY_KIND_FAILED",
+                error:
+                  "git delivery refused: this invocation's --verify-kind verdict is red " +
+                  "(RT_E_VERIFY_KIND_FAILED) — no commit was issued and the emitted tree is kept " +
+                  "on disk; fix the toolchain and re-run before landing it.",
+              };
+            }
+            if (withheld) {
+              payload.git = {
+                committed: false,
+                skipped: true,
+                reason: withheld.reason,
+                code: typeof payload.code === "string" ? payload.code : withheld.code,
+                error: withheld.error,
+              };
               payload.ok = false;
-              payload.code = "RT_E_TREE_RUN_FAILED";
-              if (typeof payload.error !== "string") payload.error = "tree-run failed — commit withheld";
+              if (typeof payload.code !== "string") payload.code = withheld.code;
+              if (typeof payload.error !== "string") payload.error = withheld.error;
             } else {
               const landed = await h.landEmittedTree(project, res.dir, { files: res.files });
               payload.git = landed.ok
@@ -4729,7 +4768,10 @@ async function main() {
           // nothing and lists nothing (never a fabricated list). `--mcp-call`
           // additionally exercises the F1 read-only round-trip on that client.
           const mcpFlag = args["mcp-call"];
-          if (mcpFlag === true) {
+          // A bare `--mcp-call` AND an empty `--mcp-call=` are both a missing
+          // value: pre-fix only the bare form refused, so `--mcp-call=` was
+          // silently ignored and doctor ran as if no call was requested.
+          if (mcpFlag === true || (typeof mcpFlag === "string" && mcpFlag.trim() === "")) {
             return respond(
               { ok: false, error: "doctor: --mcp-call needs a value (the tool name to call)", code: "RT_E_VALIDATION" },
               1,

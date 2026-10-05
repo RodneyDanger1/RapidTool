@@ -628,6 +628,74 @@ describe("trendNotes", () => {
 });
 
 // ---------------------------------------------------------------------------
+// fixes/346 C3 — the DEFAULT fetch legs (no injected fetchText/fetchJson) code
+// their non-ok responses with RT_E_RESEARCH_UNAVAILABLE and the harvest notes
+// surface the class. Exercised through the documented replaced-global-fetch
+// seam (oneShotFetch defers to a replaced reference), so no network is touched.
+// ---------------------------------------------------------------------------
+describe("harvest default fetch legs carry a coded class (346 C3)", () => {
+  it("an HTTP 404 README + license check surface [RT_E_RESEARCH_UNAVAILABLE] in the notes", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response("nope", { status: 404 })) as typeof fetch;
+    try {
+      const res = await harvestRepos(["q"], {
+        search: searchWith([
+          { title: "Acme", url: "https://github.com/acme/scheduler", content: "search summary" },
+        ]),
+      });
+      assert.equal(res.hits.length, 1);
+      assert.equal(res.hits[0].provenance, "web-search");
+      const readmeNote = res.notes.find((n) => n.includes("raw README fetch failed"));
+      assert.ok(readmeNote, `expected a README-failure note, got ${JSON.stringify(res.notes)}`);
+      assert.match(readmeNote!, /\[RT_E_RESEARCH_UNAVAILABLE\]/, "the README leg note names the coded class");
+      const licenseNote = res.notes.find((n) => n.includes("license spot-check failed"));
+      assert.ok(licenseNote, `expected a license-failure note, got ${JSON.stringify(res.notes)}`);
+      assert.match(licenseNote!, /\[RT_E_RESEARCH_UNAVAILABLE\]/, "the license leg note names the coded class");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/346 C3 — hostile/NaN knobs must not bypass a bound. The old
+// `Math.max(0, NaN)` was NaN, so a NaN maxFetches disabled the fetch budget
+// (6 candidates × 2 legs) and a NaN maxQueries sliced every query away. Knobs
+// now go through the shared boundedInt, so NaN falls back to the default.
+// ---------------------------------------------------------------------------
+describe("harvest knob sanitization (346 C3)", () => {
+  it("NaN maxFetches / maxQueries fall back to the documented bounds", async () => {
+    const six = ["a", "b", "c", "d", "e", "f"].map((n) => ({
+      title: n,
+      url: `https://github.com/o/${n}`,
+      content: "s",
+    }));
+    let searchCalls = 0;
+    const search = async (q: string) => {
+      searchCalls += 1;
+      return { ok: true as const, query: q, items: six, provider: "duckduckgo" as const };
+    };
+    let fetches = 0;
+    const res = await harvestRepos(["q"], {
+      maxFetches: Number.NaN,
+      maxQueries: Number.NaN,
+      search: search as unknown as HarvestOptions["search"],
+      fetchText: async () => {
+        fetches += 1;
+        return "readme";
+      },
+      fetchJson: async () => {
+        fetches += 1;
+        return { license: null };
+      },
+    });
+    assert.equal(searchCalls, 1, "a NaN maxQueries must fall back to the default, not slice every query away");
+    assert.equal(fetches, 4, `a NaN maxFetches must fall back to the 4-fetch budget, not disable it (got ${fetches})`);
+    assert.equal(res.hits.length, 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // harvestForPacket — research rows.
 // ---------------------------------------------------------------------------
 

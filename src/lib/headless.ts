@@ -123,7 +123,14 @@ import { packetBudgetBoundary, type PacketBudget } from "./packet.ts";
 export function loadProject(path: string, opts?: { preserveWildRun?: boolean; maxChars?: number }): Project {
   const raw = readFileSync(path, "utf8");
   const res = importProject(raw, { maxChars: Number.POSITIVE_INFINITY, ...opts });
-  if (!res.ok) throw new Error(`loadProject(${path}): ${res.error}`);
+  if (!res.ok) {
+    // Preserve the loader's own coded refusal (RT_E_VALIDATION for a parse /
+    // shape failure, RT_E_IMPORT_TOO_LARGE for the cap arm) instead of
+    // re-deriving a class from prose; the CLI envelope reads `err.code`.
+    const err = new Error(`loadProject(${path}): ${res.error}`) as Error & { code?: ErrorCode };
+    err.code = res.code ?? "RT_E_VALIDATION";
+    throw err;
+  }
   return res.project;
 }
 
@@ -357,7 +364,13 @@ export function runAcceptance(
 /** Create a fresh project from a brief (emptyProject + inferName). */
 export function createProject(input: { brief: string; name?: string; kind?: Project["kind"] }): Project {
   const brief = typeof input?.brief === "string" ? input.brief.trim() : "";
-  if (!brief) throw new Error("createProject requires a non-empty brief.");
+  if (!brief) {
+    // A surfaced input refusal: themed RT_E_VALIDATION so the CLI/console
+    // classify it without string-matching "non-empty brief".
+    const err = new Error("createProject requires a non-empty brief.") as Error & { code?: ErrorCode };
+    err.code = "RT_E_VALIDATION";
+    throw err;
+  }
   const name = typeof input?.name === "string" && input.name.trim() ? input.name.trim() : inferName(brief);
   return emptyProject({ name, brief, ...(input.kind ? { kind: input.kind } : {}) });
 }
@@ -1506,12 +1519,22 @@ export function approve(
   opts: { force?: boolean; actor?: ApproveActor; humanSeatToken?: string } = {},
 ): Project {
   if (!project.hitl) {
-    throw new Error(`approve: no pending gate to approve (status: ${project.status}).`);
+    // CLI parity (rapidtool-cli.mjs approve door): "no open gate" rides
+    // RT_E_GATE_PENDING, so a direct headless caller and the verb agree.
+    const err = new Error(
+      `approve: no pending gate to approve (status: ${project.status}).`,
+    ) as Error & { code?: ErrorCode };
+    err.code = "RT_E_GATE_PENDING";
+    throw err;
   }
   if (project.hitl.phase !== project.currentPhase) {
-    throw new Error(
+    // CLI parity: a stale gate is a PHASE_ILLEGAL state refusal, never the
+    // exit-4 internal catch-all.
+    const err = new Error(
       `approve: pending gate is for P${project.hitl.phase} but the current edge is P${project.currentPhase} — state drifted; refusing a silent no-op.`,
-    );
+    ) as Error & { code?: ErrorCode };
+    err.code = "RT_E_PHASE_ILLEGAL";
+    throw err;
   }
   const actor = opts.actor ?? HARNESS_APPROVE_ACTOR;
   // 216o (T-107.3 · P0-01/P0-06 · W5-L3): the decision routes through the ONE
@@ -1972,7 +1995,13 @@ function loadVaultModule(): Promise<VaultModule> {
     const mod = (await import(spec)) as Record<string, unknown>;
     for (const name of ["buildVaultNotes", "vaultMarkdown", "vaultIndex", "searchVault"]) {
       if (typeof mod[name] !== "function") {
-        throw new Error(`vault module (src/lib/vault.ts) is missing its "${name}" export — contract drift.`);
+        // Sibling-module contract drift is an INTERNAL wiring failure, one
+        // class for every dynamic-import seam below (vault/design/diagram).
+        const err = new Error(
+          `vault module (src/lib/vault.ts) is missing its "${name}" export — contract drift.`,
+        ) as Error & { code?: ErrorCode };
+        err.code = "RT_E_INTERNAL";
+        throw err;
       }
     }
     return mod as unknown as VaultModule;
@@ -4232,7 +4261,11 @@ function asSearchHit(note: unknown): VaultSearchHit | null {
  */
 export async function vaultSearch(project: Project, query: string, limit = 10): Promise<VaultSearchHit[]> {
   const q = typeof query === "string" ? query.trim() : "";
-  if (!q) throw new Error("vaultSearch requires a non-empty query.");
+  if (!q) {
+    const err = new Error("vaultSearch requires a non-empty query.") as Error & { code?: ErrorCode };
+    err.code = "RT_E_VALIDATION";
+    throw err;
+  }
   const vault = await loadVaultModule();
   const notes = vault.buildVaultNotes(project);
   const want = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 200) : 10;
@@ -4291,7 +4324,13 @@ import type { VerifyOutcomeShape } from "./verify.ts";
 export async function verifyGeneratedSource(project: Project): Promise<VerifyOutcomeShape> {
   const source = typeof project.generatedSource === "string" ? project.generatedSource : "";
   if (!source.trim()) {
-    throw new Error("Project has no generatedSource yet — run the codegen phases (P10+) before verify.");
+    // CLI parity (rapidtool-cli.mjs verify door): "no source yet" is a graph
+    // state refusal mapped to PHASE_ILLEGAL, not the exit-4 internal class.
+    const err = new Error(
+      "Project has no generatedSource yet — run the codegen phases (P10+) before verify.",
+    ) as Error & { code?: ErrorCode };
+    err.code = "RT_E_PHASE_ILLEGAL";
+    throw err;
   }
   const { verifyAndFixServer } = await import("./verify.server.ts");
   // R4-f03 (W30 · LANE S3): thread the PROCESS session budget into the verify
@@ -4377,7 +4416,11 @@ function loadDesignModule(): Promise<DesignModule> {
     const mod = (await import(spec)) as Record<string, unknown>;
     for (const name of ["designTokens", "designHtml"]) {
       if (typeof mod[name] !== "function") {
-        throw new Error(`design module (src/lib/design.ts) is missing its "${name}" export — contract drift.`);
+        const err = new Error(
+          `design module (src/lib/design.ts) is missing its "${name}" export — contract drift.`,
+        ) as Error & { code?: ErrorCode };
+        err.code = "RT_E_INTERNAL";
+        throw err;
       }
     }
     return mod as unknown as DesignModule;
@@ -4396,7 +4439,11 @@ function loadDiagramModule(): Promise<DiagramModule> {
     const spec = "./diagram.ts";
     const mod = (await import(spec)) as Record<string, unknown>;
     if (typeof mod.buildDiagram !== "function") {
-      throw new Error(`diagram module (src/lib/diagram.ts) is missing its "buildDiagram" export — contract drift.`);
+      const err = new Error(
+        `diagram module (src/lib/diagram.ts) is missing its "buildDiagram" export — contract drift.`,
+      ) as Error & { code?: ErrorCode };
+      err.code = "RT_E_INTERNAL";
+      throw err;
     }
     return mod as unknown as DiagramModule;
   })();
@@ -4411,9 +4458,11 @@ export async function designTokens(project: Project): Promise<DesignTokens> {
   const design = await loadDesignModule();
   const tokens = design.designTokens(project);
   if (tokens === null || typeof tokens !== "object" || Array.isArray(tokens)) {
-    throw new Error(
+    const err = new Error(
       "design module (src/lib/design.ts) returned a non-object from designTokens — contract drift.",
-    );
+    ) as Error & { code?: ErrorCode };
+    err.code = "RT_E_INTERNAL";
+    throw err;
   }
   return tokens as DesignTokens;
 }
@@ -4427,9 +4476,11 @@ export async function designHtml(project: Project): Promise<string> {
   const design = await loadDesignModule();
   const html = design.designHtml(project);
   if (typeof html !== "string" || !html.trim()) {
-    throw new Error(
+    const err = new Error(
       "design module (src/lib/design.ts) returned a non-string from designHtml — contract drift.",
-    );
+    ) as Error & { code?: ErrorCode };
+    err.code = "RT_E_INTERNAL";
+    throw err;
   }
   return html;
 }
@@ -4442,14 +4493,20 @@ export async function designHtml(project: Project): Promise<string> {
  */
 export async function buildDiagram(project: Project, kind: string): Promise<string> {
   if (!(DIAGRAM_KINDS as readonly string[]).includes(kind)) {
-    throw new Error(`buildDiagram: unknown kind "${String(kind)}" — expected one of ${DIAGRAM_KINDS.join(" | ")}.`);
+    const err = new Error(
+      `buildDiagram: unknown kind "${String(kind)}" — expected one of ${DIAGRAM_KINDS.join(" | ")}.`,
+    ) as Error & { code?: ErrorCode };
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
   const diagram = await loadDiagramModule();
   const svg = diagram.buildDiagram(project, kind as DiagramKind);
   if (typeof svg !== "string" || !svg.trim()) {
-    throw new Error(
+    const err = new Error(
       "diagram module (src/lib/diagram.ts) returned a non-string from buildDiagram — contract drift.",
-    );
+    ) as Error & { code?: ErrorCode };
+    err.code = "RT_E_INTERNAL";
+    throw err;
   }
   return svg;
 }
@@ -5166,7 +5223,14 @@ function walkSourceFiles(
     try {
       entries = readdirSync(current, { withFileTypes: true });
     } catch (err) {
-      throw new Error(`mineDir: cannot read "${current}" — ${err instanceof Error ? err.message : String(err)}`);
+      // Preserve the OS errno family (EACCES→PERMISSION_DENIED,
+      // ENOENT→PROJECT_MISSING, ENOTDIR→PATH_KIND_MISMATCH) on the surfaced
+      // read failure instead of collapsing it to a caller fallback.
+      const e = new Error(
+        `mineDir: cannot read "${current}" — ${err instanceof Error ? err.message : String(err)}`,
+      ) as Error & { code?: ErrorCode };
+      e.code = classifyError(err, "RT_E_INTERNAL");
+      throw e;
     }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const entry of entries) {

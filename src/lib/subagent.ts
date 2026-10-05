@@ -346,7 +346,12 @@ export function createSubagentContract(deps: {
   now?: () => number;
 }): SubagentContract {
   if (typeof deps?.complete !== "function") {
-    throw new Error("createSubagentContract: deps.complete must be a function (RT_E_VALIDATION)");
+    // The code is attached, not just named in the prose: classifyError reads
+    // `.code`, so a parenthetical alone left this refusal as RT_E_UNKNOWN.
+    throw Object.assign(
+      new Error("createSubagentContract: deps.complete must be a function (RT_E_VALIDATION)"),
+      { code: "RT_E_VALIDATION" },
+    );
   }
   const orchestrator =
     typeof deps.orchestrator === "string" && deps.orchestrator.trim()
@@ -357,11 +362,17 @@ export function createSubagentContract(deps: {
       ? SUBAGENT_DEFAULT_BUDGET_TOKENS
       : tokenNumber(deps.perAgentBudgetTokens);
   if (cap <= 0) {
-    throw new Error("createSubagentContract: perAgentBudgetTokens must be a positive number (RT_E_VALIDATION)");
+    throw Object.assign(
+      new Error("createSubagentContract: perAgentBudgetTokens must be a positive number (RT_E_VALIDATION)"),
+      { code: "RT_E_VALIDATION" },
+    );
   }
   const concurrencyRefusal = subagentConcurrencyRefusal(deps.maxConcurrency ?? SUBAGENT_MAX_CONCURRENCY);
   if (concurrencyRefusal) {
-    throw new Error(`createSubagentContract: ${concurrencyRefusal.error} (${concurrencyRefusal.code})`);
+    throw Object.assign(
+      new Error(`createSubagentContract: ${concurrencyRefusal.error} (${concurrencyRefusal.code})`),
+      { code: concurrencyRefusal.code },
+    );
   }
   const maxConcurrency = deps.maxConcurrency ?? SUBAGENT_MAX_CONCURRENCY;
   const now = deps.now ?? (() => Date.now());

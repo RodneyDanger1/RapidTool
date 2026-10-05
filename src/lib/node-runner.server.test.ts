@@ -187,6 +187,27 @@ describe("runNodeBounded preserves multibyte output across pipe chunks", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// fixes/346 C3 — the timeout floor: a positive sub-millisecond budget (0.5ms)
+// used to `Math.floor` to 0, so `setTimeout(fn, 0)` killed the run on the first
+// tick and reported "killed after 0s" — a positive ask became an instant
+// timeout. The floor is now 1ms (mirrors the probe.ts floor), while a finite
+// in-range value still rides through and the >32-bit ceiling stays clamped.
+// ---------------------------------------------------------------------------
+describe("runNodeBounded timeout sanitization (346 C3)", () => {
+  it("a positive sub-millisecond budget floors to 1ms, never setTimeout(0) 'after 0s'", async () => {
+    if (!runnerAvailable()) return;
+    // A 1ms budget is genuinely too short for node startup, so the run times
+    // out either way; the regression is the FLOOR: 0.5 used to floor to 0 and
+    // report a fake "killed after 0s" for a positive budget.
+    const res = await runNodeBounded("console.log('sub-ms')", { timeoutMs: 0.5 });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, "timeout");
+    if (res.ok) return;
+    assert.doesNotMatch(res.error ?? "", /after 0s/, `a positive budget must not report 0s: ${res.error}`);
+  });
+});
+
 describe("runNodeBounded advertises sandbox:false (not a security sandbox)", () => {
   it("ok envelope carries sandbox:false — never true", async () => {
     if (!runnerAvailable()) return;

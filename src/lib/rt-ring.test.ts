@@ -200,6 +200,18 @@ test("hydrate clamps unknown stall.class to step-overdue (never trusts junk enum
   assert.equal(ring.stall!.projectId, "p");
 });
 
+test("hydrate coerces a non-finite stall.since/stepElapsedMs to 0 (JSON 1e999 parses to Infinity)", () => {
+  // JSON cannot spell NaN, but a hostile/foreign blob can carry `1e999`, which
+  // JSON.parse returns as Infinity. Every sibling coercion in rtHydrate guards
+  // finiteness; these two did not, leaking an Infinity latch to the rail's
+  // agoLabel (and any elapsed arithmetic).
+  const raw = `{"sessionId":"s-stall","rows":[],"stall":{"projectId":"p","since":1e999,"stepElapsedMs":1e999,"class":"step-overdue"}}`;
+  const ring = rtHydrate(raw);
+  assert.ok(ring.stall);
+  assert.equal(ring.stall!.since, 0, "a non-finite `since` floors to 0, not Infinity");
+  assert.equal(ring.stall!.stepElapsedMs, 0, "a non-finite `stepElapsedMs` floors to 0, not Infinity");
+});
+
 // ---------------------------------------------------------------------------
 // fixes/309 A2 — M3-01…07 hostile-input throw guards. Repros from
 // ~/rt308_m3/hostile1.ts; each pin asserts the guarded (throw-free) outcome.

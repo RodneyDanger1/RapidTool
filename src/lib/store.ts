@@ -497,6 +497,29 @@ export function staleEmitStep(prev: boolean, staleNow: boolean): { emit: boolean
   return { emit: staleNow && !prev, next: staleNow };
 }
 
+/** JSON for an object with recursively key-SORTED objects, so two rows with the
+ *  same content but a different literal field order hash identically. Used for
+ *  the concurrent-writer union keys (fixes/115 H-06); a row that is not a plain
+ *  JSON value serializes to "" rather than throwing into the commit path. */
+function canonicalKey(value: unknown): string {
+  const sort = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(sort);
+    if (v && typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+        out[k] = sort((v as Record<string, unknown>)[k]);
+      }
+      return out;
+    }
+    return v;
+  };
+  try {
+    return JSON.stringify(sort(value)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 /**
  * fixes/115 H-06: union engine-owned rows a CONCURRENT writer appended while an
  * async step was in flight into the step's committed project. `stepInput` is
@@ -518,10 +541,19 @@ function rebaseConcurrentEngine(committed: Project, stepInput: Project, live: Pr
   const prevArtifactIds = idsOf(stepInput.artifacts);
   const prevDecisionIds = idsOf(stepInput.decisions);
   const prevMemoryIds = idsOf(stepInput.memory);
-  const logKey = (l: JsonLog): string => `${l.ts}:${l.event}`;
+  // A log row's key must be INJECTIVE: the old `${ts}:${event}` collapsed two
+  // distinct concurrent rows written in the same ms with the same event but a
+  // different detail, so both were treated as already-seen and dropped. A
+  // key-sorted JSON of the whole row distinguishes every field while staying
+  // idempotent across re-applies (a merged row re-serializes identically).
+  const logKey = (l: JsonLog): string => canonicalKey(l);
   const prevLogKeys = new Set((stepInput.logs ?? []).map(logKey));
+  // The item-url list is deduped + sorted (deliberately order-insensitive), but
+  // it must be encoded injectively: joining with "\n" made `items: []` and
+  // `items: [{url: ""}]` collide. JSON.stringify of the list keeps the two
+  // distinct (`[]` vs `[""]`) without making the key order-sensitive.
   const urlsOf = (items: readonly { url: string }[] | undefined): string =>
-    [...new Set((items ?? []).map((i) => i.url))].sort().join("\n");
+    JSON.stringify([...new Set((items ?? []).map((i) => i.url))].sort());
   const researchKey = (e: ResearchCorpusEntry): string => `${e.query}\u0000${urlsOf(e.items)}`;
   const prevResearchKeys = new Set((stepInput.research ?? []).map(researchKey));
   const unseen = <T extends { id: string }>(rows: T[] | undefined, prev: Set<string>): T[] =>

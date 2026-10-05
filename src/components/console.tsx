@@ -1099,7 +1099,17 @@ function WildConsole({ project }: { project: Project }) {
   const running = wild.run?.active === true && !wildPaused(wild.run);
   const [feed, setFeed] = useState<WildEntryView[]>([]);
   const [note, setNote] = useState<string | null>(null);
+  /** 346-C5: the strip note is shared by failures AND the successful stop
+   *  confirmation. Tone it by what it is — a consumed failure is a danger
+   *  alert, the stop confirmation is a plain status. Before this every note
+   *  ("Wild run stopped.") rendered `role="alert" text-danger`. */
+  const [noteIsError, setNoteIsError] = useState(true);
   const [busy, setBusy] = useState<"pause" | "resume" | "stop" | null>(null);
+  /** Every failure note goes through here so its tone can never be dropped. */
+  const setNoteErr = (text: string) => {
+    setNoteIsError(true);
+    setNote(text);
+  };
   const [clock, setClock] = useState(() => Date.now());
   // Incremental cursors — the strip only re-renders on real activity.
   const seenLast = useRef<string | null>(null);
@@ -1323,7 +1333,7 @@ function WildConsole({ project }: { project: Project }) {
         void useRapid.getState().startWildRun(projectId).then(
           (res) => {
             if (!res.ok)
-              setNote(
+              setNoteErr(
                 codedFailureText(
                   res.error && res.error.length > 0 ? res.error : "Could not resume the wild run.",
                   res.code,
@@ -1331,7 +1341,7 @@ function WildConsole({ project }: { project: Project }) {
               );
           },
           (errCaught: unknown) => {
-            setNote(errCaught instanceof Error ? errCaught.message : String(errCaught));
+            setNoteErr(errCaught instanceof Error ? errCaught.message : String(errCaught));
           },
         );
         setNote(null);
@@ -1345,7 +1355,7 @@ function WildConsole({ project }: { project: Project }) {
         setNote(null);
       }
     } catch (errCaught) {
-      setNote(errCaught instanceof Error ? errCaught.message : String(errCaught));
+      setNoteErr(errCaught instanceof Error ? errCaught.message : String(errCaught));
     } finally {
       setBusy(null);
     }
@@ -1355,9 +1365,10 @@ function WildConsole({ project }: { project: Project }) {
     setBusy("stop"); // PB-05a: the Stop button gets its own busy mode
     try {
       useRapid.getState().stopWildRun(projectId);
+      setNoteIsError(false); // success confirmation, not an error
       setNote("Wild run stopped.");
     } catch (errCaught) {
-      setNote(errCaught instanceof Error ? errCaught.message : String(errCaught));
+      setNoteErr(errCaught instanceof Error ? errCaught.message : String(errCaught));
     } finally {
       setBusy(null);
     }
@@ -1454,7 +1465,10 @@ function WildConsole({ project }: { project: Project }) {
       </div>
 
       {note ? (
-        <p role="alert" className="mt-2 font-mono text-xs leading-relaxed text-danger">
+        <p
+          role={noteIsError ? "alert" : "status"}
+          className={`mt-2 font-mono text-xs leading-relaxed ${noteIsError ? "text-danger" : "text-muted"}`}
+        >
           {note}
         </p>
       ) : null}
@@ -3686,8 +3700,18 @@ export function RunScreen({ id }: { id: string }) {
                 </Tabs.List>
                 <button
                   type="button"
-                  onClick={() => setAdvancedOpen((v) => !v)}
+                  /* 346-C5: derive the next state from the VISIBLE tier (`showAdvanced`),
+                     not the user flag alone. While an advanced panel is active the tier is
+                     force-open (`activeIsAdvanced`), so `!advancedOpen` read "Fewer panels"
+                     and then SET the flag true — the opposite of the label; switching back to
+                     a primary panel left the tier expanded. Next = !showAdvanced matches the
+                     label and the documented pre-collapse. When the tier is force-open and
+                     the user has not expanded it, the click is a no-op, so the control is
+                     exposed as aria-disabled rather than pretending to collapse. */
+                  onClick={() => setAdvancedOpen((v) => !(v || activeIsAdvanced))}
                   aria-expanded={showAdvanced}
+                  aria-controls="advanced-panels"
+                  aria-disabled={activeIsAdvanced && !advancedOpen ? true : undefined}
                   title={
                     activeIsAdvanced && !advancedOpen
                       ? "The open panel lives in this tier, so its trigger stays visible until you switch back to a primary panel — this pre-collapses the section for when you do."
@@ -3703,7 +3727,11 @@ export function RunScreen({ id }: { id: string }) {
                 </button>
               </div>
               {showAdvanced ? (
-                <Tabs.List aria-label={tabListLabel("advanced")} className="mt-1 flex flex-wrap gap-1">
+                <Tabs.List
+                  id="advanced-panels"
+                  aria-label={tabListLabel("advanced")}
+                  className="mt-1 flex flex-wrap gap-1"
+                >
                   {RUN_TABS.filter((t) => t.tier === "advanced").map((t) => (
                     <RunTabTrigger key={t.id} tab={t} />
                   ))}
@@ -5116,7 +5144,7 @@ function RuntimeLogPane({ project }: { project: Project }) {
         <p className="text-muted">
           Runtime telemetry — uncaught errors, rejections, boundary crashes, persist failures and
           watchdogs. Ring: {snap.stats.rows} row(s) · {snap.stats.criticalCount} critical · last
-          heartbeat {snap.ring.lastHeartbeat?.ts ?? null}
+          heartbeat {snap.ring.lastHeartbeat ? `${agoLabel(snap.ring.lastHeartbeat.ts)} ago` : "none"}
         </p>
         <button
           type="button"
@@ -5796,6 +5824,11 @@ function DesignPane({ project }: { project: Project }) {
   const [copiedCss, setCopiedCss] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const flashTs = useRef(0);
+  /** 346-C5: the CSS-variable flash needs its own latest-action guard, exactly
+   *  like `flashToken`/`flashCopied`. Without it a second copy's "Copied CSS"
+   *  was cleared by the FIRST timer ~1.6 s in, so the toast vanished while the
+   *  newer copy was still the latest action. */
+  const cssFlashTs = useRef(0);
 
   const view = useMemo(() => loadDesignView(project), [project]);
   const cssVars = useMemo(() => cssVarsText(view), [view]);
@@ -5830,8 +5863,11 @@ function DesignPane({ project }: { project: Project }) {
     setError(null);
     try {
       await navigator.clipboard.writeText(cssVars);
+      const my = ++cssFlashTs.current;
       setCopiedCss(true);
-      window.setTimeout(() => setCopiedCss(false), 1600);
+      window.setTimeout(() => {
+        if (cssFlashTs.current === my) setCopiedCss(false); // latest copy only
+      }, 1600);
     } catch {
       setError("Clipboard blocked — unable to copy the CSS variables.");
     }

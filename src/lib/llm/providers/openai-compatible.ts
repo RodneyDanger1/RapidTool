@@ -60,6 +60,7 @@
  */
 
 import {
+  MAX_PROVIDER_TIMEOUT_MS,
   TRANSIENT_RETRY_STATUS,
   cutMarked,
   isInsufficientFundsText,
@@ -437,9 +438,13 @@ async function completeOpenAiCompatibleInner(
     };
   }
 
+  // 346 C3: a FINITE value past setTimeout's 32-bit ceiling is clamped — Node
+  // fires a larger delay at 1ms (`TimeoutOverflowWarning`), so an unclamped
+  // large budget was an instant "timed out after Ns" the caller never asked for
+  // (the same class the DeepSeek adapter clamps).
   const timeoutMs =
     typeof opts.timeoutMs === "number" && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
-      ? opts.timeoutMs
+      ? Math.min(opts.timeoutMs, MAX_PROVIDER_TIMEOUT_MS)
       : OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_MS;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];

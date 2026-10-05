@@ -91,6 +91,13 @@ const DEFAULT_MAX_TOKENS_PRO = 8192;
 const TIMEOUT_FLASH_MS = 20_000;
 const TIMEOUT_PRO_MS = 60_000;
 
+/** setTimeout's overflow ceiling (32-bit signed ms). A LARGER finite value
+ *  passes `Number.isFinite`/`> 0` but Node clamps the delay to 1ms and warns
+ *  (`TimeoutOverflowWarning`) — so a caller's "no timeout" budget became an
+ *  immediate abort (346 C3). Shared by both provider adapters so the ceiling
+ *  can never drift (mirrors `websearch.server.ts` / node-runner's MAX_TIMER_MS). */
+export const MAX_PROVIDER_TIMEOUT_MS = 2_147_483_647;
+
 /** fixes/121-style long-generation budget (research/99 §2; fixes/129): the
  *  20s flash default aborts large JSON generations (3000-token expansions,
  *  crew architect/coder 8k-token turns) mid-flight. Callers whose output
@@ -440,11 +447,13 @@ async function completeDeepSeekInner(
   // first tick (`setTimeout(fn, 0)`/NaN), so a buggy caller's 0 produced an
   // immediate "timed out after 0s" the caller never asked for. Mirror the
   // OpenAI-compatible adapter: only a positive finite number is honored, else
-  // the per-tier default applies.
+  // the per-tier default applies. 346 C3: a FINITE value past setTimeout's
+  // 32-bit ceiling is clamped (Node would otherwise fire it at 1ms), so a large
+  // budget stays a real timer instead of an instant abort.
   const tierTimeoutMs = isPro ? TIMEOUT_PRO_MS : TIMEOUT_FLASH_MS;
   const timeoutMs =
     typeof opts.timeoutMs === "number" && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
-      ? opts.timeoutMs
+      ? Math.min(opts.timeoutMs, MAX_PROVIDER_TIMEOUT_MS)
       : tierTimeoutMs;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];

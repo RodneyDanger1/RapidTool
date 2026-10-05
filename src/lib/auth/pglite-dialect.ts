@@ -65,6 +65,9 @@ class LazyPGliteDriver implements Driver {
 
   async releaseConnection(connection: DatabaseConnection): Promise<void> {
     if (connection !== this.connection) {
+      // Internal Kysely driver-contract invariant (the pool handed back a
+      // connection it never issued); left bare deliberately — it is not a
+      // surfaced domain failure a machine caller can act on.
       throw new Error("Invalid connection");
     }
     const next = this.queue.shift();
@@ -140,6 +143,8 @@ class PGliteConnection implements DatabaseConnection {
     chunkSize: number,
   ): AsyncIterableIterator<QueryResult<O>> {
     if (!Number.isInteger(chunkSize) || chunkSize <= 0) {
+      // Internal Kysely driver-contract invariant (Kysely always passes a
+      // positive integer); left bare deliberately — not a surfaced failure.
       throw new Error("chunkSize must be a positive integer");
     }
     const result = await this.client.query(compiledQuery.sql, [

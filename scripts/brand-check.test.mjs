@@ -235,6 +235,13 @@ test("parseBrandCheckArgs takes --game, --placeholder-ok and --root, and rejects
   const missingRoot = parseBrandCheckArgs(["--root"]);
   assert.ok(missingRoot.error, "--root needs a value");
   assert.match(missingRoot.error, /--root needs a directory/);
+  // A flag-looking token after --root is a MISSING value, never the root:
+  // pre-fix `--root --game` swallowed --game and silently checked "--game".
+  const swallowedGame = parseBrandCheckArgs(["--root", "--game"]);
+  assert.ok(swallowedGame.error, "--root must not swallow a following flag as its directory");
+  assert.match(swallowedGame.error, /--root needs a directory/);
+  const swallowedRoot = parseBrandCheckArgs(["--root", "--placeholder-ok"]);
+  assert.ok(swallowedRoot.error, "--root must not swallow any following flag as its directory");
   const canvas = parseBrandCheckArgs(["--canvas"]);
   assert.ok(canvas.error, "--canvas is not a known flag");
   assert.match(canvas.error, /unexpected argument: --canvas/);

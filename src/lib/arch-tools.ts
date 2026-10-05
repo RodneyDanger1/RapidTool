@@ -258,15 +258,17 @@ export function dependencyGraph(files: ScaffoldFileLike[]): DependencyGraph {
  * Deterministic: no dates, ids or hashes — numbering and file naming are the
  * caller's job (the G-32 CLI/headless layer). `consequences` may be one line
  * or newline-separated; each non-empty line becomes a bullet.
- * Throws TypeError on empty title/context/decision (usage errors).
+ * Throws TypeError on empty title/context/decision (usage errors), each
+ * carrying `code: "RT_E_VALIDATION"` so an orchestrator classifies the refusal
+ * on the machine code without string-matching the message.
  */
 export function adrRecord(title: string, context: string, decision: string, consequences: string): string {
   const t = title.trim();
   const c = context.trim();
   const d = decision.trim();
-  if (!t) throw new TypeError("adrRecord: title must be non-empty");
-  if (!c) throw new TypeError("adrRecord: context must be non-empty");
-  if (!d) throw new TypeError("adrRecord: decision must be non-empty");
+  if (!t) throw Object.assign(new TypeError("adrRecord: title must be non-empty"), { code: "RT_E_VALIDATION" });
+  if (!c) throw Object.assign(new TypeError("adrRecord: context must be non-empty"), { code: "RT_E_VALIDATION" });
+  if (!d) throw Object.assign(new TypeError("adrRecord: decision must be non-empty"), { code: "RT_E_VALIDATION" });
   const bullets = consequences
     .trim()
     .split("\n")

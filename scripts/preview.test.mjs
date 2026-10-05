@@ -7,6 +7,7 @@ import {
   parsePid,
   parsePreviewArgs,
   previewOwners,
+  resolveReadyTimeoutMs,
   stopOutcome,
   terminatePids,
 } from "./preview.mjs";
@@ -30,6 +31,22 @@ test("parsePreviewArgs rejects missing, unknown and extra arguments", () => {
   const extra = parsePreviewArgs(["restart", "--force"]);
   assert.ok(extra.error, "a trailing argument must be refused");
   assert.match(extra.error, /unexpected argument: --force/);
+});
+
+test("resolveReadyTimeoutMs falls back to the default for a junk/absent/preview-negative env", () => {
+  // Pre-fix `Number("abc")` was NaN → a NaN ready deadline → waitForReady never
+  // polled and restart reported "nothing answered ... within NaNs".
+  assert.equal(resolveReadyTimeoutMs("abc"), 60000);
+  assert.equal(resolveReadyTimeoutMs(undefined), 60000);
+  assert.equal(resolveReadyTimeoutMs(""), 60000);
+  assert.equal(resolveReadyTimeoutMs("0"), 60000, "a zero/negative ready window is never a useful timeout");
+  assert.equal(resolveReadyTimeoutMs("-5"), 60000);
+  assert.equal(resolveReadyTimeoutMs("Infinity"), 60000);
+  // A real value (numeric string or number) is honoured.
+  assert.equal(resolveReadyTimeoutMs("2500"), 2500);
+  assert.equal(resolveReadyTimeoutMs(1234), 1234);
+  // The fallback is caller-overridable (the constant layer pins 60000).
+  assert.equal(resolveReadyTimeoutMs("abc", 7), 7);
 });
 
 test("parsePid reads a pidfile and rejects junk", () => {

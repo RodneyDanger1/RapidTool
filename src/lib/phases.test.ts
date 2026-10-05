@@ -421,6 +421,30 @@ describe("W51/337-1 phase bounds name PHASE_LAST (never a bare 12)", () => {
       });
     }
   });
+
+  it("A1-15 drift: packet.ts / io.ts / engine.ts name the phase-count authority, never a bare 12/13 string", () => {
+    // The sources outside the bound scrub above carry the same class in
+    // PROSE/schema form (a schema range, a drift message, a seal line). Pin
+    // them so a phase-count change cannot leave a stale literal behind.
+    const forms: [RegExp, string][] = [
+      [/integer 0\.\.12/, "./packet.ts"],
+      [/pipeline phases 0\.\.12/, "./packet.ts"],
+      [/phase\.id >= 12\b/, "./packet.ts"],
+      [/between 0 and 12/, "./io.ts"],
+      [/All 13 phases sealed/, "./engine.ts"],
+      [/all 13 phases sealed/, "./engine.ts"],
+    ];
+    for (const [re, file] of forms) {
+      const lines = readFileSync(new URL(file, import.meta.url), "utf8").split("\n");
+      lines.forEach((line, i) => {
+        assert.equal(
+          re.test(line),
+          false,
+          `${file}:${i + 1} carries bare-literal drift — use the phase-count authority: ${line.trim()}`,
+        );
+      });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   applyVerifyOutcome,
   approve,
+  buildDiagram,
   createProject,
   driveP6Journey,
   emitProject,
@@ -23,6 +24,7 @@ import {
   keyedTrailOutcome,
   landEmittedTree,
   loadProject,
+  mineDir,
   nextAction,
   p6CycleLiveDeps,
   packet,
@@ -41,6 +43,7 @@ import {
   saveProject,
   summary,
   treeRunFailureFiles,
+  vaultSearch,
   wildPauseRun,
   wildResumeRun,
   wildStartHeadless,
@@ -57,6 +60,7 @@ import { checkpointPath, readCheckpoint } from "./checkpoint.server.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { recordSessionSpend, resetSessionBudget, sessionTokenBudget } from "./token-ledger.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
+import { ERROR_CODES } from "./errors.ts";
 import { fnv1a } from "./algorithms.ts";
 import type { PhaseId, Project, WildPlan } from "./types.ts";
 import { applyPhaseResult } from "./engine.ts";
@@ -4825,6 +4829,55 @@ describe("346 E1 A1-04 - verifyGeneratedSource feeds the A7 oracle seeds", () =>
       globalThis.fetch = realFetch;
       if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
       else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W60/346-6 C1 — every surfaced headless refusal carries a registered RT_E
+// code (or the typed ReportRejectedError the classifier maps by name), so a
+// machine caller branches on the code instead of matching refusal prose.
+// ---------------------------------------------------------------------------
+describe("C1 — surfaced headless refusals are coded", () => {
+  it("headless.ts carries no bare `throw new Error(` (every surfaced refusal is coded)", () => {
+    const src = readFileSync(new URL("./headless.ts", import.meta.url), "utf8");
+    assert.equal(src.includes("throw new Error("), false, "an uncoded surfaced throw remains in headless.ts");
+    assert.ok(src.includes("throw new ReportRejectedError("), "the report seam keeps its typed error");
+  });
+
+  it("the reachable refusals carry their codes (createProject / approve / vaultSearch / verify / buildDiagram / mineDir)", async () => {
+    const codeOf = async (fn: () => unknown): Promise<string | undefined> => {
+      try {
+        await fn();
+      } catch (e) {
+        return (e as { code?: string }).code;
+      }
+      return undefined;
+    };
+    const p = createProject({ brief: FIXTURE_BRIEF });
+    assert.equal(await codeOf(() => createProject({ brief: "  " })), "RT_E_VALIDATION");
+    assert.equal(await codeOf(() => approve(p)), "RT_E_GATE_PENDING");
+    const drifted: Project = {
+      ...p,
+      status: "awaiting_hitl",
+      currentPhase: 0 as Project["currentPhase"],
+      hitl: { phase: 3 as Project["currentPhase"], title: "t", prompt: "?", stakes: "s" },
+    };
+    assert.equal(await codeOf(() => approve(drifted)), "RT_E_PHASE_ILLEGAL");
+    assert.equal(await codeOf(() => vaultSearch(p, "  ")), "RT_E_VALIDATION");
+    assert.equal(await codeOf(() => verifyGeneratedSource(p)), "RT_E_PHASE_ILLEGAL");
+    assert.equal(await codeOf(() => buildDiagram(p, "bogus")), "RT_E_VALIDATION");
+    const dir = mkdtempSync(join(tmpdir(), "headless-coded-"));
+    try {
+      const file = join(dir, "a.txt");
+      writeFileSync(file, "x", "utf8");
+      const code = await codeOf(() => mineDir(file));
+      assert.ok(code !== undefined && code.startsWith("RT_E_"), `mineDir read refusal is coded: ${code}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    for (const c of ["RT_E_VALIDATION", "RT_E_GATE_PENDING", "RT_E_PHASE_ILLEGAL"]) {
+      assert.ok((ERROR_CODES as readonly string[]).includes(c), `${c} is registered`);
     }
   });
 });

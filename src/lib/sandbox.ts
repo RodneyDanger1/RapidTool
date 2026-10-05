@@ -1,4 +1,5 @@
 import { canonicalStem } from "./algorithms.ts";
+import type { ErrorCode } from "./errors.ts";
 
 // A02 (deep-audit-01): the denylist below must target ACTUAL primitive /
 // identifier usage in code — never engine-injected TEXT inside string literals
@@ -136,7 +137,16 @@ export function maskLiteralsAndComments(src: string): string {
   return out;
 }
 
-export type SandboxResult = { ok: boolean; detail: string };
+/**
+ * 346 C3: the surfaced failure carries its machine class. `code` is PRESENT on
+ * every `ok:false` envelope (errors.ts registry) and ABSENT on success. NOTE:
+ * the `throw new Error(...)` occurrences inside `buildPhase6Module` /
+ * `healSource` / `sandboxWorkerSource` are EMITTED PRODUCT / worker-body source,
+ * not sandbox machine failures — they stay bare (RT_E_* is the tool's error
+ * namespace, and those exact bytes are pinned by checked-in build artifacts).
+ * The failures a CALLER sees are these envelopes, and those are coded here.
+ */
+export type SandboxResult = { ok: boolean; detail: string; code?: ErrorCode };
 
 export function runGenerated(source: string): SandboxResult {
   // Honest sync gate (B-01): the synchronous path is a bounded engine-template
@@ -153,11 +163,11 @@ export function runGenerated(source: string): SandboxResult {
   // bounded, NOT a security sandbox). The message text is retained because the
   // worker route remains the correct browser-side answer when one lands.
   if (!source.startsWith("const JOBS = [") || !source.includes("function test_no_skip")) {
-    return { ok: false, detail: "non-template source requires runSandboxed()" };
+    return { ok: false, detail: "non-template source requires runSandboxed()", code: "RT_E_VALIDATION" };
   }
   // A02: scan code only — engine-injected string literals / comments are prose.
   if (FORBIDDEN.test(maskLiteralsAndComments(source))) {
-    return { ok: false, detail: "Forbidden primitive in generated module." };
+    return { ok: false, detail: "Forbidden primitive in generated module.", code: "RT_E_VALIDATION" };
   }
   try {
     const body = `${source}\n;if (typeof test_happy === "function") test_happy();\nif (typeof test_no_skip === "function") test_no_skip();`;
@@ -166,7 +176,9 @@ export function runGenerated(source: string): SandboxResult {
     fn();
     return { ok: true, detail: "tests.pass" };
   } catch (err) {
-    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+    // The generated module's own self-test threw — the sync bounded runner
+    // executed and failed (never an input-validation refusal).
+    return { ok: false, detail: err instanceof Error ? err.message : String(err), code: "RT_E_RUNNER_FAILED" };
   }
 }
 
@@ -445,7 +457,14 @@ export async function runSandboxed(
   const workerFactory =
     opts?.workerFactory ??
     ((url: string): SandboxWorker => {
-      if (typeof Worker === "undefined") throw new Error("worker unavailable");
+      if (typeof Worker === "undefined") {
+        // Coded (346 C3): the one throw this module executes itself, so a caller
+        // reading the caught error still sees the machine class. runSandboxed
+        // maps it to the same coded `worker unavailable` envelope below.
+        const err = new Error("worker unavailable") as Error & { code: ErrorCode };
+        err.code = "RT_E_RUNNER_UNAVAILABLE";
+        throw err;
+      }
       // Adapter: the DOM Worker's own onmessage is MessageEvent-typed; expose the
       // narrow {data}-shaped surface this module's protocol actually uses.
       const real = new Worker(url);
@@ -465,7 +484,7 @@ export async function runSandboxed(
       return adapted;
     });
   if (typeof source !== "string" || source.length === 0) {
-    return { ok: false, detail: "empty source" };
+    return { ok: false, detail: "empty source", code: "RT_E_VALIDATION" };
   }
   let worker: SandboxWorker | null = null;
   let blobUrl: string | null = null;
@@ -489,7 +508,7 @@ export async function runSandboxed(
         // Blob URLs unsupported (odd host) — nothing to revoke.
       }
     }
-    return { ok: false, detail: "worker unavailable" };
+    return { ok: false, detail: "worker unavailable", code: "RT_E_RUNNER_UNAVAILABLE" };
   }
   const id = ++sandboxRunId;
   const w: SandboxWorker = worker;
@@ -515,25 +534,27 @@ export async function runSandboxed(
       resolve(result);
     };
     timer = setTimeout(() => {
-      settle({ ok: false, detail: `killed after ${timeoutMs / 1000}s` });
+      settle({ ok: false, detail: `killed after ${timeoutMs / 1000}s`, code: "RT_E_RUNNER_FAILED" });
     }, timeoutMs);
     w.onmessage = (e: { data: unknown }) => {
       const data = e.data as { id?: unknown; ok?: unknown; detail?: unknown } | null;
       if (!data || typeof data !== "object" || data.id !== id) return; // stale-worker guard
+      const ok = data.ok === true;
       settle({
-        ok: data.ok === true,
+        ok,
         detail: typeof data.detail === "string" ? data.detail : "unknown result",
+        ...(ok ? {} : { code: "RT_E_RUNNER_FAILED" as const }),
       });
     };
     // A14: dead-before-reply workers (CSP block, blob parse failure) settle
     // fast with an honest message instead of burning the whole timeout.
     w.onerror = () => {
-      settle({ ok: false, detail: "worker crashed" });
+      settle({ ok: false, detail: "worker crashed", code: "RT_E_RUNNER_FAILED" });
     };
     try {
       w.postMessage({ id, code: source });
     } catch {
-      settle({ ok: false, detail: "worker unavailable" });
+      settle({ ok: false, detail: "worker unavailable", code: "RT_E_RUNNER_UNAVAILABLE" });
     }
   });
 }

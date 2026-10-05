@@ -132,6 +132,19 @@ describe("subagent contract — caps", () => {
     );
   });
 
+  it("the constructor refusals carry .code (the prose tag alone is not a machine channel)", () => {
+    // Before this pin the message said "(RT_E_VALIDATION)" but no `.code` was
+    // attached, so classifyError(…, fallback) returned the fallback — the
+    // refusal read as RT_E_UNKNOWN to a caller that branches on the code.
+    for (const bad of [
+      () => createSubagentContract({ complete: undefined as never }),
+      () => createSubagentContract({ complete: async () => okReply("x"), perAgentBudgetTokens: 0 }),
+      () => createSubagentContract({ complete: async () => okReply("x"), maxConcurrency: 99 }),
+    ]) {
+      assert.throws(bad, (err: unknown) => (err as { code?: string }).code === "RT_E_VALIDATION");
+    }
+  });
+
   it("per-agent budget: an over-cap budget is refused PRE-dispatch with RT_E_BUDGET_EXHAUSTED", async () => {
     const { contract, seen } = harness({ cap: 100 });
     const report = await contract.runBatch([task("t1", { budgetTokens: 101 })]);

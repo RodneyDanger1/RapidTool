@@ -520,15 +520,19 @@ commit, files, foreign }`; a refusal flips the envelope to `ok: false` + its cod
 reason (`RT_E_GIT_UNAVAILABLE`, `RT_E_FOREIGN_FILES`, …) and exit 1 — **the emitted
 tree still exists on disk**, so the failure is in delivery, never in the build.
 
-> **Ordering guard (`emit --run --git`) — W346 · P0-3.** When `--git` is combined
-> with `--run`, the just-computed run verdict gates the commit: a RED `--run`
-> verdict WITHHOLDS it — the envelope stays `ok:false` + `RT_E_TREE_RUN_FAILED`,
-> `git` reports `{ committed:false, skipped:true, reason:"tree-run-red",
-> code:"RT_E_TREE_RUN_FAILED" }` and a loud `error`, and the emitted tree is still
-> written to disk (delivery withheld, the build kept). A GREEN `--run` verdict
-> commits exactly as before. `emit --git` WITHOUT `--run` is unchanged: it cannot
-> consult a verdict it never computed, so it lands the commit as today. This is
-> the CLI-level mirror of the deliver step's verify-before-commit ordering in
+> **Ordering guard (`emit --git` + a judging leg) — W346 · P0-3 + L4.** A commit
+> is delivered ONLY when every judging leg REQUESTED in this invocation is green;
+> a red/suppressed one WITHHOLDS it — the envelope stays `ok:false`, `git` reports
+> `{ committed:false, skipped:true, reason, code }` and a loud `error`, and the
+> emitted tree is still written to disk (delivery withheld, the build kept). The
+> reason names the leg: `tree-run-red` (a red `--run`, code
+> `RT_E_TREE_RUN_FAILED`; W346 · P0-3), `check-red` (a red `--check`, code
+> `RT_E_CHECK_FAILED`), `verify-kind-red` (a red `--verify-kind`, code
+> `RT_E_VERIFY_KIND_FAILED`), or `foreign-files-left-in-place` (a supported
+> quarantine left the tree mixed). A GREEN leg commits exactly as before. `emit
+> --git` WITHOUT any judging leg is unchanged: it cannot consult a verdict it
+> never computed, so it lands the commit as today. This is the CLI-level mirror of
+> the deliver step's verify-before-commit ordering in
 > [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs).
 
 `--force` admits an emit into a folder that already holds foreign files — without it the

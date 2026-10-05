@@ -523,7 +523,7 @@ export function importProject(
     // drift class — the sibling check at :473 already keys off PHASE_COUNT).
     p.currentPhase > PHASE_COUNT - 1
   ) {
-    return { ok: false, error: "Project currentPhase must be an integer between 0 and 12." };
+    return { ok: false, error: `Project currentPhase must be an integer between 0 and ${PHASE_COUNT - 1}.` };
   }
   if (!Array.isArray(p.artifacts)) {
     return { ok: false, error: "Project artifacts must be an array." };

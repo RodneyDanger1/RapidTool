@@ -1218,6 +1218,22 @@ export function lessonEvidenceDetail(
 }
 
 /**
+ * The lesson-injection sort order: score descending, then id ascending (the
+ * findPatterns tiebreak convention). TOTAL and SYMMETRIC: equal rows compare
+ * 0 (the old inline expression returned 1 for `a.id === b.id`, an invalid
+ * comparator), and non-finite scores order below finite ones instead of
+ * producing a NaN comparison. Pure; exported so the contract is directly
+ * pinned (selectLessons' stability can mask an invalid comparator on V8).
+ */
+export function compareLessons(a: MemoryEntry, b: MemoryEntry): number {
+  const as = Number.isFinite(a.score) ? a.score : Number.NEGATIVE_INFINITY;
+  const bs = Number.isFinite(b.score) ? b.score : Number.NEGATIVE_INFINITY;
+  if (as > bs) return -1;
+  if (as < bs) return 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/**
  * Ranked lesson selection for injection (98 §5): rows tagged LESSON_TAG,
  * optionally class-filtered, phase-matched first — when NO row matches the
  * requested phase, the pool falls back to all eligible lesson rows
@@ -1243,9 +1259,7 @@ export function selectLessons(
   const phaseRows = eligible.filter((m) => m.phase === phase);
   const pool = phaseRows.length > 0 ? phaseRows : eligible;
   const cap = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0;
-  return [...pool]
-    .sort((a, b) => (b.score - a.score !== 0 ? b.score - a.score : a.id < b.id ? -1 : 1))
-    .slice(0, cap);
+  return [...pool].sort(compareLessons).slice(0, cap);
 }
 
 /**

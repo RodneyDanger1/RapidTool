@@ -535,3 +535,67 @@ describe("identifierHits (322 X1 · P6-B stem tolerance)", () => {
     assert.deepEqual(identifierHits(["board"], "function createBoard() {}"), ["board"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// fixes/346 C3 — the sandbox's SURFACED failures carry a registry code. The
+// `throw new Error(...)` sites inside emitted template/worker source are
+// product code (pinned by checked-in artifacts), not sandbox machine failures;
+// what a caller receives is a SandboxResult, and every ok:false envelope now
+// names its class (errors.ts). Success stays code-free.
+// ---------------------------------------------------------------------------
+describe("sandbox failure envelopes carry an RT_E code (346 C3)", () => {
+  it("runGenerated: refusals and an executed-test failure are coded; success is not", () => {
+    assert.deepEqual(runGenerated('console.log("x");'), {
+      ok: false,
+      detail: NON_TEMPLATE_MSG,
+      code: "RT_E_VALIDATION",
+    });
+    assert.deepEqual(
+      runGenerated('const JOBS = ["a"];\nfunction test_no_skip() {}\nprocess.exit(0);'),
+      { ok: false, detail: "Forbidden primitive in generated module.", code: "RT_E_VALIDATION" },
+    );
+    const failed = runGenerated(
+      'const JOBS = ["a"];\nfunction test_happy() { throw new Error("boom"); }\nfunction test_no_skip() {}',
+    );
+    assert.equal(failed.ok, false);
+    assert.equal(failed.code, "RT_E_RUNNER_FAILED");
+    const okRun = runGenerated(buildPhase6Module({ name: "demo", jobs: ["job-a"] }));
+    assert.equal(okRun.ok, true);
+    assert.equal(okRun.code, undefined, "success carries no code");
+  });
+
+  it("runSandboxed: empty source, unavailable worker, timeout, crash and a failed turn are all coded", async () => {
+    const empty = await runSandboxed("");
+    assert.equal(empty.code, "RT_E_VALIDATION");
+
+    const noWorker = await runSandboxed("whatever();", {
+      timeoutMs: 100,
+      workerFactory: () => {
+        throw new Error("no worker");
+      },
+    });
+    assert.equal(noWorker.code, "RT_E_RUNNER_UNAVAILABLE");
+
+    const timedOut = await runSandboxed("while (true) {}", {
+      timeoutMs: 20,
+      workerFactory: () => fakeWorker("silent"),
+    });
+    assert.equal(timedOut.code, "RT_E_RUNNER_FAILED");
+
+    const crashed = await runSandboxed("x", { timeoutMs: 5000, workerFactory: () => fakeWorker("crash") });
+    assert.equal(crashed.code, "RT_E_RUNNER_FAILED");
+
+    const failedTurn = await runSandboxed('function test_happy() { throw new Error("boom-in-worker"); }', {
+      timeoutMs: 2000,
+      workerFactory: () => fakeWorker("eval"),
+    });
+    assert.equal(failedTurn.code, "RT_E_RUNNER_FAILED");
+
+    const passed = await runSandboxed(buildPhase6Module({ name: "demo", jobs: ["job-a"] }), {
+      timeoutMs: 2000,
+      workerFactory: () => fakeWorker("eval"),
+    });
+    assert.equal(passed.ok, true);
+    assert.equal(passed.code, undefined, "success carries no code");
+  });
+});

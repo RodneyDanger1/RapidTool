@@ -2620,6 +2620,52 @@ test("R11-f08 (340-5): a failed quarantine move surfaces quarantineFailed + judg
 });
 
 // ---------------------------------------------------------------------------
+// 346 L4 — the SUPPRESSED --run verdict must not reach the commit. When a
+// forced emit cannot quarantine its foreign survivors, emitProject returns
+// `ok:false` + RT_E_FOREIGN_FILES and names `judgingSkipped`; the CLI answers
+// with an EARLY refusal (no `--run` verdict exists), so the git tail is never
+// reached and NO commit lands over the mixed tree. This pins that live path
+// (the CLI's own `foreignLeftInPlace` git guard is defensive-only: emitProject
+// always returns survivors:[] now, so the branch cannot fire).
+// ---------------------------------------------------------------------------
+test("346 L4 — a quarantine-move failure with `--run --git` lands NO commit (the run verdict is suppressed)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-quarantine-git-"));
+  const env = { ...process.env, DEEPSEEK_API_KEY: "" };
+  for (const key of ["RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  try {
+    const proj = join(cwd, "q.json");
+    rt3405CreateProject(cwd, env, proj);
+    const tree = join(cwd, "tree");
+    mkdirSync(tree, { recursive: true });
+    writeFileSync(join(tree, "CONTAMINANT.txt"), "not authored by the factory\n");
+    writeFileSync(join(tree, ".rapidtool-quarantine"), "blocker\n");
+
+    const emitted = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "emit", "--project", proj, "--out", tree, "--force", "--run", "--git"],
+      { cwd, env, encoding: "utf8", timeout: 300_000, maxBuffer: 64 * 1024 * 1024 },
+    );
+    assert.equal(
+      emitted.status,
+      1,
+      `a failed quarantine move must refuse (exit 1).\nstdout: ${emitted.stdout}\nstderr: ${emitted.stderr}`,
+    );
+    const envelope = JSON.parse(emitted.stdout);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.code, "RT_E_FOREIGN_FILES");
+    assert.match(String(envelope.judgingSkipped), /did not run/);
+    assert.equal(envelope.treeRun, undefined, "the --run leg is suppressed — no green verdict was computed");
+    assert.equal(
+      existsSync(join(tree, ".git")),
+      false,
+      "no commit may land over a mixed tree whose --run verdict was suppressed",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 341-6 (autonomy loop, BEHAVIORAL spawn). The scheduler verb `unattended` was
 // not self-sufficient: it parked at the P4 stock HITL gate on every
 // re-invocation (`steps:0`) because the arm passed `autopilot:true` with no
@@ -2806,6 +2852,19 @@ test("342-5 — a malformed --mcp-call-args is refused coded (exit 1, nothing sp
   assert.match(String(json.error), /--mcp-call-args must be a JSON object/);
 });
 
+test("342-5 — a bare OR empty `--mcp-call` is refused coded (never a silently-ignored flag)", () => {
+  // Pre-fix `--mcp-call=` parsed to "" and was skipped, so doctor ran as a
+  // plain capability pre-flight at exit 0 — the requested call vanished.
+  for (const value of ["--mcp-call", "--mcp-call="]) {
+    const res = spawnDoctor([value], mcpEnv({ RAPIDTOOL_MCP_ENABLED: "1", RAPIDTOOL_MCP_SERVER: process.execPath }));
+    assert.equal(res.status, 1, `${value} must refuse coded.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+    const json = JSON.parse(res.stdout);
+    assert.equal(json.ok, false, `${value} is a refusal envelope`);
+    assert.equal(json.code, "RT_E_VALIDATION");
+    assert.match(String(json.error), /--mcp-call needs a value/);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // fixes/343_3 — the delivery lane's CLI wiring. Source-level pins (the bytes
 // ARE the artifact a reviewer diffs): `emit --git` must read the flag and hand
@@ -2948,6 +3007,92 @@ test(
       assert.equal(gj.ok, true);
       assert.equal(gj.treeRun?.ok, true, "precondition: the green fixture's tree genuinely runs GREEN");
       assert.equal(gj.git?.committed, true, "a green --run --git still lands the commit");
+      assert.equal(existsSync(join(greenDir, ".git")), true, "the green tree's .git exists");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// 346 L4 (autonomy audit re-audit, the P0-3 residual) — the emit --git HONESTY
+// CONTRACT for the OTHER judging legs. P0-3 consulted only the --run verdict,
+// so `emit --check --git` on a RED tree still landed a commit: --run was never
+// requested, runVerdict stayed null, and the git tail ran unconditionally — a
+// commit offered as evidence of a tree THIS invocation had just reported
+// unparseable. The contract now: a commit lands ONLY when every judging leg
+// REQUESTED in this invocation is green; `--git` ALONE is unchanged (there is
+// no verdict to consult). Real keyless emits + REAL git, no mocks.
+// ---------------------------------------------------------------------------
+test(
+  "346 L4 — `emit --check --git` withholds a red-check commit; `--git` alone and a green `--check --git` are unchanged",
+  { skip: GIT_AVAILABLE ? false : "git is not available on this box (the delivery lane needs a real git)", timeout: 300_000 },
+  () => {
+    const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-checkgit-"));
+    const env = { ...process.env, DEEPSEEK_API_KEY: "" };
+    for (const key of ["RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+    const BRIEF = "Build a tiny keyless CLI emit --check --git pin: a project used to prove a red check withholds the commit.";
+    const runNode = (argv) =>
+      spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...argv], {
+        cwd,
+        env,
+        encoding: "utf8",
+        timeout: 300_000,
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    try {
+      // RED fixture: a generatedTree file that genuinely does not parse.
+      const redProj = join(cwd, "red.json");
+      const createdRed = runNode(["create", "--brief", BRIEF, "--name", "L1 Check Red", "--out", redProj]);
+      assert.equal(createdRed.status, 0, `red fixture create failed.\n${createdRed.stdout}\n${createdRed.stderr}`);
+      const red = JSON.parse(readFileSync(redProj, "utf8"));
+      red.generatedTree = [{ path: "src/jobs/track.ts", source: "export const broken: number = ;\n", hash: "deadbeef", attempt: 0 }];
+      writeFileSync(redProj, `${JSON.stringify(red, null, 2)}\n`, "utf8");
+
+      // (1) RED + `--check --git`: the check is red, so NO commit lands.
+      const redDir = join(cwd, "red-checked");
+      const redCheck = runNode(["emit", "--project", redProj, "--out", redDir, "--check", "--git"]);
+      assert.equal(
+        redCheck.status,
+        1,
+        `a red --check --git is a coded refusal at exit 1.\nstdout: ${redCheck.stdout}\nstderr: ${redCheck.stderr}`,
+      );
+      const rj = JSON.parse(redCheck.stdout);
+      assert.equal(rj.ok, false, "a failed check is a refusal envelope");
+      assert.equal(rj.check?.ok, false, "precondition: the emitted tree genuinely fails compile-check");
+      assert.equal(rj.code, "RT_E_CHECK_FAILED", "the refusal keeps the check's own code");
+      assert.equal(rj.git?.committed, false, `a red --check must NOT land a commit: ${JSON.stringify(rj.git)}`);
+      assert.equal(rj.git?.skipped, true, "the withheld commit is explicit on the envelope (git.skipped)");
+      assert.equal(rj.git?.reason, "check-red", "the refusal names the red leg class");
+      assert.ok(String(rj.git?.error).includes("no commit was issued"), `the refusal must be loud: ${rj.git?.error}`);
+      assert.equal(existsSync(join(redDir, ".git")), false, "a red --check --git must leave NO .git on disk");
+      assert.equal(existsSync(join(redDir, "src", "jobs", "track.ts")), true, "the emitted tree is still written");
+
+      // (2) `--git` ALONE on the SAME red fixture: UNCHANGED — no verdict to consult.
+      const redGitDir = join(cwd, "red-git-only");
+      const redGit = runNode(["emit", "--project", redProj, "--out", redGitDir, "--git"]);
+      assert.equal(
+        redGit.status,
+        0,
+        `emit --git WITHOUT a judging leg must stay a clean commit.\nstdout: ${redGit.stdout}\nstderr: ${redGit.stderr}`,
+      );
+      assert.equal(JSON.parse(redGit.stdout).git?.committed, true, "`--git` alone is unchanged");
+      assert.equal(existsSync(join(redGitDir, ".git")), true, "`--git` alone still lands the commit");
+
+      // (3) GREEN + `--check --git`: a clean tree still commits.
+      const greenProj = join(cwd, "green.json");
+      const createdGreen = runNode(["create", "--brief", BRIEF, "--name", "L1 Check Green", "--out", greenProj]);
+      assert.equal(createdGreen.status, 0, `green fixture create failed.\n${createdGreen.stdout}\n${createdGreen.stderr}`);
+      const greenDir = join(cwd, "green-checked");
+      const greenCheck = runNode(["emit", "--project", greenProj, "--out", greenDir, "--check", "--git"]);
+      assert.equal(
+        greenCheck.status,
+        0,
+        `a green --check --git must commit at exit 0.\nstdout: ${greenCheck.stdout}\nstderr: ${greenCheck.stderr}`,
+      );
+      const gj = JSON.parse(greenCheck.stdout);
+      assert.equal(gj.check?.ok, true, "precondition: the green fixture passes compile-check");
+      assert.equal(gj.git?.committed, true, "a green --check --git still lands the commit");
       assert.equal(existsSync(join(greenDir, ".git")), true, "the green tree's .git exists");
     } finally {
       rmSync(cwd, { recursive: true, force: true });

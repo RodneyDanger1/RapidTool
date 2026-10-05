@@ -87,7 +87,11 @@ export function gateKeyResolver(
       }
     }
     if (!key) {
-      throw new Error("no gate identity key matches the token kid");
+      // Coded (RT_E_VALIDATION): the token's `kid` matched no published JWK —
+      // a bad/incomplete token-vs-issuer refusal, not an internal fault.
+      throw Object.assign(new Error("no gate identity key matches the token kid"), {
+        code: "RT_E_VALIDATION",
+      });
     }
     return importJWK(key, "EdDSA");
   };

@@ -33,10 +33,13 @@ describe("db.ts — server-only SQL surface (Neon branch)", () => {
     assert.equal(typeof db.ensureDbReady, "function");
   });
 
-  it("refuses getSql() from browser code (server-only guard)", async () => {
+  it("refuses getSql() from browser code (server-only guard, coded RT_E_INTERNAL)", async () => {
     Object.defineProperty(globalThis, "window", { value: {}, configurable: true });
     try {
-      await assert.rejects(db.getSql(), /server-only/);
+      await assert.rejects(db.getSql(), (err: unknown) => {
+        const e = err as { code?: string; message?: string };
+        return e.code === "RT_E_INTERNAL" && /server-only/.test(e.message ?? "");
+      });
     } finally {
       Reflect.deleteProperty(globalThis, "window");
     }
@@ -55,7 +58,10 @@ describe("db.ts — server-only SQL surface (Neon branch)", () => {
     assert.equal(await db.ensureDbReady(), undefined);
   });
 
-  it("getPglite() refuses when the Neon backend is active", async () => {
-    await assert.rejects(db.getPglite(), /only available on the PGLite fallback/);
+  it("getPglite() refuses when the Neon backend is active (coded RT_E_VALIDATION)", async () => {
+    await assert.rejects(db.getPglite(), (err: unknown) => {
+      const e = err as { code?: string; message?: string };
+      return e.code === "RT_E_VALIDATION" && /only available on the PGLite fallback/.test(e.message ?? "");
+    });
   });
 });

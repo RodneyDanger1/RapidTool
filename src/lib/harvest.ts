@@ -30,6 +30,7 @@
 // TanStack server-fn and throws outside a Start runtime).
 // ---------------------------------------------------------------------------
 import { completeDeepSeek, DEEPSEEK_MODELS, isDeepSeekConfigured } from "./deepseek.server.ts";
+import { boundedInt } from "./bounded-int.ts";
 import { dualChannelFailDetail } from "./errors.ts";
 import { freeWebSearch } from "./websearch.server.ts";
 import { failureSignature, lessonRow } from "./knowledge.ts";
@@ -66,6 +67,10 @@ export const HARVEST_LLM_MAX_QUERIES = 6;
  *  candidate list past it. Exportable like the other bounds — consumers may
  *  persist/search on it. */
 export const HARVEST_MAX_CANDIDATES = 6;
+
+/** setTimeout's overflow ceiling (32-bit signed ms) — a longer delay fires at
+ *  1ms and warns, so a caller's large deadline must be clamped to a real timer. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 export const HARVEST_QUERY_LABEL =
   "queries are derived from the brief (deepseek-v4-flash json:true when configured, deterministic keyword floor otherwise) — not a promise that any repo matches.";
@@ -372,6 +377,26 @@ function clipSnippet(text: string, cap: number): string {
   return `${clean.slice(0, at).trimEnd()}…`;
 }
 
+/**
+ * 346 C3: a fetch leg's non-ok response as a CODED error. `RT_E_RESEARCH_UNAVAILABLE`
+ * is the class the live web-research legs carry (websearch.server.ts maps its
+ * provider HTTP failures to the same code); the `HTTP N` message stays
+ * byte-identical so injected-fake notes/tests are unchanged — only the machine
+ * class is added for a consumer that branches on `.code`.
+ */
+function httpStatusError(status: number): Error & { code: string } {
+  const err = new Error(`HTTP ${status}`) as Error & { code: string };
+  err.code = "RT_E_RESEARCH_UNAVAILABLE";
+  return err;
+}
+
+/** ` [RT_E_…]` for a coded throw, `""` for a prose-only one — appended to the
+ *  harvest notes so a machine caller sees the class without parsing the text. */
+function errCodeSuffix(err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" && /^RT_E_[A-Z0-9_]+$/.test(code) ? ` [${code}]` : "";
+}
+
 async function defaultFetchText(url: string, o: { timeoutMs: number }): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1, o.timeoutMs));
@@ -380,7 +405,7 @@ async function defaultFetchText(url: string, o: { timeoutMs: number }): Promise<
       headers: { "user-agent": UA_HARVEST, accept: "text/plain,text/markdown,*/*" },
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw httpStatusError(res.status);
     return await res.text();
   } finally {
     clearTimeout(timer);
@@ -395,7 +420,7 @@ async function defaultFetchJson(url: string, o: { timeoutMs: number }): Promise<
       headers: { "user-agent": UA_HARVEST, accept: "application/json" },
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw httpStatusError(res.status);
     return await res.json();
   } finally {
     clearTimeout(timer);
@@ -407,9 +432,14 @@ export async function harvestRepos(queries: readonly string[], opts: HarvestOpti
   const search = opts.search ?? ((q, o) => freeWebSearch(q, { maxResults: o.maxResults, timeoutMs: o.timeoutMs ?? HARVEST_SEARCH_TIMEOUT_MS }));
   const fetchText = opts.fetchText ?? defaultFetchText;
   const fetchJson = opts.fetchJson ?? defaultFetchJson;
-  const maxFetches = Math.max(0, opts.maxFetches ?? HARVEST_DEFAULT_MAX_FETCHES);
-  const timeoutMs = Math.max(1, opts.timeoutMs ?? HARVEST_DEFAULT_TIMEOUT_MS);
-  const maxQueries = Math.max(0, opts.maxQueries ?? HARVEST_DEFAULT_MAX_QUERIES);
+  // 346 C3: hostile/typo'd knobs are sanitized (the shared boundedInt, as the
+  // search providers use). The old `Math.max(0, NaN)` was NaN, so a NaN
+  // maxFetches disabled the fetch budget (probe: 12 attempts across 6
+  // candidates vs the 4-fetch cap), a NaN maxQueries sliced every query away,
+  // and a NaN timeout never expired. A finite input keeps its meaning.
+  const maxFetches = boundedInt(opts.maxFetches, HARVEST_DEFAULT_MAX_FETCHES, 0, Number.MAX_SAFE_INTEGER);
+  const timeoutMs = boundedInt(opts.timeoutMs, HARVEST_DEFAULT_TIMEOUT_MS, 1, MAX_TIMER_MS);
+  const maxQueries = boundedInt(opts.maxQueries, HARVEST_DEFAULT_MAX_QUERIES, 0, HARVEST_LLM_MAX_QUERIES);
 
   const qs = (Array.isArray(queries) ? queries : [])
     .filter((q): q is string => typeof q === "string" && q.trim() !== "")
@@ -493,8 +523,8 @@ export async function harvestRepos(queries: readonly string[], opts: HarvestOpti
         snippet = clipped;
         provenance = "github-raw";
       }
-    } catch {
-      notes.push(`raw README fetch failed for ${cand.repo} — snippet is the search summary (provenance "web-search")`);
+    } catch (err) {
+      notes.push(`raw README fetch failed for ${cand.repo}${errCodeSuffix(err)} — snippet is the search summary (provenance "web-search")`);
     }
 
     let license: string | undefined;
@@ -513,8 +543,8 @@ export async function harvestRepos(queries: readonly string[], opts: HarvestOpti
             if (provenance === "web-search") provenance = "github-api";
           }
         }
-      } catch {
-        notes.push(`GitHub API license spot-check failed for ${cand.repo} (unreachable or rate-limited) — license left absent`);
+      } catch (err) {
+        notes.push(`GitHub API license spot-check failed for ${cand.repo}${errCodeSuffix(err)} (unreachable or rate-limited) — license left absent`);
       }
     } else if (fetches >= maxFetches) {
       notes.push(`fetch budget exhausted — license spot-check skipped for ${cand.repo}`);

@@ -334,6 +334,13 @@ describe("generateBadge (deterministic, keyless)", () => {
     assert.ok(soft.includes('fill="#fef3c7"') && soft.includes('fill="#92400e"'));
   });
 
+  it("codes the unknown-tone refusal RT_E_VALIDATION (message is not the machine channel)", () => {
+    assert.throws(
+      () => generateBadge("x", "neon" as never),
+      (err: unknown) => (err as { code?: string }).code === "RT_E_VALIDATION",
+    );
+  });
+
   it("throws on unknown tones and stays deterministic for every BADGE_TONES value", () => {
     assert.throws(() => generateBadge("x", "neon" as never), /unknown badge tone/);
     for (const tone of BADGE_TONES) {

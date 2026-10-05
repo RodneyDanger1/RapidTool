@@ -120,3 +120,40 @@ describe("W45 331-1 F3 — a rejected credential maps to its own code", () => {
     if (!neg.ok) assert.equal(neg.code, "RT_E_LLM_REJECTED");
   });
 });
+
+// ---------------------------------------------------------------------------
+// fixes/346 C3 — a FINITE timeoutMs past setTimeout's 32-bit ceiling
+// (2_147_483_647). Both adapters accepted the number verbatim, so Node clamped
+// the delay to 1ms and warned — a caller's large budget became an instant
+// "request timed out after 9999999s". The value is now clamped to a real timer.
+// ---------------------------------------------------------------------------
+describe("346 C3 — large finite timeoutMs is clamped, not an instant abort", () => {
+  const delayedOk = ((_url: unknown, init?: RequestInit) =>
+    new Promise<Response>((resolve, reject) => {
+      init?.signal?.addEventListener("abort", () =>
+        reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+      setTimeout(
+        () =>
+          resolve(
+            jsonResponse({ model: "m", choices: [{ message: { content: "ok" } }] }, 200),
+          ),
+        5,
+      );
+    })) as typeof fetch;
+
+  it("DeepSeek honors a 1e10 budget as a real timer", async () => {
+    const res = await completeDeepSeek("hi", { fetch: delayedOk, timeoutMs: 1e10 });
+    assert.equal(res.ok, true, res.ok ? "" : `unclamped overflow aborted early: ${res.code} ${res.error ?? ""}`);
+  });
+
+  it("the OpenAI-compatible adapter honors a 1e10 budget as a real timer", async () => {
+    process.env.XAI_API_KEY = "xai-ffffffffffffffffffffffffffff19b3";
+    const provider = createOpenAiCompatibleProvider(XAI_SPEC, ["probe-model-id"]);
+    const res = await provider.complete("hi", {
+      model: "probe-model-id" as never,
+      fetch: delayedOk,
+      timeoutMs: 1e10,
+    });
+    assert.equal(res.ok, true, res.ok ? "" : `unclamped overflow aborted early: ${res.code} ${res.error ?? ""}`);
+  });
+});

@@ -52,11 +52,28 @@ function text(v: unknown): string {
  * A `human/…` label that is not the console implies an inconsistent row (the
  * CLI human seat always carries the token path) — render it as unverified,
  * never as a machine seat.
+ *
+ * 346 lane-6: the clause is a CROSS-CHECK, not a read of the `via` object in
+ * isolation. `decidedVia` is persisted (a hand-edited/pasted project can carry
+ * a forged one), so a `tokenPath:true` claim is honoured only when the row's
+ * own actor is `human` AND the label is the token-verifiable CLI seat — never
+ * because a machine row merely asserts the flag. A `human/…` label on a
+ * non-human actor is a provenance mismatch and renders as unverified. This
+ * mirrors dod.ts `provenanceConsistent` (which fails the gate closed on the
+ * same contradiction) so the pasted prompt cannot outrun the gate.
  */
-function tokenPathClause(via: { tokenPath: boolean; label: string }): string {
-  if (via.tokenPath) return "out-of-band token path verified";
+function tokenPathClause(via: { tokenPath: boolean; label: string }, decidedBy: string): string {
+  const humanLabel = via.label.startsWith("human/");
+  if (via.tokenPath) {
+    return via.label === "human/human-cli-i-am-human" && decidedBy === "human"
+      ? "out-of-band token path verified"
+      : "token path claimed for a seat that cannot carry one — not verified";
+  }
+  if (humanLabel && decidedBy !== "human") {
+    return `provenance mismatch (recorded seat "${via.label}" vs actor "${decidedBy}") — not verified`;
+  }
   if (via.label === "human/console") return "unattested console human seat — no out-of-band token";
-  if (via.label.startsWith("human/")) return "human seat — token path not verified";
+  if (humanLabel) return "human seat — token path not verified";
   return "machine seat — no token path claimed";
 }
 
@@ -167,7 +184,7 @@ export function phaseHandoff(project: Project, phase: PhaseId): string {
     const via = lastDecision.decidedVia;
     const actor = via?.label ? text(via.label) : text(lastDecision.decidedBy);
     const viaClause = via
-      ? ` · via ${text(via.action)} on ${text(via.resource)} (${tokenPathClause(via)})`
+      ? ` · via ${text(via.action)} on ${text(via.resource)} (${tokenPathClause(via, text(lastDecision.decidedBy))})`
       : "";
     // Hostile/missing stamps degrade to no timestamp, never a throw (the
     // never-throw prompt contract at the top of this file); the ms value is

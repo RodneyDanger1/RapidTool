@@ -767,7 +767,12 @@ export function generateBadge(
   tokens?: Record<string, string>,
 ): string {
   if (!BADGE_TONES.includes(tone)) {
-    throw new Error(`unknown badge tone: ${String(tone)} — expected one of ${BADGE_TONES.join(", ")}`);
+    // Coded (RT_E_VALIDATION): an unknown tone is caller input, not an internal
+    // fault — an orchestrator branches on the code without parsing the prose.
+    throw Object.assign(
+      new Error(`unknown badge tone: ${String(tone)} — expected one of ${BADGE_TONES.join(", ")}`),
+      { code: "RT_E_VALIDATION" },
+    );
   }
   const label = stripControl(String(text));
   const mapped = TONE_TOKENS[tone];

@@ -183,8 +183,15 @@ export function parseBrandCheckArgs(argv) {
     } else if (argv[i] === "--placeholder-ok") {
       placeholderOk = true;
     } else if (argv[i] === "--root") {
-      root = argv[++i];
-      if (root === undefined) return { error: `--root needs a directory — ${usage}` };
+      // A flag-looking token is a MISSING value, not a directory: pre-fix
+      // `--root --game` swallowed --game as the root and silently ran as a
+      // non-game check against a path literally named "--game".
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("--")) {
+        return { error: `--root needs a directory — ${usage}` };
+      }
+      root = value;
+      i += 1;
     } else {
       return { error: `unexpected argument: ${argv[i]} — ${usage}` };
     }

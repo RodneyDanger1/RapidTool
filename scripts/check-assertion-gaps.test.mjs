@@ -127,6 +127,38 @@ test("T-17 detects identical-literal and same-operand comparisons once each", ()
   assert.deepEqual(findTautologies("assert.equal(true, false);"), []);
 });
 
+test("T-17 detects the typeof same-operand tautology (assert.equal(typeof x, typeof x))", () => {
+  // Pre-fix the operand grammar was a bare identifier, so the `typeof` form
+  // (the same expression on both sides) slipped through unfalsifiable.
+  const same = findTautologies("assert.equal(typeof value, typeof value);");
+  assert.equal(same.length, 1);
+  assert.equal(same[0].rule, "tautology:same-operand");
+  // Different operands stay falsifiable — never flagged.
+  assert.deepEqual(findTautologies("assert.equal(typeof left, typeof right);"), []);
+  assert.deepEqual(findTautologies('assert.equal(typeof value, "string");'), []);
+});
+
+test("T-17 detects assert.ifError of a falsy value / no argument as a tautology", () => {
+  // ifError throws only on a TRUTHY value, so every falsy argument passes.
+  for (const src of [
+    "assert.ifError(null);",
+    "assert.ifError(undefined);",
+    "assert.ifError(false);",
+    "assert.ifError(0);",
+    'assert.ifError("");',
+    "assert.ifError();",
+    'assert.ifError(null, "must not throw");',
+  ]) {
+    const findings = findTautologies(src);
+    assert.equal(findings.length, 1, `${src} must be exactly one finding`);
+    assert.equal(findings[0].rule, "tautology:iferror-falsy");
+  }
+  // The ordinary falsifiable checks are NOT flagged.
+  assert.deepEqual(findTautologies("assert.ifError(err);"), []);
+  assert.deepEqual(findTautologies("assert.ifError(nullValue);"), []);
+  assert.deepEqual(findTautologies("assert.ifError(maybeError);"), []);
+});
+
 test("T-17 ignores tautologies that are data (strings, comments) — masking, not matching", () => {
   const source = [
     'const note = "assert.ok(true)";',

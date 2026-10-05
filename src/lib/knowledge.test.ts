@@ -16,6 +16,7 @@ import {
   lessonRow,
   lessonLog,
   selectLessons,
+  compareLessons,
   shouldPromoteLesson,
   lessonEvidenceDetail,
   absentLexNouns,
@@ -463,6 +464,26 @@ describe("M-tier lesson surface (fixes/98 §2/§3)", () => {
     assert.deepEqual(selectLessons(rows, 9, 2, ["vague-brief"]).map((m) => m.id), ["d", "e"]);
     assert.deepEqual(selectLessons([], 0), []);
     assert.deepEqual(selectLessons(rows, 3, 0), []);
+  });
+
+  it("compareLessons is symmetric and total (equal rows compare 0, never 1)", () => {
+    const r = (id: string, score: number) =>
+      ({ id, kind: "semantic" as const, phase: 0 as const, text: id, score, tags: [LESSON_TAG] });
+    const a = r("same", 1);
+    const b = r("same", 1);
+    const c = r("other", 1);
+    const hi = r("x", 9);
+    const lo = r("x", 2);
+    assert.equal(compareLessons(a, b), 0, "equal id + equal score must compare 0");
+    assert.equal(compareLessons(b, a), 0, "and be symmetric");
+    assert.equal(Math.sign(compareLessons(a, c)) , -Math.sign(compareLessons(c, a)), "distinct ids must be antisymmetric");
+    assert.ok(compareLessons(hi, lo) < 0, "higher score sorts first");
+    assert.ok(compareLessons(lo, hi) > 0, "lower score sorts last");
+    assert.equal(compareLessons(a, a), 0, "reflexive (total on equal elements)");
+    // non-finite scores must not yield a NaN comparator
+    const nan = r("n", Number.NaN);
+    assert.ok(Number.isFinite(compareLessons(nan, a)), "NaN score yields a finite comparison");
+    assert.equal(compareLessons(nan, nan), 0, "two NaN scores compare equal");
   });
 
   it("C: shouldPromoteLesson refuses unknown/regression, allows first or non-worse card", () => {

@@ -1322,14 +1322,14 @@ export function synthesizePhase(
         `Decision: External surfaces are ${domainSurface(domain).join(", ") || "none declared"} — declarations, not runtime bindings.`,
       ].join("\n");
       // fixes/144 (M4-1, seal-path guard — engine half): a red-gate seal is
-      // never presented as a bare clean "All 13 phases sealed." — when any
+      // never presented as a bare clean "all phases sealed" — when any
       // complete phase carries a failed DoD gate the delivery record carries
       // the census ("N failed gates: <ids>") and warns, so a failed-gate run
       // can never emit byte-identical output to a clean one.
       const seal = sealHonesty(project);
       const deliveryDetail = seal.clean
-        ? "All 13 phases sealed."
-        : `All 13 phases sealed. ${seal.failed.length} failed gates: ${seal.failed.join(", ")}`;
+        ? `All ${PHASES.length} phases sealed.`
+        : `All ${PHASES.length} phases sealed. ${seal.failed.length} failed gates: ${seal.failed.join(", ")}`;
       // W50/336-1: the P12 database-schema deliverable had no producer (335-1
       // STOP item). The A6 contract carries the input, so the DDL is DERIVED
       // here (databaseSchemaSql) and emitted as its own artifact — a contract
@@ -4952,11 +4952,11 @@ function wildFinalize(p: Project, phase: PhaseId): WildStepResult {
       active: false,
       pause: false,
       stoppedAt: Date.now(),
-      lastAutoLog: "Wild run complete — all 13 phases sealed",
+      lastAutoLog: `Wild run complete — all ${PHASES.length} phases sealed`,
       lastAutoAt: Date.now(),
     },
   );
-  const done = wildLog(stamped, phase, "info", "wild.complete", "Wild run complete — all 13 phases sealed.");
+  const done = wildLog(stamped, phase, "info", "wild.complete", `Wild run complete — all ${PHASES.length} phases sealed.`);
   return { project: done, outcome: "completed", ran: true };
 }
 

@@ -218,9 +218,15 @@ let sqlPromise: Promise<Sql> | null = null;
 
 async function createSql(): Promise<Sql> {
   if (typeof window !== "undefined") {
-    throw new Error(
-      "@/lib/db is server-only — call getSql() from a createServerFn handler " +
-        "or a server route loader, never from client code.",
+    // Coded: a browser load of this server-only module is a build/wiring
+    // failure (RT_E_INTERNAL), not user input — the code lets a classifier
+    // separate it from a genuine transport error.
+    throw Object.assign(
+      new Error(
+        "@/lib/db is server-only — call getSql() from a createServerFn handler " +
+          "or a server route loader, never from client code.",
+      ),
+      { code: "RT_E_INTERNAL" },
     );
   }
   return dbSource === "neon" ? createNeonSql() : createPgliteSql();
@@ -251,11 +257,19 @@ export function getSql(): Promise<Sql> {
  */
 export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite> {
   if (dbSource !== "pglite") {
-    throw new Error("getPglite() is only available on the PGLite fallback (no DATABASE_URL)");
+    // Coded caller misuse: a preview-only helper was reached on the Neon path
+    // (RT_E_VALIDATION), so the caller branches on the code, not the prose.
+    throw Object.assign(
+      new Error("getPglite() is only available on the PGLite fallback (no DATABASE_URL)"),
+      { code: "RT_E_VALIDATION" },
+    );
   }
   await getSql();
   const pg = await globalRef.__pgliteInstance__;
-  if (!pg) throw new Error("PGLite instance failed to initialize");
+  if (!pg) {
+    // Coded runtime failure: the embedded DB never came up (RT_E_INTERNAL).
+    throw Object.assign(new Error("PGLite instance failed to initialize"), { code: "RT_E_INTERNAL" });
+  }
   return pg;
 }
 

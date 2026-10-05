@@ -5,6 +5,7 @@ import { ConnectorType } from "./types.ts";
 import type { ToolArgs } from "./types.ts";
 import { isLoginRequired, redirectToLoginIfRequired } from "./login.ts";
 import { classifyCallToolError } from "./errors.ts";
+import { assertAppDataServerOnly } from "./server-only.ts";
 import type { CallToolResult } from "./types.ts";
 
 type WindowStub = {
@@ -530,5 +531,18 @@ describe("classifyCallToolError", () => {
     assert.equal(empty?.kind, "error");
     assert.equal(empty?.message, "Something went wrong. Try again.");
     assert.equal(empty?.detail, undefined);
+  });
+});
+
+describe("assertAppDataServerOnly — coded server-only guard", () => {
+  it("refuses a browser load with code RT_E_INTERNAL (not only a message)", () => {
+    withWindow({ location: { assign: () => {}, href: "" } }, () => {
+      assert.throws(
+        () => assertAppDataServerOnly("app-data/client.server"),
+        (err: unknown) => (err as { code?: string }).code === "RT_E_INTERNAL",
+      );
+    });
+    // No window ⇒ the guard is a no-op (the normal server case).
+    assert.doesNotThrow(() => assertAppDataServerOnly("app-data/client.server"));
   });
 });

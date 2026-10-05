@@ -5,10 +5,11 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyWrite, applyWrites, assertSafeRelPath, rollback, snapshotPaths } from "./write-set.ts";
+import { ERROR_CODES } from "./errors.ts";
 
 const tmp = (): string => mkdtempSync(join(tmpdir(), "rapidtool-writeset-"));
 
@@ -147,6 +148,55 @@ describe("write-set — snapshotPaths / applyWrite / rollback", () => {
       assert.equal(existsSync(join(root, "b/c.ts")), false);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // W60/346-6 C1: the path-class refusals are MACHINE failures — each carries
+  // its registered RT_E code so emit callers branch on the code, not prose.
+  it("path-class refusals carry a registered RT_E code (never bare prose)", () => {
+    const codeOf = (fn: () => unknown): string | undefined => {
+      try {
+        fn();
+      } catch (e) {
+        return (e as { code?: string }).code;
+      }
+      return undefined;
+    };
+    assert.equal(codeOf(() => assertSafeRelPath("")), "RT_E_VALIDATION");
+    assert.equal(codeOf(() => assertSafeRelPath("a\0b")), "RT_E_VALIDATION");
+    assert.equal(codeOf(() => assertSafeRelPath("/abs/path")), "RT_E_VALIDATION");
+    assert.equal(codeOf(() => assertSafeRelPath("../etc/passwd")), "RT_E_VALIDATION");
+    assert.ok((ERROR_CODES as readonly string[]).includes("RT_E_VALIDATION"));
+    assert.ok((ERROR_CODES as readonly string[]).includes("RT_E_PATH_KIND_MISMATCH"));
+  });
+
+  it("a physically-escaping junction is RT_E_PATH_KIND_MISMATCH (wrong-kind path, not validation)", (t) => {
+    const base = tmp();
+    const outside = tmp();
+    try {
+      const root = join(base, "root");
+      mkdirSync(root, { recursive: true });
+      writeFileSync(join(outside, "f.ts"), "x\n", "utf8");
+      try {
+        symlinkSync(outside, join(root, "link"), process.platform === "win32" ? "junction" : undefined);
+      } catch (err) {
+        if (process.platform === "win32" && (err as { code?: string }).code === "EPERM") {
+          t.skip("junction needs Developer Mode on Windows (EPERM)");
+          return;
+        }
+        throw err;
+      }
+      let caught: { code?: string } | null = null;
+      try {
+        snapshotPaths(root, ["link/f.ts"]);
+      } catch (e) {
+        caught = e as { code?: string };
+      }
+      assert.ok(caught, "a junction escaping root must be refused");
+      assert.equal(caught!.code, "RT_E_PATH_KIND_MISMATCH");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 });

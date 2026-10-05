@@ -13,7 +13,11 @@
  *          true for every string/array/typed-array length, including 0
  *        - `assert.equal(true, true)` and the identical-literal family
  *          (`false`/`null`/`undefined`/number pairs, any of equal/strictEqual/deepEqual/…)
- *        - same-operand equality — `assert.equal(x, x)`, `assert.strictEqual(a.b, a.b)`
+ *        - same-operand equality — `assert.equal(x, x)`, `assert.strictEqual(a.b, a.b)`,
+ *          including the `typeof` form `assert.equal(typeof x, typeof x)`
+ *        - `assert.ifError(<falsy literal>)` (or a no-argument `assert.ifError()`):
+ *          ifError throws only on a truthy value, so a falsy/undefined argument
+ *          passes for every run
  *        - **presence-only subjects** — `assert.ok(<always-truthy expression>)`: an
  *          object/array/function/regex/`new` literal, a non-empty string or
  *          non-zero number, a template literal, or a bare `typeof …`. These
@@ -243,9 +247,13 @@ const RULE_SAME_OPERAND = "tautology:same-operand";
 const RULE_PRESENCE_ONLY = "tautology:presence-only";
 const RULE_TYPEOF_ONLY = "tautology:typeof-only";
 const RULE_ALWAYS_TRUE = "tautology:always-true-expr";
+const RULE_IFERROR_FALSY = "tautology:iferror-falsy";
 
 const EQUALITY_FNS = "equal|strictEqual|deepEqual|deepStrictEqual";
-const OPERAND = "[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*";
+// The operand may carry a `typeof ` prefix: `assert.equal(typeof x, typeof x)`
+// is the same-operand tautology just as `assert.equal(x, x)` is (pre-fix the
+// bare-identifier grammar missed it).
+const OPERAND = "(?:typeof\\s+)?[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*";
 const LITERAL = "true|false|null|undefined|-?\\d+(?:\\.\\d+)?";
 
 /** `assert.ok(true)` / `assert.ok(true, "msg")` / `assert(true)`. */
@@ -271,6 +279,17 @@ const RE_LITERAL_PAIR = new RegExp(
 /** Same identifier on both sides: `assert.equal(x, x)`, `assert.strictEqual(a.b, a.b)`. */
 const RE_SAME_OPERAND = new RegExp(
   `\\bassert\\s*\\.\\s*(?:${EQUALITY_FNS})\\s*\\(\\s*(${OPERAND})\\s*,\\s*\\1\\s*[,)]`,
+);
+
+/**
+ * `assert.ifError(<always-falsy>)` — ifError throws only on a TRUTHY value, so a
+ * falsy literal (or an absent argument, i.e. undefined) passes for every run.
+ * The `[,)]` tail keeps `assert.ifError(nullValue)` (a real, falsifiable check)
+ * out; the optional group is the no-argument form.
+ */
+const FALSY_LITERAL = "(?:false|null|undefined|0|-0|0\\.0|\"\"|''|``|NaN)";
+const RE_IFERROR_FALSY = new RegExp(
+  `\\bassert\\s*\\.\\s*ifError\\s*\\(\\s*(?:${FALSY_LITERAL})?\\s*[,)]`,
 );
 
 /** Any assertion call — the guard that a length-floor match is *inside* an assertion. */
@@ -595,6 +614,9 @@ export function findTautologies(source) {
     const same = RE_SAME_OPERAND.exec(line);
     if (same && !LITERAL_ONLY_RE.test(same[1])) {
       push(offset, RULE_SAME_OPERAND, "both operands are the same expression — the comparison cannot fail");
+    }
+    if (RE_IFERROR_FALSY.test(line)) {
+      push(offset, RULE_IFERROR_FALSY, "assert.ifError of a falsy value is true for every run");
     }
   }
 

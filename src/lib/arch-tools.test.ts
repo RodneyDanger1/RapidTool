@@ -190,6 +190,16 @@ describe("adrRecord", () => {
     assert.throws(() => adrRecord("t", "", "d", "x"), TypeError);
     assert.throws(() => adrRecord("t", "c", "", "x"), TypeError);
   });
+
+  it("codes each usage refusal RT_E_VALIDATION (a machine caller branches on .code, not the prose)", () => {
+    for (const bad of [
+      () => adrRecord("", "c", "d", "x"),
+      () => adrRecord("t", "", "d", "x"),
+      () => adrRecord("t", "c", "", "x"),
+    ]) {
+      assert.throws(bad, (err: unknown) => (err as { code?: string }).code === "RT_E_VALIDATION");
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

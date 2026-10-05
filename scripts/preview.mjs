@@ -32,7 +32,20 @@ const PREVIEW_URL = `http://127.0.0.1:${PREVIEW_PORT}/`;
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PID_FILE = join(ROOT, ".grok/preview.pid");
 const LOG_FILE = join(ROOT, ".grok/preview.log");
-const READY_TIMEOUT_MS = Number(process.env.PREVIEW_READY_TIMEOUT_MS || 60000);
+const DEFAULT_READY_TIMEOUT_MS = 60000;
+
+/**
+ * Parse PREVIEW_READY_TIMEOUT_MS. A non-finite/non-positive value (e.g. "abc",
+ * "0") falls back to the default: pre-fix `Number("abc")` was NaN, so the
+ * ready deadline was NaN, `waitForReady` never polled, and restart reported
+ * "nothing answered ... within NaNs" — a typo silently disabled the wait.
+ */
+export function resolveReadyTimeoutMs(raw, fallback = DEFAULT_READY_TIMEOUT_MS) {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+const READY_TIMEOUT_MS = resolveReadyTimeoutMs(process.env.PREVIEW_READY_TIMEOUT_MS);
 const GRACE_MS = 3000;
 const POLL_MS = 100;
 
