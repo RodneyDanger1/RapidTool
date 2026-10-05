@@ -276,3 +276,33 @@ Everything in the W6→W12 catalogue above is the 2026-09-16 sketch. Current byt
 - **CLI truths corrected:** exit taxonomy 0/1/2/3/4/5; headless CLI reads `<cwd>/.env`; a fresh
   `emit --run` is verified when its declared scripts resolve from the repo's own `node_modules/`.
   `tsconfig.scripts.json` is CLEAN (`tsc -p tsconfig.scripts.json --noEmit` exits 0).
+
+---
+
+## CORRECTION — 2026-10-05 (346 wave batch 10; HEAD `2f0e3d7`)
+
+Everything in the W6→W12 catalogue above is the 2026-09-16 sketch; the 2026-10-03 correction is stale.
+Current byte-derived values (commands run this session):
+
+- **Gate of record — GREEN on the frozen tree (HEAD `2f0e3d7`, clean):** `ok:true`, `flakes:[]`,
+  `hardFails:[]`; typecheck 0 · lint 0 (**5 warnings**) · assertion-gap lint 0 · **prevention 20/20**
+  (`missed:[]`, `pending:[]`, `skipped:[]`, `count:20`, `countFloor:20`) · scripts **513/0** · lib
+  **3712 pass / 0 fail / 2 skipped** · build 0. Exact JSON in `README.md` / `AGENTS.md`.
+- **Tracked counts:** total **2,014** · `src` 256 · `src/lib` 244 (129 non-test + 115 tests) ·
+  `scripts` 107 (33 tests) · `fixes` 761 · `wave_plans` 139 · `research/multiagent` 103.
+- **Landing state:** the 346 wave ran **batches 1–10** (`7db4d7d`, `100504c`, `128a539`, `c16220b`,
+  `f4eb883`, `136b1dd`, `91f47f2`, `886f155`, `b3baef8`, `2f0e3d7`); all committed, tree clean. See the
+  append-only summary in `fixes/346_wave_log.md`.
+- **Autonomy contract (PR-33, 2026-10-05):** Owner Open Question 1 = **Option A** — the additive machine
+  reading (`autonomousFactoryV2` + `fleetAcceptance`, seat `machine:tree-run`) beside the byte-identical
+  human-gated `autonomousSoftwareFactory`; a machine path may never mint `decidedBy:"human"`. Rationale:
+  the 338-4 anti-self-certification doctrine. Rejected: dropping the human conjunct.
+- **Rollout flags (design §10), all default off / byte-identical when omitted:** `--allow-empty`,
+  `gate --resynthesize`, `repair --from-gate`, `--token-ledger <file>` / `RAPIDTOOL_LEDGER_FILE` +
+  `RAPIDTOOL_CAMPAIGN_TOKEN_CAP`, `resumeAccepted`. Defaults + rollback table in `README.md` / `AGENTS.md`.
+- **Campaign #1 (keyed, 2026-10-05; `testruns\_report\CAMPAIGN1.md`):** `workingApp` **0/8** (target
+  ≥5/8); 6/8 stall at the P6 DoD gate; delivery truth PASSED (0 empty-substance commits, 0 red-tree
+  commits). **The remaining constraint is the P6 synthesis wall**, not a W6→W12 lane.
+- **Residuals:** `resumeAccepted` plumbed but not consumed by codegen; 5 lint warnings; cross-family
+  failover unimplemented; console seat-delivery seam open; no OS isolation beyond the runtime Permission
+  Model bound; P7 `p7-research` offline; prettier drift measured, not gated.

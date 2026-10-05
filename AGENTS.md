@@ -231,3 +231,120 @@ disagree, the bytes win.
   `awaitingHumanAcceptance:false` — the autonomy bar requires a human-approved fixture row.
   `fixes/346_audit_autonomy.md` refutes the "100% autonomous factory" claim and lists the remaining
   work (keyed P6 reliability, cross-family failover, isolation, console seat-delivery seam).
+
+## Corrections in force — appended 2026-10-05 (346 wave batch 10; HEAD `2f0e3d7`)
+
+This block supersedes the gate/count claims above and in every dated block. All values re-derived
+from the bytes and commands run this session; where a doc and the bytes disagree, the bytes win.
+
+### Gate of record — GREEN on the frozen tree (HEAD `2f0e3d7`, clean tree)
+
+`& 'C:\Program Files\Git\bin\bash.exe' scripts/gate.sh` returned, as its single stdout JSON line:
+
+```json
+{"ok":true,"double":false,"flakes":[],"hardFails":[],"quarantined":[],"quarantineCandidates":[],"skips":2,"wallMs":535223,"gates":{"typecheck":{"ok":true,"exit":0,"ms":54129},"lint":{"ok":true,"exit":0,"ms":20283,"problems":5},"assertionGaps":{"ok":true,"exit":0,"ms":1059},"build":{"ok":true,"exit":0,"ms":14581},"prevention":{"ok":true,"exit":0,"ms":3901,"missed":[],"pending":[],"skipped":[],"count":20,"countFloor":20},"testsScripts":{"ok":true,"exit":0,"ms":249046,"pass":513,"fail":0,"skipped":0},"testsLib":{"ok":true,"exit":0,"ms":191241,"pass":3712,"fail":0,"skipped":2}}}
+```
+
+`gate.sh`'s own exit logic maps `ok:true` → exit 0. (A PowerShell wrapper may report exit 1: bash's
+`[gate] … running…` progress lines on stderr trip PowerShell's `NativeCommandError`, which is a
+wrapper artifact, not the gate's code — the JSON verdict is authoritative.)
+
+### Tracked counts (`git ls-files`, 2026-10-05 at `2f0e3d7`)
+
+total **2,014** · `src` 256 · `src/lib` 244 (129 non-test + 115 colocated test suites) · `scripts` 107
+(33 `*.test.mjs` suites + 74 tools/guards/prevention) · `fixes` 761 · `wave_plans` 139 ·
+`research/multiagent` 103 · `research/eval-out` 345 · `research/eval-corpus` 23 · `research` 476 ·
+root (top-level) 41. Superseded: the 2026-10-03 values (total 1,933 · scripts 49 · fixes 744) and the
+2026-10-04 values (total 1,951 · scripts 52 · fixes 759).
+
+### The keyless proof layer — what it is, and its exact command
+
+**Command (also an additive stage inside `gate.sh`):**
+
+```bash
+node scripts/prevention/verify-prevention.mjs --all --selftest
+```
+
+Returned this session:
+
+```json
+{"ok":true,"guards":20,"count":20,"countFloor":20,"historical":20,"fixtureIntegrity":{"fired":["C-01","C-02","C-03","C-13","C-09","C-11","C-06","C-04","C-05","C-12","C-14","C-16","C-18","C-15","C-17","C1-01","C1-02","C1-05","C1-06","C1-08"],"missed":[]},"fixPresence":{"enforced":["C-01","C-02","C-03","C-13","C-09","C-11","C-06","C-04","C-05","C-12","C-14","C-16","C-18","C-15","C-17","C1-01","C1-02","C1-05","C1-06","C1-08"],"pending":[]},"fired":["C-01","C-02","C-03","C-13","C-09","C-11","C-06","C-04","C-05","C-12","C-14","C-16","C-18","C-15","C-17","C1-01","C1-02","C1-05","C1-06","C1-08"],"missed":[],"pending":[],"skipped":[],"registry":"present","controlMissed":[],"rubricBaselines":{"ok":true,"present":true,"treeCount":13,"covered":13,"expected":13,"missing":[],"missingTrees":[],"badScores":[]},"heldOut":{"ok":true,"present":true,"slug":"held-out-community-tool-library","disjoint":true,"hasBrief":true,"hasExpected":true,"live":{"domain":"custom-software","kind":"app","name":"Rivertown Tool Library"},"expected":{"domain":"custom-software","kind":"app","name":"Rivertown Tool Library","incidents":[]},"matches":true}}
+```
+
+**What it is.** A keyless replay harness over pinned cassettes of persisted artifacts (the historical
+`testruns/**` trees plus the campaign-1 trees). Each of the **20** registry guards is replayed and
+reports **two orthogonal signals**, never one:
+
+1. **`fixtureIntegrity`** — does the guard's detector still FIRE on the historical/campaign defect it
+   was written for? (`fired` / `missed`.)
+2. **`fixPresence`** — is the live fixer seam present **and wired**? (`enforced` / `pending`.)
+
+**`countFloor` rule.** `countFloor` is the pinned number of registry guard entries (here 20); the
+harness fails if the guard `count` drops below it, so a green reading cannot be reached by deleting a
+guard. The gate **fails if a guard stops firing**: `gate.sh`'s additive `prevention` stage requires
+`missed:[] ∧ pending:[] ∧ skipped:[] ∧ count ≥ countFloor`. A `pending` fixer, a `skipped` guard, or a
+missing guard is a hard failure — "the historical defect is still visible" alone never certifies a fix.
+
+### The autonomy contract (PR-33, decided 2026-10-05 — Open Question 1 = Option A)
+
+**Decided: Option A — a new additive machine-verified reading sits BESIDE the human-gated bar.** The
+two flags are distinct and both live in `doctor.ts` (`src/lib/acceptance.ts` owns the machine reading):
+
+- **`autonomousSoftwareFactory`** — the existing human-gated bar: the AND of the machine conjuncts plus
+  a **human-approved fixture row** stamped `decidedBy:"human"` through an out-of-band seat. It is
+  **byte-identical and never machine-mintable.** `doctor` (keyless, this box) prints it `false`.
+- **`autonomousFactoryV2`** — NEW, additive, machine-only; satisfied by machine evidence alone: the
+  per-brief persisted P6 tree-run promotion stamp (`lastTest.label === "tested"` with a non-empty
+  `evidenceHash`). It never flips the human flag.
+- **`fleetAcceptance`** — the aggregate behind `autonomousFactoryV2`: an attributable machine seat
+  (`seat:"machine:tree-run"`, `decidedBy:"machine"`), accepted briefs, coded refusals, and a floor of
+  5 of 8 (`FLEET_ACCEPTANCE_MIN`/`FLEET_TARGET_BRIEFS`). Fail-closed: absent/hollow/unattributed
+  evidence, or two distinct briefs sharing one `evidenceHash`, refuses (false).
+- **`fleetMetrics` / `fleetAlarms`** — PR-32 observability: tokens/calls/cache hits/rubric mean with
+  `estimatedCostUsd` always `null` (spend is never fabricated), and threshold alarms (cache-cold,
+  over-cap calls, rubric below target, `evidenceHash` collision, fabricated spend). `fleetAlarms.tripped`
+  is a hard failure.
+
+**A machine path may never mint `decidedBy:"human"`.** The machine reader refuses a record claiming a
+human seat outright (`ACCEPTANCE_REFUSAL.humanSeat`) — it is never laundered into machine evidence —
+and provenance unit tests assert the machine seat and the human-seat refusal.
+
+**Date:** 2026-10-05. **Rationale:** it preserves the **338-4 anti-self-certification doctrine** — the
+human conjunct is deliberate and *the machine may not set the bar it is graded against* — so the
+honest move is a new, separately-attributed machine reading that cannot forge a human stamp, not a
+redefinition of the existing bar. **Rejected alternative (Option B):** dropping the human-acceptance
+conjunct from the factory bar. That would make "autonomous" unfalsifiable and delete the repo's central
+honesty doctrine (What-NOT-To-Do #18); it is an owner decision and was not implemented unilaterally.
+
+### Rollout flags (design §10) — default + rollback
+
+| Flag | Default | Meaning | Rollback |
+|---|---|---|---|
+| `--allow-empty` (opt-in) | **off** | On `emit --run --git`: withhold the commit when the tree's `substance` verdict is `empty` or the trail is red; `--allow-empty` admits a deliberate scaffold-only commit. | Omit it — the default is byte-identical (withhold). |
+| `gate --resynthesize` | **off** | Re-opens a red RUNNING P6 (retry) and re-enters the P6 journey once, live, bounded, from the recorded unmet requirements. | Omit it — a red running P6 re-parks at 0 steps. |
+| `repair --from-gate` | **off** | Re-opens a red RUNNING P6 first so the bounded repair cycle targets the recorded unmet state instead of refusing `RT_E_PHASE_ILLEGAL`. | Omit it — legacy repair path unchanged. |
+| `--token-ledger <file>` / `RAPIDTOOL_LEDGER_FILE` | **off** | The cross-process campaign ledger: each opted-in invocation preflight-loads a persistent JSON, refuses coded once `spent >= cap`, and post-appends its measured session spend. Cap from `RAPIDTOOL_CAMPAIGN_TOKEN_CAP` or the file's own `cap`. | Unset both — the ledger is never read/written/surfaced; every code path and envelope byte is byte-identical. |
+| `RAPIDTOOL_CAMPAIGN_TOKEN_CAP` | **unset** | Integer campaign bound for the ledger above; a non-numeric value refuses coded. | Unset it (falls back to the file's own `cap`, else unbounded). |
+| `resumeAccepted` | **absent** | A previous cycle's accepted chunks, threaded `P6JourneyCycleContext → p6CycleLiveDeps` for reuse instead of re-buying every chunk. Absent/empty ⇒ no key materialized. | Absent is the default and is byte-identical. |
+| machine flag (`autonomousFactoryV2` / `fleetAcceptance`) | **separate** | Additive machine reading; flipping it off leaves `autonomousSoftwareFactory` untouched. | Ignore the reading; the human bar is unchanged. |
+
+No silent default flips. The human door is never removed.
+
+### Honest limits (kept/refreshed)
+
+- **The keyed P6 productivity wall is unbroken.** Campaign #1 (2026-10-05,
+  `testruns\_report\CAMPAIGN1.md` + `CAMPAIGN1.json` + `campaign1-score.json`) scored `workingApp`
+  **0 of 8** trees (target ≥5/8); 6/8 stall at the P6 DoD gate (`RT_E_GATE_PENDING`). The **delivery-truth**
+  target PASSED: **0 empty-substance commits, 0 red-tree commits** (historical: 6 empty + 5 red).
+  Spend 615,533 tokens / ~US$0.38 (label-only; `estimatedCostUsd:null`), 1,505 s across 8 projects.
+- **No OS isolation beyond the runtime Permission Model bound.** Generated code runs under Node's
+  Permission Model (fs writes confined to the per-run scratch dir, `child_process`/`worker_threads`/
+  native addons denied, 512 MB heap cap). `doctor` keeps `isolation.sandbox:false`; no network denial
+  and no Docker/bwrap/AppContainer/Windows-Job-Object boundary is claimed.
+- **The human acceptance door is reserved, unchanged.** `autonomousSoftwareFactory` still requires a
+  human-approved fixture row (`decidedBy:"human"`, out-of-band); `doctor` prints it `false` by design.
+- **Known residuals.** `resumeAccepted` is plumbed through `headless.ts` but **not yet consumed by
+  codegen** (`grep resumeAccepted src/lib/codegen.server.ts` = 0); **5 lint warnings** are reported by the
+  gate (`lint.problems:5`) with lint `ok:true`; cross-family failover is genuinely unimplemented
+  (the un-armed switch was deleted; `RAPIDTOOL_FALLBACK_PROVIDERS` is inert); the console seat records
+  provenance but has no out-of-band delivery seam; prettier drift is measured, not gated.

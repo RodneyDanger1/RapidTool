@@ -846,3 +846,46 @@ The 345-F1 block and every dated snapshot above are superseded by these byte-der
   `RAPIDTOOL_FALLBACK_PROVIDERS` is inert); the console approval lacks an out-of-band seat-delivery
   seam (provenance recorded, not verified); P7 `p7-research` is offline; prettier drift (244 `[warn]`
   files) is measured but NOT gated.
+
+---
+
+## CORRECTION — 2026-10-05 (346 wave batch 10; HEAD `2f0e3d7`)
+
+The 2026-10-04 (346) block and every dated snapshot above are superseded by these byte-derived values.
+All numbers below come from commands run this session; where a doc and the bytes disagree, the bytes win.
+
+- **Gate:** GREEN on the frozen tree (HEAD `2f0e3d7`, clean) — `ok:true`, `flakes:[]`, `hardFails:[]`,
+  typecheck/lint/assertionGaps/build all `ok`, **prevention 20/20** (`missed:[]`, `pending:[]`,
+  `skipped:[]`, `count:20`, `countFloor:20`), scripts **513 pass / 0 fail**, lib **3712 pass / 0 fail /
+  2 skipped**, `skips:2`. The exact JSON is quoted in `README.md` §"Corrections in force — appended
+  2026-10-05" and in `AGENTS.md`.
+- **Tracked counts (`git ls-files`):** total **2,014** · `src` 256 · `src/lib` 244 (129 non-test + 115
+  colocated tests) · `scripts` 107 (33 `*.test.mjs`) · `fixes` 761 · `wave_plans` 139 ·
+  `research/multiagent` 103 · `research/eval-out` 345 · `research/eval-corpus` 23 · root 41. The
+  1,951 / scripts 52 / fixes 759 values are superseded.
+- **Autonomy contract (PR-33, decided 2026-10-05); Owner Open Question 1 = Option A:** a NEW additive
+  machine-verified reading — `autonomousFactoryV2` + `fleetAcceptance` / `fleetMetrics` / `fleetAlarms`,
+  reported under the attributable seat `machine:tree-run` (`decidedBy:"machine"`) — sits BESIDE the
+  byte-identical human-gated `autonomousSoftwareFactory`, which is never machine-mintable. **A machine
+  path may never mint `decidedBy:"human"`** (the reader refuses a human-seat claim outright). Rationale:
+  preserve the **338-4 anti-self-certification doctrine** (the machine may not set the bar it is graded
+  against). Rejected: Option B, dropping the human-acceptance conjunct (would make "autonomous"
+  unfalsifiable). `doctor` (keyless, this box) prints `autonomousSoftwareFactory:false` and
+  `autonomousFactoryV2:false` (no machine evidence supplied on the box). Owned by `src/lib/acceptance.ts`
+  + `doctor.ts`.
+- **Rollout flags (design §10) — each default off / byte-identical when omitted:** `--allow-empty`
+  (opt-in scaffold-only commit), `gate --resynthesize` / `repair --from-gate` (bounded P6 re-entry from
+  recorded unmet requirements), `--token-ledger <file>` / `RAPIDTOOL_LEDGER_FILE` +
+  `RAPIDTOOL_CAMPAIGN_TOKEN_CAP` (the cross-process campaign bound), and `resumeAccepted` (absent ⇒
+  byte-identical). Defaults + rollback table in `README.md` / `AGENTS.md`.
+- **Keyless proof layer:** `node scripts/prevention/verify-prevention.mjs --all --selftest` → **20 guards**,
+  both orthogonal signals clean (fixture-integrity `missed:[]` ∧ fix-presence `pending:[]`), `skipped:[]`,
+  `countFloor:20`; wired as an additive `gate.sh` stage, so a guard that stops firing fails the gate.
+- **Campaign #1 (keyed, 2026-10-05; `testruns\_report\CAMPAIGN1.md`):** `workingApp` **0/8** (target
+  ≥5/8); 6/8 stall at the P6 DoD gate. Delivery truth PASSED: **0 empty-substance commits and 0
+  red-tree commits** (historical 6 empty + 5 red). Spend 615,533 tokens / ~US$0.38 label-only; 1,505 s.
+- **Known residuals (unchanged or new):** `resumeAccepted` is plumbed through `headless.ts` but **not
+  consumed by codegen** (`grep resumeAccepted src/lib/codegen.server.ts` = 0); the gate reports **5 lint
+  warnings** (`lint.problems:5`, lint `ok:true`); cross-family failover genuinely unimplemented; the
+  console seat-delivery seam open; no OS isolation beyond the runtime Permission Model bound
+  (`isolation.sandbox:false`); P7 `p7-research` offline; prettier drift measured, not gated.

@@ -10,17 +10,17 @@ and a file-based headless CLI (`scripts/rapidtool-cli.mjs`, **39 verbs** — re-
 `grep -c 'case "' scripts/rapidtool-cli.mjs` = 39) that drives the same
 pure engine with no browser and no server.
 
-> **Status (2026-10-04, committed HEAD `c16220b` + the K1–K6 lanes).** The full boundary gate on the
-> frozen tree is GREEN: `bash scripts/gate.sh` → `ok:true` (typecheck 0 · lint 0 · assertion-gap lint 0
-> · scripts **452/0** + lib **3507 pass / 0 fail / 2 skipped** · build 0). An earlier mid-wave run in
-> this session returned `ok:false` on one child-spawn `compile-check.server` test that passes standalone
-> and in isolation (the documented load-sensitive flake class) while sibling lanes were editing
-> `src/**`; the exact JSON is in `fixes/346_batch5_notes.md` §1. The
-> gate script emits a
-> single JSON verdict; every number here is re-runnable by you. RapidTool is **not yet** an autonomous
-> software factory that beats Codex/OpenHands/Claude Code — and it **tells you that itself**: `doctor`
-> reports `autonomousSoftwareFactory: false` with named `gaps[]`. The remaining code-level work is
-> catalogued wave-by-wave in **[`remainingwaves.md`](remainingwaves.md)**.
+> **Status (2026-10-05, committed HEAD `2f0e3d7`, clean tree).** The full boundary gate on the frozen
+> tree is GREEN: `bash scripts/gate.sh` → `ok:true` (typecheck 0 · lint 0 with **5 warnings** ·
+> assertion-gap lint 0 · **prevention 20/20 guards** · scripts **513/0** + lib **3712 pass / 0 fail /
+> 2 skipped** · build 0). The gate script emits a single JSON verdict; every number here is re-runnable
+> by you, and the exact JSON is quoted in the "Corrections in force" block below. RapidTool is **not
+> yet** an autonomous software factory that beats Codex/OpenHands/Claude Code — and it **tells you that
+> itself**: `doctor` reports `autonomousSoftwareFactory: false` with named `gaps[]`, and keyed campaign
+> #1 scored `workingApp` **0 of 8** trees. A new **additive** machine reading (`autonomousFactoryV2` +
+> `fleetAcceptance`, seat `machine:tree-run`) now sits BESIDE the human-gated bar — PR-33, Owner Open
+> Question 1 = **Option A**; see [The autonomy contract (PR-33, 2026-10-05)](#the-autonomy-contract-pr-33-2026-10-05).
+> The remaining code-level work is catalogued wave-by-wave in **[`remainingwaves.md`](remainingwaves.md)**.
 
 ---
 
@@ -258,6 +258,56 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
 8. **English-only.** The console UI and every app the factory emits are hardcoded en-US strings —
    there is no i18n library, no locale tables, and no `Intl` usage; brief-level locale support is
    future work (R15-f11).
+9. **The keyed P6 productivity wall is unbroken (campaign #1, 2026-10-05).** A real keyed acceptance
+   campaign over the seven briefs plus a held-out brief (615,533 tokens / ~US$0.38 label-only /
+   1,505 s) scored **`workingApp` 0 of 8** trees against the plan's target of ≥5/8; **6 of 8 stall at
+   the P6 DoD gate** (`RT_E_GATE_PENDING`), and the synthesis gate refuses below-floor trees. The
+   **delivery-truth** half DID pass: **0 empty-substance commits and 0 red-tree commits** (historical:
+   6 empty + 5 red). Raw evidence: `testruns\_report\CAMPAIGN1.md`, `CAMPAIGN1.json`,
+   `campaign1-score.json`. Do not read a green gate as a working app.
+10. **Known residuals.** `resumeAccepted` is plumbed through `headless.ts` but **not yet consumed by
+    codegen** (the accepted-chunk reuse is not yet effective); the gate reports **5 lint warnings**
+    (`lint.problems:5`, lint still `ok:true`); cross-family failover is genuinely unimplemented (the
+    un-armed switch was deleted; `RAPIDTOOL_FALLBACK_PROVIDERS` is inert); the console seat records
+    provenance but has no out-of-band delivery seam; prettier drift is measured, not gated.
+
+### The autonomy contract (PR-33, 2026-10-05)
+
+**Owner Open Question 1 is decided as Option A:** a NEW additive machine-verified reading sits BESIDE
+the human-gated `autonomousSoftwareFactory`, which is byte-identical and never machine-mintable.
+
+- **`autonomousSoftwareFactory`** — the existing human-gated bar: the AND of the machine conjuncts plus
+  a **human-approved fixture row** stamped `decidedBy:"human"` through an out-of-band seat. Unchanged;
+  **a machine path may never mint `decidedBy:"human"`** (the machine reader refuses a human-seat claim
+  outright and never launders it). `doctor` prints it `false` by design.
+- **`autonomousFactoryV2`** — the NEW, additive, machine-only reading; satisfied by machine evidence
+  alone: the per-brief persisted P6 tree-run promotion stamp (`lastTest.label === "tested"` with a
+  non-empty `evidenceHash`). It never flips the human flag.
+- **`fleetAcceptance`** — the aggregate behind `autonomousFactoryV2`, reported under its own
+  attributable seat `machine:tree-run` with `decidedBy:"machine"`; fail-closed when evidence is absent,
+  hollow, unattributed, or colliding (two briefs sharing one `evidenceHash`), floor 5 of 8.
+- **`fleetMetrics` / `fleetAlarms`** — fleet observability (tokens/calls/cache/rubric; `estimatedCostUsd`
+  always `null`) plus threshold alarms that hard-fail the wave. Owned by `src/lib/acceptance.ts`.
+
+**Date:** 2026-10-05. **Rationale:** it preserves the **338-4 anti-self-certification doctrine** — the
+machine may not set the bar it is graded against, so the machine reading gets its own flag and its own
+seat rather than redefining the human bar. **Rejected alternative (Option B):** dropping the
+human-acceptance conjunct — it would make "autonomous" unfalsifiable and delete the repo's honesty
+doctrine (an owner decision, not a code-lane change).
+
+### Rollout flags — defaults and rollback
+
+| Flag | Default | Meaning | Rollback |
+|---|---|---|---|
+| `--allow-empty` | **off** | On `emit --run --git`: withhold the commit on `substance:"empty"`/red; `--allow-empty` admits a deliberate scaffold-only commit. | Omit it (byte-identical default). |
+| `gate --resynthesize` | **off** | Re-opens a red RUNNING P6 and re-enters the P6 journey once, live, bounded, from the recorded unmet requirements. | Omit it (a red running P6 re-parks). |
+| `repair --from-gate` | **off** | Re-opens a red RUNNING P6 first so the bounded repair targets the recorded unmet state instead of `RT_E_PHASE_ILLEGAL`. | Omit it (legacy repair path). |
+| `--token-ledger <file>` / `RAPIDTOOL_LEDGER_FILE` | **off** | Cross-process campaign ledger: preflight-load, refuse coded when `spent >= cap`, post-append measured spend. | Unset both (never read/written/surfaced; byte-identical). |
+| `RAPIDTOOL_CAMPAIGN_TOKEN_CAP` | **unset** | Integer campaign bound for the ledger above. | Unset (falls back to the file's `cap`). |
+| `resumeAccepted` | **absent** | A previous cycle's accepted chunks threaded for reuse. | Absent is the default and is byte-identical. |
+
+The machine flag is separate from `autonomousSoftwareFactory`; no silent default flips; the human door
+is never removed.
 
 ## Current state — 2026-09-26 (works / shelled / blocked)
 
@@ -365,6 +415,40 @@ counts and limits above. All values re-derived from the bytes this session.
   seat-delivery seam (provenance recorded, not verified); Windows Job Objects are unavailable from pure
   Node; P7 `p7-research` is offline; prettier drift (244 `[warn]` files) is measured but NOT gated.
 
+**Corrections in force — appended 2026-10-05 (346 wave batch 10; HEAD `2f0e3d7`):** this block
+supersedes the counts, gate, and limits above. All values re-derived from the bytes and commands run
+this session.
+
+- **Gate of record — GREEN on the frozen tree (HEAD `2f0e3d7`, clean tree).**
+  `& 'C:\Program Files\Git\bin\bash.exe' scripts/gate.sh` returned, as its single stdout JSON line:
+  ```json
+  {"ok":true,"double":false,"flakes":[],"hardFails":[],"quarantined":[],"quarantineCandidates":[],"skips":2,"wallMs":535223,"gates":{"typecheck":{"ok":true,"exit":0,"ms":54129},"lint":{"ok":true,"exit":0,"ms":20283,"problems":5},"assertionGaps":{"ok":true,"exit":0,"ms":1059},"build":{"ok":true,"exit":0,"ms":14581},"prevention":{"ok":true,"exit":0,"ms":3901,"missed":[],"pending":[],"skipped":[],"count":20,"countFloor":20},"testsScripts":{"ok":true,"exit":0,"ms":249046,"pass":513,"fail":0,"skipped":0},"testsLib":{"ok":true,"exit":0,"ms":191241,"pass":3712,"fail":0,"skipped":2}}}
+  ```
+  `gate.sh`'s own exit logic maps `ok:true` → exit 0. (A PowerShell wrapper may report exit 1 because
+  bash's stderr progress lines trip PowerShell's `NativeCommandError`; that is a wrapper artifact, not
+  the gate's code — the JSON verdict is authoritative.)
+- **Tracked counts (`git ls-files`):** total **2,014** · `src` 256 · `src/lib` 244 (129 non-test + 115
+  colocated test suites) · `scripts` 107 (33 `*.test.mjs`) · `fixes` 761 · `wave_plans` 139 ·
+  `research/multiagent` 103. The 1,951 / scripts 52 / fixes 759 values above are superseded.
+- **Prevention harness (the keyless proof layer — the gate of record).**
+  `node scripts/prevention/verify-prevention.mjs --all --selftest` → `ok:true`, `guards:20`,
+  `countFloor:20`, both signals clean (`fixtureIntegrity.missed:[]`, `fixPresence.pending:[]`),
+  `skipped:[]`. It is a wired additive `gate.sh` stage: the gate fails if a guard stops firing, a fixer
+  seam stays `pending`, a guard is `skipped`, or the guard count drops below the floor.
+- **Autonomy decision (PR-33, 2026-10-05):** Owner Open Question 1 = **Option A** — the additive
+  `autonomousFactoryV2` + `fleetAcceptance` (seat `machine:tree-run`) beside the byte-identical
+  human-gated `autonomousSoftwareFactory`; a machine path may never mint `decidedBy:"human"`. Rationale:
+  the 338-4 anti-self-certification doctrine. Rejected: dropping the human conjunct. Full text and the
+  rollout-flag defaults/rollback are in §"What it does **not** do yet" above.
+- **Campaign #1 (keyed, 2026-10-05):** `workingApp` **0/8** (target ≥5/8); 6/8 stall at the P6 DoD gate;
+  delivery truth PASSED (**0 empty-substance commits, 0 red-tree commits**). Evidence:
+  `testruns\_report\CAMPAIGN1.md` / `CAMPAIGN1.json` / `campaign1-score.json`.
+- **Honest limits that remain:** the keyed P6 productivity wall (above); no OS isolation beyond the
+  runtime Permission Model bound (`isolation.sandbox:false`); the reserved human acceptance door;
+  `resumeAccepted` plumbed but not consumed by codegen; 5 lint warnings; cross-family failover
+  unimplemented; the console seat-delivery seam open; P7 `p7-research` offline; prettier drift measured,
+  not gated.
+
 ## Progress so far (the paper trail)
 
 Five multi-agent waves ran 2026-09-16 (25 flash subagents, every wave closed with `gate.sh`-class
@@ -412,12 +496,12 @@ re-run. Where reality is behind, the docs say so, the packets say so, and `docto
 
 ---
 
-# THE CATALOG — every tracked file (1,951 today)
+# THE CATALOG — every tracked file (2,014 today)
 
 **What this is:** the literal catalog of the repository's tracked universe. Counts re-derived
-2026-10-04 (346 wave; HEAD `c16220b`) by the lane-5 docs-truth re-derivation: `git ls-files | wc -l` =
-**1,951** (the prior 2026-10-03 value, 1,933, and the earlier 1,908/2,096 values are superseded —
-`.t4scratch/` is no longer tracked). Every **root file, every script, every route,
+2026-10-05 (346 wave batch 10; HEAD `2f0e3d7`) by the docs-truth re-derivation: `git ls-files | wc -l` =
+**2,014** (the prior 2026-10-04 value, 1,951, the 2026-10-03 value, 1,933, and the earlier 1,908/2,096
+values are superseded — `.t4scratch/` is no longer tracked). Every **root file, every script, every route,
 every migration, every config** is named below; mass-produced classes (tests, wave plans, fix
 logs, vault notes, eval trees, vault/E2E outputs) are described **by convention with their full
 membership derivable from one command** — stated inline — because each member's purpose is its
@@ -428,18 +512,18 @@ staged changes (re-derived 2026-09-30 by the W44 wave — the W44 commit moved `
 `wave_plans/`, `scripts/` and root + Total together: 7 lane logs, 5 probe relocations, and the
 eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth).
 
-## 10.1 Census (tracked, re-derived 2026-10-04 at `c16220b` by the lane-5 docs-truth re-derivation)
+## 10.1 Census (tracked, re-derived 2026-10-05 at `2f0e3d7` by the docs-truth re-derivation)
 
 | Area | Files | What it is |
 |---|---:|---|
 | `research/` | 476 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 23 · `eval-out/` 345 · 5 top-level research docs) |
-| `fixes/` | 759 | Append-only per-lane landing logs (§10.9) |
-| `src/` | 250 | The product: engine + UI (§10.6) |
+| `fixes/` | 761 | Append-only per-lane landing logs (§10.9) |
+| `src/` | 256 | The product: engine + UI (§10.6) |
 | `wave_plans/` | 139 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 · W42 · W43 + the convention README (§10.10) |
 | `.grok/` | 89 | Legacy platform chrome — **do not build on it** (§10.12) |
 | `builds/` | 50 | Legacy sample build outputs (vault export + sample project) (§10.11) |
 | `vault-e2e/` | 47 | Vault export of the HVAC Dispatch E2E project (§10.11) |
-| `scripts/` | 52 | CLI + gates + guards + tooling + their tests (§10.7) |
+| `scripts/` | 107 | CLI + gates + guards + the keyless prevention/replay corpus + their tests (§10.7) |
 | root | 41 | Every root file named in §10.2 |
 | `screenshots/` | 16 | QA/app screenshots (§10.11) |
 | `public/` | 10 | Static assets served as-is (§10.4) |
@@ -450,7 +534,7 @@ eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth
 | `.github/` | 1 | CI workflow (§10.3) |
 | `attachments/` · `artifacts/` · `.audit-g2/` | 1 + 1 + 1 | Historical artifact + stored image + G2 probe (§10.12) |
 | `.t4scratch/` | 0 | Untracked/removed (was 192 tracked at `ac6b151`; stripped in the 342 wave, `73f660a`) |
-| **Total** | **1,951** | `git ls-files \| wc -l` |
+| **Total** | **2,014** | `git ls-files \| wc -l` |
 
 ## 10.2 Root files (all 41 tracked — named)
 
@@ -535,7 +619,7 @@ eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth
 - `src/routes/` (3): `__root.tsx` (root layout + auth provider), `index.tsx` (HomeScreen from
   `console.tsx`), `run.$id.tsx` (RunScreen from `console.tsx`).
 
-## 10.6 `src/lib/` — the engine (239 files = 127 non-test + 112 colocated tests; re-derived 2026-10-04 by lane-5)
+## 10.6 `src/lib/` — the engine (244 files = 129 non-test + 115 colocated tests; re-derived 2026-10-05)
 
 **90 direct `.ts` modules** (one line each; the module's comments read 2026-09-26/27; re-counted 2026-10-03):
 
@@ -628,7 +712,14 @@ engine's contracts are pinned from `headless.test.ts`, `gates.test.ts`, `judgmen
 others). (The enumerated names above are the last full hand-list; the count of record is the live
 `git ls-files src/lib | grep -c '\.test\.'` = 112 — re-derive rather than trusting this list.)
 
-## 10.7 `scripts/` — CLI, gates, guards, tooling (52 tracked = 26 tools + 26 tests; re-derived 2026-10-04)
+## 10.7 `scripts/` — CLI, gates, guards, tooling (107 tracked = 74 tools/guards/prevention + 33 `*.test.mjs`; re-derived 2026-10-05)
+
+> **Correction (2026-10-05):** the 2026-10-04 count was 52 (26 tools + 26 tests). Batches 9–10 added the
+> keyless proof layer to `scripts/` — `scripts/prevention/**` (the replay harness, `guard-registry.json`,
+> and the campaign-1 cassette corpus under `scripts/prevention/cassettes/campaign1/`), plus the new
+> `scripts/guards/campaign-invariants.mjs` + `campaign-pins.test.mjs`. The per-directory enumeration
+> below is the last hand-list; the count of record is the live `git ls-files scripts | wc -l` = 107.
+> Test-suite count of record: `git ls-files scripts | grep -c '\.test\.mjs$'` = 33.
 
 - **CLI:** `rapidtool-cli.mjs` — the headless driver, **39 verbs** (count source of truth:
   `grep -c 'case "'`), one JSON object per call, exit taxonomy 0/1/2/3/4/**5**.
