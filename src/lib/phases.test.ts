@@ -14,6 +14,7 @@ import {
   HITL_PHASES,
   PHASES,
   PHASE_BY_ID,
+  PHASE_DESCRIPTIONS,
   PHASE_LAST,
   PHASE_TAIL_START,
   STOCK_HITL,
@@ -21,6 +22,7 @@ import {
   phaseCoverage,
   phaseCoverageLine,
   phaseDef,
+  phaseDescription,
   priorsSealed,
 } from "./phases.ts";
 import { approve, createProject, runUntilGate } from "./headless.ts";
@@ -72,6 +74,27 @@ describe("PHASES table integrity", () => {
       phaseDef(12).summary,
       /Frontend\/backend parity is a roadmap declaration/,
       "P12: parity has no producer",
+    );
+  });
+});
+
+describe("349 L3 — every phase carries a human title + one-line plain-English description", () => {
+  it("every phase 0..12 has a non-empty title and a plain-English description", () => {
+    for (const def of PHASES) {
+      assert.ok(def.title.trim().length > 0, `P${def.id} has no title`);
+      const desc = phaseDescription(def.id);
+      assert.equal(desc, PHASE_DESCRIPTIONS[def.id], "phaseDescription mirrors the map");
+      assert.ok(desc.trim().length > 0, `P${def.id} has no plain-English description`);
+      // Plain English: one physical line, no ticket ids / internal jargon.
+      assert.ok(!desc.includes("\n"), `P${def.id} description must be one line`);
+      assert.ok(!/B-18|T-\d|W\d|L\d|DoD|ADR/.test(desc), `P${def.id} description must be plain English`);
+    }
+  });
+
+  it("the map is exhaustive over the real graph (no phantom, no missing id)", () => {
+    assert.deepEqual(
+      Object.keys(PHASE_DESCRIPTIONS).map(Number).sort((a, b) => a - b),
+      PHASES.map((p) => p.id),
     );
   });
 });

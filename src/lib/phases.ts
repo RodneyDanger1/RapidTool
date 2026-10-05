@@ -109,6 +109,35 @@ export const PHASES: PhaseDef[] = [
 
 export const PHASE_BY_ID: ReadonlyMap<PhaseId, PhaseDef> = new Map(PHASES.map((p) => [p.id, p]));
 
+/**
+ * 349 L3: one-line plain-English description per phase 0–12, for the run
+ * report / generated documents. `PhaseDef.summary` keeps the engineering
+ * caveats (B-18 declarations, producer status); this is the human sentence a
+ * reader sees first. Keyed by id — never positional — and compile-time
+ * exhaustive (`Record<PhaseId, string>` fails typecheck if the graph grows
+ * without a description). Additive: no existing consumer reads it.
+ */
+export const PHASE_DESCRIPTIONS: Readonly<Record<PhaseId, string>> = {
+  0: "Works out whether the idea is feasible and what it needs, before any code is written.",
+  1: "Maps the steps the product runs in and the state each step carries between them.",
+  2: "Decides what data the product keeps and how it is stored and read back.",
+  3: "Lists the outside services the product talks to and how each one plugs in.",
+  4: "Sets who may do what, and how the product's work is isolated from the host.",
+  5: "Defines when the pipeline pauses for a human decision and how rejections are handled.",
+  6: "Writes and runs the product's code; without a configured model it emits a tested template module.",
+  7: "Researches the market, competitors and risks the product will be judged against.",
+  8: "Describes the screens or command/API surface people use to work with the product.",
+  9: "Lays out the automated test gates and the (unexecuted) deployment templates for the product.",
+  10: "Decides where the product's work runs, keeping it local unless the brief asks for a model.",
+  11: "Names the live data sources and tools the product can call on at runtime.",
+  12: "Writes the finished documentation: decision records, the API description and the database schema.",
+};
+
+/** Plain-English description for a phase (see PHASE_DESCRIPTIONS). */
+export function phaseDescription(id: PhaseId): string {
+  return PHASE_DESCRIPTIONS[id];
+}
+
 export function phaseDef(id: PhaseId): PhaseDef {
   const def = PHASE_BY_ID.get(id);
   if (!def) {

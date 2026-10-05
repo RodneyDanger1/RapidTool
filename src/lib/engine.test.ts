@@ -37,6 +37,8 @@ import { applyPhaseResult, approveHitl, deepenResearch, emptyProject, databaseSc
 import { exportProjectJson, importProject } from "./io.ts";
 import { recordSessionSpend, resetSessionBudget, type TokenSpend } from "./token-ledger.ts";
 import { wildResumeRun } from "./headless.ts";
+import { PHASES } from "./phases.ts";
+import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
 import type { RtEventSeed } from "./rt-events.ts";
 import type { PhaseId, Project, WildParkInfo } from "./types.ts";
@@ -1083,5 +1085,34 @@ describe("W61 C9 - intent-first research query + off-intent filter", () => {
       false,
       "P7 market-landscape research is not subject to the engineering blocklist",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 349 L3 — every pipeline stage produces a real, visible artifact. The
+// per-phase Artifact rows are the run's "real output", so a full keyless run
+// must leave ≥1 artifact with a NON-EMPTY body on every phase 0..12 (a phase
+// whose body were empty would render as a blank deliverable). Drives the same
+// real engine via the shared fixtures (runHeadless → applyPhaseResult, the
+// deterministic keyless floor) — no mocks, no key, no network.
+// ---------------------------------------------------------------------------
+describe("349 L3 — every phase 0..12 records ≥1 artifact with a non-empty body after a full run", () => {
+  const done = runHeadless(seedProject(), ALL_PHASES);
+
+  it("the run is a real, complete keyless pipeline (P12 sealed)", () => {
+    assert.equal(done.status, "complete");
+    assert.equal(done.currentPhase, 12);
+    assert.equal(done.phases.filter((r) => r.status === "complete").length, PHASES.length);
+  });
+
+  it("each phase records at least one artifact whose body is real (non-empty)", () => {
+    for (const def of PHASES) {
+      const rows = (done.artifacts ?? []).filter((a) => a.phase === def.id);
+      assert.ok(rows.length >= 1, `P${def.id} ${def.title} recorded no artifact`);
+      assert.ok(
+        rows.some((a) => typeof a.body === "string" && a.body.trim().length > 0),
+        `P${def.id} ${def.title}: every recorded artifact has an empty body`,
+      );
+    }
   });
 });
