@@ -10,12 +10,17 @@
 //       · a missing dir               → honest skip RT_SHOT_NO_DIR (exit 3)
 //       · an existing dir, no entry   → honest skip RT_SHOT_NO_ENTRY (exit 3)
 //       · a renderable static tree    → ok:true + real PNGs (browser present)
-//       · an unrenderable entry       → skip RT_SHOT_EMPTY_RENDER, ZERO files
-//         written (the honesty rule: a blank frame is never kept as a shot)
+//       · an unrenderable entry with
+//         --no-build                  → skip RT_SHOT_EMPTY_RENDER, ZERO files
+//                                       written (a blank frame is never kept)
+//       · a Vite-source tree (350)    → BUILT in a temp copy, served from
+//                                       dist/, real PNGs; input never mutated
+//       · a failing / no-dist build   → coded skip, exit 3 unchanged
 //
-// Browser availability is detected honestly: when Playwright's chromium is not
-// installed the capture legs assert the coded RT_SHOT_NO_BROWSER skip instead,
-// so the suite passes with or without a browser download. Run:
+// Browser/toolchain availability is detected honestly: no chromium asserts the
+// coded RT_SHOT_NO_BROWSER skip, and no repo shared toolchain asserts
+// RT_SHOT_BUILD_UNAVAILABLE — so the suite passes with or without a browser
+// download or buildable toolchain. Run:
 //   node --test scripts/run-shot.test.mjs
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
@@ -34,9 +39,11 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
+  buildTreeToDist,
   defaultOutDir,
   mimeFor,
   parseShotArgs,
+  repoSharedToolchainRoot,
   resolveEntry,
   startStaticServer,
 } from "./run-shot.mjs";
@@ -55,6 +62,31 @@ async function detectBrowser() {
 }
 
 const HAS_BROWSER = await detectBrowser();
+const HAS_TOOLCHAIN = Boolean(repoSharedToolchainRoot());
+
+/**
+ * Write a minimal Vite-source tree: `index.html` → `/src/main.ts`, where the TS
+ * type annotation is a syntax error to a raw static serve (so the tree renders
+ * empty statically, forcing the build path) but compiles cleanly under vite.
+ * `config` writes a `vite.config.ts` when provided.
+ * @param {string} dir
+ * @param {{ config?: string }} [opts]
+ */
+function writeViteTree(dir, { config } = {}) {
+  writeFileSync(
+    join(dir, "index.html"),
+    '<!doctype html><html><body><div id="root"></div><script type="module" src="/src/main.ts"></script></body></html>',
+    "utf8",
+  );
+  mkdirSync(join(dir, "src"), { recursive: true });
+  writeFileSync(
+    join(dir, "src", "main.ts"),
+    'const root: HTMLElement | null = document.getElementById("root");\nif (root) root.textContent = "built product";\n',
+    "utf8",
+  );
+  writeFileSync(join(dir, "package.json"), '{"name":"fixture","private":true,"type":"module"}', "utf8");
+  if (config !== undefined) writeFileSync(join(dir, "vite.config.ts"), config, "utf8");
+}
 
 function runShot(args) {
   return spawnSync(process.execPath, [SCRIPT_PATH, ...args], {
@@ -78,7 +110,7 @@ function jsonOf(res) {
 function parseOk(argv) {
   const r = parseShotArgs(argv);
   if (r.error !== undefined) assert.fail(`expected a valid parse, got: ${r.error}`);
-  return /** @type {{ dir: string, out: string | null, viewport: { width: number, height: number }, waitMs: number }} */ (
+  return /** @type {{ dir: string, out: string | null, viewport: { width: number, height: number }, waitMs: number, build: boolean }} */ (
     r
   );
 }
@@ -105,6 +137,12 @@ test("parseShotArgs — validates --dir/--out/--viewport/--wait, never silently 
   const defaults = parseOk(["--dir", "."]);
   assert.deepEqual(defaults.viewport, { width: 1280, height: 800 });
   assert.equal(defaults.waitMs, 1500);
+  assert.equal(defaults.build, true, "the bounded build fallback is ON by default");
+
+  // --no-build is a boolean opt-out, never a value that could swallow the next arg.
+  assert.equal(parseOk(["--dir", ".", "--no-build"]).build, false);
+  assert.match(String(parseShotArgs(["--dir", ".", "--no-build", "--no-build"]).error), /more than once/);
+  assert.match(String(parseShotArgs(["--dir", ".", "--no-build", "oops"]).error), /unknown argument/);
 
   // A second parse must not inherit the first's mutated viewport.
   assert.deepEqual(parseOk(["--dir", "."]).viewport, { width: 1280, height: 800 });
@@ -236,6 +274,7 @@ test("an entry that renders nothing is an honest skip and writes NO blank image"
   withTempDir((dir) => {
     // A module entry the browser cannot execute (JSX in a .tsx), exactly the
     // shape of a Vite source tree served statically — it renders an empty root.
+    // --no-build pins the STATIC-only path (the build fallback has its own leg).
     writeFileSync(
       join(dir, "index.html"),
       '<!doctype html><html><head><title>Blank</title></head><body><div id="root"></div><script type="module" src="/app.tsx"></script></body></html>',
@@ -247,7 +286,7 @@ test("an entry that renders nothing is an honest skip and writes NO blank image"
       "utf8",
     );
     const out = join(dir, "shots");
-    const res = runShot(["--dir", dir, "--out", out, "--wait", "800"]);
+    const res = runShot(["--dir", dir, "--out", out, "--wait", "800", "--no-build"]);
 
     if (!HAS_BROWSER) {
       assert.equal(res.status, 3);
@@ -262,6 +301,128 @@ test("an entry that renders nothing is an honest skip and writes NO blank image"
     assert.deepEqual(j.shots, []);
     const written = existsSync(out) ? readdirSync(out).filter((f) => f.endsWith(".png")) : [];
     assert.deepEqual(written, [], "a blank render must never leave a PNG behind");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C · BUILD FALLBACK (fixes/350 F2) — a Vite-source tree is built in a temp
+// copy and the produced dist/ is captured; every failure stays an honest skip.
+// ---------------------------------------------------------------------------
+test("buildTreeToDist — no reachable vite toolchain is a coded skip, never a fabricated dist", () => {
+  withTempDir((dir) => {
+    writeViteTree(dir);
+    const noToolchain = mkdtempSync(join(tmpdir(), "run-shot-notc-"));
+    try {
+      const r = buildTreeToDist(dir, { toolchainRoot: noToolchain });
+      assert.equal(r.ok, false);
+      assert.equal(r.reason, "RT_SHOT_BUILD_UNAVAILABLE");
+      assert.equal(r.dist, undefined, "no dist may be pointed at when no build happened");
+    } finally {
+      rmSync(noToolchain, { recursive: true, force: true });
+    }
+  });
+});
+
+test("a Vite-source tree is BUILT in a temp copy and captured — real PNGs, input untouched", () => {
+  withTempDir((dir) => {
+    writeViteTree(dir);
+    const out = join(dir, "shots");
+    const res = runShot(["--dir", dir, "--out", out, "--wait", "600"]);
+    if (!HAS_BROWSER) {
+      assert.equal(res.status, 3);
+      assert.equal(jsonOf(res).reason, "RT_SHOT_NO_BROWSER");
+      return;
+    }
+    if (!HAS_TOOLCHAIN) {
+      assert.equal(res.status, 3, `no toolchain ⇒ honest skip.\n${res.stdout}\n${res.stderr}`);
+      assert.equal(jsonOf(res).reason, "RT_SHOT_BUILD_UNAVAILABLE");
+      return;
+    }
+    assert.equal(res.status, 0, `expected a built capture.\n${res.stdout}\n${res.stderr}`);
+    const j = jsonOf(res);
+    assert.equal(j.ok, true);
+    assert.equal(j.skipped, false);
+    assert.equal(j.build.attempted, true);
+    assert.equal(j.build.ok, true);
+    assert.match(String(j.servedDir), /[\\/]dist$/, "the capture is served from the build's dist/");
+    assert.ok(j.shots.length >= 1);
+    for (const shot of j.shots) {
+      assert.equal(shot.png, true, "the bytes must be a real PNG");
+      assert.ok(existsSync(shot.path));
+      assert.ok(statSync(shot.path).size > 0, "a shot is never a zero-byte file");
+    }
+    // PATCH-ONLY / no-mutation: the INPUT tree gained no build output or deps.
+    assert.equal(existsSync(join(dir, "dist")), false, "the input tree must never be mutated");
+    assert.equal(existsSync(join(dir, "node_modules")), false, "no deps are installed into the input tree");
+  });
+});
+
+test("a build that FAILS is an honest coded skip and writes NO image", () => {
+  withTempDir((dir) => {
+    // A vite config whose import cannot resolve ⇒ the bounded build exits non-zero.
+    writeViteTree(dir, { config: 'import x from "./does-not-exist.js";\nexport default x;\n' });
+    const out = join(dir, "shots");
+    const res = runShot(["--dir", dir, "--out", out, "--wait", "600"]);
+    if (!HAS_BROWSER) {
+      assert.equal(res.status, 3);
+      assert.equal(jsonOf(res).reason, "RT_SHOT_NO_BROWSER");
+      return;
+    }
+    if (!HAS_TOOLCHAIN) {
+      assert.equal(jsonOf(res).reason, "RT_SHOT_BUILD_UNAVAILABLE");
+      return;
+    }
+    assert.equal(res.status, 3, `a failed build is a skip, not an error.\n${res.stdout}\n${res.stderr}`);
+    const j = jsonOf(res);
+    assert.equal(j.skipped, true);
+    assert.equal(j.reason, "RT_SHOT_BUILD_FAILED");
+    assert.equal(j.build.ok, false);
+    assert.deepEqual(j.shots, []);
+    const written = existsSync(out) ? readdirSync(out).filter((f) => f.endsWith(".png")) : [];
+    assert.deepEqual(written, [], "a failed build must never leave a blank PNG behind");
+  });
+});
+
+test("a build that produces no dist/index.html is an honest coded skip", () => {
+  withTempDir((dir) => {
+    // Redirect vite's output so `dist/index.html` never appears.
+    writeViteTree(dir, { config: 'export default { build: { outDir: "out-custom" } };\n' });
+    const out = join(dir, "shots");
+    const res = runShot(["--dir", dir, "--out", out, "--wait", "600"]);
+    if (!HAS_BROWSER) {
+      assert.equal(res.status, 3);
+      assert.equal(jsonOf(res).reason, "RT_SHOT_NO_BROWSER");
+      return;
+    }
+    if (!HAS_TOOLCHAIN) {
+      assert.equal(jsonOf(res).reason, "RT_SHOT_BUILD_UNAVAILABLE");
+      return;
+    }
+    assert.equal(res.status, 3, `a missing dist is a skip, not an error.\n${res.stdout}\n${res.stderr}`);
+    const j = jsonOf(res);
+    assert.equal(j.skipped, true);
+    assert.equal(j.reason, "RT_SHOT_NO_DIST");
+    assert.deepEqual(j.shots, []);
+  });
+});
+
+test("--no-build keeps the static path: no build, no mutation, honest empty-render skip", () => {
+  withTempDir((dir) => {
+    writeViteTree(dir);
+    const out = join(dir, "shots");
+    const res = runShot(["--dir", dir, "--out", out, "--wait", "600", "--no-build"]);
+    if (!HAS_BROWSER) {
+      assert.equal(res.status, 3);
+      assert.equal(jsonOf(res).reason, "RT_SHOT_NO_BROWSER");
+      return;
+    }
+    assert.equal(res.status, 3);
+    const j = jsonOf(res);
+    assert.equal(j.skipped, true);
+    assert.equal(j.reason, "RT_SHOT_EMPTY_RENDER");
+    assert.equal(j.build, undefined, "no build attempt is recorded when --no-build is set");
+    const written = existsSync(out) ? readdirSync(out).filter((f) => f.endsWith(".png")) : [];
+    assert.deepEqual(written, []);
   });
 });
 
@@ -282,7 +443,15 @@ test("the real emitted tree under ../testruns is captured or honestly skipped", 
   // Whatever the outcome, it must be one of the honest, coded shapes.
   assert.ok(
     j.ok === true ||
-      ["RT_SHOT_NO_ENTRY", "RT_SHOT_NO_BROWSER", "RT_SHOT_EMPTY_RENDER"].includes(j.reason),
+      [
+        "RT_SHOT_NO_ENTRY",
+        "RT_SHOT_NO_BROWSER",
+        "RT_SHOT_EMPTY_RENDER",
+        "RT_SHOT_BUILD_UNAVAILABLE",
+        "RT_SHOT_BUILD_FAILED",
+        "RT_SHOT_BUILD_TIMEOUT",
+        "RT_SHOT_NO_DIST",
+      ].includes(j.reason),
     `unexpected verdict: ${res.stdout}`,
   );
   if (j.ok === true) {

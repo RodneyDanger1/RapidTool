@@ -8,32 +8,60 @@
 // directory statically over loopback, loads the tree's `index.html` in headless
 // Chromium, and writes real PNGs of what the browser rendered.
 //
+// fixes/350 F2: an emitted Vite/TSX tree is SOURCE (`index.html` →
+// `/src/main.tsx`), so a purely static serve renders an empty root and there
+// was no picture to take. When the static serve renders nothing AND the build
+// step is enabled, the tool makes a BOUNDED `vite build` of a TEMP COPY of the
+// tree (the input tree is never mutated) using the repo's shared toolchain —
+// the same symlink seam `compile-check.server.ts` uses (`linkSharedToolchain`)
+// — then serves the produced `dist/` and captures that. `--no-build` keeps the
+// static-only path.
+//
 // HONESTY (the whole point): a shot is a claim that "this is what the product
 // looks like". So the tool FAILS to a coded, non-fabricating skip whenever it
 // cannot make that claim:
 //   · no `index.html` at the tree root      → skipped RT_SHOT_NO_ENTRY
 //   · Playwright / its chromium is absent   → skipped RT_SHOT_NO_BROWSER
 //   · the page rendered no visible content  → skipped RT_SHOT_EMPTY_RENDER
+//   · no buildable tree toolchain           → skipped RT_SHOT_BUILD_UNAVAILABLE
+//   · the bounded `vite build` failed/timed → skipped RT_SHOT_BUILD_FAILED /
+//                                              RT_SHOT_BUILD_TIMEOUT
+//   · the build wrote no `dist/index.html`  → skipped RT_SHOT_NO_DIST
 //     (a blank 1280x800 PNG is written by NO branch: nothing is captured
 //      before the render is confirmed, so a blank image is never kept)
 // It never renders a placeholder and never passes one off as a screenshot.
 //
 // Usage:
 //   node scripts/run-shot.mjs --dir <emitted-dir> [--out <dir>]
-//                             [--viewport <WxH>] [--wait <ms>]
+//                             [--viewport <WxH>] [--wait <ms>] [--no-build]
 //
 //   --dir <dir>       the emitted tree (must contain index.html to capture).
 //   --out <dir>       output directory (default: <dir>/../screenshots, i.e.
 //                     beside the run artifact).
 //   --viewport <WxH>  browser viewport (default 1280x800).
 //   --wait <ms>       settle time after load before the capture (default 1500).
+//   --no-build        never build; serve the tree statically as-emitted and
+//                     keep the honest RT_SHOT_EMPTY_RENDER skip when it does
+//                     not render.
 //
 // stdout: exactly ONE JSON object `{ ok, dir, entry, shots[], skipped, reason }`.
 // Exit: 0 captured · 3 honest skip · 1 capture error · 2 usage error.
 // ---------------------------------------------------------------------------
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { extname, join, resolve, sep } from "node:path";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, extname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isMainModule } from "./with-app-env.mjs";
 
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
@@ -42,6 +70,12 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const ENTRY_FILE = "index.html";
 const MAX_VIEWPORT = 10_000;
 const MAX_WAIT_MS = 120_000;
+/** scripts/ → the RapidTool repo root (for the shared toolchain junction). */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+/** Vite's default build output, relative to the built tree root. */
+const BUILD_DIR = "dist";
+const DEFAULT_BUILD_TIMEOUT_MS = 90_000;
+const MAX_BUILD_TIMEOUT_MS = 600_000;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -77,17 +111,23 @@ export function mimeFor(filePath) {
 }
 
 /**
- * Parse and validate argv. Returns `{ dir, out, viewport, waitMs }` or
+ * Parse and validate argv. Returns `{ dir, out, viewport, waitMs, build }` or
  * `{ error }` — a malformed argument is a usage error (exit 2), never a silent
  * default that screenshots or writes somewhere the caller did not name.
  * @param {string[]} argv
- * @returns {{ dir: string, out: string | null, viewport: { width: number, height: number }, waitMs: number, error?: undefined } | { error: string }}
+ * @returns {{ dir: string, out: string | null, viewport: { width: number, height: number }, waitMs: number, build: boolean, error?: undefined } | { error: string }}
  */
 export function parseShotArgs(argv) {
   const known = new Set(["--dir", "--out", "--viewport", "--wait"]);
+  const booleanFlags = new Set(["--no-build"]);
   const values = {};
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
+    if (booleanFlags.has(token)) {
+      if (values[token] !== undefined) return { error: `${token} given more than once` };
+      values[token] = true;
+      continue;
+    }
     if (!known.has(token)) return { error: `unknown argument: ${token}` };
     const value = argv[i + 1];
     if (value === undefined || value.startsWith("--")) {
@@ -136,6 +176,7 @@ export function parseShotArgs(argv) {
     out: values["--out"] !== undefined ? resolve(values["--out"]) : null,
     viewport: { width: viewport.width, height: viewport.height },
     waitMs,
+    build: values["--no-build"] !== true,
   };
 }
 
@@ -235,9 +276,171 @@ export function isPng(buffer) {
   );
 }
 
+/**
+ * The RapidTool repo's own installed toolchain root (the `node_modules` beside
+ * `scripts/`), or null when there is none. This is the same shared root
+ * `compile-check.server.ts` junctions into an emitted tree that ships no deps:
+ * only the toolchain + modules the repo already has are reachable, so a build
+ * is genuinely offline and no dependency is fabricated.
+ */
+export function repoSharedToolchainRoot() {
+  try {
+    const deps = join(REPO_ROOT, "node_modules");
+    return existsSync(join(deps, ".bin")) ? deps : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * BOUNDED production build of an emitted Vite-source tree, in a TEMP COPY.
+ *
+ * The input tree is NEVER mutated: the copy excludes `node_modules`/`.git` and
+ * gains a JUNCTION to the tree's own (or the repo's shared) toolchain root, so
+ * `vite build` resolves a real, offline toolchain. Returns
+ * `{ ok:true, dist, copy, cleanup }` when `dist/index.html` exists, else an
+ * honest `{ ok:false, reason, detail }` — this function never fabricates an
+ * output.
+ * @param {string} treeDir
+ * @param {{ toolchainRoot?: string, tmpRoot?: string, timeoutMs?: number, spawn?: typeof spawnSync }} [opts]
+ */
+export function buildTreeToDist(treeDir, opts = {}) {
+  const timeoutMs =
+    typeof opts.timeoutMs === "number" && opts.timeoutMs > 0
+      ? Math.min(opts.timeoutMs, MAX_BUILD_TIMEOUT_MS)
+      : DEFAULT_BUILD_TIMEOUT_MS;
+  const treeDeps = join(treeDir, "node_modules");
+  const linkSource =
+    existsSync(treeDeps) ? treeDeps : opts.toolchainRoot ?? repoSharedToolchainRoot();
+  const viteBin = linkSource ? join(linkSource, "vite", "bin", "vite.js") : null;
+  if (!linkSource || !viteBin || !existsSync(viteBin)) {
+    return {
+      ok: false,
+      reason: "RT_SHOT_BUILD_UNAVAILABLE",
+      detail:
+        "no vite toolchain reachable for the tree (neither the tree's node_modules nor the repo shared root ships vite)",
+    };
+  }
+
+  let copy;
+  try {
+    copy = mkdtempSync(join(opts.tmpRoot ?? tmpdir(), "rt-shot-"));
+  } catch (err) {
+    return { ok: false, reason: "RT_SHOT_BUILD_FAILED", detail: `temp copy failed: ${String(err?.message || err)}` };
+  }
+  const cleanup = () => {
+    try {
+      rmSync(copy, { recursive: true, force: true });
+    } catch {
+      // best-effort: a leftover temp dir never fails the capture
+    }
+  };
+  try {
+    const skip = new Set([join(treeDir, "node_modules"), join(treeDir, ".git")]);
+    cpSync(treeDir, copy, { recursive: true, filter: (src) => !skip.has(src) });
+    if (!existsSync(join(copy, "node_modules"))) {
+      try {
+        symlinkSync(linkSource, join(copy, "node_modules"), "junction");
+      } catch (err) {
+        cleanup();
+        return {
+          ok: false,
+          reason: "RT_SHOT_BUILD_UNAVAILABLE",
+          detail: `could not link the shared toolchain into the build copy: ${String(err?.message || err)}`,
+        };
+      }
+    }
+    const spawn = opts.spawn ?? spawnSync;
+    const res = spawn(process.execPath, [viteBin, "build"], {
+      cwd: copy,
+      encoding: "utf8",
+      timeout: timeoutMs,
+      maxBuffer: 8 * 1024 * 1024,
+      windowsHide: true,
+      killSignal: "SIGKILL",
+      // Offline posture: vite build makes no network calls, and these keep npm
+      // from trying an update check. No dependency is ever fetched.
+      env: { ...process.env, CI: "1", NO_UPDATE_NOTIFIER: "1", npm_config_offline: "true" },
+    });
+    if (res.error && /** @type {{ code?: string }} */ (res.error).code === "ETIMEDOUT") {
+      cleanup();
+      return { ok: false, reason: "RT_SHOT_BUILD_TIMEOUT", detail: `vite build exceeded ${timeoutMs}ms` };
+    }
+    if (res.error) {
+      cleanup();
+      return { ok: false, reason: "RT_SHOT_BUILD_FAILED", detail: String(res.error.message || res.error) };
+    }
+    if (res.status !== 0) {
+      const out = [res.stdout, res.stderr].filter((s) => typeof s === "string" && s.trim()).join("\n");
+      cleanup();
+      return {
+        ok: false,
+        reason: "RT_SHOT_BUILD_FAILED",
+        detail: out.trim().split("\n").slice(-8).join("\n").slice(0, 1200) || `vite build exited ${res.status}`,
+      };
+    }
+    const dist = join(copy, BUILD_DIR);
+    if (!existsSync(join(dist, ENTRY_FILE))) {
+      cleanup();
+      return { ok: false, reason: "RT_SHOT_NO_DIST", detail: `vite build produced no ${BUILD_DIR}/${ENTRY_FILE}` };
+    }
+    return { ok: true, dist, copy, cleanup, command: `vite build (${viteBin})` };
+  } catch (err) {
+    cleanup();
+    return { ok: false, reason: "RT_SHOT_BUILD_FAILED", detail: String(err?.message || err) };
+  }
+}
+
 function done(payload, exitCode) {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
   process.exitCode = exitCode;
+}
+
+/**
+ * Serve `root` statically, load its entry in the browser, probe what rendered
+ * and — ONLY when the page is confirmed non-empty — write the PNGs. Each call
+ * is self-contained (its own server + page, both closed) so the tree as
+ * emitted and the built `dist/` are probed by the exact same rule.
+ * @returns {Promise<{ rendered: { rendered: boolean, textLen: number, canvas: number, media: number }, shots: Array<{ name: string, path: string, fullPage: boolean, bytes: number, png: boolean }>, consoleErrors: string[] }>}
+ */
+async function captureRoot(browser, root, args, outDir, timeoutMs) {
+  const consoleErrors = [];
+  const server = await startStaticServer(root);
+  try {
+    const page = await browser.newPage({ viewport: args.viewport });
+    page.on("console", (msg) => {
+      if (msg.type() === "error") consoleErrors.push(msg.text());
+    });
+    page.on("pageerror", (err) => consoleErrors.push(String(err?.message || err)));
+    await page.goto(server.url, { waitUntil: "load", timeout: timeoutMs });
+    await page.waitForTimeout(args.waitMs);
+
+    const rendered = await page.evaluate(renderedProbe);
+    const shots = [];
+    if (rendered.rendered) {
+      mkdirSync(outDir, { recursive: true });
+      /** @type {Array<[string, boolean]>} */
+      const shotSpecs = [
+        ["shot.png", false],
+        ["shot-full.png", true],
+      ];
+      for (const [name, fullPage] of shotSpecs) {
+        const path = join(outDir, name);
+        await page.screenshot({ path, fullPage });
+        shots.push({
+          name,
+          path,
+          fullPage,
+          bytes: statSync(path).size,
+          png: isPng(readFileSync(path)),
+        });
+      }
+    }
+    await page.close();
+    return { rendered, shots, consoleErrors };
+  } finally {
+    await server.close();
+  }
 }
 
 async function capture(args) {
@@ -286,25 +489,57 @@ async function capture(args) {
 
   const outDir = defaultOutDir(args.dir, args.out);
   const timeoutMs = Number(process.env.RUN_SHOT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
-  let server = null;
-  let browser = null;
+  const buildTimeoutMs = Number(process.env.RUN_SHOT_BUILD_TIMEOUT_MS) || DEFAULT_BUILD_TIMEOUT_MS;
   const consoleErrors = [];
+  let browser = null;
+  let build = null;
   try {
-    server = await startStaticServer(args.dir);
     browser = await chromium.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
     });
-    const page = await browser.newPage({ viewport: args.viewport });
-    page.on("console", (msg) => {
-      if (msg.type() === "error") consoleErrors.push(msg.text());
-    });
-    page.on("pageerror", (err) => consoleErrors.push(String(err?.message || err)));
-    await page.goto(server.url, { waitUntil: "load", timeout: timeoutMs });
-    await page.waitForTimeout(args.waitMs);
 
-    const rendered = await page.evaluate(renderedProbe);
-    if (!rendered.rendered) {
+    // 1) The tree AS EMITTED. A Vite-source tree (index.html → /src/main.tsx)
+    //    renders an empty root here — which is exactly what the build step fixes.
+    let servedDir = args.dir;
+    let attempt = await captureRoot(browser, args.dir, args, outDir, timeoutMs);
+    consoleErrors.push(...attempt.consoleErrors);
+    let buildInfo = null;
+
+    // 2) BOUNDED build fallback: build a temp copy of the tree with the shared
+    //    toolchain, then serve the produced dist/ and capture THAT. The input
+    //    tree is never mutated; a failed build keeps the honest coded skip.
+    if (!attempt.rendered.rendered && args.build) {
+      build = buildTreeToDist(args.dir, { timeoutMs: buildTimeoutMs });
+      buildInfo = {
+        attempted: true,
+        ok: build.ok === true,
+        reason: build.ok ? null : build.reason,
+        command: build.command ?? null,
+        detail: build.detail ?? null,
+        dist: build.ok ? build.dist : null,
+      };
+      if (!build.ok) {
+        return done(
+          {
+            ...base,
+            entry,
+            skipped: true,
+            reason: build.reason,
+            viewport: args.viewport,
+            consoleErrors,
+            build: buildInfo,
+            note: `the static serve rendered nothing and the bounded build could not produce ${BUILD_DIR}/${ENTRY_FILE}; no image written`,
+          },
+          3,
+        );
+      }
+      servedDir = build.dist;
+      attempt = await captureRoot(browser, servedDir, args, outDir, timeoutMs);
+      consoleErrors.push(...attempt.consoleErrors);
+    }
+
+    if (!attempt.rendered.rendered) {
       return done(
         {
           ...base,
@@ -313,30 +548,16 @@ async function capture(args) {
           reason: "RT_SHOT_EMPTY_RENDER",
           viewport: args.viewport,
           consoleErrors,
-          note: "the tree's entry rendered no visible content when served statically; no image written",
+          ...(buildInfo ? { build: buildInfo } : {}),
+          note: buildInfo
+            ? "the built tree's entry rendered no visible content; no image written"
+            : "the tree's entry rendered no visible content when served statically; no image written",
         },
         3,
       );
     }
 
-    mkdirSync(outDir, { recursive: true });
-    /** @type {Array<[string, boolean]>} */
-    const shotSpecs = [
-      ["shot.png", false],
-      ["shot-full.png", true],
-    ];
-    const shots = [];
-    for (const [name, fullPage] of shotSpecs) {
-      const path = join(outDir, name);
-      await page.screenshot({ path, fullPage });
-      shots.push({
-        name,
-        path,
-        fullPage,
-        bytes: statSync(path).size,
-        png: isPng(readFileSync(path)),
-      });
-    }
+    const shots = attempt.shots;
     if (shots.some((s) => !s.png)) {
       return done(
         {
@@ -354,6 +575,7 @@ async function capture(args) {
       {
         ok: true,
         dir: args.dir,
+        servedDir,
         entry,
         shots,
         skipped: false,
@@ -361,8 +583,9 @@ async function capture(args) {
         out: outDir,
         viewport: args.viewport,
         waitMs: args.waitMs,
-        rendered,
+        rendered: attempt.rendered,
         consoleErrors,
+        ...(buildInfo ? { build: buildInfo } : {}),
       },
       0,
     );
@@ -383,7 +606,7 @@ async function capture(args) {
     } catch {
       // best-effort teardown
     }
-    await server?.close();
+    build?.cleanup?.();
   }
 }
 

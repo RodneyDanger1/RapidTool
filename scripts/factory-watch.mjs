@@ -618,7 +618,9 @@ export function deliverVerified(projectFile, emitDir, timeoutMs) {
  * fixes/349 L2: BEST-EFFORT screenshot of a delivered tree, recorded beside the
  * run artifact (`<work>/<slug>/screenshots/`). It shells out to run-shot.mjs,
  * which serves the tree, renders it headless and writes real PNGs — or fails to
- * an honest coded skip (no entry / no browser / empty render). This function
+ * an honest coded skip (no entry / no browser / empty render). fixes/350 F2:
+ * the default timeout covers run-shot's bounded build fallback (a Vite-source
+ * tree is built in a temp copy before its dist/ is captured). This function
  * NEVER throws and NEVER influences the tick's outcome: a skipped or failed
  * capture is a recorded fact, not a run failure. `spawnShot` is injectable for
  * the wiring test; production uses spawnSync.
@@ -630,7 +632,7 @@ export function captureDeliveryShots({
   out,
   viewport,
   waitMs,
-  timeoutMs = 120_000,
+  timeoutMs = 180_000,
   spawnShot = spawnSync,
 } = {}) {
   const record = {
