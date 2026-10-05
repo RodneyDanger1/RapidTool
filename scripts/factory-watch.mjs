@@ -93,6 +93,7 @@ const SCHEMA_VERSION = 1;
 const CMD = "factory-watch";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI_PATH = join(REPO_ROOT, "scripts", "rapidtool-cli.mjs");
+const RUN_SHOT_PATH = join(REPO_ROOT, "scripts", "run-shot.mjs");
 const STATE_REL = join("state", "factory-state.json");
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -367,7 +368,8 @@ export function deliveryEvidence(envelope) {
   // "delivered" proves a REBUILT/TESTED artifact (the decisive verdict fields,
   // compile-check.treeVerdictHash) — not merely a landed commit. Absent on an
   // older envelope ⇒ null, never fabricated.
-  const verdictHash = typeof tree?.verdictHash === "string" && tree.verdictHash ? tree.verdictHash : null;
+  const verdictHash =
+    typeof tree?.verdictHash === "string" && tree.verdictHash ? tree.verdictHash : null;
   // C1-06: the delivery record must also state WHAT was actually verified — the
   // mounted UI's wiring reading the CLI's git.verification carries, and whether
   // the folded tree-run is a fully verified product. A commit over an unwired
@@ -377,7 +379,8 @@ export function deliveryEvidence(envelope) {
     git && git.verification && typeof git.verification === "object" ? git.verification : null;
   const uiWired = verification ? verification.uiWired === true : null;
   const declared = tree?.declaredScriptsVerified === true;
-  const verifiedProduct = tree?.ok === true && declared && tree?.unverifiedEntry === undefined && uiWired === true;
+  const verifiedProduct =
+    tree?.ok === true && declared && tree?.unverifiedEntry === undefined && uiWired === true;
   return {
     treeRun: {
       ok: tree?.ok === true,
@@ -528,9 +531,7 @@ function commitState(statePath, state, dirtySlugs) {
         typeof disk.projects !== "object" ||
         disk.projects === null
       ) {
-        throw new Error(
-          `${statePath}: the factory state is malformed — refusing to overwrite it`,
-        );
+        throw new Error(`${statePath}: the factory state is malformed — refusing to overwrite it`);
       }
       projects = { ...disk.projects };
       for (const slug of dirtySlugs) projects[slug] = state.projects[slug];
@@ -589,14 +590,14 @@ function runCli(args, timeoutMs) {
  * Returns the real envelopes so the caller records the verdict evidence.
  */
 export function deliverVerified(projectFile, emitDir, timeoutMs) {
-  const verified = runCli(
-    ["emit", "--project", projectFile, "--out", emitDir, "--run"],
-    timeoutMs,
-  );
+  const verified = runCli(["emit", "--project", projectFile, "--out", emitDir, "--run"], timeoutMs);
   if (!runProved(verified.envelope, verified.exitCode)) {
     return { ok: false, stage: "verify", verified, committed: null };
   }
-  const committed = runCli(["emit", "--project", projectFile, "--out", emitDir, "--git"], timeoutMs);
+  const committed = runCli(
+    ["emit", "--project", projectFile, "--out", emitDir, "--git"],
+    timeoutMs,
+  );
   const gitDirExists = existsSync(join(emitDir, ".git"));
   const proof = {
     ...(committed.envelope ?? {}),
@@ -611,6 +612,69 @@ export function deliverVerified(projectFile, emitDir, timeoutMs) {
     gitDirExists,
     proof,
   };
+}
+
+/**
+ * fixes/349 L2: BEST-EFFORT screenshot of a delivered tree, recorded beside the
+ * run artifact (`<work>/<slug>/screenshots/`). It shells out to run-shot.mjs,
+ * which serves the tree, renders it headless and writes real PNGs — or fails to
+ * an honest coded skip (no entry / no browser / empty render). This function
+ * NEVER throws and NEVER influences the tick's outcome: a skipped or failed
+ * capture is a recorded fact, not a run failure. `spawnShot` is injectable for
+ * the wiring test; production uses spawnSync.
+ * @param {{ dir?: string, out?: string, viewport?: string, waitMs?: number, timeoutMs?: number, spawnShot?: Function }} [opts]
+ * @returns {{ at: string, ok: boolean, skipped: boolean, reason: string | null, entry: string | null, shots: unknown[], exitCode: number | null, renderError?: string, error?: string }}
+ */
+export function captureDeliveryShots({
+  dir,
+  out,
+  viewport,
+  waitMs,
+  timeoutMs = 120_000,
+  spawnShot = spawnSync,
+} = {}) {
+  const record = {
+    at: new Date().toISOString(),
+    ok: false,
+    skipped: false,
+    reason: /** @type {string | null} */ (null),
+    entry: /** @type {string | null} */ (null),
+    shots: /** @type {unknown[]} */ ([]),
+    exitCode: /** @type {number | null} */ (null),
+  };
+  if (typeof dir !== "string" || dir.trim() === "") {
+    return { ...record, skipped: true, reason: "RT_SHOT_NO_DIR" };
+  }
+  try {
+    const args = [RUN_SHOT_PATH, "--dir", dir];
+    if (out) args.push("--out", out);
+    if (viewport) args.push("--viewport", viewport);
+    if (Number.isFinite(waitMs)) args.push("--wait", String(waitMs));
+    const res = spawnShot(process.execPath, args, { encoding: "utf8", timeout: timeoutMs });
+    record.exitCode = res.status ?? null;
+    let verdict = null;
+    try {
+      verdict = JSON.parse(res.stdout ?? "");
+    } catch {
+      verdict = null;
+    }
+    if (verdict && typeof verdict === "object") {
+      record.ok = verdict.ok === true;
+      record.skipped = verdict.skipped === true;
+      record.reason = verdict.reason ?? verdict.code ?? null;
+      record.entry = verdict.entry ?? null;
+      record.shots = Array.isArray(verdict.shots) ? verdict.shots : [];
+      if (typeof verdict.renderError === "string") record.renderError = verdict.renderError;
+    } else {
+      record.skipped = true;
+      record.reason = "RT_SHOT_UNPARSEABLE";
+    }
+  } catch (err) {
+    record.skipped = true;
+    record.reason = "RT_SHOT_SPAWN_FAILED";
+    record.error = String(err?.message || err);
+  }
+  return record;
 }
 
 // ---------------------------------------------------------------------------
@@ -802,6 +866,21 @@ function main() {
     });
 
     if (plan.action === "deliver" || plan.action === "terminal" || plan.action === "changed") {
+      // fixes/349 L2: backfill the product screenshot for an already-delivered
+      // item that predates the capture (or whose capture was never attempted).
+      // Best-effort and idempotent: once recorded, later ticks make no attempt.
+      if (plan.action === "deliver" && recorded && !recorded.screenshots) {
+        try {
+          recorded.screenshots = captureDeliveryShots({
+            dir: recorded.delivery?.dir ?? recorded.emitDir ?? emitDir,
+            out: join(work, slug, "screenshots"),
+          });
+          dirtySlugs.add(slug);
+          commitState(statePath, state, dirtySlugs);
+        } catch {
+          // a shot must never fail an already-delivered tick
+        }
+      }
       results.push({
         slug,
         name: brief.name,
@@ -812,6 +891,7 @@ function main() {
         needsHuman: plan.needsHuman === true,
         delivered: plan.action === "deliver",
         delivery: recorded?.delivery ?? null,
+        screenshots: recorded?.screenshots ?? null,
       });
       continue;
     }
@@ -925,6 +1005,13 @@ function main() {
       verified: true,
       ...deliveryEvidence(delivered.proof),
     };
+    // fixes/349 L2: capture the product screenshot beside the run artifact.
+    // Best-effort — a skipped/failed shot is recorded, never fatal (the item is
+    // already delivered; capturing is observability, not a delivery condition).
+    entry.screenshots = captureDeliveryShots({
+      dir: entry.delivery.dir ?? emitDir,
+      out: join(work, slug, "screenshots"),
+    });
     commitState(statePath, state, dirtySlugs);
     const r = row(entry, "delivered");
     results.push(r);
@@ -987,6 +1074,7 @@ function row(entry, action) {
     needsHuman: entry.needsHuman === true,
     delivered: entry.status === "delivered",
     delivery: entry.delivery ?? null,
+    screenshots: entry.screenshots ?? null,
   };
 }
 

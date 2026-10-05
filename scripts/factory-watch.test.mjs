@@ -33,7 +33,14 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +48,7 @@ import { test } from "node:test";
 import {
   assessSrcDirty,
   briefHash,
+  captureDeliveryShots,
   classifyDeliverFailure,
   classifyDrive,
   deliverVerified,
@@ -345,7 +353,11 @@ test("deliveryProved — a commit alone is NOT a delivery; the emitted tree must
   assert.equal(ev.treeRun.ok, true);
   assert.equal(ev.treeRun.declaredScriptsVerified, true);
   assert.deepEqual(ev.treeRun.specs, { total: 1, passed: 1 });
-  assert.equal(ev.treeRun.verdictHash, "verdict-hash-1", "PR-21: the verdict hash proves a rebuilt/tested artifact");
+  assert.equal(
+    ev.treeRun.verdictHash,
+    "verdict-hash-1",
+    "PR-21: the verdict hash proves a rebuilt/tested artifact",
+  );
   assert.equal(ev.verdictHash, "verdict-hash-1");
   assert.equal(ev.evidenceHash, "ev1dence");
   // An older envelope without a verdict hash persists null — never fabricated.
@@ -361,15 +373,31 @@ test("deliveryProved — a commit alone is NOT a delivery; the emitted tree must
     git: { committed: true, verification: { uiWired: true, unverifiedReasons: [] } },
   });
   assert.equal(withWiredUi.uiWired, true);
-  assert.equal(withWiredUi.verifiedProduct, true, "a green, toolchain-verified, UI-wired tree is a verified product");
+  assert.equal(
+    withWiredUi.verifiedProduct,
+    true,
+    "a green, toolchain-verified, UI-wired tree is a verified product",
+  );
 
   const unwired = deliveryEvidence({
     ...committed,
-    git: { committed: true, verification: { uiWired: false, unverifiedReasons: ["mounted UI imports … but never calls an exported function"] } },
+    git: {
+      committed: true,
+      verification: {
+        uiWired: false,
+        unverifiedReasons: ["mounted UI imports … but never calls an exported function"],
+      },
+    },
   });
   assert.equal(unwired.uiWired, false);
-  assert.equal(unwired.verifiedProduct, false, "committed:true with an unwired UI is NOT a verified product (C1-06)");
-  assert.deepEqual(unwired.unverifiedReasons, ["mounted UI imports … but never calls an exported function"]);
+  assert.equal(
+    unwired.verifiedProduct,
+    false,
+    "committed:true with an unwired UI is NOT a verified product (C1-06)",
+  );
+  assert.deepEqual(unwired.unverifiedReasons, [
+    "mounted UI imports … but never calls an exported function",
+  ]);
 
   // An older envelope with no git.verification keeps honoured nulls (never a
   // fabricated true) and is not presented as a verified product.
@@ -382,7 +410,11 @@ test("runProved / classifyDeliverFailure — a red delivery-time tree-run is a c
   const green = { ok: true, treeRun: { ok: true }, tested: { evidenceHash: "e" } };
   assert.equal(runProved(green, 0), true, "exit 0 + ok + a green treeRun verifies a delivery");
   assert.equal(runProved({ ok: false, treeRun: { ok: false } }, 1), false);
-  assert.equal(runProved({ ok: true, treeRun: { ok: false } }, 0), false, "a red tree never verifies");
+  assert.equal(
+    runProved({ ok: true, treeRun: { ok: false } }, 0),
+    false,
+    "a red tree never verifies",
+  );
   assert.equal(runProved({ ok: true }, 0), false, "a run with no treeRun is not verification");
   assert.equal(runProved(green, 1), false, "a non-zero exit is never verified");
 
@@ -408,7 +440,10 @@ test("factory-watch's deliver step VERIFIES (`--run`) before it COMMITS (`--git`
   const src = readFileSync(SCRIPT_PATH, "utf8");
   const verifyCall = src.indexOf('["emit", "--project", projectFile, "--out", emitDir, "--run"]');
   const commitCall = src.indexOf('["emit", "--project", projectFile, "--out", emitDir, "--git"]');
-  assert.ok(verifyCall !== -1, "deliverVerified must emit --run (no commit) to verify the tree first");
+  assert.ok(
+    verifyCall !== -1,
+    "deliverVerified must emit --run (no commit) to verify the tree first",
+  );
   assert.ok(commitCall !== -1, "deliverVerified must issue a separate emit --git for the commit");
   assert.ok(
     verifyCall < commitCall,
@@ -463,10 +498,10 @@ test(
 
     // REFUSE: a dirty src/ stops the tick with a coded reason, with no CLI verb
     // run and no project created (no keyed spend).
-    const refused = runFactory(
-      ["--intake", intake, "--work", work, "--src-root", dirtyRepo],
-      { cwd: root, allowDirtySrc: false },
-    );
+    const refused = runFactory(["--intake", intake, "--work", work, "--src-root", dirtyRepo], {
+      cwd: root,
+      allowDirtySrc: false,
+    });
     assert.equal(refused.status, 1, `a dirty src must refuse.\n${refused.stdout}`);
     const jr = jsonOf(refused);
     assert.equal(jr.ok, false);
@@ -477,15 +512,23 @@ test(
       false,
       "the refusal precedes create — nothing is spent",
     );
-    assert.equal(existsSync(join(work, "state", "factory-state.json")), false, "no state is written");
+    assert.equal(
+      existsSync(join(work, "state", "factory-state.json")),
+      false,
+      "no state is written",
+    );
 
     // ALLOW control: the same intake over a CLEAN src root runs the real path
     // (the keyless drive's honest stall) — never the preflight refusal.
-    const ok = runFactory(
-      ["--intake", intake, "--work", work, "--src-root", cleanRepo],
-      { cwd: root, allowDirtySrc: false },
+    const ok = runFactory(["--intake", intake, "--work", work, "--src-root", cleanRepo], {
+      cwd: root,
+      allowDirtySrc: false,
+    });
+    assert.equal(
+      ok.status,
+      1,
+      `a clean src proceeds to the keyless stall.\n${ok.stdout}\n${ok.stderr}`,
     );
-    assert.equal(ok.status, 1, `a clean src proceeds to the keyless stall.\n${ok.stdout}\n${ok.stderr}`);
     const jo = jsonOf(ok);
     assert.notEqual(jo.code, "RT_E_SRC_DIRTY");
     assert.equal(jo.processes[0].action, "drive-stalled");
@@ -648,7 +691,10 @@ test(
     assert.equal(first.proof.treeRun.ok, true);
     const ev = deliveryEvidence(first.proof);
     assert.equal(ev.treeRun.ok, true);
-    assert.ok(typeof ev.evidenceHash === "string" && ev.evidenceHash, "the verdict evidence is kept");
+    assert.ok(
+      typeof ev.evidenceHash === "string" && ev.evidenceHash,
+      "the verdict evidence is kept",
+    );
 
     const second = withKeylessEnv(() => deliverVerified(projectFile, emitDir, 600_000));
     assert.equal(second.ok, true, "the idempotent re-delivery stays green");
@@ -692,6 +738,114 @@ test("a brief already delivered is skipped idempotently (no CLI verb runs)", () 
     existsSync(join(work, "expense-tracker", "build.json")),
     false,
     "a delivered brief must not be re-created (the skip happens BEFORE any CLI verb)",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// fixes/349 L2 — the product screenshot is wired BEST-EFFORT: it is attempted
+// after/for a delivery, recorded beside the run artifact, and must never change
+// the tick's outcome. These legs use real run-shot invocations; the unrenderable
+// (or missing-browser) tree is the honest skip path, so no browser is required.
+// ---------------------------------------------------------------------------
+test("captureDeliveryShots — best-effort: a bad dir/runner/verdict is a recorded skip, never a throw", () => {
+  const noDir = captureDeliveryShots({ dir: "" });
+  assert.equal(noDir.skipped, true);
+  assert.equal(noDir.reason, "RT_SHOT_NO_DIR");
+  assert.deepEqual(noDir.shots, []);
+
+  const threw = captureDeliveryShots({
+    dir: "x",
+    spawnShot: () => {
+      throw new Error("no spawn");
+    },
+  });
+  assert.equal(threw.skipped, true);
+  assert.equal(threw.reason, "RT_SHOT_SPAWN_FAILED");
+
+  const garbage = captureDeliveryShots({
+    dir: "x",
+    spawnShot: () => ({ status: 0, stdout: "not json" }),
+  });
+  assert.equal(garbage.skipped, true);
+  assert.equal(garbage.reason, "RT_SHOT_UNPARSEABLE");
+
+  const skipped = captureDeliveryShots({
+    dir: "x",
+    spawnShot: () => ({
+      status: 3,
+      stdout: JSON.stringify({
+        ok: false,
+        skipped: true,
+        reason: "RT_SHOT_NO_ENTRY",
+        shots: [],
+        entry: null,
+      }),
+    }),
+  });
+  assert.equal(skipped.skipped, true);
+  assert.equal(skipped.reason, "RT_SHOT_NO_ENTRY");
+  assert.equal(skipped.exitCode, 3);
+});
+
+test("the deliver step captures a shot BEST-EFFORT — a skip is recorded, the tick's exit is unchanged", () => {
+  const root = mkdtempSync(join(tmpdir(), "rapidtool-factory-watch-shot-"));
+  const intake = join(root, "intake");
+  const work = join(root, "work");
+  mkdirSync(intake, { recursive: true });
+  const briefFile = join(intake, "expense-tracker.md");
+  writeFileSync(briefFile, BRIEF, "utf8");
+  // A real emitted dir with NO index.html — run-shot's honest no-entry skip.
+  const emitDir = join(work, "expense-tracker", "emitted");
+  mkdirSync(emitDir, { recursive: true });
+  seedState(work, {
+    "expense-tracker": {
+      name: "expense tracker",
+      briefHash: briefHash(BRIEF),
+      source: briefFile,
+      projectFile: join(work, "expense-tracker", "build.json"),
+      emitDir,
+      status: "delivered",
+      attempts: 1,
+      delivery: { dir: emitDir, committed: true, noop: false, commit: { hash: "deadbeef" } },
+    },
+  });
+
+  const res = runFactory(["--intake", intake, "--work", work], { cwd: root });
+  assert.equal(
+    res.status,
+    0,
+    `a screenshot must never change the tick's exit.\n${res.stdout}\n${res.stderr}`,
+  );
+  const j = jsonOf(res);
+  assert.equal(j.exit_code, 0);
+  assert.equal(j.processes[0].action, "deliver");
+  assert.equal(j.processes[0].delivered, true, "the delivery outcome is untouched");
+  assert.equal(j.processes[0].screenshots.skipped, true, "the skip is recorded on the row");
+  assert.equal(j.processes[0].screenshots.reason, "RT_SHOT_NO_ENTRY");
+
+  const state = JSON.parse(readFileSync(join(work, "state", "factory-state.json"), "utf8"));
+  assert.equal(
+    state.projects["expense-tracker"].screenshots.skipped,
+    true,
+    "the skip is durable in the checkpoint",
+  );
+
+  // An unrenderable tree leaves NO fabricated image behind.
+  const shotDir = join(work, "expense-tracker", "screenshots");
+  const pngs = existsSync(shotDir) ? readdirSync(shotDir).filter((f) => f.endsWith(".png")) : [];
+  assert.deepEqual(pngs, [], "no blank/placeholder PNG may be written for a skipped capture");
+});
+
+test("factory-watch wires the shot after delivery and never branches the run outcome on it", () => {
+  const src = readFileSync(SCRIPT_PATH, "utf8");
+  assert.ok(
+    src.includes("entry.screenshots = captureDeliveryShots("),
+    "a fresh delivery captures beside the run artifact",
+  );
+  assert.ok(src.includes("captureDeliveryShots("), "the factory must attempt the product shot");
+  assert.ok(
+    !/if\s*\(\s*(entry\.screenshots|captureDeliveryShots)/.test(src),
+    "the capture result must never gate the item's outcome",
   );
 });
 
