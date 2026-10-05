@@ -30,7 +30,8 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { approveHitl, emptyProject, databaseSchemaSql, deliveryKindOf, hydrateProject, liveLayer, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
+import { applyPhaseResult, approveHitl, emptyProject, databaseSchemaSql, deliveryKindOf, hydrateProject, liveLayer, rejectHitl, repairPhases, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
+import { exportProjectJson, importProject } from "./io.ts";
 import { recordSessionSpend, resetSessionBudget, type TokenSpend } from "./token-ledger.ts";
 import { wildResumeRun } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
@@ -660,5 +661,111 @@ describe("346 K3 - wildStep surfaces the step measured session-ledger usage to o
     const seen: TokenSpend[] = [];
     await wildStep(spendP6Fixture(), { reviewer: notConfigured, p6Edge: floorEdge, onUsage: (u) => seen.push(u) });
     assert.equal(seen.length, 0, "an unmeasured step calls no sink - nothing to record");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M7-01 (fixes/310) — a phase record that repairPhases has to INSERT must carry
+// the same hydrate birth-stamps (rejectionHistory/gate) a KEPT record gets.
+// Without them the repaired payload's first export→import→export hop silently
+// ADDED both keys (the exact drift M7-01 exists to kill).
+// ---------------------------------------------------------------------------
+describe("M7-01 - a repaired phase INSERT is already normalized (no first-hop key drift)", () => {
+  it("repairPhases stamps rejectionHistory/gate on inserted records", () => {
+    const base = emptyProject({ name: "Repair", brief: "a repaired brief with vocabulary" });
+    const raw = base.phases.filter((p) => p.id !== 5);
+    const rep = repairPhases(raw as never);
+    assert.deepEqual(rep.inserted, [5]);
+    assert.deepEqual(rep.phases.find((p) => p.id === 5), {
+      id: 5,
+      status: "locked",
+      rejectionHistory: [],
+      gate: null,
+    });
+  });
+
+  it("a missing-phase payload export→import→export is byte-stable on the FIRST hop", () => {
+    const base = emptyProject({ name: "Repair", brief: "a repaired brief with vocabulary", enforceDod: false });
+    const raw = JSON.parse(exportProjectJson(base)) as { phases: unknown[] };
+    raw.phases.splice(5, 1);
+    const hydrated = hydrateProject(raw as never);
+    const e1 = exportProjectJson(hydrated);
+    const imported = importProject(e1);
+    assert.equal(imported.ok, true, "the repaired export still imports");
+    assert.equal(
+      exportProjectJson((imported as { project: Project }).project),
+      e1,
+      "the inserted record must not gain rejectionHistory/gate on the next hop",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// H-03 / B-25 - repairs are LOUD, never silent. The research normalizer dropped
+// entry-level junk (a null/non-object entry, or `items` that is not an array)
+// without setting researchRepaired → the entry vanished from the corpus with no
+// hydrate.repaired row. The flag now names every entry-level drop.
+// ---------------------------------------------------------------------------
+describe("H-03 - entry-level research drops are recorded in hydrate.repaired", () => {
+  const cases: [string, unknown][] = [
+    ["a null entry", [null]],
+    ["a primitive entry", [5]],
+    ["an entry whose items is not an array", [{ items: 5 }]],
+  ];
+  for (const [label, research] of cases) {
+    it(`logs the repair for ${label}`, () => {
+      const base = emptyProject({ name: "Research", brief: "a research brief with vocabulary" });
+      const h = hydrateProject({ ...base, research } as never);
+      assert.deepEqual(h.research, [], "the junk entry contributes nothing");
+      assert.ok(
+        h.logs.some((l) => l.event === "hydrate.repaired" && String(l.detail).includes("research:dropped")),
+        "the drop is named in the repair log",
+      );
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Uncoded-failure lead: every engine refusal a machine caller can hit carries
+// its RT_E_* code on the thrown Error (the phases.ts phaseDef precedent), so a
+// caller classifies on `err.code` and never string-matches the message.
+// ---------------------------------------------------------------------------
+describe("engine refusals carry their RT_E_* code (never an uncoded throw)", () => {
+  const codeOf = (fn: () => unknown): string | undefined => {
+    try {
+      fn();
+    } catch (e) {
+      return (e as { code?: string }).code;
+    }
+    return undefined;
+  };
+
+  it("applyPhaseResult refuses an out-of-graph phase as RT_E_PHASE_ILLEGAL", () => {
+    const p = emptyProject({ name: "Coded", brief: "a coded refusal brief" });
+    assert.equal(codeOf(() => applyPhaseResult(p, 99 as never)), "RT_E_PHASE_ILLEGAL");
+  });
+
+  it("approveHitl refuses a missing/invalid seat and a machine forceHuman pass as RT_E_VALIDATION", () => {
+    const p = emptyProject({ name: "Coded", brief: "a coded refusal brief" });
+    p.status = "awaiting_hitl";
+    p.phases[0] = { ...p.phases[0], status: "awaiting_hitl" };
+    p.hitl = { phase: 0, title: "Gate", prompt: "Approve?", stakes: "high", forceHuman: false };
+    assert.equal(codeOf(() => approveHitl(p, { decidedBy: "agent" as never })), "RT_E_VALIDATION");
+    p.hitl = { phase: 0, title: "Human only", prompt: "Approve?", stakes: "high", forceHuman: true };
+    assert.equal(codeOf(() => approveHitl(p, { decidedBy: "autopilot" })), "RT_E_VALIDATION");
+  });
+
+  it("rejectHitl refuses short feedback as RT_E_VALIDATION", () => {
+    const p = emptyProject({ name: "Coded", brief: "a coded refusal brief" });
+    p.status = "awaiting_hitl";
+    p.phases[0] = { ...p.phases[0], status: "awaiting_hitl" };
+    p.hitl = { phase: 0, title: "Gate", prompt: "Approve?", stakes: "high", forceHuman: false };
+    assert.equal(codeOf(() => rejectHitl(p, "too short")), "RT_E_VALIDATION");
+  });
+
+  it("the scorecard precondition refusal is RT_E_INTERNAL (its own comment says the branch is unreachable)", () => {
+    const p = emptyProject({ name: "Coded", brief: "a coded refusal brief" });
+    p.lattice = null;
+    assert.equal(codeOf(() => synthesizePhase(p, 0)), "RT_E_INTERNAL");
   });
 });

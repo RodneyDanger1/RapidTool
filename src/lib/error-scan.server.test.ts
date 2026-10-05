@@ -76,6 +76,40 @@ describe("W23 L6 error-scan — planted fixture trees", () => {
     }
   });
 
+  it("line attribution survives a multi-line block comment above the catch (mask keeps index, not newlines)", () => {
+    // The masker replaces every masked span with SAME-LENGTH spaces, so a
+    // character index is stable — but a block comment's newlines become spaces,
+    // so counting lines on the MASKED text under-reports. Before the fix this
+    // reported line 3 (two block-comment newlines lost) with a snippet that was
+    // not the catch line. The finding must land on the real catch (line 5).
+    const dir = fixtureTree({
+      "drift.ts": [
+        "/**", // 1
+        " * multi-line doc — two newlines the masker turns into spaces.", // 2
+        " */", // 3
+        "export function f(): number {", // 4
+        "  try {", // 5
+        "    return g();", // 6
+        "  } catch {", // 7
+        "  }", // 8
+        "}", // 9
+        "", // 10
+      ].join("\n"),
+    });
+    try {
+      const res = scanTreeErrorSignals(dir);
+      assert.equal(res.ok, true);
+      if (!res.ok) return;
+      assert.deepEqual(
+        res.findings.map(key),
+        ["catch-empty@drift.ts:7"],
+        "the finding's line must be the actual catch line, not the masked drift",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("R3: a neutral return adjacent to an unimplemented marker is reported; the SAME return without the marker is not", () => {
     const dir = fixtureTree({
       "unimplemented.ts": [
@@ -118,6 +152,41 @@ describe("W23 L6 error-scan — planted fixture trees", () => {
         withoutMarker.findings,
         [],
         "a neutral return with NO unimplemented marker must not be reported (adjacency control)",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("R2 allowlist is keyword-aware: `throwaway()`/`rethrow(e)` do not mask a swallow; a real `throw` does", () => {
+    // The old substring check (`body.includes("throw")`) treated an identifier
+    // containing "throw" as loud, so these two swallows were silently missed.
+    // The control is a genuine `throw` statement — still clean.
+    const dir = fixtureTree({
+      "allowlist.ts": [
+        "export function a(x: number): number {", // 1
+        "  try { return g(x); }", // 2
+        "  catch (e) { throwaway(); }", // 3
+        "}", // 4
+        "export function b(x: number): number {", // 5
+        "  try { return g(x); }", // 6
+        "  catch (e) { rethrow(e); }", // 7
+        "}", // 8
+        "export function c(x: number): number {", // 9
+        "  try { return g(x); }", // 10
+        "  catch (e) { throw e; }", // 11
+        "}", // 12
+        "", // 13
+      ].join("\n"),
+    });
+    try {
+      const res = scanTreeErrorSignals(dir);
+      assert.equal(res.ok, true);
+      if (!res.ok) return;
+      assert.deepEqual(
+        res.findings.map(key),
+        ["catch-swallowed@allowlist.ts:3", "catch-swallowed@allowlist.ts:7"],
+        "an identifier merely containing `throw` must not satisfy the allowlist; the real throw must",
       );
     } finally {
       rmSync(dir, { recursive: true, force: true });

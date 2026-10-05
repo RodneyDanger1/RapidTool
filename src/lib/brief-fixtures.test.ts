@@ -522,6 +522,13 @@ describe("fixtureApprovalGate + approveFixtureCases", () => {
       () => approveFixtureCases(cases, ["orc-1"], { decidedBy: "agent" as "human" }),
       /decidedBy/,
     );
+    // Uncoded-failure lead: the refusal carries a machine-readable code.
+    try {
+      approveFixtureCases(cases, ["orc-1"], { decidedBy: "agent" as "human" });
+      assert.fail("expected a refusal");
+    } catch (e) {
+      assert.equal((e as { code?: string }).code, "RT_E_VALIDATION");
+    }
   });
 });
 
@@ -699,6 +706,29 @@ describe("A1-01 — placeholder sentinels are not substantive fixtures", () => {
       !helper.includes("<draft>") && !helper.includes("<any>"),
       "the emitted matcher must have no sentinel escape hatch",
     );
+  });
+
+  // Regression: the deterministic floor (draftTypedLiterals) must emit a
+  // placeholder for CONSTRAINT rows too. The throws arm used a hardcoded
+  // "invalid" pattern that fixtureCaseIsPlaceholder did not recognize, so a
+  // constraint-only floor set passed the gate/emit guard as a substantive bar.
+  it("the deterministic floor's constraint rows are placeholders too (never a guessed bar)", () => {
+    const oracle = [
+      { id: "orc-c-1", name: "constraint.positiveQty", job: "schedule", given: "quantity violates positive", expect: "rejected" },
+      { id: "orc-c-2", name: "constraint.email", job: "notify", given: "email invalid", expect: "rejected" },
+    ] as unknown as OracleTest[];
+    const typed = draftTypedLiterals({ oracle });
+    const draft = draftBriefFixtures({ oracle, capabilities: [], typed });
+    assert.equal(draft.cases.length, 2, JSON.stringify(draft.redCards));
+    assert.ok(
+      draft.cases.every((c) => fixtureCaseIsPlaceholder(c)),
+      "every floor-drafted constraint row is a placeholder",
+    );
+    const approved = approveFixtureCases(draft.cases, draft.cases.map((c) => c.id), { decidedBy: "human" });
+    const gate = fixtureApprovalGate(approved);
+    assert.equal(gate.ok, false, "an approved constraint-only floor set asserts nothing real");
+    assert.deepEqual(gate.placeholderIds.sort(), ["orc-c-1", "orc-c-2"]);
+    assert.equal(approvedAcceptanceFixtures(approved), null, "a floor constraint bar never emits");
   });
 });
 

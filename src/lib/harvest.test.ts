@@ -28,7 +28,7 @@ import {
   TREND_NOTE_DISCLAIMER,
   trendNotes,
 } from "./harvest.ts";
-import type { HarvestLessonReason, HarvestLlmResult, HarvestOptions } from "./harvest.ts";
+import type { HarvestLessonReason, HarvestLlmResult, HarvestHit, HarvestOptions } from "./harvest.ts";
 import {
   benchProject,
   harvest,
@@ -617,6 +617,13 @@ describe("trendNotes", () => {
     const notes = trendNotes("b", []);
     assert.ok(notes.length >= 2);
     assert.ok(notes.some((n) => n.includes("No deprecation/removal signals")));
+  });
+
+  it("a non-array hit list is treated as absent, never a TypeError", () => {
+    const notes = trendNotes("b", null as unknown as HarvestHit[]);
+    assert.ok(notes[0].includes(TREND_NOTE_DISCLAIMER));
+    assert.ok(notes.some((n) => n.includes("No deprecation/removal signals")));
+    assert.deepEqual(notes, trendNotes("b", []), "a junk list behaves exactly like an empty one");
   });
 });
 

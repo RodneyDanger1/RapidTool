@@ -61,8 +61,12 @@ const SNIPPET_CAP = 160;
 /** A catch clause header (`catch`, optional binding) up to its opening brace. */
 const CATCH_RE = /\bcatch\s*(?:\([^)]*\))?\s*\{/g;
 /** R2's deliberate allowlist — a mention is a signal to look, so missing one is
- *  a prompt, not a verdict (advisory: true). */
-const CATCH_ALLOW = ["throw", "RT_E_", "console.", ".warn(", ".error(", "report("];
+ *  a prompt, not a verdict (advisory: true). `throw` is matched as the KEYWORD
+ *  (`\bthrow\b`), not a substring: a plain `includes("throw")` counted
+ *  `throwaway();` / `rethrow(e);` as loud, silently suppressing a real
+ *  swallow (found by scratch probe). The remaining tokens stay substring
+ *  mentions by the rule's own wording ("an `RT_E_` mention", `console.`, …). */
+const CATCH_ALLOW_RE = [/\bthrow\b/, /RT_E_/, /console\./, /\.warn\(/, /\.error\(/, /report\(/];
 /** R3: a STANDALONE neutral return (nothing else on the line). */
 const NEUTRAL_RETURN_RE = /^\s*return\s+(?:"{2}|'{2}|\[\]|-1)\s*;\s*$/;
 const UNIMPLEMENTED_RE = /unimplemented|not implemented|todo|stub|placeholder|not yet/i;
@@ -103,13 +107,19 @@ function scanCatchClauses(path: string, raw: string, findings: ErrorScanFinding[
     const close = matchingBrace(masked, open);
     if (close === -1) continue; // unbalanced text — nothing analyzable here
     const body = masked.slice(open + 1, close);
-    const line = lineOf(masked, m.index);
+    // Masking preserves LENGTH and character INDEX (each masked span is
+    // replaced by same-length spaces) but NOT newline count: newlines inside a
+    // block comment / template literal become spaces. Counting lines on the
+    // masked text therefore under-reports every position after a multi-line
+    // comment — the reported line (and its snippet) pointed above the real
+    // catch. Count on RAW at the identical index instead.
+    const line = lineOf(raw, m.index);
     const snippet = snippetOf(rawLines[line - 1] ?? "");
     if (body.trim() === "") {
       findings.push({ path, line, rule: "catch-empty", snippet, advisory: true });
       continue;
     }
-    if (!CATCH_ALLOW.some((token) => body.includes(token))) {
+    if (!CATCH_ALLOW_RE.some((re) => re.test(body))) {
       findings.push({ path, line, rule: "catch-swallowed", snippet, advisory: true });
     }
   }

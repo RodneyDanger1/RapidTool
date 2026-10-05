@@ -361,11 +361,15 @@ export function buildVaultNotes(project: Project): VaultNote[] {
     const rec = phaseList.find((r) => r.id === id);
 
     const parts: string[] = [`# ${pn.title}`, ""];
+    // Corrupt-store guard: a persisted gate whose `unmet` is missing/not an
+    // array must coerce to [] (the module's no-TypeError stance), never throw
+    // inside `.join`.
+    const gateUnmet: string[] = rec?.gate && Array.isArray(rec.gate.unmet) ? rec.gate.unmet : [];
     const gate =
       rec?.gate != null
         ? rec.gate.passed
-          ? ` · **Gate:** passed${rec.gate.unmet.length ? ` (unmet: ${rec.gate.unmet.join("; ")})` : ""}`
-          : ` · **Gate:** failed (unmet: ${rec.gate.unmet.join("; ")})`
+          ? ` · **Gate:** passed${gateUnmet.length ? ` (unmet: ${gateUnmet.join("; ")})` : ""}`
+          : ` · **Gate:** failed (unmet: ${gateUnmet.join("; ")})`
         : "";
     parts.push(`**Status:** ${rec?.status ?? "unknown"}${gate}`);
     if (rec?.startedAt || rec?.completedAt) {
@@ -702,9 +706,12 @@ export function lessonNote(project: Project, phase: number): VaultNote | null {
   // --- Header facts (gate verdict recorded at completion, status, rejections).
   let gateText = "not recorded";
   if (gate !== null && gate !== undefined) {
+    // Corrupt-store guard (same as buildVaultNotes): a missing/non-array
+    // `unmet` coerces to [] instead of throwing inside `.join`.
+    const unmet: string[] = Array.isArray(gate.unmet) ? gate.unmet : [];
     gateText = gate.passed
-      ? `passed${gate.unmet.length ? ` (unmet: ${gate.unmet.join("; ")})` : ""}`
-      : `failed (unmet: ${gate.unmet.join("; ") || "unknown"})`;
+      ? `passed${unmet.length ? ` (unmet: ${unmet.join("; ")})` : ""}`
+      : `failed (unmet: ${unmet.join("; ") || "unknown"})`;
   }
   const facts = [
     `# ${title}`,

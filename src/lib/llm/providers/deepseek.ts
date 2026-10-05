@@ -436,7 +436,16 @@ async function completeDeepSeekInner(
   const isPro = model === DEEPSEEK_MODELS.pro;
   const maxTokens =
     opts.maxTokens ?? (isPro ? DEFAULT_MAX_TOKENS_PRO : DEFAULT_MAX_TOKENS_FLASH);
-  const timeoutMs = opts.timeoutMs ?? (isPro ? TIMEOUT_PRO_MS : TIMEOUT_FLASH_MS);
+  // A non-positive / non-finite timeoutMs would make setTimeout fire on the
+  // first tick (`setTimeout(fn, 0)`/NaN), so a buggy caller's 0 produced an
+  // immediate "timed out after 0s" the caller never asked for. Mirror the
+  // OpenAI-compatible adapter: only a positive finite number is honored, else
+  // the per-tier default applies.
+  const tierTimeoutMs = isPro ? TIMEOUT_PRO_MS : TIMEOUT_FLASH_MS;
+  const timeoutMs =
+    typeof opts.timeoutMs === "number" && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
+      ? opts.timeoutMs
+      : tierTimeoutMs;
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
   if (opts.system) messages.push({ role: "system", content: opts.system });

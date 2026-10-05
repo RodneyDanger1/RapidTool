@@ -130,7 +130,12 @@ function flag(args, key) {
 
 function intFlag(args, key, fallback) {
   const raw = args[key];
-  if (typeof raw !== "string" || raw.trim() === "") return fallback;
+  if (raw === undefined) return fallback; // flag absent → the caller's default
+  // A bare flag parses as `true` and an empty value as "": both are caller
+  // mistakes, never a silent fall-back (a bare --limit meaning UNLIMITED would
+  // process every brief; a bare --timeout-ms would silently use 30 minutes).
+  if (raw === true) return null;
+  if (typeof raw !== "string" || raw.trim() === "") return null;
   const n = Number(raw);
   return Number.isInteger(n) && n >= 0 ? n : null;
 }

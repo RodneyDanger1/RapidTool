@@ -819,6 +819,31 @@ describe("vault corrupt-store hardening (strField/tsField/row/rowsOf)", () => {
     assert.ok(n.title.startsWith("Daily — "));
     assert.ok(n.body.includes("_none_"));
   });
+
+  it("a gate whose unmet is missing/non-array never throws (coerces to [])", () => {
+    const base = seedProject();
+    const p = {
+      ...base,
+      phases: base.phases.map((r, i) =>
+        i === 0
+          ? {
+              ...r,
+              status: "complete" as const,
+              // Corrupt persisted gate: `unmet` omitted (type lie at the edge).
+              gate: { passed: false, evidenceHash: "x", checkedAt: 1 } as unknown as NonNullable<
+                typeof r.gate
+              >,
+            }
+          : r,
+      ),
+    };
+    assert.doesNotThrow(() => buildVaultNotes(p), "buildVaultNotes floors a corrupt gate");
+    let note: ReturnType<typeof lessonNote> = null;
+    assert.doesNotThrow(() => {
+      note = lessonNote(p, 0);
+    }, "lessonNote floors a corrupt gate");
+    assert.ok(note && (note as { body: string }).body.includes("**Gate:** failed (unmet: unknown)"));
+  });
 });
 
 // W-16: backlinksFor was this file's only untested export; the [null, 5] case

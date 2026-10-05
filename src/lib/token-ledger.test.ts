@@ -44,6 +44,10 @@ describe("token-ledger", () => {
     const l = emptyLedger();
     assert.equal(recordSpend(l, null), l);
     assert.equal(recordSpend(l, undefined), l);
+    // An object that reports NO numeric token count is unmeasured usage too:
+    // it must not read as a metered call (was calls+1 with zero tokens).
+    assert.equal(recordSpend(l, {} as never), l);
+    assert.equal(recordSpend(l, { promptTokens: "9" } as never), l);
   });
 
   it("no cap never exceeds (unmetered path)", () => {

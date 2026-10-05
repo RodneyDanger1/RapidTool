@@ -1107,8 +1107,22 @@ describe("registry — second family: the live-probed candidate (F2 · W19-L5)",
     assert.equal(PROBE_TIMEOUT_MS, 3_000);
     assert.equal(resolveProbeTimeoutMs(60_000), 3_000);
     assert.equal(resolveProbeTimeoutMs(1_000), 1_000);
+    // A positive sub-millisecond request must floor at 1ms, not 0 — a 0ms
+    // budget aborts before any probe I/O, i.e. a positive ask became an
+    // instant timeout.
+    assert.equal(resolveProbeTimeoutMs(0.5), 1);
     for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
       assert.equal(resolveProbeTimeoutMs(bad), 3_000, `unset/hostile budget ⇒ the cap: ${String(bad)}`);
+    }
+  });
+
+  it("probeProviderModels never throws on a hostile descriptor — the refusal is coded", async () => {
+    for (const bad of [null, undefined, 42, "x"]) {
+      const r = await probeProviderModels(bad as never, { env: {} });
+      assert.equal(r.reachable, false, `descriptor ${String(bad)}: not reachable`);
+      assert.equal(r.authenticated, false, `descriptor ${String(bad)}: not authenticated`);
+      assert.equal(r.status, null, `descriptor ${String(bad)}: no I/O performed`);
+      assert.equal(r.code, "RT_E_VALIDATION", `descriptor ${String(bad)}: coded refusal, never a throw`);
     }
   });
 });

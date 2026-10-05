@@ -2496,6 +2496,33 @@ test("L3-02: reconcileCrossTabProjects adds new remote ids, merges shared ids, k
   assert.equal(out.projects.find((p) => p.id === a.id)?.name, "A-renamed");
 });
 
+test("L3-02: a remote-only appended row (strict remote superset) is adopted, not ignored", () => {
+  // Tab A appended an artifact while this tab's copy is otherwise identical —
+  // scalars equal, so only the row union can detect the change. The old
+  // `union.length !== remote.length` check reported changed:false here and the
+  // storage-event seam silently never committed the other tab's row.
+  const base = emptyProject({ name: "P", brief: BRIEF });
+  const row: Artifact = { id: "remote-only-1", phase: 0, kind: "docs", title: "R", body: "r" };
+  const remote = { ...base, artifacts: [...base.artifacts, row] };
+  const out = reconcileCrossTabProjects([base], [remote]);
+  assert.equal(out.changed, true, "a remote-only append changes this tab's record");
+  assert.ok(out.projects[0].artifacts.some((a) => a.id === row.id), "the remote row rides the merged project");
+
+  // End-to-end through the storage-event seam.
+  const p = install(seedProject());
+  useRapid.setState({ projectTombstones: [], crossTabNotice: null });
+  const liveRow: Artifact = { id: "remote-live-1", phase: 0, kind: "docs", title: "L", body: "l" };
+  const raw = JSON.stringify({
+    state: { projects: [{ ...p, artifacts: [...p.artifacts, liveRow] }], activeId: p.id, autopilot: false, demoSeeded: true },
+    version: 1,
+  });
+  assert.equal(applyCrossTabSnapshot(raw), true, "the remote append commits");
+  assert.ok(
+    current(p.id).artifacts.some((a) => a.id === liveRow.id),
+    "the other tab's appended row is adopted live",
+  );
+});
+
 test("L3-02: applyCrossTabSnapshot commits a storage snapshot, warns on drift, ignores junk", () => {
   const p = install(seedProject());
   useRapid.setState({ crossTabNotice: null });

@@ -322,10 +322,19 @@ function mergeCacheField(
   return floorNonNeg(ledgerValue) + floorNonNeg(spendValue);
 }
 
-/** Append one API usage blob. Missing spend is a no-op (does not bump calls).
- *  T-107.6: the optional cache fields accumulate only when reported. */
+/** Append one API usage blob. Missing spend — absent, or an object that reports
+ *  NO numeric token count (`{}`/all-junk) — is a no-op (does not bump calls):
+ *  a call with unmeasured usage must not read as a metered call. T-107.6: the
+ *  optional cache fields accumulate only when reported. */
 export function recordSpend(ledger: TokenLedger, spend: TokenSpend | null | undefined): TokenLedger {
   if (!spend || typeof spend !== "object") return ledger;
+  const reported =
+    typeof spend.promptTokens === "number" ||
+    typeof spend.completionTokens === "number" ||
+    typeof spend.cachedPromptTokens === "number" ||
+    typeof spend.cacheWriteTokens === "number" ||
+    typeof spend.reasoningTokens === "number";
+  if (!reported) return ledger;
   const next: TokenLedger = {
     promptTokens: ledger.promptTokens + floorNonNeg(spend.promptTokens),
     completionTokens: ledger.completionTokens + floorNonNeg(spend.completionTokens),

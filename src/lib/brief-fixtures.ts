@@ -171,8 +171,13 @@ export function draftTypedLiterals(args: {
     const constraint = isConstraintRow(row);
     typed[row.id] = {
       given: {},
+      // A1-01: the floor's literals are SENTINELS, never guessed assertions.
+      // The constraint arm used a hardcoded "invalid" message pattern, which
+      // fixtureCaseIsPlaceholder did not flag — so a constraint-only floor set
+      // passed fixtureApprovalGate/approvedAcceptanceFixtures as if it were a
+      // substantive acceptance bar (the exact claim A1-01 forbids).
       expect: constraint
-        ? { kind: "throws", messagePattern: "invalid" }
+        ? { kind: "throws", messagePattern: PLACEHOLDER_DRAFT }
         : { kind: "shape", value: { id: PLACEHOLDER_DRAFT } },
       kind: constraint ? "effect" : "pure",
     };
@@ -615,9 +620,13 @@ export function approveFixtureCases(
   const wanted = new Set(ids);
   const decidedBy = opts?.decidedBy;
   if (decidedBy !== undefined && !(BRIEF_FIXTURE_DECIDED_BY as readonly string[]).includes(decidedBy)) {
-    throw new Error(
+    // Coded refusal (errors.ts registry) so an A2 caller classifies the bad
+    // seat on the code, never on the message.
+    const err = new Error(
       `approveFixtureCases: decidedBy must be one of ${BRIEF_FIXTURE_DECIDED_BY.join("|")} when provided`,
-    );
+    ) as Error & { code?: string };
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
   return cases.map((c) => {
     if (!wanted.has(c.id)) return c;

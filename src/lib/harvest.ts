@@ -641,10 +641,13 @@ const TREND_NOTE_MAX = 7;
 
 export function trendNotes(brief: string, hits: readonly HarvestHit[]): string[] {
   const notes: string[] = [];
+  // Normalize BEFORE the first read: the disclaimer named `hits.length`, so a
+  // non-array (null/undefined) threw a TypeError here even though the loop
+  // below already guards with Array.isArray.
+  const list = Array.isArray(hits) ? hits : [];
   const briefHead =
     typeof brief === "string" && brief.trim() ? `brief "${clipSnippet(brief.trim(), 80)}"` : "no brief supplied";
-  notes.push(`${TREND_NOTE_DISCLAIMER} (${briefHead}; ${hits.length} harvested snippet(s))`);
-  const list = Array.isArray(hits) ? hits : [];
+  notes.push(`${TREND_NOTE_DISCLAIMER} (${briefHead}; ${list.length} harvested snippet(s))`);
   let signals = 0;
   const seen = new Set<string>();
   for (const hit of list) {

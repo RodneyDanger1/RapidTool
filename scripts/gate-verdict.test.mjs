@@ -189,6 +189,41 @@ test("D: --double run-1/run-2 disagreement → exit 3 with both names as flakes"
 });
 
 // ---------------------------------------------------------------------------
+// J · a red NON-TEST gate outranks a --double flake: exit 1, never 3.
+// Pre-fix the flake branch returned 3 and masked a permanently-red typecheck/
+// build behind a "retry" verdict — the documented taxonomy puts a hard-failed
+// gate at 1, which must dominate a flake.
+// ---------------------------------------------------------------------------
+test("J: --double flake + red typecheck → exit 1 (hard gate dominates the flake, never 3)", () => {
+  const { status, verdict } = runVerdict({
+    exits: { typecheck: 1, testsScripts: 1 },
+    double: true,
+    logs: {
+      "testsScripts.log": "TAP version 13\nnot ok 1 - flakey X\n# fail 1\n",
+      "testsScripts2.log": "TAP version 13\n# pass 5\n# fail 0\n",
+    },
+  });
+  assert.equal(status, 1, "a red typecheck outranks a flake — exit 1, never 3");
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.gates.typecheck.ok, false, "the red gate is recorded");
+  assert.deepEqual(verdict.flakes, ["flakey X"], "the flake is still named");
+});
+
+test("J2: --double flake + red build → exit 1 (a red gate cannot be masked by a flake)", () => {
+  const { status, verdict } = runVerdict({
+    exits: { build: 1, testsScripts: 1 },
+    double: true,
+    logs: {
+      "testsScripts.log": "TAP version 13\nnot ok 1 - flakey X\n# fail 1\n",
+      "testsScripts2.log": "TAP version 13\n# pass 5\n# fail 0\n",
+    },
+  });
+  assert.equal(status, 1, "a red build outranks a flake — exit 1, never 3");
+  assert.equal(verdict.gates.build.ok, false, "the red gate is recorded");
+  assert.deepEqual(verdict.flakes, ["flakey X"]);
+});
+
+// ---------------------------------------------------------------------------
 // E · --double, run-1 crash without TAP lines / run-2 produced none either:
 // still exit 1 (fixes/173 §F-H11 — a runner-level red is never a flake).
 // ---------------------------------------------------------------------------
@@ -290,6 +325,27 @@ test("I: a test NOT on the allowlist is never quarantined", () => {
   assert.equal(status, 1);
   assert.ok(verdict.hardFails.includes("some failing test"));
   assert.deepEqual(verdict.quarantineCandidates, [], "only allowlisted names are ever candidates");
+});
+
+// ---------------------------------------------------------------------------
+// K · --double --quarantine: an allowlisted test that fails BOTH runs (a hard
+// fail, not a flake) but is isolated-GREEN is relieved in double mode too.
+// Pre-fix `relieved` was computed only in single mode, so the quarantined test
+// left hardFails empty yet the gate still exited 1 with no named cause.
+// ---------------------------------------------------------------------------
+test("K: --double --quarantine relieves an isolated-green allowlisted hard fail (exit 0, not a nameless red)", () => {
+  const { status, verdict } = runVerdict({
+    exits: { testsLib: 1 },
+    double: true,
+    logs: { "testsLib.log": FLAKE_TAP, "testsLib2.log": FLAKE_TAP },
+    quarantine: true,
+    env: quarantineEnv("green"),
+  });
+  assert.equal(status, 0, "a quarantined isolated-green test must relieve the gate in --double mode too");
+  assert.equal(verdict.ok, true);
+  assert.deepEqual(verdict.hardFails, []);
+  assert.equal(verdict.quarantined.length, 1, "the quarantine is LOUD in the verdict");
+  assert.equal(verdict.quarantined[0].name, FLAKE);
 });
 
 test("F: exit-0 leg with zero '# pass' lines → ok:false, exit 1 (no green off an empty leg)", () => {

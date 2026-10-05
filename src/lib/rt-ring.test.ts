@@ -166,6 +166,10 @@ test("rtTail returns newest-first slices", () => {
   for (let i = 0; i < 5; i++) ring = rtPush(ring, row({ message: `m${i}` }), { now: i + 1 }).ring;
   const tail = rtTail(ring, 2);
   assert.deepEqual(tail.map((r) => r.message), ["m4", "m3"]);
+  // n <= 0 must be an EMPTY tail: `slice(-0)` is `slice(0)` (the whole ring).
+  assert.deepEqual(rtTail(ring, 0), [], "n=0 tails nothing, not everything");
+  assert.deepEqual(rtTail(ring, -3), []);
+  assert.deepEqual(rtTail(ring, Number.NaN), []);
 });
 
 test("rtStats: rows/bytes/ts window + error/critical/warn counts", () => {

@@ -296,30 +296,31 @@ const quarantineCandidates = hardFails
 const quarantined = quarantine ? quarantineCandidates.filter((q) => q.isolated) : [];
 const quarantinedNames = new Set(quarantined.map((q) => q.name));
 const effectiveHardFails = hardFails.filter((n) => !quarantinedNames.has(n));
-// A leg whose ONLY failures are quarantined counts as relieved (single mode;
-// --double's disagreement path already owns flakes).
+// A leg whose ONLY failures are quarantined counts as relieved. This applies in
+// BOTH modes: the --double disagreement path only owns run-1/run-2 FLAKES, while
+// a test that fails both runs is a hard fail — leaving it unnamed in hardFails
+// yet still forcing exit 1 (the pre-fix --double --quarantine behavior) reported
+// a quarantined test and a red gate with no cause.
 const relieved = new Set();
-if (!double) {
-  for (const [id, log1] of [["testsScripts", s1], ["testsLib", l1]]) {
-    const fails = legStats(log1).failNames;
-    if (fails.length > 0 && fails.every((n) => quarantinedNames.has(n))) relieved.add(id);
-  }
+for (const [id, log1] of [["testsScripts", s1], ["testsLib", l1]]) {
+  const fails = legStats(log1).failNames;
+  if (fails.length > 0 && fails.every((n) => quarantinedNames.has(n))) relieved.add(id);
 }
+
+// A red NON-TEST gate (typecheck/lint/gaps/build) is a hard failure that
+// OUTRANKS a --double flake: the flake branch must never mask a permanently-red
+// gate behind an exit-3 "retry" verdict (pre-fix, flake+red typecheck read 3).
+const nonTestGatesOk =
+  gates.typecheck.ok && gates.lint.ok && gates.assertionGaps.ok && gates.build.ok;
+const testLegsOk =
+  (gates.testsScripts.ok || relieved.has("testsScripts")) &&
+  (gates.testsLib.ok || relieved.has("testsLib"));
 
 let code = 0;
 if (effectiveHardFails.length > 0) code = 1;
+else if (!nonTestGatesOk) code = 1;
 else if (flakes.length > 0) code = 3;
-else if (
-  !(
-    gates.typecheck.ok &&
-    gates.lint.ok &&
-    gates.assertionGaps.ok &&
-    (gates.testsScripts.ok || relieved.has("testsScripts")) &&
-    (gates.testsLib.ok || relieved.has("testsLib")) &&
-    gates.build.ok
-  )
-)
-  code = 1;
+else if (!testLegsOk) code = 1;
 
 const verdict = {
   ok: code === 0,

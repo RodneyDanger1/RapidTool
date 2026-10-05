@@ -54,6 +54,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 export { runnerIsolationClaim } from "./sandbox-policy.ts";
 
 type NodeRunCore =
@@ -661,6 +662,14 @@ export async function runNodeBounded(
   let stdout = "";
   let stderr = "";
   let verdictRaw = "";
+  // A pipe read can split a multibyte UTF-8 sequence across two chunks; decoding
+  // each Buffer with `d.toString()` would emit U+FFFD for the straddled bytes and
+  // silently mangle the child's output. One StringDecoder per stream carries the
+  // partial sequence to the next chunk (flushed at settle), so the captured text
+  // is byte-faithful.
+  const stdoutDecoder = new StringDecoder("utf8");
+  const stderrDecoder = new StringDecoder("utf8");
+  const verdictDecoder = verdictChannel ? new StringDecoder("utf8") : null;
   // W-26: streaming output-bomb counter — the ONLY live enforcement of
   // MAX_BUFFER. Kills the tree once the child has written more bytes than the
   // cap across both pipes; settle() then reports the coded bomb failure.
@@ -680,17 +689,17 @@ export async function runNodeBounded(
   };
   child.stdout?.on("data", (d: Buffer) => {
     bombCheck(d);
-    stdout = (stdout + d.toString()).slice(-MAX_OUTPUT);
+    stdout = (stdout + stdoutDecoder.write(d)).slice(-MAX_OUTPUT);
   });
   child.stderr?.on("data", (d: Buffer) => {
     bombCheck(d);
-    stderr = (stderr + d.toString()).slice(-MAX_OUTPUT);
+    stderr = (stderr + stderrDecoder.write(d)).slice(-MAX_OUTPUT);
   });
   if (verdictChannel) {
     const verdictStream = child.stdio[3];
     verdictStream?.on("data", (d: Buffer) => {
       bombCheck(d);
-      verdictRaw = (verdictRaw + d.toString()).slice(-MAX_OUTPUT);
+      verdictRaw = (verdictRaw + verdictDecoder!.write(d)).slice(-MAX_OUTPUT);
     });
   }
 
@@ -727,11 +736,24 @@ export async function runNodeBounded(
       resolve(advertised);
     };
 
+    // Flush any decoded-but-incomplete UTF-8 sequence before a terminal settle
+    // reads stdout/stderr — the pipe 'end' may not have run yet on the
+    // exit/kill grace paths (or a grandchild still holds the pipes open).
+    let decodersFlushed = false;
+    const flushDecoders = (): void => {
+      if (decodersFlushed) return;
+      decodersFlushed = true;
+      stdout = (stdout + stdoutDecoder.end()).slice(-MAX_OUTPUT);
+      stderr = (stderr + stderrDecoder.end()).slice(-MAX_OUTPUT);
+      if (verdictDecoder) verdictRaw = (verdictRaw + verdictDecoder.end()).slice(-MAX_OUTPUT);
+    };
+
     // Shared settle decision — 'close', the post-'exit' drain grace, and the
     // post-kill grace all land here, so every path reports the SAME honest
     // classification (timeout vs signal-kill vs exited) instead of whichever
     // event happened to arrive last.
     const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
+      flushDecoders();
       if (outputBombed) {
         // W-26: the streaming counter killed the tree — the honest cause is
         // NOT a timeout/signal teardown; report the bomb with the cap + the

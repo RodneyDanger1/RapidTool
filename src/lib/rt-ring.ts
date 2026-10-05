@@ -274,7 +274,11 @@ export function rtHydrate(raw: unknown): RtRing {
  */
 export function rtTail(ring: RtRing, n: number): RtEvent[] {
   const rows = ring && typeof ring === "object" && Array.isArray(ring.rows) ? ring.rows : [];
-  return rows.slice(-n).reverse();
+  // A non-positive/non-finite count is an empty tail, never `slice(-0)` (which
+  // is `slice(0)` — the WHOLE ring) or `slice(-Infinity)`.
+  const count = Number.isFinite(n) ? Math.floor(n) : 0;
+  if (count <= 0) return [];
+  return rows.slice(-count).reverse();
 }
 
 /**

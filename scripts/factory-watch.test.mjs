@@ -675,3 +675,25 @@ test("usage refusals are coded — no intake/queue, both, or a missing --work", 
   assert.equal(noWork.status, 1);
   assert.match(String(jsonOf(noWork).error), /--work .* required/);
 });
+
+test("usage refusals are coded — a valueless/empty --limit and --timeout-ms are refused, never a silent default", () => {
+  const root = mkdtempSync(join(tmpdir(), "rapidtool-factory-watch-int-"));
+  const intake = join(root, "intake");
+  const work = join(root, "work");
+  mkdirSync(intake, { recursive: true });
+  mkdirSync(work, { recursive: true });
+
+  // Pre-fix a bare --limit parsed as `true`, and intFlag returned the fallback
+  // (Infinity) — the tick silently processed EVERY brief instead of refusing.
+  const bareLimit = runFactory(["--intake", intake, "--work", work, "--limit"]);
+  assert.equal(bareLimit.status, 1, "a bare --limit must refuse, never silently mean unlimited");
+  assert.match(String(jsonOf(bareLimit).error), /--limit expects a non-negative integer/);
+
+  const bareTimeout = runFactory(["--intake", intake, "--work", work, "--timeout-ms"]);
+  assert.equal(bareTimeout.status, 1);
+  assert.match(String(jsonOf(bareTimeout).error), /--timeout-ms expects a positive integer/);
+
+  const emptyLimit = runFactory(["--intake", intake, "--work", work, "--limit="]);
+  assert.equal(emptyLimit.status, 1);
+  assert.match(String(jsonOf(emptyLimit).error), /--limit expects a non-negative integer/);
+});

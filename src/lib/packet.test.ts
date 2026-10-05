@@ -1187,6 +1187,21 @@ test("A3/M3-17: packetInputHash(null) fingerprints as the empty shape — never 
   assert.equal(packetInputHash(null as unknown as Project), packetInputHash({} as Project));
 });
 
+test("R2-f05 research citations: a url-less/corrupt item never renders `undefined` as a source", () => {
+  // Regression: the item filter accepted ANY object, so a hand-built/foreign
+  // payload rendered `- T1 — undefined` inside a "cite these, do not invent
+  // sources" list. The render now applies the same string-url predicate
+  // hydrateProject/io use; a non-citable row contributes nothing.
+  const p = makeProject();
+  p.research = [
+    { query: "q", items: [{ title: "T1" }, { title: "T2", url: 5 }, { title: "T3", url: "https://e/x" }] },
+  ] as unknown as Project["research"];
+  const out = compileAgentPacket(p);
+  assert.ok(!out.includes("- T1 — undefined"), "a missing url is never printed as a source");
+  assert.ok(!out.includes("— 5"), "a non-string url is never printed as a source");
+  assert.ok(out.includes("- T3 — https://e/x"), "a real citation still renders");
+});
+
 test("A6c/M3-18: junk collection containers compile to honest empty forms — never a TypeError (325 BUG A)", () => {
   // The 14 shapes the A6 hunt byte-anchored (fixes/325_a6_hunt.md §A): a
   // foreign `{}`/`42` in place of a collection used to crash compileAgentPacket

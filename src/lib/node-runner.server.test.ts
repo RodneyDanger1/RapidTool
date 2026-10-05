@@ -162,6 +162,31 @@ describe("runNodeBounded applies redactSecrets to stdout/stderr", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Pipe-chunk UTF-8 integrity: the child's stdout/stderr arrive in ~64 KiB
+// reads, and a 3-byte sequence can straddle a read boundary. Decoding each
+// Buffer with `d.toString()` emits U+FFFD for the split bytes and inflates the
+// captured length (probe: 40000x U+2764 -> 3 replacement chars on BOTH
+// runtimes); a per-stream StringDecoder must carry the partial sequence across
+// the boundary instead.
+// ---------------------------------------------------------------------------
+describe("runNodeBounded preserves multibyte output across pipe chunks", () => {
+  it("a 120 KB stream of 3-byte chars survives the read boundary byte-faithfully", async () => {
+    if (!runnerAvailable()) return;
+    const count = 40_000; // 3 bytes each -> 120 KB, crosses a 64 KiB pipe read
+    assert.ok(count * 3 > 65_536, "the payload must cross at least one pipe read boundary");
+    const heart = "\u2764";
+    const code = `process.stdout.write(${JSON.stringify(heart)}.repeat(${count}));process.stderr.write(${JSON.stringify(heart)}.repeat(${count}));`;
+    const res = await runNodeBounded(code, { timeoutMs: 20_000 });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(res.stdout.includes("\uFFFD"), false, "no replacement char from a split stdout sequence");
+    assert.equal(res.stderr.includes("\uFFFD"), false, "no replacement char from a split stderr sequence");
+    assert.equal(res.stdout, heart.repeat(count), "stdout must round-trip byte-faithfully");
+    assert.equal(res.stderr, heart.repeat(count), "stderr must round-trip byte-faithfully");
+  });
+});
+
 describe("runNodeBounded advertises sandbox:false (not a security sandbox)", () => {
   it("ok envelope carries sandbox:false — never true", async () => {
     if (!runnerAvailable()) return;

@@ -819,7 +819,17 @@ export function compileAgentPacket(
       if (!Array.isArray(items)) return [];
       return items
         .slice(0, 5)
-        .filter((it) => it !== null && typeof it === "object")
+        // A1-24 parity: a citation needs a URL. The old guard accepted any
+        // object, so a url-less/corrupt item rendered `- title — undefined`
+        // (measured) inside a "cite these, do not invent sources" list. Require
+        // the same string-url predicate hydrateProject/io apply.
+        .filter(
+          (it): it is NonNullable<typeof it> =>
+            it !== null &&
+            typeof it === "object" &&
+            typeof (it as { url?: unknown }).url === "string" &&
+            (it as { url: string }).url.length > 0,
+        )
         .map((it) => {
           const title =
             typeof it.title === "string" && it.title.length > 0 ? it.title : "(untitled)";

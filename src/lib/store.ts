@@ -1308,6 +1308,17 @@ function unionRows(local: readonly unknown[], remote: readonly unknown[]): unkno
   return out;
 }
 
+/** Do two row arrays carry the same rows in the same order (the union's key
+ *  sequence)? Used to decide whether a reconcile actually changed THIS tab's
+ *  record — the union always begins with the tab's own rows, so comparing
+ *  against `remote` (the old bug) missed a remote-only append and never
+ *  committed it. */
+function sameRows(a: readonly unknown[], b: readonly unknown[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (crossTabRowKey(a[i]) !== crossTabRowKey(b[i])) return false;
+  return true;
+}
+
 /** Scalar/engine fields whose change in another tab is genuine drift worth
  *  warning about (a rename/notes/status/phase this tab had not seen), plus the
  *  operator-owned toggles (enforceDod/wildMode/kind) whose change — unlike an
@@ -1415,7 +1426,12 @@ export function mergeCrossTabProject(
     const l = Array.isArray(localRows) ? localRows : [];
     const r = Array.isArray(remoteRows) ? remoteRows : [];
     const union = key === "chatLog" ? unionRows(l, r).slice(-CHAT_LOG_MAX_ROWS) : unionRows(l, r);
-    if (union.length !== r.length) changed = true;
+    // Compare against THIS tab's rows, not the remote's: the union always
+    // contains every local row, so `union !== local` is exactly "the remote
+    // added a row (or a chatLog trim shifted the window)" — the condition that
+    // must commit. `union.length !== r.length` missed a strict remote superset
+    // (local ⊆ remote) and silently never adopted the other tab's appends.
+    if (!sameRows(union, l)) changed = true;
     (next as unknown as Record<string, unknown>)[key] = union;
   }
   const drifted = crossTabDrifted(local, remote);

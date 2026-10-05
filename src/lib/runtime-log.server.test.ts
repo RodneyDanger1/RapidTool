@@ -78,6 +78,10 @@ test("readRtTail returns newest-first, capped, and skips torn/junk lines", () =>
       "newest first",
     );
     assert.equal(readRtTail(dir, 1).length, 1, "n cap respected");
+    // n <= 0 is an EMPTY tail: `slice(-0)` is `slice(0)` (the whole window).
+    assert.deepEqual(readRtTail(dir, 0), [], "n=0 tails nothing, not everything");
+    assert.deepEqual(readRtTail(dir, -5), []);
+    assert.deepEqual(readRtTail(dir, Number.NaN), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

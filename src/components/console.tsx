@@ -1005,15 +1005,25 @@ function WildToggle({ project }: { project: Project }) {
         // (e.g. already complete) left the toggle reading "on" with no
         // explanation. Handle it exactly like the resume path
         // (onPauseToggle) and render it (below) — the result is no longer lost.
+        // 346-H4: the enable is persisted by `setWildMode` BEFORE this start
+        // runs, so a refusal must also revert it — otherwise the switch stays
+        // ON (and the wild strip claims it "acts silently") for a run that was
+        // refused, and the 4 s alert clears leaving no trace. Revert on both
+        // the coded refusal and a thrown start: neither confirms a running loop.
+        const revertEnable = () => useRapid.getState().setWildMode(project.id, false);
         void useRapid
           .getState()
           .startWildRun(project.id)
           .then(
             (res) => {
-              if (!res.ok) setErr(res.error.length > 0 ? res.error : "Wild run did not start.");
+              if (!res.ok) {
+                setErr(res.error.length > 0 ? res.error : "Wild run did not start.");
+                revertEnable();
+              }
             },
             (errCaught: unknown) => {
               setErr(errCaught instanceof Error ? errCaught.message : String(errCaught));
+              revertEnable();
             },
           );
       }
@@ -2009,6 +2019,11 @@ function ExportMenuItem({
   );
 }
 
+/** 346-H4: the sidebar Memory list is a bounded subset of `project.memory`
+ *  (the Vault tab is the full surface). Kept as ONE constant so the cap and the
+ *  "N of M shown" caption cannot drift apart. */
+const SIDEBAR_MEMORY_LIMIT = 8;
+
 export function RunScreen({ id }: { id: string }) {
   const nav = useNavigate();
   const {
@@ -2273,8 +2288,16 @@ export function RunScreen({ id }: { id: string }) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // 346-H4: this effect must re-bind once the store has hydrated. On a hard
+    // load the first render is the pre-hydration skeleton (`!project` early
+    // return below), where `projectId`/`current` are still in their TDZ — a
+    // handler captured THERE threw `Cannot access 'projectId' before
+    // initialization` on every `e`/`g`/`a`/Ctrl+Enter press (buttons, which
+    // use the current render's bindings, kept working). `hydrated` + the
+    // frontier phase re-bind the handler from a render whose `current` is
+    // initialized, and keep it fresh as the run advances.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, hydrated, project?.currentPhase]);
 
   const rec = project?.phases[project.currentPhase];
   const artifacts = useMemo(() => project?.artifacts ?? [], [project?.artifacts]);
@@ -4033,7 +4056,7 @@ export function RunScreen({ id }: { id: string }) {
 
           <h2 className="mt-8 text-xs font-medium tracking-wide text-muted uppercase">Memory</h2>
           <ul className="scroll-thin mt-3 max-h-[46vh] space-y-3 overflow-y-auto pr-1">
-            {project.memory.slice(0, 8).map((m) => (
+            {project.memory.slice(0, SIDEBAR_MEMORY_LIMIT).map((m) => (
               <li key={m.id} className="border-b border-line pb-3 last:border-0">
                 <p className="font-mono text-xs text-faint">
                   {m.kind} · P{m.phase} · {m.score.toFixed(2)}
@@ -4041,6 +4064,15 @@ export function RunScreen({ id }: { id: string }) {
                 <p className="mt-1 text-sm leading-snug text-fg">{m.text}</p>
               </li>
             ))}
+            {project.memory.length > SIDEBAR_MEMORY_LIMIT ? (
+              /* 346-H4: the list is capped for the sidebar; before this line it
+                 dropped the rest SILENTLY, so a 17-row build read as an 8-row
+                 one. State the subset and where the full set lives. */
+              <li className="font-mono text-xs text-faint">
+                {SIDEBAR_MEMORY_LIMIT} of {project.memory.length} memory rows shown — the Vault
+                tab holds the full set.
+              </li>
+            ) : null}
             {project.memory.length === 0 ? (
               <li className="text-sm text-muted">Empty until Phase 0 writes a checkpoint.</li>
             ) : null}

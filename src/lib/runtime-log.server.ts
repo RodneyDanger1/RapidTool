@@ -183,7 +183,11 @@ export function readRtTail(logDir: string, n: number): RtEvent[] {
         /* torn/junk line — skip */
       }
     }
-    return rows.slice(-n).reverse();
+    // A non-positive/non-finite count is an empty tail, never `slice(-0)`
+    // (which is `slice(0)` — the whole window) or `slice(-Infinity)`.
+    const count = Number.isFinite(n) ? Math.floor(n) : 0;
+    if (count <= 0) return [];
+    return rows.slice(-count).reverse();
   } catch {
     return [];
   }

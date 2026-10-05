@@ -327,7 +327,14 @@ function scorecard(project: Project): FeasibilityScorecard {
   // creation, hydration and every mutation (invariant B.3.3). The old placeholder branch was
   // unreachable and is deleted per B-22.
   if (!lat || !sched) {
-    throw new Error("scorecard requires a primed project (run algorithms first)");
+    // Internal invariant violation (the comment above proves the branch
+    // unreachable on every live path) — coded RT_E_INTERNAL so a caller never
+    // has to string-match to classify it.
+    const err = new Error("scorecard requires a primed project (run algorithms first)") as Error & {
+      code?: string;
+    };
+    err.code = "RT_E_INTERNAL";
+    throw err;
   }
   const core = feasibilityScorecard(lat, sched);
   return {
@@ -1541,7 +1548,11 @@ export function applyPhaseResult(project: Project, phase: PhaseId): Project {
   // CORE-01 (defensive): refuse a truly invalid phase id before any array
   // indexing — a corrupt caller throws loudly, never crashes mid-graph.
   if (!Number.isInteger(phase) || phase < 0 || phase > PHASE_LAST) {
-    throw new Error(`applyPhaseResult: invalid phase ${String(phase)}`);
+    // phases.ts phaseDef's documented taxonomy: an unknown/out-of-graph phase id
+    // is RT_E_PHASE_ILLEGAL, so machine callers branch on code, not prose.
+    const err = new Error(`applyPhaseResult: invalid phase ${String(phase)}`) as Error & { code?: string };
+    err.code = "RT_E_PHASE_ILLEGAL";
+    throw err;
   }
   const rec = project.phases.find((p) => p.id === phase);
   const attempt = rec?.rejectionHistory?.length ?? 0;
@@ -1814,7 +1825,11 @@ export function approveHitl(
   const phase = project.currentPhase;
   const decidedBy = opts.decidedBy;
   if (decidedBy !== "human" && decidedBy !== "autopilot") {
-    throw new Error("approveHitl requires explicit decidedBy (never default human)");
+    const err = new Error("approveHitl requires explicit decidedBy (never default human)") as Error & {
+      code?: string;
+    };
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
   // CORE-01 (defensive): refuse to approve without a pending gate, or when the
   // pending gate does not match the current edge — return the project untouched
@@ -1823,7 +1838,11 @@ export function approveHitl(
   // CORE-01 (defensive): a human-only gate (failed P6 sandbox / reframe) may
   // never be autopilot-approved unless the caller passed an explicit `force`.
   if (project.hitl.forceHuman && decidedBy === "autopilot" && !opts?.force) {
-    throw new Error("Autopilot may not approve a forceHuman gate (R3/B-03).");
+    const err = new Error("Autopilot may not approve a forceHuman gate (R3/B-03).") as Error & {
+      code?: string;
+    };
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
   const now = Date.now();
   // A1-30 residue (fixes/296 Q1): the transition bound comes from the graph authority
@@ -1935,7 +1954,11 @@ export function rejectHitl(
   // documented ≥12-char qualitative-feedback minimum before writing a row.
   const trimmed = note.trim();
   if (trimmed.length < 12) {
-    throw new Error("Rejection requires at least 12 characters of qualitative feedback.");
+    const err = new Error("Rejection requires at least 12 characters of qualitative feedback.") as Error & {
+      code?: string;
+    };
+    err.code = "RT_E_VALIDATION";
+    throw err;
   }
   if (!project.hitl || project.hitl.phase !== phase) return project;
   const now = Date.now();
@@ -2166,7 +2189,16 @@ export function repairPhases(raw: PhaseRecord[] | undefined): {
   }
   for (const def of PHASES) {
     if (!seen.has(def.id)) {
-      kept.push({ id: def.id, status: def.id === 0 ? "ready" : "locked" });
+      // M7-01 parity: a bare {id,status} insert missed the hydrate birth-stamps
+      // every kept record gets below, so the FIRST export→import→export hop
+      // ADDED rejectionHistory/gate on the repaired payload (byte drift). Stamp
+      // the same defaults here so a repaired insert is already normalized.
+      kept.push({
+        id: def.id,
+        status: def.id === 0 ? "ready" : "locked",
+        rejectionHistory: [],
+        gate: null,
+      });
       inserted.push(def.id);
     }
   }
@@ -2598,14 +2630,20 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
         })
     : [];
   const researchRepaired =
-    raw.research !== undefined && raw.research !== null && !Array.isArray(raw.research) ||
-    (Array.isArray(raw.research) &&
-      (raw.research as { items?: unknown }[]).some(
+    raw.research !== undefined &&
+    raw.research !== null &&
+    (!Array.isArray(raw.research) ||
+      // An ENTRY-level drop (a non-object entry, or one whose `items`
+      // is not an array) is a repair too — the old guard only looked at items
+      // INSIDE a well-formed entry, so `research:[null]` / `[{items:5}]` were
+      // dropped with NO hydrate.repaired row (silent data loss against the
+      // "repairs are loud, never silent" contract).
+      (raw.research as unknown[]).some(
         (e) =>
-          e !== null &&
-          typeof e === "object" &&
-          Array.isArray((e as { items?: unknown }).items) &&
-          ((e as { items?: unknown[] }).items as unknown[]).some(
+          e === null ||
+          typeof e !== "object" ||
+          !Array.isArray((e as { items?: unknown }).items) ||
+          ((e as { items: unknown[] }).items).some(
             (it) => it === null || typeof it !== "object" || typeof (it as { url?: unknown }).url !== "string",
           ),
       ));

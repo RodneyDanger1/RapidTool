@@ -684,3 +684,44 @@ describe("the call tap's cache split (W42 B2 · k6 #4 completion)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// fixes/347 — a non-positive / non-finite timeoutMs must not become an
+// immediate abort. The sibling OpenAI-compatible adapter sanitizes
+// `opts.timeoutMs`; DeepSeek honored `0`/NaN verbatim, so `setTimeout(fn, 0)`
+// fired on the first tick and the call reported a fake "timed out after 0s"
+// the caller never asked for.
+// ---------------------------------------------------------------------------
+describe("completeDeepSeek timeout sanitization", () => {
+  it("a zero / NaN / negative timeoutMs falls back to the tier default, not an immediate abort", async () => {
+    withKey(KEY);
+    try {
+      // Resolves after the first tick AND honors the abort signal, so a 0ms
+      // timer would win (the bug); the tier default must not.
+      const delayed = ((_url: unknown, init?: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+          setTimeout(
+            () =>
+              resolve(
+                new Response(
+                  JSON.stringify({
+                    model: "deepseek-v4-flash",
+                    choices: [{ message: { content: "ok" } }],
+                  }),
+                  { status: 200, headers: { "content-type": "application/json" } },
+                ),
+              ),
+            5,
+          );
+        })) as typeof fetch;
+      for (const bad of [0, Number.NaN, -5]) {
+        const r = await completeDeepSeek("hi", { fetch: delayed, timeoutMs: bad });
+        assert.equal(r.ok, true, `timeoutMs ${String(bad)} must not abort the request`);
+      }
+    } finally {
+      withKey(SAVE_KEY);
+    }
+  });
+});

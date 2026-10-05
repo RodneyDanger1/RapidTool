@@ -85,7 +85,10 @@ export function resolveProbeTimeoutMs(requested?: number): number {
   if (typeof requested !== "number" || !Number.isFinite(requested) || requested <= 0) {
     return PROBE_TIMEOUT_MS;
   }
-  return Math.min(Math.floor(requested), PROBE_TIMEOUT_MS);
+  // Floor at 1ms: a positive sub-millisecond request (e.g. 0.5) would floor to
+  // 0 and abort before any I/O, i.e. the caller's positive budget became an
+  // instant timeout. Anything at or above the cap is clamped.
+  return Math.max(1, Math.min(Math.floor(requested), PROBE_TIMEOUT_MS));
 }
 
 function isAbortError(err: unknown): boolean {
@@ -139,19 +142,25 @@ export async function probeProviderModels(
   descriptor: LlmProviderDescriptor,
   opts: ProviderProbeOptions = {},
 ): Promise<ProviderProbeResult> {
+  // The never-throws contract covers a hostile/partial descriptor too: coerce a
+  // null/undefined/non-object to an empty shell so every field read below is
+  // safe (an unknown descriptor then refuses at the "no live-probe endpoint"
+  // gate instead of a TypeError escaping).
+  const desc: Partial<LlmProviderDescriptor> =
+    descriptor !== null && typeof descriptor === "object" ? descriptor : {};
   const env = opts.env ?? process.env;
   const probedAt = new Date(safeNow(opts.now)).toISOString();
-  const keyEnv = typeof descriptor.apiKeyEnv === "string" ? descriptor.apiKeyEnv : "";
+  const keyEnv = typeof desc.apiKeyEnv === "string" ? desc.apiKeyEnv : "";
   const key = keyEnv ? String(env[keyEnv] ?? "").trim() : "";
   const endpoint =
-    descriptor.verification && descriptor.verification.kind === "live-probe"
-      ? descriptor.verification.modelsEndpoint
+    desc.verification && desc.verification.kind === "live-probe"
+      ? desc.verification.modelsEndpoint
       : "";
 
   const result = (
     partial: Partial<ProviderProbeResult> & Pick<ProviderProbeResult, "note">,
   ): ProviderProbeResult => ({
-    id: descriptor.id,
+    id: desc.id ?? "",
     configured: Boolean(key),
     reachable: false,
     authenticated: false,
@@ -164,7 +173,7 @@ export async function probeProviderModels(
   if (!endpoint) {
     return result({
       note:
-        `"${descriptor.id}" declares no live-probe endpoint — its model ids cannot be probed from this host ` +
+        `"${desc.id ?? "unknown"}" declares no live-probe endpoint — its model ids cannot be probed from this host ` +
         "(probe only where the descriptor names one; never a fake reachability claim)",
       code: "RT_E_VALIDATION",
     });
