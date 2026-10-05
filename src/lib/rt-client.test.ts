@@ -261,6 +261,63 @@ test("buildClientDiagnosis: project wildRun + errors flow into the contract", ()
   assert.equal(diag.growth.counts.artifacts, 1);
 });
 
+// fixes/348: the client path used to call buildDiagnosis with no `audit`, so
+// project.stages was always [] + a stagesGap. It now projects the loaded
+// project's phases/artifacts/tokenUsage (+ the ring's coded errors) through
+// diagnose.projectDiagnosisStages — the same projector the diagnose verb uses.
+test("buildClientDiagnosis: per-stage audit is projected from project + coded ring rows", () => {
+  __rtResetForTests();
+  reportRt({
+    level: "error",
+    scope: "wild-step",
+    event: "gate.refused",
+    message: "DoD unmet at P5",
+    capture: "src/lib/engine.ts:gate",
+    code: "RT_E_DOD_UNMET",
+    phase: 5,
+    projectId: "p1",
+  }, { now: 4_000 });
+  const project = {
+    id: "p1",
+    name: "Stage demo",
+    status: "running",
+    currentPhase: 5,
+    wildRun: null,
+    logs: [],
+    phases: [
+      { id: 5, status: "running", gate: { passed: false, unmet: ["p5-research"], evidenceHash: "h", checkedAt: 3_000 } },
+    ],
+    artifacts: [{ id: "a1", title: "research notes", phase: 5 }],
+    tokenUsage: { calls: 2, promptTokens: 10, completionTokens: 5 },
+  };
+  const diag = buildClientDiagnosis(
+    { project: project as never, persistHealth: { ok: true, lastError: null } },
+    5_000,
+  );
+  const stages = diag.project.stages ?? [];
+  assert.equal(stages.length, 1, "one observed phase");
+  assert.equal(stages[0].phase, 5);
+  assert.equal(stages[0].status, "running");
+  assert.equal(stages[0].gate?.passed, false);
+  assert.deepEqual(stages[0].gate?.unmet, ["p5-research"]);
+  assert.equal(stages[0].refusals.length, 1, "the coded ring row is attributed by phase");
+  assert.equal(stages[0].refusals[0].code, "RT_E_DOD_UNMET");
+  // Per-phase keyed is honestly null: today's PhaseRecord carries no `keyed`
+  // slice (diagnose.ts:264-266) — project-level tokenUsage maps to project.keyed.
+  assert.equal(stages[0].keyed, null);
+  assert.equal(diag.project.keyed?.calls, 2);
+  assert.deepEqual(stages[0].artifacts, ["a1"]);
+  assert.equal(stages[0].observed, true);
+  assert.equal(diag.project.stagesGap, null, "a supplied, well-formed audit has no gap");
+});
+
+test("buildClientDiagnosis: absent project keeps the honest stages gap (no fabrication)", () => {
+  __rtResetForTests();
+  const diag = buildClientDiagnosis({ project: null, persistHealth: { ok: true, lastError: null } }, 1_000);
+  assert.deepEqual(diag.project.stages, []);
+  assert.match(String(diag.project.stagesGap), /no per-phase audit supplied/);
+});
+
 // PB-02 regression: diagnosis growth must count the project's REAL chatLog
 // rows (was hardcoded 0) and must pass the store's persist-health through
 // (the RuntimeLogPane Diagnose button previously hardcoded ok:true green).

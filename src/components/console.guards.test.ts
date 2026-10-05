@@ -15,6 +15,35 @@ const CONSOLE_PATH =
   fileURLToPath(new URL("./console.tsx", import.meta.url));
 const CONSOLE = readFileSync(CONSOLE_PATH, "utf8");
 
+const RAIL_PATH =
+  process.env.RT348_RAIL_TX ??
+  fileURLToPath(new URL("./pipeline-rail.tsx", import.meta.url));
+const RAIL = readFileSync(RAIL_PATH, "utf8");
+
+test("PipelineRail surfaces the per-stage audit (348 · W3)", () => {
+  // fixes/348: the per-stage DiagnosisStage rows had no user-facing surface —
+  // the audit was only visible as raw diagnose JSON. The rail now projects them
+  // with the SAME pure projector the diagnose verb uses and renders status /
+  // gate / unmet / coded refusal / unknown per phase.
+  assert.match(
+    RAIL,
+    /import \{ projectDiagnosisStages, type DiagnosisStage \} from "@\/lib\/diagnose\.ts";/,
+    "the rail must import the shared projector read-only",
+  );
+  assert.match(
+    RAIL,
+    /projectDiagnosisStages\(\s*\{ phases: project\.phases, artifacts: project\.artifacts, tokenUsage: project\.tokenUsage \},\s*snap\.tail,?\s*\)/,
+    "the rail must feed the projector the project slices + ring tail",
+  );
+  assert.match(RAIL, /Machine audit/, "the detail panel must label the audit block");
+  assert.match(RAIL, /not observed: \{stage\.unknown\.join/, "unobserved facts must be named, never guessed");
+  assert.match(
+    RAIL,
+    /stage=\{stages\.find\(\(s\) => s\.phase === openPhase\) \?\? null\}/,
+    "the open phase must receive its projected audit row",
+  );
+});
+
 test("Runtime telemetry renders the heartbeat as a human age, never a raw epoch", () => {
   // The pre-fix bytes rendered `{snap.ring.lastHeartbeat?.ts ?? null}` — a
   // 13-digit epoch when a heartbeat row existed.

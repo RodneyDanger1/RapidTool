@@ -51,6 +51,7 @@
 import { useEffect, useState } from "react";
 import { PHASES, PHASE_BY_ID } from "@/lib/phases";
 import { pickNowLine, rtSnapshot } from "@/lib/rt-client";
+import { projectDiagnosisStages, type DiagnosisStage } from "@/lib/diagnose.ts";
 import type { PhaseId, PhaseStatus, Project } from "@/lib/types";
 
 /** Same cadence as the sibling runtime panes (ring is tiny; cost negligible). */
@@ -103,10 +104,14 @@ function clip(note: string, n = 90): string {
 function PhaseRecordDetail({
   project,
   phase,
+  stage,
   onClose,
 }: {
   project: Project;
   phase: PhaseId;
+  /** fixes/348 — the projected per-phase audit row (null when the projector
+   *  observed no fact for this phase). Rendered verbatim; no invented state. */
+  stage: DiagnosisStage | null;
   onClose: () => void;
 }) {
   const def = PHASE_BY_ID.get(phase) ?? null;
@@ -237,6 +242,76 @@ function PhaseRecordDetail({
         </>
       ) : null}
 
+      {/* fixes/348 — the per-stage audit (diagnose.ts projectDiagnosisStages):
+          the same facts the diagnose pane's JSON carries, surfaced where a person
+          reviews a phase. Every field is the projected value; unobserved facts are
+          named in `unknown`, never guessed. */}
+      <div className="mt-3 border-t border-line pt-2">
+        <p className="font-mono text-xs text-muted">Machine audit</p>
+        {stage ? (
+          <>
+            <p className="mt-0.5 font-mono text-xs text-faint">
+              status {stage.status ?? "unknown"} · gate{" "}
+              {stage.gate === null
+                ? "unknown"
+                : stage.gate.passed === null
+                  ? "recorded (no verdict)"
+                  : stage.gate.passed
+                    ? "PASS"
+                    : "FAIL"}
+              {stage.gate && stage.gate.unmet.length > 0 ? ` · ${stage.gate.unmet.length} unmet` : ""}
+              {stage.gate?.checkedAt !== null && stage.gate?.checkedAt !== undefined
+                ? ` · checked ${agoLabel(stage.gate.checkedAt)} ago`
+                : ""}
+            </p>
+            {stage.gate && stage.gate.unmet.length > 0 ? (
+              <ul className="mt-1 space-y-0.5 font-mono text-xs text-warn">
+                {stage.gate.unmet.map((u) => (
+                  <li key={u}>unmet: {u}</li>
+                ))}
+              </ul>
+            ) : null}
+            {stage.refusals.length > 0 ? (
+              <ul className="mt-1 space-y-0.5 font-mono text-xs text-danger">
+                {stage.refusals.map((r, i) => (
+                  <li key={`${r.ts ?? "na"}-${i}`}>
+                    refusal · {r.code ?? "uncoded"} · {r.event}
+                    {r.message !== "" ? (
+                      <span className="block pl-3 text-faint [overflow-wrap:anywhere]">{clip(r.message, 120)}</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {stage.keyed !== null ? (
+              <p className="mt-1 font-mono text-xs text-faint">
+                keyed · {stage.keyed.calls ?? "unknown"} call(s) · {stage.keyed.promptTokens ?? "unknown"} in /{" "}
+                {stage.keyed.completionTokens ?? "unknown"} out
+              </p>
+            ) : null}
+            {stage.treeRun !== null ? (
+              <p className="mt-0.5 font-mono text-xs text-faint">
+                tree run ·{" "}
+                {stage.treeRun.ok === null ? "outcome unknown" : stage.treeRun.ok ? "ok" : "failed"}
+                {stage.treeRun.verdict !== null ? ` · ${stage.treeRun.verdict}` : ""}
+              </p>
+            ) : null}
+            {stage.substance !== null ? (
+              <p className="mt-0.5 font-mono text-xs text-faint">
+                substance · {stage.substance.verdict ?? "verdict unknown"}
+              </p>
+            ) : null}
+            {stage.unknown.length > 0 ? (
+              <p className="mt-0.5 font-mono text-xs text-faint">not observed: {stage.unknown.join(" · ")}</p>
+            ) : null}
+          </>
+        ) : (
+          <p className="mt-0.5 font-mono text-xs text-faint">
+            No audit row observed for this phase — the projector captured no status/gate/refusal fact for it.
+          </p>
+        )}
+      </div>
+
       {isCurrent && wr ? (
         <div className="mt-3 border-t border-line pt-2">
           <p className="font-mono text-xs text-wild">
@@ -314,6 +389,16 @@ export function PipelineRail({
   }, []);
 
   const now = pickNowLine(project, snap.tail, snap.stats.rows);
+
+  // fixes/348 — per-stage audit via the SAME pure projector the diagnose verb
+  // uses: the project's raw store slices + the ring tail (coded refusals are
+  // attributed by `row.phase`). Real observed facts only; unobserved fields stay
+  // null/[] and are named in each row's `unknown`. `stagesGap` names a malformed
+  // / absent projection, never a silent empty.
+  const { stages, gap: stagesGap } = projectDiagnosisStages(
+    { phases: project.phases, artifacts: project.artifacts, tokenUsage: project.tokenUsage },
+    snap.tail,
+  );
 
   // Per-phase attention rows — all real fields (mirrors + extends PhaseProgressRail).
   const attention: { code: string; word: string; tone: string }[] = [];
@@ -396,6 +481,11 @@ export function PipelineRail({
       </div>
       <p className="mt-0.5 font-mono text-xs text-faint">{now.note}</p>
 
+      {/* fixes/348: the audit's own honesty channel — a gap is named, never hidden. */}
+      {stagesGap !== null ? (
+        <p className="mt-0.5 font-mono text-xs text-faint">Stage audit incomplete — {stagesGap}</p>
+      ) : null}
+
       {attention.length > 0 || park !== null || stall !== null ? (
         <div className="mt-1.5 space-y-0.5 font-mono text-xs leading-relaxed">
           {stall !== null ? (
@@ -424,7 +514,12 @@ export function PipelineRail({
       ) : null}
 
       {openPhase !== null ? (
-        <PhaseRecordDetail project={project} phase={openPhase} onClose={onCloseDetail} />
+        <PhaseRecordDetail
+          project={project}
+          phase={openPhase}
+          stage={stages.find((s) => s.phase === openPhase) ?? null}
+          onClose={onCloseDetail}
+        />
       ) : null}
     </section>
   );

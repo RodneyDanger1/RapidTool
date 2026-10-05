@@ -799,6 +799,22 @@ function projectToDiagnosis(project: Project | null, now: number): DiagnosisProj
 }
 
 /**
+ * fixes/348 — the raw per-phase audit the client hands `buildDiagnosis`, built
+ * from state the client already holds: the project's `phases`/`artifacts`/
+ * `tokenUsage` slices (the ring's error rows arrive separately as `errors`, and
+ * the projector attributes coded refusals by `row.phase`). diagnose.ts's
+ * `projectDiagnosisStages` validates every field and names what it did not
+ * observe; nothing is invented here — no project → undefined, so the diagnosis
+ * reports its honest stages gap instead of a fabricated `[]`.
+ */
+function projectAudit(project: Project | null):
+  | { phases: Project["phases"]; artifacts: Project["artifacts"]; tokenUsage: Project["tokenUsage"] }
+  | undefined {
+  if (!project) return undefined;
+  return { phases: project.phases, artifacts: project.artifacts, tokenUsage: project.tokenUsage };
+}
+
+/**
  * Build the SAME one-JSON diagnosis the CLI `diagnose` verb emits (§6.1
  * contract — byte-identical field names) from the client ring + the passed
  * project/persist/counts. Pure with respect to its inputs (reads the
@@ -855,6 +871,9 @@ export function buildClientDiagnosis(input: ClientDiagnosisInput, now: number = 
       ua: typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 200) : "",
     },
     project: projectToDiagnosis(input.project ?? null, now),
+    // fixes/348: feed the per-phase audit so `project.stages` is the REAL
+    // projection (was `[]` + a stagesGap on the client path, mirroring the CLI).
+    audit: projectAudit(input.project ?? null),
     errors,
     timeline,
     watchdog,
