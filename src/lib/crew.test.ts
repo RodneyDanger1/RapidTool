@@ -1205,4 +1205,39 @@ describe("crew.critic.disagreement — advisory judge never overrides the gate (
     if (!res.ok) return;
     assert.equal(res.disagreements, undefined);
   });
+
+  // 346 V5 (judge/crew under the ARMED chunk resample): the P6 resample can
+  // change the emitted MODULE, but the deterministic gate is recorded from the
+  // real machine-run verdict and the crew only ever READS it. A reviewer PASS
+  // over a resample-selected module must be recorded as a disagreement, never
+  // promote the gate — and the crew must not rewrite the selected bytes either.
+  it("a resample-changed module cannot be gate-promoted by a reviewer PASS", async () => {
+    const project = projectWithGate(false);
+    const gateBefore = project.phases.find((r) => r.id === 6)!.gate;
+    // The resample selected a NEW module (the winner's bytes replace the source).
+    const resampled: Project = { ...project, generatedSource: "exports.add = (a, b) => a + b;" };
+    const crew = createCrew(async (_prompt, cOpts) =>
+      cOpts?.system?.includes("VERIFIER") ? VERIFIER_REPLY("PASS") : okText("ok"),
+    );
+    const res = await crew.runCrew(resampled, {
+      phase: 6,
+      live: false,
+      roles: ["reviewer"],
+      maxSteps: 1,
+    });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(res.disagreements?.length, 1, "the advisory PASS contradiction is recorded");
+    assert.equal(res.disagreements[0]!.gate, "FAIL", "the recorded gate is FAIL — the gate stands");
+    assert.deepEqual(
+      resampled.phases.find((r) => r.id === 6)?.gate,
+      gateBefore,
+      "the gate object is never mutated by the advisory reviewer",
+    );
+    assert.equal(
+      resampled.generatedSource,
+      "exports.add = (a, b) => a + b;",
+      "the crew never rewrites the resample-selected module",
+    );
+  });
 });

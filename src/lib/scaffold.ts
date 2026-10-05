@@ -1328,12 +1328,38 @@ const UI_PRIMITIVE_TYPE = /^(string|number|boolean|bigint|symbol)$/i;
  * boolean). A domain-typed param (e.g. `board: Board`) is NOT here: the
  * emitted `String(data.get(...))` argument is not assignable to it, so a form
  * must never be bound to such a callable. Empty/any/unknown accept anything.
+ * fixes/346-S5: the test runs on the alias-RESOLVED type text
+ * (`uiResolveTypeText`), so a local `type Money = number` IS bindable while an
+ * interface `Board` or a string-literal-union alias is still not.
  */
 const UI_FORM_BINDABLE_TYPE =
   /^(string|number|boolean|int|integer|float|double|decimal|any|unknown)$/i;
 
-function uiFormBindableParam(type: string): boolean {
-  const t = type.trim();
+/**
+ * fixes/346-S5: resolve a parameter/field type text through the single-line
+ * `type A = RHS` aliases the scanned entry source declares (`uiTypeAliases`) —
+ * bounded and cycle-safe. The measured defect: the keyed tree's only callable
+ * `computeLineTotal(quantity: number, unitPrice: Money)` (with `type Money =
+ * number;` in the same tree) was left unwired because the bindable test saw the
+ * alias NAME `Money`, not its real numeric shape. A form's `Number(...)` IS
+ * assignable to it, so the honest panel was a false negative. An interface (not
+ * a `type`) is never in the alias map, so a domain object param stays unbindable.
+ */
+function uiResolveTypeText(type: string, aliases?: ReadonlyMap<string, string>): string {
+  let t = String(type ?? "").trim();
+  if (aliases === undefined || aliases.size === 0) return t;
+  const seen = new Set<string>();
+  while (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(t) && !seen.has(t)) {
+    const next = aliases.get(t);
+    if (next === undefined) break;
+    seen.add(t);
+    t = next.trim();
+  }
+  return t;
+}
+
+function uiFormBindableParam(type: string, aliases?: ReadonlyMap<string, string>): boolean {
+  const t = uiResolveTypeText(type, aliases);
   return t === "" || UI_FORM_BINDABLE_TYPE.test(t);
 }
 
@@ -1603,6 +1629,7 @@ function uiDomainFields(
   project: Project,
   callable: UiCallable,
   shape: "object" | "positional" | "none",
+  aliases?: ReadonlyMap<string, string>,
 ): UiField[] {
   const fields: UiField[] = [];
   const seen = new Set<string>();
@@ -1614,14 +1641,16 @@ function uiDomainFields(
   };
 
   if (shape === "positional") {
-    for (const p of callable.params) if (!p.rest) push(p.name, p.name, p.type);
+    // fixes/346-S5: resolve a local alias (`Money` → `number`) so the emitted
+    // form's coercion and the recorded field type agree with the callable.
+    for (const p of callable.params) if (!p.rest) push(p.name, p.name, uiResolveTypeText(p.type, aliases));
     return fields.slice(0, UI_FIELD_CAP);
   }
   if (callable.objectKeys) {
     for (const key of callable.objectKeys) push(key.name, key.name, key.type);
     return fields.slice(0, UI_FIELD_CAP);
   }
-  for (const p of callable.params) if (!p.rest) push(p.name, p.name, p.type);
+  for (const p of callable.params) if (!p.rest) push(p.name, p.name, uiResolveTypeText(p.type, aliases));
 
   const spec = project.implementationSpec;
   const sigs = spec && Array.isArray(spec.typeSignatures) ? spec.typeSignatures : [];
@@ -1814,6 +1843,34 @@ const defaultUiGeneration = ({
   // entirely "not implemented"). Only a zero-arg, non-async render export is
   // actually CALLED; a param-bearing one still yields its honest section.
   const renderLike = callables.filter(uiRenderLike);
+  // fixes/346-S5: the form-binding shape + soundness of ONE callable, and the
+  // preference order for picking it. A callable the form can genuinely bind
+  // (≥2 real fields + a sound arg) is preferred over the first multi-field
+  // callable: the measured keyed trees carried a bindable two-arg numeric
+  // `computeLineTotal(price: number, quantity: number)` that was skipped for an
+  // unbindable object-param export declared earlier.
+  const formShapeOf = (c: UiCallable): "object" | "positional" | "none" =>
+    c.objectKeys
+      ? "object"
+      : c.params.length === 0
+        ? "none"
+        : c.params.length === 1
+          ? UI_PRIMITIVE_TYPE.test(uiResolveTypeText(c.params[0]!.type, typeAliases))
+            ? "positional"
+            : "object"
+          : "positional";
+  const formBindableOf = (c: UiCallable, shape: "object" | "positional" | "none"): boolean =>
+    shape === "object"
+      ? c.params.length === 1 && c.objectKeys !== null
+      : c.params.every((p) => p.rest || uiFormBindableParam(p.type, typeAliases));
+  const formWouldWire = (c: UiCallable): boolean => {
+    const shape = formShapeOf(c);
+    return uiDomainFields(project, c, shape, typeAliases).length >= 2 && formBindableOf(c, shape);
+  };
+  const multiField = (c: UiCallable): boolean =>
+    (c.objectKeys?.length ?? 0) >= 2 || c.params.filter((p) => !p.rest).length >= 2;
+  const pickFormCallable = (): UiCallable | null =>
+    callables.find((c) => multiField(c) && formWouldWire(c)) ?? callables.find(multiField) ?? callables[0] ?? null;
   if (renderLike.length > 0) {
     // C1-02: call a render export with SOUND arguments where its own declared
     // parameter types permit (a zero-arg renderer, or one whose params are
@@ -1825,30 +1882,27 @@ const defaultUiGeneration = ({
       const args = uiRenderCallArgs(c, typeAliases);
       if (args !== null) renderCalls.push({ name: c.name, args });
     }
-    const pages = uiBriefPages(project);
-    const shellPages =
-      pages.length > 0
-        ? pages
-        : renderLike.map((c) => ({ id: ident(c.name.replace(/^render/, "") || c.name, "page"), title: c.name }));
-    return defaultUiShellBody(project, shellPages, renderCalls);
+    // fixes/346-S5: an all-null shell (NO render export callable) calls nothing
+    // — honest, but a false negative when the same tree exposes a form-bindable
+    // callable (s1/s2 bakery-website: `renderOpeningHoursBadge(status:
+    // OpenStatus)` with an object-typed status, alongside the bindable
+    // `computeLineTotal(price: number, quantity: number)`). Prefer the wired
+    // form in that case; keep the shell whenever it (or the honest all-null
+    // version) is the only sound shape.
+    const formCallable = renderCalls.length === 0 ? pickFormCallable() : null;
+    if (formCallable === null || !formWouldWire(formCallable)) {
+      const pages = uiBriefPages(project);
+      const shellPages =
+        pages.length > 0
+          ? pages
+          : renderLike.map((c) => ({ id: ident(c.name.replace(/^render/, "") || c.name, "page"), title: c.name }));
+      return defaultUiShellBody(project, shellPages, renderCalls);
+    }
   }
-  // Prefer a callable whose own surface can carry ≥2 real fields.
-  const callable =
-    callables.find((c) => (c.objectKeys?.length ?? 0) >= 2 || c.params.filter((p) => !p.rest).length >= 2) ??
-    callables[0] ??
-    null;
-  const shape: "object" | "positional" | "none" = !callable
-    ? "none"
-    : callable.objectKeys
-      ? "object"
-      : callable.params.length === 0
-        ? "none"
-        : callable.params.length === 1
-          ? UI_PRIMITIVE_TYPE.test(callable.params[0]!.type)
-            ? "positional"
-            : "object"
-          : "positional";
-  const fields = callable ? uiDomainFields(project, callable, shape) : [];
+  // Prefer a callable the form can genuinely bind, then any ≥2-field callable.
+  const callable = pickFormCallable();
+  const shape: "object" | "positional" | "none" = callable ? formShapeOf(callable) : "none";
+  const fields = callable ? uiDomainFields(project, callable, shape, typeAliases) : [];
   // fixes/341-1: the synthesized arguments must be assignable to the
   // callable's REAL parameter types. A positional form supplies one coerced
   // primitive per param, so every non-rest param must be primitive-coercible;
@@ -1858,11 +1912,7 @@ const defaultUiGeneration = ({
   // a guess, and a guessed arg is a compile error the pre-seal gate refuses
   // with no repairable chunk. When the binding cannot be proven sound, emit the
   // honest "nothing to bind" panel instead of fabricating a call.
-  const bindable =
-    callable !== null &&
-    (shape === "object"
-      ? callable.params.length === 1 && callable.objectKeys !== null
-      : callable.params.every((p) => p.rest || uiFormBindableParam(p.type)));
+  const bindable = callable !== null && formBindableOf(callable, shape);
   if (!callable || fields.length < 2 || !bindable) {
     const reason = !callable
       ? "generated module exports no callable function"

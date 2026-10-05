@@ -18,6 +18,7 @@ import {
   evidenceFromProjectRecord,
   factoryClaim,
   FACTORY_GAP,
+  fleetTelemetryFromProject,
   humanFixturesFromProject,
   inventoryFromJobSources,
   jobScopeShortfall,
@@ -1471,5 +1472,94 @@ describe("PR-31/PR-32 — autonomousFactoryV2 + fleet observability (human door 
       {},
     );
     assert.equal(collided.fleetAlarms.evidenceHashCollision.tripped, true, "the BF-6 collision alarm trips");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/346-X5 — resample telemetry (from the persisted journal rows) + the
+// variance reading, surfaced on the doctor's fleet metrics.
+// ---------------------------------------------------------------------------
+
+const RESAMPLE_ROW_WIN =
+  "chunk 1/10 (fail-fast) · candidates 2 · winner 1 · candidate 1: selected — pre-seal typecheck";
+const RESAMPLE_ROW_RETRY =
+  'chunk 2/10 · candidates 2 · winner 2 · candidate 1: rejected — RT_E_VALIDATION: typeSignature functions not exported | candidate 2: selected';
+const RESAMPLE_ROW_NONE =
+  "chunk 3/10 (fail-fast) · candidates 2 · winner none · candidate 1: rejected — structure refused | candidate 2: rejected — tsc refused";
+
+describe("fixes/346-X5 — the armed resample's usage is read back from the journal", () => {
+  it("fleetTelemetryFromProject reads the candidates rows + measured tokens; never invents workingApp", () => {
+    const record = {
+      id: "bfo",
+      logs: [
+        { event: "phase.enter", detail: "6" },
+        { event: "p6.synthesis.candidates", detail: RESAMPLE_ROW_WIN },
+        { event: "p6.synthesis.candidates", detail: RESAMPLE_ROW_RETRY },
+        { event: "p6.synthesis.candidates", detail: RESAMPLE_ROW_NONE },
+        { event: "p6.synthesis.candidates", detail: "not a candidates row" },
+      ],
+      tokenUsage: { promptTokens: 100, completionTokens: 50, calls: 7, cachedPromptTokens: 0 },
+    };
+    const t = fleetTelemetryFromProject(record);
+    assert.ok(t);
+    assert.equal(t.brief, "bfo");
+    assert.equal(t.tokens, 150);
+    assert.equal(t.calls, 7);
+    assert.equal(t.keyed, true);
+    assert.equal(t.cachedPromptTokens, 0);
+    assert.equal(t.synthesisCandidates?.length, 4, "the candidates rows are copied verbatim (the parser is the gate)");
+    assert.equal("workingApp" in t, false, "the campaign verdict needs the on-disk tree — never inferred here");
+  });
+
+  it("WIRED at the doctor: a record's journal rows surface as fleetMetrics.resample (with vs without)", () => {
+    const withResample = factoryClaim(
+      evidenceFromProjectRecord({
+        ...ov9Project(),
+        logs: [
+          { event: "p6.synthesis.candidates", detail: RESAMPLE_ROW_WIN },
+          { event: "p6.synthesis.candidates", detail: RESAMPLE_ROW_RETRY },
+          { event: "p6.synthesis.candidates", detail: RESAMPLE_ROW_NONE },
+        ],
+      }),
+      {},
+    );
+    assert.equal(withResample.fleetMetrics.resample.events, 3);
+    assert.equal(withResample.fleetMetrics.resample.candidatesRequested, 6);
+    assert.equal(withResample.fleetMetrics.resample.candidatesTried, 5);
+    assert.equal(withResample.fleetMetrics.resample.winners, 2);
+    assert.equal(withResample.fleetMetrics.resample.noWinner, 1);
+    assert.equal(withResample.fleetMetrics.resample.extraKeyedCalls, 2);
+    assert.equal(withResample.fleetMetrics.resample.extraTokens, null, "tokens per resample are not in the journal");
+    assert.deepEqual(withResample.fleetMetrics.resample.byRun[0].winnersByEvent, [1, 2, null]);
+
+    // The opt-out shape (P6_SYNTH_CANDIDATES=1) emits no candidates row at all.
+    const noResample = factoryClaim(evidenceFromProjectRecord({ ...ov9Project(), logs: [] }), {});
+    assert.equal(noResample.fleetMetrics.resample.runs, 0);
+    assert.equal(noResample.fleetMetrics.resample.events, 0);
+    assert.equal(noResample.fleetMetrics.resample.extraKeyedCalls, 0);
+    assert.equal("workingApp" in (fleetTelemetryFromProject({ ...ov9Project(), logs: [] }) ?? {}), false);
+  });
+
+  it("the variance reading: per-sample workingApp + the sample count ride the doctor metrics", () => {
+    const base = evidenceFromProjectRecord(ov9Project());
+    const c = factoryClaim(
+      {
+        ...base,
+        fleetTelemetry: [
+          { brief: "mobile-companion", workingApp: true },
+          { brief: "mobile-companion", workingApp: false },
+          { brief: "office-stock-tracker", workingApp: true },
+          { brief: "office-stock-tracker", workingApp: false },
+          { brief: "bakery-website", workingApp: true },
+        ],
+      },
+      {},
+    );
+    assert.equal(c.fleetMetrics.workingAppSamples, 5);
+    assert.equal(c.fleetMetrics.workingAppPass, 3);
+    assert.equal(c.fleetMetrics.workingAppRate, 3 / 5, "the machine reading states the sample fraction, not one lucky run");
+    assert.equal(c.fleetMetrics.workingAppByBrief.length, 5);
+    assert.equal(c.fleetAcceptance.sampleCount, 1, "the acceptance aggregate names its sample count too");
+    assert.equal(c.fleetMetrics.estimatedCostUsd, null, "spend is still never fabricated");
   });
 });

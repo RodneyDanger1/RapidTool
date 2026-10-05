@@ -18,12 +18,14 @@
 //     resample stay OPT-IN (`resolveSynthesisCandidates`, default 1) — unchanged
 //     from 343-1.
 //   • The chunked P6 tree's per-chunk + fail-fast offender resample is now ARMED
-//     BY DEFAULT (`resolveChunkResampleCandidates`, default 2, fixes/346 lane S4).
-//     The campaign #2 journals measure the dominant P6 stall as a per-chunk
-//     deterministic-validation refusal, so this is the lever T1 measured opt-in
-//     (`P6_SYNTH_CANDIDATES=2`). It is lazy/Pareto: a first sample that already
-//     clears the deterministic validator pays nothing, so the extra spend lands
-//     only on a stochastic refusal.
+//     BY DEFAULT (`resolveChunkResampleCandidates`, default 3, fixes/346 lane S4;
+//     S5 raised it 2→3 for reliability). The campaign #2 journals measure the
+//     dominant P6 stall as a per-chunk deterministic-validation refusal, so this
+//     is the lever T1 measured opt-in (`P6_SYNTH_CANDIDATES=2`). Two samples
+//     still read green on one sweep and red on the next (same brief), so the
+//     armed default carries one more independent sample. It is lazy/Pareto: a
+//     first sample that already clears the deterministic validator pays nothing,
+//     so the extra spend lands only on a stochastic refusal.
 //
 // The explicit OPT-OUT `P6_SYNTH_CANDIDATES=1` (or `deps.candidates: 1`) restores
 // the byte-identical legacy single-sample path for BOTH policies.
@@ -42,10 +44,14 @@ export const P6_SYNTH_CANDIDATES_MAX = 4;
  * after a single sample plus one class repair, with no independent second
  * attempt. This is ARMED BY DEFAULT (fixes/346 lane S4): a refused chunk is
  * resampled with the SAME primary prompt up to this many total candidates, the
- * deterministic validator being the selector. `P6_SYNTH_CANDIDATES=1` (or
- * `deps.candidates: 1`) keeps the legacy single-sample path byte-identical.
+ * deterministic validator being the selector. fixes/346 lane S5 raised the armed
+ * default 2→3: a two-sample sweep still read 0/4 on one run and 3/4 on the next
+ * over the SAME briefs, and the journals show the fatal refusal is a chunk where
+ * BOTH samples failed — one more independent sample is the bounded reliability
+ * lever. `P6_SYNTH_CANDIDATES=1` (or `deps.candidates: 1`) keeps the legacy
+ * single-sample path byte-identical.
  */
-export const P6_SYNTH_CHUNK_RETRY_CANDIDATES = 2;
+export const P6_SYNTH_CHUNK_RETRY_CANDIDATES = 3;
 
 /**
  * Resolve the primary best-of-N / whole-tree resample count. `explicit` (a
@@ -73,7 +79,7 @@ export function resolveSynthesisCandidates(explicit?: unknown, env?: unknown): n
  * Resolve the chunk-level (per-chunk acceptance + fail-fast offender) resample
  * count. Same precedence as {@link resolveSynthesisCandidates} — an explicit
  * `deps.candidates` wins over the `P6_SYNTH_CANDIDATES` env — but the ABSENT
- * default is {@link P6_SYNTH_CHUNK_RETRY_CANDIDATES} (2): this is the armed-by-
+ * default is {@link P6_SYNTH_CHUNK_RETRY_CANDIDATES} (3): this is the armed-by-
  * default lane. An explicit `1` (env or `deps.candidates`) is the opt-out and
  * yields 1, exactly the legacy single-sample path; every other value is clamped
  * to `1..P6_SYNTH_CANDIDATES_MAX`. Pure + deterministic — never throws.

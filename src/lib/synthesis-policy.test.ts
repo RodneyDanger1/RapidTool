@@ -44,11 +44,11 @@ describe("fixes/343-1 resolveSynthesisCandidates (default 1 = byte-identical leg
   });
 });
 
-describe("fixes/346-S4 resolveChunkResampleCandidates (ARMED default 2, opt-out 1)", () => {
+describe("fixes/346-S4 resolveChunkResampleCandidates (ARMED default 3, opt-out 1)", () => {
   it("absent input arms the chunk resample by default; the primary default stays 1", () => {
-    assert.equal(P6_SYNTH_CHUNK_RETRY_CANDIDATES, 2, "the armed chunk-level default");
-    assert.equal(resolveChunkResampleCandidates(undefined, undefined), 2, "no option + no env ⇒ ARMED");
-    assert.equal(resolveChunkResampleCandidates(undefined, null), 2);
+    assert.equal(P6_SYNTH_CHUNK_RETRY_CANDIDATES, 3, "the armed chunk-level default (S5: raised 2→3 for reliability)");
+    assert.equal(resolveChunkResampleCandidates(undefined, undefined), 3, "no option + no env ⇒ ARMED");
+    assert.equal(resolveChunkResampleCandidates(undefined, null), 3);
   });
 
   it("an explicit 1 (option or env) is the opt-out to the byte-identical legacy single sample", () => {
@@ -63,7 +63,7 @@ describe("fixes/346-S4 resolveChunkResampleCandidates (ARMED default 2, opt-out 
     assert.equal(resolveChunkResampleCandidates(3, "4"), 3, "deps.candidates wins");
     assert.equal(resolveChunkResampleCandidates(9), P6_SYNTH_CANDIDATES_MAX, "clamped to the cap");
     for (const bad of ["", "abc", "2.5", "0", "-3", Number.NaN, {} as unknown]) {
-      assert.equal(resolveChunkResampleCandidates(bad, undefined), 2, `hostile ${JSON.stringify(bad)} ⇒ armed default`);
+      assert.equal(resolveChunkResampleCandidates(bad, undefined), 3, `hostile ${JSON.stringify(bad)} ⇒ armed default`);
     }
   });
 });

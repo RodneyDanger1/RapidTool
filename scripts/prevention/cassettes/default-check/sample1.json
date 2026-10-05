@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "kind": "default-check-sample",
+  "campaign": "default-check",
+  "sample": "sample1",
+  "source": "testruns/default-check/sample1/TUNING.json",
+  "equivalentRunRoot": null,
+  "generatedAt": "2026-10-05T12:24:56.164Z",
+  "scoreComplete": true,
+  "artifactComplete": false,
+  "treesOnDisk": [],
+  "completenessNote": "sample1 carries the score plus per-slug envelope dirs but NO emitted/ tree on disk (3 of 4 projects parked at the P6 gate) - score recorded, artifact INCOMPLETE.",
+  "ledger": {
+    "cap": 1500000,
+    "spent": 532597,
+    "calls": 95
+  },
+  "tally": {
+    "workingApp": 0,
+    "of": 4,
+    "emptySubstanceCommits": 0
+  },
+  "projects": [
+    {
+      "slug": "bakery-website",
+      "workingApp": false,
+      "rubric": 0,
+      "emitted": false,
+      "driveExit": 1,
+      "driveCode": "RT_E_GATE_PENDING",
+      "substance": null,
+      "uiWired": false,
+      "testsAgg": {
+        "pass": 0,
+        "skipped": 0,
+        "fail": 0
+      }
+    },
+    {
+      "slug": "bakery-florist-orders",
+      "workingApp": false,
+      "rubric": 3,
+      "emitted": true,
+      "driveExit": 0,
+      "driveCode": null,
+      "substance": "real",
+      "uiWired": false,
+      "testsAgg": {
+        "pass": 42,
+        "skipped": 1,
+        "fail": 0
+      }
+    },
+    {
+      "slug": "mobile-companion",
+      "workingApp": false,
+      "rubric": 0,
+      "emitted": false,
+      "driveExit": 1,
+      "driveCode": "RT_E_GATE_PENDING",
+      "substance": null,
+      "uiWired": false,
+      "testsAgg": {
+        "pass": 0,
+        "skipped": 0,
+        "fail": 0
+      }
+    },
+    {
+      "slug": "office-stock-tracker",
+      "workingApp": false,
+      "rubric": 0,
+      "emitted": false,
+      "driveExit": 1,
+      "driveCode": "RT_E_GATE_PENDING",
+      "substance": null,
+      "uiWired": false,
+      "testsAgg": {
+        "pass": 0,
+        "skipped": 0,
+        "fail": 0
+      }
+    }
+  ]
+}

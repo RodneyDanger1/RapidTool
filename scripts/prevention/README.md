@@ -87,20 +87,23 @@ control scratch tree** (must stay silent) and an **injected-defect scratch tree*
 
 ## Red pin
 
-At the time of writing, **C-04** (monotonic repair / no-progress abort) is the one
-guard that cannot fire. Lane B landed the best-tree metric *internally* in
-`headless.ts` (`bestTreeMetricOf` / `isBetterTree` / `keepBestTree`), but the names
-P-B's registry and this harness both consume — `headless.treeVerdictScore` and
-`headless.failureSignature` — are **not exported**, so neither P-B's
-`repair-monotonic.test.mjs` pin nor this driver can call the real comparator. The
-historical defect is still on disk (`bakery-florist-orders/repair.json`: 3/3 cycles,
-`RT_E_REPAIR_FAILED`, cycle 2 repeats cycle 1's failure signature — the exact
-non-monotonic signal C-04 must abort on).
+**There is no red pin on the landed tree today.** Two pins were RED while their
+fixer lane was open and both flipped green when the fixer landed:
 
-This is reported, not hidden: the command exits `1` naming `C-04`, and
-`replay-harness.test.mjs` pins the miss to the pending B2 export. Once lane B
-exports the comparator, the driver calls it on the real captured cycle sequence and
-the command exits `0` with no other change.
+- **C-04** (monotonic repair / no-progress abort): the names P-B's registry and
+  this harness consume — `headless.treeVerdictScore` and
+  `headless.failureSignature` — were exported when lane D landed PR-07, so the
+  driver calls the real comparator on the captured cycle sequence.
+- **S4-04** (accepted-chunk reuse): the codegen consumer (`resumeByPath` /
+  `p6.synthesis.reused`) landed first, and the pin stayed RED (`status:"pending"`,
+  owner lane D5, naming `src/lib/headless.ts#driveP6Journey -> ctx.resumeAccepted`)
+  until lane D5 landed the producer (`resumeAcceptedFromTree(synthesized)` →
+  `ctx.resumeAccepted`, headless.ts:3568/3597). It now reads green (0 synthesis
+  prompts on a resumed/accepted path).
+
+A pin that goes red again (a fixer revert) is reported by name, not hidden: the
+command exits `1` naming the guard, and the guard's own `*.test.mjs` pins the
+interface so the state is legible.
 
 ## Cassettes
 
@@ -109,7 +112,11 @@ artifacts, not hand-written: the full brief text, the persisted vs corrected
 `{name, domain, kind}`, the tree set, the incident ids, and the normalised
 `{file, ok, exit_code, code, error, unmet}` failure signatures from the run
 envelopes. `cassettes/trees.json` lists the 13 emitted trees;
-`cassettes/runlock-bl010.json` carries the BL-010 timestamp set.
+`cassettes/runlock-bl010.json` carries the BL-010 timestamp set;
+`cassettes/default-check/{sample1,sample2}.json` carry the two default-check
+campaign samples (workingApp 0/4 and 3/4 — sample1 is artifact-incomplete, and
+says so), whose scores are pinned in `cassettes/rubric-baselines.json#defaultCheck`
+(both samples, so the variance is recorded) and guarded by **S4-05**.
 
 To refresh after new evidence lands (keyless, writes only `cassettes/`):
 

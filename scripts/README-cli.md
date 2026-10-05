@@ -567,13 +567,24 @@ tree still exists on disk**, so the failure is in delivery, never in the build.
 > substance hold is checked before `tree-run-red`, so an empty tree refuses with
 > its own specific code. The withheld `git` block's own `code` always matches its
 > `reason` (C1-08: it used to carry a leg's earlier code beside a different
-> reason). It is lifted by the explicit **`--allow-empty`** opt-in
-> (a deliberate scaffold-only delivery), which lands the commit as before. A GREEN
-> leg commits exactly as before. `emit --git` WITHOUT any judging leg is
+> reason). The **`substance-empty` / red-trail hold is lifted by the explicit
+> `--allow-empty`** opt-in (a deliberate scaffold-only delivery), which lands the
+> commit as before. A GREEN leg commits exactly as before. `emit --git` WITHOUT
+> any judging leg is
 > unchanged: it cannot consult a verdict it never computed, so it lands the commit
 > as today. This is the CLI-level mirror of the deliver step's verify-before-commit
 > ordering in
 > [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs).
+
+> **`--allow-empty` is substance-ONLY (W346 · D5 contract).** It does **not**
+> escape the below-floor refusal. A tree below the brief-driven floor is
+> `plan-underproduced` / `RT_E_PLAN_UNDERPRODUCED` — a SEPARATE refusal from the
+> substance hold, raised by the scaffold BEFORE the tree is written (so no flag
+> is consulted) and echoed here as the deciding `code`. The only remedy is to
+> synthesize the missing declared modules and re-emit; there is deliberately no
+> flag that lands a below-floor partial as "delivered". (`--allow-empty` still
+> lands an empty-substance or red-trail scaffold, which is a different, honest
+> opt-in.)
 
 `--force` admits an emit into a folder that already holds foreign files — without it the
 emit is refused (`RT_E_FOREIGN_FILES`, exit 1, the `foreign` list on the envelope); with it

@@ -2586,8 +2586,11 @@ async function main() {
           // under-production predicate; when the delivered tree is still below
           // the floor, the floor code becomes the DECIDING delivery reason
           // (top-level `code` + the withheld git reason below) — never a silent
-          // partial. `--allow-empty` remains the explicit scaffold-only escape,
-          // exactly as for the substance-empty gate.
+          // partial. This is a SEPARATE refusal from the substance hold: the
+          // below-floor plan has its OWN deciding code and is NOT escaped by
+          // `--allow-empty` (whose contract is substance ONLY) — the scaffold
+          // already refuses it pre-write regardless of any flag (R2-01), and the
+          // post-write seal must agree.
           const planUnder = await h.planUnderproductionSeal(project);
           if (planUnder !== null) {
             payload.planUnderproduced = {
@@ -2598,16 +2601,14 @@ async function main() {
               missing: planUnder.missing,
               detail: planUnder.detail,
             };
-            if (!flag(args, "allow-empty")) {
-              payload.ok = false;
-              if (typeof payload.code !== "string" || payload.code !== planUnder.code) {
-                payload.code = planUnder.code;
-                payload.error =
-                  `emit refused at delivery: ${planUnder.detail} — a tree below the brief-driven floor ` +
-                  `(${planUnder.emitted} file(s), ${planUnder.modules} module(s), floor ${planUnder.floor}) is an ` +
-                  "under-produced plan, never a normal artifact; the emitted tree is kept on disk — synthesize " +
-                  "the missing module(s) and re-emit to green.";
-              }
+            payload.ok = false;
+            if (typeof payload.code !== "string" || payload.code !== planUnder.code) {
+              payload.code = planUnder.code;
+              payload.error =
+                `emit refused at delivery: ${planUnder.detail} — a tree below the brief-driven floor ` +
+                `(${planUnder.emitted} file(s), ${planUnder.modules} module(s), floor ${planUnder.floor}) is an ` +
+                "under-produced plan, never a normal artifact; the emitted tree is kept on disk — synthesize " +
+                "the missing module(s) and re-emit to green.";
             }
           }
           // fixes/343_3 · git-native delivery: `emit --git` lands the just-
@@ -2628,10 +2629,12 @@ async function main() {
             // evidence of a clean, verified tree, so a red `--check` must
             // withhold exactly as a red `--run` does.
             let withheld = null;
-            if (!flag(args, "allow-empty") && planUnder !== null) {
+            if (planUnder !== null) {
               // R2-01: the floor is the DECIDING reason — a below-floor tree is
               // an under-produced plan, not a merely-empty or red one. Checked
               // first so the sealed git sub-envelope names the floor code too.
+              // NOT escaped by `--allow-empty` (substance-only): the scaffold
+              // refuses the below-floor partial pre-write regardless.
               withheld = {
                 reason: "plan-underproduced",
                 code: planUnder.code,
@@ -5589,7 +5592,7 @@ const USAGE = {
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",
     packet: "packet --project <file.json> [--out <file.md>] [--knowledge <store.json>]  # --knowledge seeds the Ranked-memory section with cross-project accepted lesson rows (tier-1, advisory)",
     export: "export --project <file.json> [--out <file.json>]",
-    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified] [--allow-empty] [--git]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok, exit 0 when it is ok (the envelope always carries declaredScriptsVerified/unverifiedDeclaredScripts when a declared script did not run); --require-verified opts into exit 5 for that green-but-unverified state; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse); --git lands the emitted tree as ONE Conventional-Commits delivery commit (feat(<slug>): <brief>) — emitted files only, a foreign file is reported not committed, the host repo is never a target, and a clean tree is a no-op (envelope `git`); with --run, --git WITHHOLDS the commit (RT_E_SUBSTANCE_EMPTY) when the tree's substance verdict is \"empty\" or the project carries an uncleared red trail, unless --allow-empty opts into a deliberate scaffold-only commit",
+    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified] [--allow-empty] [--git]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok, exit 0 when it is ok (the envelope always carries declaredScriptsVerified/unverifiedDeclaredScripts when a declared script did not run); --require-verified opts into exit 5 for that green-but-unverified state; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse); --git lands the emitted tree as ONE Conventional-Commits delivery commit (feat(<slug>): <brief>) — emitted files only, a foreign file is reported not committed, the host repo is never a target, and a clean tree is a no-op (envelope `git`); with --run, --git WITHHOLDS the commit (RT_E_SUBSTANCE_EMPTY) when the tree's substance verdict is \"empty\" or the project carries an uncleared red trail, unless --allow-empty opts into a deliberate scaffold-only commit; --allow-empty is substance-ONLY and does NOT lift the SEPARATE below-floor refusal (RT_E_PLAN_UNDERPRODUCED, raised at scaffold time before any flag is read)",
     fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR approve selected/all ids — never auto-approves: --approve routes through the policy seam's human seat (--i-am-human + a TTY re-entry of RT_HUMAN_SEAT_TOKEN; a denied verdict writes nothing and stamps no decidedBy)",
     eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, nothing fabricated — the eval-out documents are never written (like every verb, the exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/); a missing history prints as 'no history', never a fake 0 delta",
     "tree-run": "tree-run --dir <dir> [--project <file.json>] [--require-verified]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0 (the envelope still names an unverified declared toolchain; --require-verified turns that state into exit 5); red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",

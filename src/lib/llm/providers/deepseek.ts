@@ -36,7 +36,7 @@
  */
 
 import { appendFileSync } from "node:fs";
-import type { LlmModel, LlmResult } from "../../llm.ts";
+import type { LlmModel, LlmResult, LlmUsage } from "../../llm.ts";
 import { classifyError } from "../../errors.ts";
 // T5.7: the deterministic cassette seam. `wrapWithActiveCassette` is the
 // identity when RAPIDTOOL_CASSETTE_MODE is unset/"off" (see its doc), so the
@@ -297,6 +297,39 @@ type DeepSeekChatBody = {
     prompt_cache_miss_tokens?: unknown;
   };
 };
+
+/**
+ * Map the vendor's `usage` block to `LlmUsage` — the ONE parse site, shared by
+ * the success return and the empty-content refusals. A 200 body that returned
+ * no text (finish_reason length / content_filter / capacity) still BILLED the
+ * prompt (and, on a truncation, the completion); discarding the block on the
+ * refusal path silently under-counted real spend in both the session ledger
+ * (`accountSynthUsage` records every response that reports usage, success or
+ * refusal) and the call tap — the P6 resample multiplies exactly those
+ * refused candidates. Pure; undefined when the two required counts are absent
+ * (no fabricated 0 — the legacy shape survives). The context-cache split rides
+ * only when the vendor reported it.
+ */
+function usageFromParsed(parsed: DeepSeekChatBody): LlmUsage | undefined {
+  const usage = parsed.usage;
+  if (
+    !usage ||
+    typeof usage.prompt_tokens !== "number" ||
+    typeof usage.completion_tokens !== "number"
+  ) {
+    return undefined;
+  }
+  return {
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    ...(typeof usage.prompt_cache_hit_tokens === "number"
+      ? { cachedPromptTokens: usage.prompt_cache_hit_tokens }
+      : {}),
+    ...(typeof usage.prompt_cache_miss_tokens === "number"
+      ? { cacheMissTokens: usage.prompt_cache_miss_tokens }
+      : {}),
+  };
+}
 
 type DeepSeekFetchDeps = {
   fetch: typeof fetch;
@@ -664,6 +697,10 @@ async function completeDeepSeekInner(
           ? `; model returned reasoning only (${reasoning.trim().length} chars of reasoning_content, content empty)`
           : "";
       const lengthNote = finishClass === "length" ? "; stopped at max_tokens (finish_reason length)" : "";
+      // The vendor reports `usage` on a 200 body, so a no-text reply that
+      // burned tokens must still carry its measured cost — a refused P6
+      // candidate is a real call, not a free one.
+      const refusalUsage = usageFromParsed(parsed);
       // W61 lane D (D4): the documented taxonomy, classified — a `content_filter`
       // refusal is NOT retryable and is named as such; `insufficient_system_resource`
       // reached this point only after the bounded retry above was exhausted.
@@ -673,6 +710,7 @@ async function completeDeepSeekInner(
           reason: "error",
           error: `DeepSeek refused the request (finish_reason content_filter)${reasoningNote}`,
           code: "RT_E_LLM_REJECTED",
+          ...(refusalUsage ? { usage: refusalUsage } : {}),
         };
       }
       const capacityNote =
@@ -684,47 +722,28 @@ async function completeDeepSeekInner(
         reason: "error",
         error: `DeepSeek returned no text content${reasoningNote}${lengthNote}${capacityNote}`,
         code: "RT_E_LLM_REJECTED",
+        ...(refusalUsage ? { usage: refusalUsage } : {}),
       };
     }
-    const usage = parsed.usage;
+    const usage = usageFromParsed(parsed);
     return {
       ok: true,
       text: content.trim(),
       model:
         typeof parsed.model === "string" && parsed.model ? parsed.model : model,
-      ...(usage &&
-      typeof usage.prompt_tokens === "number" &&
-      typeof usage.completion_tokens === "number"
-        ? {
-            usage: {
-              promptTokens: usage.prompt_tokens,
-              completionTokens: usage.completion_tokens,
-              // W39·K6 (completes C2 · fixes/288_c2): the context-cache split
-              // the vendor reports on every response — "Checking Cache Hit
-              // Status" (api-docs.deepseek.com/guides/kv_cache): hit tokens
-              // are billed at the cache-hit price, miss tokens at the full
-              // input price (the docs' own 50x spread). The TYPE carried these
-              // fields since C2's 00:21 patch; this parse completes the job.
-              // Additive + conditional: a response without the fields (old
-              // cassette tapes, other providers) keeps the EXACT legacy 2-key
-              // usage object, so the deepEqual pins at
-              // deepseek.server.test.ts:389 and the cassette copy semantics
-              // stay green. `cachedPromptTokens` is the token-ledger /
-              // packet / doctor vocabulary (`TokenSpend.cachedPromptTokens`,
-              // packet `cached_prompt_tokens`) — the pass-through ledger
-              // seams (token-ledger `recordBudgetSpend(budget, res.usage)`
-              // merges CACHE_FIELDS off the spend object) accumulate it with
-              // no further wiring; hand-built spends in codegen/crew/subagent
-              // are logged in fixes/290_k6 for their owners.
-              ...(typeof usage.prompt_cache_hit_tokens === "number"
-                ? { cachedPromptTokens: usage.prompt_cache_hit_tokens }
-                : {}),
-              ...(typeof usage.prompt_cache_miss_tokens === "number"
-                ? { cacheMissTokens: usage.prompt_cache_miss_tokens }
-                : {}),
-            },
-          }
-        : {}),
+      // W39·K6 (completes C2 · fixes/288_c2): the context-cache split the
+      // vendor reports on every response — "Checking Cache Hit Status"
+      // (api-docs.deepseek.com/guides/kv_cache): hit tokens are billed at the
+      // cache-hit price, miss tokens at the full input price (the docs' own
+      // 50x spread). `usageFromParsed` keeps the parse additive + conditional:
+      // a response without the fields (old cassette tapes, other providers)
+      // keeps the EXACT legacy 2-key usage object, so the deepEqual pins at
+      // deepseek.server.test.ts:389 and the cassette copy semantics stay
+      // green. `cachedPromptTokens` is the token-ledger / packet / doctor
+      // vocabulary — the pass-through ledger seams (token-ledger
+      // `recordBudgetSpend(budget, res.usage)` merges CACHE_FIELDS off the
+      // spend object) accumulate it with no further wiring.
+      ...(usage ? { usage } : {}),
     };
   } catch (err) {
     if (isAbortError(err)) {
@@ -864,8 +883,13 @@ export async function completeDeepSeek(
       typeof opts.model === "string" && opts.model ? opts.model : DEEPSEEK_MODELS.flash,
     servedModel: res.ok === true ? res.model : null,
     code: res.ok === true ? null : res.code ?? null,
-    promptTokens: res.ok === true && res.usage ? res.usage.promptTokens : null,
-    completionTokens: res.ok === true && res.usage ? res.usage.completionTokens : null,
+    // 346 V5: carry the MEASURED tokens whenever the result reports them —
+    // not only on success. A refused candidate can report usage (an empty-
+    // content 200 that burned the window), and dropping it here was how the
+    // refusal path under-counted resample spend. Null stays the honest
+    // "nothing was measured" value (a transport/not-configured refusal).
+    promptTokens: res.usage ? res.usage.promptTokens : null,
+    completionTokens: res.usage ? res.usage.completionTokens : null,
     // W42·B2 (fixes/307_b2_backends — completes the k6 #4 cache chain): the
     // vendor's context-cache split ride-along. The record TYPE has carried
     // these since W41·Q7 (G3, fixes/285) but this emit dropped them, so every
@@ -874,10 +898,10 @@ export async function completeDeepSeek(
     // the parse site (:577-582): a response (or tape) that reports no split
     // keeps the byte-identical legacy record — no fabricated 0, no consumer
     // that ignores the fields is affected.
-    ...(res.ok === true && res.usage && typeof res.usage.cachedPromptTokens === "number"
+    ...(res.usage && typeof res.usage.cachedPromptTokens === "number"
       ? { cachedPromptTokens: res.usage.cachedPromptTokens }
       : {}),
-    ...(res.ok === true && res.usage && typeof res.usage.cacheMissTokens === "number"
+    ...(res.usage && typeof res.usage.cacheMissTokens === "number"
       ? { cacheMissTokens: res.usage.cacheMissTokens }
       : {}),
   };

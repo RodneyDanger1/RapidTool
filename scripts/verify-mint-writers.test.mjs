@@ -127,3 +127,17 @@ test("the codegen seam stamps through the shared helper and the tree-run floor",
   assert.ok(src.includes("treeRunTestedEvidence"), "the tree-run mint is gated by the executed-assertion floor");
   assert.ok(src.includes('label: "tested" as const'), "the tested label lives in the deterministic stamp helper");
 });
+
+test("the ARMED resample selector cannot mint a tested verdict", () => {
+  // The chunk resample (fixes/346-S4) selects by deterministic gates only
+  // (structure -> brief-fit -> pre-seal tsc), never by behaviour. The selector
+  // must stay mint-free: a resample winner earns "tested" only downstream,
+  // through the single-writer floors guarded above.
+  const src = read(join(REPO_ROOT, "src", "lib", "synthesis-policy.ts"));
+  assert.ok(
+    !/label\s*:\s*["']tested["']/.test(src),
+    "synthesis-policy.ts (the resample selector) must not assign a tested label",
+  );
+  assert.ok(!src.includes("evidenceHash"), "the resample selector must not carry a machine-proof hash");
+  assert.ok(!/\blastTest\b/.test(src), "the resample selector must not touch lastTest");
+});

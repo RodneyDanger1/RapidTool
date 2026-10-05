@@ -449,6 +449,50 @@ this session.
   unimplemented; the console seat-delivery seam open; P7 `p7-research` offline; prettier drift measured,
   not gated.
 
+**Corrections in force — appended 2026-10-05 (346 wave batch 15 / X5 acceptance lane).** This block
+supersedes the product-position, proof-layer-count and P6-resample claims above. Every number below was
+re-derived this session from the file or command named beside it; where a doc and the bytes disagree,
+the bytes win.
+
+- **The chunked P6 resample is ARMED BY DEFAULT.** A refused chunk is retried with the SAME primary
+  prompt (per-chunk acceptance) and the compiler-named fail-fast offender is re-synthesized with the
+  SAME compiler-informed repair prompt; a deterministic validator selects the winner, so a chunk whose
+  FIRST pipeline validates pays nothing. It is bounded ≤ **4** (`P6_SYNTH_CANDIDATES_MAX`); the armed
+  chunk-lane default is **3** this session (`src/lib/synthesis-policy.ts:54`
+  `P6_SYNTH_CHUNK_RETRY_CANDIDATES = 3`, guard `S4-01`). **`P6_SYNTH_CANDIDATES=1`** (or
+  `deps.candidates: 1`) is the explicit opt-out and emits no `p6.synthesis.candidates` row. The
+  **PRIMARY** single-module best-of-N + whole-tree pre-seal resample stay **opt-in**
+  (`resolveSynthesisCandidates` default 1) — the armed lever is the chunk lane only.
+- **The measured product position — with the variance stated.** Campaign #2 scored `workingApp`
+  **2 of 8** (`testruns\_report\CAMPAIGN2.md` §5). The final keyed samples disagreed: the
+  no-env-override confirmation `testruns\default-check\TUNING.json` scored **3 / 4** (generatedAt
+  2026-10-05T12:57:59Z; ledger 966,170 tokens / 173 calls), and the opt-in tuning run
+  `testruns\tuning\TUNING.json` scored **1 / 6** (generatedAt 2026-10-05T11:42:16Z; ledger 1,052,563
+  tokens / 177 calls) — combined **4 / 10**. The same brief flips across runs: `mobile-companion` and
+  `office-stock-tracker` are each `true` in default-check and `false` in the tuning sample;
+  `bakery-website` is `true` in both, `bakery-florist-orders` `false` in both. **Variance is the
+  dominant factor**; the binding wall is the **P6 DoD gate** (`RT_E_GATE_PENDING`), not the resample
+  lever. Delivery honesty held throughout: **0 empty-substance commits · 0 red-tree commits**.
+- **The proof layer at its current guard count: 27.** `node
+  scripts/prevention/verify-prevention.mjs --all --selftest` → `ok:true`, `guards:27`,
+  `countFloor:27`, both orthogonal signals clean (`fixtureIntegrity.missed:[]` ∧
+  `fixPresence.pending:[]`), `skipped:[]`. The gate fails if a guard stops firing, a fixer seam stays
+  `pending`, a guard is `skipped`, or the count drops below the floor. (The batch-10 block's "20
+  guards" is superseded: the S4-01/S4-02/S4-03 wave guards rode in.)
+- **Resample telemetry now rides the doctor, read from the persisted journal.** `fleetMetrics.resample`
+  reports, per run and in aggregate, candidates requested / tried, winners / `noWinner`, the winner
+  index per event, and the extra keyed calls (`Σ max(0, tried−1)`). Measured this session from the
+  default-check journals: **3 of 4 runs recorded rows · 17 events · 34 requested · 25 tried · 14 winners
+  · 3 no-winner · 8 extra keyed calls**; the single `doctor --project
+  testruns\default-check\bakery-florist-orders\build.json` reading is `events:9, requested:18,
+  tried:15, winners:6, noWinner:3, extraKeyedCalls:6`. `extraTokens` is **`null`** with
+  `tokenAccounting:"not-recorded-in-journal"` — the candidate row records candidates, not token usage,
+  and spend is never fabricated.
+- **The machine reading reports its sample count.** `fleetAcceptance.sampleCount` + `evidencedRate` and
+  `fleetMetrics.workingAppSamples` / `workingAppPass` / `workingAppRate` / `workingAppByBrief` (per
+  sample) mean a single lucky run can no longer read as a fleet result; an absent `workingApp` verdict
+  is not scored.
+
 ## Progress so far (the paper trail)
 
 Five multi-agent waves ran 2026-09-16 (25 flash subagents, every wave closed with `gate.sh`-class

@@ -56,6 +56,12 @@ import type { VerifyCase } from "./verify.server.ts";
 // 346 cross-lane: the tree-lane assertion floor, exercised head-to-head against
 // behaviouralOracleExpression over one shared corpus (cross-lane parity pin).
 import { specSourceHasBehaviouralAssert } from "./compile-check.server.ts";
+// 346 V5: the ARMED chunk resample's selector (pure, keyless) + the tree-run
+// mint seam — composed here to prove a deterministic-gate winner still cannot
+// mint `tested` without the executed-assertion floor.
+import { selectBestOfN } from "./synthesis-policy.ts";
+import { mintTreeRunTested, treeRunTestedEvidence } from "./codegen.server.ts";
+import type { TreeRunOutcome } from "./compile-check.server.ts";
 import { runnerAvailable, permissionModelAvailable } from "./node-runner.server.ts";
 import { createTokenBudget, emptyLedger } from "./token-ledger.ts";
 import { oracleToCaseSeeds } from "./dod.ts";
@@ -2153,6 +2159,140 @@ describe("PR-20 (D2/I6) — monotone fix acceptance + frozen oracle cases", () =
       assert.equal(outcome.status, "passed", `a strict improvement must be accepted: ${JSON.stringify(outcome)}`);
       assert.equal(outcome.iterations, 2, "the fix was accepted on the second iteration");
       assert.equal(outcome.finalSource, GOOD, "the improved source is the final one");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 V5 — the ARMED chunk resample must not lower the mint floor.
+//
+// The resample selects a winner with DETERMINISTIC gates (structure →
+// brief-fit → pre-seal tsc), none of which observe BEHAVIOUR. So a
+// structure-green winner is only "buildable", not "verified": it must still
+// clear the machine oracle, and the tree-run mint must still require an
+// executed behavioural assertion. These pins compose the resample SELECTOR
+// with both mint seams so a green-but-vacuous winner is provably unable to
+// stamp `lastTest.label:"tested"`.
+// ---------------------------------------------------------------------------
+describe("346 V5 — a resampled candidate cannot mint tested without the floor", () => {
+  it("a selector-green but vacuous winner still fails machine verification (no tested)", { skip: !available }, async () => {
+    // Candidate 1 is structure-refused; candidate 2 passes the deterministic
+    // selector — exactly the "resample selected a winner" state.
+    const selection = await selectBestOfN<string>(
+      2,
+      async (index) => (index === 0 ? "candidate-1" : "exports.boardAdd = function () { return NaN; };"),
+      async (module) =>
+        module === "candidate-1"
+          ? { passed: false, reason: "structure refused" }
+          : { passed: true, reason: "structure + brief-fit + pre-seal typecheck" },
+    );
+    assert.equal(selection.winner, 1, "the deterministic selector kept candidate 2 (structure-green)");
+    assert.equal(selection.chosen, "exports.boardAdd = function () { return NaN; };");
+
+    const restoreKey = withFakeKey();
+    // A shape-only oracle is the vacuous certificate the floor exists to refuse.
+    const shapeOnly = { cases: [{ id: "c1", expression: "boardAdd(1) !== null" }] };
+    const mock = mockChat([shapeOnly, shapeOnly]);
+    try {
+      const outcome = await verifyAndFixServer(selection.chosen!, "build a board", { maxIterations: 1 });
+      assert.equal(outcome.status, "error", `selector-green is not machine-verified: ${JSON.stringify(outcome)}`);
+      const applied = applyVerifyOutcome(seedProject(), outcome);
+      assert.notEqual(
+        (applied.lastTest as { label?: string } | null)?.label ?? null,
+        "tested",
+        "a green-but-vacuous winner mints no tested label",
+      );
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  const treeOutcome = (over: Partial<TreeRunOutcome> = {}): TreeRunOutcome =>
+    ({
+      ok: true,
+      dir: "C:/scratch/rt-v5",
+      compile: { ok: true, dir: "C:/scratch/rt-v5", checked: 2, passed: 2, failed: 0, skipped: 0, verdicts: [] },
+      tests: [
+        {
+          file: "tests/oracle.spec.ts",
+          compile: "pass",
+          tests: { pass: 3, fail: 0 },
+          run: "pass",
+        },
+      ],
+      run: null,
+      ...over,
+    }) as unknown as TreeRunOutcome;
+
+  it("a resample-winner tree whose only green spec is shape-only/skip-dominated mints no tested", () => {
+    const vacuous = treeOutcome({
+      tests: [
+        {
+          file: "tests/oracle.spec.ts",
+          compile: "pass",
+          // 1 live case against 9 skips: the winner "ran green" but proved nothing.
+          tests: { pass: 1, fail: 0, skipped: 9 },
+          run: "pass",
+          behavioural: false,
+        },
+      ],
+    });
+    assert.equal(
+      treeRunTestedEvidence(vacuous).executed,
+      false,
+      "a shape-only/skip-dominated spec is not executed behavioural evidence",
+    );
+    const minted = mintTreeRunTested(seedProject(), vacuous);
+    assert.notEqual(
+      (minted.lastTest as { label?: string } | null)?.label ?? null,
+      "tested",
+      "no tested stamp for a vacuously green resample winner",
+    );
+    assert.ok(
+      (minted.logs ?? []).some((l) => l.event === "p6.tree.tested.skipped"),
+      "the refusal to mint is recorded visibly, never silent",
+    );
+  });
+
+  it("control: a resample winner with a genuinely behavioural spec still mints tested", () => {
+    const good = treeOutcome({
+      tests: [
+        {
+          file: "tests/oracle.spec.ts",
+          compile: "pass",
+          tests: { pass: 3, fail: 0 },
+          run: "pass",
+          behavioural: true,
+        },
+      ],
+    });
+    assert.equal(treeRunTestedEvidence(good).executed, true);
+    const minted = mintTreeRunTested(seedProject(), good);
+    assert.equal(
+      (minted.lastTest as { label?: string } | null)?.label,
+      "tested",
+      "a real behavioural tree-run still mints the machine verdict",
+    );
+  });
+
+  it("a budgeted verify records exactly one ledger call per model call (no drop, no double-count)", async () => {
+    const restoreKey = withFakeKey();
+    // A shape-only reply forces one extra bounded repair call: two candidates
+    // of the same generation seam.
+    const shapeOnly = { cases: [{ id: "c1", expression: "typeof add === 'function'" }] };
+    const behavioural = { cases: [{ id: "c1", expression: "add(2,3) === 5" }] };
+    const mock = mockChat([shapeOnly, behavioural]);
+    const budget = createTokenBudget(null, emptyLedger());
+    try {
+      const res = await generateCases("exports.add = (a, b) => a + b;", "", [], "", [], budget);
+      assert.equal(res.ok, true, JSON.stringify(res));
+      assert.equal(mock.calls.length, 2, "generation + one bounded repair candidate");
+      assert.equal(budget.ledger.calls, 2, "each candidate call is metered exactly once");
+      assert.equal(budget.ledger.promptTokens, 20, "both candidates' measured prompt tokens are recorded");
     } finally {
       mock.restore();
       restoreKey();

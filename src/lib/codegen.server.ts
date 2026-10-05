@@ -6133,14 +6133,16 @@ async function synthesizeChunkedTree(
     // `cross-chunk duplicate declaration` (bakery-florist-orders,
     // office-stock-tracker) — at chunk 2-3 of an 8-11 chunk plan, after one
     // sample + one class repair and with no independent second attempt. When
-    // chunkCandidates > 1 (the default 2, fixes/346-S4), resample the SAME
+    // chunkCandidates > 1 (the default 3, fixes/346-S4 + S5), resample the SAME
     // primary prompt and keep the FIRST candidate the SAME deterministic
     // validator accepts. Pareto: a chunk whose first pipeline already validates
     // pays nothing; only a stochastic refusal is retried. A budget/not-configured
     // refusal is terminal (retrying cannot help). An explicit chunkCandidates === 1
-    // is the opt-out that leaves every byte of this path legacy.
+    // is the opt-out that leaves every byte of this path legacy. The bound is
+    // carried by resolveChunkResampleCandidates, so an explicit value is honored
+    // exactly and the hard cap stays P6_SYNTH_CANDIDATES_MAX.
     if (!synth.ok && chunkCandidates > 1 && (synth.code === "RT_E_VALIDATION" || synth.code === "RT_E_LLM_REJECTED")) {
-      const chunkRetry = Math.min(P6_SYNTH_CANDIDATES_MAX, Math.max(chunkCandidates, P6_SYNTH_CHUNK_RETRY_CANDIDATES));
+      const chunkRetry = Math.min(P6_SYNTH_CANDIDATES_MAX, chunkCandidates);
       const outcomes: string[] = [
         `candidate 1: rejected — ${synth.code}: ${String(synth.error ?? "").replace(/\s+/g, " ").slice(0, 160)}`,
       ];
@@ -6273,15 +6275,14 @@ async function synthesizeChunkedTree(
           // chunk 7/8 and the compiler-named offender file (TS2554/TS2339/TS7006
           // cross-chunk drift) refuses on the SINGLE repair; campaign #2's
           // two-sample probe reverted (3→9, 2→2). With chunkCandidates > 1 (the
-          // default 2, fixes/346-S4), resample the SAME compiler-informed repair
-          // prompt and keep the FIRST offender whose substituted prefix clears
-          // the real tsc (strictly fewer diagnostics or green). Pareto: a
+          // default 3, fixes/346-S4 + S5), resample the SAME compiler-informed
+          // repair prompt and keep the FIRST offender whose substituted prefix
+          // clears the real tsc (strictly fewer diagnostics or green). Pareto: a
           // converging first sample pays nothing. An explicit chunkCandidates === 1
-          // opts out to the legacy path.
+          // opts out to the legacy path. The bound is honored exactly (the armed
+          // default comes from resolveChunkResampleCandidates), capped at MAX.
           const offenderCandidates =
-            chunkCandidates > 1
-              ? Math.min(P6_SYNTH_CANDIDATES_MAX, Math.max(chunkCandidates, P6_SYNTH_CHUNK_RETRY_CANDIDATES))
-              : 1;
+            chunkCandidates > 1 ? Math.min(P6_SYNTH_CANDIDATES_MAX, chunkCandidates) : 1;
           let fixed = false;
           const failfastOutcomes: string[] = [];
           for (let k = 1; k <= offenderCandidates; k++) {

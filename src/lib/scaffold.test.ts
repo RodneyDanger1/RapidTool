@@ -1838,6 +1838,98 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     assertParsesTsx("unbindable UI", ui);
   });
 
+  it("fixes/346-S5: a form binds to a callable whose param type is a local numeric alias", () => {
+    // The measured keyed tree's only callable: computeLineTotal(quantity: number,
+    // unitPrice: Money) with `type Money = number;` in the same source. The alias
+    // NAME is not a primitive, but its shape is — the form's Number(...) argument
+    // is assignable to it, so the shell must call it. Pre-fix this was the honest
+    // (but false-negative) panel that left the real tree unwired.
+    const p: Project = {
+      ...primed(),
+      implementationSpec: null,
+      generatedSource:
+        "type Money = number;\n" +
+        "export function computeLineTotal(quantity: number, unitPrice: Money): Money {\n" +
+        "  return Math.round(quantity) * Math.round(unitPrice);\n" +
+        "}\n",
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.match(ui, /generated\.computeLineTotal\(/, "the alias-typed callable IS wired, not the honest panel");
+    assert.ok(!ui.includes("nothing to wire yet"), "the pre-fix false-negative panel is gone");
+    assert.ok(ui.includes('name="quantity"') && ui.includes('name="unitPrice"'), "both real params are bound");
+    assert.match(ui, /Number\(data\.get\("unitPrice"\)/, "the alias-typed param coerces to a number, never a string");
+    assertParsesTsx("alias-bound UI", ui);
+  });
+
+  it("fixes/346-S5: an alias to a NON-primitive keeps the honest panel (no fabricated argument)", () => {
+    // S5 must not over-broaden: resolving an alias is only sound when its RHS is
+    // a form-bindable primitive. A string-literal-union alias stays unbindable —
+    // a plain String(...) is not assignable to `"draft" | "confirmed"`.
+    const p: Project = {
+      ...primed(),
+      implementationSpec: null,
+      generatedSource:
+        'type OrderStatus = "draft" | "confirmed";\n' +
+        "export function transitionOrder(orderId: string, status: OrderStatus): string {\n" +
+        '  return orderId + ":" + status;\n' +
+        "}\n",
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.ok(!/generated\.transitionOrder\(/.test(ui), "never calls with an unprovable literal-union arg");
+    assert.match(ui, /cannot supply|nothing to wire/, "the honest panel states why");
+    assertParsesTsx("union-unbindable UI", ui);
+  });
+
+  it("fixes/346-S5: the form prefers a genuinely bindable callable over an earlier unbindable one", () => {
+    // The keyed tree's first multi-field export was an object-param
+    // `listItems(params: {...})`; a bindable two-arg numeric export existed too.
+    // Selecting the FIRST candidate left the form unwired — prefer the bindable.
+    const p: Project = {
+      ...primed(),
+      implementationSpec: null,
+      generatedSource:
+        "type Board = { id: string };\n" +
+        "export function createBoard(name: string, board: Board): void { void name; void board; }\n" +
+        "export function add(a: number, b: number): number { return a + b; }\n",
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.match(ui, /generated\.add\(/, "the later bindable callable IS wired");
+    assert.ok(!/generated\.createBoard\(/.test(ui), "the earlier unbindable callable is never fabricated");
+    assert.ok(!ui.includes("nothing to wire yet"), "not the false-negative panel");
+    assertParsesTsx("bindable-first UI", ui);
+  });
+
+  it("fixes/346-S5: a render tree whose render export is unfedable wires a bindable form callable instead", () => {
+    // s1/s2 keyed bakery-website: `renderOpeningHoursBadge(status: OpenStatus)`
+    // (object-typed) could not be called, so the shell had ALL-null pages and
+    // called nothing — while `computeLineTotal(price, quantity)` was bindable.
+    const p: Project = {
+      ...primed(),
+      implementationSpec: null,
+      generatedSource:
+        "type OpenStatus = { open: boolean };\n" +
+        "export function renderOpeningHoursBadge(status: OpenStatus): string { return String(status.open); }\n" +
+        "export function computeLineTotal(price: number, quantity: number): number { return price * quantity; }\n",
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.match(ui, /generated\.computeLineTotal\(/, "the bindable two-arg numeric export IS wired");
+    assert.ok(!/generated\.renderOpeningHoursBadge\(/.test(ui), "the unfedable render export is never called");
+    assert.ok(!ui.includes("nothing to wire yet"), "not the false-negative panel");
+    assertParsesTsx("render-fallback UI", ui);
+  });
+
+  it("fixes/346-S5 control: a callable render export still yields the multi-section shell", () => {
+    const p: Project = {
+      ...primed(),
+      implementationSpec: null,
+      generatedSource: "export function renderHome(width: 360 | 430): string { return String(width); }\n",
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.match(ui, /generated\.renderHome\(360\)/, "the callable render export is still called");
+    assert.ok(ui.includes("<nav>"), "the multi-section shell is preserved");
+    assertParsesTsx("render shell control UI", ui);
+  });
+
   it("no generated module ⇒ the honest no-module panel (nothing fabricated)", () => {
     const ui = bodyOf(scaffoldProject(primed()), "src/ui/console.tsx");
     assert.ok(ui.includes("no generated module yet"), "the honest no-module notice survives");

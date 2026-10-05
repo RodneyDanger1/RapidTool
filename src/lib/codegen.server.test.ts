@@ -2089,20 +2089,20 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
       !q.logs.some((l) => l.event === "p6.synthesis" && l.detail.includes("Chunked synthesis:")),
       "no success log on a partial",
     );
-    // fixes/346-S4: the per-chunk resample is ARMED BY DEFAULT (2 candidates), so a
-    // genuinely-impossible chunk is attempted twice (primary + class repair, then
-    // the resample's primary + repair) before the SAME coded refusal. Refusal is
-    // never skipped — only the spend to reach it is bounded to one extra sample.
+    // fixes/346-S4 + S5: the per-chunk resample is ARMED BY DEFAULT (3 candidates),
+    // so a genuinely-impossible chunk is attempted three times (primary + class
+    // repair each) before the SAME coded refusal. Refusal is never skipped — only
+    // the spend to reach it is bounded to two extra samples.
     assert.deepEqual(
       f.calls,
-      ["expand", "complete", "complete", "complete", "complete", "complete", "complete"],
-      "chunk 2 = synth + 1 repair, retried once by the armed resample",
+      ["expand", "complete", "complete", "complete", "complete", "complete", "complete", "complete", "complete"],
+      "chunk 2 = synth + 1 repair, retried twice by the armed resample",
     );
     assert.ok(
       q.logs.some(
-        (l) => l.event === "p6.synthesis.candidates" && /chunk 3\/6 · candidates 2 · winner none/.test(String(l.detail)),
+        (l) => l.event === "p6.synthesis.candidates" && /chunk 3\/6 · candidates 3 · winner none/.test(String(l.detail)),
       ),
-      "the armed resample records both rejected candidates (the honest cost of the refusal)",
+      "the armed resample records all three rejected candidates (the honest cost of the refusal)",
     );
 
     // Opt-out (fixes/346-S4): an explicit candidates:1 restores the byte-identical
@@ -2127,9 +2127,10 @@ describe("liveP6Synthesis chunked tree mode (fixes/144 M2 / S-01 T2)", () => {
     const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
     assert.ok(refusal);
     assert.match(refusal.detail, /chunk 1\/6 refused/);
-    // fixes/346-S4: armed default = primary + repair, then the resample's primary +
-    // repair, then the same coded refusal (the chunk is genuinely impossible).
-    assert.equal(f.calls.filter((c) => c === "complete").length, 4, "chunk 0 = synth + 1 repair, retried once by the armed resample, then stop");
+    // fixes/346-S4 + S5: armed default = primary + repair, then the resample's
+    // primary + repair twice more, then the same coded refusal (the chunk is
+    // genuinely impossible).
+    assert.equal(f.calls.filter((c) => c === "complete").length, 6, "chunk 0 = synth + 1 repair, retried twice by the armed resample, then stop");
     // Opt-out: the byte-identical legacy spend.
     const g = chunkedDeps({ failChunk: 0 });
     const legacy = await liveP6Synthesis(base, { ...g.deps, candidates: 1 });
@@ -3940,18 +3941,18 @@ describe("216f e2e refusals through liveP6Synthesis (T-09 / T-15)", () => {
       prompts.some((p) => p.includes("English prose sentences written into the module body")),
       "the PROSE repair class dispatched inside the chunked path (this is the LLM-chunk gate)",
     );
-    // fixes/346-S4: the armed per-chunk resample retries chunk 0's SAME prompt
-    // once, so it is synthesized twice before the same coded refusal. The walk
-    // still stops at chunk 0 (chunk 1 is never reached) — the refusal is genuine
-    // because the fake returns prose on every candidate.
+    // fixes/346-S4 + S5: the armed per-chunk resample retries chunk 0's SAME
+    // prompt twice, so it is synthesized three times before the same coded
+    // refusal. The walk still stops at chunk 0 (chunk 1 is never reached) — the
+    // refusal is genuine because the fake returns prose on every candidate.
     assert.equal(
       prompts.filter((p) => p.includes("TYPE SIGNATURES (must export")).length,
-      2,
-      "only chunk 0 ever synthesized — twice: the primary + the armed resample (the refusal stopped the walk)",
+      3,
+      "only chunk 0 ever synthesized — three times: the primary + two armed resamples (the refusal stopped the walk)",
     );
     assert.ok(
-      q.logs.some((l) => l.event === "p6.synthesis.candidates" && /chunk 1\/6 · candidates 2 · winner none/.test(String(l.detail))),
-      "the armed resample records both candidates rejected — the refusal is not silent spend",
+      q.logs.some((l) => l.event === "p6.synthesis.candidates" && /chunk 1\/6 · candidates 3 · winner none/.test(String(l.detail))),
+      "the armed resample records all three candidates rejected — the refusal is not silent spend",
     );
   });
 });
@@ -4893,10 +4894,10 @@ describe("217k envelope read-failure signals (G6 silent sinks)", () => {
     const f = chunkedDeps({ failChunk: 1 });
     const q = await liveP6Synthesis(base, f.deps);
     const warns = (q.logs ?? []).filter((l) => l.event === "p6.synthesis.envelope.unreadable");
-    // fixes/346-S4: the armed per-chunk resample retries chunk 1's SAME prompt,
-    // so its unreadable primary + unreadable bounded repair are recorded TWICE
-    // (4 warns) before the same coded partial refusal.
-    assert.equal(warns.length, 4, "chunk 1's synthesis + bounded repair were unreadable on both candidates → all recorded");
+    // fixes/346-S4 + S5: the armed per-chunk resample retries chunk 1's SAME
+    // prompt twice, so its unreadable primary + unreadable bounded repair are
+    // recorded THREE times (6 warns) before the same coded partial refusal.
+    assert.equal(warns.length, 6, "chunk 1's synthesis + bounded repair were unreadable on all three candidates → all recorded");
     assert.ok(
       warns.every((w) => w.detail.startsWith("src/jobs/rent-2.ts · RT_E_LLM_REJECTED · ")),
       "the planned file path attributes the failure to the refused chunk",
@@ -6037,7 +6038,7 @@ describe("fixes/343-1 opt-in best-of-N synthesis (gate-based selection)", () => 
     assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "a converged resample is not a refusal");
     const ev = candidatesEvent(q);
     assert.ok(ev, "the per-chunk selection is recorded");
-    assert.match(String(ev!.detail), /chunk 1\/1 · candidates 2 · winner 2/);
+    assert.match(String(ev!.detail), /chunk 1\/1 · candidates 3 · winner 2/);
     assert.match(String(ev!.detail), /candidate 1: rejected — RT_E_VALIDATION: typeSignature functions not exported/);
     assert.match(String(ev!.detail), /candidate 2: selected/);
     assert.equal(f.synthCalls(), 3, "one primary + one class repair + one selected resample");
@@ -6080,13 +6081,13 @@ describe("fixes/343-1 opt-in best-of-N synthesis (gate-based selection)", () => 
         ? { run: "fail", detail: "src/jobs/rent.ts(1,1): error TS2749: 'TextDecoder' is used as a type.", files: ["src/jobs/rent.ts"] }
         : { run: "pass" };
     };
-    // NO explicit candidates — the DEFAULT (chunkCandidates 2, fixes/346-S4) must arm it.
+    // NO explicit candidates — the DEFAULT (chunkCandidates 3, fixes/346-S4 + S5) must arm it.
     const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), { ...f.deps, complete, typecheckTree });
     assert.equal(q.generatedTree?.length, 7, "the resampled offender cleared the prefix tsc and the full tree was synthesized");
     assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "a converged fail-fast resample is not a refusal");
     const ev = (q.logs ?? []).find((l) => l.event === "p6.synthesis.candidates" && String(l.detail).includes("fail-fast"));
     assert.ok(ev, "the fail-fast selection is recorded");
-    assert.match(String(ev!.detail), /chunk 1\/6 \(fail-fast\) · candidates 2 · winner 2/);
+    assert.match(String(ev!.detail), /chunk 1\/6 \(fail-fast\) · candidates 3 · winner 2/);
     assert.match(String(ev!.detail), /candidate 1: rejected — tsc refused/);
     assert.match(String(ev!.detail), /candidate 2: selected/);
   });
@@ -6783,16 +6784,16 @@ describe("W346-A6b per-chunk fail-fast (A6/PR-13)", () => {
     assert.match(refusal!.detail, /never synthesized/);
     assert.equal(
       f.calls.filter((c) => c === "complete").length,
-      3,
-      "one primary chunk-0 call + the armed resample's TWO bounded fail-fast repairs; chunks 2..N are never paid for",
+      4,
+      "one primary chunk-0 call + the armed resample's THREE bounded fail-fast repairs; chunks 2..N are never paid for",
     );
     assert.ok(q.logs.some((l) => l.event === "p6.synthesis.failfast"), "the fail-fast stop is recorded");
-    // fixes/346-S4: with the resample armed the revert is recorded by the
-    // per-chunk candidates event (both offender samples rejected by the prefix
+    // fixes/346-S4 + S5: with the resample armed the revert is recorded by the
+    // per-chunk candidates event (all offender samples rejected by the prefix
     // tsc) rather than the N=1-only monotonic row.
     assert.ok(
-      q.logs.some((l) => l.event === "p6.synthesis.candidates" && /\(fail-fast\) · candidates 2 · winner none/.test(String(l.detail))),
-      "the non-converging offender resample records both candidates rejected — the revert is not silent",
+      q.logs.some((l) => l.event === "p6.synthesis.candidates" && /\(fail-fast\) · candidates 3 · winner none/.test(String(l.detail))),
+      "the non-converging offender resample records all candidates rejected — the revert is not silent",
     );
 
     // Opt-out (=1): the byte-identical legacy fail-fast path — one bounded repair,

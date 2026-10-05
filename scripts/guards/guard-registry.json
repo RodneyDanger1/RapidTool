@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "countFloor": 27,
+  "countFloor": 29,
   "owner": "P-B — Invariant & Anti-Regression Guards (W346 prevention wave)",
   "purpose": "The machine-readable guard list P-A's verify-prevention harness consumes. Each entry names the historical fixture the guard must FIRE on and the clean control it must PASS on. A guard that no longer fires on its historical fixture is a MISS (exit 1) — the fixture/fix landed and the entry is stale, so it must be updated, never silently dropped.",
   "testrunsRoot": "resolved by each guard: the sibling ../testruns next to the repo, else <repo>/testruns",
@@ -509,20 +509,20 @@
       "kind": "static",
       "driver": "enabling-wave-invariants",
       "incident": "fixes/346 lane S4 (silent revert of the enabled default)",
-      "seam": "src/lib/synthesis-policy.ts P6_SYNTH_CHUNK_RETRY_CANDIDATES (2) + resolveChunkResampleCandidates (absent ⇒ 2; an explicit 1 is the byte-identical opt-out)",
+      "seam": "src/lib/synthesis-policy.ts P6_SYNTH_CHUNK_RETRY_CANDIDATES (3) + resolveChunkResampleCandidates (absent ⇒ 3; an explicit 1 is the byte-identical opt-out)",
       "expectedCode": "RT_E_SYNTH_DEFAULT_DISARMED",
       "expected": "fires",
       "historicalFixture": "the injected disarmed default (P6_SYNTH_CHUNK_RETRY_CANDIDATES = 1) derived from the live policy bytes",
-      "cleanControl": "src/lib/synthesis-policy.ts live (armed default 2; the resolver still consumes the constant)",
+      "cleanControl": "src/lib/synthesis-policy.ts live (armed default 3; the resolver still consumes the constant)",
       "keyless": true,
       "status": "enforced",
-      "fixSeam": "src/lib/synthesis-policy.ts P6_SYNTH_CHUNK_RETRY_CANDIDATES + resolveChunkResampleCandidates (fixes/346 lane S4) — the armed-by-default chunk resample; the live seam reads resolveChunkResampleCandidates(undefined, undefined) === 2",
-      "proof": "The guard parses the REAL synthesis-policy.ts and fires when the armed chunk-resample default is <= 1 or resolveChunkResampleCandidates stops falling back to the armed constant. Mutation: reverting the constant to 1 makes the detector fire; the live source (default 2, resolver consuming the constant) is silent — the control proves the check can fail. The primary single-module best-of-N default stays 1 BY DESIGN (S4's honest split); the armed lever is the chunk resample."
+      "fixSeam": "src/lib/synthesis-policy.ts P6_SYNTH_CHUNK_RETRY_CANDIDATES + resolveChunkResampleCandidates (fixes/346 lane S4; S5 raised the armed default 2→3) — the armed-by-default chunk resample; the live seam reads resolveChunkResampleCandidates(undefined, undefined) === 3",
+      "proof": "The guard parses the REAL synthesis-policy.ts and fires when the armed chunk-resample default is <= 1 or resolveChunkResampleCandidates stops falling back to the armed constant. Mutation: reverting the constant to 1 makes the detector fire; the live source (default 3, resolver consuming the constant) is silent — the control proves the check can fail. The primary single-module best-of-N default stays 1 BY DESIGN (S4's honest split); the armed lever is the chunk resample."
     },
     {
       "id": "S4-02",
       "class": "A",
-      "title": "Bounded resample — every per-chunk / fail-fast / whole-tree resample loop is bounded by P6_SYNTH_CANDIDATES_MAX",
+      "title": "Bounded resample — every per-chunk / fail-fast / whole-tree resample loop is bounded by a P6_SYNTH_CANDIDATES_MAX cap that is finite and in [2,4]",
       "file": "scripts/guards/enabling-wave-invariants.mjs",
       "kind": "static",
       "driver": "enabling-wave-invariants",
@@ -535,7 +535,7 @@
       "keyless": true,
       "status": "enforced",
       "fixSeam": "src/lib/codegen.server.ts chunkRetry/offenderCandidates + src/lib/synthesis-policy.ts selectBestOfN — a finite P6_SYNTH_CANDIDATES_MAX clamp on every loop bound",
-      "proof": "The guard asserts the five real bounded markers: the `for (let k = 2; k <= chunkRetry)` acceptance loop with `chunkRetry = Math.min(P6_SYNTH_CANDIDATES_MAX, …)`, the `for (let k = 1; k <= offenderCandidates)` fail-fast loop with its clamp, the `for (let k = 1; k < candidates)` whole-tree loop, selectBestOfN's `Math.min(Math.floor(count), P6_SYNTH_CANDIDATES_MAX)`, and a finite cap >= 2. Mutation: stripping the clamps makes the detector fire; the live source is silent."
+      "proof": "The guard asserts the five real bounded markers: the `for (let k = 2; k <= chunkRetry)` acceptance loop with `chunkRetry = Math.min(P6_SYNTH_CANDIDATES_MAX, …)`, the `for (let k = 1; k <= offenderCandidates)` fail-fast loop with its clamp, the `for (let k = 1; k < candidates)` whole-tree loop, selectBestOfN's `Math.min(Math.floor(count), P6_SYNTH_CANDIDATES_MAX)`, and a finite cap that is BOTH >= 2 (armed) AND <= 4 (the documented cost bound in synthesis-policy.test.ts). Mutation: stripping the clamps makes the detector fire, and raising the cap above 4 fires too; the live source (cap 4, S5 armed default 3) is silent."
     },
     {
       "id": "S4-03",
@@ -553,7 +553,43 @@
       "keyless": true,
       "status": "enforced",
       "fixSeam": "src/lib/codegen.server.test.ts + src/lib/synthesis-policy.test.ts — the S4 re-pins preserve a genuine coded refusal in every touched suite and pin the legacy byte-identical behaviour via an explicit candidates:1 opt-out variant",
-      "proof": "The six re-pinned refusal suites (chunked tree mode, 216f e2e refusals, 217k envelope read-failure, fixes/343-1 opt-in best-of-N, PR-28 C1-01/C1-04 floor refusal path, W346-A6b per-chunk fail-fast) each keep >= 1 coded `p6.synthesis.refused` assertion, the file keeps >= 54 refused (HEAD 52 → live 54) and 56 coded reasons, and the armed 'both candidates rejected' proof is present. Mutation: deleting every `p6.synthesis.refused` drops a count below the floor and fires. Audit: no re-pin deleted or loosened a refusal; the one replaced assertion (W346-A6b's monotonic row) is re-pinned on the explicit opt-out variant."
+      "proof": "The six re-pinned refusal suites (chunked tree mode, 216f e2e refusals, 217k envelope read-failure, fixes/343-1 opt-in best-of-N, PR-28 C1-01/C1-04 floor refusal path, W346-A6b per-chunk fail-fast) each keep >= 1 coded `p6.synthesis.refused` assertion, the file keeps >= 54 refused (HEAD 52 → live 54) and 56 coded reasons, and the armed 'both candidates rejected' proof is present. Mutation: deleting every `p6.synthesis.refused` drops a count below the floor and fires. Audit: no re-pin deleted or loosened a refusal; the one replaced assertion (W346-A6b's monotonic row) is re-pinned on the explicit opt-out variant. Re-checked after S5's 2→3 marker re-pin: only `policyArmedMarker` moved; the refused/coded-reason floors are unchanged."
+    },
+    {
+      "id": "S4-04",
+      "class": "A",
+      "title": "Accepted-chunk reuse — a resumed/accepted path is REUSED (0 synthesis prompts) when ctx.resumeAccepted is populated",
+      "file": "scripts/guards/enabling-wave-invariants.mjs",
+      "kind": "static",
+      "driver": "enabling-wave-invariants",
+      "incident": "fixes/346 final wave lane D5 (I7/O-01): the codegen consumer landed (resumeByPath + p6.synthesis.reused) but driveP6Journey never populates ctx.resumeAccepted, so a repair cycle still re-buys accepted chunks",
+      "seam": "src/lib/headless.ts driveP6Journey -> P6JourneyCycleContext.resumeAccepted -> src/lib/codegen.server.ts resumeByPath (0 synthesis prompts)",
+      "expectedCode": "RT_E_SYNTH_RESUME_NOT_REUSED",
+      "expected": "fires",
+      "historicalFixture": "the injected no-producer journey (ctx.resumeAccepted assignment stripped) derived from the live headless bytes",
+      "cleanControl": "the injected producer-present journey (ctx.resumeAccepted = acceptedChunks) plus the real codegen consumer",
+      "keyless": true,
+      "status": "enforced",
+      "fixSeam": "src/lib/headless.ts#driveP6Journey + resumeAcceptedFromTree (landed by lane D5) threads the previous cycle's accepted chunks into ctx.resumeAccepted; codegen.server.ts reuses any path present in resumeByPath with 0 synthesis prompts",
+      "proof": "The detector reads the REAL headless.ts + codegen.server.ts bytes. Both halves are present: the codegen consumer (resumeByPath / `p6.synthesis.reused` / the `resumeByPath.size > 0` branch) AND the journey producer — `driveP6Journey` rebuilds the previous cycle's raw accepted set via `resumeAcceptedFromTree(synthesized)` and assigns `ctx.resumeAccepted = resumeAccepted` for the next cycle (headless.ts:3568/3597), so codegen reuses accepted chunks with 0 synthesis prompts. The source-time I7 test (codegen.server.test.ts 'I7 — resumeAccepted chunk reuse') is the behavioural proof. The pin was RED (status pending, owner lane D5) while only the consumer was landed; it flipped green when D5 landed the producer. Mutation: removing every `ctx.resumeAccepted =` assignment fires; the live source is silent."
+    },
+    {
+      "id": "S4-05",
+      "class": "A",
+      "title": "default-check sample baselines — BOTH runs' workingApp scores are pinned (the variance is recorded, not just the good sample)",
+      "file": "scripts/guards/enabling-wave-invariants.mjs",
+      "kind": "static",
+      "driver": "enabling-wave-invariants",
+      "incident": "fixes/346 final wave Q4 (default-check cassettes): a future lane must not drop the weaker 0/4 sample to make the campaign look better",
+      "seam": "scripts/prevention/cassettes/default-check/{sample1,sample2}.json + scripts/prevention/cassettes/rubric-baselines.json#defaultCheck",
+      "expectedCode": "RT_E_DEFAULT_CHECK_BASELINE_LOST",
+      "expected": "fires",
+      "historicalFixture": "the injected baseline with the weaker sample1 entry dropped, derived from the live rubric-baselines.json + cassettes",
+      "cleanControl": "the live rubric-baselines.json#defaultCheck (sample1 0/4 AND sample2 3/4 pinned; each workingApp.count agrees with its project rows)",
+      "keyless": true,
+      "status": "enforced",
+      "fixSeam": "scripts/prevention/cassettes/default-check/{sample1,sample2}.json + rubric-baselines.json#defaultCheck — both samples of the default-check campaign stay pinned",
+      "proof": "The detector reads the REAL default-check sample cassettes and rubric-baselines.json. sample1 scored 0/4 (three projects parked at the P6 gate; artifact incomplete — no emitted/ tree on disk) and sample2 scored 3/4 (TUNING.json byte-identical to the run root; 4 emitted trees). The block pins exactly 2 samples, each with workingApp {count,of:4} that agrees with its four per-slug rows, plus the honest artifactComplete flag, and records the variance (range 3; bakery-website / mobile-companion / office-stock-tracker flip). Mutation: dropping the weaker sample1 entry fires; the live block is silent."
     }
   ],
   "allowlist": [

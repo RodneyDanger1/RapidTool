@@ -75,6 +75,7 @@ import {
   type FleetAcceptance,
   type FleetAlarms,
   type FleetMetrics,
+  type FleetRunTelemetry,
 } from "./acceptance.ts";
 // 345 L2-X1: the acceptance gate's placeholder rule, shared so the doctor's
 // fixtures bar and maker-score's M1/M2 cannot disagree about one bar.
@@ -601,6 +602,50 @@ function normalizeMachineVerifiedAcceptance(v: unknown): MachineVerifiedAcceptan
 }
 
 /**
+ * fixes/346-X5: derive the fleet telemetry the doctor reports from a persisted
+ * project record — the run's `p6.synthesis.candidates` journal rows (the armed
+ * chunk resample, lanes S4/T1) plus its measured token usage. It is READ back,
+ * never invented: `workingApp` is deliberately NOT set here, because the
+ * campaign verdict needs the on-disk tree's own `tsc`/`npm test`, which the
+ * record alone cannot prove. Absent/non-object ⇒ null (fail-closed).
+ */
+export function fleetTelemetryFromProject(record: unknown): FleetRunTelemetry | null {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return null;
+  const r = record as { id?: unknown; name?: unknown; brief?: unknown; logs?: unknown; tokenUsage?: unknown };
+  const logs = Array.isArray(r.logs) ? r.logs : [];
+  const candidates: string[] = [];
+  for (const l of logs) {
+    if (!l || typeof l !== "object" || Array.isArray(l)) continue;
+    const e = l as { event?: unknown; detail?: unknown };
+    if (e.event === "p6.synthesis.candidates" && typeof e.detail === "string") candidates.push(e.detail);
+  }
+  const tu =
+    r.tokenUsage && typeof r.tokenUsage === "object" && !Array.isArray(r.tokenUsage)
+      ? (r.tokenUsage as { promptTokens?: unknown; completionTokens?: unknown; calls?: unknown; cachedPromptTokens?: unknown })
+      : null;
+  const num = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+  const prompt = num(tu?.promptTokens) ?? 0;
+  const completion = num(tu?.completionTokens) ?? 0;
+  const calls = num(tu?.calls);
+  const cached = num(tu?.cachedPromptTokens);
+  const brief = [r.id, r.name, r.brief].find((v): v is string => typeof v === "string" && v.trim().length > 0);
+  return {
+    ...(brief ? { brief: brief.trim() } : {}),
+    ...(calls !== undefined ? { keyed: calls > 0, calls } : {}),
+    ...(prompt + completion > 0 ? { tokens: prompt + completion } : {}),
+    ...(cached !== undefined ? { cachedPromptTokens: cached } : {}),
+    ...(candidates.length > 0 ? { synthesisCandidates: candidates } : {}),
+  };
+}
+
+/** One telemetry row for a project record, or an empty set (never a fabricated run). */
+function telemetryOfProject(record: unknown): FleetRunTelemetry[] {
+  const t = fleetTelemetryFromProject(record);
+  return t ? [t] : [];
+}
+
+/**
  * W52 · 338-3: the factory evidence a persisted project RECORD supports WITHOUT
  * a job-file census (the `--project <record>` path with no emitted tree to
  * scan). `productComplete` + `humanFixtures` are DERIVED from the record;
@@ -621,6 +666,9 @@ export function evidenceFromProjectRecord(project: unknown): FactoryEvidence {
     // PR-31: the record is the fleet evidence for the machine acceptance
     // aggregate (derived, never a caller's boolean).
     fleet: project ? [project] : [],
+    // fixes/346-X5: the resample/token telemetry is read back from the record's
+    // own journal rows — derived, never a caller's claim.
+    fleetTelemetry: telemetryOfProject(project),
     chatHasSlashToolsOnly: true,
   };
 }
@@ -670,6 +718,9 @@ export function evidenceFromJobInventory(
     machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(extra?.project),
     // PR-31: derived from the trusted project record, never a hand-fed flag.
     fleet: extra?.project ? [extra.project] : [],
+    // fixes/346-X5: derived from the record's own journal rows (omitted from
+    // `extra`'s type, so a caller cannot hand-feed the resample reading).
+    fleetTelemetry: telemetryOfProject(extra?.project),
     chatHasSlashToolsOnly: extra?.chatHasSlashToolsOnly !== false,
     isolation: extra?.isolation,
     inventory: inv,
@@ -848,10 +899,11 @@ export function coerceFactoryClaim(raw?: unknown, project?: unknown): DoctorFact
         // blob's `fleet` key is never read, so a raw claim cannot mint the
         // machine acceptance reading.
         fleet: project ? [project] : [],
+        fleetTelemetry: telemetryOfProject(project),
         chatHasSlashToolsOnly: blob.chatHasSlashToolsOnly !== false,
         isolation: blob.isolation,
       }
-    : { ...RAPIDTOOL_FACTORY_EVIDENCE, productComplete: productCompleteFromProject(project), humanFixtures: humanFixturesFromProject(project), acceptance: liveAcceptanceState(project), machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(project), fleet: project ? [project] : [] };
+    : { ...RAPIDTOOL_FACTORY_EVIDENCE, productComplete: productCompleteFromProject(project), humanFixtures: humanFixturesFromProject(project), acceptance: liveAcceptanceState(project), machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(project), fleet: project ? [project] : [], fleetTelemetry: telemetryOfProject(project) };
   return factoryClaim(evidence);
 }
 

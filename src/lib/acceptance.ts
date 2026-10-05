@@ -171,6 +171,15 @@ export type FleetAcceptance = {
   evidenceHashCollision: boolean;
   /** True when any record claimed a human seat — poisoned, never laundered. */
   forgedHumanStamp: boolean;
+  /**
+   * fixes/346-X5: the number of briefs/samples the reading was computed over —
+   * the variance denominator. The machine reading carries it so a caller cannot
+   * read a single lucky sample as a fleet result; `evidencedRate` names the
+   * actual pass fraction.
+   */
+  sampleCount: number;
+  /** evidenced / sampleCount; null when no brief was presented. Never a fabricated 1. */
+  evidencedRate: number | null;
   /** Why `autonomousFactoryV2` is false (empty iff true). */
   reasons: string[];
 };
@@ -250,6 +259,8 @@ export function fleetAcceptanceFromProjects(
     refused,
     evidenceHashCollision,
     forgedHumanStamp,
+    sampleCount: briefs,
+    evidencedRate: briefs > 0 ? unique.length / briefs : null,
     reasons: autonomousFactoryV2 ? [] : reasons,
   };
 }
@@ -272,7 +283,151 @@ export type FleetRunTelemetry = {
   /** Rubric total for this tree (/14). Absent/null ⇒ not scored. */
   rubricScore?: number | null;
   evidenceHash?: string;
+  /** fixes/346-X5: the run's persisted `p6.synthesis.candidates` journal details,
+   *  verbatim. Absent/empty ⇒ no resample was recorded for this run. */
+  synthesisCandidates?: readonly unknown[];
+  /** fixes/346-X5: the campaign `workingApp` verdict for this sample, when the
+   *  caller's scorer supplies it. Absent/null ⇒ not scored (never inferred). */
+  workingApp?: boolean | null;
 };
+
+// ---------------------------------------------------------------------------
+// fixes/346-X5 — the armed P6 chunk-resample, read back from the journal
+// ---------------------------------------------------------------------------
+
+/**
+ * One parsed `p6.synthesis.candidates` journal row — the persisted record of a
+ * bounded, validator-selected resample decision (fixes/346 lanes S4/T1). The
+ * detail is a single line: `chunk N/M [(fail-fast)] · candidates K · winner
+ * <i|none> · candidate 1: … | candidate 2: …`. This reader reports ONLY what
+ * the bytes recorded — never an inferred token or a fabricated winner.
+ */
+export type CandidateJournalEvent = {
+  /** The unit that was resampled, e.g. `chunk 3/10 (fail-fast)`. */
+  unit: string;
+  /** True when the offender fail-fast path (not the per-chunk acceptance) ran. */
+  failFast: boolean;
+  /** The `candidates K` budget the row names. */
+  requested: number;
+  /** Candidate slots actually evaluated (a `not produced` slot is not tried). */
+  tried: number;
+  /** 1-based selected candidate index, or null for `winner none`. */
+  winner: number | null;
+};
+
+/** Parse one `p6.synthesis.candidates` detail; null when it is not such a row. Pure. */
+export function parseCandidateJournalRow(detail: unknown): CandidateJournalEvent | null {
+  if (typeof detail !== "string") return null;
+  const m = /candidates\s+(\d+)\s*·\s*winner\s+(none|\d+)/.exec(detail);
+  if (!m) return null;
+  const requested = Number(m[1]);
+  if (!Number.isFinite(requested)) return null;
+  const winner = m[2] === "none" ? null : Number(m[2]);
+  const head = detail.split("· candidate ")[0];
+  const unit = head.split("· candidates")[0].trim();
+  const slots = detail.match(/candidate\s+\d+:/g) ?? [];
+  const notProduced = (detail.match(/candidate\s+\d+:\s*not produced/g) ?? []).length;
+  return { unit, failFast: /\(fail-fast\)/.test(unit), requested, tried: slots.length - notProduced, winner };
+}
+
+/** One run's resample usage, summarised from its journal rows. */
+export type ResampleRunUsage = {
+  brief: string;
+  /** Rows parsed for this run. */
+  events: number;
+  /** Σ the rows' `candidates K` budget. */
+  candidatesRequested: number;
+  /** Σ candidates actually evaluated (a `not produced` slot excluded). */
+  candidatesTried: number;
+  /** Rows where a candidate was selected (`winner <i>`). */
+  winners: number;
+  /** Rows where every candidate was rejected (`winner none`). */
+  noWinner: number;
+  /** Extra keyed synthesis calls: Σ max(0, candidatesTried − 1). */
+  extraKeyedCalls: number;
+  /** Winner index per row, in journal order; null = `winner none`. */
+  winnersByEvent: Array<number | null>;
+};
+
+/**
+ * The armed resample's measured usage over the fleet. Derived ONLY from the
+ * persisted `p6.synthesis.candidates` journal rows — candidates requested and
+ * tried are counted, and `winner` is read, never invented.
+ *
+ * TOKENS ARE NOT IN THE ROW. The candidate row records candidates, not token
+ * usage, so `extraTokens` stays null with `tokenAccounting` naming that gap —
+ * a fabricated per-resample token figure would be exactly the over-claim the
+ * honesty contract forbids. `extraKeyedCalls` is the counted lower bound: each
+ * extra evaluated candidate is ≥1 keyed synthesis call (a candidate's own
+ * bounded repair call is inside one candidate and is not separable here).
+ */
+export type ResampleUsage = {
+  /** Runs whose telemetry named ≥1 candidates row. */
+  runs: number;
+  events: number;
+  candidatesRequested: number;
+  candidatesTried: number;
+  winners: number;
+  noWinner: number;
+  extraKeyedCalls: number;
+  /** Never fabricated — the journal records no token usage per candidate. */
+  extraTokens: null;
+  tokenAccounting: "not-recorded-in-journal";
+  /** Per-run detail, so the doctor reading names each run, not just a total. */
+  byRun: ResampleRunUsage[];
+};
+
+/** Aggregate the armed-resample usage from per-run telemetry rows (pure). */
+export function resampleUsage(runs: readonly unknown[]): ResampleUsage {
+  const rows = (Array.isArray(runs) ? runs : []).filter(
+    (r): r is FleetRunTelemetry => !!r && typeof r === "object" && !Array.isArray(r),
+  );
+  const byRun: ResampleRunUsage[] = [];
+  let events = 0;
+  let candidatesRequested = 0;
+  let candidatesTried = 0;
+  let winners = 0;
+  let noWinner = 0;
+  let extraKeyedCalls = 0;
+  rows.forEach((r, i) => {
+    const details = Array.isArray(r.synthesisCandidates) ? r.synthesisCandidates : [];
+    const parsed = details
+      .map((d) => parseCandidateJournalRow(d))
+      .filter((e): e is CandidateJournalEvent => e !== null);
+    if (parsed.length === 0) return;
+    const brief = typeof r.brief === "string" && r.brief.trim() ? r.brief.trim() : `run-${i + 1}`;
+    const runExtra = parsed.reduce((n, e) => n + Math.max(0, e.tried - 1), 0);
+    const runWinners = parsed.filter((e) => e.winner !== null).length;
+    byRun.push({
+      brief,
+      events: parsed.length,
+      candidatesRequested: parsed.reduce((n, e) => n + e.requested, 0),
+      candidatesTried: parsed.reduce((n, e) => n + e.tried, 0),
+      winners: runWinners,
+      noWinner: parsed.length - runWinners,
+      extraKeyedCalls: runExtra,
+      winnersByEvent: parsed.map((e) => e.winner),
+    });
+    events += parsed.length;
+    candidatesRequested += parsed.reduce((n, e) => n + e.requested, 0);
+    candidatesTried += parsed.reduce((n, e) => n + e.tried, 0);
+    winners += runWinners;
+    noWinner += parsed.length - runWinners;
+    extraKeyedCalls += runExtra;
+  });
+  return {
+    runs: byRun.length,
+    events,
+    candidatesRequested,
+    candidatesTried,
+    winners,
+    noWinner,
+    extraKeyedCalls,
+    extraTokens: null,
+    tokenAccounting: "not-recorded-in-journal",
+    byRun,
+  };
+}
 
 export type FleetMetrics = {
   runs: number;
@@ -288,6 +443,20 @@ export type FleetMetrics = {
   uniqueEvidenceHashes: number;
   /** Non-empty hashes seen on more than one distinct brief. */
   duplicateEvidenceHashes: string[];
+  /** fixes/346-X5: the armed chunk-resample usage read from the journals. */
+  resample: ResampleUsage;
+  /**
+   * fixes/346-X5 — the VARIANCE reading. The final keyed samples disagreed
+   * across runs on the same briefs, so the machine reading reports the working
+   * sample count and the per-sample `workingApp` rather than a single lucky
+   * run. Only rows carrying a boolean `workingApp` count; an absent verdict is
+   * NOT scored (never inferred).
+   */
+  workingAppSamples: number;
+  workingAppPass: number;
+  /** workingAppPass / workingAppSamples; null when no sample was scored. */
+  workingAppRate: number | null;
+  workingAppByBrief: Array<{ brief: string; workingApp: boolean }>;
   /** Honesty: never fabricated. Always null — tokens are the reported unit. */
   estimatedCostUsd: null;
 };
@@ -318,6 +487,9 @@ export function fleetMetrics(runs: readonly unknown[]): FleetMetrics {
   let cacheObserved = false;
   let rubricSum = 0;
   let rubricScored = 0;
+  let workingAppSamples = 0;
+  let workingAppPass = 0;
+  const workingAppByBrief: Array<{ brief: string; workingApp: boolean }> = [];
   const hashToBriefs = new Map<string, Set<string>>();
   rows.forEach((r, i) => {
     const t = finiteNonNeg(r.tokens);
@@ -334,6 +506,13 @@ export function fleetMetrics(runs: readonly unknown[]): FleetMetrics {
     if (rs !== null) {
       rubricSum += rs;
       rubricScored += 1;
+    }
+    // fixes/346-X5: only a supplied boolean scores; an absent verdict is not inferred.
+    if (typeof r.workingApp === "boolean") {
+      const brief = typeof r.brief === "string" && r.brief.trim() ? r.brief.trim() : `run-${i + 1}`;
+      workingAppSamples += 1;
+      if (r.workingApp) workingAppPass += 1;
+      workingAppByBrief.push({ brief, workingApp: r.workingApp });
     }
     if (typeof r.evidenceHash === "string" && r.evidenceHash.length > 0) {
       const brief = typeof r.brief === "string" && r.brief.trim() ? r.brief.trim() : `run-${i + 1}`;
@@ -357,6 +536,11 @@ export function fleetMetrics(runs: readonly unknown[]): FleetMetrics {
     rubricMean: rubricScored > 0 ? rubricSum / rubricScored : null,
     uniqueEvidenceHashes: [...hashToBriefs.keys()].filter((h) => (hashToBriefs.get(h)?.size ?? 0) === 1).length,
     duplicateEvidenceHashes,
+    resample: resampleUsage(rows),
+    workingAppSamples,
+    workingAppPass,
+    workingAppRate: workingAppSamples > 0 ? workingAppPass / workingAppSamples : null,
+    workingAppByBrief,
     estimatedCostUsd: null,
   };
 }

@@ -18,7 +18,9 @@ import {
   fleetAcceptanceFromProjects,
   fleetAlarms,
   fleetMetrics,
+  parseCandidateJournalRow,
   readMachineEvidence,
+  resampleUsage,
 } from "./acceptance.ts";
 import { mintTreeRunTested, treeBytesDigest, treeRunTestedEvidence } from "./codegen.server.ts";
 import { fnv1a } from "./algorithms.ts";
@@ -321,5 +323,142 @@ describe("PR-32 — threshold alarms are falsifiable", () => {
     assert.equal(fleetAlarms([{ brief: "a", estimatedCostUsd: 0.82 }]).spendFabricated.tripped, true);
     assert.equal(fleetAlarms([{ brief: "a", estimatedCostUsd: null }]).spendFabricated.tripped, false);
     assert.equal(fleetAlarms([{ brief: "a" }]).spendFabricated.tripped, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/346-X5 — the armed chunk-resample telemetry + the variance reading.
+// The detail strings below are VERBATIM rows read from the persisted
+// default-check journal (`testruns/default-check/<slug>/build.json`
+// `logs[event === "p6.synthesis.candidates"]`) this session — not fabricated.
+// ---------------------------------------------------------------------------
+
+const ROW_WIN_FIRST =
+  "chunk 1/10 (fail-fast) · candidates 2 · winner 1 · candidate 1: selected — pre-seal typecheck";
+const ROW_RESAMPLED =
+  'chunk 2/10 · candidates 2 · winner 2 · candidate 1: rejected — RT_E_VALIDATION: typeSignature functions not exported: computeLineTotal | candidate 2: selected';
+const ROW_BOTH_REJECTED =
+  "chunk 3/10 (fail-fast) · candidates 2 · winner none · candidate 1: rejected — structure refused (RT_E_VALIDATION) | candidate 2: rejected — tsc refused (src/generated/get-low-stock-products.ts(57,3): error TS2719)";
+
+describe("fixes/346-X5 — parseCandidateJournalRow (report the journal, invent nothing)", () => {
+  it("parses a winner-first row: the armed budget is named, ONE candidate was tried", () => {
+    const e = parseCandidateJournalRow(ROW_WIN_FIRST);
+    assert.ok(e);
+    assert.equal(e.failFast, true);
+    assert.equal(e.unit, "chunk 1/10 (fail-fast)");
+    assert.equal(e.requested, 2);
+    assert.equal(e.tried, 1, "lazy/Pareto — the first sample passed, so no resample was bought");
+    assert.equal(e.winner, 1);
+  });
+
+  it("parses a resampled row: candidate 2 selected after candidate 1 was refused", () => {
+    const e = parseCandidateJournalRow(ROW_RESAMPLED);
+    assert.ok(e);
+    assert.equal(e.failFast, false);
+    assert.equal(e.unit, "chunk 2/10");
+    assert.equal(e.requested, 2);
+    assert.equal(e.tried, 2);
+    assert.equal(e.winner, 2);
+  });
+
+  it("parses a both-rejected row: winner is null, both candidates were tried", () => {
+    const e = parseCandidateJournalRow(ROW_BOTH_REJECTED);
+    assert.ok(e);
+    assert.equal(e.tried, 2);
+    assert.equal(e.winner, null);
+  });
+
+  it("a `not produced` slot is not a tried candidate (no keyed call to count)", () => {
+    const e = parseCandidateJournalRow(
+      "chunk 7/8 · candidates 2 · winner none · candidate 1: not produced | candidate 2: rejected — RT_E_VALIDATION",
+    );
+    assert.ok(e);
+    assert.equal(e.tried, 1);
+    assert.equal(e.requested, 2);
+  });
+
+  it("refuses anything that is not a candidates row (fail-closed, never guessed)", () => {
+    assert.equal(parseCandidateJournalRow(null), null);
+    assert.equal(parseCandidateJournalRow(undefined), null);
+    assert.equal(parseCandidateJournalRow(""), null);
+    assert.equal(parseCandidateJournalRow("chunk 1/10 · attempt 1 · 240000ms · ok"), null);
+    assert.equal(parseCandidateJournalRow({ detail: ROW_WIN_FIRST }), null);
+  });
+});
+
+describe("fixes/346-X5 — the armed resample's usage, WITH vs WITHOUT the resample", () => {
+  it("WITH the resample: requested/tried/winner + the extra keyed calls are counted", () => {
+    const m = fleetMetrics([
+      { brief: "bfo", keyed: true, synthesisCandidates: [ROW_WIN_FIRST, ROW_RESAMPLED, ROW_BOTH_REJECTED] },
+    ]);
+    assert.equal(m.resample.runs, 1);
+    assert.equal(m.resample.events, 3);
+    assert.equal(m.resample.candidatesRequested, 6, "3 rows × the 2-candidate budget");
+    assert.equal(m.resample.candidatesTried, 5, "1 + 2 + 2 evaluated candidates");
+    assert.equal(m.resample.winners, 2);
+    assert.equal(m.resample.noWinner, 1, "both-rejected is recorded, not hidden");
+    assert.equal(m.resample.extraKeyedCalls, 2, "Σ max(0, tried−1): 0 + 1 + 1");
+    assert.equal(m.resample.extraTokens, null, "the journal records no token usage per candidate");
+    assert.equal(m.resample.tokenAccounting, "not-recorded-in-journal");
+    assert.equal(m.resample.byRun.length, 1);
+    assert.deepEqual(m.resample.byRun[0].winnersByEvent, [1, 2, null]);
+  });
+
+  it("WITHOUT the resample (the P6_SYNTH_CANDIDATES=1 opt-out shape): zero events, zero extra calls", () => {
+    const optOut = fleetMetrics([{ brief: "bfo", keyed: true, synthesisCandidates: [] }]);
+    assert.equal(optOut.resample.runs, 0);
+    assert.equal(optOut.resample.events, 0);
+    assert.equal(optOut.resample.candidatesRequested, 0);
+    assert.equal(optOut.resample.candidatesTried, 0);
+    assert.equal(optOut.resample.extraKeyedCalls, 0);
+    assert.equal(optOut.resample.extraTokens, null, "no resample ⇒ no token claim either");
+    // An absent field is the same honest empty reading.
+    const absent = fleetMetrics([{ brief: "bfo", keyed: true }]);
+    assert.deepEqual(absent.resample, optOut.resample);
+    assert.equal(fleetMetrics([]).resample.events, 0);
+    // A row whose details are all unparseable counts as no resample, never a guessed one.
+    assert.equal(resampleUsage([{ brief: "x", synthesisCandidates: ["junk", null, 7] }]).events, 0);
+  });
+});
+
+describe("fixes/346-X5 — the variance reading (never one lucky sample)", () => {
+  it("records per-sample workingApp and the sample count; the rate follows the samples", () => {
+    // The final keyed samples disagreed on the SAME briefs — mobile-companion
+    // passed in default-check and failed in the tuning sample.
+    const m = fleetMetrics([
+      { brief: "mobile-companion", workingApp: true },
+      { brief: "mobile-companion", workingApp: false },
+      { brief: "office-stock-tracker", workingApp: true },
+      { brief: "office-stock-tracker", workingApp: false },
+      { brief: "bakery-website", workingApp: true },
+      { brief: "no-verdict-yet" },
+    ]);
+    assert.equal(m.workingAppSamples, 5, "only rows carrying a boolean verdict score");
+    assert.equal(m.workingAppPass, 3);
+    assert.equal(m.workingAppRate, 3 / 5);
+    assert.equal(m.workingAppByBrief.length, 5, "per-sample, not collapsed to one row per brief");
+    assert.deepEqual(m.workingAppByBrief[0], { brief: "mobile-companion", workingApp: true });
+    assert.deepEqual(m.workingAppByBrief[1], { brief: "mobile-companion", workingApp: false });
+  });
+
+  it("an absent verdict is NOT scored — the rate is null, never a fabricated 0 or 1", () => {
+    const m = fleetMetrics([{ brief: "a", keyed: true }, { brief: "b", workingApp: null }]);
+    assert.equal(m.workingAppSamples, 0);
+    assert.equal(m.workingAppPass, 0);
+    assert.equal(m.workingAppRate, null);
+    assert.deepEqual(m.workingAppByBrief, []);
+  });
+
+  it("fleetAcceptance reports the sample count + evidenced rate (the variance denominator)", () => {
+    const empty = fleetAcceptanceFromProjects([]);
+    assert.equal(empty.sampleCount, 0);
+    assert.equal(empty.evidencedRate, null);
+    const one = fleetAcceptanceFromProjects([evidenced("a", "h1")]);
+    assert.equal(one.sampleCount, 1);
+    assert.equal(one.evidencedRate, 1);
+    const mixed = fleetAcceptanceFromProjects([evidenced("a", "h1"), { id: "b" }]);
+    assert.equal(mixed.sampleCount, 2);
+    assert.equal(mixed.evidenced, 1);
+    assert.equal(mixed.evidencedRate, 0.5, "one of two samples evidenced — the 1-sample reading is not overstated");
   });
 });

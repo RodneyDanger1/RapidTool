@@ -158,8 +158,8 @@ test("single command: the two signals are reported and the gate of record is exa
   assert.deepEqual(verdict.skipped, [], "a skip is a hard failure");
   assert.equal(verdict.guards, registry.guards.length, "every registered guard is evaluated");
   assert.ok(verdict.count >= verdict.countFloor, `count ${verdict.count} must meet the pinned floor ${verdict.countFloor}`);
-  assert.equal(verdict.countFloor, 27, "the guard-count floor is pinned at 27 (deleting a guard fails)");
-  assert.equal(verdict.guards, 27, "27 guards: 15 W346 + 5 campaign1 + 4 campaign2 tourniquets + 3 S4 enabling-wave pins");
+  assert.equal(verdict.countFloor, 29, "the guard-count floor is pinned at 29 (deleting a guard fails)");
+  assert.equal(verdict.guards, 29, "29 guards: 15 W346 + 5 campaign1 + 4 campaign2 tourniquets + 5 S4 final-wave pins (S4-01/02/03/04/05)");
   assert.deepEqual(verdict.controlMissed, [], "every fired guard has a clean control");
   // TWO orthogonal signals on every guard.
   for (const r of verdict.detail) {
@@ -167,11 +167,10 @@ test("single command: the two signals are reported and the gate of record is exa
     assert.ok(r.fixtureIntegrity && typeof r.fixtureIntegrity.fired === "boolean", `${r.id}: fixture-integrity signal`);
     assert.ok(r.fixPresence && typeof r.fixPresence.present === "boolean" && typeof r.fixPresence.wired === "boolean", `${r.id}: fix-presence signal`);
   }
-  // Every historical detector fires AND every live seam is wired on the landed
-  // tree: the gate of record is green, and the classification is EXACTLY
-  // disjoint + total (the defect this pin exists to catch).
+  // Every historical detector fires AND every live seam is wired: the gate of
+  // record is green, and the classification is EXACTLY disjoint + total.
   assert.deepEqual(verdict.missed, [], "no fixture-integrity miss");
-  assert.deepEqual(verdict.pending, [], "no fix-presence pending");
+  assert.deepEqual(verdict.pending, [], "no fix-presence pending — S4-04 flipped green when lane D5 landed ctx.resumeAccepted");
   assert.deepEqual(verdict.skipped, [], "no skip");
   const inv = verdict.fixPresenceInvariant;
   assert.ok(inv, "the verdict carries the fix-presence classification invariant");
@@ -180,18 +179,23 @@ test("single command: the two signals are reported and the gate of record is exa
   assert.deepEqual(inv.uncovered, [], "no guard is in neither set");
   assert.deepEqual(inv.unknown, [], "no unknown id is classified");
   const allIds = verdict.detail.map((r) => r.id).sort();
-  assert.deepEqual([...verdict.fixPresence.enforced].sort(), allIds, "enforced ∪ pending == guards");
+  assert.deepEqual([...verdict.fixPresence.enforced, ...verdict.fixPresence.pending].sort(), allIds, "enforced ∪ pending == guards");
   assert.deepEqual([...verdict.fixPresence.pending].sort(), [], "pending is empty on the landed tree");
   assert.equal(new Set([...verdict.fixPresence.enforced, ...verdict.fixPresence.pending]).size, allIds.length, "union is exact (no duplicates)");
-  // Both orthogonal signals fire for the five campaign-2 pins and the three
-  // S4 enabling-wave pins (default armed / bounded resample / refusal coverage).
-  for (const id of ["C1-02", "R2-01", "R2-03", "R2-05", "R2-06", "S4-01", "S4-02", "S4-03"]) {
+  // Both orthogonal signals fire for the five campaign-2 pins and the five
+  // S4 final-wave pins (default armed / bounded resample / refusal coverage /
+  // accepted-chunk reuse / default-check baselines).
+  for (const id of ["C1-02", "R2-01", "R2-03", "R2-05", "R2-06", "S4-01", "S4-02", "S4-03", "S4-04", "S4-05"]) {
     const r = verdict.detail.find((x) => x.id === id);
     assert.equal(r.fixtureIntegrity.fired, true, `${id} fires on its historical defect bytes`);
     assert.equal(r.fixPresence.present, true, `${id} fix is on the gate-of-record surface`);
     assert.equal(r.fixPresence.wired, true, `${id} seam is wired`);
     assert.equal(r.fixPresence.mutationRed, true, `${id} retains a working mutation control`);
   }
+  // S4-04 names the resumeAccepted interface it guards (lane D5).
+  const s404 = verdict.detail.find((r) => r.id === "S4-04");
+  assert.equal(s404.fixtureIntegrity.controlClean, true, "S4-04 stays silent on the producer-bearing control");
+  assert.match(JSON.stringify(s404.fixPresence.evidence), /resumeAccepted/, "S4-04 names the resumeAccepted interface");
   const c04 = verdict.detail.find((r) => r.id === "C-04");
   assert.equal(c04.fixtureIntegrity.fired, true, "the historical non-monotonic defect is visible");
   assert.equal(c04.fixPresence.present, true, "the live comparator seam is present (lane D PR-07)");

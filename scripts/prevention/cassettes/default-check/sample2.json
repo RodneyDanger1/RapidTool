@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "kind": "default-check-sample",
+  "campaign": "default-check",
+  "sample": "sample2",
+  "source": "testruns/default-check/sample2/TUNING.json",
+  "equivalentRunRoot": "testruns/default-check",
+  "generatedAt": "2026-10-05T12:57:59.863Z",
+  "scoreComplete": true,
+  "artifactComplete": true,
+  "treesOnDisk": [
+    "bakery-website",
+    "bakery-florist-orders",
+    "mobile-companion",
+    "office-stock-tracker"
+  ],
+  "completenessNote": "sample2/TUNING.json is byte-identical (SHA-256) to the run root's TUNING.json; its 4 emitted trees live under the run root (testruns/default-check/<slug>/emitted), not under sample2/.",
+  "ledger": {
+    "cap": 1500000,
+    "spent": 966170,
+    "calls": 173
+  },
+  "tally": {
+    "workingApp": 3,
+    "of": 4,
+    "emptySubstanceCommits": 0
+  },
+  "projects": [
+    {
+      "slug": "bakery-website",
+      "workingApp": true,
+      "rubric": 4,
+      "emitted": true,
+      "driveExit": 0,
+      "driveCode": null,
+      "substance": "real",
+      "uiWired": true,
+      "testsAgg": {
+        "pass": 30,
+        "skipped": 1,
+        "fail": 0
+      }
+    },
+    {
+      "slug": "bakery-florist-orders",
+      "workingApp": false,
+      "rubric": 1,
+      "emitted": true,
+      "driveExit": 1,
+      "driveCode": "RT_E_GATE_PENDING",
+      "substance": null,
+      "uiWired": false,
+      "testsAgg": {
+        "pass": 0,
+        "skipped": 0,
+        "fail": 0
+      }
+    },
+    {
+      "slug": "mobile-companion",
+      "workingApp": true,
+      "rubric": 4,
+      "emitted": true,
+      "driveExit": 0,
+      "driveCode": null,
+      "substance": "real",
+      "uiWired": true,
+      "testsAgg": {
+        "pass": 38,
+        "skipped": 1,
+        "fail": 0
+      }
+    },
+    {
+      "slug": "office-stock-tracker",
+      "workingApp": true,
+      "rubric": 4,
+      "emitted": true,
+      "driveExit": 0,
+      "driveCode": null,
+      "substance": "real",
+      "uiWired": true,
+      "testsAgg": {
+        "pass": 30,
+        "skipped": 1,
+        "fail": 0
+      }
+    }
+  ]
+}

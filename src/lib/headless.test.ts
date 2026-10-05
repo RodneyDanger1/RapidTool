@@ -47,6 +47,7 @@ import {
   treeVerdictScore,
   treeVerdictScoreOf,
   failureSignature,
+  resumeAcceptedFromTree,
   emittedUiWiring,
   realGeneratedExportWiring,
   planUnderproductionSeal,
@@ -72,11 +73,21 @@ import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
 import { ERROR_CODES } from "./errors.ts";
 import { fnv1a } from "./algorithms.ts";
 import type { PhaseId, Project, WildPlan } from "./types.ts";
-import { applyPhaseResult } from "./engine.ts";
+import { applyPhaseResult, emptyProject } from "./engine.ts";
 import type { WildReviewer } from "./engine.ts";
 import type { RtEventSeed } from "./rt-events.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
-import { TREE_ENTRY_PATH } from "./codegen.server.ts";
+import {
+  liveP6Synthesis,
+  materializeImportableTree,
+  signatureFunctionNames,
+  toGeneratedTreeFile,
+  TREE_ENTRY_PATH,
+} from "./codegen.server.ts";
+import type { DeepSeekCompleteOptions } from "./deepseek.server.ts";
+import type { LlmResult } from "./llm.ts";
+import type { ExpandBriefResult } from "./prompt-engine.ts";
+import type { VerifyOutcome } from "./verify.server.ts";
 import { compileAgentPacket } from "./packet.ts";
 
 // fix 327 L1 — non-hermetic keyless suite. The host shell may carry a real
@@ -1403,6 +1414,159 @@ describe("PR-16 (B5/C-11/I7) — the in-run RUNLOCK guard + resumeAccepted threa
       { resumeAccepted: accepted },
       "the accepted chunks ride the deps object verbatim",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR-16 (I7) — the ACTIVE half: driveP6Journey rebuilds the previous cycle's
+// accepted chunk set from the tree it sealed and threads it as
+// ctx.resumeAccepted, so codegen REUSES the accepted chunks instead of
+// re-buying every one (baker-florist-orders burned 419k tokens re-synthesizing
+// from zero — O-01). The consumer contract (a resumed path ⇒ 0 model calls +
+// p6.synthesis.reused) is pinned in codegen.server.test.ts; these pins prove
+// the SETTER exists, the derived set is faithful, and a second cycle really
+// issues 0 synthesis calls through the REAL consumer.
+// ---------------------------------------------------------------------------
+describe("PR-16 (I7/O-01) — driveP6Journey activates accepted-chunk reuse", () => {
+  it("resumeAcceptedFromTree de-materializes the persisted tree back to the accepted bytes", async () => {
+    // The RAW accepted set codegen's own materializer turns into the tree a
+    // project carries (CJS module bodies, as the model emits them).
+    const raw = [
+      { path: "src/jobs/a.ts", source: "function a(x) { return x; }\nmodule.exports.a = a;\n", exports: ["a"] },
+      { path: "src/jobs/b.ts", source: "function b(x) { return a(x); }\nmodule.exports.b = b;\n", exports: ["b"] },
+    ];
+    const accepted = materializeImportableTree(raw);
+    const project = {
+      generatedTree: accepted.files.map((f) => toGeneratedTreeFile(f.path, f.source)),
+    } as unknown as Project;
+    const resume = await resumeAcceptedFromTree(project);
+    assert.ok(resume && resume.length > 0, "the persisted tree yields a resume set");
+    assert.deepEqual(
+      resume.map((r) => r.path),
+      raw.map((r) => r.path),
+      "the barrel is excluded and the chunk paths are preserved",
+    );
+    // Faithfulness anchor: re-materializing the derived RAW set reproduces the
+    // accepted tree byte-for-byte (a materialized source would double every
+    // import/export line instead).
+    const rematerialized = materializeImportableTree(resume.map((r) => ({ ...r })));
+    assert.deepEqual(rematerialized.files, accepted.files, "the reused chunks re-materialize to the accepted bytes");
+    assert.equal(rematerialized.entrySource, accepted.entrySource, "the reused barrel is byte-identical");
+  });
+
+  it("an absent/empty tree yields no set (byte-identical legacy journey)", async () => {
+    assert.equal(await resumeAcceptedFromTree({ generatedTree: [] } as unknown as Project), undefined);
+    assert.equal(
+      await resumeAcceptedFromTree({ generatedTree: [{ path: TREE_ENTRY_PATH, source: "export {};\n" }] } as unknown as Project),
+      undefined,
+      "a barrel-only tree has no plan chunk to resume",
+    );
+  });
+
+  it("a second cycle issues 0 synthesis calls for the accepted paths and logs p6.synthesis.reused", async () => {
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "sk-i7-reuse-pin";
+    const LEDGER_BRIEF =
+      "a property ledger for rent collection with tenant records, lease renewal reminders and payment tracking";
+    const sigs = Array.from({ length: 20 }, (_, i) => `export function collectRent${i}(payment: Payment): Receipt`);
+    const spec = {
+      requirements: ["Track rent collection per tenant."],
+      edgeCases: ["Empty payment records are skipped."],
+      errorHandling: ["Invalid payments raise a coded error."],
+      typeSignatures: sigs,
+      dataFlow: ["payment → ledger → receipt"],
+      negativeConstraints: ["DO NOT invent tenant data."],
+    };
+    // The demanded `- <signature>` lines of a chunk prompt.
+    const demandedNames = (prompt: string): string[] => {
+      const lines = prompt.split("\n");
+      const start = lines.findIndex((l) => l.includes("TYPE SIGNATURES (must export"));
+      if (start < 0) return [];
+      const names: string[] = [];
+      for (let i = start + 1; i < lines.length; i++) {
+        const line = lines[i] ?? "";
+        if (line.trim() === "") break;
+        if (line.startsWith("- ")) {
+          const n = signatureFunctionNames([line.slice(2).trim()])[0];
+          if (typeof n === "string") names.push(n);
+        }
+      }
+      return names;
+    };
+    const chunkModule = (names: readonly string[]): string =>
+      [
+        ...names.map((n) => `function ${n}(input) { return input; }`),
+        "const ledgerKit = { property: 1, ledger: 1, rent: 1, collection: 1, tenant: 1, records: 1, lease: 1, renewal: 1, reminders: 1, payment: 1, tracking: 1 };",
+        ...names.map((n) => `module.exports.${n} = ${n};`),
+      ].join("\n");
+    const fake = () => {
+      const prompts: string[] = [];
+      const complete = async (prompt: string, _opts?: DeepSeekCompleteOptions): Promise<LlmResult> => {
+        if (!prompt.includes("TYPE SIGNATURES (must export")) {
+          return { ok: true, text: "the model babbled prose, no json at all", model: "deepseek-v4-flash" };
+        }
+        prompts.push(prompt);
+        const names = demandedNames(prompt);
+        return {
+          ok: true,
+          text: JSON.stringify({ module: chunkModule(names), exports: names, reqTrace: {} }),
+          model: "deepseek-v4-flash",
+        };
+      };
+      return { prompts, complete };
+    };
+    const expand = async (): Promise<ExpandBriefResult> => ({ ok: true, spec });
+    const verify = async (): Promise<VerifyOutcome> => ({
+      status: "passed",
+      iterations: 0,
+      evidence: "unused in tree mode",
+      finalSource: "",
+      cases: [],
+    });
+    const red: TreeRunOutcome = {
+      ok: false,
+      dir: "",
+      compile: { ok: false, dir: "", checked: 1, passed: 0, failed: 1, skipped: 0, verdicts: [{ file: "src/jobs/x.ts", verdict: "fail", detail: "error TS2322: x" }] },
+      tests: [],
+      run: null,
+    };
+    const perCycle: { prompts: number; tree: Project["generatedTree"] }[] = [];
+    try {
+      const base = applyPhaseResult(emptyProject({ name: "I7 Ledger", brief: LEDGER_BRIEF }), 6);
+      const res = await driveP6Journey(base, {
+        budget: 3,
+        deps: {
+          synthesize: async (p, ctx) => {
+            const f = fake();
+            const q = await liveP6Synthesis(p, { ...(p6CycleLiveDeps(ctx) ?? {}), complete: f.complete, expand, verify });
+            perCycle.push({ prompts: f.prompts.length, tree: q.generatedTree });
+            return q;
+          },
+          runTree: async () => red,
+          recordGate: (p) => p,
+        },
+      });
+      assert.equal(res.outcome, "failed", "the constant red aborts the journey honestly");
+      assert.ok(perCycle.length >= 2, "the journey ran at least two synthesis cycles");
+      assert.ok(
+        (perCycle[0]!.prompts ?? 0) > 1,
+        `cycle 1 synthesizes every chunk (got ${perCycle[0]!.prompts})`,
+      );
+      assert.equal(
+        perCycle[1]!.prompts,
+        0,
+        "cycle 2 reuses every already-accepted path — 0 synthesis calls (I7/O-01)",
+      );
+      assert.ok(
+        (res.project.logs ?? []).some((l) => l.event === "p6.synthesis.reused"),
+        "the reuse is recorded with the codegen consumer's own p6.synthesis.reused event",
+      );
+      // The reused tree is the SAME accepted tree — never a re-materialized drift.
+      assert.deepEqual(perCycle[1]!.tree, perCycle[0]!.tree, "the reused tree is byte-identical to the accepted one");
+    } finally {
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+    }
   });
 });
 

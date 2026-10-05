@@ -3420,6 +3420,85 @@ function keepBestTree(
   );
 }
 
+/** PR-16 (I7, O-01): de-materialize ONE chunk of a persisted tree back to the
+ *  RAW accepted source + exports codegen's `resumeAccepted` consumer expects.
+ *  `materializeImportableTree` prefixes each chunk with cross-file import lines
+ *  and appends a single `export { … };` list; both are removed here. The import
+ *  strip matches the materializer's OWN specifier (codegen's `relTsImport`) so
+ *  a model-authored import is never mistaken for a materializer one. Pure. */
+function dematerializeAcceptedChunk(
+  path: string,
+  materialized: string,
+  siblingPaths: readonly string[],
+  relTsImport: (from: string, to: string) => string,
+): { source: string; exports: string[] } {
+  const lines = materialized.split("\n");
+  let start = 0;
+  while (start < lines.length) {
+    const m = /^import \{ (.+) \} from "(.+)";$/.exec(lines[start] ?? "");
+    if (!m) break;
+    const spec = m[2]!;
+    const isSiblingImport = siblingPaths.some((p) => p !== path && relTsImport(path, p) === spec);
+    if (!isSiblingImport) break;
+    start += 1;
+  }
+  let end = lines.length;
+  while (end > start && lines[end - 1] === "") end -= 1;
+  let exports: string[] = [];
+  if (end > start) {
+    const m = /^export \{ (.+) \};$/.exec(lines[end - 1] ?? "");
+    if (m) {
+      exports = m[1]!.split(",").map((n) => n.trim()).filter((n) => n.length > 0);
+      end -= 1;
+    }
+  }
+  const body = lines.slice(start, end).join("\n");
+  return { source: body.length > 0 ? `${body}\n` : "", exports };
+}
+
+/** PR-16 (I7, O-01): rebuild the previous cycle's RAW accepted chunk set from
+ *  the ONLY representation a project carries — its persisted (materialized)
+ *  `generatedTree` — so `driveP6Journey` can thread it as
+ *  `ctx.resumeAccepted` and codegen reuses the accepted chunks instead of
+ *  re-buying every one (bakery-florist-orders burned 419k tokens re-synthesizing
+ *  from zero). The barrel/entry file is not a plan chunk and is excluded;
+ *  passing the MATERIALIZED bytes straight through would double every import and
+ *  export line when codegen re-materializes, so each row is de-materialized
+ *  (`dematerializeAcceptedChunk`). Absent/empty tree ⇒ undefined ⇒ no ctx key
+ *  (byte-identical legacy journey). Pure/deterministic; the codegen import is
+ *  dynamic so headless's module graph is unchanged, and any failure degrades to
+ *  undefined rather than perturbing the run. */
+export async function resumeAcceptedFromTree(
+  project: Project,
+): Promise<readonly { path: string; source: string; exports: string[] }[] | undefined> {
+  const rows = Array.isArray(project?.generatedTree) ? project.generatedTree : [];
+  if (rows.length === 0) return undefined;
+  let codegen: { TREE_ENTRY_PATH: string; TREE_CHUNK0_RELOCATED_PATH: string; relTsImport: (from: string, to: string) => string };
+  try {
+    codegen = (await import("./codegen.server.ts")) as unknown as typeof codegen;
+  } catch {
+    return undefined;
+  }
+  const entryPath = codegen.TREE_ENTRY_PATH;
+  const chunkPaths = rows
+    .filter((r) => r && typeof r.path === "string" && r.path !== entryPath)
+    .map((r) => r.path);
+  if (chunkPaths.length === 0) return undefined;
+  const out: { path: string; source: string; exports: string[] }[] = [];
+  for (const row of rows) {
+    if (!row || typeof row.path !== "string" || typeof row.source !== "string") continue;
+    if (row.path === entryPath) continue;
+    const { source, exports } = dematerializeAcceptedChunk(row.path, row.source, chunkPaths, codegen.relTsImport);
+    if (source.trim().length === 0) continue;
+    // A tree whose first plan row was the entry path is relocated off
+    // TREE_ENTRY_PATH by the materializer; the plan still names the entry path,
+    // so re-key the relocated chunk back to it (the consumer matches plan paths).
+    const resumePath = row.path === codegen.TREE_CHUNK0_RELOCATED_PATH ? entryPath : row.path;
+    out.push({ path: resumePath, source, exports });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 export async function driveP6Journey(
   project: Project,
   opts: {
@@ -3477,11 +3556,16 @@ export async function driveP6Journey(
   // the repair carried zero new information, so the journey aborts rather than
   // spending the remaining budget re-buying a known-dead end.
   let prevFailureSig: string | null = null;
+  // PR-16 (I7, O-01): the previous cycle's RAW accepted chunks, rebuilt from the
+  // tree it sealed. Threaded as ctx.resumeAccepted so codegen reuses the chunks
+  // it already paid for; undefined ⇒ no ctx key ⇒ byte-identical legacy.
+  let resumeAccepted: P6JourneyCycleContext["resumeAccepted"] = undefined;
   for (let cycle = 1; cycle <= budget; cycle++) {
     const ctx: P6JourneyCycleContext = { cycle };
     if (proven !== null) ctx.proven = proven;
     if (treeTail !== null) ctx.treeFailureTail = treeTail;
     if (refusal !== null) ctx.refusal = refusal;
+    if (resumeAccepted !== undefined) ctx.resumeAccepted = resumeAccepted;
     if (gateRepair !== null) {
       ctx.gateRepair = gateRepair;
       gateRepair = null; // consume-once: the diversion is exactly one cycle
@@ -3506,6 +3590,11 @@ export async function driveP6Journey(
       prevSynthProject = synthesized;
       prevSynthKey = synthKey;
     }
+    // PR-16 (I7, O-01): rebuild the accepted chunks this cycle sealed and carry
+    // them to the next cycle. Every synthesized project holds the accepted set
+    // (a full tree or a refusal's partial): a repair cycle then reuses those
+    // paths instead of re-buying them.
+    resumeAccepted = await resumeAcceptedFromTree(synthesized);
     const ref = p6RefusalDetail(synthesized);
     if (ref !== null) refusal = ref;
     const tree = synthesized.generatedTree;

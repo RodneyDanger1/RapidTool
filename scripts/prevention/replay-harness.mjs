@@ -678,13 +678,18 @@ const SEAM_CHECKS = {
       "the delivery record's verifiedProduct must be exactly the stated evidence conjunction (scripts/rapidtool-cli.mjs deliveryVerification); an honest false + reason is the designed outcome",
     ),
 
-  // --- S4-01/02/03 (fixes/346 lane S4) — the enabling-wave tourniquet --------
+  // --- S4-01/02/03/04/05 (fixes/346 final wave) — the S4 tourniquet --------
   // The live seam is the REAL source the detector reads: the armed default
   // (S4-01), the bounded resample loops (S4-02), and the re-pinned refusal
   // coverage floor (S4-03). `mutationRed` is the guard's own control proof.
   "S4-01": async () => enablingSeam("S4-01"),
   "S4-02": async () => enablingSeam("S4-02"),
   "S4-03": async () => enablingSeam("S4-03"),
+  // S4-04 — accepted-chunk reuse: RED (pending) until lane D5 populates
+  // ctx.resumeAccepted in driveP6Journey; the codegen consumer is landed.
+  "S4-04": async () => enablingSeam("S4-04"),
+  // S4-05 — both default-check samples' workingApp scores stay pinned.
+  "S4-05": async () => enablingSeam("S4-05"),
 };
 
 /** Read a text file, "" on failure (never throws). @param {string} p */
@@ -1274,7 +1279,7 @@ DRIVERS["campaign2-verify"] = async (_ctx, g) => {
   return { fired: firedSlugs.length > 0, controlClean, evidence: { code: g.expectedCode, firedSlugs, cleanOnHonestRecord: controlClean } };
 };
 
-// S4-01/02/03 — the enabling-wave guard tool's own controls are the
+// S4-01/02/03/04/05 — the S4 guard tool's own controls are the
 // fixture-integrity signal: each detector fires on its injected defect/mutation
 // and stays silent on the live source (the mutation is the guard's proof).
 DRIVERS["enabling-wave-invariants"] = async (_ctx, g) => {
@@ -1492,11 +1497,11 @@ export async function verifyHeldOut(cassettes, heldOut, _ctx) {
 // ---------------------------------------------------------------------------
 
 /** Pinned floor: removing a registry entry must fail the gate of record (§4.6-3).
- *  Overridable by `countFloor` in the registry (now 27 — the 15 W346 guards, the
+ *  Overridable by `countFloor` in the registry (now 29 — the 15 W346 guards, the
  *  five campaign #1 residual guards C1-01/02/05/06/08, the four campaign #2
- *  tourniquets R2-01/03/05/06, and the three S4 enabling-wave pins
- *  S4-01/02/03). */
-export const GUARD_COUNT_FLOOR = 27;
+ *  tourniquets R2-01/03/05/06, and the five S4 final-wave pins
+ *  S4-01/02/03/04/05). */
+export const GUARD_COUNT_FLOOR = 29;
 
 /**
  * Classify every guard's fix-presence into EXACTLY ONE bucket. `enforced` is the

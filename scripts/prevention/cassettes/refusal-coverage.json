@@ -2,7 +2,7 @@
   "schema_version": 1,
   "owner": "Q4 — S4 enabling-wave refusal-coverage pin",
   "generatedAt": "2026-10-05",
-  "purpose": "The refusal-coverage floor the S4 re-pins must not fall below. Derived from the real src/lib/codegen.server.test.ts and src/lib/synthesis-policy.test.ts bytes: the pre-S4 HEAD suite carried 52 `p6.synthesis.refused` (annotation: HEAD) and 56 coded-reason assertions; S4's honest re-pins raised the refused count to 54 while moving the legacy single-sample pins to explicit opt-out variants. A re-pin that DELETES or WEAKENS a refusal (instead of moving it to an opt-out variant) drops a count below these floors and fires RT_E_REFUSAL_COVERAGE_LOST.",
+  "purpose": "The refusal-coverage floor the S4 re-pins must not fall below. Derived from the real src/lib/codegen.server.test.ts and src/lib/synthesis-policy.test.ts bytes: the pre-S4 HEAD suite carried 52 `p6.synthesis.refused` (annotation: HEAD) and 56 coded-reason assertions; S4's honest re-pins raised the refused count to 54 while moving the legacy single-sample pins to explicit opt-out variants. A re-pin that DELETES or WEAKENS a refusal (instead of moving it to an opt-out variant) drops a count below these floors and fires RT_E_REFUSAL_COVERAGE_LOST. S5 re-pinned only the armed-default marker value 2→3 (the constant rose; no refusal was deleted or weakened).",
   "file": "src/lib/codegen.server.test.ts",
   "policyFile": "src/lib/synthesis-policy.test.ts",
   "totals": {
@@ -10,7 +10,7 @@
     "codedReasons": 56
   },
   "armedMarker": "winner none",
-  "policyArmedMarker": "resolveChunkResampleCandidates(undefined, undefined), 2",
+  "policyArmedMarker": "resolveChunkResampleCandidates(undefined, undefined), 3",
   "policyOptOutMarker": "resolveChunkResampleCandidates(1, undefined), 1",
   "suites": [
     { "match": "chunked tree mode", "refusedAtLeast": 1, "rePinned": true },

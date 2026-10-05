@@ -3509,6 +3509,38 @@ test("W346 R2-01 - a below-floor emit seals RT_E_PLAN_UNDERPRODUCED (not a silen
     assert.equal(json.git && json.git.code, "RT_E_PLAN_UNDERPRODUCED", "the withheld sub-envelope names the same deciding code");
     assert.ok(Array.isArray(json.planUnderproduced.missing) && json.planUnderproduced.missing.length > 0, "the seal names the missing modules");
     assert.equal(json.exit_code, res.status, "the envelope's exit_code must equal the process exit");
+
+    // W346 · D5 contract: `--allow-empty` is SUBSTANCE-only — it must NOT lift
+    // the below-floor refusal (a SEPARATE, scaffold-time code).
+    const allowRes = spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        CLI_PATH,
+        "emit",
+        "--project",
+        proj,
+        "--out",
+        join(cwd, "out-allow"),
+        "--red-tree",
+        "banner",
+        "--git",
+        "--allow-empty",
+      ],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(allowRes.error, undefined, `spawn failed: ${String(allowRes.error)}`);
+    assert.equal(
+      allowRes.status,
+      1,
+      `--allow-empty must NOT land a below-floor partial.\nstdout: ${allowRes.stdout}\nstderr: ${allowRes.stderr}`,
+    );
+    const allowJson = JSON.parse(allowRes.stdout);
+    assert.equal(allowJson.ok, false, "--allow-empty does not satisfy the below-floor refusal");
+    assert.equal(allowJson.code, "RT_E_PLAN_UNDERPRODUCED", "the floor code is still the deciding reason");
+    assert.equal(allowJson.git && allowJson.git.committed, false, "no commit even with --allow-empty");
+    assert.equal(allowJson.git && allowJson.git.reason, "plan-underproduced");
+    assert.equal(allowJson.git && allowJson.git.code, "RT_E_PLAN_UNDERPRODUCED");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

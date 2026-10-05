@@ -23,13 +23,22 @@
  *                            armed-resample "both candidates rejected" proof is
  *                            kept. Fires when a re-pin deletes or weakens a
  *                            refusal instead of moving it to an opt-out variant.
+ *   S4-04 accepted-chunk reuse  a resumed/accepted path is REUSED (0 synthesis
+ *                            prompts) when `ctx.resumeAccepted` is populated.
+ *                            The codegen consumer is landed; the journey
+ *                            producer (`driveP6Journey` assigning
+ *                            `ctx.resumeAccepted`) is the lane-D5 interface, so
+ *                            this pin is RED (pending) until D5 lands it.
+ *   S4-05 default-check baselines  BOTH default-check samples' workingApp scores
+ *                            (sample1 0/4 AND sample2 3/4) stay pinned — the
+ *                            variance is recorded, never just the good sample.
  *
  * Every detector reads the REAL bytes it guards: `src/lib/synthesis-policy.ts`,
- * `src/lib/codegen.server.ts`, the two re-pinned suites, and the frozen
- * `cassettes/refusal-coverage.json` baseline (derived from the HEAD suite
- * counts). Each carries a real mutation control — the guard fires on the
- * injected defect and stays silent on the live source; a guard that cannot fail
- * is worthless.
+ * `src/lib/codegen.server.ts`, `src/lib/headless.ts`, the two re-pinned suites,
+ * the frozen `cassettes/refusal-coverage.json`, and the default-check cassettes
+ * + `rubric-baselines.json`. Each carries a real mutation control — the guard
+ * fires on the injected defect and stays silent on the live source; a guard that
+ * cannot fail is worthless.
  *
  * Usage:
  *   node scripts/guards/enabling-wave-invariants.mjs [--json] [--selftest]
@@ -49,6 +58,7 @@ export const POLICY_FILE = join(REPO_ROOT, "src", "lib", "synthesis-policy.ts");
 export const CODEGEN_FILE = join(REPO_ROOT, "src", "lib", "codegen.server.ts");
 export const REFUSAL_SUITE_FILE = join(REPO_ROOT, "src", "lib", "codegen.server.test.ts");
 export const POLICY_SUITE_FILE = join(REPO_ROOT, "src", "lib", "synthesis-policy.test.ts");
+export const HEADLESS_FILE = join(REPO_ROOT, "src", "lib", "headless.ts");
 export const REFUSAL_BASELINE_FILE = join(REPO_ROOT, "scripts", "prevention", "cassettes", "refusal-coverage.json");
 
 /** The armed chunk-resample default constant — the lever S4 turned on. */
@@ -59,6 +69,23 @@ const REFUSAL_EVENT = "p6.synthesis.refused";
 export const DEFAULT_DISARMED_CODE = "RT_E_SYNTH_DEFAULT_DISARMED";
 export const UNBOUNDED_RESAMPLE_CODE = "RT_E_SYNTH_RESAMPLE_UNBOUNDED";
 export const REFUSAL_COVERAGE_CODE = "RT_E_REFUSAL_COVERAGE_LOST";
+export const RESUME_NOT_REUSED_CODE = "RT_E_SYNTH_RESUME_NOT_REUSED";
+export const DEFAULT_CHECK_BASELINE_CODE = "RT_E_DEFAULT_CHECK_BASELINE_LOST";
+
+/**
+ * The documented hard cap on resample candidates (`synthesis-policy.test.ts`
+ * asserts `P6_SYNTH_CANDIDATES_MAX === 4`). The bound must be BOTH >= 2 (armed,
+ * S4-01) and <= this cap: a raised cap is an unbounded-cost regression even
+ * though every loop is still "bounded".
+ */
+export const P6_SYNTH_CANDIDATES_CAP = 4;
+
+/** The journey-side producer the reuse contract needs (fixed/346 lane D5). */
+export const RESUME_PRODUCER_RE = /ctx\.resumeAccepted\s*=/;
+
+/** The two default-check sample cassettes + the pinned rubric baselines. */
+export const DEFAULT_CHECK_CASSETTE_DIR = join(REPO_ROOT, "scripts", "prevention", "cassettes", "default-check");
+export const RUBRIC_BASELINES_FILE = join(REPO_ROOT, "scripts", "prevention", "cassettes", "rubric-baselines.json");
 
 /** Read a text file, "" on any failure (never throws). @param {string} p @returns {string} */
 export function safeRead(p) {
@@ -167,6 +194,11 @@ export function detectUnboundedResample(policySource, codegenSource) {
   const max = parseConstNumber(policy, MAX_CONST);
   if (max === null || !Number.isFinite(max) || max < 2) {
     findings.push({ code: UNBOUNDED_RESAMPLE_CODE, detail: `${MAX_CONST} is not a finite integer >= 2 (the hard retry bound)` });
+  } else if (max > P6_SYNTH_CANDIDATES_CAP) {
+    findings.push({
+      code: UNBOUNDED_RESAMPLE_CODE,
+      detail: `${MAX_CONST} is ${max}, above the documented hard cap of ${P6_SYNTH_CANDIDATES_CAP} — the armed candidate bound must be <= ${P6_SYNTH_CANDIDATES_CAP}`,
+    });
   }
   if (!new RegExp("Math\\.min\\(\\s*Math\\.floor\\(count\\)\\s*,\\s*" + MAX_CONST + "\\s*\\)").test(policy)) {
     findings.push({ code: UNBOUNDED_RESAMPLE_CODE, detail: `selectBestOfN does not clamp its count to ${MAX_CONST}` });
@@ -254,11 +286,123 @@ export function detectRefusalCoverageLoss(sources, baseline) {
 }
 
 // ---------------------------------------------------------------------------
+// S4-04 — accepted-chunk reuse: an accepted path is REUSED (0 synthesis prompt).
+//
+// The consumer half is landed in codegen.server.ts (the `resumeByPath` map, the
+// `if (resumeByPath.size > 0)` branch, and the `p6.synthesis.reused` event), but
+// `driveP6Journey` never POPULATES `ctx.resumeAccepted`, so a repair cycle with
+// populated accepted chunks still re-buys them. This is the one RED pin of the
+// final wave: it stays pending until lane D5 threads the previous cycle's
+// accepted chunks into `P6JourneyCycleContext.resumeAccepted`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The reuse contract is met iff (a) codegen still CONSUMES `resumeAccepted`
+ * (skips the model call for an accepted path) AND (b) the journey PRODUCES it.
+ * Each missing half is a finding; a half-landed contract is the defect.
+ * @param {{headlessSource:string, codegenSource:string}} sources
+ * @returns {Array<{code:string, detail:string, surface:string}>}
+ */
+export function detectResumeReuseContract(sources) {
+  const headless = String((sources && sources.headlessSource) || "");
+  const codegen = String((sources && sources.codegenSource) || "");
+  const findings = [];
+  const consumer =
+    codegen.includes("resumeByPath") &&
+    codegen.includes("p6.synthesis.reused") &&
+    /if\s*\(\s*resumeByPath\.size\s*>\s*0\s*\)/.test(codegen);
+  if (!consumer) {
+    findings.push({
+      code: RESUME_NOT_REUSED_CODE,
+      surface: "src/lib/codegen.server.ts",
+      detail:
+        "codegen.server.ts no longer consumes resumeAccepted (resumeByPath / `p6.synthesis.reused` / the `resumeByPath.size > 0` reuse branch is gone) — an accepted chunk would be re-synthesized",
+    });
+  }
+  const producer = RESUME_PRODUCER_RE.test(headless);
+  if (!producer) {
+    findings.push({
+      code: RESUME_NOT_REUSED_CODE,
+      surface: "src/lib/headless.ts#driveP6Journey",
+      detail:
+        "driveP6Journey does not populate ctx.resumeAccepted — the journey re-synthesizes previously-accepted chunks instead of reusing them with 0 synthesis prompts (lane D5 interface)",
+    });
+  }
+  return findings;
+}
+
+// ---------------------------------------------------------------------------
+// S4-05 — default-check sample baselines: BOTH runs' workingApp scores pinned.
+//
+// The default-check campaign ran the same 4-slug brief twice: sample1 scored
+// 0/4 (three projects still parked at the P6 gate), sample2 scored 3/4. Pinning
+// only the good sample would launder the variance; dropping the weak sample is
+// the loss this guards.
+// ---------------------------------------------------------------------------
+
+/**
+ * The two-sample default-check pin is intact iff rubric-baselines.json carries a
+ * `defaultCheck` block naming exactly two samples, each with a workingApp
+ * {count,of} that AGREES with its per-project rows and an honest
+ * `artifactComplete` flag, and every sample cassette is represented.
+ * @param {any} baselines @param {any[]} samples
+ * @returns {Array<{code:string, detail:string}>}
+ */
+export function detectDefaultCheckBaselineLoss(baselines, samples) {
+  const dc = baselines && typeof baselines === "object" ? baselines.defaultCheck : null;
+  if (!dc || typeof dc !== "object") {
+    return [
+      {
+        code: DEFAULT_CHECK_BASELINE_CODE,
+        detail: "rubric-baselines.json carries no defaultCheck block — the two-sample default-check pin is missing (fail closed)",
+      },
+    ];
+  }
+  const findings = [];
+  const pinned = Array.isArray(dc.samples) ? dc.samples : [];
+  if (pinned.length !== 2) {
+    findings.push({
+      code: DEFAULT_CHECK_BASELINE_CODE,
+      detail: `defaultCheck pins ${pinned.length} sample(s); exactly 2 are required — the weak sample1 (0/4) AND the strong sample2 (3/4) must both be recorded, not just the good one`,
+    });
+  }
+  for (const cassette of Array.isArray(samples) ? samples : []) {
+    const id = cassette && typeof cassette.sample === "string" ? cassette.sample : null;
+    if (id && !pinned.some((s) => s && s.sample === id)) {
+      findings.push({ code: DEFAULT_CHECK_BASELINE_CODE, detail: `the cassette sample ${id} has no rubric-baselines defaultCheck entry` });
+    }
+  }
+  for (const s of pinned) {
+    const id = s && typeof s.sample === "string" ? s.sample : "(unnamed)";
+    if (!s || !s.workingApp || !Number.isFinite(s.workingApp.count) || s.workingApp.of !== 4) {
+      findings.push({ code: DEFAULT_CHECK_BASELINE_CODE, detail: `${id}: workingApp must be a {count:number,of:4} record` });
+      continue;
+    }
+    const rows = Array.isArray(s.projects) ? s.projects : [];
+    if (rows.length !== 4) {
+      findings.push({ code: DEFAULT_CHECK_BASELINE_CODE, detail: `${id}: expected 4 per-slug rows, found ${rows.length}` });
+    } else {
+      const trues = rows.filter((r) => r && r.workingApp === true).length;
+      if (trues !== s.workingApp.count) {
+        findings.push({
+          code: DEFAULT_CHECK_BASELINE_CODE,
+          detail: `${id}: workingApp.count ${s.workingApp.count} disagrees with its ${trues} true project row(s)`,
+        });
+      }
+    }
+    if (typeof s.artifactComplete !== "boolean") {
+      findings.push({ code: DEFAULT_CHECK_BASELINE_CODE, detail: `${id}: the honest artifactComplete flag is missing` });
+    }
+  }
+  return findings;
+}
+
+// ---------------------------------------------------------------------------
 // Controls (real source + real mutation).
 // ---------------------------------------------------------------------------
 
 /**
- * The three control proofs for the harness/test. `fired` = the detector alarms
+ * The control proofs for the harness/test. `fired` = the detector alarms
  * on the injected defect; `controlClean` = it stays silent on the live source;
  * `wired` = the live seam is the armed/bounded/covered one.
  * @returns {Promise<Record<string, any>>}
@@ -288,6 +432,39 @@ export async function enablingWaveControls() {
     policySuite.length > 0 &&
     detectRefusalCoverageLoss({ codegenSuite, policySuite }, baseline).length === 0;
 
+  // S4-04: the reuse contract. The fixture/control pair is synthetic and stable
+  // across the fix: the "clean" source carries the journey producer, the
+  // injected defect strips it. `wired` is the LIVE seam — currently red (the
+  // producer is absent), flipping to true once lane D5 lands it.
+  const headless = safeRead(HEADLESS_FILE);
+  const producerLine = "ctx.resumeAccepted = acceptedChunks;";
+  const resumeCleanSource = RESUME_PRODUCER_RE.test(headless)
+    ? headless
+    : headless.replace("const ctx: P6JourneyCycleContext = { cycle };", `const ctx: P6JourneyCycleContext = { cycle }; ${producerLine}`);
+  const resumeDefectSource = resumeCleanSource.replace(RESUME_PRODUCER_RE, "ctx.acceptedChunksSeen =");
+  const s4Fired = detectResumeReuseContract({ headlessSource: resumeDefectSource, codegenSource: codegen }).length > 0;
+  const s4ControlClean = detectResumeReuseContract({ headlessSource: resumeCleanSource, codegenSource: codegen }).length === 0;
+  const liveResumeFindings = detectResumeReuseContract({ headlessSource: headless, codegenSource: codegen });
+  const s4Wired = liveResumeFindings.length === 0;
+
+  // S4-05: both default-check samples pinned. Mutation: drop the weaker sample.
+  const rubricBaselines = readJson(RUBRIC_BASELINES_FILE);
+  const dcSamples = [readJson(join(DEFAULT_CHECK_CASSETTE_DIR, "sample1.json")), readJson(join(DEFAULT_CHECK_CASSETTE_DIR, "sample2.json"))].filter(
+    (s) => s && typeof s === "object",
+  );
+  const droppedBaseline =
+    rubricBaselines && rubricBaselines.defaultCheck && Array.isArray(rubricBaselines.defaultCheck.samples)
+      ? {
+          ...rubricBaselines,
+          defaultCheck: {
+            ...rubricBaselines.defaultCheck,
+            samples: rubricBaselines.defaultCheck.samples.filter((s) => s && s.sample !== "sample1"),
+          },
+        }
+      : null;
+  const s5Fired = droppedBaseline ? detectDefaultCheckBaselineLoss(droppedBaseline, dcSamples).length > 0 : false;
+  const s5Clean = rubricBaselines !== null && dcSamples.length === 2 && detectDefaultCheckBaselineLoss(rubricBaselines, dcSamples).length === 0;
+
   return {
     "S4-01": {
       fired: s1Fired,
@@ -315,6 +492,33 @@ export async function enablingWaveControls() {
       baselineFile: baseline && typeof baseline === "object" ? baseline.file : null,
       seams: Array.isArray(baseline && baseline.suites) ? baseline.suites.map((s) => s.match) : [],
       evidence: { baseline, liveFindings: detectRefusalCoverageLoss({ codegenSuite, policySuite }, baseline) },
+    },
+    "S4-04": {
+      fired: s4Fired,
+      controlClean: s4ControlClean,
+      mutationRed: s4Fired && s4ControlClean,
+      wired: s4Wired,
+      ownerLane: "D5",
+      pendingInterface:
+        "src/lib/headless.ts#driveP6Journey must assign `ctx.resumeAccepted = <previous cycle's accepted chunks>` so P6JourneyCycleContext.resumeAccepted is populated and codegen.server.ts reuses them with 0 synthesis prompts (the I7/O-01 consumer is landed; only the journey producer is missing)",
+      seam: "headless.driveP6Journey -> ctx.resumeAccepted -> codegen.resumeByPath (0 synthesis prompts)",
+      evidence: {
+        consumerPresent: codegen.includes("resumeByPath") && codegen.includes("p6.synthesis.reused"),
+        producerPresent: RESUME_PRODUCER_RE.test(headless),
+        liveFindings: liveResumeFindings,
+      },
+    },
+    "S4-05": {
+      fired: s5Fired,
+      controlClean: s5Clean,
+      mutationRed: s5Fired && s5Clean,
+      wired: s5Clean,
+      seam: "cassettes/default-check/{sample1,sample2}.json + rubric-baselines.json#defaultCheck (both samples pinned)",
+      sampleCount: dcSamples.length,
+      evidence: {
+        samples: dcSamples.map((s) => ({ sample: s.sample, workingApp: s.tally ? s.tally.workingApp : null, artifactComplete: s.artifactComplete })),
+        liveFindings: rubricBaselines ? detectDefaultCheckBaselineLoss(rubricBaselines, dcSamples) : ["baselines unreadable"],
+      },
     },
   };
 }

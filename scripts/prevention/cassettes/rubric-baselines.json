@@ -46,5 +46,45 @@
       { "slug": "office-stock-tracker", "variant": "emitted", "score": 1, "uiWired": false, "substance": "empty", "workingApp": false },
       { "slug": "held-out-community-tool-library", "variant": "emitted", "score": 1, "uiWired": false, "substance": "empty", "workingApp": false }
     ]
+  },
+  "defaultCheck": {
+    "provenance": "default-check (fixes/346 final wave, the two Q4 samples). Two independent keyless runs of the SAME 4-slug campaign under the armed default (no env override). The score is the mechanical workingApp predicate + /14 rubric read by testruns/default-check/score.mjs (surface/behaviour/non-functional/honesty + runnable evidence); NOT a browser pass. The SAMPLE VARIANCE is pinned deliberately: sample1 0/4 and sample2 3/4. A re-grade that drops below a sample's pinned count is a regression; dropping the WEAKER sample is itself a loss (RT_E_DEFAULT_CHECK_BASELINE_LOST).",
+    "source": "testruns/default-check/sample1/TUNING.json + testruns/default-check/sample2/TUNING.json (byte-identical to the run root's TUNING.json)",
+    "sampleCount": 2,
+    "of": 4,
+    "variance": {
+      "min": 0,
+      "max": 3,
+      "range": 3,
+      "varyingSlugs": ["bakery-website", "mobile-companion", "office-stock-tracker"]
+    },
+    "samples": [
+      {
+        "sample": "sample1",
+        "generatedAt": "2026-10-05T12:24:56.164Z",
+        "artifactComplete": false,
+        "completenessNote": "score plus per-slug envelope dirs, but NO emitted/ tree on disk (3 of 4 projects parked at the P6 gate)",
+        "workingApp": { "count": 0, "of": 4 },
+        "projects": [
+          { "slug": "bakery-website", "workingApp": false, "rubric": 0 },
+          { "slug": "bakery-florist-orders", "workingApp": false, "rubric": 3 },
+          { "slug": "mobile-companion", "workingApp": false, "rubric": 0 },
+          { "slug": "office-stock-tracker", "workingApp": false, "rubric": 0 }
+        ]
+      },
+      {
+        "sample": "sample2",
+        "generatedAt": "2026-10-05T12:57:59.863Z",
+        "artifactComplete": true,
+        "completenessNote": "score; the 4 emitted trees live under the run root testruns/default-check/<slug>/emitted",
+        "workingApp": { "count": 3, "of": 4 },
+        "projects": [
+          { "slug": "bakery-website", "workingApp": true, "rubric": 4 },
+          { "slug": "bakery-florist-orders", "workingApp": false, "rubric": 1 },
+          { "slug": "mobile-companion", "workingApp": true, "rubric": 4 },
+          { "slug": "office-stock-tracker", "workingApp": true, "rubric": 4 }
+        ]
+      }
+    ]
   }
 }

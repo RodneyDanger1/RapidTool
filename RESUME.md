@@ -889,3 +889,40 @@ All numbers below come from commands run this session; where a doc and the bytes
   warnings** (`lint.problems:5`, lint `ok:true`); cross-family failover genuinely unimplemented; the
   console seat-delivery seam open; no OS isolation beyond the runtime Permission Model bound
   (`isolation.sandbox:false`); P7 `p7-research` offline; prettier drift measured, not gated.
+
+---
+
+## CORRECTION — 2026-10-05 (346 wave batch 15 / X5 acceptance lane)
+
+The batch-10 block and every dated snapshot above are superseded by these byte-derived values. All
+numbers below come from the file or command named beside them; where a doc and the bytes disagree,
+the bytes win.
+
+- **The chunked P6 resample is ARMED BY DEFAULT** (validator-selected; bounded ≤
+  `P6_SYNTH_CANDIDATES_MAX` = 4; the armed chunk-lane default is `P6_SYNTH_CHUNK_RETRY_CANDIDATES` at
+  `src/lib/synthesis-policy.ts:54`, 3 this session). `P6_SYNTH_CANDIDATES=1` / `deps.candidates: 1`
+  opts out (no `p6.synthesis.candidates` row emitted). The PRIMARY best-of-N + whole-tree pre-seal
+  resample stay **opt-in** (`resolveSynthesisCandidates` default 1). Guards `S4-01`/`S4-02` pin the
+  armed default and the ≤4 bounding.
+- **Measured product position — with the variance.** Campaign #2 `workingApp` **2/8**
+  (`testruns\_report\CAMPAIGN2.md` §5). Final keyed samples: `testruns\default-check\TUNING.json`
+  **3/4** (ledger 966,170 tokens / 173 calls) vs `testruns\tuning\TUNING.json` **1/6** (1,052,563 /
+  177) — combined **4/10**. Same-brief flips: `mobile-companion` and `office-stock-tracker` each
+  `true` in default-check and `false` in the tuning sample; `bakery-website` `true` both,
+  `bakery-florist-orders` `false` both. **Variance is the dominant factor; the binding wall is the
+  P6 DoD gate** (`RT_E_GATE_PENDING`). Delivery truth held: **0 empty-substance commits · 0 red-tree
+  commits**.
+- **Proof layer: 27 guards.** `node scripts/prevention/verify-prevention.mjs --all --selftest` →
+  `ok:true`, `guards:27`, `countFloor:27`, both signals clean (`missed:[]`, `pending:[]`), `skipped:[]`.
+  Supersedes the batch-10 "20 guards".
+- **Resample telemetry + variance ride the doctor (lane X5).** `src/lib/acceptance.ts` reads the
+  persisted `p6.synthesis.candidates` rows back into `fleetMetrics.resample` (candidates
+  requested/tried, winners/no-winner, winner index per event, `extraKeyedCalls = Σ max(0, tried−1)`);
+  `doctor.ts`'s `fleetTelemetryFromProject` derives a record's telemetry from its own
+  `logs`/`tokenUsage`, wired into `evidenceFromProjectRecord` / `evidenceFromJobInventory` /
+  `coerceFactoryClaim`. Measured from the default-check journals: **3/4 runs · 17 events · 34
+  requested · 25 tried · 14 winners · 3 no-winner · 8 extra keyed calls**; `extraTokens:null` with
+  `tokenAccounting:"not-recorded-in-journal"` (tokens per candidate are not in the row). New honest
+  fields prevent a one-sample over-claim: `fleetAcceptance.sampleCount` + `evidencedRate`;
+  `fleetMetrics.workingAppSamples` / `workingAppPass` / `workingAppRate` / `workingAppByBrief`.
+  Lane log: `fixes/346_final_wave.md`.

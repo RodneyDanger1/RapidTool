@@ -154,3 +154,108 @@ describe("completeDeepSeek finish_reason handling", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 346 V5 (candidate accounting): the bounded P6 resample issues extra provider
+// calls per chunk, so the call tap must observe EVERY candidate exactly once —
+// no dropped candidate, no double-count — and a REFUSED candidate must still
+// carry the vendor's measured cost (a truncation/thinking-burn billed tokens
+// even though no text came back). The vendor reports `usage` on a 200 body, so
+// the empty-content refusals must forward it (`accountSynthUsage` records every
+// response that reports usage, success or refusal; the tap feeds run-eval's
+// `llmEvidenceFromCallRecords`). Keyless: injected fetch.
+// ---------------------------------------------------------------------------
+describe("candidate accounting — every resample call observed, refusals priced", () => {
+  it("three candidate calls emit exactly three tap records in order (no drop, no double-count)", async () => {
+    withKey("sk-cand");
+    const f = bodyFetch([
+      { content: "a", finish: "stop", usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      { content: "b", finish: "stop", usage: { prompt_tokens: 2, completion_tokens: 2 } },
+      { content: "c", finish: "stop", usage: { prompt_tokens: 3, completion_tokens: 3 } },
+    ]);
+    const seen: LlmCallTapRecord[] = [];
+    setLlmCallTap((rec) => seen.push(rec));
+    try {
+      for (const prompt of ["p1", "p2", "p3"]) {
+        const r = await completeDeepSeek(prompt, { fetch: f.fetch, sleep: sleeping().sleep, random: () => 1 });
+        assert.equal(r.ok, true);
+      }
+      assert.equal(seen.length, 3, "one tap record per candidate call (never a drop)");
+      assert.deepEqual(
+        seen.map((r) => r.promptTokens),
+        [1, 2, 3],
+        "each candidate's measured prompt tokens, in call order (never a double-count)",
+      );
+    } finally {
+      clearLlmCallTap();
+      withKey(SAVE_KEY);
+    }
+  });
+
+  it("a content_filter refusal still emits one record carrying its code and the measured cost", async () => {
+    withKey("sk-cand");
+    const f = bodyFetch([
+      { content: "", finish: "content_filter", usage: { prompt_tokens: 5, completion_tokens: 0 } },
+    ]);
+    const seen: LlmCallTapRecord[] = [];
+    setLlmCallTap((rec) => seen.push(rec));
+    try {
+      const r = await completeDeepSeek("hi", { fetch: f.fetch, sleep: sleeping().sleep, random: () => 1 });
+      assert.equal(r.ok, false);
+      if (!r.ok) assert.equal(r.code, "RT_E_LLM_REJECTED");
+      assert.equal(seen.length, 1, "a refused candidate is still an observed call (cost recorded, not dropped)");
+      assert.equal(seen[0]!.ok, false);
+      assert.equal(seen[0]!.code, "RT_E_LLM_REJECTED");
+      assert.equal(seen[0]!.promptTokens, 5, "the refusal's measured prompt tokens ride the record");
+    } finally {
+      clearLlmCallTap();
+      withKey(SAVE_KEY);
+    }
+  });
+
+  it("an empty-content length truncation reports the vendor's burned tokens (resample candidate priced)", async () => {
+    withKey("sk-cand");
+    const f = bodyFetch([
+      { content: "", finish: "length", usage: { prompt_tokens: 9, completion_tokens: 32_000 } },
+    ]);
+    const seen: LlmCallTapRecord[] = [];
+    setLlmCallTap((rec) => seen.push(rec));
+    try {
+      const r = await completeDeepSeek("synthesize", { fetch: f.fetch, sleep: sleeping().sleep, random: () => 1 });
+      assert.equal(r.ok, false, "no text ⇒ refusal");
+      assert.deepEqual(
+        r.usage,
+        { promptTokens: 9, completionTokens: 32_000 },
+        "the truncated candidate's measured usage is not discarded by the refusal path",
+      );
+      assert.equal(seen[0]!.promptTokens, 9);
+      assert.equal(seen[0]!.completionTokens, 32_000);
+    } finally {
+      clearLlmCallTap();
+      withKey(SAVE_KEY);
+    }
+  });
+
+  it("the cache split rides each candidate's record, refusals included", async () => {
+    withKey("sk-cand");
+    const f = bodyFetch([
+      { content: "ok", finish: "stop", usage: { prompt_tokens: 10, completion_tokens: 2, prompt_cache_hit_tokens: 7, prompt_cache_miss_tokens: 3 } },
+      { content: "", finish: "length", usage: { prompt_tokens: 20, completion_tokens: 40, prompt_cache_hit_tokens: 15, prompt_cache_miss_tokens: 5 } },
+    ]);
+    const seen: LlmCallTapRecord[] = [];
+    setLlmCallTap((rec) => seen.push(rec));
+    try {
+      await completeDeepSeek("a", { fetch: f.fetch, sleep: sleeping().sleep, random: () => 1 });
+      await completeDeepSeek("b", { fetch: f.fetch, sleep: sleeping().sleep, random: () => 1 });
+      assert.equal(seen.length, 2);
+      assert.deepEqual(
+        seen.map((r) => r.cachedPromptTokens),
+        [7, 15],
+        "the cache-hit split is per-candidate, including the refused one",
+      );
+    } finally {
+      clearLlmCallTap();
+      withKey(SAVE_KEY);
+    }
+  });
+});

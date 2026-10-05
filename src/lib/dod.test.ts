@@ -672,3 +672,77 @@ describe("W61 C14 - p6-arch fails closed on dead re-export bridges", () => {
     assert.deepEqual(implementationIdentifierHits(["board"], "export function board() {}"), ["board"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lane G5 — p6-brief-fit on the REAL stalled bytes: the binding P6 miss is
+// GENUINE noun absence, not a coverage miscompute.
+//
+// Both stalled bakery-florist-orders trees (the 9-file `bakery-florist-orders`
+// run and the 4-file `default-check` run) fail p6-brief-fit. This pin proves
+// the failure is the model DROPPING the brief's nouns: the role nouns the brief
+// names (**Stock keeper**, **Manager**, **Counter staff**) do not occur in the
+// tree union at all — not as identifiers and not even as raw text — while the
+// matcher is substring+stem tolerant (`identifierHits` matches any identifier
+// containing the token), so a genuine export could not be missed. The faithful
+// P12 tree (`default-check/sample1`) passes both the probe and the whole P6
+// gate, so the bar is satisfiable, not over-strict. If a future change widens
+// the core set / relaxes the bar, this RED->GREEN pin fails with it.
+// ---------------------------------------------------------------------------
+describe("Lane G5 — p6-brief-fit fails the stalled trees on GENUINE noun absence", () => {
+  const loadBuild = (rel: string): Project | null => {
+    const file = join(TESTRUNS_ROOT, rel, "build.json");
+    return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Project) : null;
+  };
+  /** Raw word-boundary occurrences of `t` in the unmasked tree union. */
+  const rawWordCount = (src: string, t: string): number =>
+    (src.match(new RegExp(`\\b${t}\\b`, "gi")) ?? []).length;
+  const ROLE_NOUNS = ["keeper", "management", "staff"];
+
+  it("the stalled 9-file and 4-file trees fail p6-brief-fit and genuinely lack the brief's role nouns", () => {
+    let checked = 0;
+    for (const rel of ["bakery-florist-orders", "default-check/bakery-florist-orders"]) {
+      const p = loadBuild(rel);
+      if (!p) continue;
+      checked++;
+      const src = unionOf(p);
+      assert.equal(
+        briefFitSubstancePasses(p.brief, src, p),
+        false,
+        `${rel}: p6-brief-fit fails the under-produced tree`,
+      );
+      assert.ok(runGate(p, 6).unmet.some((g) => g.id === "p6-brief-fit"), `${rel}: runGate surfaces it`);
+      for (const t of ROLE_NOUNS) {
+        assert.equal(identifierHits([t], src).length, 0, `${rel}: "${t}" is not an exported identifier`);
+        assert.equal(rawWordCount(src, t), 0, `${rel}: "${t}" is absent from the tree bytes (the model dropped it)`);
+      }
+    }
+    assert.ok(checked === 0 || checked === 2, "stalled fixtures resolve all-or-none");
+  });
+
+  it("the faithful P12 tree passes p6-brief-fit and the whole P6 gate (bar is satisfiable)", () => {
+    const p = loadBuild("default-check/sample1/bakery-florist-orders");
+    if (!p) return;
+    assert.equal(
+      briefFitSubstancePasses(p.brief, unionOf(p), p),
+      true,
+      "the genuinely brief-faithful tree clears the core bar",
+    );
+    assert.equal(runGate(p, 6).pass, true, "the faithful tree's P6 gate is green");
+  });
+
+  it("p6-test / p6-arch miss on the same genuine under-production, not on over-strictness", () => {
+    const stalled = loadBuild("default-check/bakery-florist-orders");
+    if (stalled) {
+      const ids = runGate(stalled, 6).unmet.map((u) => u.id);
+      assert.ok(ids.includes("p6-test"), "no green tree-run ⇒ lastTest absent ⇒ p6-test honestly unmet");
+      assert.ok(stalled.lastTest == null, "the stalled run recorded no passing self-test");
+      assert.ok(archTrace(stalled).missing.length > 0, "the tree materialised fewer files than the plan demands");
+    }
+    const faithful = loadBuild("default-check/sample1/bakery-florist-orders");
+    if (faithful) {
+      assert.equal(faithful.lastTest?.ok, true, "the faithful run minted a passing self-test");
+      assert.equal((faithful.lastTest as { label?: string } | null)?.label, "tested", "…promoted to a tested verdict");
+      assert.deepEqual(archTrace(faithful).missing, [], "every demanded capability maps to a real tree file");
+    }
+  });
+});

@@ -348,3 +348,36 @@ No silent default flips. The human door is never removed.
   gate (`lint.problems:5`) with lint `ok:true`; cross-family failover is genuinely unimplemented
   (the un-armed switch was deleted; `RAPIDTOOL_FALLBACK_PROVIDERS` is inert); the console seat records
   provenance but has no out-of-band delivery seam; prettier drift is measured, not gated.
+
+## Corrections in force — appended 2026-10-05 (346 wave batch 15 / X5 acceptance lane)
+
+This block supersedes the P6-resample, product-position and proof-layer claims above. Every number was
+re-derived this session from the file or command named beside it; where a doc and the bytes disagree,
+the bytes win.
+
+- **The chunked P6 resample is ARMED BY DEFAULT** (validator-selected; bounded ≤ `P6_SYNTH_CANDIDATES_MAX`
+  = 4; the armed chunk-lane default reads `P6_SYNTH_CHUNK_RETRY_CANDIDATES` at
+  `src/lib/synthesis-policy.ts:54`, 3 this session). `P6_SYNTH_CANDIDATES=1` (or `deps.candidates: 1`) is
+  the explicit opt-out and emits no `p6.synthesis.candidates` row. The **PRIMARY** single-module
+  best-of-N + whole-tree pre-seal resample stay **opt-in** (`resolveSynthesisCandidates` default 1).
+- **Measured product position, variance stated.** Campaign #2 `workingApp` was **2/8**
+  (`testruns\_report\CAMPAIGN2.md` §5); the final keyed samples disagreed —
+  `testruns\default-check\TUNING.json` **3/4** vs `testruns\tuning\TUNING.json` **1/6** (combined 4/10).
+  `mobile-companion` and `office-stock-tracker` each flip `true`→`false` between the two samples.
+  **Variance is the dominant factor; the binding wall is the P6 DoD gate** (`RT_E_GATE_PENDING`).
+  Delivery honesty held: **0 empty-substance commits · 0 red-tree commits**.
+- **Proof layer: 27 guards.** `node scripts/prevention/verify-prevention.mjs --all --selftest` →
+  `ok:true`, `guards:27`, `countFloor:27`, `fixtureIntegrity.missed:[]` ∧ `fixPresence.pending:[]`,
+  `skipped:[]`. (Supersedes the batch-10 "20 guards".)
+- **Resample telemetry is on the doctor.** `src/lib/acceptance.ts` reads the persisted
+  `p6.synthesis.candidates` rows back into `fleetMetrics.resample` (candidates requested/tried,
+  winners/no-winner, winner index per event, extra keyed calls = Σ max(0, tried−1)); `doctor.ts`'s
+  `fleetTelemetryFromProject` derives a record's telemetry from its own `logs`/`tokenUsage`. Measured
+  from the default-check journals: **3/4 runs · 17 events · 34 requested · 25 tried · 14 winners ·
+  3 no-winner · 8 extra keyed calls**. `extraTokens` is `null` with
+  `tokenAccounting:"not-recorded-in-journal"` — the row records candidates, not token usage; spend is
+  never fabricated.
+- **The machine reading states its sample count** so one lucky run cannot read as a fleet result:
+  `fleetAcceptance.sampleCount` + `evidencedRate`; `fleetMetrics.workingAppSamples` /
+  `workingAppPass` / `workingAppRate` / `workingAppByBrief` (per sample; an absent verdict is not
+  scored). Lane log: `fixes/346_final_wave.md`.
