@@ -599,3 +599,166 @@ test("FIX-2c: isParkRow — the generic parked tag wins anywhere; exit 1 / a str
     "no payload → not a park",
   );
 });
+
+// ---------------------------------------------------------------------------
+// fixes/347 (auditor lane A): the per-phase audit. The fixture below is copied
+// VERBATIM from the real campaign-3 artifact set for bakery-florist-orders —
+//   ../testruns/campaign3/bakery-florist-orders/build.json  (phases[6], tokenUsage, artifacts)
+//   ../testruns/campaign3/bakery-florist-orders/.rapidtool/logs/rapidtool.ndjson (the coded rows)
+// and carries the P6 hard-DoD red that stopped the run. The audit must show
+// what went right/wrong per phase from exactly these bytes, leaving the facts
+// the pipeline never persisted as explicit `unknown` — never fabricated.
+// ---------------------------------------------------------------------------
+
+/** phases[6], byte-copied from build.json (the P6 gate failed: false). */
+const REAL_P6_PHASE = {
+  id: 6,
+  status: "complete",
+  rejectionHistory: [],
+  gate: {
+    passed: false,
+    unmet: [
+      "Last template self-test run passed",
+      'Machine verification promoted a tested verdict (lastTest.label === "tested" with evidenceHash)',
+      "Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) — keyed tree synthesis ran (9 file(s)) but its union dropped the brief's required nouns core missing (19/40): back, bloom, console, crumb, dashboard, keeper, management, manager, marketing, office, oracle, persist, …; advisory missing (82/169): business, application, sells, baked, goods, flowers, room, manage, restocking, internal, not, roles, …",
+    ],
+    evidenceHash: "689887517",
+    checkedAt: 1791213144899,
+  },
+  startedAt: 1791212892344,
+  completedAt: 1791213124028,
+};
+
+/** artifacts[] for phase 6, id/phase copied verbatim from build.json. */
+const REAL_P6_ARTIFACTS = [
+  { id: "packet-6", phase: 6 },
+  { id: "6-code-tree-19373702", phase: 6 },
+  { id: "6-docs-p6-architecture-trace-reqtrace", phase: 6 },
+  { id: "gate-p6-68988751", phase: 6 },
+  { id: "harddod-p6-68988751", phase: 6 },
+];
+
+/** tokenUsage, copied verbatim from build.json (project-level; not per phase). */
+const REAL_TOKEN_USAGE = { promptTokens: 57727, completionTokens: 33263, calls: 14, cachedPromptTokens: 0 };
+
+/** The two distinct coded rows, copied verbatim from rapidtool.ndjson. NOTE:
+ *  the real rows carry `phase: null` AND omit `capture` — the CLI emitter
+ *  attributes no phase and no capture seam, so per-stage refusal attribution
+ *  is impossible from these bytes (fixes/347 names both emitter gaps; neither
+ *  is fabricated onto a phase here). The cast records the byte-faithful shape
+ *  (the pure-core RtEvent type requires `capture`; the emitted rows do not). */
+const REAL_CODED_ROWS = [
+  {
+    schema_version: 1,
+    ts: 1791213145522,
+    level: "error",
+    host: "cli",
+    sessionId: "cli-muvdwjan",
+    scope: "cli-command",
+    event: "cli.invocation",
+    message:
+      "P6 DoD unmet — hard gate blocks advance: p6-test, p6-verified, p6-brief-fit. — resolve the unmet DoD criteria before advancing.",
+    phase: null,
+    projectId: null,
+    code: "RT_E_GATE_PENDING",
+    stack: null,
+    payload: { cmd: "unattended", exitCode: 1 },
+    runRef: null,
+    elapsedMs: null,
+  },
+  {
+    schema_version: 1,
+    ts: 1791213162341,
+    level: "error",
+    host: "cli",
+    sessionId: "cli-muve269x",
+    scope: "cli-command",
+    event: "cli.invocation",
+    message: "the emitted project's own `npm run test` fail (exit 1)",
+    phase: null,
+    projectId: null,
+    code: "RT_E_TREE_RUN_FAILED",
+    stack: null,
+    payload: { cmd: "emit", exitCode: 1 },
+    runRef: null,
+    elapsedMs: null,
+  },
+] as unknown as RtEvent[];
+
+test("347: a real P6 phase renders status + failed gate + unmet criteria + artifact names from the verbatim artifact", () => {
+  const diag = buildDiagnosis(
+    baseInput({
+      audit: { phases: [REAL_P6_PHASE], artifacts: REAL_P6_ARTIFACTS, tokenUsage: REAL_TOKEN_USAGE },
+    }),
+  );
+  const p6 = diag.project.stages!.find((s) => s.phase === 6);
+  assert.ok(p6, "P6 stage present");
+  assert.equal(p6!.status, "complete");
+  assert.equal(p6!.gate!.passed, false, "the red gate is shown as red, not hidden");
+  assert.equal(p6!.gate!.unmet.length, 3);
+  assert.equal(p6!.gate!.unmet[0], "Last template self-test run passed");
+  assert.ok(p6!.gate!.unmet[2].startsWith("Brief-conformance:"), "third criterion verbatim");
+  assert.equal(p6!.gate!.evidenceHash, "689887517");
+  assert.equal(p6!.gate!.checkedAt, 1791213144899);
+  assert.deepEqual(p6!.artifacts, REAL_P6_ARTIFACTS.map((a) => a.id));
+  assert.equal(p6!.observed, true);
+  // Facts the pipeline never persisted for a phase must read UNKNOWN, not fake.
+  assert.ok(p6!.unknown.includes("keyed"), "per-phase keyed tokens/calls never emitted → unknown");
+  assert.ok(p6!.unknown.includes("treeRun"), "per-phase tree-run verdict never persisted → unknown");
+  assert.ok(p6!.unknown.includes("substance"), "per-phase substance verdict never persisted → unknown");
+  assert.equal(p6!.treeRun, null);
+  assert.equal(p6!.substance, null);
+});
+
+test("347: project-level tokenUsage is surfaced verbatim; per-phase attribution stays unknown", () => {
+  const diag = buildDiagnosis(baseInput({ audit: { phases: [REAL_P6_PHASE], tokenUsage: REAL_TOKEN_USAGE } }));
+  assert.deepEqual(diag.project.keyed, { calls: 14, promptTokens: 57727, completionTokens: 33263 });
+});
+
+test("347: the real phase-less coded rows are NEVER attributed to a fake phase — the gap names them", () => {
+  const diag = buildDiagnosis(
+    baseInput({
+      errors: REAL_CODED_ROWS,
+      audit: { phases: [REAL_P6_PHASE], artifacts: REAL_P6_ARTIFACTS, tokenUsage: REAL_TOKEN_USAGE },
+    }),
+  );
+  const p6 = diag.project.stages!.find((s) => s.phase === 6)!;
+  assert.deepEqual(p6.refusals, [], "no phase-bearing refusal row exists in the real bytes — nothing invented");
+  assert.ok(
+    /2 coded refusal row\(s\) carry no phase/.test(diag.project.stagesGap ?? ""),
+    `gap must name the unattributed refusals: ${diag.project.stagesGap}`,
+  );
+});
+
+test("347: a phase-bearing coded row IS attributed to its phase (unit input, clearly not artifact data)", () => {
+  const diag = buildDiagnosis(
+    baseInput({
+      errors: [rtRow({ phase: 6, scope: "cli-command", event: "cli.invocation", code: "RT_E_GATE_PENDING", message: "parked" })],
+      audit: { phases: [REAL_P6_PHASE] },
+    }),
+  );
+  const p6 = diag.project.stages!.find((s) => s.phase === 6)!;
+  assert.equal(p6.refusals.length, 1);
+  assert.equal(p6.refusals[0].code, "RT_E_GATE_PENDING");
+});
+
+test("347 fail-soft: a malformed/truncated audit never throws and surfaces the gap", () => {
+  const truncated = buildDiagnosis(baseInput({ audit: { phases: "[{\"id\":6,\"gate\":{\"pass" } as never }));
+  assert.equal(truncated.ok, true);
+  assert.deepEqual(truncated.project.stages, []);
+  assert.ok(/audit\.phases is not an array/.test(truncated.project.stagesGap ?? ""));
+  // Junk phase records are skipped and counted, not thrown.
+  const junk = buildDiagnosis(
+    baseInput({ audit: { phases: [null, 7, { id: "x" }, REAL_P6_PHASE] } as never }),
+  );
+  assert.equal(junk.ok, true);
+  assert.equal(junk.project.stages!.length, 1, "only the one well-formed record projects");
+  assert.ok(/3 malformed phase record\(s\) skipped/.test(junk.project.stagesGap ?? ""));
+});
+
+test("347 fail-soft: no audit supplied reads as explicit unknown, never a silent clean shape", () => {
+  const diag = buildDiagnosis(baseInput());
+  assert.deepEqual(diag.project.stages, []);
+  assert.ok(/no per-phase audit supplied/.test(diag.project.stagesGap ?? ""));
+});
+

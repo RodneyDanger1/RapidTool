@@ -16,9 +16,19 @@
 //  10. honest-park (ONLY exit-2 park rows in window — the designed outcome,
 //      never counted as an error; fixes/323 FIX-2c)  11. none-detected
 //
+// fixes/347 (auditor lane A): the per-phase audit (below) is ADDITIVE. It
+// reports, for each project phase that the observed data can speak to: status,
+// gate verdict (passed + unmet criteria), coded refusals, keyed tokens/calls,
+// tree-run verdict (ok + verdictHash), substance verdict and artifact names.
+// Any fact the observed data does NOT carry reads as an explicit `null` / `[]`
+// and is NAMED in `unknown[]` — never fabricated. The projector fails soft:
+// a malformed/partial audit yields an empty stage list plus a named `gap`,
+// never a throw.
+//
 // EXPORT SURFACE (compile against these — do not rename):
-//   buildDiagnosis · projectWildRun · isParkRow · type DiagnosisInput ·
-//   type DiagnosisJson · type DiagnosisCause
+//   buildDiagnosis · projectWildRun · projectDiagnosisStages · isParkRow ·
+//   type DiagnosisInput · type DiagnosisJson · type DiagnosisCause ·
+//   type DiagnosisProject · type DiagnosisStage · type DiagnosisAudit
 // ---------------------------------------------------------------------------
 
 import { ERROR_CODE_DOC, type ErrorCode } from "./errors.ts";
@@ -48,6 +58,64 @@ export type DiagnosisProject = {
   status: string | null;
   currentPhase: number | null;
   wildRun: DiagnosisWildRun;
+  /** fixes/347 — per-phase audit (additive). Empty ⇒ nothing observed; a
+   *  caller that supplies no audit gets `[]` plus a named `stagesGap`. */
+  stages?: DiagnosisStage[];
+  /** Project-level keyed LLM usage when observed (`tokenUsage`) — per-phase
+   *  attribution is NOT emitted by the pipeline, so it stays null here. */
+  keyed?: { calls: number | null; promptTokens: number | null; completionTokens: number | null } | null;
+  /** Non-fatal gap surfaced while projecting the audit (malformed/partial/
+   *  truncated input, or no audit supplied at all) — never a throw. */
+  stagesGap?: string | null;
+};
+
+/** One phase's gate record, verbatim-projected. `passed:null` = not observed. */
+export type DiagnosisStageGate = {
+  passed: boolean | null;
+  unmet: string[];
+  evidenceHash: string | null;
+  checkedAt: number | null;
+};
+
+/** One coded refusal row observed for a phase (from the error/telemetry feed). */
+export type DiagnosisStageRefusal = {
+  code: string | null;
+  event: string;
+  ts: number | null;
+  message: string;
+};
+
+/** Per-phase audit row (fixes/347). Every field is null / [] when the fact was
+ *  not present in the observed data — the missing keys are listed in `unknown`. */
+export type DiagnosisStage = {
+  phase: number;
+  status: string | null;
+  gate: DiagnosisStageGate | null;
+  refusals: DiagnosisStageRefusal[];
+  keyed: { calls: number | null; promptTokens: number | null; completionTokens: number | null } | null;
+  treeRun: { ok: boolean | null; verdictHash: string | null; verdict: string | null } | null;
+  substance: { verdict: string | null } | null;
+  artifacts: string[];
+  /** True only when at least one fact above came from observed data. */
+  observed: boolean;
+  /** Names of the facts NOT observed for this phase (explicit, never silent). */
+  unknown: string[];
+};
+
+/** Optional raw audit the caller may supply (e.g. the loaded Project). All
+ *  fields are `unknown` on purpose — the projector validates each. */
+export type DiagnosisAudit = {
+  /** Raw PhaseRecord[] (status/gate/id), each optionally carrying keyed/
+   *  treeRun/substance fields if a future emitter adds them. */
+  phases?: unknown;
+  /** Raw artifacts[] ({ id?, title?, phase? }). */
+  artifacts?: unknown;
+  /** Project-level tokenUsage ({ calls, promptTokens, completionTokens }). */
+  tokenUsage?: unknown;
+  /** Project-level tree-run outcome ({ ok, verdictHash, verdict }). */
+  treeRun?: unknown;
+  /** Project-level substance census ({ verdict }). */
+  substance?: unknown;
 };
 
 export type DiagnosisTimelineRow = {
@@ -96,6 +164,9 @@ export type DiagnosisInput = {
   crashSnapshot: { at: number; href: string } | null;
   /** Optional watcher surface (CAP-12) — additive field. */
   watcher?: { active: number; errors: number; refused: number };
+  /** fixes/347 — optional raw per-phase audit (the loaded Project, or its
+   *  persisted slice). Absent ⇒ every stage fact reads null/unknown. */
+  audit?: DiagnosisAudit;
 };
 
 export type DiagnosisJson = {
@@ -183,6 +254,235 @@ export function projectWildRun(raw: unknown, now: number): DiagnosisWildRun {
 }
 
 /**
+ * fixes/347 — pure, fail-soft projector from a raw audit (`DiagnosisAudit`)
+ * plus the observed error/telemetry rows into per-phase audit rows.
+ *
+ * Observed-data rules:
+ *   • `phases[]` (raw PhaseRecord[]) supplies id/status/gate, and — when a
+ *     record carries them — keyed/treeRun/substance (forward-compatible with a
+ *     future emitter; today the persisted records carry none of the three).
+ *   • `errors[]` supplies coded refusals, attributed by `row.phase`; a row
+ *     with a `RT_E_*` code or a park marker is a stage-level refusal.
+ *   • `artifacts[]` supplies names, attributed by `artifact.phase`.
+ *   • Project-level `treeRun`/`substance` apply to the phase they name (`phase`
+ *     field) when present; unbalanced ones stay unknown per phase.
+ *
+ * Anything not observed → `null`/`[]`, and the missing keys are named in
+ * `unknown`. Junk input never throws: a malformed audit returns `[]` + a named
+ * `gap` (which the caller surfaces verbatim).
+ */
+export function projectDiagnosisStages(
+  audit: unknown,
+  errors: RtEvent[],
+): { stages: DiagnosisStage[]; gap: string | null } {
+  try {
+    const rows = Array.isArray(errors) ? errors : [];
+    const auditSupplied = audit !== undefined && audit !== null;
+    const root =
+      audit && typeof audit === "object" && !Array.isArray(audit) ? (audit as Record<string, unknown>) : null;
+    const phasesRaw = root && Array.isArray(root.phases) ? root.phases : null;
+    const artifactsRaw = root && Array.isArray(root.artifacts) ? root.artifacts : null;
+
+    const gaps: string[] = [];
+    const numOrNull = (x: unknown): number | null =>
+      typeof x === "number" && Number.isFinite(x) ? x : null;
+    const strOrNull = (x: unknown): string | null =>
+      typeof x === "string" && x.length > 0 ? x : null;
+    const objOrNull = (x: unknown): Record<string, unknown> | null =>
+      x && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>) : null;
+    const keyedOf = (x: unknown) => {
+      const o = objOrNull(x);
+      if (!o) return null;
+      return {
+        calls: numOrNull(o.calls),
+        promptTokens: numOrNull(o.promptTokens),
+        completionTokens: numOrNull(o.completionTokens),
+      };
+    };
+    const treeRunOf = (x: unknown) => {
+      const o = objOrNull(x);
+      if (!o) return null;
+      return {
+        ok: typeof o.ok === "boolean" ? o.ok : null,
+        verdictHash: strOrNull(o.verdictHash),
+        verdict: strOrNull(o.verdict),
+      };
+    };
+    const substanceOf = (x: unknown) => {
+      const o = objOrNull(x);
+      if (!o) return null;
+      const v = strOrNull(o.verdict);
+      return v === null && !("verdict" in o) ? null : { verdict: v };
+    };
+
+    if (audit !== undefined && audit !== null && root === null && !Array.isArray(audit)) {
+      return { stages: [], gap: "audit is not an object — per-phase facts unknown" };
+    }
+
+    type Acc = {
+      phase: number;
+      status: string | null;
+      gate: DiagnosisStageGate | null;
+      refusals: DiagnosisStageRefusal[];
+      keyed: DiagnosisStage["keyed"];
+      treeRun: DiagnosisStage["treeRun"];
+      substance: DiagnosisStage["substance"];
+      artifacts: string[];
+      sawStatus: boolean;
+      sawGate: boolean;
+    };
+    const byPhase = new Map<number, Acc>();
+    const ensure = (phase: number): Acc => {
+      let acc = byPhase.get(phase);
+      if (!acc) {
+        acc = {
+          phase,
+          status: null,
+          gate: null,
+          refusals: [],
+          keyed: null,
+          treeRun: null,
+          substance: null,
+          artifacts: [],
+          sawStatus: false,
+          sawGate: false,
+        };
+        byPhase.set(phase, acc);
+      }
+      return acc;
+    };
+
+    if (phasesRaw) {
+      let junk = 0;
+      for (const rec of phasesRaw) {
+        const o = objOrNull(rec);
+        const id = o ? numOrNull(o.id) : null;
+        if (!o || id === null || !Number.isInteger(id)) {
+          junk += 1;
+          continue;
+        }
+        const acc = ensure(id);
+        const status = strOrNull(o.status);
+        if (status !== null) {
+          acc.status = status;
+          acc.sawStatus = true;
+        }
+        const gate = objOrNull(o.gate);
+        if (gate) {
+          acc.gate = {
+            passed: typeof gate.passed === "boolean" ? gate.passed : null,
+            unmet: Array.isArray(gate.unmet) ? gate.unmet.filter((u): u is string => typeof u === "string") : [],
+            evidenceHash: strOrNull(gate.evidenceHash),
+            checkedAt: numOrNull(gate.checkedAt),
+          };
+          acc.sawGate = true;
+        } else if (o.gate === null) {
+          acc.sawGate = true; // explicit null = the phase recorded no gate
+        }
+        acc.keyed = acc.keyed ?? keyedOf(o.keyed);
+        acc.treeRun = acc.treeRun ?? treeRunOf(o.treeRun);
+        acc.substance = acc.substance ?? substanceOf(o.substance);
+      }
+      if (junk > 0) gaps.push(`${junk} malformed phase record(s) skipped`);
+    }
+
+    // Project-level treeRun/substance: attribute to the phase they name.
+    const projTree = treeRunOf(root?.treeRun);
+    const projSub = substanceOf(root?.substance);
+    if (projTree && root) {
+      const ph = numOrNull(root.treeRun && (root.treeRun as Record<string, unknown>).phase);
+      if (ph !== null) ensure(ph).treeRun = ensure(ph).treeRun ?? projTree;
+      else gaps.push("project treeRun carries no phase — not attributed");
+    }
+    if (projSub && root) {
+      const ph = numOrNull(root.substance && (root.substance as Record<string, unknown>).phase);
+      if (ph !== null) ensure(ph).substance = ensure(ph).substance ?? projSub;
+      else gaps.push("project substance carries no phase — not attributed");
+    }
+
+    // Coded refusals + parks, attributed by row.phase.
+    let unattributed = 0;
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const code = strOrNull((row as RtEvent).code);
+      const park = isParkRow(row);
+      if (!(park || (code !== null && /^RT_E_[A-Z0-9_]+$/.test(code)))) continue;
+      const ph = numOrNull((row as RtEvent).phase);
+      if (ph === null || !Number.isInteger(ph)) {
+        unattributed += 1;
+        continue;
+      }
+      ensure(ph).refusals.push({
+        code,
+        event: typeof (row as RtEvent).event === "string" ? (row as RtEvent).event : "",
+        ts: numOrNull((row as RtEvent).ts),
+        message: typeof (row as RtEvent).message === "string" ? (row as RtEvent).message : "",
+      });
+    }
+    if (unattributed > 0) gaps.push(`${unattributed} coded refusal row(s) carry no phase — not attributed`);
+
+    // Artifact names, attributed by artifact.phase.
+    if (artifactsRaw) {
+      for (const art of artifactsRaw) {
+        const o = objOrNull(art);
+        if (!o) continue;
+        const ph = numOrNull(o.phase);
+        const name = strOrNull(o.id) ?? strOrNull(o.title);
+        if (ph === null || !Number.isInteger(ph) || name === null) continue;
+        ensure(ph).artifacts.push(name);
+      }
+    }
+
+    const stages: DiagnosisStage[] = [...byPhase.values()]
+      .sort((a, b) => a.phase - b.phase)
+      .map((acc) => {
+        const unknown: string[] = [];
+        if (!acc.sawStatus) unknown.push("status");
+        if (!acc.sawGate) unknown.push("gate");
+        if (acc.keyed === null) unknown.push("keyed");
+        if (acc.treeRun === null) unknown.push("treeRun");
+        if (acc.substance === null) unknown.push("substance");
+        if (acc.artifacts.length === 0) unknown.push("artifacts");
+        const observed =
+          acc.sawStatus ||
+          acc.sawGate ||
+          acc.refusals.length > 0 ||
+          acc.keyed !== null ||
+          acc.treeRun !== null ||
+          acc.substance !== null ||
+          acc.artifacts.length > 0;
+        return {
+          phase: acc.phase,
+          status: acc.status,
+          gate: acc.gate,
+          refusals: acc.refusals,
+          keyed: acc.keyed,
+          treeRun: acc.treeRun,
+          substance: acc.substance,
+          artifacts: acc.artifacts,
+          observed,
+          unknown,
+        };
+      });
+
+    if (phasesRaw === null && auditSupplied) {
+      gaps.push("audit.phases is not an array — per-phase status/gate unknown");
+    }
+    if (!auditSupplied) {
+      gaps.push(
+        "no per-phase audit supplied — stage status/gate/keyed/treeRun/substance/artifacts unknown",
+      );
+    }
+    return { stages, gap: gaps.length > 0 ? gaps.join("; ") : null };
+  } catch (err) {
+    return {
+      stages: [],
+      gap: `audit projection failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
  * fixes/323 FIX-2c (F-3): an exit-2 PARK row — `run`/`gate`/`resume`/
  * `unattended` parked at a HITL gate or `blocked`, stamped by the CLI as a
  * `cli.invocation` row with `payload.exitCode === 2` (plus `payload.parked:
@@ -223,6 +523,23 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisJson {
     status: null,
     currentPhase: null,
     wildRun: null,
+  };
+  // fixes/347: the per-phase audit is projected ONCE here, fail-soft. Existing
+  // callers that supply no audit get `stages:[]` + a named gap; the ranking
+  // heuristics above/below are untouched by it.
+  const auditProjection = projectDiagnosisStages(src.audit, errors);
+  const projectOut: DiagnosisProject = {
+    ...project,
+    stages: auditProjection.stages,
+    keyed: (() => {
+      const o = src.audit && typeof src.audit.tokenUsage === "object" && src.audit.tokenUsage !== null
+        ? (src.audit.tokenUsage as Record<string, unknown>)
+        : null;
+      if (!o) return null;
+      const n = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) ? x : null);
+      return { calls: n(o.calls), promptTokens: n(o.promptTokens), completionTokens: n(o.completionTokens) };
+    })(),
+    stagesGap: auditProjection.gap ?? null,
   };
   const watchdog: DiagnosisWatchdog = src.watchdog ?? {
     lastHeartbeatAt: null,
@@ -464,7 +781,7 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisJson {
     generatedAt: now,
     source: src.source,
     session: src.session,
-    project,
+    project: projectOut,
     errors: errors.map((e) => ({
       ts: e.ts,
       level: e.level,
