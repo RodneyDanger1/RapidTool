@@ -428,6 +428,12 @@ function respond(result, exitCode) {
         // cli.invocation was never emitted — the verb + outcome now ride the
         // payload instead of an invented event name.
         event: "cli.invocation",
+        // fixes/348 (W1): RtEventSeed.capture is REQUIRED (rt-events.ts:110) —
+        // the exit rows used to omit it entirely. Point it at this emit site.
+        capture: "scripts/rapidtool-cli.mjs:415",
+        // fixes/348 (W1): the loaded project's current phase when one was
+        // loaded, else the honest null (never a guessed phase).
+        phase: CLI_PHASE,
         message:
           out.ok === false && typeof out.error === "string"
             ? out.error.slice(0, 200)
@@ -789,6 +795,11 @@ const RT_PATH = pathToFileURL(
 const RT_DIAG_PATH = pathToFileURL(
   join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "diagnose.ts"),
 ).href;
+// fixes/348 (W1): the read-only pipeline review (src/lib/pipeline-review.ts),
+// surfaced additively on the diagnose envelope as top-level `review`.
+const RT_REVIEW_PATH = pathToFileURL(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "pipeline-review.ts"),
+).href;
 // W40 N5 (OPS-10): the budget constants' single authority — `diagnose.ts`
 // itself imports WILD_STEP_BUDGET_MS / CHAT_STEP_BUDGET_MS from here, so the
 // CLI reads them too instead of duplicating their values as literals.
@@ -799,8 +810,13 @@ const RT_EVENTS_PATH = pathToFileURL(
 let rtServer = null;
 let rtDiag = null;
 let rtEvents = null;
+let rtReview = null;
 let rtSessionId = `cli-${Date.now().toString(36)}`;
 let CLI_PROJECT = null;
+// fixes/348 (W1): the loaded project's current phase, stamped onto the
+// cli.invocation exit row (RtEventSeed.phase). Set by makeLoader/the diagnose
+// load; stays null when no project was loaded (the honest floor).
+let CLI_PHASE = null;
 
 async function ensureRtAppender() {
   if (rtServer) return;
@@ -1305,7 +1321,10 @@ async function main() {
     // verb fell through and ran with `undefined` (audit 216y §2.3 G1).
     if (proj.error !== undefined) return respond({ ok: false, error: proj.error, code: "RT_E_VALIDATION" }, 1);
     try {
-      return h.loadProject(proj.value);
+      const project = h.loadProject(proj.value);
+      // fixes/348 (W1): stamp the loaded project's phase onto the exit row.
+      CLI_PHASE = typeof project?.currentPhase === "number" ? project.currentPhase : null;
+      return project;
     } catch (err) {
       // Classify the OBJECT: a read ENOENT → RT_E_PROJECT_MISSING; a malformed
       // project file (JSON/shape) → RT_E_VALIDATION. Prose could not tell them apart.
@@ -5353,6 +5372,7 @@ async function main() {
         try {
           if (!rtDiag) rtDiag = await import(RT_DIAG_PATH);
           if (!rtEvents) rtEvents = await import(RT_EVENTS_PATH);
+          if (!rtReview) rtReview = await import(RT_REVIEW_PATH);
           const rows = rtServer
             ? rtServer.readRtTail(rtServer.resolveLogDir(CLI_PROJECT), 200)
             : [];
@@ -5379,6 +5399,12 @@ async function main() {
           let status = null;
           let currentPhase = null;
           let wildRun = null;
+          // fixes/348 (W1): the raw per-phase audit + the read-only pipeline
+          // review, both built from the SAME loaded project. Absent when no
+          // --project was supplied — the projector names the gap, the review
+          // stays null (never a fabricated empty project).
+          let audit;
+          let review = null;
           // R12-f07: the growth surface below must carry REAL counts, not the
           // hardcoded zeros that made the detector inert (projectFile: 0 even
           // for a measured 158,302 B file). Filled inside the load block.
@@ -5408,6 +5434,19 @@ async function main() {
               // derived ONLY for a progressing run (active && !pause), never a
               // growing `now - lastAutoAt` on a parked/stopped run.
               wildRun = rtDiag.projectWildRun(p.wildRun, Date.now());
+              // fixes/348 (W1): the loaded project is the audit's authority —
+              // its phases/artifacts/tokenUsage feed the per-phase projector
+              // (the coded rows already ride `errors` below), and the SAME
+              // project feeds the read-only pipeline review (W1 · 347).
+              CLI_PHASE = currentPhase;
+              audit = rtDiag.auditFromProject(p);
+              // The review is pure, but diagnose's contract is "never throws":
+              // a projection failure degrades to the honest null, never exit 4.
+              try {
+                review = rtReview.buildPipelineReview(p);
+              } catch {
+                review = null;
+              }
             } catch (loadErr) {
               persistHealth = {
                 ok: false,
@@ -5505,10 +5544,15 @@ async function main() {
             },
             persistHealth,
             crashSnapshot: null,
+            // fixes/348 (W1): the per-phase audit built from the loaded project
+            // (undefined when no project → the projector's honest named gap).
+            audit,
           });
           // K7 item 9 (W40 N5 + rendezvous fix): the computed checkpoint snapshot now
           // actually RIDES the envelope — it was computed and dropped (assigned-unused).
-          respond({ ok: true, ...diagnosis, checkpoint }, 0);
+          // fixes/348 (W1): the read-only pipeline review (pipeline-review.ts)
+          // now rides too — the additively reachable consumer W1 wired.
+          respond({ ok: true, ...diagnosis, checkpoint, review }, 0);
         } catch (err) {
           respond(
             {

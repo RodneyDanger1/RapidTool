@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildDiagnosis, isParkRow, projectWildRun, type DiagnosisInput } from "./diagnose.ts";
+import { buildDiagnosis, auditFromProject, isParkRow, projectWildRun, type DiagnosisInput } from "./diagnose.ts";
 import { WILD_STEP_BUDGET_MS } from "./rt-events.ts";
 import type { RtEvent } from "./rt-events.ts";
 
@@ -761,4 +761,56 @@ test("347 fail-soft: no audit supplied reads as explicit unknown, never a silent
   assert.deepEqual(diag.project.stages, []);
   assert.ok(/no per-phase audit supplied/.test(diag.project.stagesGap ?? ""));
 });
+
+// ---------------------------------------------------------------------------
+// fixes/348 (W1) — auditFromProject: the thin pure builder the CLI diagnose
+// verb passes so the envelope's per-phase `stages` are REAL, not the empty
+// `[]` + "no per-phase audit supplied" gap every run used to carry.
+// ---------------------------------------------------------------------------
+
+test("348 (W1): auditFromProject projects phases/artifacts/tokenUsage from a loaded project — stages become real", () => {
+  // A trimmed REAL project record (the shape h.loadProject returns; the fields
+  // auditFromProject reads are byte-faithful to the campaign-3 P6 fixture).
+  const project = {
+    phases: [REAL_P6_PHASE],
+    artifacts: REAL_P6_ARTIFACTS,
+    tokenUsage: REAL_TOKEN_USAGE,
+    // Fields the builder must IGNORE (unchanged in the audit).
+    name: "bakery-florist-orders",
+    currentPhase: 6,
+  };
+  const audit = auditFromProject(project);
+  assert.equal(audit.phases, project.phases, "phases pass through verbatim (the projector validates)");
+  assert.equal(audit.artifacts, project.artifacts);
+  assert.equal(audit.tokenUsage, project.tokenUsage);
+  assert.deepEqual(Object.keys(audit).sort(), ["artifacts", "phases", "tokenUsage"]);
+
+  const diag = buildDiagnosis(baseInput({ audit }));
+  const p6 = diag.project.stages!.find((s) => s.phase === 6)!;
+  assert.ok(p6, "the project's P6 record projects into a real stage");
+  assert.equal(p6.status, "complete");
+  assert.equal(p6.gate!.passed, false);
+  assert.equal(p6.observed, true);
+  assert.deepEqual(p6.artifacts, REAL_P6_ARTIFACTS.map((a) => a.id));
+  assert.deepEqual(diag.project.keyed, { calls: 14, promptTokens: 57727, completionTokens: 33263 });
+  assert.equal(
+    /no per-phase audit supplied/.test(diag.project.stagesGap ?? ""),
+    false,
+    "a supplied audit never reads as the no-audit gap",
+  );
+});
+
+test("348 (W1): auditFromProject is fail-soft — junk input yields an empty audit, never a throw", () => {
+  for (const junk of [null, undefined, 42, "x", true, []]) {
+    assert.deepEqual(auditFromProject(junk), {}, `junk ${String(junk)} → empty audit`);
+  }
+  // A project missing phases/artifacts/tokenUsage carries none of the keys.
+  assert.deepEqual(auditFromProject({ name: "x" }), {});
+  // Non-array phases/artifacts are not smuggled in.
+  assert.deepEqual(auditFromProject({ phases: "nope", artifacts: 3, tokenUsage: "x" }), {});
+  const diag = buildDiagnosis(baseInput({ audit: auditFromProject({}) }));
+  assert.deepEqual(diag.project.stages, []);
+  assert.ok(/audit\.phases is not an array/.test(diag.project.stagesGap ?? ""), "an empty audit names the missing phases");
+});
+
 

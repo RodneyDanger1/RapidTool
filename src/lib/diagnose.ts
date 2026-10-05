@@ -26,8 +26,8 @@
 // never a throw.
 //
 // EXPORT SURFACE (compile against these — do not rename):
-//   buildDiagnosis · projectWildRun · projectDiagnosisStages · isParkRow ·
-//   type DiagnosisInput · type DiagnosisJson · type DiagnosisCause ·
+//   buildDiagnosis · projectWildRun · projectDiagnosisStages · auditFromProject ·
+//   isParkRow · type DiagnosisInput · type DiagnosisJson · type DiagnosisCause ·
 //   type DiagnosisProject · type DiagnosisStage · type DiagnosisAudit
 // ---------------------------------------------------------------------------
 
@@ -480,6 +480,35 @@ export function projectDiagnosisStages(
       gap: `audit projection failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+/**
+ * fixes/348 (W1): thin, pure projection from a loaded `Project` to the raw
+ * `DiagnosisAudit` the per-phase projector (`projectDiagnosisStages`) consumes
+ * — the wiring that makes a CLI `diagnose --project <build.json>` carry real
+ * per-phase rows instead of the empty `stages` + `no per-phase audit supplied`
+ * gap.
+ *
+ * The project is the ONLY authority here: its persisted `phases[]` supply
+ * status/gate, its `artifacts[]` supply names (attributed by `phase`), and its
+ * `tokenUsage` supplies the project-level keyed spend. The coded refusal rows
+ * are NOT read here — they are the caller's `errors` input to buildDiagnosis
+ * and reach the projector attributed by `row.phase` (no fact is duplicated
+ * onto a phase).
+ *
+ * Junk input (null / non-object / array) → an empty audit, never a throw; the
+ * projector then reports its own honest "no per-phase audit supplied" gap.
+ */
+export function auditFromProject(project: unknown): DiagnosisAudit {
+  if (!project || typeof project !== "object" || Array.isArray(project)) return {};
+  const p = project as Record<string, unknown>;
+  const audit: DiagnosisAudit = {};
+  if (Array.isArray(p.phases)) audit.phases = p.phases;
+  if (Array.isArray(p.artifacts)) audit.artifacts = p.artifacts;
+  if (p.tokenUsage && typeof p.tokenUsage === "object" && !Array.isArray(p.tokenUsage)) {
+    audit.tokenUsage = p.tokenUsage;
+  }
+  return audit;
 }
 
 /**
