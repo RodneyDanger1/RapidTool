@@ -29,6 +29,8 @@ import {
   criteriaMeanExcluding,
   meetsRunKindBar,
   firstRunBarIsAdmissible,
+  stageQualitySignals,
+  PIPELINE_STAGE_IDS,
   FIRST_RUN_UNSCOREABLE_CRITERIA,
   FIRST_RUN_BAR_MEAN_ATLEAST,
   type MakerBarWhen,
@@ -1235,5 +1237,54 @@ describe("342-3 per-run-kind corpus bar", () => {
 
   test("FIRST_RUN_BAR_MEAN_ATLEAST is 1 — the only first-run threshold that demands every scoreable criterion", () => {
     assert.equal(FIRST_RUN_BAR_MEAN_ATLEAST, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/347 (Lane B) — stageQualitySignals: additive stage visibility that
+// never touches the M1..M9 card.
+// ---------------------------------------------------------------------------
+
+describe("stageQualitySignals (347)", () => {
+  test("reads the persisted phase status/gate and journals codes + lesson rows per stage", () => {
+    const p = project({
+      phases: [
+        phase(0, { passed: true, evidenceHash: "h0" }),
+        { id: 6, status: "awaiting_hitl", gate: null } as never,
+      ],
+      logs: [
+        { ts: 1, phase: 6, level: "error", event: "p6.synthesis.refused", detail: "RT_E_PLAN_UNDERPRODUCED · chunk 2/8 refused — proximate RT_E_VALIDATION" },
+        { ts: 2, phase: 6, level: "error", event: "p6.synthesis.refused", detail: "RT_E_PLAN_UNDERPRODUCED again" },
+        { ts: 3, phase: 6, level: "info", event: "lesson.capture", detail: "lesson-template-emission-96c804dc" },
+      ],
+      artifacts: [
+        { id: "a", phase: 0, kind: "scorecard", title: "Scorecard", body: "" },
+        { id: "b", phase: 6, kind: "gate", title: "P6 gate", body: "" },
+      ],
+    });
+    const sig = stageQualitySignals(p);
+    assert.equal(sig.length, PIPELINE_STAGE_IDS.length);
+    assert.equal(sig[0].status, "complete");
+    assert.equal(sig[0].gate?.passed, true);
+    assert.equal(sig[0].gate?.evidenceHash, "h0");
+    const p6 = sig.find((s) => s.id === 6)!;
+    assert.equal(p6.status, "awaiting_hitl");
+    assert.equal(p6.gate, null);
+    assert.deepEqual(p6.codedRefusals, ["RT_E_PLAN_UNDERPRODUCED", "RT_E_VALIDATION"], "deduped, first-seen order");
+    assert.equal(p6.lessons, 1);
+    assert.deepEqual(p6.lessonDetails, ["lesson-template-emission-96c804dc"]);
+    assert.deepEqual(p6.artifacts, ["P6 gate"]);
+  });
+
+  test("missing phase record reads as null status/gate, empty codes — never inferred", () => {
+    const sig = stageQualitySignals(project());
+    assert.ok(sig.every((s) => s.status === null && s.gate === null && s.codedRefusals.length === 0 && s.lessons === 0));
+  });
+
+  test("stageQualitySignals is purely additive — it never mutates the project record", () => {
+    const p = project({ phases: [phase(0, { passed: true })], logs: [{ ts: 1, phase: 0, level: "info", event: "x", detail: "RT_E_A" }] });
+    const snap = JSON.stringify(p);
+    stageQualitySignals(p);
+    assert.equal(JSON.stringify(p), snap, "the visibility pass owns no mutation");
   });
 });

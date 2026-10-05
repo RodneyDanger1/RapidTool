@@ -42,7 +42,7 @@
  *   M9 on-time    — run stopped on time; a refused/abnormal stop is 1 only
  *                   when it parked LOUDLY with a code (never silent).
  */
-import type { Project } from "./types.ts";
+import type { Project, PhaseStatus } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 import { canonicalStem } from "./algorithms.ts";
 import { isStubSource } from "./dod.ts";
@@ -936,4 +936,84 @@ export function meetsRunKindBar(
   const bar = barForRunKind(when, runKind);
   const mean = criteriaMeanExcluding(card, bar.excludeCriteria);
   return { ok: mean >= bar.meanAtLeast, mean, meanAtLeast: bar.meanAtLeast, excludeCriteria: bar.excludeCriteria };
+}
+
+// ---------------------------------------------------------------------------
+// 347 (Lane B) — stage-level quality signals.
+//
+// A purely ADDITIVE, deterministic visibility pass over the persisted record:
+// per stage, what the phase record says, which RT_E_* codes its logs journaled,
+// which lesson.capture rows it carries, and which artifacts it produced.
+//
+// This is NOT a tenth rubric criterion: scoreMaker's M1..M9 card (total/mean)
+// is untouched, so every existing score keeps its meaning. Missing data reads
+// as null / [] — never inferred, never fabricated.
+// ---------------------------------------------------------------------------
+
+/** The canonical pipeline stages P0..P12. */
+export const PIPELINE_STAGE_IDS: readonly number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+const RT_E_CODE_RE = /RT_E_[A-Z0-9_]+/g;
+
+export type StageQualitySignal = {
+  id: number;
+  /** Persisted phase status, or null when no phase record exists for this stage. */
+  status: PhaseStatus | null;
+  /** Recorded DoD gate, or null when none was persisted. */
+  gate: { passed: boolean; unmet: string[]; evidenceHash: string | null } | null;
+  /** RT_E_* codes journaled by this stage's logs (deduped, order-preserving). */
+  codedRefusals: string[];
+  /** lesson.capture rows at this stage. */
+  lessons: number;
+  /** The raw lesson.capture details at this stage (verbatim log details). */
+  lessonDetails: string[];
+  /** Titles of artifacts persisted for this stage (record order). */
+  artifacts: string[];
+};
+
+/** Every RT_E_* code named in `detail`, deduped in first-seen order. */
+function codedRefusalsIn(detail: unknown): string[] {
+  if (typeof detail !== "string") return [];
+  const out: string[] = [];
+  for (const m of detail.matchAll(RT_E_CODE_RE)) {
+    if (!out.includes(m[0])) out.push(m[0]);
+  }
+  return out;
+}
+
+/** One quality signal per stage, derived only from `project`. `stageIds`
+ *  overrides the default P0..P12 set (test/UI convenience). PURE. */
+export function stageQualitySignals(
+  project: Project,
+  stageIds: readonly number[] = PIPELINE_STAGE_IDS,
+): StageQualitySignal[] {
+  const logs = Array.isArray(project.logs) ? project.logs : [];
+  const artifacts = Array.isArray(project.artifacts) ? project.artifacts : [];
+  return [...stageIds].map((id) => {
+    const rec = (project.phases ?? []).find((p) => p && p.id === id) ?? null;
+    const g = rec && rec.gate && typeof rec.gate === "object" ? rec.gate : null;
+    const stageLogs = logs.filter((l) => l && l.phase === id);
+    const codedRefusals: string[] = [];
+    for (const l of stageLogs) {
+      for (const code of codedRefusalsIn(l.detail)) {
+        if (!codedRefusals.includes(code)) codedRefusals.push(code);
+      }
+    }
+    const lessonLogs = stageLogs.filter((l) => l.event === "lesson.capture");
+    return {
+      id,
+      status: rec ? rec.status : null,
+      gate: g
+        ? {
+            passed: g.passed === true,
+            unmet: Array.isArray(g.unmet) ? g.unmet.filter((u): u is string => typeof u === "string") : [],
+            evidenceHash: typeof g.evidenceHash === "string" && g.evidenceHash.length > 0 ? g.evidenceHash : null,
+          }
+        : null,
+      codedRefusals,
+      lessons: lessonLogs.length,
+      lessonDetails: lessonLogs.map((l) => l.detail),
+      artifacts: artifacts.filter((a) => a && a.phase === id).map((a) => a.title),
+    };
+  });
 }
