@@ -420,3 +420,48 @@ disagree, the bytes win.
   and it committed).
 - **Tests:** `node --experimental-strip-types --test --test-reporter=tap src/lib/acceptance.test.ts
   src/lib/doctor.test.ts` → **108 pass / 0 fail**; `npx tsc --noEmit` exit 0.
+
+## Corrections in force — appended 2026-10-05 (346 wave batch 17 / final finish wave; HEAD `b33c84e`)
+
+This block supersedes EVERY earlier gate-of-record, guard-count and product-position claim above. The
+values below were re-derived from the commands named beside them; where a doc and the bytes disagree,
+the bytes win.
+
+### Gate of record — GREEN on the frozen tree (`b33c84e`, clean tree)
+
+`& 'C:\Program Files\Git\bin\bash.exe' scripts/gate.sh`:
+
+```json
+{"ok":true,"double":false,"flakes":[],"hardFails":[],"quarantined":[],"quarantineCandidates":[],"skips":2,"wallMs":535603,"gates":{"typecheck":{"ok":true,"exit":0,"ms":67827},"lint":{"ok":true,"exit":0,"ms":23930,"problems":null},"assertionGaps":{"ok":true,"exit":0,"ms":1093},"build":{"ok":true,"exit":0,"ms":14082},"prevention":{"ok":true,"exit":0,"ms":7137,"missed":[],"pending":[],"skipped":[],"count":34,"countFloor":34},"testsScripts":{"ok":true,"exit":0,"ms":248606,"pass":538,"fail":0,"skipped":0},"testsLib":{"ok":true,"exit":0,"ms":172052,"pass":3779,"fail":0,"skipped":2}}}
+```
+
+### Proof layer — 34 guards (supersedes the batch-10 "20" and batch-15 "27")
+
+`node scripts/prevention/verify-prevention.mjs --all --selftest` → `ok:true`, `guards:34`,
+`countFloor:34`, `fixtureIntegrity.missed:[]`, `fixPresence.pending:[]`, `skipped:[]`, and the
+disjoint+total `fixPresenceInvariant` clean. Five new guards landed this wave (G1-01 intent-first
+query, S3-01 floor-refusal code, D2-01 seal floor code, D3-01 `tree-run` RUNLOCK wiring, D1-01
+best-tree gate recompute), each with a mutation control.
+
+### Product position — campaign #3 = `workingApp` 4/8 (best yet; variance stated)
+
+Campaign #3 (keyed, 8 briefs, armed chunked resample default 3, `P6_SYNTH_CANDIDATES` unset): **4 of 8**
+`workingApp`; **0 empty-substance commits · 0 red-tree commits**; 2 trees withheld coded. Ledger
+948,586 / 3,000,000 tokens. The S-1 two-sample run on a frozen tree scored 1/4 and 2/4 (combined 3/8).
+Fresh final-wave samples combined: 7/16 (43.75%); all history 13/42 (≈31%). Trajectory: campaign #1
+**0/8** → #2 **2/8** → #3 **4/8**. The binding wall remains the P6 DoD gate (`RT_E_GATE_PENDING`), and
+the clause that fails most often is UI wiring. Variance is the dominant factor — the same brief flips
+between samples, so no single run is the product. Full tables: `testruns\_report\CAMPAIGN3.md`.
+
+### Other batch-17 landings (declare-or-strike)
+
+- `headless.keepBestTree` now recomputes the phase-6 gate over the PERSISTED tree and logs
+  `p6.journey.gate-recomputed`, so a recorded verdict can no longer describe an earlier cycle's tree.
+- The below-floor `planUnderproductionSeal` is the deciding reason on the default `emit` path.
+- The in-run RUNLOCK guard is wired into the `tree-run` arm too (`RT_E_SRC_EDITED_DURING_RUN`).
+- `RT_E_LLM_REJECTED` refusals on a below-floor tree now code as `RT_E_PLAN_UNDERPRODUCED`.
+- Served-provider provenance is stamped at the LLM registry dispatch boundary (`ServedLlmResult`);
+  `verifyAndFix` is strictly subset-monotone (a compile-failure sentinel can no longer read as progress).
+- Eleven guard `expectedCode` values are registered, with a test that every registry `RT_E_*` resolves
+  in `ERROR_CODE_DOC`.
+- The last lint error was fixed (a regex literal-space nit); `lint.problems` is `null` again.
