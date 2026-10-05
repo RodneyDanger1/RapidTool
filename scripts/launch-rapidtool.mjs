@@ -40,6 +40,44 @@ export function resolvePort(raw) {
 const PORT = resolvePort(process.env.PORT);
 const URL = `http://127.0.0.1:${PORT}/`;
 
+/**
+ * Stable on-disk directory for the embedded PGLite, OUTSIDE the repo so a
+ * build/clean never drops the app's server-side data. An explicit
+ * `RAPIDTOOL_PGLITE_DIR` in the environment always wins (the launcher and a
+ * manual run agree); otherwise it defaults per-user: `%LOCALAPPDATA%\RapidTool\
+ * pglite` on Windows, `$XDG_DATA_HOME/RapidTool/pglite` (or
+ * `~/.local/share/RapidTool/pglite`) elsewhere. Returns null only when no home
+ * directory is discoverable — the child then keeps PGLite's in-memory default.
+ * @param {NodeJS.ProcessEnv} env
+ * @param {NodeJS.Platform} [platform]
+ * @returns {string | null}
+ */
+export function resolvePgliteDir(env, platform = process.platform) {
+  const override = env.RAPIDTOOL_PGLITE_DIR?.trim();
+  if (override) return override;
+  if (platform === "win32") {
+    const local = env.LOCALAPPDATA?.trim();
+    return local ? join(local, "RapidTool", "pglite") : null;
+  }
+  const xdg = env.XDG_DATA_HOME?.trim();
+  if (xdg) return join(xdg, "RapidTool", "pglite");
+  const home = (env.HOME ?? env.USERPROFILE)?.trim();
+  return home ? join(home, ".local", "share", "RapidTool", "pglite") : null;
+}
+
+/**
+ * Resolve the PGLite dir, create it, and export it to `process.env` so a child
+ * spawned from here (the Windows server, or the POSIX preview.mjs delegate)
+ * opens the SAME persistent DB. Idempotent; returns the dir or null.
+ */
+function applyPgliteDir() {
+  const dir = resolvePgliteDir(process.env);
+  if (!dir) return null;
+  mkdirSync(dir, { recursive: true });
+  process.env.RAPIDTOOL_PGLITE_DIR = dir;
+  return dir;
+}
+
 export function parseLaunchArgs(argv) {
   const [action, ...rest] = argv;
   if (action === undefined || action === "") return { action: "start" };
@@ -189,6 +227,8 @@ async function startWin() {
     console.error("[launch] build failed — nothing to serve");
     return 1;
   }
+  const pgliteDir = applyPgliteDir();
+  if (pgliteDir) console.log(`[launch] app data lives at ${pgliteDir}`);
   mkdirSync(dirname(LOG_FILE), { recursive: true });
   const log = openSync(LOG_FILE, "a");
   // Spawn the wrapper directly (not the `npm` shim, which is npm.cmd on win32):
@@ -234,6 +274,8 @@ async function run() {
       console.error("[launch] build failed — nothing to serve");
       return 1;
     }
+    const pgliteDir = applyPgliteDir();
+    if (pgliteDir) console.log(`[launch] app data lives at ${pgliteDir}`);
     const previewAction = args.action === "stop" ? "stop" : "restart";
     const r = spawnSync(process.execPath, [PREVIEW_SCRIPT, previewAction], { stdio: "inherit" });
     if (r.status === 0 && args.action !== "stop") openBrowser();

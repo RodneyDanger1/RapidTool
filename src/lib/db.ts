@@ -29,6 +29,19 @@ const authEnabledByEnv =
 export const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
 
 /**
+ * Optional on-disk directory for the embedded PGLite. When `RAPIDTOOL_PGLITE_DIR`
+ * is set, the PGLite fallback opens that directory instead of PGLite's in-memory
+ * default, so server-side data survives a server restart. The Windows launcher
+ * (`scripts/launch-rapidtool.mjs`) points it at a stable path outside the repo
+ * (`%LOCALAPPDATA%\RapidTool\pglite`). Unset (or empty/whitespace, the same rule
+ * as `DATABASE_URL` above) keeps today's in-memory behavior byte-for-byte.
+ */
+const rawPgliteDir =
+  typeof process !== "undefined" ? process.env.RAPIDTOOL_PGLITE_DIR : undefined;
+export const pgliteDataDir: string | undefined =
+  rawPgliteDir && rawPgliteDir.trim() ? rawPgliteDir.trim() : undefined;
+
+/**
  * Minimal shared SQL surface, satisfied by both Neon and PGLite. Both the
  * tagged-template and `.query()` forms resolve to an array of row objects:
  *
@@ -117,11 +130,20 @@ function createNeonSql(): Promise<Sql> {
 
 async function createPgliteSql(): Promise<Sql> {
   // Embedded Postgres, imported on demand so it never loads on the Neon path.
-  // One in-memory instance per process, shared across HMR module instances, so
-  // data survives source edits (it resets on dev-server restart).
+  // One instance per process, shared across HMR module instances. On-disk when
+  // `RAPIDTOOL_PGLITE_DIR` is set (data survives a server restart); otherwise
+  // PGLite's in-memory default, which resets on restart.
   globalRef.__pgliteInstance__ ??= (async () => {
+    if (pgliteDataDir) {
+      // PGlite's NodeFS does a non-recursive mkdir, so a dataDir whose parent
+      // does not exist (a fresh `%LOCALAPPDATA%\RapidTool`) would ENOENT. The
+      // import is lazy: a top-level `node:fs` would break the client bundle.
+      const { mkdirSync } = await import("node:fs");
+      mkdirSync(pgliteDataDir, { recursive: true });
+    }
     const { PGlite } = await import("@electric-sql/pglite");
     const pg = new PGlite({
+      ...(pgliteDataDir ? { dataDir: pgliteDataDir } : {}),
       parsers: {
         [OID_INT8]: Number,
         [OID_DATE]: identity,
@@ -276,8 +298,9 @@ export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite
 /**
  * Finish DB bootstrap before the server handles traffic.
  *
- * - **PGLite** (preview / no `DATABASE_URL`): open the in-memory DB and apply
- *   `migrations/*.sql`. Idempotent — concurrent callers share one promise.
+ * - **PGLite** (preview / no `DATABASE_URL`): open the embedded DB and apply
+ *   `migrations/*.sql`. In-memory unless `RAPIDTOOL_PGLITE_DIR` names a
+ *   directory. Idempotent — concurrent callers share one promise.
  * - **Neon**: no-op (pool is created lazily on first query).
  *
  * Vite `configureServer` awaits this at dev startup; production imports of this
