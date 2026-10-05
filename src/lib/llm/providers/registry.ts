@@ -617,31 +617,55 @@ export type CallModelOptions = {
 };
 
 /**
+ * fixes/346 V2 — served-provider provenance on EVERY registry result. The
+ * provider id that actually handled the call (or, on a pre-dispatch refusal,
+ * the tier provider the role would have used, else `null`) is stamped beside
+ * the `LlmResult` fields, so a provider switch or a mislabeled model failure is
+ * visible at the result boundary instead of only inferable from a model id.
+ * ADDITIVE: consumers typed to `LlmResult` ignore the extra key; the
+ * `RAPIDTOOL_PROVIDER`/explicit dispatch paths all pass through here.
+ * (Why the adapter does not stamp it: `completeDeepSeek` is also called
+ * directly, and its own result-shape pins stay byte-identical.) */
+export type ServedLlmResult = LlmResult & { readonly servedProvider: LlmProviderId | null };
+
+/** Attach the provenance key to a result without touching its own fields. */
+function withServedProvider(res: LlmResult, provider: LlmProviderId | null): ServedLlmResult {
+  return { ...res, servedProvider: provider };
+}
+
+/**
  * Call a provider BY ROLE (T-107.2). The role decides the provider + model id
  * (see `ROLE_TIERS`); an explicit `opts.model` / env pin is validated first and
  * refused when unknown. The provider keeps its byte-identical behavior: body
  * shape, retry schedule, timeouts, and the keyless `not-configured` envelope
- * are exactly what the pre-registry seams sent.
+ * are exactly what the pre-registry seams sent. Every return additionally
+ * carries `servedProvider` (see `ServedLlmResult`).
  */
 export async function callModel(
   role: RapidToolModelRole,
   prompt: string,
   opts: CallModelOptions = {},
-): Promise<LlmResult> {
+): Promise<ServedLlmResult> {
   // T-107.10 (fixes/216t): an EXPLICIT provider short-circuits the role tier
   // (the caller selected it — never a fallback, never a "configured" probe
   // read). The model id is validated inside the provider's own namespace.
   if (opts.provider !== undefined) {
     const selection = resolveExplicitProvider(opts.provider, { model: opts.model });
     if (!selection.ok) {
-      return { ok: false, reason: "error", error: selection.error, code: selection.code };
+      return withServedProvider(
+        { ok: false, reason: "error", error: selection.error, code: selection.code },
+        null,
+      );
     }
     const { model: _explicitModel, provider: _explicitProvider, ...rest } = opts;
     // `selection.model` is an opaque, provider-scoped id on this path; the
     // descriptor owns its meaning (the mock ignores it). The cast is confined
     // to this one forwarding boundary — `DeepSeekCompleteOptions.model` is
     // deliberately NOT widened (deepseek request shapes stay untouched).
-    return selection.descriptor.complete(prompt, { ...rest, model: selection.model as LlmModel });
+    return withServedProvider(
+      await selection.descriptor.complete(prompt, { ...rest, model: selection.model as LlmModel }),
+      selection.descriptor.id,
+    );
   }
   // OV-1 (W23 · L4, fixes/262): the `RAPIDTOOL_PROVIDER` env selection
   // (precedence rung 2, 101 §4.4) — precedence rung 1 above keeps winning.
@@ -651,7 +675,10 @@ export async function callModel(
   // never a silent deepseek fallback.
   const envSelection = resolveEnvProvider(process.env);
   if (!envSelection.ok) {
-    return { ok: false, reason: "error", error: envSelection.error, code: envSelection.code };
+    return withServedProvider(
+      { ok: false, reason: "error", error: envSelection.error, code: envSelection.code },
+      null,
+    );
   }
   // fixes/346 A2-F2: there is no failover chain to consult — the dead
   // `RAPIDTOOL_FALLBACK_PROVIDERS` switch was deleted. Dispatch is
@@ -663,28 +690,46 @@ export async function callModel(
   ) {
     const route = resolveEnvSelectedRoute(role, { model: opts.model });
     if (!route.ok) {
-      return { ok: false, reason: "error", error: route.error, code: route.code };
+      return withServedProvider(
+        { ok: false, reason: "error", error: route.error, code: route.code },
+        null,
+      );
     }
     const { model: _envModel, provider: _envProvider, ...rest } = opts;
     // Same opaque-id boundary as the explicit path above: the id was validated
     // against the SELECTED provider's own request namespace; the cast is
     // confined to this one forwarding site.
-    return route.provider.complete(prompt, { ...rest, model: route.model as LlmModel });
+    return withServedProvider(
+      await route.provider.complete(prompt, { ...rest, model: route.model as LlmModel }),
+      route.provider.id,
+    );
   }
   const resolved = resolveRoleModel(role, { model: opts.model });
   if (!resolved.ok) {
-    return { ok: false, reason: "error", error: resolved.error, code: resolved.code };
+    // A valid role still names its tier provider even when model resolution was
+    // refused (an unknown explicit id precedes any dispatch) — report that
+    // honestly rather than null when it is knowable.
+    return withServedProvider(
+      { ok: false, reason: "error", error: resolved.error, code: resolved.code },
+      isModelRole(role) ? ROLE_TIERS[role].provider : null,
+    );
   }
   const provider = getProvider(resolved.provider);
   if (!provider) {
-    return {
-      ok: false,
-      reason: "error",
-      error: `provider "${resolved.provider}" is not registered`,
-      code: "RT_E_INTERNAL",
-    };
+    return withServedProvider(
+      {
+        ok: false,
+        reason: "error",
+        error: `provider "${resolved.provider}" is not registered`,
+        code: "RT_E_INTERNAL",
+      },
+      resolved.provider,
+    );
   }
   // Strip the caller's override: the resolved+validated id is what gets sent.
   const { model: _explicitModel, ...rest } = opts;
-  return provider.complete(prompt, { ...rest, model: resolved.model });
+  return withServedProvider(
+    await provider.complete(prompt, { ...rest, model: resolved.model }),
+    provider.id,
+  );
 }

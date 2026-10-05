@@ -5555,6 +5555,10 @@ async function synthesizeSingleModule(
         reason: verdict.run === "pass" ? "structure + brief-fit + pre-seal typecheck" : "structure + brief-fit (typecheck skipped — unverified)",
       };
     };
+    // V5/I-A: the session-ledger delta around the selection is the resample
+    // spend (the primary `envelope` was produced before this block; the gate
+    // judge spends nothing).
+    const candidatesTokensBefore = totalTokens(sessionTokenBudget().ledger);
     const selection = await selectBestOfN<SynthesisEnvelope>(
       candidates,
       async (index) => {
@@ -5567,13 +5571,14 @@ async function synthesizeSingleModule(
       },
       gateCandidate,
     );
+    const candidatesTokens = totalTokens(sessionTokenBudget().ledger) - candidatesTokensBefore;
     if (selection.chosen !== null && selection.winner !== null) envelope = selection.chosen;
     pushAttemptLog(attemptLogs, {
       ts: Date.now(),
       phase: 6 as PhaseId,
       level: "info",
       event: "p6.synthesis.candidates",
-      detail: candidatesLogDetail("single-module", candidates, selection.winner, selection.outcomes),
+      detail: candidatesLogDetail("single-module", candidates, selection.winner, selection.outcomes, candidatesTokens),
     });
   }
 
@@ -6007,15 +6012,24 @@ async function synthesizeChunkedTree(
     { budget: P6_SYNTH_REPO_MAP_BUDGET },
   ).rendered;
 
-  // C1-01 (BF-1): the ONE refusal door for this tree. A refusal whose accepted
-  // set is below the brief-driven floor is an UNDER-PRODUCED PLAN — it is coded
-  // `RT_E_PLAN_UNDERPRODUCED` and names the declared modules that never landed,
-  // never the generic `RT_E_VALIDATION` and never a silent partial. A specific
-  // coded reason (LLM/runner/env) is preserved as-is; the floor only replaces
-  // the generic validation code. `chunkIndex < 0` marks a whole-tree refusal.
+  // C1-01 (BF-1) + S-3: the ONE refusal door for this tree. A refusal whose
+  // accepted set is below the brief-driven floor is an UNDER-PRODUCED PLAN — it
+  // is coded `RT_E_PLAN_UNDERPRODUCED` and names the declared modules that
+  // never landed, never the generic `RT_E_VALIDATION` and never a silent
+  // partial. The floor verdict OUTRANKS the two RETRYABLE synthesis outcomes
+  // (`RT_E_VALIDATION`, `RT_E_LLM_REJECTED`): a chunk that refused either way on
+  // a tree that cannot reach the floor is the same under-produced plan, and the
+  // scaffold's `underProductionRefusalOf` refuses the emission only when the
+  // journal names the floor code. Infrastructure stops (budget / LLM not
+  // configured / runner) are honest run-stops, not product verdicts, and keep
+  // their code. `chunkIndex < 0` marks a whole-tree refusal.
   const refuse = (chunkIndex: number, chunkTotal: number, code: ErrorCode, detail: string): Project => {
     const under = underProducedRefusal(project, treeSpec, accepted.map((f) => f.path));
-    if (under !== null && code === "RT_E_VALIDATION") {
+    // The generic-validation mapping stays a literal seam (guard S3-01); the
+    // other retryable synthesis outcome is the SAME under-produced plan.
+    const validationFloor = under !== null && code === "RT_E_VALIDATION";
+    const floorOverridable = validationFloor || code === "RT_E_LLM_REJECTED";
+    if (under !== null && floorOverridable) {
       return partialTreeRefuse(
         withAttemptLogs(project, attemptLogs),
         accepted,
@@ -6146,6 +6160,9 @@ async function synthesizeChunkedTree(
       const outcomes: string[] = [
         `candidate 1: rejected — ${synth.code}: ${String(synth.error ?? "").replace(/\s+/g, " ").slice(0, 160)}`,
       ];
+      // V5/I-A: the session-ledger delta across the resample loop is the extra
+      // spend this candidate row incurred (candidate 1 already ran above).
+      const chunkResampleTokensBefore = totalTokens(sessionTokenBudget().ledger);
       let winner: number | null = null;
       for (let k = 2; k <= chunkRetry; k++) {
         const retry = await produceChunk();
@@ -6165,7 +6182,13 @@ async function synthesizeChunkedTree(
         phase: 6 as PhaseId,
         level: "info",
         event: "p6.synthesis.candidates",
-        detail: candidatesLogDetail(`chunk ${i + 1}/${plan.length}`, chunkRetry, winner, outcomes),
+        detail: candidatesLogDetail(
+          `chunk ${i + 1}/${plan.length}`,
+          chunkRetry,
+          winner,
+          outcomes,
+          totalTokens(sessionTokenBudget().ledger) - chunkResampleTokensBefore,
+        ),
       });
     }
     if (!synth.ok) {
@@ -6283,6 +6306,8 @@ async function synthesizeChunkedTree(
           // default comes from resolveChunkResampleCandidates), capped at MAX.
           const offenderCandidates =
             chunkCandidates > 1 ? Math.min(P6_SYNTH_CANDIDATES_MAX, chunkCandidates) : 1;
+          // V5/I-A: the session-ledger delta across the offender candidate loop.
+          const failfastTokensBefore = totalTokens(sessionTokenBudget().ledger);
           let fixed = false;
           const failfastOutcomes: string[] = [];
           for (let k = 1; k <= offenderCandidates; k++) {
@@ -6348,6 +6373,7 @@ async function synthesizeChunkedTree(
                 offenderCandidates,
                 fixed ? failfastOutcomes.length - 1 : null,
                 failfastOutcomes,
+                totalTokens(sessionTokenBudget().ledger) - failfastTokensBefore,
               ),
             });
           }
@@ -6493,6 +6519,8 @@ async function synthesizeChunkedTree(
           );
         let repaired = await produceChunk();
         if (candidates > 1) {
+          // V5/I-A: the session-ledger delta across the repair-candidate probes.
+          const repairCandidatesTokensBefore = totalTokens(sessionTokenBudget().ledger);
           const outcomes: string[] = [];
           let winner: number | null = null;
           if (repaired.ok) {
@@ -6542,7 +6570,13 @@ async function synthesizeChunkedTree(
             phase: 6 as PhaseId,
             level: "info",
             event: "p6.synthesis.candidates",
-            detail: candidatesLogDetail(`chunk ${i + 1}/${plan.length}`, candidates, winner, outcomes),
+            detail: candidatesLogDetail(
+              `chunk ${i + 1}/${plan.length}`,
+              candidates,
+              winner,
+              outcomes,
+              totalTokens(sessionTokenBudget().ledger) - repairCandidatesTokensBefore,
+            ),
           });
         }
         if (!repaired.ok) {

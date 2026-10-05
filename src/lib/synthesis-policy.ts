@@ -147,10 +147,31 @@ export async function selectBestOfN<T>(
  * The bounded, single-line detail for the `p6.synthesis.candidates` event —
  * names the unit, the sample budget, the winning candidate (or none), and why
  * every candidate was selected or rejected.
+ *
+ * fixes/346 final wave (lane S, V5/I-A): `extraTokens` is the resample call-
+ * usage delta the caller measured for this candidate block; when present the
+ * row carries a trailing ` · tokens <int>` so the acceptance/doctor consumers
+ * can attribute the resample spend instead of recording `extraTokens:null`.
+ * Absent (the legacy callers/tests) ⇒ the byte-identical row, no suffix.
  */
-export function candidatesLogDetail(unit: string, count: number, winner: number | null, outcomes: readonly string[]): string {
+export function candidatesLogDetail(
+  unit: string,
+  count: number,
+  winner: number | null,
+  outcomes: readonly string[],
+  extraTokens?: number,
+): string {
   const winnerText = winner === null ? "none" : String(winner + 1);
-  return `${unit} · candidates ${count} · winner ${winnerText} · ${outcomes.join(" | ")}`.slice(0, 1000);
+  const head = `${unit} · candidates ${count} · winner ${winnerText} · `;
+  // The token suffix is reserved out of the 1000-char budget so a long outcome
+  // tail can never truncate it away (the consumer parses it as a suffix).
+  const tokenText =
+    typeof extraTokens === "number" && Number.isFinite(extraTokens) && extraTokens >= 0
+      ? ` · tokens ${Math.floor(extraTokens)}`
+      : "";
+  const body = outcomes.join(" | ");
+  const budget = Math.max(0, 1000 - head.length - tokenText.length);
+  return `${head}${body.slice(0, budget)}${tokenText}`;
 }
 
 // ---------------------------------------------------------------------------

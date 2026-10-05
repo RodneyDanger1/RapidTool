@@ -2363,20 +2363,37 @@ async function main() {
               foreign: res.foreign,
               ...(res.quarantineFailed ? { quarantineFailed: res.quarantineFailed, judgingSkipped: res.judgingSkipped } : {}),
             });
-            if (floorRefused) {
-              try {
-                const seal = await h.planUnderproductionSeal(project);
-                if (seal !== null) refusal.planUnderproduced = seal;
-              } catch {
-                /* the refusal already carries its registered code */
+            // R2-01 (D-2): the floor code is the project's OWN journal code, so
+            // a below-floor project must decide on it even when the scaffold
+            // refused for another leg first (the red tree-run trail echoed
+            // RT_E_TREE_RUN_FAILED, the substance hold RT_E_SUBSTANCE_EMPTY).
+            // Re-derive the seal from the journal; when the delivered tree is
+            // still below the floor, the floor code becomes the DECIDING reason.
+            let seal = null;
+            try {
+              seal = await h.planUnderproductionSeal(project);
+            } catch {
+              /* the refusal already carries its registered code */
+            }
+            if (seal !== null) {
+              refusal.planUnderproduced = seal;
+              if (!floorRefused) {
+                refusal.code = seal.code;
+                refusal.error =
+                  `emit refused at delivery: ${seal.detail} — a tree below the brief-driven floor ` +
+                  `(${seal.emitted} file(s), ${seal.modules} module(s), floor ${seal.floor}) is an ` +
+                  "under-produced plan, never a normal artifact; the emitted tree is kept on disk — synthesize " +
+                  "the missing module(s) and re-emit to green.";
               }
+            }
+            if (floorRefused || seal !== null) {
               if (flag(args, "git")) {
                 refusal.git = {
                   committed: false,
                   skipped: true,
                   reason: "plan-underproduced",
                   code: "RT_E_PLAN_UNDERPRODUCED",
-                  error: res.error,
+                  error: refusal.error,
                 };
               }
             }
@@ -3089,6 +3106,10 @@ async function main() {
         if (dirArg.error !== undefined) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
         try {
           const dir = resolve(dirArg.value);
+          // PR-16 (B5/C-11): stamp the run window BEFORE executing the tree so a
+          // repo `src/**`/`scripts/**` edit landing during the compile/tests is
+          // caught (BL-010). The verdict is refused if the tree moved under it.
+          const runlockStartMs = Date.now();
           const cc = await checkDriver();
           const outcome = await cc.treeRun(dir);
           const payload = { ok: outcome.ok === true, dir, treeRun: outcome };
@@ -3147,6 +3168,32 @@ async function main() {
             payload.unverifiedDeclaredScripts = [...outcome.unverifiedDeclaredScripts];
             payload.unverifiedNote =
               "declared project script(s) did not execute — the tree is ok (nothing ran red) but its toolchain is UNVERIFIED; install deps and re-run to verify";
+          }
+          // PR-16 (B5/C-11) in-run RUNLOCK guard: if the repo's own `src/**` or
+          // `scripts/**` changed while this tree-run was executing, the verdict
+          // was produced against a moving tree — refuse honestly with the named
+          // file(s) instead of presenting a clean result (BL-010).
+          const runlockViolations =
+            typeof h.runlockEditViolations === "function"
+              ? h.runlockEditViolations(REPO_ROOT, runlockStartMs)
+              : [];
+          if (runlockViolations.length > 0) {
+            respond(
+              {
+                ok: false,
+                dir,
+                code: "RT_E_SRC_EDITED_DURING_RUN",
+                error:
+                  `the tree-run overlapped a repo source edit (RUNLOCK): ${runlockViolations
+                    .slice(0, 5)
+                    .join(", ")}${runlockViolations.length > 5 ? ` (+${runlockViolations.length - 5} more)` : ""} ` +
+                  "— the verdict was produced against a moving tree; freeze the tree and re-run.",
+                runlock: { runStartMs: runlockStartMs, violations: runlockViolations },
+                treeRun: outcome,
+              },
+              1,
+            );
+            return;
           }
           respond(
             payload,

@@ -22,6 +22,7 @@ import {
   setLlmCallTap,
   type LlmCallTapRecord,
 } from "./deepseek.ts";
+import { callModel } from "./registry.ts";
 
 const SAVE_KEY = process.env.DEEPSEEK_API_KEY;
 
@@ -150,6 +151,68 @@ describe("completeDeepSeek finish_reason handling", () => {
       assert.equal(seen[0]!.cacheMissTokens, 3, "prompt_cache_miss_tokens is carried too");
     } finally {
       clearLlmCallTap();
+      withKey(SAVE_KEY);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 V2 (served-provider provenance): EVERY `callModel` result names the
+// provider that handled (or would have handled) the call, so a provider switch
+// or a `content_filter` stop cannot masquerade as a model failure. Keyless:
+// injected fetch; no network touched.
+// ---------------------------------------------------------------------------
+describe("V-2 — served-provider provenance rides every registry result", () => {
+  function withProviderEnv<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = process.env.RAPIDTOOL_PROVIDER;
+    delete process.env.RAPIDTOOL_PROVIDER;
+    return fn().finally(() => {
+      if (prev === undefined) delete process.env.RAPIDTOOL_PROVIDER;
+      else process.env.RAPIDTOOL_PROVIDER = prev;
+    });
+  }
+
+  it("stamps servedProvider on success and on a content_filter refusal", async () => {
+    withKey("sk-prov");
+    try {
+      await withProviderEnv(async () => {
+        const ok = await callModel("main", "hi", {
+          fetch: bodyFetch([{ content: "hi", finish: "stop", usage: { prompt_tokens: 3, completion_tokens: 1 } }]).fetch,
+          sleep: sleeping().sleep,
+          random: () => 1,
+        });
+        assert.equal(ok.ok, true);
+        assert.equal(ok.servedProvider, "deepseek");
+
+        const filtered = await callModel("main", "hi", {
+          fetch: bodyFetch([{ content: "", finish: "content_filter" }]).fetch,
+          sleep: sleeping().sleep,
+          random: () => 1,
+        });
+        assert.equal(filtered.ok, false);
+        assert.equal(filtered.servedProvider, "deepseek", "a filtered stop names the provider, not a model failure");
+        if (!filtered.ok) assert.equal(filtered.code, "RT_E_LLM_REJECTED");
+      });
+    } finally {
+      withKey(SAVE_KEY);
+    }
+  });
+
+  it("never omits the field: the keyless refusal and an unknown explicit id still carry it", async () => {
+    withKey(undefined);
+    try {
+      await withProviderEnv(async () => {
+        const keyless = await callModel("main", "hi");
+        assert.equal(keyless.ok, false);
+        assert.equal(keyless.servedProvider, "deepseek", "the tier provider is named even keyless");
+
+        withKey("sk-prov");
+        const bad = await callModel("main", "hi", { model: "gpt-9" });
+        assert.equal(bad.ok, false);
+        assert.equal(bad.servedProvider, "deepseek", "a valid role names its tier provider even on a validation refusal");
+        if (!bad.ok) assert.equal(bad.code, "RT_E_VALIDATION");
+      });
+    } finally {
       withKey(SAVE_KEY);
     }
   });

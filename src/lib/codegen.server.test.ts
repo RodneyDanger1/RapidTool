@@ -6369,6 +6369,48 @@ describe("PR-28 C1-01/C1-04 — the minimum-file floor fires on the refusal path
     assert.match(refusal.detail, /under-produced/);
   });
 
+  it("S-3: an RT_E_LLM_REJECTED chunk refusal on a below-floor tree is coded RT_E_PLAN_UNDERPRODUCED", async () => {
+    // The other RETRYABLE synthesis outcome. Before S-3 only RT_E_VALIDATION was
+    // rewritten to the floor code, so a below-floor partial refused after the
+    // LLM-rejection path persisted an `RT_E_LLM_REJECTED` journal row the
+    // scaffold's underProductionRefusalOf cannot see — and the below-floor tree
+    // still emitted. RED before the fix (row leads with RT_E_LLM_REJECTED).
+    const base = p6Base(LEDGER_BRIEF);
+    const q = await liveP6Synthesis(base, chunkedDeps({ failChunk: 2 }).deps);
+    const spec = { typeSignatures: ledgerSpec(20).typeSignatures };
+    const accepted = (q.generatedTree ?? []).map((f) => f.path).filter((p) => p !== TREE_ENTRY_PATH);
+    assert.ok(underProducedRefusal(q, spec, accepted), "precondition: the refused tree is genuinely below the floor");
+    const refusal = (q.logs ?? []).find(
+      (l) => l.event === "p6.synthesis.refused" && /chunk 3\/6 refused/.test(String(l.detail)),
+    );
+    assert.ok(refusal, "the chunk refusal is logged");
+    assert.match(String(refusal!.detail), /^RT_E_PLAN_UNDERPRODUCED · /, "the floor verdict OUTRANKS the LLM rejection");
+    assert.match(String(refusal!.detail), /RT_E_LLM_REJECTED/, "the proximate LLM reason is still named");
+    assert.match(String(refusal!.detail), /under-produced/);
+  });
+
+  it("S-3 replay: the persisted office-scheduler below-floor tree computes the floor verdict", () => {
+    // Lane S-3 acceptance fixture. The campaign1 artifact's own recorded row
+    // predates C1-01 and leads with RT_E_VALIDATION; re-derived through the
+    // current floor gate its 2-module tree is an under-produced plan, so the
+    // journal the fixed code writes names RT_E_PLAN_UNDERPRODUCED (the e2e pin
+    // above proves the door emits that code for both retryable outcomes).
+    const file = join(TESTRUNS_ROOT, "office-scheduler", "build.json");
+    if (!existsSync(file)) return; // frozen checkout with no sibling testruns
+    const project = JSON.parse(readFileSync(file, "utf8")) as Project;
+    const spec = project.implementationSpec ?? { typeSignatures: [] };
+    const accepted = (project.generatedTree ?? []).map((f) => f.path).filter((p) => p !== TREE_ENTRY_PATH);
+    assert.ok(accepted.length > 0, "the persisted office-scheduler tree carries real chunk modules");
+    const under = underProducedRefusal(project, spec, accepted);
+    assert.ok(under, "office-scheduler's persisted tree is below the brief floor");
+    assert.equal(under!.code, "RT_E_PLAN_UNDERPRODUCED", "the floor gate code, not the stale RT_E_VALIDATION row");
+    assert.ok(under!.missing.length > 0 && under!.detail.includes("missing module"), "the never-landed modules are named");
+    assert.ok(
+      (project.logs ?? []).some((l) => l.event === "p6.synthesis.refused" && l.phase === 6),
+      "the persisted P6 journal carries the refusal this floor verdict re-codes",
+    );
+  });
+
   it("C1-01/C1-04 replay: the recorded campaign1 + historical trees compute the floor verdict", () => {
     if (!existsSync(TESTRUNS_ROOT)) return; // frozen checkout with no sibling testruns
     let underFloor = 0;

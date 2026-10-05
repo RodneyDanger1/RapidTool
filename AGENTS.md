@@ -381,3 +381,42 @@ the bytes win.
   `fleetAcceptance.sampleCount` + `evidencedRate`; `fleetMetrics.workingAppSamples` /
   `workingAppPass` / `workingAppRate` / `workingAppByBrief` (per sample; an absent verdict is not
   scored). Lane log: `fixes/346_final_wave.md`.
+
+## Corrections in force — appended 2026-10-05 (346 wave batch 16 / Lane X close-out)
+
+This block supersedes the product-position, resample-token and sample-count claims above. Every number
+was re-derived this session from the file or command named beside it; where a doc and the bytes
+disagree, the bytes win.
+
+- **Campaign #3 (keyed, 8 briefs, armed default `P6_SYNTH_CANDIDATES` unset ⇒ candidates 3):**
+  `workingApp` **4 of 8** (`testruns\_report\CAMPAIGN3.md` + `CAMPAIGN3.json`; per-brief rows in §3).
+  Delivery truth held: **0 empty-substance commits · 0 red-tree commits**; 2 trees withheld coded —
+  `bakery-florist-orders` red trail (`RT_E_TREE_RUN_FAILED`), `office-invoice-tracker` below-floor
+  (`RT_E_PLAN_UNDERPRODUCED`, HITL-parked exit 2). Ledger `testruns\campaign3\ledger.json`: cap
+  3,000,000, **spent 948,586 tokens / 179 calls**, bound not tripped; wall 2,347 s;
+  `estimatedCostUsd:null`.
+- **S-1 two-sample (keyed, armed default, 4 default-check briefs):** sample1 **1/4**, sample2 **2/4**
+  — combined **3/8** (`testruns\s5-reliability\sample1\TUNING.json`, `sample2\TUNING.json`).
+  `office-stock-tracker` flips `false`→`true`; `mobile-companion` and `bakery-florist-orders` are
+  `false` in both; `bakery-website` `true` in both.
+- **Combined position + variance.** Fresh final-wave samples (S-1 + campaign #3): **7 / 16 (43.75%)**.
+  All campaign/sample history (campaign #1 0/8 · #2 2/8 · default-check 3/4 · tuning 1/6 · S-1 3/8 ·
+  #3 4/8): **13 / 42 (≈31.0%)**. The spread across identical armed-default code is the measurement:
+  **no single run is the product**. The binding wall is the **P6 DoD gate** (`RT_E_GATE_PENDING`); the
+  clause that now fails most is UI wiring (`mobile-companion`, `held-out-community-tool-library`).
+- **Candidate-token accounting is measured, not null.** Producer (lane S S-4,
+  `src/lib/synthesis-policy.ts` `candidatesLogDetail`) appends an optional trailing ` · tokens <int>`
+  to the `p6.synthesis.candidates` row; consumer (lane X X-1, `src/lib/acceptance.ts`
+  `parseCandidateJournalRow` → `ResampleUsage`) sums it into `extraTokens` and sets
+  `tokenAccounting:"journal"`; a legacy row stays `null` / `"not-recorded-in-journal"`. Measured on
+  campaign #3's own journals: **7/8 runs · 28 events · 84 requested · 55 tried · 20 winners · 8
+  no-winner · 27 extra keyed calls · `extraTokens` 293,152 (`tokenAccounting:"journal"`)**;
+  `doctor.ts` surfaces it via `fleetMetrics.resample.extraTokens` with `estimatedCostUsd` still `null`
+  (X-4).
+- **Landing corroboration (sibling-lane fixes; cited, not re-derived).** Form-bindable UI decision:
+  `src/lib/scaffold.ts:1872-1908` (`wiredFormCallable` / `pickFormCallable`). Persisted-gate recompute:
+  `src/lib/headless.ts:3441` (`p6.journey.gate-recomputed`) — campaign #3's `mobile-companion` is the
+  live corroboration (drive P6 `RT_E_GATE_PENDING` while the persisted best tree's `treeRunOk` is true
+  and it committed).
+- **Tests:** `node --experimental-strip-types --test --test-reporter=tap src/lib/acceptance.test.ts
+  src/lib/doctor.test.ts` → **108 pass / 0 fail**; `npx tsc --noEmit` exit 0.

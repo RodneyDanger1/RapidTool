@@ -1531,13 +1531,37 @@ describe("fixes/346-X5 — the armed resample's usage is read back from the jour
     assert.equal(withResample.fleetMetrics.resample.extraKeyedCalls, 2);
     assert.equal(withResample.fleetMetrics.resample.extraTokens, null, "tokens per resample are not in the journal");
     assert.deepEqual(withResample.fleetMetrics.resample.byRun[0].winnersByEvent, [1, 2, null]);
-
     // The opt-out shape (P6_SYNTH_CANDIDATES=1) emits no candidates row at all.
     const noResample = factoryClaim(evidenceFromProjectRecord({ ...ov9Project(), logs: [] }), {});
     assert.equal(noResample.fleetMetrics.resample.runs, 0);
     assert.equal(noResample.fleetMetrics.resample.events, 0);
     assert.equal(noResample.fleetMetrics.resample.extraKeyedCalls, 0);
     assert.equal("workingApp" in (fleetTelemetryFromProject({ ...ov9Project(), logs: [] }) ?? {}), false);
+  });
+
+  it("fixes/346-X4: a journal row carrying ` · tokens N` surfaces on the doctor; a legacy row stays null, cost null", () => {
+    const withTokens = factoryClaim(
+      evidenceFromProjectRecord({
+        ...ov9Project(),
+        logs: [
+          { event: "p6.synthesis.candidates", detail: `${RESAMPLE_ROW_RETRY} · tokens 321` },
+        ],
+      }),
+      {},
+    );
+    assert.equal(withTokens.fleetMetrics.resample.extraTokens, 321, "the token total is read back, not fabricated");
+    assert.equal(withTokens.fleetMetrics.resample.tokenAccounting, "journal");
+    assert.equal(withTokens.fleetMetrics.estimatedCostUsd, null, "spend is still never fabricated");
+
+    const legacy = factoryClaim(
+      evidenceFromProjectRecord({
+        ...ov9Project(),
+        logs: [{ event: "p6.synthesis.candidates", detail: RESAMPLE_ROW_RETRY }],
+      }),
+      {},
+    );
+    assert.equal(legacy.fleetMetrics.resample.extraTokens, null, "a legacy row reports the honest gap");
+    assert.equal(legacy.fleetMetrics.resample.tokenAccounting, "not-recorded-in-journal");
   });
 
   it("the variance reading: per-sample workingApp + the sample count ride the doctor metrics", () => {

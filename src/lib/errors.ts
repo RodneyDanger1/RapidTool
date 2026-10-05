@@ -150,6 +150,35 @@ export const ERROR_CODES = [
   "RT_E_MONEY_SEMANTICS",
   "RT_E_README_PARITY",
   "RT_E_SRC_EDITED_DURING_RUN",
+  // W61 final-wave lane G (G-2): the remaining `expectedCode` strings the guard
+  // registry (scripts/guards/guard-registry.json) and its campaign/S4 invariant
+  // detectors name as codes but that were absent here — so those guards were
+  // consuming aspirational code strings. Registering them is additive-only;
+  // consumers match string literals, never array position. errors.test.ts pins
+  // that EVERY registry `expectedCode` resolves in ERROR_CODE_DOC, so a guard
+  // can never again name an unregistered code.
+  //   - UI_UNWIRED: the mounted console calls no real generated export (C1-02).
+  //   - SPEC_SKIP_VACUOUS: an emitted oracle is skip-dominated — green by vacuity (C1-05/R2-05).
+  //   - CLAIM_UNVERIFIED: a delivery claims a product without stating its verification (C1-06).
+  //   - GIT_CODE_INCONSISTENT: a withheld git envelope's reason disagrees with its deciding code (C1-08).
+  //   - SYNTH_DEFAULT_DISARMED: the armed chunk-resample default was silently re-disarmed (S4-01).
+  //   - SYNTH_RESAMPLE_UNBOUNDED: a resample loop lacks the finite P6_SYNTH_CANDIDATES_MAX clamp (S4-02).
+  //   - REFUSAL_COVERAGE_LOST: a re-pinned refusal suite dropped its coded refusal (S4-03).
+  //   - SYNTH_RESUME_NOT_REUSED: an accepted chunk was re-synthesized instead of reused (S4-04).
+  //   - JSX_IN_TS: an emitted `.ts` module carries JSX / the global JSX namespace (R2-03).
+  //   - VERIFIED_PRODUCT_UNEVIDENCED: a committed delivery claims a verified product without evidence (R2-06).
+  //   - DEFAULT_CHECK_BASELINE_LOST: a default-check baseline dropped the weaker sample (S4-05).
+  "RT_E_UI_UNWIRED",
+  "RT_E_SPEC_SKIP_VACUOUS",
+  "RT_E_CLAIM_UNVERIFIED",
+  "RT_E_GIT_CODE_INCONSISTENT",
+  "RT_E_SYNTH_DEFAULT_DISARMED",
+  "RT_E_SYNTH_RESAMPLE_UNBOUNDED",
+  "RT_E_REFUSAL_COVERAGE_LOST",
+  "RT_E_SYNTH_RESUME_NOT_REUSED",
+  "RT_E_JSX_IN_TS",
+  "RT_E_VERIFIED_PRODUCT_UNEVIDENCED",
+  "RT_E_DEFAULT_CHECK_BASELINE_LOST",
 ] as const;
 
 /**
@@ -672,5 +701,71 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
       "A run observed `src/**` (or `scripts/**`) modified after the run began (RUNLOCK / BL-010) — the run's build artifacts and verdicts were produced against a tree that changed underneath it.",
     agentAction:
       "Discard the suspect run's evidence: stop the run, name the changed file(s), re-run against the frozen tree; never treat a concurrently-edited run as a clean measurement.",
+  },
+  RT_E_UI_UNWIRED: {
+    meaning:
+      "A mounted UI (the emitted console) imports a generated surface but calls no real generated export — the product's interface is unwired from its own logic, even when the tree typechecks.",
+    agentAction:
+      "Consume the single product predicate `realGeneratedExportWiring`: wire the UI to CALL a real generated export, or mark the delivery unverified; never seal an unwired console as a product.",
+  },
+  RT_E_SPEC_SKIP_VACUOUS: {
+    meaning:
+      "An emitted behavioural oracle is skip-dominated (mostly `test.skip` rows against a handful of live rows), so `npm test` exit 0 is vacuity, not behaviour.",
+    agentAction:
+      "Emit an oracle whose live assertions dominate and tie a module read to a concrete value; never count a skip-dominated green as tested or as behaviour.",
+  },
+  RT_E_CLAIM_UNVERIFIED: {
+    meaning:
+      "A delivery record claims a product (git committed) without stating its real verification — no verification block and no `unverified` flag, though its evidence is absent.",
+    agentAction:
+      "State the verification block / `unverifiedReasons` in the delivery envelope, or mark the delivery unverified; never let an unverified commit read as a verified product.",
+  },
+  RT_E_GIT_CODE_INCONSISTENT: {
+    meaning:
+      "A withheld git envelope's nested `git.code`/`git.reason` names a different deciding reason than the top-level code (e.g. `substance-empty` beside `RT_E_TREE_RUN_FAILED`).",
+    agentAction:
+      "Set the withheld envelope's `git.code` to the deciding withhold code so nested and top-level agree; never leave the envelope contradicting its own verdict.",
+  },
+  RT_E_SYNTH_DEFAULT_DISARMED: {
+    meaning:
+      "The synthesis policy's armed chunk-resample default was silently re-disarmed (candidate count <= 1) — a revert of the enabled reliability lever while the resolver still consumes the constant.",
+    agentAction:
+      "Restore the armed default (`P6_SYNTH_CHUNK_RETRY_CANDIDATES` > 1) or make an explicit opt-out; never silently re-disarm the resample lever.",
+  },
+  RT_E_SYNTH_RESAMPLE_UNBOUNDED: {
+    meaning:
+      "A per-chunk, fail-fast, or whole-tree resample loop lacks the finite `P6_SYNTH_CANDIDATES_MAX` clamp — retries can run unbounded and blow the token budget.",
+    agentAction:
+      "Clamp every resample loop bound to the finite cap (>= 2 armed, <= 4 the cost bound); never run an unbounded resample.",
+  },
+  RT_E_REFUSAL_COVERAGE_LOST: {
+    meaning:
+      "A re-pinned refusal-path suite lost its genuine coded refusal assertion (a deleted/weakened `p6.synthesis.refused` made to pass) — the refusal floor is no longer pinned.",
+    agentAction:
+      "Restore the coded refusal assertion in the touched suite and keep the refused/coded-reason counts at or above their floor; never let a re-pin drop or loosen a refusal.",
+  },
+  RT_E_SYNTH_RESUME_NOT_REUSED: {
+    meaning:
+      "An accepted chunk was re-synthesized (paid for again) instead of being reused, though `ctx.resumeAccepted` was populated for the repair cycle.",
+    agentAction:
+      "Thread the previous cycle's accepted chunks into `ctx.resumeAccepted` and reuse any path present in `resumeByPath` with 0 synthesis prompts; never re-buy an accepted chunk.",
+  },
+  RT_E_JSX_IN_TS: {
+    meaning:
+      "An emitted `.ts` module contains JSX or names the global `JSX` namespace (TypeScript TS2503) — the JSX transform applies to `.tsx` only, so the tree fails its own typecheck.",
+    agentAction:
+      "Move JSX into a `.tsx` chunk or emit plain TypeScript; never ship a `.ts` module that references the JSX namespace or raw JSX.",
+  },
+  RT_E_VERIFIED_PRODUCT_UNEVIDENCED: {
+    meaning:
+      "A committed delivery claims `verifiedProduct` without the recorded verification block / evidence conjunction that backs the claim.",
+    agentAction:
+      "State `verifiedProduct` as exactly the recorded evidence conjunction (or `false` with reasons); never claim a verified product without the evidence.",
+  },
+  RT_E_DEFAULT_CHECK_BASELINE_LOST: {
+    meaning:
+      "A default-check baseline dropped a sample's `workingApp` score — only the flattering sample is pinned, so the recorded variance is erased.",
+    agentAction:
+      "Pin every sample's score (including the weaker one) with its `artifactComplete` flag; never drop a sample to make the baseline look better.",
   },
 };

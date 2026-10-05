@@ -608,6 +608,11 @@ function normalizeMachineVerifiedAcceptance(v: unknown): MachineVerifiedAcceptan
  * never invented: `workingApp` is deliberately NOT set here, because the
  * campaign verdict needs the on-disk tree's own `tsc`/`npm test`, which the
  * record alone cannot prove. Absent/non-object ⇒ null (fail-closed).
+ *
+ * fixes/346-X1: the rows are copied verbatim, so the `p6.synthesis.candidates`
+ * token suffix (lane S S-4) rides through unchanged and `fleetMetrics`'s
+ * `resample.extraTokens` reads it downstream — no second parse here, and
+ * `estimatedCostUsd` stays null (tokens are the reported unit).
  */
 export function fleetTelemetryFromProject(record: unknown): FleetRunTelemetry | null {
   if (!record || typeof record !== "object" || Array.isArray(record)) return null;

@@ -3546,6 +3546,65 @@ test("W346 R2-01 - a below-floor emit seals RT_E_PLAN_UNDERPRODUCED (not a silen
   }
 });
 
+test("W346 D-2 - a below-floor default emit decides on the journal's RT_E_PLAN_UNDERPRODUCED, not the red-trail code", () => {
+  const campaign2 = fileURLToPath(new URL("../../testruns/campaign2", import.meta.url));
+  const below = join(campaign2, "office-stock-tracker", "build.json");
+  if (!existsSync(below)) return; // artifacts live outside the repo; skip when absent
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-floor-decides-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR", "RAPIDTOOL_LEDGER_FILE", "RAPIDTOOL_CAMPAIGN_TOKEN_CAP"]) {
+    delete env[key];
+  }
+  try {
+    const proj = join(cwd, "build.json");
+    writeFileSync(proj, readFileSync(below));
+    // The DEFAULT emit (no --red-tree banner): the scaffold used to refuse on
+    // the red tree-run trail and echo RT_E_TREE_RUN_FAILED. The project's own
+    // journal carries RT_E_PLAN_UNDERPRODUCED and its tree is below the floor,
+    // so the floor code must be the DECIDING delivery reason.
+    const res = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "emit", "--project", proj, "--out", join(cwd, "out"), "--git"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(res.error, undefined, `spawn failed: ${String(res.error)}`);
+    const stderr = res.stderr ?? "";
+    assert.ok(!/(^|\n)\s+at\s/.test(stderr), `the floor seal must never print a Node stack:\n${stderr}`);
+    assert.equal(res.status, 1, `a below-floor emit refuses at exit 1.\nstdout: ${res.stdout}\nstderr: ${stderr}`);
+    const json = JSON.parse(res.stdout);
+    assert.equal(json.ok, false, "a below-floor emit is a refusal envelope");
+    assert.equal(json.code, "RT_E_PLAN_UNDERPRODUCED", "the journal's floor code decides, not the red-trail code");
+    assert.ok(json.planUnderproduced && json.planUnderproduced.code === "RT_E_PLAN_UNDERPRODUCED", "the envelope names the floor seal");
+    assert.equal(json.git && json.git.committed, false, "no commit is issued for a below-floor tree");
+    assert.equal(json.git && json.git.reason, "plan-underproduced");
+    assert.equal(json.git && json.git.code, "RT_E_PLAN_UNDERPRODUCED", "the withheld sub-envelope names the same deciding code");
+    assert.ok(Array.isArray(json.planUnderproduced.missing) && json.planUnderproduced.missing.length > 0, "the seal names the missing modules");
+    assert.equal(json.exit_code, res.status, "the envelope's exit_code must equal the process exit");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("W346 D-3 - the tree-run arm wires the in-run RUNLOCK guard (headless.runlockEditViolations)", () => {
+  const arm = cliText.match(/case "tree-run": \{[\s\S]*?\n {6}case "repair": \{/);
+  assert.ok(arm, "tree-run arm not found - re-derive this guard");
+  assert.match(
+    arm[0],
+    /runlockStartMs = Date\.now\(\)/,
+    "the run window must be stamped BEFORE treeRun executes",
+  );
+  assert.match(
+    arm[0],
+    /h\.runlockEditViolations\(REPO_ROOT, runlockStartMs\)/,
+    "the tree-run arm must scan the repo src/**+scripts/** for edits during the run (BL-010)",
+  );
+  assert.match(
+    arm[0],
+    /RT_E_SRC_EDITED_DURING_RUN/,
+    "a tree that moved under the run must refuse with the RUNLOCK code, never a clean verdict",
+  );
+});
+
 test("W346 R2-02 - the delivery record consumes the ONE canonical wiring predicate", () => {
   const arm = cliText.match(/async function deliveryVerification\([\s\S]*?\n\}/);
   assert.ok(arm, "deliveryVerification seam not found - re-derive this guard");

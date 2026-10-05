@@ -133,6 +133,29 @@ describe("fixes/343-1 selectBestOfN (lazy, deterministic)", () => {
     const none = candidatesLogDetail("single-module", 2, null, ["candidate 1: rejected — brief-fit missing board"]);
     assert.match(none, /winner none/);
   });
+
+  it("V5/I-A: an optional resample token delta rides the row as a trailing ` · tokens <int>`", () => {
+    const outcomes = ["candidate 1: rejected — tsc refused", "candidate 2: selected — pre-seal typecheck"];
+    const withTokens = candidatesLogDetail("chunk 1/3", 3, 1, outcomes, 1234);
+    assert.ok(withTokens.endsWith(" · tokens 1234"), "the token delta is the trailing segment");
+    assert.equal(
+      withTokens,
+      candidatesLogDetail("chunk 1/3", 3, 1, outcomes) + " · tokens 1234",
+      "appending the measured delta never rewrites the legacy head/outcomes bytes",
+    );
+    const legacy = candidatesLogDetail("chunk 1/3", 3, 1, outcomes);
+    assert.ok(!legacy.includes(" · tokens "), "absent delta ⇒ no token suffix (byte-identical legacy row)");
+    // A hostile / non-finite / negative delta never fabricates a token segment.
+    for (const bad of [undefined, Number.NaN, Number.POSITIVE_INFINITY, -1] as (number | undefined)[]) {
+      assert.ok(!candidatesLogDetail("u", 1, 0, [], bad).includes(" · tokens "), `hostile ${String(bad)} ⇒ no suffix`);
+    }
+    assert.equal(candidatesLogDetail("u", 1, null, [], 0), "u · candidates 1 · winner none ·  · tokens 0", "a measured 0 is recorded");
+    // The 1000-char bound reserves the suffix: a huge outcome tail can never
+    // truncate the token segment the acceptance consumer parses.
+    const long = candidatesLogDetail("u", 4, null, [`candidate 1: rejected — ${"x".repeat(2000)}`], 42);
+    assert.ok(long.endsWith(" · tokens 42"), "the reserved suffix survives the char cap");
+    assert.ok(long.length <= 1000, "the row stays bounded");
+  });
 });
 
 describe("A9/PR-15 adaptiveChunkSize (clamp(floor(budget/avgSigChars), 4, 12))", () => {

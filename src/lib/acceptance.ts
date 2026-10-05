@@ -313,6 +313,11 @@ export type CandidateJournalEvent = {
   tried: number;
   /** 1-based selected candidate index, or null for `winner none`. */
   winner: number | null;
+  /** fixes/346-X1 (I-A consumer): the ` · tokens <int>` suffix the producer
+   *  (lane S S-4) appends to the resample row — the measured keyed tokens the
+   *  extra evaluated candidate(s) cost. Absent on legacy rows ⇒ null, never
+   *  estimated from the candidate count. */
+  extraTokens: number | null;
 };
 
 /** Parse one `p6.synthesis.candidates` detail; null when it is not such a row. Pure. */
@@ -323,11 +328,21 @@ export function parseCandidateJournalRow(detail: unknown): CandidateJournalEvent
   const requested = Number(m[1]);
   if (!Number.isFinite(requested)) return null;
   const winner = m[2] === "none" ? null : Number(m[2]);
+  // I-A: the optional ` · tokens <int>` suffix; a legacy row (no suffix) stays null.
+  const tm = /·\s*tokens\s+(\d+)/.exec(detail);
+  const extraTokens = tm ? Number(tm[1]) : null;
   const head = detail.split("· candidate ")[0];
   const unit = head.split("· candidates")[0].trim();
   const slots = detail.match(/candidate\s+\d+:/g) ?? [];
   const notProduced = (detail.match(/candidate\s+\d+:\s*not produced/g) ?? []).length;
-  return { unit, failFast: /\(fail-fast\)/.test(unit), requested, tried: slots.length - notProduced, winner };
+  return {
+    unit,
+    failFast: /\(fail-fast\)/.test(unit),
+    requested,
+    tried: slots.length - notProduced,
+    winner,
+    extraTokens: extraTokens !== null && Number.isFinite(extraTokens) ? extraTokens : null,
+  };
 }
 
 /** One run's resample usage, summarised from its journal rows. */
@@ -345,6 +360,9 @@ export type ResampleRunUsage = {
   noWinner: number;
   /** Extra keyed synthesis calls: Σ max(0, candidatesTried − 1). */
   extraKeyedCalls: number;
+  /** fixes/346-X1: Σ the rows' ` · tokens <int>` suffix; null when no row
+   *  carried one (legacy/opt-out) — never a per-candidate estimate. */
+  extraTokens: number | null;
   /** Winner index per row, in journal order; null = `winner none`. */
   winnersByEvent: Array<number | null>;
 };
@@ -354,12 +372,17 @@ export type ResampleRunUsage = {
  * persisted `p6.synthesis.candidates` journal rows — candidates requested and
  * tried are counted, and `winner` is read, never invented.
  *
- * TOKENS ARE NOT IN THE ROW. The candidate row records candidates, not token
- * usage, so `extraTokens` stays null with `tokenAccounting` naming that gap —
- * a fabricated per-resample token figure would be exactly the over-claim the
- * honesty contract forbids. `extraKeyedCalls` is the counted lower bound: each
- * extra evaluated candidate is ≥1 keyed synthesis call (a candidate's own
- * bounded repair call is inside one candidate and is not separable here).
+ * TOKENS come from the row's own ` · tokens <int>` suffix (producer: lane S
+ * S-4). `extraTokens` is the Σ of that suffix across rows; `tokenAccounting`
+ * names whether any row carried it (`"journal"`) or none did
+ * (`"not-recorded-in-journal"`, the legacy/opt-out shape). A row without the
+ * suffix contributes 0 and never turns the whole fleet reading into a null when
+ * another row did record it — but when NO row recorded tokens, `extraTokens`
+ * stays null: a fabricated per-resample token figure would be exactly the
+ * over-claim the honesty contract forbids. `extraKeyedCalls` is the counted
+ * lower bound: each extra evaluated candidate is ≥1 keyed synthesis call (a
+ * candidate's own bounded repair call is inside one candidate and is not
+ * separable here).
  */
 export type ResampleUsage = {
   /** Runs whose telemetry named ≥1 candidates row. */
@@ -370,9 +393,10 @@ export type ResampleUsage = {
   winners: number;
   noWinner: number;
   extraKeyedCalls: number;
-  /** Never fabricated — the journal records no token usage per candidate. */
-  extraTokens: null;
-  tokenAccounting: "not-recorded-in-journal";
+  /** Σ the rows' ` · tokens <int>` suffix; null when no row recorded it. */
+  extraTokens: number | null;
+  /** `"journal"` iff ≥1 row carried the token suffix, else the honest gap. */
+  tokenAccounting: "journal" | "not-recorded-in-journal";
   /** Per-run detail, so the doctor reading names each run, not just a total. */
   byRun: ResampleRunUsage[];
 };
@@ -389,6 +413,8 @@ export function resampleUsage(runs: readonly unknown[]): ResampleUsage {
   let winners = 0;
   let noWinner = 0;
   let extraKeyedCalls = 0;
+  let extraTokens = 0;
+  let tokensRecorded = false;
   rows.forEach((r, i) => {
     const details = Array.isArray(r.synthesisCandidates) ? r.synthesisCandidates : [];
     const parsed = details
@@ -397,6 +423,8 @@ export function resampleUsage(runs: readonly unknown[]): ResampleUsage {
     if (parsed.length === 0) return;
     const brief = typeof r.brief === "string" && r.brief.trim() ? r.brief.trim() : `run-${i + 1}`;
     const runExtra = parsed.reduce((n, e) => n + Math.max(0, e.tried - 1), 0);
+    const runTokens = parsed.reduce((n, e) => n + (e.extraTokens ?? 0), 0);
+    const runHasTokens = parsed.some((e) => e.extraTokens !== null);
     const runWinners = parsed.filter((e) => e.winner !== null).length;
     byRun.push({
       brief,
@@ -406,6 +434,7 @@ export function resampleUsage(runs: readonly unknown[]): ResampleUsage {
       winners: runWinners,
       noWinner: parsed.length - runWinners,
       extraKeyedCalls: runExtra,
+      extraTokens: runHasTokens ? runTokens : null,
       winnersByEvent: parsed.map((e) => e.winner),
     });
     events += parsed.length;
@@ -414,6 +443,8 @@ export function resampleUsage(runs: readonly unknown[]): ResampleUsage {
     winners += runWinners;
     noWinner += parsed.length - runWinners;
     extraKeyedCalls += runExtra;
+    extraTokens += runTokens;
+    if (runHasTokens) tokensRecorded = true;
   });
   return {
     runs: byRun.length,
@@ -423,8 +454,8 @@ export function resampleUsage(runs: readonly unknown[]): ResampleUsage {
     winners,
     noWinner,
     extraKeyedCalls,
-    extraTokens: null,
-    tokenAccounting: "not-recorded-in-journal",
+    extraTokens: tokensRecorded ? extraTokens : null,
+    tokenAccounting: tokensRecorded ? "journal" : "not-recorded-in-journal",
     byRun,
   };
 }

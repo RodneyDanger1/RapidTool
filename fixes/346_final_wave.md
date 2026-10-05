@@ -110,3 +110,61 @@ README.md, AGENTS.md and RESUME.md each gained a "Corrections in force — appen
 - **Residuals named, not papered over:** `extraTokens` is `null` because the journal does
   not record per-candidate token usage; `resumeAccepted` is still plumbed but not consumed
   by codegen; 5 lint warnings; cross-family failover unimplemented.
+
+---
+
+# fixes/346 — final finish wave (Lane X: acceptance / observability / docs)
+
+**Lane:** X (six-lane finish wave). **HEAD at start:** `95089de` (clean, gate GREEN).
+**Owned files:** `src/lib/acceptance.ts` (+test), `src/lib/doctor.ts` (+test), `README.md`,
+`AGENTS.md`, `RESUME.md`, this log; measurement artifacts under `testruns\campaign3\**` +
+`testruns\_report\**`. The tree was mid-edit throughout (sibling lanes S/D/G/V/Q); the
+orchestrator commits.
+
+## A. X-1 [KEYLESS] — parse the ` · tokens <int>` journal suffix
+
+- `src/lib/acceptance.ts` — `CandidateJournalEvent` gains `extraTokens: number | null`;
+  `parseCandidateJournalRow` reads the optional trailing ` · tokens <int>` (I-A suffix, producer
+  lane S S-4) into it. `ResampleRunUsage` / `ResampleUsage` gain `extraTokens`; `resampleUsage`
+  sums the suffix across rows and sets `tokenAccounting:"journal"` iff ≥1 row carried it, else the
+  honest `null` / `"not-recorded-in-journal"` (backward compatible with every campaign #1/#2 row).
+- Tests (`src/lib/acceptance.test.ts`): a suffix-bearing row parses to a number; a legacy row and a
+  non-integer suffix stay `null`; the aggregate sums a mixed set and reports `"journal"`.
+
+## B. X-4 [KEYLESS] — surface `fleetMetrics.resample.extraTokens` on the doctor
+
+- `src/lib/doctor.ts` `fleetTelemetryFromProject` copies the candidate rows verbatim, so the token
+  suffix reaches `fleetMetrics.resample.extraTokens` with no second parse; `estimatedCostUsd` stays
+  `null`.
+- Test (`src/lib/doctor.test.ts`): a row carrying ` · tokens 321` reads `extraTokens:321` /
+  `"journal"`; a legacy row reads `null` / `"not-recorded-in-journal"`; cost stays `null`.
+
+Command: `node --experimental-strip-types --test --test-reporter=tap src/lib/acceptance.test.ts
+src/lib/doctor.test.ts` → **108 pass / 0 fail**; `npx tsc --noEmit` exit 0.
+
+## C. X-2 [KEYED] — campaign #3
+
+Eight briefs at the armed default (`P6_SYNTH_CANDIDATES` unset ⇒ candidates 3), every invocation
+`--token-ledger testruns\campaign3\ledger.json` with `RAPIDTOOL_CAMPAIGN_TOKEN_CAP=3000000`.
+Result: **`workingApp` 4/8**; **0 empty-substance commits · 0 red-tree commits**; 2 trees withheld
+coded. Ledger **948,586 tokens / 179 calls**, cap 3 M not tripped; wall 2,347 s. Resample read back:
+**7/8 runs · 28 events · 55 tried · 20 winners · 8 no-winner · 27 extra keyed calls · `extraTokens`
+293,152 (`"journal"`)**. Full scorecard: `testruns\_report\CAMPAIGN3.md` + `CAMPAIGN3.json`.
+
+## D. X-3 [KEYLESS] — docs close-out
+
+README.md, AGENTS.md and RESUME.md each gained a "346 wave batch 16 / Lane X close-out" block
+declaring, with sources: campaign #3 4/8; the S-1 two-sample (1/4, 2/4 ⇒ 3/8); the combined rate
+(fresh 7/16 = 43.75%; all history 13/42 ≈ 31.0%) and the variance; the candidate-token accounting
+(293,152 / `"journal"`); and the sibling-lane landing corroboration (S-2 `scaffold.ts:1872-1908`,
+D-1 `headless.ts:3441`).
+
+## E. Honest residuals
+
+- `extraTokens` is a MEASURED per-resample delta; a row without the suffix contributes 0 and never
+  fabricates a figure. Campaign #3's first brief (`bakery-website`) recorded rows with no suffix, so
+  its per-run `extraTokens` is `null` while the fleet total is a number — the mixed case X-1 pins.
+- The campaign ran against the LIVE working tree (HEAD `95089de` → `841383d`), not a frozen SHA:
+  sibling lanes (including S-4) were landing during the run. This is recorded in `CAMPAIGN3.md` §0.
+- The product wall is unchanged: the binding clause is the P6 DoD gate, and `workingApp` at 4/8 is
+  still under the ≥5/8 target.

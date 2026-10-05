@@ -4,6 +4,9 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ERROR_CODES,
   ERROR_CODE_DOC,
@@ -539,6 +542,43 @@ describe("ERROR_CODE_DOC", () => {
       assert.ok(doc.meaning.trim().length > 0, `${code} meaning is empty`);
       assert.ok(doc.agentAction.trim().length > 0, `${code} agentAction is empty`);
     }
+  });
+
+  it("W61 final wave G-2: every guard-registry expectedCode resolves in ERROR_CODE_DOC", () => {
+    // The proof layer names failure codes as `expectedCode`; a code only the
+    // registry believes in is aspirational. Every `RT_E_*` it references must
+    // be a real key in ERROR_CODE_DOC, so a guard can never name a code that
+    // no failure can actually carry.
+    const registryPath = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "scripts",
+      "guards",
+      "guard-registry.json",
+    );
+    const registry = JSON.parse(readFileSync(registryPath, "utf8")) as {
+      guards?: { id?: unknown; expectedCode?: unknown }[];
+    };
+    const referenced = new Map<string, string[]>();
+    for (const guard of registry.guards ?? []) {
+      const id = typeof guard.id === "string" ? guard.id : "?";
+      const raw = typeof guard.expectedCode === "string" ? guard.expectedCode : "";
+      for (const code of raw.match(/RT_E_[A-Z0-9_]+/g) ?? []) {
+        referenced.set(code, [...(referenced.get(code) ?? []), id]);
+      }
+    }
+    assert.ok((registry.guards ?? []).length > 0, "the guard registry lists guards");
+    assert.ok(referenced.size > 0, "the guard registry names at least one RT_E_* code");
+    const docKeys = new Set<string>(Object.keys(ERROR_CODE_DOC));
+    const aspirational = [...referenced.keys()].filter((code) => !docKeys.has(code));
+    assert.deepEqual(
+      aspirational,
+      [],
+      `guard-registry names codes absent from ERROR_CODE_DOC: ${aspirational
+        .map((code) => `${code} (${(referenced.get(code) ?? []).join(",")})`)
+        .join("; ")}`,
+    );
   });
 });
 

@@ -1869,9 +1869,21 @@ const defaultUiGeneration = ({
   };
   const multiField = (c: UiCallable): boolean =>
     (c.objectKeys?.length ?? 0) >= 2 || c.params.filter((p) => !p.rest).length >= 2;
+  // fixes/346-S2: the GENUINE form callable — ≥2 real fields + sound args AND
+  // a shape that actually consumes them (a zero-arg renderer whose fields would
+  // come only from the spec fallback is not a form). `pickFormCallable` keeps
+  // the legacy fallback chain for the non-render path; only the genuine one may
+  // outrank a render shell.
+  const wiredFormCallable: UiCallable | null = callables.find((c) => multiField(c) && formWouldWire(c)) ?? null;
   const pickFormCallable = (): UiCallable | null =>
-    callables.find((c) => multiField(c) && formWouldWire(c)) ?? callables.find(multiField) ?? callables[0] ?? null;
-  if (renderLike.length > 0) {
+    wiredFormCallable ?? callables.find(multiField) ?? callables[0] ?? null;
+  // fixes/346-S2: ONE deterministic decision. The S5 form-bindable preference
+  // was unsigned — a soundly callable render export forced the shell and left a
+  // genuinely bindable form callable unwired. A genuinely bindable callable now
+  // OUTRANKS the render shell: the console CALLS the bindable export. The
+  // render/`nothing to wire` shape stands only when no callable can be bound —
+  // a call is never fabricated.
+  if (renderLike.length > 0 && wiredFormCallable === null) {
     // C1-02: call a render export with SOUND arguments where its own declared
     // parameter types permit (a zero-arg renderer, or one whose params are
     // primitives / literal unions) so the shell mounts a real generated export.
@@ -1882,24 +1894,15 @@ const defaultUiGeneration = ({
       const args = uiRenderCallArgs(c, typeAliases);
       if (args !== null) renderCalls.push({ name: c.name, args });
     }
-    // fixes/346-S5: an all-null shell (NO render export callable) calls nothing
-    // — honest, but a false negative when the same tree exposes a form-bindable
-    // callable (s1/s2 bakery-website: `renderOpeningHoursBadge(status:
-    // OpenStatus)` with an object-typed status, alongside the bindable
-    // `computeLineTotal(price: number, quantity: number)`). Prefer the wired
-    // form in that case; keep the shell whenever it (or the honest all-null
-    // version) is the only sound shape.
-    const formCallable = renderCalls.length === 0 ? pickFormCallable() : null;
-    if (formCallable === null || !formWouldWire(formCallable)) {
-      const pages = uiBriefPages(project);
-      const shellPages =
-        pages.length > 0
-          ? pages
-          : renderLike.map((c) => ({ id: ident(c.name.replace(/^render/, "") || c.name, "page"), title: c.name }));
-      return defaultUiShellBody(project, shellPages, renderCalls);
-    }
+    const pages = uiBriefPages(project);
+    const shellPages =
+      pages.length > 0
+        ? pages
+        : renderLike.map((c) => ({ id: ident(c.name.replace(/^render/, "") || c.name, "page"), title: c.name }));
+    return defaultUiShellBody(project, shellPages, renderCalls);
   }
-  // Prefer a callable the form can genuinely bind, then any ≥2-field callable.
+  // The genuine form callable chosen above, else the legacy first ≥2-field /
+  // fallback callable (which the honest panel rejects below when unbindable).
   const callable = pickFormCallable();
   const shape: "object" | "positional" | "none" = callable ? formShapeOf(callable) : "none";
   const fields = callable ? uiDomainFields(project, callable, shape, typeAliases) : [];

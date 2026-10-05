@@ -158,8 +158,8 @@ test("single command: the two signals are reported and the gate of record is exa
   assert.deepEqual(verdict.skipped, [], "a skip is a hard failure");
   assert.equal(verdict.guards, registry.guards.length, "every registered guard is evaluated");
   assert.ok(verdict.count >= verdict.countFloor, `count ${verdict.count} must meet the pinned floor ${verdict.countFloor}`);
-  assert.equal(verdict.countFloor, 29, "the guard-count floor is pinned at 29 (deleting a guard fails)");
-  assert.equal(verdict.guards, 29, "29 guards: 15 W346 + 5 campaign1 + 4 campaign2 tourniquets + 5 S4 final-wave pins (S4-01/02/03/04/05)");
+  assert.equal(verdict.countFloor, 34, "the guard-count floor is pinned at 34 (deleting a guard fails)");
+  assert.equal(verdict.guards, 34, "34 guards: 15 W346 + 5 campaign1 + 4 campaign2 tourniquets + 5 S4 pins (S4-01..S4-05) + 5 finish-wave pins (D1-01/D2-01/D3-01/S3-01/G1-01)");
   assert.deepEqual(verdict.controlMissed, [], "every fired guard has a clean control");
   // TWO orthogonal signals on every guard.
   for (const r of verdict.detail) {
@@ -170,7 +170,15 @@ test("single command: the two signals are reported and the gate of record is exa
   // Every historical detector fires AND every live seam is wired: the gate of
   // record is green, and the classification is EXACTLY disjoint + total.
   assert.deepEqual(verdict.missed, [], "no fixture-integrity miss");
-  assert.deepEqual(verdict.pending, [], "no fix-presence pending — S4-04 flipped green when lane D5 landed ctx.resumeAccepted");
+  // A finish-wave pin may be RED (pending) until its owner's interface reaches
+  // the gate-of-record surface; ONLY these named owners may linger.
+  const RED_PENDING_OWNERS = { "D1-01": "D" };
+  assert.deepEqual(verdict.pending.filter((id) => !(id in RED_PENDING_OWNERS)), [], "only the named RED pins may be pending (lane D must commit keepBestTree's recompute)");
+  for (const id of verdict.pending) {
+    const r = verdict.detail.find((x) => x.id === id);
+    assert.match(JSON.stringify(r.fixPresence.evidence), new RegExp(RED_PENDING_OWNERS[id]), `${id} names its pending owner lane`);
+    assert.match(JSON.stringify(r.fixPresence.evidence), /workingTreeHasInterface/, `${id} reports the working-tree interface state`);
+  }
   assert.deepEqual(verdict.skipped, [], "no skip");
   const inv = verdict.fixPresenceInvariant;
   assert.ok(inv, "the verdict carries the fix-presence classification invariant");
@@ -180,12 +188,13 @@ test("single command: the two signals are reported and the gate of record is exa
   assert.deepEqual(inv.unknown, [], "no unknown id is classified");
   const allIds = verdict.detail.map((r) => r.id).sort();
   assert.deepEqual([...verdict.fixPresence.enforced, ...verdict.fixPresence.pending].sort(), allIds, "enforced ∪ pending == guards");
-  assert.deepEqual([...verdict.fixPresence.pending].sort(), [], "pending is empty on the landed tree");
+  assert.deepEqual([...verdict.fixPresence.pending].sort(), Object.keys(RED_PENDING_OWNERS).filter((id) => verdict.pending.includes(id)).sort(), "pending is exactly the named RED pins");
   assert.equal(new Set([...verdict.fixPresence.enforced, ...verdict.fixPresence.pending]).size, allIds.length, "union is exact (no duplicates)");
   // Both orthogonal signals fire for the five campaign-2 pins and the five
   // S4 final-wave pins (default armed / bounded resample / refusal coverage /
-  // accepted-chunk reuse / default-check baselines).
-  for (const id of ["C1-02", "R2-01", "R2-03", "R2-05", "R2-06", "S4-01", "S4-02", "S4-03", "S4-04", "S4-05"]) {
+  // accepted-chunk reuse / default-check baselines), and for the four
+  // finish-wave pins whose owners have committed their interface.
+  for (const id of ["C1-02", "R2-01", "R2-03", "R2-05", "R2-06", "S4-01", "S4-02", "S4-03", "S4-04", "S4-05", "G1-01", "S3-01", "D2-01", "D3-01"]) {
     const r = verdict.detail.find((x) => x.id === id);
     assert.equal(r.fixtureIntegrity.fired, true, `${id} fires on its historical defect bytes`);
     assert.equal(r.fixPresence.present, true, `${id} fix is on the gate-of-record surface`);
@@ -200,7 +209,14 @@ test("single command: the two signals are reported and the gate of record is exa
   assert.equal(c04.fixtureIntegrity.fired, true, "the historical non-monotonic defect is visible");
   assert.equal(c04.fixPresence.present, true, "the live comparator seam is present (lane D PR-07)");
   assert.equal(c04.fixPresence.wired, true, "the comparator is wired");
-  assert.equal(verdict.ok, true, "the gate of record is green when missed/pending/skipped are empty, count meets the floor, and the classification is consistent");
+  // D1-01 is the one RED pin while lane D's keepBestTree recompute is not yet on
+  // the gate-of-record surface; it names its owner and reports the working-tree
+  // state, and the gate of record is green exactly once every RED pin flips.
+  const d101 = verdict.detail.find((r) => r.id === "D1-01");
+  assert.equal(d101.fixtureIntegrity.fired, true, "D1-01 fires on the real G5 fixture (stale persisted gate)");
+  assert.equal(d101.fixPresence.mutationRed, true, "D1-01 retains a working mutation control");
+  assert.match(JSON.stringify(d101.fixPresence.evidence), /"ownerLane":"D"/, "D1-01 names its pending owner lane D");
+  assert.equal(verdict.ok, verdict.pending.length === 0, "the gate of record is green iff every RED pin has flipped (missed/skipped/count/classification already pinned)");
 });
 
 test("fix-presence classification: disjoint + total, and `ok` is FALSE on any pending or inconsistent set", () => {

@@ -2059,10 +2059,12 @@ describe("346 E1 L2-X4 — a verdict-channel failure is not a module defect", ()
 
 // ---------------------------------------------------------------------------
 // PR-20 (D2 / I6) — the monotone fix gate + the frozen spec-first oracle
-// contract. A fix is accepted ONLY when it strictly reduces the failing set
-// (or makes one non-recurring lateral move); otherwise the prior best source is
-// kept, the loop stops early, and the outcome says `regressed: true`. The
-// frozen contract makes the SAME model unable to author both the module and
+// contract. A fix is accepted ONLY when it strictly SHRINKS the failing set —
+// a sideways set (an equal-size member swap) is rejected even when its members
+// are new, so a broken fix that merely trades one failure for another can never
+// read as the empty failing set a real pass produces. Otherwise the prior best
+// source is kept, the loop stops early, and the outcome says `regressed: true`.
+// The frozen contract makes the SAME model unable to author both the module and
 // its cases: the pinned oracle ids + spec requirements are fixed before
 // synthesis and are stable across cycles.
 // ---------------------------------------------------------------------------
@@ -2082,13 +2084,30 @@ describe("PR-20 (D2/I6) — monotone fix acceptance + frozen oracle cases", () =
     assert.deepEqual(failingCaseIds({ results: [{ id: "a", pass: true, detail: "" }] }), []);
   });
 
-  it("isMonotoneFix accepts a strict subset / non-recurring lateral move, rejects supersets / identical / recurring", () => {
-    assert.equal(isMonotoneFix(["a"], ["a", "b"], [["a", "b"]]), true, "strict subset");
-    assert.equal(isMonotoneFix([], ["a"], [["a"]]), true, "a pass is the empty strict subset");
-    assert.equal(isMonotoneFix(["c"], ["a"], [["a"]]), true, "equal-size non-recurring lateral move");
-    assert.equal(isMonotoneFix(["a", "b"], ["a"], [["a"]]), false, "superset is never an improvement");
-    assert.equal(isMonotoneFix(["a"], ["a"], [["a"]]), false, "an identical set is no progress");
-    assert.equal(isMonotoneFix(["b"], ["a"], [["a"], ["b"]]), false, "a recurring lateral member is rejected");
+  it("isMonotoneFix accepts ONLY a strict subset — a sideways/worse set is rejected", () => {
+    assert.equal(isMonotoneFix(["a"], ["a", "b"]), true, "strict subset (one prior failure resolved)");
+    assert.equal(isMonotoneFix([], ["a"]), true, "a pass is the empty strict subset");
+    assert.equal(isMonotoneFix(["b", "c"], ["a", "b", "c"]), true, "strict subset by size, members kept");
+    assert.equal(isMonotoneFix(["c"], ["a"]), false, "equal-size lateral swap is NOT progress");
+    assert.equal(isMonotoneFix(["a", "b"], ["a"]), false, "superset is never an improvement");
+    assert.equal(isMonotoneFix(["a"], ["a"]), false, "an identical set is no progress");
+  });
+
+  it("V-3: a broken fix that only compiles a new failure is rejected (never reads as progress)", () => {
+    // A healthy run was failing {case-a}; the "fix" breaks compilation, whose
+    // failing set is the compile sentinel — a sideways equal-size swap. Under a
+    // lateral-move allowance this read as an improvement; it must be rejected so
+    // only a genuine pass (the empty set) is ever accepted.
+    assert.equal(
+      isMonotoneFix([COMPILE_FAILURE_CASE_ID], ["case-a"]),
+      false,
+      "the compile-failure sentinel is not a strict subset of the prior failing set",
+    );
+    assert.equal(
+      isMonotoneFix(["case-b"], ["case-a"]),
+      false,
+      "a moved failure is not a reduced failing set",
+    );
   });
 
   it("frozenOracleCases is deterministic, pins every oracle id, and is spec-grounded", () => {

@@ -365,6 +365,7 @@ const SRC = {
   campaign: "../guards/campaign-invariants.mjs",
   campaign2: "../guards/campaign2-invariants.mjs",
   enabling: "../guards/enabling-wave-invariants.mjs",
+  finalWave: "../guards/final-wave-invariants.mjs",
 };
 
 const ERRORS_SRC = join(REPO_ROOT, "src", "lib", "errors.ts");
@@ -690,6 +691,109 @@ const SEAM_CHECKS = {
   "S4-04": async () => enablingSeam("S4-04"),
   // S4-05 — both default-check samples' workingApp scores stay pinned.
   "S4-05": async () => enablingSeam("S4-05"),
+
+  // --- Final wave (fixes/346) — D1-01/D2-01/D3-01/S3-01/G1-01 tourniquets ---
+  // Fix-presence is measured against the GATE-OF-RECORD surface (`git show
+  // HEAD:<file>`), never another lane's dirty working tree; the mutation control
+  // is the guard's own injected-defect proof. A pin is RED (pending) until its
+  // owner COMMITS the named interface, then it flips.
+  "G1-01": async () => {
+    const landed =
+      gateHeadContains("src/lib/engine.ts", "[intent, ...qualifiers]") === true &&
+      gateHeadContains("src/lib/engine.ts", "isOffIntentResearch") === true;
+    const c = (await finalWaveControlsFor())?.["G1-01"];
+    return {
+      present: landed,
+      wired: landed,
+      mutationRed: !!(c && c.mutationRed),
+      evidence: {
+        ownerInterface: "src/lib/engine.ts#researchQueryText ([intent, ...qualifiers]) + isOffIntentResearch",
+        gateOfRecordHasInterface: landed,
+        workingTreeHasInterface: safeReadText(join(REPO_ROOT, "src", "lib", "engine.ts")).includes("[intent, ...qualifiers]"),
+        detectorFires: !!(c && c.fired),
+        controlClean: !!(c && c.controlClean),
+      },
+    };
+  },
+  "S3-01": async () => {
+    const landed =
+      gateHeadContains("src/lib/codegen.server.ts", "underProducedRefusal(") === true &&
+      gateHeadContains("src/lib/codegen.server.ts", "under.code") === true;
+    const c = (await finalWaveControlsFor())?.["S3-01"];
+    return {
+      present: landed,
+      wired: landed,
+      mutationRed: !!(c && c.mutationRed),
+      evidence: {
+        ownerInterface: "src/lib/codegen.server.ts#refuse -> underProducedRefusal -> RT_E_PLAN_UNDERPRODUCED",
+        gateOfRecordHasInterface: landed,
+        workingTreeHasInterface: safeReadText(join(REPO_ROOT, "src", "lib", "codegen.server.ts")).includes("under.code"),
+        detectorFires: !!(c && c.fired),
+        controlClean: !!(c && c.controlClean),
+      },
+    };
+  },
+  "D2-01": async () => {
+    const landed =
+      gateHeadContains("scripts/rapidtool-cli.mjs", "planUnderproductionSeal(") === true &&
+      gateHeadContains("scripts/rapidtool-cli.mjs", "RT_E_PLAN_UNDERPRODUCED") === true;
+    const c = (await finalWaveControlsFor())?.["D2-01"];
+    return {
+      present: landed,
+      wired: landed,
+      mutationRed: !!(c && c.mutationRed),
+      evidence: {
+        ownerInterface: "scripts/rapidtool-cli.mjs emit seal consumes headless.planUnderproductionSeal",
+        gateOfRecordHasInterface: landed,
+        workingTreeHasInterface: safeReadText(join(REPO_ROOT, "scripts", "rapidtool-cli.mjs")).includes("planUnderproductionSeal("),
+        detectorFires: !!(c && c.fired),
+        controlClean: !!(c && c.controlClean),
+      },
+    };
+  },
+  "D3-01": async () => {
+    const cli = gateHeadText("scripts/rapidtool-cli.mjs");
+    const headless = gateHeadText("src/lib/headless.ts");
+    const countSites = (src) => (src ? src.split("runlockEditViolations(").length - 1 : 0);
+    const cliSites = countSites(cli);
+    const headlessSites = Math.max(0, countSites(headless) - 1);
+    const landed = cli !== null && (cliSites >= 1 || headlessSites >= 1) && /RT_E_SRC_EDITED_DURING_RUN/.test(cli || "");
+    const c = (await finalWaveControlsFor())?.["D3-01"];
+    return {
+      present: landed,
+      wired: landed,
+      mutationRed: !!(c && c.mutationRed),
+      evidence: {
+        ownerInterface: "the run path calls headless.runlockEditViolations and refuses with RT_E_SRC_EDITED_DURING_RUN",
+        gateOfRecordHasInterface: landed,
+        cliCallSitesAtHead: cliSites,
+        headlessCallSitesAtHead: headlessSites,
+        detectorFires: !!(c && c.fired),
+        controlClean: !!(c && c.controlClean),
+      },
+    };
+  },
+  // D1-01 — the ONE RED pin of this lane: lane D's keepBestTree recompute is not
+  // yet on the gate-of-record surface. It flips the moment D commits it.
+  "D1-01": async () => {
+    const landed =
+      gateHeadContains("src/lib/headless.ts", "p6.journey.gate-recomputed") === true ||
+      gateHeadContains("src/lib/headless.ts", "recordGateInto(retained, 6)") === true;
+    const c = (await finalWaveControlsFor())?.["D1-01"];
+    return {
+      present: landed,
+      wired: landed,
+      mutationRed: !!(c && c.mutationRed),
+      evidence: {
+        ownerLane: "D",
+        ownerInterface: (c && c.pendingInterface) || "src/lib/headless.ts#keepBestTree must recompute the phase-6 gate over the grafted persisted tree",
+        gateOfRecordHasInterface: landed,
+        workingTreeHasInterface: safeReadText(join(REPO_ROOT, "src", "lib", "headless.ts")).includes("p6.journey.gate-recomputed"),
+        detectorFires: !!(c && c.fired),
+        controlClean: !!(c && c.controlClean),
+      },
+    };
+  },
 };
 
 /** Read a text file, "" on failure (never throws). @param {string} p */
@@ -770,6 +874,13 @@ function gateHeadContains(file, needle) {
   return r.stdout.includes(needle);
 }
 
+/** The committed gate-of-record text for a file, or null when git cannot be consulted. @param {string} file */
+function gateHeadText(file) {
+  const r = spawnSync("git", ["show", `HEAD:${file}`], { cwd: REPO_ROOT, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+  if (r.error || r.status !== 0 || typeof r.stdout !== "string") return null;
+  return r.stdout;
+}
+
 /**
  * A campaign2 tourniquet's fix-presence: the owner's interface must be on the
  * gate-of-record surface, and the guard's own mutation control must prove the
@@ -826,6 +937,27 @@ async function enablingSeam(id) {
   if (!ctl || !ctl[id]) return ABSENT("enabling-wave-invariants controls unavailable for " + id);
   const r = ctl[id];
   return { present: true, wired: !!r.wired, mutationRed: !!r.mutationRed, evidence: { ...r } };
+}
+
+// --- Final-wave (fixes/346) controls -----------------------------------------
+// The guard module owns the detectors + real mutation controls; the harness
+// consumes them (it does not re-implement the checks). The per-id SEAM_CHECKS
+// above decide fix-presence against the gate-of-record surface.
+let FINAL_WAVE_CONTROLS;
+/** @returns {Promise<Record<string, any>|null>} */
+async function finalWaveControlsFor() {
+  if (FINAL_WAVE_CONTROLS !== undefined) return FINAL_WAVE_CONTROLS;
+  const mod = await importCached(SRC.finalWave);
+  if (mod.__error || typeof mod.finalWaveControls !== "function") {
+    FINAL_WAVE_CONTROLS = null;
+    return null;
+  }
+  try {
+    FINAL_WAVE_CONTROLS = await mod.finalWaveControls();
+  } catch {
+    FINAL_WAVE_CONTROLS = null;
+  }
+  return FINAL_WAVE_CONTROLS;
 }
 
 /** Evaluate a guard's live-seam (fix-presence) signal. @param {any} g @param {any} ctx */
@@ -1289,6 +1421,16 @@ DRIVERS["enabling-wave-invariants"] = async (_ctx, g) => {
   return { fired: !!r.fired, controlClean: !!r.controlClean, evidence: { ...r } };
 };
 
+// D1-01/D2-01/D3-01/S3-01/G1-01 — the final-wave guard tool's own controls are
+// the fixture-integrity signal: each detector fires on its historical/injected
+// defect and stays silent on the live control.
+DRIVERS["final-wave-invariants"] = async (_ctx, g) => {
+  const ctl = await finalWaveControlsFor();
+  if (!ctl || !ctl[g.id]) return { fired: false, controlClean: false, evidence: "final-wave-invariants controls unavailable for " + g.id };
+  const r = ctl[g.id];
+  return { fired: !!r.fired, controlClean: !!r.controlClean, evidence: { ...r } };
+};
+
 DRIVERS["arch-failclosed"] = async (ctx) => {
   const dod = await import("../../src/lib/dod.ts");
   const proj = readJsonFile(join(ctx.runRoot, "office-stock-tracker", "emitted", ".rapidtool", "project.json"));
@@ -1362,6 +1504,9 @@ const ID_TO_DRIVER = {
   "c1-08": "campaign-invariants",
   "r2-01": "campaign2-invariants", "r2-03": "campaign2-invariants",
   "r2-05": "campaign2-invariants", "r2-06": "campaign2-verify",
+  "g1-01": "final-wave-invariants", "s3-01": "final-wave-invariants",
+  "d1-01": "final-wave-invariants", "d2-01": "final-wave-invariants",
+  "d3-01": "final-wave-invariants",
 };
 
 /** @param {any} g @returns {string|null} */
@@ -1497,11 +1642,11 @@ export async function verifyHeldOut(cassettes, heldOut, _ctx) {
 // ---------------------------------------------------------------------------
 
 /** Pinned floor: removing a registry entry must fail the gate of record (§4.6-3).
- *  Overridable by `countFloor` in the registry (now 29 — the 15 W346 guards, the
+ *  Overridable by `countFloor` in the registry (now 34 — the 15 W346 guards, the
  *  five campaign #1 residual guards C1-01/02/05/06/08, the four campaign #2
- *  tourniquets R2-01/03/05/06, and the five S4 final-wave pins
- *  S4-01/02/03/04/05). */
-export const GUARD_COUNT_FLOOR = 29;
+ *  tourniquets R2-01/03/05/06, the five S4 final-wave pins S4-01..S4-05, and the
+ *  five finish-wave pins D1-01/D2-01/D3-01/S3-01/G1-01). */
+export const GUARD_COUNT_FLOOR = 34;
 
 /**
  * Classify every guard's fix-presence into EXACTLY ONE bucket. `enforced` is the

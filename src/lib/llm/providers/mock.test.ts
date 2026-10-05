@@ -296,7 +296,12 @@ describe("mock provider — explicit selection only", () => {
     const restore = withCleanLlmEnv();
     try {
       const res = await callModel("main", "hello");
-      assert.deepEqual(res, { ok: false, reason: "not-configured", code: "RT_E_LLM_NOT_CONFIGURED" });
+      assert.deepEqual(res, {
+        ok: false,
+        reason: "not-configured",
+        code: "RT_E_LLM_NOT_CONFIGURED",
+        servedProvider: "deepseek",
+      });
     } finally {
       restore();
     }

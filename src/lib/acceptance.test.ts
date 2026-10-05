@@ -377,6 +377,17 @@ describe("fixes/346-X5 — parseCandidateJournalRow (report the journal, invent 
     assert.equal(e.requested, 2);
   });
 
+  it("fixes/346-X1 (I-A consumer): parses the ` · tokens <int>` suffix; a legacy row stays null", () => {
+    const withTokens = parseCandidateJournalRow(`${ROW_RESAMPLED} · tokens 1234`);
+    assert.ok(withTokens);
+    assert.equal(withTokens.extraTokens, 1234);
+    assert.equal(withTokens.winner, 2, "the suffix does not disturb the parsed winner");
+    // A row without the suffix (every campaign #1/#2 row) stays the honest null.
+    assert.equal(parseCandidateJournalRow(ROW_RESAMPLED)?.extraTokens, null);
+    // A non-integer suffix is not a token figure — never guessed.
+    assert.equal(parseCandidateJournalRow(`${ROW_RESAMPLED} · tokens x`)?.extraTokens, null);
+  });
+
   it("refuses anything that is not a candidates row (fail-closed, never guessed)", () => {
     assert.equal(parseCandidateJournalRow(null), null);
     assert.equal(parseCandidateJournalRow(undefined), null);
@@ -402,6 +413,26 @@ describe("fixes/346-X5 — the armed resample's usage, WITH vs WITHOUT the resam
     assert.equal(m.resample.tokenAccounting, "not-recorded-in-journal");
     assert.equal(m.resample.byRun.length, 1);
     assert.deepEqual(m.resample.byRun[0].winnersByEvent, [1, 2, null]);
+  });
+
+  it("fixes/346-X1: the ` · tokens <int>` suffix is summed into extraTokens (accounting:'journal')", () => {
+    const withTokens = resampleUsage([
+      { brief: "bfo", keyed: true, synthesisCandidates: [`${ROW_WIN_FIRST} · tokens 100`, `${ROW_RESAMPLED} · tokens 250`] },
+    ]);
+    assert.equal(withTokens.extraTokens, 350);
+    assert.equal(withTokens.tokenAccounting, "journal");
+    assert.equal(withTokens.byRun[0].extraTokens, 350);
+    // Mixed: a recorded row keeps the reading non-null even with a legacy sibling.
+    const mixed = resampleUsage([
+      { brief: "bfo", keyed: true, synthesisCandidates: [ROW_WIN_FIRST, `${ROW_RESAMPLED} · tokens 7`] },
+    ]);
+    assert.equal(mixed.extraTokens, 7);
+    assert.equal(mixed.tokenAccounting, "journal");
+    // A run with no recorded suffix still reports null per-run and fleet-wide.
+    const legacy = resampleUsage([{ brief: "bfo", keyed: true, synthesisCandidates: [ROW_WIN_FIRST, ROW_RESAMPLED] }]);
+    assert.equal(legacy.extraTokens, null);
+    assert.equal(legacy.tokenAccounting, "not-recorded-in-journal");
+    assert.equal(legacy.byRun[0].extraTokens, null);
   });
 
   it("WITHOUT the resample (the P6_SYNTH_CANDIDATES=1 opt-out shape): zero events, zero extra calls", () => {

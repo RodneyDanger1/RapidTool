@@ -1918,6 +1918,28 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     assertParsesTsx("render-fallback UI", ui);
   });
 
+  it("fixes/346-S2: a soundly callable render export never suppresses a genuinely bindable form", () => {
+    // The signed decision: when the tree exposes BOTH a soundly callable
+    // renderer and a genuinely bindable form callable (≥2 real domain fields +
+    // sound args), the console binds the form that CALLS the bindable export —
+    // the render shell is the fallback, not the default. Pre-fix the zero-arg
+    // renderer forced the shell (`renderCalls` non-empty ⇒ formCallable null)
+    // and the bindable form was left unwired.
+    const p: Project = {
+      ...primed(),
+      implementationSpec: null,
+      generatedSource:
+        'export function renderHome(): string { return "home"; }\n' +
+        "export function computeTotal(price: number, quantity: number): number { return price * quantity; }\n",
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.match(ui, /generated\.computeTotal\(/, "the genuinely bindable callable IS wired");
+    assert.ok(!/generated\.renderHome\(/.test(ui), "the render shell does not displace the bindable form");
+    assert.ok(!ui.includes("nothing to wire yet"), "not the honest-panel path");
+    assert.ok(ui.includes('name="price"') && ui.includes('name="quantity"'), "both real fields are bound");
+    assertParsesTsx("S2 form-over-render UI", ui);
+  });
+
   it("fixes/346-S5 control: a callable render export still yields the multi-section shell", () => {
     const p: Project = {
       ...primed(),

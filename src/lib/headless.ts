@@ -3405,19 +3405,46 @@ function keepBestTree(
   best: { project: Project; metric: BestTreeMetric } | null,
   current: BestTreeMetric | null,
   events: string[],
-): Project {
-  if (best === null) return project;
+  gate: P6JourneyResult["gate"],
+): { project: Project; gate: P6JourneyResult["gate"] } {
+  if (best === null) return { project, gate };
   const cur = current ?? bestTreeMetricOf(project, null);
-  if (!isBetterTree(best.metric, cur)) return project;
+  if (!isBetterTree(best.metric, cur)) return { project, gate };
   events.push(
     `best-tree-kept: earlier cycle had ${best.metric.ts} diagnostic(s) / ${best.metric.files} file(s) vs ${cur.ts} / ${cur.files} — returning the better tree`,
   );
-  return p6JourneyLog(
+  const kept = p6JourneyLog(
     { ...project, generatedTree: best.project.generatedTree },
     "warn",
     "p6.journey.best-tree-kept",
     `kept the best tree (${best.metric.ts} diagnostic(s), ${best.metric.files} file(s)); the last cycle produced ${cur.ts} diagnostic(s), ${cur.files} file(s)`,
   );
+  // G5: the graft replaces the tree, but `project`'s phase-6 gate verdict was
+  // recorded over the LAST cycle's tree. Recompute it over the tree actually
+  // persisted, so the verdict on disk is the verdict of the tree on disk —
+  // never keep a verdict computed over another tree (bakery-florist-orders:
+  // the recorded gate failed p6-arch while the grafted tree passes it).
+  const recomputed = recordGateInto(kept, 6 as PhaseId);
+  const g = (recomputed.phases ?? []).find((ph) => ph.id === 6)?.gate;
+  const nextGate: P6JourneyResult["gate"] =
+    g && typeof g === "object"
+      ? {
+          passed: g.passed === true,
+          unmet: Array.isArray(g.unmet) ? g.unmet.map((u) => String(u)) : [],
+          evidenceHash: typeof g.evidenceHash === "string" ? g.evidenceHash : "",
+        }
+      : gate;
+  return {
+    project: p6JourneyLog(
+      recomputed,
+      "warn",
+      "p6.journey.gate-recomputed",
+      nextGate === null
+        ? "phase-6 gate recomputed over the persisted best tree — no gate record (phase 6 not complete)"
+        : `phase-6 gate recomputed over the persisted best tree — ${nextGate.passed ? "PASS" : `FAIL · ${nextGate.unmet.length} unmet`}`,
+    ),
+    gate: nextGate,
+  };
 }
 
 /** PR-16 (I7, O-01): de-materialize ONE chunk of a persisted tree back to the
@@ -3688,7 +3715,8 @@ export async function driveP6Journey(
               `tree-run ok + P6 gate green but fixtures pending (${pending.join(", ") || fx.length}) — never auto-approve`,
             );
             events.push(`cycle ${cycle}: fixtures pending — P6 journey FAILED`);
-            return { outcome: "failed", project: keepBestTree(finalProject, bestTree, lastMetric, events), cycles: cycle, budget, treeTail: null, refusal, gate, events };
+            const kept = keepBestTree(finalProject, bestTree, lastMetric, events, gate);
+            return { outcome: "failed", project: kept.project, cycles: cycle, budget, treeTail: null, refusal, gate: kept.gate, events };
           }
           const spec = (verdict.tests ?? []).find((t) => t.file === "tests/oracle.spec.ts" || t.file.endsWith("oracle.spec.ts"));
           if (!spec || spec.run !== "pass" || spec.tests.pass === 0) {
@@ -3700,7 +3728,8 @@ export async function driveP6Journey(
               `approved fixtures did not pass under treeRun — ${why}`,
             );
             events.push(`cycle ${cycle}: fixtures red under treeRun — P6 journey FAILED`);
-            return { outcome: "failed", project: keepBestTree(finalProject, bestTree, lastMetric, events), cycles: cycle, budget, treeTail: null, refusal, gate, events };
+            const kept = keepBestTree(finalProject, bestTree, lastMetric, events, gate);
+            return { outcome: "failed", project: kept.project, cycles: cycle, budget, treeTail: null, refusal, gate: kept.gate, events };
           }
         }
         finalProject = await applyTreeRunTestedMint(finalProject, verdict);
@@ -3757,7 +3786,8 @@ export async function driveP6Journey(
         `tree-run ok after ${cycle}/${budget} cycle(s) but ${gateReason} — journey FAILED, not converged (converged requires treeRun ok AND gate.passed)`,
       );
       events.push(`cycle ${cycle}: tree-run ok but ${gateReason} — P6 journey FAILED (converged requires gate.passed)`);
-      return { outcome: "failed", project: keepBestTree(finalProject, bestTree, lastMetric, events), cycles: cycle, budget, treeTail: null, refusal, gate, events };
+      const kept = keepBestTree(finalProject, bestTree, lastMetric, events, gate);
+      return { outcome: "failed", project: kept.project, cycles: cycle, budget, treeTail: null, refusal, gate: kept.gate, events };
     }
     treeTail = treeRunFailureTail(verdict).slice(0, P6_JOURNEY_TAIL_MAX);
     p = p6JourneyLog(synthesized, "warn", "p6.tree.failure", treeTail);
@@ -3773,7 +3803,8 @@ export async function driveP6Journey(
       const detail = `no progress: cycle ${cycle} reproduced cycle ${cycle - 1}'s failure signature (${failSig}) — aborting with ${budget - cycle} cycle(s) unspent`;
       p = p6JourneyLog(p, "error", "p6.journey.no-progress", detail);
       events.push(detail);
-      return { outcome: "failed", project: keepBestTree(p, bestTree, lastMetric, events), cycles: cycle, budget, treeTail, refusal, gate: null, events };
+      const kept = keepBestTree(p, bestTree, lastMetric, events, null);
+      return { outcome: "failed", project: kept.project, cycles: cycle, budget, treeTail, refusal, gate: kept.gate, events };
     }
     prevFailureSig = failSig;
     events.push(`cycle ${cycle}: tree-run fail — ${treeTail.slice(0, 140)}`);
@@ -3791,7 +3822,8 @@ export async function driveP6Journey(
       refusal !== null ? ` — last refusal: ${refusal.slice(0, 180)}` : ""
     }`,
   );
-  return { outcome: "failed", project: keepBestTree(p, bestTree, lastMetric, events), cycles: budget, budget, treeTail, refusal, gate: null, events };
+  const kept = keepBestTree(p, bestTree, lastMetric, events, null);
+  return { outcome: "failed", project: kept.project, cycles: budget, budget, treeTail, refusal, gate: kept.gate, events };
 }
 
 /**

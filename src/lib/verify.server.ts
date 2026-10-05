@@ -10,11 +10,13 @@
 //      the source and each expression, printing machine-readable results.
 //      The machine — never the LLM — declares pass/fail.
 //   3. verifyAndFixServer() — bounded loop: fail → DeepSeek emits a patched
-//      source → re-run, up to maxIterations. PR-20 (D2): the loop is MONOTONE —
-//      a fix is accepted only when its failing-case set is a strict subset (or
-//      one non-recurring lateral move); a non-improving fix is rejected, the
-//      prior best source is kept, the loop stops early, and the outcome reports
-//      `regressed: true` — never worse bytes in `finalSource`.
+//      source → re-run, up to maxIterations. PR-20 (D2) / V-3: the loop is
+//      MONOTONE — a fix is accepted only when its failing-case set is a STRICT
+//      subset of the prior one; a sideways or worse set (a broken fix that only
+//      trades one failure for another) is rejected, the prior best source is
+//      kept, the loop stops early, and the outcome reports `regressed: true` —
+//      never worse bytes in `finalSource`, and a broken fix never reads as the
+//      empty failing set a real pass produces.
 //   4. E-08 (A4-b) oracle pinning: generateCases() is SEEDED with the
 //      project's A7 oracle rows (a caller-rendered oracleToCaseSeeds() string
 //      + the pinned ids — passed as parameters so this module never imports
@@ -816,26 +818,22 @@ export function failingCaseIds(run: {
 
 /**
  * PR-20 (D2 / R2 Row 3): is `next` an acceptable monotone improvement over
- * `prior`? Yes iff it is a STRICT subset of `prior`, or an EQUAL-SIZE set that
- * differs from `prior` and whose members are non-recurring (absent from every
- * previously-seen failing set — one lateral move allowed, no oscillation). A
- * superset, an identical set, or a recurring lateral set is NOT an improvement:
- * the fix must be rejected and the prior best kept. Pure; never throws.
+ * `prior`? Yes iff it is a STRICT subset of `prior` — every remaining failing
+ * id was already failing, and at least one prior failure is gone. A superset,
+ * an identical set, and any SIDEWAYS move (an equal-size set swapping members,
+ * e.g. a compile-failure sentinel replacing a real failing case) are NOT
+ * improvements: the fix is rejected and the prior best kept. The strict-subset
+ * rule is what stops a BROKEN fix (one that only compiles a different failure)
+ * from reading as progress — a lateral swap can never be mistaken for the
+ * empty failing set a real pass produces. Pure; never throws.
  */
 export function isMonotoneFix(
   next: readonly string[],
   prior: readonly string[],
-  seen: readonly (readonly string[])[] = [],
 ): boolean {
   const n = [...new Set(next)];
   const p = new Set(prior);
-  if (n.length < prior.length && n.every((id) => p.has(id))) return true;
-  if (n.length === prior.length && n.some((id) => !p.has(id))) {
-    const recurring = new Set<string>();
-    for (const s of seen) for (const id of s) recurring.add(id);
-    return n.every((id) => !recurring.has(id));
-  }
-  return false;
+  return n.length < prior.length && n.every((id) => p.has(id));
 }
 
 /**
@@ -2187,7 +2185,6 @@ export async function verifyAndFixServer(
   // regression honestly instead of writing worse bytes into `finalSource`.
   let bestSource = source;
   let priorFailing: string[] | null = null;
-  const seenFailing: string[][] = [];
   for (let i = 0; i < maxIterations; i++) {
     const run = await runCases(current, cases);
     const lint = lintFailures(current);
@@ -2216,7 +2213,7 @@ export async function verifyAndFixServer(
     // prior best source is kept, the loop stops early, and the evidence says so.
     if (priorFailing !== null) {
       const nextFailing = failingCaseIds(run);
-      if (!isMonotoneFix(nextFailing, priorFailing, seenFailing)) {
+      if (!isMonotoneFix(nextFailing, priorFailing)) {
         const fails = run.results.filter((r) => !r.pass);
         const evidence = `machine-run cases still failing after ${i + 1} iterations: ${fails
           .map((f) => `${f.id}: ${f.detail}`)
@@ -2264,7 +2261,6 @@ export async function verifyAndFixServer(
     const incumbentIds = failingCaseIds(run);
     bestSource = current;
     priorFailing = incumbentIds;
-    seenFailing.push(incumbentIds);
     const failing = run.results.filter((r) => !r.pass);
     const failures = failing.map((f) => `${f.id}: ${f.detail}`).join("; ");
     const fix = await runBudgetedCall(opts.budget, () =>

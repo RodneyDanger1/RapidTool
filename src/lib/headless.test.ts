@@ -64,7 +64,7 @@ import {
 } from "./headless.ts";
 import type { ApproveActor, P6JourneyCycleContext } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
-import { runGate } from "./dod.ts";
+import { recordGateInto, runGate } from "./dod.ts";
 import { IMPORT_MAX_CHARS, importProject } from "./io.ts";
 import { checkpointPath, readCheckpoint } from "./checkpoint.server.ts";
 import { evaluatePolicy } from "./policy.ts";
@@ -1254,6 +1254,51 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
     assert.ok(
       (res.project.logs ?? []).some((l) => l.event === "p6.journey.best-tree-kept"),
       "the best-tree recovery is recorded loudly",
+    );
+  });
+
+  it("D-1 (G5): a best-tree graft re-records the phase-6 gate over the PERSISTED tree, never the last cycle's", async () => {
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    const treeA = [{ path: "src/generated.ts", source: "export const a = 1;", hash: "a", attempt: 0 }];
+    const treeB = [
+      { path: "src/generated.ts", source: "export const a = 1;", hash: "a", attempt: 0 },
+      { path: "src/extra.ts", source: "export const b = 2;", hash: "b", attempt: 0 },
+    ];
+    const withTrees = (p: Project, tree: typeof treeA): Project => ({ ...p, generatedTree: tree });
+    let cycle = 0;
+    const synthesize = async (p: Project): Promise<Project> => {
+      cycle += 1;
+      return withTrees(p, cycle === 1 ? treeA : treeB);
+    };
+    const oneTs: TreeRunOutcome = {
+      ok: false,
+      dir: "",
+      compile: { ok: false, dir: "", checked: 1, passed: 0, failed: 1, skipped: 0, verdicts: [{ file: "src/generated.ts", verdict: "fail", detail: "error TS2322: type mismatch" }] },
+      tests: [],
+      run: null,
+    };
+    const twoTs: TreeRunOutcome = {
+      ok: false,
+      dir: "",
+      compile: { ok: false, dir: "", checked: 2, passed: 0, failed: 2, skipped: 0, verdicts: [{ file: "src/extra.ts", verdict: "fail", detail: "error TS2322: a\nerror TS2345: b" }] },
+      tests: [],
+      run: null,
+    };
+    let run = 0;
+    const runTree = async (): Promise<TreeRunOutcome> => (++run === 1 ? oneTs : twoTs);
+    const res = await driveP6Journey(base, { budget: 2, deps: { synthesize, runTree } });
+    assert.equal(res.outcome, "failed");
+    assert.deepEqual(res.project.generatedTree, treeA, "the best tree is what is persisted");
+    // The recorded verdict must be the verdict of the tree that was persisted,
+    // not the last cycle's — re-derive it exactly as a fresh gate would.
+    const persisted = (res.project.phases ?? []).find((ph) => ph.id === 6)?.gate;
+    const freshGate = (recordGateInto(res.project, 6 as PhaseId).phases ?? []).find((ph) => ph.id === 6)?.gate;
+    assert.ok(persisted && freshGate, "phase 6 carries a gate on both the persisted and freshly recomputed records");
+    assert.equal(persisted!.passed, freshGate!.passed, "the persisted verdict matches the tree on disk");
+    assert.deepEqual(persisted!.unmet, freshGate!.unmet, "…including its unmet set");
+    assert.ok(
+      (res.project.logs ?? []).some((l) => l.event === "p6.journey.gate-recomputed"),
+      "the recompute is recorded loudly",
     );
   });
 

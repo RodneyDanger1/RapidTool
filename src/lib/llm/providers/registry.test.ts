@@ -473,6 +473,9 @@ describe("registry — callModel fetch path (injected transport)", () => {
         ok: false,
         reason: "not-configured",
         code: "RT_E_LLM_NOT_CONFIGURED",
+        // fixes/346 V2: the keyless refusal still names the provider that
+        // would have served the role.
+        servedProvider: "deepseek",
       });
       assert.equal(calls.length, 0, "keyless never reaches the network");
     } finally {
