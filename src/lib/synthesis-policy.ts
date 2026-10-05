@@ -23,6 +23,19 @@ export const P6_SYNTH_CANDIDATES_DEFAULT = 1;
 export const P6_SYNTH_CANDIDATES_MAX = 4;
 
 /**
+ * fixes/346 (lane T1): the bounded per-chunk RESAMPLE count for the chunked P6
+ * tree. The campaign #2 journals measure the dominant stall as a per-chunk
+ * deterministic-validation refusal (`typeSignature functions not exported` /
+ * `cross-chunk duplicate declaration`) at chunk 2-3 of an 8-11 chunk plan —
+ * after a single sample plus one class repair, with no independent second
+ * attempt. When the caller opts into best-of-N (`P6_SYNTH_CANDIDATES` or
+ * `deps.candidates` > 1), a refused chunk is resampled with the SAME primary
+ * prompt up to this many total candidates, the deterministic validator being
+ * the selector. A count of 1 keeps the legacy single-sample path byte-identical.
+ */
+export const P6_SYNTH_CHUNK_RETRY_CANDIDATES = 2;
+
+/**
  * Resolve the best-of-N count. `explicit` (a caller's `deps.candidates`) wins
  * over `env` (`P6_SYNTH_CANDIDATES`); anything non-integer, non-positive, or
  * absent falls back to {@link P6_SYNTH_CANDIDATES_DEFAULT}, and every value is

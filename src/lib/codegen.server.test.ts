@@ -5923,6 +5923,118 @@ describe("fixes/343-1 opt-in best-of-N synthesis (gate-based selection)", () => 
       else process.env.P6_SYNTH_CANDIDATES = prev;
     }
   });
+
+  // -------------------------------------------------------------------------
+  // fixes/346 (lane T1): the PER-CHUNK bounded resample. The campaign #2
+  // journals measure the dominant stall as a per-chunk deterministic-validation
+  // refusal (`typeSignature functions not exported` / `cross-chunk duplicate
+  // declaration`) at chunk 2-3 of an 8-11 chunk plan, after one sample + one
+  // class repair and no independent second attempt. These tests drive the REAL
+  // chunked lane with a scripted `complete` seam: candidate 1 (and its repair)
+  // miss a required export, candidate 3 is a conforming module — the resample
+  // must be selected. With candidates === 1 the path stays legacy.
+  // -------------------------------------------------------------------------
+  /** Successive synthesis calls return `envelopes[n]` (the last repeats); the
+   *  envelope's `exports` is scripted too, so a missing-signature refusal can be
+   *  reproduced exactly. */
+  function chunkRetryDeps(envelopes: { module: string; exports: string[] }[], candidates?: number) {
+    const prompts: string[] = [];
+    let synthCalls = 0;
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      prompts.push(prompt);
+      const env = envelopes[Math.min(synthCalls, envelopes.length - 1)]!;
+      synthCalls += 1;
+      return { ok: true, text: JSON.stringify({ ...KANBAN_ENVELOPE, module: env.module, exports: env.exports }), model: "deepseek-v4-flash" };
+    };
+    const expand = async () => ({ ok: true as const, spec: KANBAN_SPEC });
+    const verify = async () => ({ status: "passed" as const, iterations: 0, evidence: "unused", finalSource: "", cases: [] });
+    const typecheckTree = async (): Promise<P6TreeTypecheckVerdict> => ({ run: "pass" });
+    const deps: Partial<P6SynthesisDeps> = {
+      complete,
+      expand,
+      verify,
+      typecheckTree,
+      ...(candidates === undefined ? {} : { candidates }),
+    };
+    return { prompts, deps, synthCalls: () => synthCalls };
+  }
+  // `addColumn` is a required typeSignature; a module whose JSON `exports` omits
+  // it (while still binding it) is the exact `typeSignature functions not
+  // exported` class — and its bounded class repair repeats the same defect.
+  const MISSING_SIG_ENVELOPE = {
+    module: KANBAN_MODULE,
+    exports: ["createBoard", "dragCard", "kanbanBoard"],
+  };
+  const GOOD_ENVELOPE = { module: KANBAN_MODULE, exports: [...KANBAN_ENVELOPE.exports] };
+
+  it("RED baseline: candidates=1 keeps the legacy single sample — a per-chunk missing-signature refusal stands", async () => {
+    const f = chunkRetryDeps([MISSING_SIG_ENVELOPE, MISSING_SIG_ENVELOPE], undefined);
+    const q = await liveP6Synthesis(bofBase(), f.deps);
+    assert.ok(!sealed(q), "N=1 does not recover a chunk the single sample refused");
+    assert.ok(q.logs.some((l) => l.event === "p6.synthesis.refused"), "N=1 refuses exactly as before 346-T1");
+    assert.equal(candidatesEvent(q), undefined, "N=1 emits NO per-chunk candidates event");
+    assert.equal(f.synthCalls(), 2, "N=1 = one primary + one bounded class repair");
+  });
+
+  it("GREEN: candidates>1 resamples a per-chunk validation refusal and seals the conforming candidate", async () => {
+    const f = chunkRetryDeps([MISSING_SIG_ENVELOPE, MISSING_SIG_ENVELOPE, GOOD_ENVELOPE], 2);
+    const q = await liveP6Synthesis(bofBase(), f.deps);
+    assert.ok(sealed(q), "the resampled chunk validates and the tree seals");
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "a converged resample is not a refusal");
+    const ev = candidatesEvent(q);
+    assert.ok(ev, "the per-chunk selection is recorded");
+    assert.match(String(ev!.detail), /chunk 1\/1 · candidates 2 · winner 2/);
+    assert.match(String(ev!.detail), /candidate 1: rejected — RT_E_VALIDATION: typeSignature functions not exported/);
+    assert.match(String(ev!.detail), /candidate 2: selected/);
+    assert.equal(f.synthCalls(), 3, "one primary + one class repair + one selected resample");
+  });
+
+  it("GREEN: a chunk whose FIRST pipeline validates is never resampled (Pareto — zero extra calls)", async () => {
+    const f = chunkRetryDeps([GOOD_ENVELOPE], 2);
+    const q = await liveP6Synthesis(bofBase(), f.deps);
+    assert.ok(sealed(q), "the first candidate validates");
+    assert.equal(f.synthCalls(), 1, "the conforming primary pays exactly one call");
+    assert.equal(candidatesEvent(q), undefined, "no retry selection is recorded when the first sample passes");
+  });
+
+  it("GREEN fixes/346 T1: the fail-fast offender is resampled when candidates>1 (the second measured wall)", async () => {
+    // A multi-chunk tree: the first accepted chunk is tsc-RED (TextDecoder used
+    // as a type — the measured TS2749/TS2554/TS2339 cross-chunk-drift class), so
+    // the fail-fast fires BEFORE chunk 2 and the offender must be resampled.
+    // The first primary synthesis AND the first bounded offender repair are
+    // dirty; the SECOND offender sample is conforming, so only the resample
+    // (not the legacy single repair) clears the prefix tsc.
+    const f = chunkedDeps();
+    let synth = 0;
+    const complete = async (prompt: string, o?: DeepSeekCompleteOptions): Promise<LlmResult> => {
+      const res = await f.deps.complete(prompt, o);
+      if (!prompt.includes("TYPE SIGNATURES (must export")) return res;
+      synth += 1;
+      if (synth > 2 || !res.ok) return res;
+      const env = JSON.parse(res.text) as { module: string };
+      return {
+        ...res,
+        text: JSON.stringify({
+          ...env,
+          module: `${env.module}\nfunction dirtyHelper(x: TextDecoder): number { return 1; }\nmodule.exports.dirtyHelper = dirtyHelper;`,
+        }),
+      };
+    };
+    const typecheckTree = async (cand: Project): Promise<P6TreeTypecheckVerdict> => {
+      const bad = (cand.generatedTree ?? []).some((x) => x.source.includes("TextDecoder"));
+      return bad
+        ? { run: "fail", detail: "src/jobs/rent.ts(1,1): error TS2749: 'TextDecoder' is used as a type.", files: ["src/jobs/rent.ts"] }
+        : { run: "pass" };
+    };
+    const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), { ...f.deps, complete, typecheckTree, candidates: 2 });
+    assert.equal(q.generatedTree?.length, 7, "the resampled offender cleared the prefix tsc and the full tree was synthesized");
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.refused"), "a converged fail-fast resample is not a refusal");
+    const ev = (q.logs ?? []).find((l) => l.event === "p6.synthesis.candidates" && String(l.detail).includes("fail-fast"));
+    assert.ok(ev, "the fail-fast selection is recorded");
+    assert.match(String(ev!.detail), /chunk 1\/6 \(fail-fast\) · candidates 2 · winner 2/);
+    assert.match(String(ev!.detail), /candidate 1: rejected — tsc refused/);
+    assert.match(String(ev!.detail), /candidate 2: selected/);
+  });
 });
 
 // ---------------------------------------------------------------------------

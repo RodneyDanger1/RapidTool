@@ -151,6 +151,8 @@ import { P6_PHASE_MAX_MS } from "./rt-events.ts";
 import {
   adaptiveChunkSize,
   candidatesLogDetail,
+  P6_SYNTH_CANDIDATES_MAX,
+  P6_SYNTH_CHUNK_RETRY_CANDIDATES,
   resolveSynthesisCandidates,
   selectBestOfN,
   type CandidateEvaluation,
@@ -6090,27 +6092,69 @@ async function synthesizeChunkedTree(
     const patch: PatchRepairOptions | undefined = patchRepairs
       ? { path: chunk.path, log: (entry) => pushAttemptLog(attemptLogs, entry) }
       : undefined;
-    const synth = await synthesizeChunkEnvelope(
-      complete,
-      user,
-      opts,
-      signatureFunctionNames(chunk.signatures),
-      treeFailure,
-      patch,
-      (attempt, res) => {
-        pushAttemptLog(
-          attemptLogs,
-          synthAttemptLogEntry({ chunkIndex: i, chunkTotal: plan.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
+    const produceChunk = () =>
+      synthesizeChunkEnvelope(
+        complete,
+        user,
+        opts,
+        signatureFunctionNames(chunk.signatures),
+        treeFailure,
+        patch,
+        (attempt, res) => {
+          pushAttemptLog(
+            attemptLogs,
+            synthAttemptLogEntry({ chunkIndex: i, chunkTotal: plan.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
+          );
+        },
+        // 217k (W12 LANE B · G6): the unreadable-reply sink for this chunk's
+        // envelope reads — the reply belongs to the planned file's path.
+        (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, chunk.path)),
+        // W45/331-4 (Finding B): the earlier chunks of this tree. The materializer
+        // imports their exports into this file, so a redeclaration is refused by the
+        // validator and gets the bounded duplicate-declaration repair below.
+        prior,
+      );
+    let synth = await produceChunk();
+    // fixes/346 (lane T1): per-chunk bounded resampling. The campaign #2
+    // journals show the dominant P6 stall is a per-chunk deterministic
+    // validation refusal — `typeSignature functions not exported`
+    // (bakery-website, mobile-companion, office-invoice-tracker, held-out) or
+    // `cross-chunk duplicate declaration` (bakery-florist-orders,
+    // office-stock-tracker) — at chunk 2-3 of an 8-11 chunk plan, after one
+    // sample + one class repair and with no independent second attempt. When
+    // the caller opts into best-of-N (candidates > 1), resample the SAME primary
+    // prompt and keep the FIRST candidate the SAME deterministic validator
+    // accepts. Pareto: a chunk whose first pipeline already validates pays
+    // nothing; only a stochastic refusal is retried. A budget/not-configured
+    // refusal is terminal (retrying cannot help). candidates === 1 leaves every
+    // byte of this path legacy.
+    if (!synth.ok && candidates > 1 && (synth.code === "RT_E_VALIDATION" || synth.code === "RT_E_LLM_REJECTED")) {
+      const chunkRetry = Math.min(P6_SYNTH_CANDIDATES_MAX, Math.max(candidates, P6_SYNTH_CHUNK_RETRY_CANDIDATES));
+      const outcomes: string[] = [
+        `candidate 1: rejected — ${synth.code}: ${String(synth.error ?? "").replace(/\s+/g, " ").slice(0, 160)}`,
+      ];
+      let winner: number | null = null;
+      for (let k = 2; k <= chunkRetry; k++) {
+        const retry = await produceChunk();
+        if (retry.ok) {
+          outcomes.push(`candidate ${k}: selected`);
+          winner = k - 1;
+          synth = retry;
+          break;
+        }
+        outcomes.push(
+          `candidate ${k}: rejected — ${retry.code}: ${String(retry.error ?? "").replace(/\s+/g, " ").slice(0, 160)}`,
         );
-      },
-      // 217k (W12 LANE B · G6): the unreadable-reply sink for this chunk's
-      // envelope reads — the reply belongs to the planned file's path.
-      (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, chunk.path)),
-      // W45/331-4 (Finding B): the earlier chunks of this tree. The materializer
-      // imports their exports into this file, so a redeclaration is refused by the
-      // validator and gets the bounded duplicate-declaration repair below.
-      prior,
-    );
+        if (retry.code === "RT_E_BUDGET_EXHAUSTED" || retry.code === "RT_E_LLM_NOT_CONFIGURED") break;
+      }
+      pushAttemptLog(attemptLogs, {
+        ts: Date.now(),
+        phase: 6 as PhaseId,
+        level: "info",
+        event: "p6.synthesis.candidates",
+        detail: candidatesLogDetail(`chunk ${i + 1}/${plan.length}`, chunkRetry, winner, outcomes),
+      });
+    }
     if (!synth.ok) {
       return refuse(i, plan.length, synth.code, synth.error);
     }
@@ -6197,23 +6241,46 @@ async function synthesizeChunkedTree(
           const repairPatch: PatchRepairOptions | undefined = patchRepairs
             ? { path: oChunk.path, log: (entry) => pushAttemptLog(attemptLogs, entry) }
             : undefined;
-          const repaired = await synthesizeChunkEnvelope(
-            complete,
-            repairUser,
-            opts,
-            signatureFunctionNames(oChunk.signatures),
-            context,
-            repairPatch,
-            (attempt, res) =>
-              pushAttemptLog(
-                attemptLogs,
-                synthAttemptLogEntry({ chunkIndex: oi, chunkTotal: plan.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
-              ),
-            (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, oChunk.path)),
-            priorForO,
-          );
+          const produceRepair = () =>
+            synthesizeChunkEnvelope(
+              complete,
+              repairUser,
+              opts,
+              signatureFunctionNames(oChunk.signatures),
+              context,
+              repairPatch,
+              (attempt, res) =>
+                pushAttemptLog(
+                  attemptLogs,
+                  synthAttemptLogEntry({ chunkIndex: oi, chunkTotal: plan.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
+                ),
+              (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, oChunk.path)),
+              priorForO,
+            );
+          // fixes/346 (lane T1): the fail-fast offender is the SECOND measured
+          // wall. With the per-chunk resample in place the tree now reaches
+          // chunk 7/8 and the compiler-named offender file (TS2554/TS2339/TS7006
+          // cross-chunk drift) refuses on the SINGLE repair; campaign #2's
+          // two-sample probe reverted (3→9, 2→2). When the caller opts into
+          // best-of-N, resample the SAME compiler-informed repair prompt and
+          // keep the FIRST offender whose substituted prefix clears the real
+          // tsc (strictly fewer diagnostics or green). Pareto: a converging
+          // first sample pays nothing. candidates === 1 keeps the legacy path.
+          const offenderCandidates =
+            candidates > 1
+              ? Math.min(P6_SYNTH_CANDIDATES_MAX, Math.max(candidates, P6_SYNTH_CHUNK_RETRY_CANDIDATES))
+              : 1;
           let fixed = false;
-          if (repaired.ok) {
+          const failfastOutcomes: string[] = [];
+          for (let k = 1; k <= offenderCandidates; k++) {
+            const repaired = await produceRepair();
+            if (!repaired.ok) {
+              failfastOutcomes.push(
+                `candidate ${k}: rejected — structure refused (${repaired.code}: ${String(repaired.error ?? "").replace(/\s+/g, " ").slice(0, 140)})`,
+              );
+              if (repaired.code === "RT_E_BUDGET_EXHAUSTED" || repaired.code === "RT_E_LLM_NOT_CONFIGURED") break;
+              continue;
+            }
             const substituted = accepted.slice();
             substituted[oi] = {
               path: oChunk.path,
@@ -6240,7 +6307,11 @@ async function synthesizeChunkedTree(
               };
               if (servedModel === null) servedModel = repaired.servedModel;
               fixed = true;
-            } else {
+              failfastOutcomes.push(`candidate ${k}: selected — ${probe.run === "pass" ? "pre-seal typecheck" : "fewer diagnostics"}`);
+              break;
+            }
+            if (offenderCandidates === 1) {
+              // Legacy N=1: preserve the exact recorded monotonic-revert row.
               pushAttemptLog(attemptLogs, {
                 ts: Date.now(),
                 phase: 6 as PhaseId,
@@ -6249,6 +6320,23 @@ async function synthesizeChunkedTree(
                 detail: `chunk ${oi + 1}/${plan.length} (fail-fast): repair reverted — diagnostics ${before} → ${after} (not strictly fewer); the pre-repair chunk stands`,
               });
             }
+            failfastOutcomes.push(
+              `candidate ${k}: rejected — tsc refused (${String(probe.detail ?? "").replace(/\s+/g, " ").slice(0, 140)})`,
+            );
+          }
+          if (offenderCandidates > 1) {
+            pushAttemptLog(attemptLogs, {
+              ts: Date.now(),
+              phase: 6 as PhaseId,
+              level: "info",
+              event: "p6.synthesis.candidates",
+              detail: candidatesLogDetail(
+                `chunk ${oi + 1}/${plan.length} (fail-fast)`,
+                offenderCandidates,
+                fixed ? failfastOutcomes.length - 1 : null,
+                failfastOutcomes,
+              ),
+            });
           }
           if (!fixed) {
             return refuse(
