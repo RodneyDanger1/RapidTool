@@ -845,7 +845,10 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
         stubs: 0,
         reexports: 0,
         real: 2,
-        files: 2,
+        files: [
+          { path: "src/jobs/order-total.ts", kind: "real" },
+          { path: "src/jobs/stock-levels.ts", kind: "real" },
+        ],
         verdict: "real",
         greenWhileStubbed: false,
         oracleStubTrap: false,
