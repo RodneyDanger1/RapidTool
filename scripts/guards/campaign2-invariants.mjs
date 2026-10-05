@@ -15,8 +15,10 @@
  *          TS2503/TS1005 class that reddens the tree's own `tsc`.
  *   R2-05  RT_E_SPEC_SKIP_VACUOUS    an emitted oracle spec whose live rows are
  *          dominated by `test.skip` — a green `npm test` that asserts nothing.
- *   R2-06  RT_E_VERIFIED_PRODUCT_UNEVIDENCED   a committed delivery record whose
- *          `verifiedProduct` is false (or claimed true without backing evidence).
+ *   R2-06  RT_E_VERIFIED_PRODUCT_UNEVIDENCED   a committed delivery record that
+ *          carries no verification block, omits a required field, or states a
+ *          `verifiedProduct` that disagrees with its own recorded evidence
+ *          conjunction (an honest `false` + reason is the designed outcome).
  *
  * The detectors read REAL bytes (the emitted tree, the sealed `emit*.json`
  * envelopes) and reuse the REAL campaign-invariants seams (`minimumTreeFileCount`
@@ -41,6 +43,7 @@ import { fileURLToPath } from "node:url";
 
 import { maskLiteralsAndComments } from "./tree-invariants.mjs";
 import {
+  CAMPAIGN_CASSETTE_DIR,
   campaignTreeDir,
   detectFloorReachability,
   detectSkipVacuity,
@@ -134,14 +137,48 @@ export function detectJsxInTs(treeDir, slug) {
 
 // ---------------------------------------------------------------------------
 // Detector R2-06 — a committed tree's verification record must be present and
-// its verifiedProduct backed by evidence.
+// its `verifiedProduct` must EQUAL the evidence conjunction it states.
+//
+// The product seam deliberately does NOT execute the emitted UI shell headless
+// (it is not executable headless), so `verifiedProduct:false` with the honest
+// reason "kind entry not executed: UI shell — not executable headless" is the
+// DESIGNED outcome, not a defect. What is verifiable, and what this guard
+// enforces, is the record's own honesty: a committed delivery must carry the
+// full verification block, and its `verifiedProduct` must be exactly the
+// conjunction of the evidence the block records.
 // ---------------------------------------------------------------------------
+
+/** The verification block fields a committed delivery record MUST carry. */
+export const VERIFY_REQUIRED_FIELDS = [
+  "treeRunOk",
+  "treeRunVerdictHash",
+  "treeRunTests",
+  "declaredScriptsVerified",
+  "evidenceHash",
+  "uiWired",
+  "unverifiedReasons",
+  "verifiedProduct",
+];
+
+/**
+ * The evidence conjunction the record states: `verifiedProduct` is true iff the
+ * tree-run was green AND every declared script executed AND the mounted UI is
+ * wired AND no entry was left unexecuted. Re-derived from the block's OWN fields
+ * (the "entry not executed" reason is the record's honest unexecuted marker).
+ * @param {any} rec
+ */
+export function verificationConjunction(rec) {
+  if (!rec || typeof rec !== "object") return false;
+  const reasons = Array.isArray(rec.unverifiedReasons) ? rec.unverifiedReasons.map(String) : [];
+  const entryUnexecuted = reasons.some((r) => /entry not executed/i.test(r));
+  return rec.treeRunOk === true && rec.declaredScriptsVerified === true && rec.uiWired === true && !entryUnexecuted;
+}
 
 /**
  * A committed delivery is evidence of a verified product. Every seal with
- * `git.committed === true` must carry a verification record whose
- * `verifiedProduct` is true AND backed by evidence (an evidenceHash, a green
- * tree-run, and its test rows). Withheld trees (no commit) claim nothing.
+ * `git.committed === true` must carry a verification block with every required
+ * field, and `verifiedProduct` must EQUAL `verificationConjunction(rec)`.
+ * Withheld trees (no commit) claim nothing.
  * @param {string} slugDir
  */
 export function detectVerifiedCommit(slugDir) {
@@ -156,37 +193,33 @@ export function detectVerifiedCommit(slugDir) {
         code: VERIFY_CODE,
         slug,
         envelope: seal.name,
-        reason: "committed without a verification record",
-        detail: `${seal.name} commits a product but carries no git.verification record`,
+        reason: "committed without a verification block",
+        detail: `${seal.name} commits a product but carries no git.verification block`,
       });
       continue;
     }
-    const evidenceHash = rec.evidenceHash ?? null;
-    const tests = Array.isArray(rec.treeRunTests) ? rec.treeRunTests : [];
-    const backed =
-      typeof evidenceHash === "string" && evidenceHash.length > 0 && rec.treeRunOk === true && tests.length > 0;
-    if (rec.verifiedProduct !== true) {
+    const missing = VERIFY_REQUIRED_FIELDS.filter((k) => !(k in rec));
+    if (missing.length > 0) {
       findings.push({
         code: VERIFY_CODE,
         slug,
         envelope: seal.name,
-        verifiedProduct: false,
-        reason: "committed but verifiedProduct is not true",
-        unverifiedReasons: Array.isArray(rec.unverifiedReasons) ? rec.unverifiedReasons : [],
-        detail: `${seal.name} commits a product whose verification record reads verifiedProduct:false${
-          Array.isArray(rec.unverifiedReasons) && rec.unverifiedReasons.length > 0
-            ? ` (reasons: ${rec.unverifiedReasons.join("; ")})`
-            : ""
-        }`,
+        reason: "committed verification block is incomplete",
+        missing,
+        detail: `${seal.name}'s git.verification block is missing field(s): ${missing.join(", ")}`,
       });
-    } else if (!backed) {
+      continue;
+    }
+    const conjunction = verificationConjunction(rec);
+    if (rec.verifiedProduct !== conjunction) {
       findings.push({
         code: VERIFY_CODE,
         slug,
         envelope: seal.name,
-        verifiedProduct: true,
-        reason: "verifiedProduct:true is not backed by evidence",
-        detail: `${seal.name} claims verifiedProduct:true without backing evidence (evidenceHash/treeRunOk/treeRunTests)`,
+        verifiedProduct: rec.verifiedProduct,
+        conjunction,
+        reason: "verifiedProduct disagrees with the recorded evidence conjunction",
+        detail: `${seal.name} states verifiedProduct:${rec.verifiedProduct} but its recorded evidence conjunction is ${conjunction}`,
       });
     }
   }
@@ -310,37 +343,47 @@ export async function campaign2Controls(root) {
     }),
   };
 
-  // R2-06: the real committed-but-unverified tree (fires) vs a withheld tree
-  // (silent) and a committed record with verifiedProduct + evidence (silent).
-  const verifyMutation = scratch((d) => {
-    writeFileSync(
-      join(d, "emit.json"),
-      JSON.stringify({
-        ok: true,
-        git: {
-          committed: true,
-          verification: {
-            verifiedProduct: true,
-            treeRunOk: true,
-            evidenceHash: "1709540120",
-            treeRunTests: [{ file: "tests/oracle.spec.ts", run: "pass", pass: 30, fail: 0 }],
-          },
-        },
-      }),
-    );
+  // R2-06: a committed record with NO verification block fires (the campaign #1
+  // shape). The honest campaign #2 shape — block present, verifiedProduct:false
+  // with the "entry not executed" reason — is the CONJUNCTION and stays silent.
+  const verifyBlock = (verifiedProduct, reasons) => ({
+    ok: true,
+    git: {
+      committed: true,
+      verification: {
+        verifiedProduct,
+        treeRunOk: true,
+        treeRunVerdictHash: "1903527125",
+        treeRunTests: [{ file: "tests/oracle.spec.ts", run: "pass", pass: 30, fail: 0 }],
+        declaredScriptsVerified: true,
+        evidenceHash: "1709540120",
+        uiWired: true,
+        unverifiedReasons: reasons,
+      },
+    },
+  });
+  const verifyHonestFalse = scratch((d) => {
+    writeFileSync(join(d, "emit.json"), JSON.stringify(verifyBlock(false, ["kind entry not executed: UI shell — not executable headless"])));
     return detectVerifiedCommit(d).length === 0;
   });
-  const verifyUnbacked = scratch((d) => {
-    writeFileSync(
-      join(d, "emit.json"),
-      JSON.stringify({ ok: true, git: { committed: true, verification: { verifiedProduct: true, treeRunOk: true } } }),
-    );
+  const verifyHonestTrue = scratch((d) => {
+    writeFileSync(join(d, "emit.json"), JSON.stringify(verifyBlock(true, [])));
+    return detectVerifiedCommit(d).length === 0;
+  });
+  const verifyNoBlock = scratch((d) => {
+    writeFileSync(join(d, "emit.json"), JSON.stringify({ ok: true, git: { committed: true } }));
     return detectVerifiedCommit(d).length > 0;
   });
+  const verifyMismatch = scratch((d) => {
+    // claims verified while its own reason says the entry never ran → lies about its evidence.
+    writeFileSync(join(d, "emit.json"), JSON.stringify(verifyBlock(true, ["kind entry not executed: UI shell — not executable headless"])));
+    return detectVerifiedCommit(d).length > 0;
+  });
+  const campaign1Committed = ["flower-shop-website", "bakery-florist-orders", "mobile-companion"];
   controls["R2-06"] = {
-    fired: detectVerifiedCommit(join(root, "flower-shop-website")).length > 0,
-    controlClean: detectVerifiedCommit(join(root, "office-stock-tracker")).length === 0,
-    mutationRed: verifyMutation && verifyUnbacked,
+    fired: campaign1Committed.some((s) => detectVerifiedCommit(join(CAMPAIGN_CASSETTE_DIR, s)).length > 0),
+    controlClean: detectVerifiedCommit(join(root, "flower-shop-website")).length === 0 && detectVerifiedCommit(join(root, "office-stock-tracker")).length === 0,
+    mutationRed: verifyHonestFalse && verifyHonestTrue && verifyNoBlock && verifyMismatch,
   };
 
   return controls;

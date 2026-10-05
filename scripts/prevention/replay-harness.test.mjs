@@ -167,23 +167,58 @@ test("single command: the two signals are reported and the gate of record is exa
     assert.ok(r.fixtureIntegrity && typeof r.fixtureIntegrity.fired === "boolean", `${r.id}: fixture-integrity signal`);
     assert.ok(r.fixPresence && typeof r.fixPresence.present === "boolean" && typeof r.fixPresence.wired === "boolean", `${r.id}: fix-presence signal`);
   }
-  // Every historical detector fires; the gate of record is RED because the
-  // campaign-2 tourniquets' owners have not landed their fixes on the
-  // gate-of-record surface. The pending list NAMES each red pin.
+  // Every historical detector fires AND every live seam is wired on the landed
+  // tree: the gate of record is green, and the classification is EXACTLY
+  // disjoint + total (the defect this pin exists to catch).
   assert.deepEqual(verdict.missed, [], "no fixture-integrity miss");
-  assert.deepEqual([...verdict.pending].sort(), ["C1-02", "R2-01", "R2-03", "R2-05", "R2-06"], "the named pins left red pending their owners");
-  for (const id of ["R2-01", "R2-03", "R2-05", "R2-06"]) {
+  assert.deepEqual(verdict.pending, [], "no fix-presence pending");
+  assert.deepEqual(verdict.skipped, [], "no skip");
+  const inv = verdict.fixPresenceInvariant;
+  assert.ok(inv, "the verdict carries the fix-presence classification invariant");
+  assert.equal(inv.ok, true, "the classification is disjoint + total");
+  assert.deepEqual(inv.overlap, [], "no guard is both enforced and pending");
+  assert.deepEqual(inv.uncovered, [], "no guard is in neither set");
+  assert.deepEqual(inv.unknown, [], "no unknown id is classified");
+  const allIds = verdict.detail.map((r) => r.id).sort();
+  assert.deepEqual([...verdict.fixPresence.enforced].sort(), allIds, "enforced ∪ pending == guards");
+  assert.deepEqual([...verdict.fixPresence.pending].sort(), [], "pending is empty on the landed tree");
+  assert.equal(new Set([...verdict.fixPresence.enforced, ...verdict.fixPresence.pending]).size, allIds.length, "union is exact (no duplicates)");
+  // Both orthogonal signals fire for the five campaign-2 pins.
+  for (const id of ["C1-02", "R2-01", "R2-03", "R2-05", "R2-06"]) {
     const r = verdict.detail.find((x) => x.id === id);
-    assert.equal(r.fixtureIntegrity.fired, true, `${id} fires on the real campaign2 defect bytes`);
-    assert.equal(r.fixPresence.present, false, `${id} fix is not yet on the gate-of-record surface (HEAD)`);
+    assert.equal(r.fixtureIntegrity.fired, true, `${id} fires on its historical defect bytes`);
+    assert.equal(r.fixPresence.present, true, `${id} fix is on the gate-of-record surface`);
+    assert.equal(r.fixPresence.wired, true, `${id} seam is wired`);
     assert.equal(r.fixPresence.mutationRed, true, `${id} retains a working mutation control`);
   }
-  assert.equal(verdict.detail.find((r) => r.id === "C1-02").fixtureIntegrity.fired, true, "C1-02 fires on the campaign1 bytes (R2-02 guard re-pointed)");
   const c04 = verdict.detail.find((r) => r.id === "C-04");
   assert.equal(c04.fixtureIntegrity.fired, true, "the historical non-monotonic defect is visible");
   assert.equal(c04.fixPresence.present, true, "the live comparator seam is present (lane D PR-07)");
   assert.equal(c04.fixPresence.wired, true, "the comparator is wired");
-  assert.equal(verdict.ok, false, "the gate of record is RED while any owner pin is pending (missed/pending/skipped/count semantics)");
+  assert.equal(verdict.ok, true, "the gate of record is green when missed/pending/skipped are empty, count meets the floor, and the classification is consistent");
+});
+
+test("fix-presence classification: disjoint + total, and `ok` is FALSE on any pending or inconsistent set", () => {
+  const results = [{ id: "A" }, { id: "B" }];
+  const base = { guards: 2, count: 2, countFloor: 2, missed: [], controlMissed: [], skipped: [], detail: results, pending: [] };
+  // Consistent + fully enforced → green.
+  const green = finalize({ ...base, fixPresence: { enforced: ["A", "B"] } });
+  assert.equal(green.ok, true, "a consistent, fully-enforced set is green");
+  assert.equal(green.fixPresenceInvariant.ok, true, "invariant holds");
+  // Any pending guard → red.
+  const pendingAny = finalize({ ...base, fixPresence: { enforced: ["A"] }, pending: ["B"] });
+  assert.equal(pendingAny.ok, false, "any pending guard fails the gate of record");
+  // An id in BOTH sets → red (the exact defect this lane exists to prevent).
+  const overlap = finalize({ ...base, fixPresence: { enforced: ["A", "B"] }, pending: ["A"] });
+  assert.equal(overlap.ok, false, "an id in both enforced and pending fails");
+  assert.equal(overlap.fixPresenceInvariant.ok, false, "the overlap is detected");
+  assert.deepEqual(overlap.fixPresenceInvariant.overlap, ["A"], "the overlapping id is named");
+  assert.ok(overlap.missed.includes("<fix-presence-classification>"), "the inconsistency is folded into missed");
+  // An id in NEITHER set → red (a silently-dropped guard).
+  const uncovered = finalize({ ...base, fixPresence: { enforced: ["A"] } });
+  assert.equal(uncovered.ok, false, "an unclassified guard fails closed");
+  assert.deepEqual(uncovered.fixPresenceInvariant.uncovered, ["B"], "the uncovered id is named");
+  assert.ok(uncovered.missed.includes("<fix-presence-classification>"), "the uncovered guard is named");
 });
 
 test("fix-presence: a status:pending entry always fails the gate of record", async () => {

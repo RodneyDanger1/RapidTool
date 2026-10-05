@@ -332,11 +332,9 @@
       ],
       "cleanControl": "scripts/guards/campaign-invariants.mjs#wired-console-mutation",
       "keyless": true,
-      "status": "pending",
-      "ownerLane": "D — the canonical UI-wiring seam",
-      "pendingInterface": "src/lib/headless.ts#realGeneratedExportWiring",
-      "fixSeam": "src/lib/headless.ts#realGeneratedExportWiring — R2-02: the detector now CONSUMES this exported predicate (no parallel realModuleSet); the pin is pending until the interface lands on the gate-of-record surface (HEAD). The harness fix-presence checks `git show HEAD:src/lib/headless.ts` for the export.",
-      "proof": "R2-02: the guard's verdict now EQUALS the product seam's verdict for every tree (the two can no longer disagree). Under the canonical seam campaign1 reads 7/8 unwired (office-invoice-tracker is wired: its console calls generated.computeDueDate, which resolves to a real generated module); the detector fires on the other 7 and stays silent on office-invoice. Mutation: a copy of flower-shop whose console CALLS a real generated export stays clean (campaign-invariants.test.mjs). Pin RED pending headless.realGeneratedExportWiring landing at HEAD."
+      "status": "enforced",
+      "fixSeam": "src/lib/headless.ts#realGeneratedExportWiring — R2-02: the detector CONSUMES this exported predicate (no parallel realModuleSet), so the guard can never disagree with the product seam. The harness fix-presence checks `git show HEAD:src/lib/headless.ts` for the export (landed 23fb616).",
+      "proof": "R2-02 (landed): the guard's verdict EQUALS the product seam's verdict for every tree. Under the canonical seam campaign1 reads 7/8 unwired (office-invoice-tracker is wired: its console calls generated.computeDueDate, which resolves to a real generated module); the detector fires on the other 7 and stays silent on office-invoice. Mutation: a copy of flower-shop whose console CALLS a real generated export stays clean (campaign-invariants.test.mjs)."
     },
     {
       "id": "C1-05",
@@ -432,11 +430,9 @@
       ],
       "cleanControl": "campaign2/flower-shop-website",
       "keyless": true,
-      "status": "pending",
-      "ownerLane": "D — the emit seal",
-      "pendingInterface": "scripts/rapidtool-cli.mjs emit seal consuming headless.planUnderproductionSeal",
-      "fixSeam": "scripts/rapidtool-cli.mjs emit seal must consume headless.planUnderproductionSeal (R2-01); fix-presence is measured against the gate-of-record surface (`git show HEAD:scripts/rapidtool-cli.mjs`).",
-      "proof": "Campaign #2: all 6 below-floor trees (floor 8; 2-3 generatedTree files) write NO RT_E_PLAN_UNDERPRODUCED into their emit seal — the literal emit reads RT_E_TREE_RUN_FAILED, the banner emit RT_E_SUBSTANCE_EMPTY. flower-shop-website (9 files) and office-scheduler (9) reach the floor and are clean. Mutation: injecting RT_E_PLAN_UNDERPRODUCED into the seal silences the guard (campaign2-invariants.test.mjs). Pin RED pending the CLI floor-seal fix at HEAD."
+      "status": "enforced",
+      "fixSeam": "scripts/rapidtool-cli.mjs emit seal consumes headless.planUnderproductionSeal (landed 23fb616); fix-presence is measured against the gate-of-record surface (`git show HEAD:scripts/rapidtool-cli.mjs`).",
+      "proof": "Campaign #2: all 6 below-floor trees (floor 8; 2-3 generatedTree files) write NO RT_E_PLAN_UNDERPRODUCED into their emit seal — the literal emit reads RT_E_TREE_RUN_FAILED, the banner emit RT_E_SUBSTANCE_EMPTY. flower-shop-website (9 files) and office-scheduler (9) reach the floor and are clean. Mutation: injecting RT_E_PLAN_UNDERPRODUCED into the seal silences the guard (campaign2-invariants.test.mjs). The live emit seal now sets the deciding code to the floor code (landed 23fb616)."
     },
     {
       "id": "R2-03",
@@ -454,11 +450,9 @@
       "historicalFixtures": ["campaign2/bakery-website"],
       "cleanControl": "campaign2/office-scheduler",
       "keyless": true,
-      "status": "pending",
-      "ownerLane": "A/D — the codegen JSX-in-.ts contract",
-      "pendingInterface": "src/lib/codegen.server.ts JSX-namespace-in-.ts validation (jsxHits extended beyond raw tags)",
-      "fixSeam": "src/lib/codegen.server.ts must reject the global JSX namespace in a .ts chunk (its raw-tag jsxHits currently does not cover `JSX.Element`/`JSXElement`); fix-presence is measured against `git show HEAD:src/lib/codegen.server.ts` naming the JSX namespace.",
-      "proof": "bakery-website's own tsc fails (2) on src/generated/validate-order-form.ts: `Cannot find namespace 'JSX'` (TS2503). The detector fires on exactly that one .ts module and is silent on the two P12 trees (flower-shop, office-scheduler) whose .ts surface is JSX-free. Mutation: a synthetic .ts with `JSX.Element` + raw JSX fires; a JSX-free .ts and a .tsx carrying JSX stay silent (campaign2-invariants.test.mjs). Pin RED pending the codegen seam fix at HEAD."
+      "status": "enforced",
+      "fixSeam": "src/lib/codegen.server.ts rejects the global JSX namespace in a .ts chunk (its jsxHits contract now covers `JSX.Element`/`JSXElement`; landed 23fb616); fix-presence is measured against `git show HEAD:src/lib/codegen.server.ts` naming the JSX namespace.",
+      "proof": "bakery-website's own tsc fails (2) on src/generated/validate-order-form.ts: `Cannot find namespace 'JSX'` (TS2503). The detector fires on exactly that one .ts module and is silent on the two P12 trees (flower-shop, office-scheduler) whose .ts surface is JSX-free. Mutation: a synthetic .ts with `JSX.Element` + raw JSX fires; a JSX-free .ts and a .tsx carrying JSX stay silent (campaign2-invariants.test.mjs). The codegen JSX-in-.ts seam now rejects the namespace (landed 23fb616)."
     },
     {
       "id": "R2-05",
@@ -483,11 +477,9 @@
       ],
       "cleanControl": "campaign2/flower-shop-website",
       "keyless": true,
-      "status": "pending",
-      "ownerLane": "A/B — the scaffold oracle generator",
-      "pendingInterface": "src/lib/scaffold.ts oracle generation avoiding a skip-dominated spec",
-      "fixSeam": "src/lib/scaffold.ts oracle generation must not emit a skip-dominated spec (live rows must dominate); fix-presence is measured against `git show HEAD:src/lib/scaffold.ts` naming the skip-dominated contract.",
-      "proof": "The 6 hollow/bridge campaign2 oracles emit 1 live row against 9-11 `test.skip` rows (89-92% SKIP), so `npm test` exit 0 is vacuity. flower-shop (31 live / 3 skip) and office-scheduler (30 / 3) are the clean controls. Mutation: a 3-live/1-skip spec stays silent (campaign2-invariants.test.mjs). Pin RED pending the scaffold generator fix at HEAD."
+      "status": "enforced",
+      "fixSeam": "src/lib/scaffold.ts oracle generation does not emit a skip-dominated spec (live rows dominate; landed 23fb616); fix-presence is measured against `git show HEAD:src/lib/scaffold.ts` naming the skip-dominated contract.",
+      "proof": "The 6 hollow/bridge campaign2 oracles emit 1 live row against 9-11 `test.skip` rows (89-92% SKIP), so `npm test` exit 0 is vacuity. flower-shop (31 live / 3 skip) and office-scheduler (30 / 3) are the clean controls. Mutation: a 3-live/1-skip spec stays silent (campaign2-invariants.test.mjs). The scaffold oracle seam now emits a non-skip-dominated spec (landed 23fb616)."
     },
     {
       "id": "R2-06",
@@ -496,20 +488,18 @@
       "file": "scripts/guards/campaign2-invariants.mjs",
       "kind": "static",
       "detector": "verified-product",
-      "driver": "campaign2-invariants",
+      "driver": "campaign2-verify",
       "incident": "R2-06",
-      "seam": "the sealed emit*.json `git.verification` record (scripts/rapidtool-cli.mjs deliveryVerification) vs the executed product",
+      "seam": "the sealed emit*.json `git.verification` block (scripts/rapidtool-cli.mjs deliveryVerification) — committed ⟹ block present ∧ verifiedProduct == the recorded evidence conjunction",
       "expectedCode": "RT_E_VERIFIED_PRODUCT_UNEVIDENCED",
       "expected": "fires",
-      "historicalFixture": "campaign2/flower-shop-website",
-      "historicalFixtures": ["campaign2/flower-shop-website", "campaign2/office-scheduler"],
-      "cleanControl": "campaign2/office-stock-tracker",
+      "historicalFixture": "campaign1/flower-shop-website",
+      "historicalFixtures": ["campaign1/flower-shop-website", "campaign1/bakery-florist-orders", "campaign1/mobile-companion"],
+      "cleanControl": "campaign2/flower-shop-website",
       "keyless": true,
-      "status": "pending",
-      "ownerLane": "D — the delivery verification record",
-      "pendingInterface": "scripts/rapidtool-cli.mjs#deliveryVerification executing the committed tree's UI entry",
-      "fixSeam": "scripts/rapidtool-cli.mjs deliveryVerification must execute the committed tree's UI entry so `verifiedProduct` can become true (R2-06); fix-presence is measured against `git show HEAD:scripts/rapidtool-cli.mjs` naming the executed entry.",
-      "proof": "Both committed campaign2 trees (flower-shop, office-scheduler) carry git.verification with verifiedProduct:false and unverifiedReasons:[`kind entry not executed: UI shell — not executable headless`]. The 6 withheld trees make no product claim and are silent. Mutation: a committed record with verifiedProduct:true + evidenceHash + treeRunOk + treeRunTests stays silent; the same record without evidenceHash fires (campaign2-invariants.test.mjs). Pin RED pending the entry-execution fix at HEAD."
+      "status": "enforced",
+      "fixSeam": "scripts/rapidtool-cli.mjs#deliveryVerification states `verifiedProduct` as exactly the recorded evidence conjunction (landed 23fb616); fix-presence is measured against `git show HEAD:scripts/rapidtool-cli.mjs` naming that conjunction.",
+      "proof": "Re-pointed to the honest, verifiable contract: a committed delivery must carry the full block {treeRunOk, treeRunVerdictHash, treeRunTests, declaredScriptsVerified, evidenceHash, uiWired, unverifiedReasons, verifiedProduct}, and verifiedProduct must EQUAL the conjunction it states. The historical fixture is campaign #1's committed trees (flower-shop, bfo, mobile) which carry NO verification block at all. The designed campaign #2 shape (block present, verifiedProduct:false with `kind entry not executed: UI shell — not executable headless`) is the honest conjunction and is the clean control. Mutation: an honest-false block and an honest-true block stay silent; a block-less record and a block whose verifiedProduct disagrees with its own reason fire (campaign2-invariants.test.mjs)."
     }
   ],
   "allowlist": [

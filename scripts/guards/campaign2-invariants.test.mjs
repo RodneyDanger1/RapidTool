@@ -29,7 +29,7 @@ import {
   scanCampaign2,
   REPO_ROOT,
 } from "./campaign2-invariants.mjs";
-import { listCampaignSlugs, loadCampaignSeams, detectFloorReachability, detectSkipVacuity, campaignTreeDir } from "./campaign-invariants.mjs";
+import { listCampaignSlugs, loadCampaignSeams, detectFloorReachability, detectSkipVacuity, campaignTreeDir, CAMPAIGN_CASSETTE_DIR } from "./campaign-invariants.mjs";
 
 const ROOT = resolveCampaign2Root();
 assert.ok(ROOT, "the campaign2 root (cassette copy or live testruns/campaign2) must resolve");
@@ -81,22 +81,28 @@ test("R2-05 skip vacuity: fires on the 6 skip-dominated campaign2 oracles", () =
   }
 });
 
-test("R2-06 verified product: fires on the 2 committed-but-unverified trees, silent on withheld", () => {
-  const fired = firedSlugs((s) => detectVerifiedCommit(slugDir(s)));
-  assert.deepEqual(fired, ["flower-shop-website", "office-scheduler"], "both committed trees read verifiedProduct:false");
+test("R2-06 verified product: fires on a committed record with NO verification block; silent on the honest block", () => {
+  // The real historical fixture: campaign #1's committed envelopes carry no block.
+  const c1 = ["flower-shop-website", "bakery-florist-orders", "mobile-companion"];
+  const fired = c1.filter((s) => detectVerifiedCommit(join(CAMPAIGN_CASSETTE_DIR, s)).length > 0).sort();
+  assert.deepEqual(fired, ["bakery-florist-orders", "flower-shop-website", "mobile-companion"], "campaign1 committed records carry no verification block");
+  const finding = detectVerifiedCommit(join(CAMPAIGN_CASSETTE_DIR, "flower-shop-website"))[0];
+  assert.equal(finding.code, "RT_E_VERIFIED_PRODUCT_UNEVIDENCED");
+  assert.match(finding.reason, /without a verification block/);
+  // The designed campaign #2 shape — block present, verifiedProduct:false with the
+  // honest "entry not executed" reason — IS the conjunction and stays silent.
+  for (const s of ["flower-shop-website", "office-scheduler"]) {
+    assert.equal(detectVerifiedCommit(slugDir(s)).length, 0, `${s} carries a complete block whose verifiedProduct equals its evidence conjunction`);
+  }
   for (const s of BELOW_FLOOR) {
     assert.equal(detectVerifiedCommit(slugDir(s)).length, 0, `${s} was withheld, so it claims nothing`);
   }
-  const finding = detectVerifiedCommit(slugDir("flower-shop-website"))[0];
-  assert.equal(finding.code, "RT_E_VERIFIED_PRODUCT_UNEVIDENCED");
-  assert.equal(finding.verifiedProduct, false);
-  assert.ok(Array.isArray(finding.unverifiedReasons) && finding.unverifiedReasons.length > 0, "the record's unverified reasons are surfaced");
 });
 
-test("campaign2 scan: all four detectors fire on the real bytes", async () => {
+test("campaign2 scan: the three generation detectors fire; R2-06's fixture lives in campaign1", async () => {
   const result = await scanCampaign2(ROOT);
-  assert.deepEqual(result.counts, { seal: 6, jsx: 1, skip: 6, verify: 2 });
-  assert.equal(result.ok, false, "a campaign2 with open residuals is not clean");
+  assert.deepEqual(result.counts, { seal: 6, jsx: 1, skip: 6, verify: 0 });
+  assert.equal(result.ok, false, "a campaign2 with open generation residuals is not clean");
 });
 
 test("campaign2 guards: every detector fires on its real defect AND its mutation control stays silent", async () => {

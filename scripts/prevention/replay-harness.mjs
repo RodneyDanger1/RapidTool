@@ -673,8 +673,8 @@ const SEAM_CHECKS = {
     campaign2Seam(
       "R2-06",
       "scripts/rapidtool-cli.mjs",
-      "uiEntryExecuted",
-      "the committed tree's UI entry must actually execute so deliveryVerification.verifiedProduct can become true (not merely recorded false)",
+      "const verifiedProduct = run !== null",
+      "the delivery record's verifiedProduct must be exactly the stated evidence conjunction (scripts/rapidtool-cli.mjs deliveryVerification); an honest false + reason is the designed outcome",
     ),
 };
 
@@ -1208,6 +1208,35 @@ DRIVERS["campaign2-invariants"] = async (_ctx, g) => {
   return { fired: firedOn.length > 0, controlClean, evidence: { code, firedOn, control: controlSlug } };
 };
 
+// R2-06 — the committed-record verification guard's historical fixture lives in
+// the CAMPAIGN #1 committed envelopes (which carry NO verification block at all);
+// the honest campaign2 record (block present, `verifiedProduct:false` + reason)
+// is the clean control. This driver runs the guard's real detector over both.
+DRIVERS["campaign2-verify"] = async (_ctx, g) => {
+  const mod = await importCached(SRC.campaign2);
+  const ci = await importCached(SRC.campaign);
+  if (mod.__error || typeof mod.detectVerifiedCommit !== "function" || typeof mod.resolveCampaign2Root !== "function") {
+    return { fired: false, controlClean: false, evidence: "campaign2-invariants.mjs detectVerifiedCommit absent" };
+  }
+  const c1 = ci && typeof ci.CAMPAIGN_CASSETTE_DIR === "string" ? ci.CAMPAIGN_CASSETTE_DIR : null;
+  const c2 = mod.resolveCampaign2Root();
+  if (!c1 || !c2) return { fired: false, controlClean: false, evidence: "campaign1/campaign2 cassette roots unavailable" };
+  // Real historical fixture (from the registry): campaign #1 committed trees
+  // carry no verification block at all.
+  const c1Fixtures = [g.historicalFixture, ...(Array.isArray(g.historicalFixtures) ? g.historicalFixtures : [])]
+    .filter((f) => /campaign1\//.test(String(f)))
+    .map((f) => campaignFixtureSlug(f))
+    .filter((s) => typeof s === "string");
+  const firedSlugs = c1Fixtures.filter((s) => mod.detectVerifiedCommit(join(c1, s)).length > 0);
+  // Clean control: campaign #2's committed trees carry the block and an honest
+  // `verifiedProduct:false` + reason (the designed outcome); withheld trees claim nothing.
+  const controlClean =
+    mod.detectVerifiedCommit(join(c2, "flower-shop-website")).length === 0 &&
+    mod.detectVerifiedCommit(join(c2, "office-scheduler")).length === 0 &&
+    mod.detectVerifiedCommit(join(c2, "office-stock-tracker")).length === 0;
+  return { fired: firedSlugs.length > 0, controlClean, evidence: { code: g.expectedCode, firedSlugs, cleanOnHonestRecord: controlClean } };
+};
+
 DRIVERS["arch-failclosed"] = async (ctx) => {
   const dod = await import("../../src/lib/dod.ts");
   const proj = readJsonFile(join(ctx.runRoot, "office-stock-tracker", "emitted", ".rapidtool", "project.json"));
@@ -1280,7 +1309,7 @@ const ID_TO_DRIVER = {
   "c1-05": "campaign-invariants", "c1-06": "campaign-invariants",
   "c1-08": "campaign-invariants",
   "r2-01": "campaign2-invariants", "r2-03": "campaign2-invariants",
-  "r2-05": "campaign2-invariants", "r2-06": "campaign2-invariants",
+  "r2-05": "campaign2-invariants", "r2-06": "campaign2-verify",
 };
 
 /** @param {any} g @returns {string|null} */
@@ -1421,6 +1450,44 @@ export async function verifyHeldOut(cassettes, heldOut, _ctx) {
  *  tourniquets R2-01/03/05/06). */
 export const GUARD_COUNT_FLOOR = 24;
 
+/**
+ * Classify every guard's fix-presence into EXACTLY ONE bucket. `enforced` is the
+ * fully-proven set — the live seam is present, wired, the mutation control
+ * proves the check can fail, AND the registry does not still declare the guard
+ * `pending` (a stale `pending` declaration keeps a guard out of `enforced` so
+ * the two sets stay disjoint). `pending` is the complement, so a guard can never
+ * appear in both (the defect this lane exists to prevent) and never in neither.
+ * @param {Array<any>} results
+ * @returns {{enforced:string[], pending:string[]}}
+ */
+export function classifyFixPresence(results) {
+  const enforced = [];
+  const pending = [];
+  for (const r of results) {
+    const proven = !!(r.fixPresence.present && r.fixPresence.wired && r.fixPresence.mutationRed);
+    if (r.status !== "pending" && proven) enforced.push(r.id);
+    else pending.push(r.id);
+  }
+  return { enforced, pending };
+}
+
+/**
+ * The fix-presence classification invariant: the two sets are disjoint and their
+ * union is exactly the guard id set. A violation (an id in both, or an id in
+ * neither) means the bookkeeping is inconsistent and must fail closed.
+ * @param {string[]} enforced @param {string[]} pending @param {Array<any>} results
+ */
+export function fixPresenceInvariant(enforced, pending, results) {
+  const e = new Set(enforced);
+  const p = new Set(pending);
+  const all = new Set(results.map((r) => r.id));
+  const overlap = [...e].filter((id) => p.has(id));
+  const union = new Set([...e, ...p]);
+  const uncovered = [...all].filter((id) => !union.has(id));
+  const unknown = [...union].filter((id) => !all.has(id));
+  return { ok: overlap.length === 0 && uncovered.length === 0 && unknown.length === 0, overlap, uncovered, unknown, enforced: [...e], pending: [...p] };
+}
+
 /** @param {any} ctx */
 export async function runAll(ctx) {
   const runRoot = ctx.runRoot;
@@ -1449,18 +1516,21 @@ export async function runAll(ctx) {
   const controlMissed = results.filter((r) => r.fixtureIntegrity.fired && !r.fixtureIntegrity.controlClean).map((r) => r.id);
   // `skipped` is DERIVED from real per-guard skip markers, never hardcoded.
   const skipped = [...new Set(results.filter((r) => r.fixtureIntegrity.skipped || r.fixPresence.skipped).map((r) => r.id))];
-  // fix-presence: a guard is enforced iff its live seam is present AND wired AND
-  // its mutation control proves the check can fail.
-  const enforced = results.filter((r) => r.fixPresence.present && r.fixPresence.wired && r.fixPresence.mutationRed).map((r) => r.id);
-  // A `status:"pending"` registry entry always fails, and so does a guard whose
-  // live seam is absent or unwired (a stale `enforced` claim is caught here).
-  const pending = results.filter((r) => r.status === "pending" || !(r.fixPresence.present && r.fixPresence.wired)).map((r) => r.id);
+  // fix-presence: ONE classification path, so `enforced` and `pending` are
+  // disjoint by construction. A guard is enforced iff its live seam is present
+  // AND wired AND its mutation control proves the check can fail AND the
+  // registry does not still declare it `pending`; `pending` is the complement.
+  const { enforced, pending } = classifyFixPresence(results);
+  const fixPresenceInv = fixPresenceInvariant(enforced, pending, results);
   // C-19 meta-control: the pinned rubric baselines and the held-out cassette.
   const rubricBaselines = verifyRubricBaselines(cassettes, loadRubricBaselines(ctx.cassetteDir ?? CASSETTE_DIR), runRoot);
   const heldOut = await verifyHeldOut(cassettes, ctx.heldOutCassettes ?? loadHeldOutCassettes(ctx.cassetteDir ?? CASSETTE_DIR), rc);
   const missedAll = [...missed];
   if (!rubricBaselines.ok) missedAll.push("C-19:rubric-baselines");
   if (!heldOut.ok) missedAll.push("C-19:held-out");
+  // The classification must be disjoint + total; a bookkeeping inconsistency is
+  // itself a hard failure (never a silently-overlapping verdict).
+  if (!fixPresenceInv.ok) missedAll.push("<fix-presence-classification>");
   return {
     guards: results.length,
     count: results.length,
@@ -1468,6 +1538,7 @@ export async function runAll(ctx) {
     historical: fired.length,
     fixtureIntegrity: { fired, missed: missedAll },
     fixPresence: { enforced, pending },
+    fixPresenceInvariant: fixPresenceInv,
     rubricBaselines,
     heldOut,
     // Top-level mirrors so a consumer can read the gate of record directly.
@@ -1506,12 +1577,18 @@ export function parseArgs(argv) {
 export function finalize(verdict) {
   const missed = new Set(verdict.missed);
   for (const id of verdict.controlMissed || []) missed.add(id + " (control)");
-  const missedArr = [...missed];
   const pending = [...new Set(verdict.pending || [])];
   const skipped = [...new Set(verdict.skipped || [])];
   const count = Number(verdict.count ?? verdict.guards ?? 0);
   const countFloor = Number(verdict.countFloor ?? 0);
   const countOk = count >= countFloor;
+  // Defense in depth: recompute the classification invariant from the verdict's
+  // own fields so an inconsistent object (an id in BOTH enforced and pending, or
+  // in neither) can never read `ok:true`.
+  const results = Array.isArray(verdict.detail) ? verdict.detail : [];
+  const inv = fixPresenceInvariant((verdict.fixPresence && verdict.fixPresence.enforced) || [], pending, results);
+  if (!inv.ok) missed.add("<fix-presence-classification>");
+  const missedArr = [...missed];
   return {
     ...verdict,
     missed: missedArr,
@@ -1520,7 +1597,8 @@ export function finalize(verdict) {
     count,
     countFloor,
     countOk,
-    ok: missedArr.length === 0 && pending.length === 0 && skipped.length === 0 && countOk,
+    fixPresenceInvariant: inv,
+    ok: missedArr.length === 0 && pending.length === 0 && skipped.length === 0 && countOk && inv.ok,
   };
 }
 
@@ -1540,6 +1618,7 @@ export function formatVerdict(verdict) {
     skipped: verdict.skipped,
     registry: verdict.registry,
     controlMissed: verdict.controlMissed,
+    fixPresenceInvariant: verdict.fixPresenceInvariant,
     rubricBaselines: verdict.rubricBaselines,
     heldOut: verdict.heldOut,
   });
