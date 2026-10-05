@@ -57,6 +57,10 @@
 //                    without it those terminals are skipped idempotently.
 //   --dry-run        report the plan; write nothing, invoke no CLI verb.
 //   --timeout-ms N   per-CLI-invocation wall clock (default 1800000 = 30 min).
+//   --src-root <dir> checkout whose `src/**` the dirty preflight reads
+//                    (default: this repo). --allow-dirty-src is the conscious
+//                    override; a dirty src refuses RT_E_SRC_DIRTY before any
+//                    CLI verb / keyed spend.
 //
 // stdout: exactly ONE JSON object (schema_version/cmd/exit_code + per-item rows),
 // matching every other script/verb in this repo. Exit taxonomy:
@@ -156,6 +160,25 @@ export function slugify(name) {
 /** SHA-256 hex of a brief's bytes — the change detector for an intake item. */
 export function briefHash(text) {
   return createHash("sha256").update(String(text), "utf8").digest("hex");
+}
+
+/**
+ * fixes/347 C-safeguard: read `git status --porcelain -- src` output and decide
+ * whether the code under test has uncommitted changes. A run whose driver bytes
+ * moved since the reviewed revision cannot be attributed to a commit — the
+ * preflight refuses it BEFORE any keyed spend. Pure. A trailing newline or
+ * whitespace-only output is clean; every non-blank row is a pending change and
+ * its path (porcelain columns are 2 chars + a space) is reported.
+ */
+export function assessSrcDirty(porcelain) {
+  const rows = String(porcelain ?? "")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() !== "");
+  return {
+    dirty: rows.length > 0,
+    files: rows.map((line) => line.slice(3).trim()).filter((p) => p !== ""),
+  };
 }
 
 /** The leading `name:` scalar of a front-matter fence, or null. */
@@ -438,6 +461,53 @@ function releaseStateLock(lockPath) {
 }
 
 /**
+ * fixes/347: the porcelain status of `<srcRoot>/src` (a git checkout), or null
+ * when it cannot be assessed (no git, not a repo, a timeout). Null means
+ * "cannot verify" and must never silently block a run — the preflight only
+ * refuses on a positive dirty reading.
+ */
+function readSrcStatus(srcRoot) {
+  try {
+    const res = spawnSync("git", ["status", "--porcelain", "--", "src"], {
+      cwd: srcRoot,
+      env: process.env,
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+    if (res.error || res.status !== 0) return null;
+    return res.stdout ?? "";
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * fixes/347: persist the per-item structured trace/verdict beside the run
+ * artifact (`<work>/<slug>/run-trace.json`) — the exact action/status/code/
+ * reason/phase/delivery row the tick produced, so a run's outcome is durable
+ * and machine-readable instead of only in the tick's stdout. Best-effort:
+ * observability must never fail a run, so any write error is swallowed.
+ */
+function persistRunTrace(work, slug, trace) {
+  try {
+    const dir = join(work, slug);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "run-trace.json");
+    const tmp = `${path}.tmp-${process.pid}`;
+    const doc = {
+      schema_version: SCHEMA_VERSION,
+      cmd: CMD,
+      at: new Date().toISOString(),
+      ...trace,
+    };
+    writeFileSync(tmp, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
+    renameSync(tmp, path);
+  } catch {
+    // best-effort only
+  }
+}
+
+/**
  * Commit the in-memory state under an exclusive lock. We start from the freshest
  * on-disk state and overlay ONLY the slugs this tick owns (dirtySlugs), so a
  * concurrent tick's newer record is never clobbered by our stale startup snapshot
@@ -652,6 +722,13 @@ function main() {
   if (timeoutMs === null || timeoutMs === 0) {
     return fail("--timeout-ms expects a positive integer", "RT_E_VALIDATION", 1);
   }
+  if (args["src-root"] === true) {
+    return fail(
+      "--src-root needs a path value (a bare flag would silently check the default checkout)",
+      "RT_E_VALIDATION",
+      1,
+    );
+  }
 
   const intake = hasIntake ? readIntake(args.intake) : readQueue(args.queue);
   if (intake.error) return fail(intake.error, "RT_E_VALIDATION", 1);
@@ -680,6 +757,33 @@ function main() {
         "RT_E_VALIDATION",
         1,
       );
+    }
+  }
+
+  // fixes/347 C-safeguard: refuse a run BEFORE any CLI verb / keyed spend while
+  // the code under test (`src/**`) has uncommitted changes. A run over dirty
+  // bytes is not the reviewed revision and cannot be attributed to a commit —
+  // the honest move is to stop coded, not to burn tokens. `--allow-dirty-src`
+  // is the conscious override (tests/dev); `--src-root` retargets the check
+  // (default: this checkout). A dry-run invokes no CLI, so it is never blocked.
+  if (!dryRun && !flag(args, "allow-dirty-src")) {
+    const srcRoot =
+      typeof args["src-root"] === "string" && args["src-root"].trim() !== ""
+        ? resolve(args["src-root"])
+        : REPO_ROOT;
+    const porcelain = readSrcStatus(srcRoot);
+    if (porcelain !== null) {
+      const status = assessSrcDirty(porcelain);
+      if (status.dirty) {
+        const shown = status.files.slice(0, 5).join(", ");
+        return fail(
+          `src/** is dirty at ${srcRoot} (${status.files.length} pending change(s): ${shown}${
+            status.files.length > 5 ? ", …" : ""
+          }) — commit or stash before a factory run, or pass --allow-dirty-src to override`,
+          "RT_E_SRC_DIRTY",
+          1,
+        );
+      }
     }
   }
 
@@ -761,7 +865,9 @@ function main() {
           "create failed";
         entry.attempts += 1;
         commitState(statePath, state, dirtySlugs);
-        results.push(row(entry, "create-failed"));
+        const r = row(entry, "create-failed");
+        results.push(r);
+        persistRunTrace(work, slug, r);
         continue;
       }
     }
@@ -781,7 +887,9 @@ function main() {
       entry.phase = driven.envelope?.summary?.currentPhase ?? entry.phase ?? null;
       entry.needsHuman = drive.needsHuman === true;
       commitState(statePath, state, dirtySlugs);
-      results.push(row(entry, `drive-${drive.kind}`));
+      const r = row(entry, `drive-${drive.kind}`);
+      results.push(r);
+      persistRunTrace(work, slug, r);
       continue;
     }
 
@@ -797,7 +905,9 @@ function main() {
     if (!delivered.ok) {
       Object.assign(entry, classifyDeliverFailure(delivered));
       commitState(statePath, state, dirtySlugs);
-      results.push(row(entry, "deliver-failed"));
+      const r = row(entry, "deliver-failed");
+      results.push(r);
+      persistRunTrace(work, slug, r);
       continue;
     }
 
@@ -816,7 +926,9 @@ function main() {
       ...deliveryEvidence(delivered.proof),
     };
     commitState(statePath, state, dirtySlugs);
-    results.push(row(entry, "delivered"));
+    const r = row(entry, "delivered");
+    results.push(r);
+    persistRunTrace(work, slug, r);
   }
 
   const counts = {

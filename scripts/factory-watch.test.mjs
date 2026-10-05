@@ -39,6 +39,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
+  assessSrcDirty,
   briefHash,
   classifyDeliverFailure,
   classifyDrive,
@@ -82,7 +83,11 @@ function keylessEnv() {
 }
 
 function runFactory(args, opts = {}) {
-  return spawnSync(process.execPath, [SCRIPT_PATH, ...args], {
+  // fixes/347: these behavioral legs run against the live dev checkout, whose
+  // src/** may be mid-edit — pass the conscious override unless a test wants to
+  // exercise the dirty-src preflight itself (opts.allowDirtySrc === false).
+  const argv = opts.allowDirtySrc === false ? args : [...args, "--allow-dirty-src"];
+  return spawnSync(process.execPath, [SCRIPT_PATH, ...argv], {
     cwd: opts.cwd,
     env: keylessEnv(),
     encoding: "utf8",
@@ -104,7 +109,7 @@ function jsonOf(res) {
 /** Spawn a factory tick without blocking — for the concurrent-ticks race. */
 function runFactoryAsync(args, opts = {}) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [SCRIPT_PATH, ...args], {
+    const child = spawn(process.execPath, [SCRIPT_PATH, ...args, "--allow-dirty-src"], {
       cwd: opts.cwd,
       env: keylessEnv(),
     });
@@ -132,6 +137,27 @@ function createProject(dir, name) {
   const res = runCliSync(["create", "--brief", BRIEF, "--name", name, "--out", projectFile]);
   assert.equal(res.status, 0, `create failed (exit ${res.status}).\n${res.stdout}\n${res.stderr}`);
   return projectFile;
+}
+
+/** A real git checkout for the dirty-src preflight fixtures (skips when absent). */
+function gitSync(dir, args) {
+  return spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+}
+
+const HAS_GIT = spawnSync("git", ["--version"], { encoding: "utf8" }).status === 0;
+
+/** A committed `src/` checkout; `dirty:true` leaves one uncommitted src change. */
+function makeSrcRepo(dir, { dirty }) {
+  mkdirSync(join(dir, "src"), { recursive: true });
+  writeFileSync(join(dir, "src", "a.ts"), "export const a = 1;\n", "utf8");
+  assert.equal(gitSync(dir, ["init", "-q"]).status, 0, "git init");
+  assert.equal(gitSync(dir, ["add", "-A"]).status, 0, "git add");
+  assert.equal(gitSync(dir, ["commit", "-qm", "init"]).status, 0, "git commit");
+  if (dirty) writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n", "utf8");
+  return dir;
 }
 
 /**
@@ -415,6 +441,57 @@ test("intake helpers — slug/name/hash/queue normalization", () => {
   assert.ok(normalizeQueue([{ name: "A" }]).error, "a row without prose is refused");
 });
 
+test("assessSrcDirty — the dirty-src preflight reads git porcelain honestly", () => {
+  assert.deepEqual(assessSrcDirty(""), { dirty: false, files: [] });
+  assert.deepEqual(assessSrcDirty("\n  \n"), { dirty: false, files: [] });
+  const d = assessSrcDirty(" M src/lib/phases.ts\n?? src/lib/new.ts\n");
+  assert.equal(d.dirty, true);
+  assert.deepEqual(d.files, ["src/lib/phases.ts", "src/lib/new.ts"]);
+});
+
+test(
+  "dirty-src preflight REFUSES coded before any spend; a clean src root proceeds",
+  { timeout: 600_000, skip: !HAS_GIT },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "rapidtool-factory-watch-src-"));
+    const dirtyRepo = makeSrcRepo(join(root, "dirty"), { dirty: true });
+    const cleanRepo = makeSrcRepo(join(root, "clean"), { dirty: false });
+    const intake = join(root, "intake");
+    const work = join(root, "work");
+    mkdirSync(intake, { recursive: true });
+    writeFileSync(join(intake, "expense-tracker.md"), BRIEF, "utf8");
+
+    // REFUSE: a dirty src/ stops the tick with a coded reason, with no CLI verb
+    // run and no project created (no keyed spend).
+    const refused = runFactory(
+      ["--intake", intake, "--work", work, "--src-root", dirtyRepo],
+      { cwd: root, allowDirtySrc: false },
+    );
+    assert.equal(refused.status, 1, `a dirty src must refuse.\n${refused.stdout}`);
+    const jr = jsonOf(refused);
+    assert.equal(jr.ok, false);
+    assert.equal(jr.code, "RT_E_SRC_DIRTY");
+    assert.match(String(jr.error), /dirty/);
+    assert.equal(
+      existsSync(join(work, "expense-tracker", "build.json")),
+      false,
+      "the refusal precedes create — nothing is spent",
+    );
+    assert.equal(existsSync(join(work, "state", "factory-state.json")), false, "no state is written");
+
+    // ALLOW control: the same intake over a CLEAN src root runs the real path
+    // (the keyless drive's honest stall) — never the preflight refusal.
+    const ok = runFactory(
+      ["--intake", intake, "--work", work, "--src-root", cleanRepo],
+      { cwd: root, allowDirtySrc: false },
+    );
+    assert.equal(ok.status, 1, `a clean src proceeds to the keyless stall.\n${ok.stdout}\n${ok.stderr}`);
+    const jo = jsonOf(ok);
+    assert.notEqual(jo.code, "RT_E_SRC_DIRTY");
+    assert.equal(jo.processes[0].action, "drive-stalled");
+  },
+);
+
 // ---------------------------------------------------------------------------
 // B · BEHAVIORAL (keyless) — the honest end-to-end tick.
 //
@@ -475,6 +552,19 @@ test(
     assert.equal(rec.status, "stalled", "the checkpoint records the terminal stall");
     assert.equal(rec.code, "RT_E_GATES_FAILED");
     assert.equal(rec.briefHash, briefHash(BRIEF), "the checkpoint pins the brief's bytes");
+
+    // fixes/347: the per-item structured trace/verdict is persisted beside the
+    // run artifact, so the outcome is durable and machine-readable on disk — not
+    // only in the tick's stdout.
+    const tracePath = join(work, "expense-tracker", "run-trace.json");
+    assert.ok(existsSync(tracePath), "the per-item run trace is persisted to the run artifact");
+    const trace = JSON.parse(readFileSync(tracePath, "utf8"));
+    assert.equal(trace.cmd, "factory-watch");
+    assert.equal(trace.slug, "expense-tracker");
+    assert.equal(trace.action, "drive-stalled");
+    assert.equal(trace.status, "stalled");
+    assert.equal(trace.code, "RT_E_GATES_FAILED");
+    assert.equal(trace.delivered, false);
 
     // Second tick (no --retry) — the terminal item is skipped idempotently: no
     // re-create, no re-drive, no new attempts, project bytes unchanged.
@@ -650,6 +740,11 @@ test("queue intake in --dry-run plans without writing", { timeout: 120_000 }, ()
     existsSync(join(work, "queue-one", "build.json")),
     false,
     "a dry-run invokes no create",
+  );
+  assert.equal(
+    existsSync(join(work, "queue-one", "run-trace.json")),
+    false,
+    "a dry-run writes no run trace",
   );
 });
 
