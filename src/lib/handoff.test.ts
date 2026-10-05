@@ -228,6 +228,24 @@ describe("phaseHandoff", () => {
     assert.match(text, /\(no brief recorded\)/);
   });
 
+  it("survives junk artifacts/decisions CONTAINERS (non-array), never a TypeError (F3)", () => {
+    // F3 sweep: a foreign object (console paste / hand-edited import) can carry
+    // a non-array container, which `?? []` did not guard — `.filter` threw a
+    // TypeError out of prompt generation. Container junk reads as the honest
+    // empty list, exactly like the schedule/oracle container guards.
+    for (const junk of [5, {}, "rows"]) {
+      const p = seedProject() as unknown as { artifacts: unknown; decisions: unknown };
+      p.artifacts = junk;
+      p.decisions = junk;
+      assert.doesNotThrow(() => phaseHandoff(p as never, 0), `artifacts/decisions=${JSON.stringify(junk)}`);
+    }
+    const p = seedProject() as unknown as { artifacts: unknown; decisions: unknown };
+    p.artifacts = 5;
+    p.decisions = {};
+    const text = phaseHandoff(p as never, 0);
+    assert.match(text, /## Context from prior phases/);
+  });
+
   it("renders the failed criterion's STATE on a red DoD row, not the bare static label (339-3/339-5)", () => {
     // Execute P6 on the deterministic floor: the placeholder module implements
     // phase bookkeeping only, so p6-brief-fit is red BY CONSTRUCTION. dod.ts

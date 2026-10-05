@@ -97,7 +97,12 @@ export function phaseHandoff(project: Project, phase: PhaseId): string {
   // an array, not that every row is a well-formed artifact (a hand-edited or
   // foreign import can carry null/garbage rows). Prompt generation must never
   // throw on one bad row — skip it like engine.ts A15 skips unknown memory.
-  const priorArts = (project.artifacts ?? [])
+  // F3 sweep: a foreign object (console paste / hand-edited import) can carry a
+  // non-array `artifacts`/`decisions` CONTAINER — `?? []` does not guard that,
+  // so `.filter` threw a TypeError out of prompt generation. Container-junk is
+  // coerced to the honest empty list, the same stance the schedule/oracle
+  // guards below already take. Valid arrays render byte-identically.
+  const priorArts = (Array.isArray(project.artifacts) ? project.artifacts : [])
     .filter(
       (a) =>
         a !== null &&
@@ -178,7 +183,9 @@ export function phaseHandoff(project: Project, phase: PhaseId): string {
   // with its seat provenance + token-path truth, so a pasted handoff never
   // reads as an unattributed "PASS". Additive: phases without a decision row
   // render byte-identically.
-  const phaseDecisions = (project.decisions ?? []).filter((d) => d && d.phase === phase);
+  const phaseDecisions = (Array.isArray(project.decisions) ? project.decisions : []).filter(
+    (d) => d && d.phase === phase,
+  );
   const lastDecision = phaseDecisions[phaseDecisions.length - 1];
   if (lastDecision) {
     const via = lastDecision.decidedVia;
