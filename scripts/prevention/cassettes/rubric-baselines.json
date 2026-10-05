@@ -16,5 +16,20 @@
     { "slug": "office-scheduler", "variant": "emitted.v2", "score": 14, "ui": "form-wired", "substance": "empty" },
     { "slug": "office-stock-tracker", "variant": "emitted", "score": 11, "ui": "placeholder", "substance": "empty" },
     { "slug": "office-stock-tracker", "variant": "emitted.v2", "score": 12, "ui": "placeholder", "substance": "empty" }
-  ]
+  ],
+  "campaign1": {
+    "provenance": "Campaign #1 (PR-27/PR-28) rubric baselines. Mechanical lower-bound /14 read of the emitted source + runnable evidence (surface/behaviour/non-functional/honesty), replicated from RUNBOOK/tools/synthesis-score.mjs; NOT a browser-driven pass. `workingApp` false on 8/8: no tree mounts a real generated export. A future re-grade of the same campaign tree must not fall below its pinned score.",
+    "source": "testruns/_report/CAMPAIGN1.json + campaign1-score.json",
+    "treeCount": 8,
+    "baselines": [
+      { "slug": "bakery-website", "variant": "emitted", "score": 1, "uiWired": false, "substance": "empty", "workingApp": false },
+      { "slug": "flower-shop-website", "variant": "emitted", "score": 3, "uiWired": false, "substance": "real", "workingApp": false },
+      { "slug": "bakery-florist-orders", "variant": "emitted", "score": 3, "uiWired": false, "substance": "real", "workingApp": false },
+      { "slug": "mobile-companion", "variant": "emitted", "score": 3, "uiWired": false, "substance": "real", "workingApp": false },
+      { "slug": "office-invoice-tracker", "variant": "emitted", "score": 2, "uiWired": false, "substance": "empty", "workingApp": false },
+      { "slug": "office-scheduler", "variant": "emitted", "score": 1, "uiWired": false, "substance": "empty", "workingApp": false },
+      { "slug": "office-stock-tracker", "variant": "emitted", "score": 1, "uiWired": false, "substance": "empty", "workingApp": false },
+      { "slug": "held-out-community-tool-library", "variant": "emitted", "score": 0, "uiWired": false, "substance": "empty", "workingApp": false }
+    ]
+  }
 }

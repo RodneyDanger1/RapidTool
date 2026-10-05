@@ -2280,7 +2280,7 @@ test("W45 331-1 — a blank process DEEPSEEK_API_KEY disables .env (keyless floo
   }
 });
 
-test("W46 332-4 (S2) — `create --brief` refuses a bare path CODED and reads `@file` (AW45-c07)", () => {
+test("W46 332-4 (S2) + C1-09 — `create --brief` reads an existing path under BOTH the plain and @ spellings (AW45-c07)", () => {
   const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-brief-"));
   try {
     // A corpus-shaped front-matter fixture (research/eval-corpus/*.md shape) and
@@ -2307,19 +2307,22 @@ test("W46 332-4 (S2) — `create --brief` refuses a bare path CODED and reads `@
         timeout: 120_000,
       });
 
-    // 1. Bare existing-file path → CODED refusal, exit 1, nothing written.
+    // 1. PLAIN existing-file path (C1-09: the documented `--brief <file>` form
+    //    must be read, not refused) → the front-matter `brief:` scalar; the YAML
+    //    never reaches the lattice and the project is not named after the path.
     const bareOut = join(cwd, "bare.json");
     const bare = run(["create", "--brief", "house-flip.md", "--out", bareOut]);
-    assert.equal(bare.status, 1, `a bare file path must be refused.\nstdout: ${bare.stdout}\nstderr: ${bare.stderr}`);
-    const bareJson = JSON.parse(bare.stdout);
-    assert.equal(bareJson.ok, false);
-    assert.equal(bareJson.code, "RT_E_VALIDATION");
-    assert.match(String(bareJson.error), /names an existing file/);
-    assert.match(String(bareJson.error), /--brief @house-flip\.md/, "the refusal names the @file form");
-    assert.ok(!existsSync(bareOut), "the refusal must write nothing");
+    assert.equal(
+      bare.status,
+      0,
+      `a plain existing-file path must be READ (C1-09: it was refused RT_E_VALIDATION before).\nstdout: ${bare.stdout}\nstderr: ${bare.stderr}`,
+    );
+    const bareProj = JSON.parse(readFileSync(bareOut, "utf8"));
+    assert.equal(bareProj.brief, "a house-flipping project manager: budgets, bids, ARV");
+    assert.ok(!bareProj.brief.includes("---"), "front matter must not be fed to the lattice");
+    assert.ok(!String(bareProj.name).includes("house-flip.md"), "the project is never named after the path");
 
-    // 2. `@fixture` → the front-matter `brief:` scalar; the YAML never reaches
-    //    the lattice and the project is not named after the path.
+    // 2. `@fixture` → the same bytes (the @ convention is preserved).
     const atOut = join(cwd, "at.json");
     const at = run(["create", "--brief", "@house-flip.md", "--out", atOut]);
     assert.equal(at.status, 0, `@file must read the fixture.\nstdout: ${at.stdout}\nstderr: ${at.stderr}`);
@@ -2334,16 +2337,29 @@ test("W46 332-4 (S2) — `create --brief` refuses a bare path CODED and reads `@
     assert.equal(plain.status, 0, `@file must read a plain file.\nstdout: ${plain.stdout}\nstderr: ${plain.stderr}`);
     assert.equal(JSON.parse(readFileSync(plainOut, "utf8")).brief, "A plain brief with no front matter.");
 
-    // 4. `@missing` → CODED refusal.
+    // 4. PLAIN `plain.txt` → the same verbatim bytes.
+    const plainBareOut = join(cwd, "plain-bare.json");
+    const plainBare = run(["create", "--brief", "plain.txt", "--out", plainBareOut]);
+    assert.equal(plainBare.status, 0, `a plain file path must be read.\nstdout: ${plainBare.stdout}\nstderr: ${plainBare.stderr}`);
+    assert.equal(JSON.parse(readFileSync(plainBareOut, "utf8")).brief, "A plain brief with no front matter.");
+
+    // 5. A value that is NOT an existing file stays PROSE (never mistaken for a
+    //    path) — the C1-09 fix must not read every argument as a file.
+    const proseOut = join(cwd, "prose.json");
+    const prose = run(["create", "--brief", "build me a recipe manager", "--out", proseOut]);
+    assert.equal(prose.status, 0, `prose must stay prose.\nstdout: ${prose.stdout}\nstderr: ${prose.stderr}`);
+    assert.equal(JSON.parse(readFileSync(proseOut, "utf8")).brief, "build me a recipe manager");
+
+    // 6. `@missing` → CODED refusal.
     const missing = run(["create", "--brief", "@nope.md", "--out", join(cwd, "nope.json")]);
     assert.equal(missing.status, 1);
     const missingJson = JSON.parse(missing.stdout);
     assert.equal(missingJson.code, "RT_E_VALIDATION");
     assert.match(String(missingJson.error), /does not name a readable file/);
 
-    // 5. The README documents both forms (the doc is part of the contract).
+    // 7. The README documents BOTH forms (the doc is part of the contract).
     assert.match(readmeText, /--brief @<path>/, "README-cli.md must document the @file form");
-    assert.match(readmeText, /names an existing file|EXISTING, readable file/, "README documents the refusal");
+    assert.match(readmeText, /--brief <path>/, "README-cli.md must document the plain-path form (C1-09)");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -3150,6 +3166,22 @@ test(
       assert.equal(ejr.code, "RT_E_SUBSTANCE_EMPTY", "the empty-substance refusal carries its own code, not the generic tree-run-red");
       assert.equal(ejr.git?.committed, false, "no commit over an empty-substance tree");
       assert.equal(ejr.git?.reason, "substance-empty", "the withheld reason names the substance class");
+      // C1-08 (campaign #1): the withheld sub-envelope's own code must name the
+      // DECIDING reason, not a leg's earlier code. Reproduced on this fixture
+      // (the run leg is itself red, so payload.code already read
+      // RT_E_TREE_RUN_FAILED before the substance branch) and on the campaign
+      // artifact office-invoice-tracker/emit-banner.json, whose `git` block
+      // carried reason:"substance-empty" beside code:"RT_E_TREE_RUN_FAILED".
+      assert.equal(
+        ejr.treeRun?.ok,
+        false,
+        "precondition: this fixture's run leg is red, so the pre-fix git.code would have been RT_E_TREE_RUN_FAILED",
+      );
+      assert.equal(
+        ejr.git?.code,
+        "RT_E_SUBSTANCE_EMPTY",
+        "the withheld git.code must match the deciding reason (C1-08: it used to carry the run leg's code)",
+      );
       assert.ok(String(ejr.git?.error).includes("no commit was issued"), `the refusal must be loud: ${ejr.git?.error}`);
       assert.equal(existsSync(join(emptyDir, ".git")), false, "no commit may land over an empty-substance tree");
       assert.equal(existsSync(join(emptyDir, "src", "generated.ts")), true, "the emitted tree is still kept on disk");
@@ -3198,6 +3230,30 @@ test(
       assert.equal(ajr.ok, true);
       assert.equal(ajr.git?.committed, true, "--allow-empty lifts the substance/red-trail hold");
       assert.equal(existsSync(join(allowDir, ".git")), true, "the deliberate commit is real");
+
+      // C1-06 (campaign #1): committed:true must NOT read as a verified product.
+      // The landed commit carries an honest verification record naming what was
+      // actually verified — the tree-run verdict + verdictHash, the promoted
+      // evidenceHash, and whether the mounted UI calls a real generated export.
+      // Reproduced on the campaign's real-substance trees (flower-shop / bfo /
+      // mobile): committed:true while uiWired=false and the toolchain unverified.
+      assert.equal(
+        ajr.git?.verifiedProduct,
+        false,
+        "a commit whose UI is unwired / toolchain unverified is NOT a verified product (C1-06)",
+      );
+      assert.ok(ajr.git?.verification, "the delivery record must carry git.verification (C1-06)");
+      assert.equal(ajr.git?.verification?.treeRunOk, true, "the record states the tree-run was green");
+      assert.equal(ajr.git?.verification?.uiWired, false, "the record states the UI is NOT wired");
+      assert.ok(
+        Array.isArray(ajr.git?.verification?.unverifiedReasons) && ajr.git.verification.unverifiedReasons.length > 0,
+        "the record names the honest gaps (C1-06)",
+      );
+      assert.match(
+        String(ajr.git?.verificationNote),
+        /NOT fully verified/,
+        "the commit carries an explicit not-fully-verified note",
+      );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -3328,6 +3384,85 @@ test("PR-22 — `gate --resynthesize` re-opens a red running P6 and re-enters (n
     // The re-opened P6 is persisted (the ledger absorbed the re-entry).
     const after = JSON.parse(readFileSync(proj, "utf8"));
     assert.ok((after.phases ?? []).some((r) => r.id === 6), "the P6 record survives the re-entry");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// C1-10 (KD-8, campaign #1 residual): the opt-in cross-process campaign ledger.
+// `RAPIDTOOL_TOKEN_CAP` binds ONE process, so a campaign driven as N CLI
+// invocations was unbounded (N x cap). This leg pins the minimum cross-process
+// mechanism: a persistent ledger the caller names (`--token-ledger <file>` /
+// `RAPIDTOOL_LEDGER_FILE`) that accumulates spend and REFUSES once the campaign
+// bound is reached. Keyless + read-only (`mine`), no keyed calls. Absent =>
+// byte-identical (no `campaignLedger` key, no file touched).
+// ---------------------------------------------------------------------------
+test("C1-10 — the cross-process campaign ledger bounds a campaign, refuses past it, and is absent by default", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-campaign-ledger-"));
+  const env = { ...process.env, DEEPSEEK_API_KEY: "" };
+  for (const key of ["RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR", "RAPIDTOOL_LEDGER_FILE", "RAPIDTOOL_CAMPAIGN_TOKEN_CAP"]) {
+    delete env[key];
+  }
+  const run = (extra) =>
+    spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "mine", "--dir", cwd, "--limit", "1"],
+      { cwd, env: { ...env, ...(extra ?? {}) }, encoding: "utf8", timeout: 120_000 },
+    );
+  try {
+    // (0) No ledger configured -> the envelope carries NO campaignLedger key.
+    const base = run();
+    assert.equal(base.status, 0, `keyless mine must stay green.\nstdout: ${base.stdout}\nstderr: ${base.stderr}`);
+    assert.ok(
+      !("campaignLedger" in JSON.parse(base.stdout)),
+      "an absent ledger must be byte-identical: no campaignLedger key on the envelope",
+    );
+
+    // (1) Opt-in with a fresh ledger under the bound: allowed + surfaced.
+    const ledger = join(cwd, "campaign.ledger.json");
+    const ok = run({ RAPIDTOOL_LEDGER_FILE: ledger, RAPIDTOOL_CAMPAIGN_TOKEN_CAP: "1000" });
+    assert.equal(ok.status, 0, `under the cap must stay green.\nstdout: ${ok.stdout}\nstderr: ${ok.stderr}`);
+    const oj = JSON.parse(ok.stdout);
+    assert.equal(oj.campaignLedger.path, ledger, "the envelope names the campaign ledger");
+    assert.equal(oj.campaignLedger.cap, 1000);
+    assert.equal(oj.campaignLedger.spent, 0);
+    assert.equal(oj.campaignLedger.remaining, 1000);
+
+    // (2) A ledger already AT the bound REFUSES coded, before any dispatch.
+    writeFileSync(ledger, `${JSON.stringify({ schema_version: 1, cap: 100, spent: 100, calls: 5, entries: [] })}\n`);
+    const over = run({ RAPIDTOOL_LEDGER_FILE: ledger, RAPIDTOOL_CAMPAIGN_TOKEN_CAP: "100" });
+    assert.equal(over.status, 1, `spent >= cap must refuse.\nstdout: ${over.stdout}\nstderr: ${over.stderr}`);
+    const xj = JSON.parse(over.stdout);
+    assert.equal(xj.ok, false);
+    assert.equal(xj.code, "RT_E_BUDGET_EXHAUSTED", "an exhausted campaign bound is the budget class");
+    assert.match(String(xj.error), /campaign token bound exceeded/);
+    assert.equal(xj.campaignLedger.spent, 100);
+    assert.equal(xj.campaignLedger.remaining, 0);
+    // The refused invocation did not spend or rewrite the ledger.
+    assert.equal(JSON.parse(readFileSync(ledger, "utf8")).spent, 100, "a refusal never mutates the ledger");
+
+    // (3) The FILE's own `cap` binds when no env cap is set (cross-process bound
+    //     survives across invocations, exactly what a per-process cap cannot do).
+    const fileCap = run({ RAPIDTOOL_LEDGER_FILE: ledger });
+    assert.equal(fileCap.status, 1, "the ledger's persisted cap must bind with no env cap");
+    assert.equal(JSON.parse(fileCap.stdout).code, "RT_E_BUDGET_EXHAUSTED");
+
+    // (4) Under the bound -> allowed, remaining reported.
+    writeFileSync(ledger, `${JSON.stringify({ schema_version: 1, cap: 100, spent: 40, calls: 2, entries: [] })}\n`);
+    const under = run({ RAPIDTOOL_LEDGER_FILE: ledger });
+    assert.equal(under.status, 0, "under the cap must stay green");
+    assert.equal(JSON.parse(under.stdout).campaignLedger.remaining, 60);
+
+    // (5) A non-numeric cap and a corrupt ledger both refuse CODED (never a
+    //     silent reset of an operator's bound).
+    const badCap = run({ RAPIDTOOL_LEDGER_FILE: ledger, RAPIDTOOL_CAMPAIGN_TOKEN_CAP: "abc" });
+    assert.equal(badCap.status, 1);
+    assert.equal(JSON.parse(badCap.stdout).code, "RT_E_VALIDATION");
+    writeFileSync(ledger, "not json");
+    const corrupt = run({ RAPIDTOOL_LEDGER_FILE: ledger });
+    assert.equal(corrupt.status, 1);
+    assert.equal(JSON.parse(corrupt.stdout).code, "RT_E_VALIDATION");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

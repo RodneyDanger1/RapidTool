@@ -47,6 +47,8 @@ import {
   treeVerdictScore,
   treeVerdictScoreOf,
   failureSignature,
+  emittedUiWiring,
+  sessionSpendTotal,
   runlockEditViolations,
   vaultSearch,
   wildPauseRun,
@@ -3155,6 +3157,11 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
       node: string;
       factory: {
         autonomousSoftwareFactory: boolean;
+        awaitingHumanAcceptance: boolean;
+        autonomousFactoryV2: boolean;
+        fleetAcceptance: { autonomousFactoryV2: boolean; seat: string; evidenced: number; required: number };
+        fleetMetrics: { runs: number; tokens: number; estimatedCostUsd: null };
+        fleetAlarms: { tripped: boolean; cacheCold: { id: string; tripped: boolean } };
         runnerIsSandbox: boolean;
         leftoverJobsAreReexportsOrStubs?: boolean;
         gaps?: string[];
@@ -3174,6 +3181,17 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
     assert.ok(Array.isArray(doctor.factory.gaps) && doctor.factory.gaps.length > 0, "210: gaps name why factory is false");
     assert.equal("error" in doctor, false, "doctor envelope is not dual-channel");
     assert.equal(doctor.factory.inventory ?? null, null, "no --tree → inventory null");
+    // X follow-up: the machine acceptance reading + fleet metrics/alarms that
+    // acceptance.ts/doctor.ts already produce must SURFACE on the doctor
+    // envelope (a field pass-through, no logic change). The empty floor refuses.
+    assert.equal(doctor.factory.autonomousFactoryV2, false, "the machine reading surfaces and refuses on no evidence");
+    assert.equal(doctor.factory.fleetAcceptance.autonomousFactoryV2, false);
+    assert.equal(doctor.factory.fleetAcceptance.seat, "machine:tree-run", "provenance: machine seat, never human");
+    assert.equal(doctor.factory.fleetAcceptance.required, 1, "the default acceptance floor is 1 (a caller raises it)");
+    assert.equal(doctor.factory.fleetMetrics.runs, 0, "no telemetry → the empty metrics floor");
+    assert.equal(doctor.factory.fleetMetrics.estimatedCostUsd, null, "spend is never fabricated");
+    assert.equal(doctor.factory.fleetAlarms.tripped, false, "no telemetry → no alarm tripped");
+    assert.equal(doctor.factory.fleetAlarms.cacheCold.id, "cache-cold");
   });
 
   it("214 doctor --tree scans leftover jobs; factory stays false (no invented bodies)", () => {
@@ -5177,5 +5195,36 @@ describe("C1 — surfaced headless refusals are coded", () => {
     for (const c of ["RT_E_VALIDATION", "RT_E_GATE_PENDING", "RT_E_PHASE_ILLEGAL"]) {
       assert.ok((ERROR_CODES as readonly string[]).includes(c), `${c} is registered`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C1-06 (campaign #1): the delivery-record readings. `emittedUiWiring` is the
+// static call-presence scan an emit --git record carries ("committed:true" is
+// not "verified product" while the mounted UI never calls a generated export);
+// `sessionSpendTotal` is the process spend the cross-process campaign ledger
+// appends (C1-10). Replayed over the real campaign artifacts when present.
+// ---------------------------------------------------------------------------
+describe("C1-06 (campaign #1) - emittedUiWiring + sessionSpendTotal", () => {
+  it("emittedUiWiring reads the campaign's committed trees as UNWIRED (their console never calls a generated export)", () => {
+    const campaignRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "testruns", "campaign1");
+    if (!existsSync(campaignRoot)) return; // artifacts live outside the repo; skip when absent
+    for (const slug of ["flower-shop-website", "bakery-florist-orders", "mobile-companion"]) {
+      const r = emittedUiWiring(join(campaignRoot, slug, "emitted"));
+      assert.equal(r.wired, false, `${slug}: the committed tree's UI never calls a generated export (C1-06)`);
+      assert.match(r.detail, /never calls an exported function/);
+    }
+    // office-invoice-tracker's console DOES call a real generated export even
+    // though its job census is empty — the reading is per-call-presence, not a
+    // substance proxy (published so a reader sees the distinction).
+    const inv = emittedUiWiring(join(campaignRoot, "office-invoice-tracker", "emitted"));
+    assert.equal(inv.wired, true, "a console calling a real generated export reads wired");
+  });
+
+  it("sessionSpendTotal is a measured, non-throwing process-spend reading", () => {
+    const s = sessionSpendTotal();
+    assert.equal(typeof s.tokens, "number");
+    assert.equal(typeof s.calls, "number");
+    assert.ok(s.tokens >= 0 && s.calls >= 0);
   });
 });

@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "cmd": "emit",
+  "ok": false,
+  "error": "emit refused: the project's tree-run trail is RED (3 failed tree-runs, no green run since) ΓÇö reach a green tree-run (rapidtool tree-run) or emit with redTree:\"banner\" to ship the unmissable banner. Last failure: the emitted project's own `npm run typecheck` fail (exit 2) ΓÇö src/ui/console.tsx(28,102): error TS2503: Cannot find namespace 'JSX'.",
+  "code": "RT_E_TREE_RUN_FAILED",
+  "remedy": "Read the tree-run outcome (compile verdicts, per-spec tests, entry run), fix the generator or re-emit, then re-run the tree before treating P6 as verified. A GREEN run is still not product-complete when the verdict's `substance` census shows stubs/reexports, so read `substance` (stubs:N reexports:N real:N) and its SUBSTANCE MARKING note (K3: exit 0 is never product quality).",
+  "exit_code": 1
+}

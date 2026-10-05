@@ -158,7 +158,7 @@ test("single command: the two signals are reported and the gate of record is exa
   assert.deepEqual(verdict.skipped, [], "a skip is a hard failure");
   assert.equal(verdict.guards, registry.guards.length, "every registered guard is evaluated");
   assert.ok(verdict.count >= verdict.countFloor, `count ${verdict.count} must meet the pinned floor ${verdict.countFloor}`);
-  assert.equal(verdict.countFloor, 15, "the guard-count floor is pinned (deleting a guard fails)");
+  assert.equal(verdict.countFloor, 20, "the guard-count floor is pinned (deleting a guard fails)");
   assert.deepEqual(verdict.controlMissed, [], "every fired guard has a clean control");
   // TWO orthogonal signals on every guard.
   for (const r of verdict.detail) {

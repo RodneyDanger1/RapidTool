@@ -345,6 +345,16 @@ export function deliveryEvidence(envelope) {
   // compile-check.treeVerdictHash) — not merely a landed commit. Absent on an
   // older envelope ⇒ null, never fabricated.
   const verdictHash = typeof tree?.verdictHash === "string" && tree.verdictHash ? tree.verdictHash : null;
+  // C1-06: the delivery record must also state WHAT was actually verified — the
+  // mounted UI's wiring reading the CLI's git.verification carries, and whether
+  // the folded tree-run is a fully verified product. A commit over an unwired
+  // UI / unverified toolchain is recorded honestly, never as a verified product.
+  const git = envelope?.git && typeof envelope.git === "object" ? envelope.git : null;
+  const verification =
+    git && git.verification && typeof git.verification === "object" ? git.verification : null;
+  const uiWired = verification ? verification.uiWired === true : null;
+  const declared = tree?.declaredScriptsVerified === true;
+  const verifiedProduct = tree?.ok === true && declared && tree?.unverifiedEntry === undefined && uiWired === true;
   return {
     treeRun: {
       ok: tree?.ok === true,
@@ -355,6 +365,11 @@ export function deliveryEvidence(envelope) {
     },
     verdictHash,
     evidenceHash: typeof hash === "string" && hash ? hash : null,
+    uiWired,
+    verifiedProduct,
+    ...(verification && Array.isArray(verification.unverifiedReasons)
+      ? { unverifiedReasons: [...verification.unverifiedReasons] }
+      : {}),
   };
 }
 

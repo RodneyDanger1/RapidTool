@@ -2344,9 +2344,10 @@ function floorSignaturesForLabel(label: string, entities: readonly string[]): st
  * Deterministic union of every DECLARED capability the brief must materialise as
  * a file (A1):
  *   1. spec-graph job nodes with a parseable label + `src/jobs/*.ts` path;
- *   2. RELAXED `job-*` nodes whose `file` sits under an emitted root even when no
- *      quoted label parses or the path is outside src/jobs/ (label derived from
- *      the capability id or the file stem) — the nodes the strict rule dropped.
+ *   2. EVERY OTHER declared `job-*` node (C1-04) — no parseable label, a path
+ *      outside the emitted roots, or no path at all still becomes a required
+ *      module at a deterministic `src/jobs/<id>.ts` path, so the capability
+ *      floor counts every declared job and a below-floor refusal can name it.
  *      The `ui` family is scaffold-owned (A4), never a synthesized chunk.
  * Each entry carries ≥1 floor signature so `mergeMinimumPlan` can always add a
  * real chunk. The brief-noun floor + domain fallback that force a minimum plan
@@ -2397,18 +2398,24 @@ export function deriveRequiredModules(
       label: t.label,
     });
   }
-  // 1b. RELAXED job nodes: a `job-*` node with a file under an emitted root even
-  //     when no quoted label parses or the path is outside src/jobs/ (the strict
-  //     rule dropped these). The UI family is scaffold-owned (A4), never a
-  //     synthesized chunk.
+  // 1b. RELAXED / derived job nodes: EVERY declared `job-*` node is a
+  //     capability-floor module (C1-04). A node with a parseable label and an
+  //     emitted-root file keeps that path; a node whose label does not parse,
+  //     whose path is outside the emitted roots, or that carries no path at all
+  //     still gets a deterministic `src/jobs/<id>.ts` path so the floor COUNTS
+  //     it and a below-floor refusal can NAME it. The UI family is
+  //     scaffold-owned (A4), never a synthesized chunk.
   const strictPaths = new Set(out.map((m) => m.path));
   const nodes = Array.isArray(project?.specGraph?.nodes) ? project!.specGraph!.nodes! : [];
   for (const n of nodes) {
     if (n === null || typeof n !== "object") continue;
     const id = typeof (n as { id?: unknown }).id === "string" ? (n as { id: string }).id : "";
     if (!id.startsWith("job-")) continue;
-    const file = (n as { file?: unknown }).file;
-    if (!isRequiredModulePath(file) || strictPaths.has(file)) continue;
+    const rawFile = (n as { file?: unknown }).file;
+    const file = isRequiredModulePath(rawFile)
+      ? rawFile
+      : `src/jobs/${pathSlugFromNames([id.slice(4)]) || "job"}.ts`;
+    if (strictPaths.has(file)) continue;
     const stem = file.split("/").pop()?.replace(/\.ts$/, "") ?? id.slice(4);
     const parsed = jobLabelFromPurpose((n as { purpose?: unknown }).purpose);
     const label = parsed ?? (id.slice(4).replace(/[-_]+/g, " ").trim() || stem);
@@ -2449,6 +2456,66 @@ export function minimumTreeFileCount(
   spec: { typeSignatures: readonly string[] },
 ): number {
   return Math.max(deriveRequiredModules(project, spec).length, briefModuleFloor(project));
+}
+
+/** C1-01 (BF-1): the coded under-production refusal for an accepted set below the floor. */
+export type UnderProducedRefusal = {
+  code: "RT_E_PLAN_UNDERPRODUCED";
+  detail: string;
+  /** The declared modules the accepted set failed to materialise (never empty for a below-floor set). */
+  missing: { path: string; label: string; source: RequiredModule["source"] }[];
+};
+
+/**
+ * C1-01 (BF-1) — THE under-production predicate. A partial tree whose accepted
+ * set is below `minimumTreeFileCount` is not a validation failure of one chunk:
+ * it is an under-produced plan, and the artifact must carry the registered
+ * `RT_E_PLAN_UNDERPRODUCED` and NAME the declared modules that never landed —
+ * never the generic `RT_E_VALIDATION`, and never a silent partial. Pure: a
+ * below-floor set returns the coded refusal + its missing-module list, else
+ * null. `acceptedPaths` is the accepted CHUNK set (the barrel is not a module).
+ */
+export function underProducedRefusal(
+  project: Parameters<typeof deriveRequiredModules>[0] & { brief?: string | null },
+  spec: { typeSignatures: readonly string[] },
+  acceptedPaths: readonly string[],
+): UnderProducedRefusal | null {
+  const accepted = Array.isArray(acceptedPaths) ? acceptedPaths : [];
+  const required = deriveRequiredModules(project, spec);
+  const minimum = Math.max(required.length, briefModuleFloor(project));
+  if (accepted.length >= minimum) return null;
+  const have = new Set(accepted);
+  // The modules the floor demands that never landed. The deterministic floor
+  // PLAN bounds the count at `minimum` (a capability-thin, noun-rich brief can
+  // be below the floor with no single declared module missing), so the refusal
+  // names exactly the planned-but-unaccepted modules, never every brief noun.
+  const byPath = new Map<string, RequiredModule>();
+  for (const m of [...required, ...floorFallbackModules(project)]) if (!byPath.has(m.path)) byPath.set(m.path, m);
+  const missing: RequiredModule[] = [];
+  for (const row of mergeMinimumPlan([], required, { minimum, project })) {
+    if (have.has(row.path)) continue;
+    missing.push(
+      byPath.get(row.path) ?? {
+        key: `floor:${row.path}`,
+        path: row.path,
+        signatures: [],
+        source: "brief",
+        label: row.label ?? row.path,
+      },
+    );
+  }
+  const named =
+    missing.length > 0
+      ? missing
+          .slice(0, 12)
+          .map((m) => `${m.path} (${m.source}:${m.label})`)
+          .join(", ") + (missing.length > 12 ? `, +${missing.length - 12} more` : "")
+      : `${minimum - accepted.length} further module(s) to reach the floor`;
+  return {
+    code: "RT_E_PLAN_UNDERPRODUCED",
+    detail: `accepted tree has ${accepted.length} module(s) but the brief demands >= ${minimum} — the plan is under-produced; missing module(s): ${named}`,
+    missing: missing.map((m) => ({ path: m.path, label: m.label, source: m.source })),
+  };
 }
 
 /** A1 floor fallback: synthetic modules added ONLY when the plan is below the brief floor. */
@@ -5822,6 +5889,36 @@ async function synthesizeChunkedTree(
     { budget: P6_SYNTH_REPO_MAP_BUDGET },
   ).rendered;
 
+  // C1-01 (BF-1): the ONE refusal door for this tree. A refusal whose accepted
+  // set is below the brief-driven floor is an UNDER-PRODUCED PLAN — it is coded
+  // `RT_E_PLAN_UNDERPRODUCED` and names the declared modules that never landed,
+  // never the generic `RT_E_VALIDATION` and never a silent partial. A specific
+  // coded reason (LLM/runner/env) is preserved as-is; the floor only replaces
+  // the generic validation code. `chunkIndex < 0` marks a whole-tree refusal.
+  const refuse = (chunkIndex: number, chunkTotal: number, code: ErrorCode, detail: string): Project => {
+    const under = underProducedRefusal(project, treeSpec, accepted.map((f) => f.path));
+    if (under !== null && code === "RT_E_VALIDATION") {
+      return partialTreeRefuse(
+        withAttemptLogs(project, attemptLogs),
+        accepted,
+        chunkIndex,
+        chunkTotal,
+        under.code,
+        `${under.detail} — proximate refusal (${code}): ${detail}`,
+        servedModel,
+      );
+    }
+    return partialTreeRefuse(
+      withAttemptLogs(project, attemptLogs),
+      accepted,
+      chunkIndex,
+      chunkTotal,
+      code,
+      detail,
+      servedModel,
+    );
+  };
+
   for (let i = 0; i < plan.length; i++) {
     const chunk = plan[i]!;
     const lessonLines = lessonLinesForBrief(
@@ -5868,15 +5965,7 @@ async function synthesizeChunkedTree(
       prior,
     );
     if (!synth.ok) {
-      return partialTreeRefuse(
-        withAttemptLogs(project, attemptLogs),
-        accepted,
-        i,
-        plan.length,
-        synth.code,
-        synth.error,
-        servedModel,
-      );
+      return refuse(i, plan.length, synth.code, synth.error);
     }
     // D1/D3: consume the plan row's path directly (no treePathForChunk for a
     // planned chunk — the plan already de-duped every path, job siblings
@@ -6015,14 +6104,11 @@ async function synthesizeChunkedTree(
             }
           }
           if (!fixed) {
-            return partialTreeRefuse(
-              withAttemptLogs(project, attemptLogs),
-              accepted,
+            return refuse(
               i,
               plan.length,
               "RT_E_VALIDATION",
               `the accepted tree prefix fails its OWN declared \`typecheck\` after chunk ${i + 1}/${plan.length} and the bounded fail-fast repair did not converge — chunk ${i + 2} was never synthesized (${partialVerdict.detail ?? ""})`,
-              servedModel,
             );
           }
         }
@@ -6034,9 +6120,7 @@ async function synthesizeChunkedTree(
   // above; this is the fail-closed backstop that never seals a tree below the
   // brief-driven minimum.
   if (accepted.length < minTreeFiles) {
-    return partialTreeRefuse(
-      withAttemptLogs(project, attemptLogs),
-      accepted,
+    return refuse(
       -1,
       plan.length,
       "RT_E_VALIDATION",
@@ -6044,7 +6128,6 @@ async function synthesizeChunkedTree(
         .map((m) => `${m.source}:${m.label}`)
         .slice(0, 12)
         .join(", ")})`,
-      servedModel,
     );
   }
 
@@ -6085,14 +6168,11 @@ async function synthesizeChunkedTree(
   const entry = assembleTreeEntry(accepted);
   const fit = briefFitSatisfied(brief, entry);
   if (!fit.ok) {
-    return partialTreeRefuse(
-      withAttemptLogs(project, attemptLogs),
-      accepted,
+    return refuse(
       -1,
       plan.length,
       "RT_E_VALIDATION",
       `assembled tree does not implement the brief's required vocabulary (missing: ${fit.missing.slice(0, 12).join(", ")}; tree-level p6-brief-fit after all chunks accepted)`,
-      servedModel,
     );
   }
   let materialized = materializeImportableTree(accepted);
@@ -6218,14 +6298,11 @@ async function synthesizeChunkedTree(
           });
         }
         if (!repaired.ok) {
-          return partialTreeRefuse(
-            withAttemptLogs(project, attemptLogs),
-            accepted,
+          return refuse(
             i,
             plan.length,
             "RT_E_VALIDATION",
             `emitted tree fails its OWN declared \`typecheck\` and the bounded repair of chunk ${i + 1}/${plan.length} did not land (${repaired.code}: ${repaired.error}) — ${first.detail ?? ""}`,
-            servedModel,
           );
         }
         // A6 (SYNTHSPEC P4b · monotonic repair): accept the substituted chunk
@@ -6263,25 +6340,19 @@ async function synthesizeChunkedTree(
         // again when no accepted probe verdict is available.
         const second = postRepairVerdict ?? (await runTreeSelfTypecheck(project, materialized, typecheck));
         if (second.run === "fail") {
-          return partialTreeRefuse(
-            withAttemptLogs(project, attemptLogs),
-            accepted,
+          return refuse(
             -1,
             plan.length,
             "RT_E_VALIDATION",
             `emitted tree still fails its OWN declared \`typecheck\` after one bounded repair round — ${second.detail ?? ""}`,
-            servedModel,
           );
         }
       } else {
-        return partialTreeRefuse(
-          withAttemptLogs(project, attemptLogs),
-          accepted,
+        return refuse(
           -1,
           plan.length,
           "RT_E_VALIDATION",
           `emitted tree fails its OWN declared \`typecheck\` but no synthesized chunk maps to the compiler-named file(s) — ${first.detail ?? ""}`,
-          servedModel,
         );
       }
     } else if (first.run === "skip") {

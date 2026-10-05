@@ -130,16 +130,18 @@ plain `process.env` read, so a bare Node / unit-test process is unchanged.
 # 1. Create a new project (writes <file>.json atomically; no --out → <slug>.json in the CWD — the intermediate file stays where the shell chains the verbs)
 node --experimental-strip-types scripts/rapidtool-cli.mjs create \
   --brief "Build a field-service dispatch board for HVAC." --name "HVAC Dispatch" --out build.json
-#    --brief takes PROSE, or --brief @<path> reads the file (the same `@file`
-#    convention as `ingest --report`). A YAML-front-matter corpus fixture
+#    --brief takes PROSE, or a PATH that names an EXISTING readable file: BOTH
+#    `--brief <path>` and `--brief @<path>` (the same `@file` convention as
+#    `ingest --report`) READ the file. A YAML-front-matter corpus fixture
 #    (research/eval-corpus/*.md, e.g. house-flip-manager.md) carries its prose
-#    in the `brief:` scalar — `@file` unwraps that instead of feeding the front
-#    matter to the lattice. A bare value that names an EXISTING, readable file
-#    is REFUSED (exit 1, RT_E_VALIDATION) naming both forms: a file path is
-#    never silently used as the brief prose (AW45-c07 — the pre-fix bug named
-#    the project after the path and mined nouns from the filename).
+#    in the `brief:` scalar — a path unwraps that instead of feeding the front
+#    matter to the lattice. Any value that is NOT an existing file is the brief
+#    prose, so a path is never silently used as prose (AW45-c07 — the pre-fix
+#    bug named the project after the path and mined nouns from the filename).
 node --experimental-strip-types scripts/rapidtool-cli.mjs create \
-  --brief @research/eval-corpus/house-flip-manager.md --out build.json
+  --brief research/eval-corpus/house-flip-manager.md --out build.json
+node --experimental-strip-types scripts/rapidtool-cli.mjs create \
+  --brief @research/eval-corpus/house-flip-manager.md --out build.json   # equivalent
 
 # 2. Advance one phase (deterministic; add --live for real keyless research + optional DeepSeek narrative)
 node --experimental-strip-types scripts/rapidtool-cli.mjs run --project build.json [--live]
@@ -529,6 +531,19 @@ commit, files, foreign }`; a refusal flips the envelope to `ok: false` + its cod
 reason (`RT_E_GIT_UNAVAILABLE`, `RT_E_FOREIGN_FILES`, …) and exit 1 — **the emitted
 tree still exists on disk**, so the failure is in delivery, never in the build.
 
+> **Committed ≠ verified (C1-06).** A commit is proof of a landed tree, not of a
+> verified product. Every landed `git` block therefore carries
+> `verifiedProduct: true|false` and a `verification` record stating what was
+> ACTUALLY verified: the tree-run verdict + `verdictHash`, the promoted
+> `evidenceHash`, `declaredScriptsVerified`, and `uiWired` (whether the mounted
+> `src/ui/console.tsx` calls a real, non-stub export of the generated module it
+> imports — a static call-presence reading, not behaviour). `verifiedProduct` is
+> `true` only when the run is green AND every declared script executed AND the
+> kind entry ran AND the UI is wired; otherwise `verificationNote` says
+> `NOT fully verified` and `verification.unverifiedReasons` names each gap. This
+> never weakens the substance/red hold above — it stops `committed:true` alone
+> from reading as a verified product.
+
 > **Ordering guard (`emit --git` + a judging leg) — W346 · P0-3 + L4.** A commit
 > is delivered ONLY when every judging leg REQUESTED in this invocation is green;
 > a red/suppressed one WITHHOLDS it — the envelope stays `ok:false`, `git` reports
@@ -542,7 +557,9 @@ tree still exists on disk**, so the failure is in delivery, never in the build.
 > an uncleared red tree-run trail, code `RT_E_SUBSTANCE_EMPTY`), or
 > `foreign-files-left-in-place` (a supported quarantine left the tree mixed). The
 > substance hold is checked before `tree-run-red`, so an empty tree refuses with
-> its own specific code. It is lifted by the explicit **`--allow-empty`** opt-in
+> its own specific code. The withheld `git` block's own `code` always matches its
+> `reason` (C1-08: it used to carry a leg's earlier code beside a different
+> reason). It is lifted by the explicit **`--allow-empty`** opt-in
 > (a deliberate scaffold-only delivery), which lands the commit as before. A GREEN
 > leg commits exactly as before. `emit --git` WITHOUT any judging leg is
 > unchanged: it cannot consult a verdict it never computed, so it lands the commit
@@ -1206,6 +1223,28 @@ provider usage from a tick can be captured with the provider's opt-in log — se
 `RAPIDTOOL_LLM_USAGE_LOG=<file>` in the hook's environment; the factory forwards
 its environment to every child, and each completed provider call appends one
 JSON line (model + token counts, never a prompt or key).
+
+## Cross-process campaign ledger (opt-in)
+
+`RAPIDTOOL_TOKEN_CAP` binds **one process**, so a campaign driven as N separate
+CLI invocations is not bounded (N × cap). For a bounded campaign, opt in with a
+persistent ledger file:
+
+```
+--token-ledger <file>             # or set RAPIDTOOL_LEDGER_FILE=<file>
+RAPIDTOOL_CAMPAIGN_TOKEN_CAP=N    # the cross-process bound (integer tokens)
+```
+
+Every opted-in invocation loads the ledger BEFORE dispatch and **refuses** with
+`RT_E_BUDGET_EXHAUSTED` (exit 1) once `spent >= cap`, where `cap` is
+`RAPIDTOOL_CAMPAIGN_TOKEN_CAP` when set, else the file's own persisted `cap`
+field. After the run the invocation appends its measured session spend
+(`headless.sessionSpendTotal`) and reports the running total on the envelope as
+`campaignLedger: { path, cap, spent, calls, remaining, thisInvocation? }`. A
+keyless (zero-spend) invocation appends nothing; a corrupt ledger or a
+non-numeric cap refuses coded rather than silently resetting the bound. When
+neither the flag nor the env var is set, the ledger is never read or written and
+the envelope is byte-identical (no `campaignLedger` key).
 
 ## Agent contract (exit codes + stdout purity)
 

@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -97,6 +97,7 @@ import {
   materializedExportNames,
   mergeMinimumPlan,
   minimumTreeFileCount,
+  underProducedRefusal,
   moneySemanticsHits,
   normalizeTreeFiles,
   offenderClass,
@@ -6082,6 +6083,151 @@ describe("W346-A1 brief-driven minimum file set", () => {
       assert.ok(required.some((m) => m.path === t.path), `required: ${t.path}`);
     }
     assert.ok(minimumTreeFileCount(project, spec) >= specGraphJobTargets(project).length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR-28 lane S2 — campaign #1 residuals C1-01 (floor unreachable) + C1-04
+// (spec-graph job nodes are the capability floor). Keyless: the e2e pin drives
+// the REAL synthesizeChunkedTree with an injected complete (the existing
+// fake-injection precedent) and the replay pin reads the read-only campaign1 /
+// historical testruns/<slug> artifacts (absent in a frozen checkout ⇒ skip, the
+// dod.test.ts convention).
+// ---------------------------------------------------------------------------
+describe("PR-28 C1-01/C1-04 — the minimum-file floor fires on the refusal path", () => {
+  const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  const TESTRUNS_ROOT = join(REPO_ROOT, "..", "testruns");
+  const CAMPAIGN_SLUGS = [
+    "bakery-website", "flower-shop-website", "bakery-florist-orders", "mobile-companion",
+    "office-invoice-tracker", "office-scheduler", "office-stock-tracker",
+    "held-out-community-tool-library",
+  ];
+
+  /** A chunked fake whose FAILING chunk returns a structurally-valid envelope
+   *  with the WRONG exports — the deterministic validator refuses it with
+   *  RT_E_VALIDATION (the generic code the floor must replace), not
+   *  RT_E_LLM_REJECTED (which the existing chunkedDeps produces). */
+  function floorRefusalDeps(failChunk: number) {
+    let idx = -1;
+    const bad = JSON.stringify({
+      module: "export function notTheDemandedExport() { return 1; }\n",
+      exports: ["notTheDemandedExport"],
+      reqTrace: {},
+    });
+    const complete = async (prompt: string): Promise<LlmResult> => {
+      if (prompt.includes("TYPE SIGNATURES (must export")) {
+        idx += 1;
+        if (idx === failChunk) return { ok: true, text: bad, model: "deepseek-v4-flash" };
+        const names = demandedSignatureLines(prompt)
+          .map((s) => signatureFunctionNames([s])[0])
+          .filter((n): n is string => typeof n === "string");
+        return { ok: true, text: JSON.stringify(chunkEnvelope(names, idx)), model: "deepseek-v4-flash" };
+      }
+      return { ok: true, text: bad, model: "deepseek-v4-flash" };
+    };
+    const expand = async () => ({ ok: true as const, spec: ledgerSpec(20) });
+    const verify = async () => ({
+      status: "passed" as const,
+      iterations: 0,
+      evidence: "unused in tree mode",
+      finalSource: "",
+      cases: [],
+    });
+    return { deps: { complete, expand, verify } };
+  }
+
+  it("C1-04: every declared spec-graph job node is a required module — even without a usable file", () => {
+    const project = {
+      brief: "a ledger with rent, lease and tenant records, payment tracking and reminders",
+      specGraph: {
+        nodes: [
+          { id: "job-rent", file: "src/jobs/rent.ts", purpose: 'Implement job "rent" against the contract' },
+          // No path at all, and a path outside the emitted roots: both are still
+          // DECLARED capabilities and must be counted by the floor.
+          { id: "job-orphan", purpose: 'Implement job "orphan" against the contract' },
+          { id: "job-away", file: "app/jobs/away.ts", purpose: 'Implement job "away" against the contract' },
+        ],
+      },
+      lattice: { jobs: ["rent"], entities: ["payment"] },
+      contracts: { entities: [{ name: "payment" }] },
+    };
+    const spec = { typeSignatures: ["collectRent(payment: Payment): Receipt"] };
+    const required = deriveRequiredModules(project, spec);
+    for (const id of ["job-rent", "job-orphan", "job-away"]) {
+      assert.ok(
+        required.some((m) => m.key === `job:${id}`),
+        `declared spec-graph job ${id} is a required module`,
+      );
+    }
+    assert.ok(minimumTreeFileCount(project, spec) >= 3, "the floor counts every declared job");
+  });
+
+  it("C1-01: a below-floor accepted set yields RT_E_PLAN_UNDERPRODUCED naming the missing modules", () => {
+    const project = p6Base(LEDGER_BRIEF);
+    const spec = { typeSignatures: ledgerSpec(20).typeSignatures };
+    const accepted = ["src/jobs/rent.ts", "src/jobs/rent-2.ts"];
+    const under = underProducedRefusal(project, spec, accepted);
+    assert.ok(under, "an accepted set below the floor must refuse");
+    assert.equal(under.code, "RT_E_PLAN_UNDERPRODUCED", "the registered under-production code, not RT_E_VALIDATION");
+    assert.ok(under.missing.length > 0, "the refusal names the modules that never landed");
+    for (const m of under.missing.slice(0, 12)) {
+      assert.ok(under.detail.includes(m.path), `detail names ${m.path}`);
+    }
+    if (under.missing.length > 12) assert.match(under.detail, /\+\d+ more/, "the tail is summarized, never silently dropped");
+    // At or above the floor ⇒ no under-production refusal.
+    const enough = Array.from({ length: minimumTreeFileCount(project, spec) }, (_, i) => `src/generated/m${i}.ts`);
+    assert.equal(underProducedRefusal(project, spec, enough), null);
+  });
+
+  it("C1-01 e2e: an RT_E_VALIDATION chunk refusal on a below-floor tree is coded RT_E_PLAN_UNDERPRODUCED", async () => {
+    const base = p6Base(LEDGER_BRIEF);
+    const q = await liveP6Synthesis(base, floorRefusalDeps(2).deps);
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal, "the refusal is logged");
+    assert.match(refusal.detail, /RT_E_PLAN_UNDERPRODUCED/, "the floor code fires on the refusal path");
+    assert.match(refusal.detail, /RT_E_VALIDATION/, "the proximate validation reason is preserved");
+    for (const label of ["track", "record", "lease"]) {
+      assert.match(refusal.detail, new RegExp(`\\b${label}\\b`), `the missing declared job ${label} is named`);
+    }
+    assert.match(refusal.detail, /under-produced/);
+  });
+
+  it("C1-01/C1-04 replay: the recorded campaign1 + historical trees compute the floor verdict", () => {
+    if (!existsSync(TESTRUNS_ROOT)) return; // frozen checkout with no sibling testruns
+    let underFloor = 0;
+    let atFloor = 0;
+    let checked = 0;
+    for (const slug of CAMPAIGN_SLUGS) {
+      for (const root of [join(TESTRUNS_ROOT, "campaign1", slug), join(TESTRUNS_ROOT, slug)]) {
+        const file = join(root, "build.json");
+        if (!existsSync(file)) continue;
+        const project = JSON.parse(readFileSync(file, "utf8")) as Project;
+        const spec = project.implementationSpec ?? { typeSignatures: [] };
+        const tree = (project.generatedTree ?? []).map((f) => f.path);
+        const accepted = tree.filter((p) => p !== TREE_ENTRY_PATH);
+        const jobs = (project.specGraph?.nodes ?? []).filter((n) => String(n.id).startsWith("job-"));
+        const required = deriveRequiredModules(project, spec);
+        assert.ok(
+          jobs.every((j) => required.some((m) => m.path === j.file)),
+          `${slug}: C1-04 every declared spec-graph job is a required module`,
+        );
+        const min = minimumTreeFileCount(project, spec);
+        const under = underProducedRefusal(project, spec, accepted);
+        if (accepted.length < min) {
+          assert.ok(under, `${root}: a below-floor tree must carry an under-production refusal`);
+          assert.equal(under.code, "RT_E_PLAN_UNDERPRODUCED");
+          assert.ok(under.missing.length > 0, `${root}: the missing modules are named`);
+          underFloor += 1;
+        } else {
+          assert.equal(under, null, `${root}: an at/above-floor tree is not under-produced`);
+          atFloor += 1;
+        }
+        checked += 1;
+      }
+    }
+    assert.ok(checked > 0, "the campaign/historical fixtures resolved");
+    assert.ok(underFloor >= 5, `C1-01: the recorded under-production class is present (got ${underFloor})`);
+    assert.ok(atFloor >= 2, `C1-01 control: at-or-above-floor trees do not refuse (got ${atFloor})`);
   });
 });
 

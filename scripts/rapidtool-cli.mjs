@@ -13,7 +13,7 @@
 //
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs --help        # the synopsis as a SUCCESS (ok:true, exit 0); `--help <verb>` narrows to one verb; `help` / `-h` are the same
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief "..." --name "..." --out build.json
-//   node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief @brief.md --out build.json   # @file = read the file (a corpus fixture's `brief:` front-matter scalar is unwrapped); a bare existing-file path is REFUSED, never fed to the lattice as prose
+//   node --experimental-strip-types scripts/rapidtool-cli.mjs create --brief brief.md --out build.json   # a path (plain, or @path) naming an existing file is READ (a corpus fixture's `brief:` front-matter scalar is unwrapped); any other value is the brief prose
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs run     --project build.json [--live]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs gate    --project build.json [--autopilot] [--live]
 //   node --experimental-strip-types scripts/rapidtool-cli.mjs resume    --project build.json [--autopilot] [--live]   # T-107.7: re-enter from the per-phase checkpoint (prints the snapshot age; never a silent resume)
@@ -69,6 +69,14 @@ import { physicalInside } from "./path-safety.mjs";
 // E-25: every result object carries schema_version + cmd + exit_code.
 const SCHEMA_VERSION = 1;
 let CMD = null;
+// C1-10 (KD-8): the opt-in cross-process campaign ledger. `RAPIDTOOL_TOKEN_CAP`
+// binds ONE process, so a multi-invocation campaign could never be bounded.
+// When `--token-ledger <file>` / `RAPIDTOOL_LEDGER_FILE` is set, every opted-in
+// invocation accumulates its measured session spend into that persistent file
+// and refuses once the campaign bound is reached. Absent ⇒ both stay null and
+// every envelope/byte is exactly as before.
+let CAMPAIGN_LEDGER = null;
+let H_DRIVER = null;
 
 // ---------------------------------------------------------------------------
 // Arg parsing (--flag value | --flag=value, plus bare boolean flags).
@@ -167,6 +175,7 @@ function refuseAgentSeal(cmdName) {
 // pathFlagRefusalError text, pinned by cli-exit-taxonomy.test.mjs.
 const VALUELESS_VALUE_FLAGS = [
   "name",
+  "token-ledger",
   "limit",
   "phase",
   "steps",
@@ -257,6 +266,65 @@ function usageRemedy(error) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// C1-10 (KD-8) — the opt-in cross-process campaign ledger.
+//
+// The problem: `RAPIDTOOL_TOKEN_CAP` is read ONCE per process (token-ledger.ts
+// §session budget), so a campaign driven as N separate CLI invocations is not
+// bounded at all — N × cap. This ledger is the minimum cross-process mechanism:
+// a persistent JSON file the caller names (`--token-ledger <file>` or
+// `RAPIDTOOL_LEDGER_FILE`); each opted-in invocation PREFLIGHT-loads it and
+// refuses coded once `spent >= cap`, and POST-appends its measured session
+// spend (headless.sessionSpendTotal). The campaign bound comes from
+// `RAPIDTOOL_CAMPAIGN_TOKEN_CAP` (an integer) or the file's own `cap` field.
+// The ledger is never read, written or surfaced when neither is set — every
+// code path and envelope byte stays exactly as before (byte-identical opt-out).
+// ---------------------------------------------------------------------------
+
+/** The ledger path from `--token-ledger <file>` / `RAPIDTOOL_LEDGER_FILE`, or
+ *  null when the campaign ledger is not opted into. */
+function campaignLedgerPath(args) {
+  const flagRaw = args["token-ledger"];
+  if (typeof flagRaw === "string" && flagRaw.trim() !== "") return resolve(flagRaw.trim());
+  const envRaw = typeof process.env.RAPIDTOOL_LEDGER_FILE === "string" ? process.env.RAPIDTOOL_LEDGER_FILE.trim() : "";
+  return envRaw === "" ? null : resolve(envRaw);
+}
+
+/** The campaign cap from `RAPIDTOOL_CAMPAIGN_TOKEN_CAP`: undefined (not set),
+ *  null (set but invalid → refuse), or a non-negative integer. */
+function campaignCapFromEnv() {
+  const raw = typeof process.env.RAPIDTOOL_CAMPAIGN_TOKEN_CAP === "string" ? process.env.RAPIDTOOL_CAMPAIGN_TOKEN_CAP.trim() : "";
+  if (raw === "") return undefined;
+  if (!/^\d+$/.test(raw)) return null;
+  return Number(raw);
+}
+
+/** Read a campaign ledger. A missing file starts a fresh one; a foreign/corrupt
+ *  file THROWS (the caller refuses — never silently resets an operator's bound). */
+function readCampaignLedger(path) {
+  if (!existsSync(path)) return { schema_version: 1, cap: null, spent: 0, calls: 0, entries: [] };
+  const doc = JSON.parse(readFileSync(path, "utf8"));
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) throw new Error("not a JSON object");
+  const count = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  const cap =
+    typeof doc.cap === "number" && Number.isFinite(doc.cap) && doc.cap >= 0 ? Math.floor(doc.cap) : null;
+  return {
+    schema_version: 1,
+    cap,
+    spent: count(doc.spent),
+    calls: count(doc.calls),
+    entries: Array.isArray(doc.entries) ? doc.entries : [],
+  };
+}
+
+/** Atomically persist a campaign ledger (write-then-rename; parent created). */
+function writeCampaignLedger(path, ledger) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, `${JSON.stringify({ ...ledger, updatedAt: new Date().toISOString() }, null, 2)}\n`, "utf8");
+  renameSync(tmp, path);
+}
+
 // E-25: single JSON object on stdout + the machine exit code. Every result
 // gains schema_version/cmd/exit_code; the legacy `ok` field is kept. Every
 // {ok:false} envelope additionally gains `code` — a stable RT_E_* id from
@@ -299,6 +367,43 @@ function respond(result, exitCode) {
     // the registry action (usageRemedy returns null for non-usage prose).
     const remedy = (out.code === "RT_E_VALIDATION" ? usageRemedy(out.error) : null) ?? remedyFor(out.code);
     if (remedy) out.remedy = remedy;
+  }
+  // C1-10: fold THIS invocation's measured session spend into the cross-process
+  // campaign ledger (only when opted in), then surface the ledger on the
+  // envelope. A keyless/no-spend invocation appends nothing (the file stays
+  // byte-identical); the ledger is absent entirely when not configured.
+  if (CAMPAIGN_LEDGER) {
+    let spend = { tokens: 0, calls: 0 };
+    try {
+      if (H_DRIVER && typeof H_DRIVER.sessionSpendTotal === "function") spend = H_DRIVER.sessionSpendTotal();
+    } catch {
+      /* the ledger is best-effort accounting; never break an exit over it */
+    }
+    const grew = spend.tokens > 0 || spend.calls > 0;
+    if (grew) {
+      CAMPAIGN_LEDGER.spent += spend.tokens;
+      CAMPAIGN_LEDGER.calls += spend.calls;
+      CAMPAIGN_LEDGER.entries = [
+        ...(Array.isArray(CAMPAIGN_LEDGER.entries) ? CAMPAIGN_LEDGER.entries : []),
+        { ts: Date.now(), verb: CMD ?? null, tokens: spend.tokens, calls: spend.calls },
+      ].slice(-500);
+      try {
+        writeCampaignLedger(CAMPAIGN_LEDGER.path, CAMPAIGN_LEDGER);
+      } catch {
+        /* best-effort persist; the envelope still reports the running totals */
+      }
+    }
+    out.campaignLedger = {
+      path: CAMPAIGN_LEDGER.path,
+      cap: typeof CAMPAIGN_LEDGER.cap === "number" ? CAMPAIGN_LEDGER.cap : null,
+      spent: CAMPAIGN_LEDGER.spent,
+      calls: CAMPAIGN_LEDGER.calls,
+      remaining:
+        typeof CAMPAIGN_LEDGER.cap === "number" && CAMPAIGN_LEDGER.cap > 0
+          ? Math.max(0, CAMPAIGN_LEDGER.cap - CAMPAIGN_LEDGER.spent)
+          : null,
+      ...(grew ? { thisInvocation: { tokens: spend.tokens, calls: spend.calls } } : {}),
+    };
   }
   out.exit_code = exitCode;
   // G/E: stamp every CLI exit into the headless NDJSON event log (best-effort
@@ -737,14 +842,16 @@ async function readReportSource(value) {
 // ---------------------------------------------------------------------------
 // S2 / AW45-c07 (W46 · 332-4): `create --brief <path>` used to feed the raw
 // PATH to the pipeline as prose — inferName named the project after the path
-// and the lattice extracted nouns from the filename. Three honest shapes:
-//   · `--brief @<path>`  — read the file (the ingest `--report @file.json`
-//     convention). A YAML-front-matter corpus fixture (research/eval-corpus/*)
-//     carries the real prose in its `brief:` scalar; extract that instead of
-//     feeding the front matter to the lattice.
-//   · `--brief "<prose>"` — the text itself.
-//   · a bare value that names an EXISTING, readable file is refused CODED,
-//     naming both forms — never silently used as prose.
+// and the lattice extracted nouns from the filename. The fix: a path is read as
+// a FILE, never fed as prose. Two spellings are accepted (C1-09, campaign #1 —
+// the bare-path refusal made the documented command form `--brief <file>` fail):
+//   · `--brief <path>`   — a plain path that names an existing readable file
+//     is read (the `cp`/`cat`-style spelling an operator reaches for first).
+//   · `--brief @<path>`  — the ingest `--report @file.json` convention, kept
+//     for backwards-compat and disambiguation from a one-word prose brief.
+//   A YAML-front-matter corpus fixture (research/eval-corpus/*) carries the real
+//   prose in its `brief:` scalar; extract that instead of feeding the front
+//   matter to the lattice. A value that is NOT an existing file is prose.
 // ---------------------------------------------------------------------------
 /** True when `p` resolves to an existing regular file (unstattable ⇒ false). */
 function isReadableFile(p) {
@@ -777,8 +884,28 @@ function briefFromFrontmatter(text) {
   return v.trim() || null;
 }
 
+/** Read a brief from a file path, unwrapping a leading YAML `brief:` scalar.
+ *  `label` is the spelling shown in the refusal (raw path or `@path`). */
+function readBriefFile(path, label) {
+  if (!isReadableFile(path)) {
+    return { error: `create: --brief ${label} does not name a readable file.` };
+  }
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (err) {
+    return { error: `create: --brief ${label} could not be read — ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const fm = briefFromFrontmatter(text);
+  return { value: fm ?? text };
+}
+
 /**
- * Resolve `create --brief` to prose.
+ * Resolve `create --brief` to prose. An existing readable file is READ, under
+ * BOTH the plain-path spelling (`--brief brief.md`) and the `@` convention
+ * (`--brief @brief.md`); anything else is prose. C1-09 (campaign #1): the plain
+ * form used to be refused, so the documented `--brief <file>` failed with
+ * RT_E_VALIDATION.
  * @param {string} raw
  * @returns {{ value: string; error?: undefined } | { value?: undefined; error: string }}
  */
@@ -786,26 +913,9 @@ function readBriefSource(raw) {
   if (raw.startsWith("@")) {
     const path = raw.slice(1).trim();
     if (!path) return { error: "create: --brief @ needs a file path (got a bare @)." };
-    if (!isReadableFile(path)) {
-      return { error: `create: --brief @${path} does not name a readable file.` };
-    }
-    let text;
-    try {
-      text = readFileSync(path, "utf8");
-    } catch (err) {
-      return { error: `create: --brief @${path} could not be read — ${err instanceof Error ? err.message : String(err)}` };
-    }
-    const fm = briefFromFrontmatter(text);
-    return { value: fm ?? text };
+    return readBriefFile(path, `@${path}`);
   }
-  if (isReadableFile(raw)) {
-    return {
-      error:
-        `create: --brief ${JSON.stringify(raw)} names an existing file — a file path is never silently ` +
-        `used as the brief prose (it would name the project after the path). Read it with --brief @${raw} ` +
-        `or pass the text itself: --brief "<prose>".`,
-    };
-  }
+  if (isReadableFile(raw)) return readBriefFile(raw, JSON.stringify(raw));
   return { value: raw };
 }
 
@@ -939,6 +1049,62 @@ function respondDriveOutcome(h, res, { path, extras = {} }) {
   );
 }
 
+/**
+ * C1-06 (campaign #1): the honest delivery verification record an `emit --git`
+ * envelope carries alongside its REAL commit. A commit is proof of a landed
+ * tree, NOT of a verified product: the campaign's real-substance trees
+ * committed while their README said `DECLARED SCRIPTS NOT RUN` and their mounted
+ * UI never called a generated export. This record names what was ACTUALLY
+ * verified — the tree-run verdict + verdictHash, the promoted evidenceHash, and
+ * whether the mounted UI calls a real generated export — so `committed:true`
+ * can never be read as a verified product without those facts beside it.
+ * `verifiedProduct` is true ONLY when every one of those is green. It never
+ * weakens the substance/red gate (that gate still withholds the commit).
+ */
+async function deliveryVerification(h, { dir, runVerdict, evidenceHash }) {
+  const run = runVerdict && typeof runVerdict === "object" ? runVerdict : null;
+  const declared = run && typeof run.declaredScriptsVerified === "boolean" ? run.declaredScriptsVerified : null;
+  let ui = { wired: false, entry: null, detail: "UI-wiring scan unavailable" };
+  try {
+    if (typeof h.emittedUiWiring === "function") ui = h.emittedUiWiring(dir);
+  } catch (err) {
+    ui = { wired: false, entry: null, detail: `UI-wiring scan failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const unverifiedReasons = [];
+  if (!run) {
+    unverifiedReasons.push("no run verdict was computed in this invocation (--run was not requested)");
+  } else {
+    if (run.ok !== true) unverifiedReasons.push("tree-run verdict is not green");
+    if (declared !== true) unverifiedReasons.push("declared project scripts did not all execute (toolchain UNVERIFIED)");
+    if (typeof run.unverifiedEntry === "string" && run.unverifiedEntry) {
+      unverifiedReasons.push(`kind entry not executed: ${run.unverifiedEntry}`);
+    }
+  }
+  if (ui.wired !== true) unverifiedReasons.push(ui.detail ?? "mounted UI does not call a real generated export");
+  const verifiedProduct = run !== null && run.ok === true && declared === true && !run.unverifiedEntry && ui.wired === true;
+  return {
+    verifiedProduct,
+    committed: true,
+    treeRunOk: run ? run.ok === true : null,
+    treeRunVerdictHash: run && typeof run.verdictHash === "string" ? run.verdictHash : null,
+    treeRunTests:
+      run && Array.isArray(run.tests)
+        ? run.tests.map((t) => ({
+            file: t.file,
+            run: t.run,
+            pass: t.tests?.pass ?? 0,
+            fail: t.tests?.fail ?? 0,
+            ...(t.tests?.skipped ? { skipped: t.tests.skipped } : {}),
+          }))
+        : null,
+    declaredScriptsVerified: declared,
+    evidenceHash: typeof evidenceHash === "string" && evidenceHash ? evidenceHash : null,
+    uiWired: ui.wired === true,
+    uiWiringEntry: ui.entry ?? null,
+    unverifiedReasons,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 330 Switchboard (T4): the ONE `--knowledge` resolver for the run-driving
 // verbs. `run`/`gate`/`unattended` thread the human-accepted cross-project
@@ -1064,6 +1230,60 @@ async function main() {
   );
   if (badNumericFlag !== undefined) return refuseNonNumericFlag(cmd, badNumericFlag, args[badNumericFlag]);
 
+  // C1-10 (KD-8): the opt-in cross-process campaign ledger PREFLIGHT. Load the
+  // persistent ledger the caller named and refuse BEFORE any verb dispatches
+  // once the campaign bound is reached — the one thing a per-process
+  // RAPIDTOOL_TOKEN_CAP cannot do. Absent ⇒ nothing here runs (byte-identical).
+  const ledgerPath = campaignLedgerPath(args);
+  if (ledgerPath !== null) {
+    const envCap = campaignCapFromEnv();
+    if (envCap === null) {
+      return respond(
+        {
+          ok: false,
+          error: "RAPIDTOOL_CAMPAIGN_TOKEN_CAP expects a non-negative integer (got a non-numeric value)",
+          code: "RT_E_VALIDATION",
+          remedy: "Pass an integer campaign bound (or drop the variable for an unmetered ledger).",
+        },
+        1,
+      );
+    }
+    let ledger;
+    try {
+      ledger = readCampaignLedger(ledgerPath);
+    } catch (err) {
+      return respond(
+        {
+          ok: false,
+          error: `campaign ledger unreadable: ${ledgerPath} (${err instanceof Error ? err.message : String(err)}) — refusing to reset an operator's bound; repair or remove it by hand`,
+          code: "RT_E_VALIDATION",
+        },
+        1,
+      );
+    }
+    ledger.cap = envCap !== undefined ? envCap : ledger.cap;
+    if (typeof ledger.cap === "number" && ledger.cap > 0 && ledger.spent >= ledger.cap) {
+      return respond(
+        {
+          ok: false,
+          error: `campaign token bound exceeded: spent ${ledger.spent} >= cap ${ledger.cap} (ledger ${ledgerPath}) — refusing further opted-in work.`,
+          code: "RT_E_BUDGET_EXHAUSTED",
+          campaignLedger: {
+            path: ledgerPath,
+            cap: ledger.cap,
+            spent: ledger.spent,
+            calls: ledger.calls,
+            remaining: 0,
+          },
+          remedy:
+            "Start a fresh campaign ledger (a new file), or raise RAPIDTOOL_CAMPAIGN_TOKEN_CAP with an owner decision — the bound is cross-process and accumulates every opted-in invocation; never edit `spent` down.",
+        },
+        1,
+      );
+    }
+    CAMPAIGN_LEDGER = { path: ledgerPath, ...ledger };
+  }
+
   // W45·331-1 (Keywright): resolve DEEPSEEK_API_KEY from <repo>/.env + the
   // process env BEFORE any dispatch, so every keyed verb (and create's
   // enforceDod default) sees the repo's key, and a conflicting ambient key is
@@ -1096,6 +1316,7 @@ async function main() {
 
   try {
     const h = await driver();
+    H_DRIVER = h; // C1-10: gives respond() the process's measured session spend
     const abortStamp = (sig) => {
       if (!CLI_PROJECT) return;
       try {
@@ -2221,6 +2442,10 @@ async function main() {
           // git leg used to run unconditionally and committed a broken tree.
           // Capture the just-computed verdict so the git leg can consult it.
           let runVerdict = null;
+          // C1-06: the promoted "tested" evidenceHash THIS invocation earned (if
+          // any) — carried into the delivery record so "committed" can state
+          // exactly which verdict it claims.
+          let deliveryEvidenceHash = null;
           if (!foreignLeftInPlace && flag(args, "run")) {
             const cc = await checkDriver();
             const outcome = await cc.treeRun(res.dir);
@@ -2290,12 +2515,13 @@ async function main() {
             // the record.
             if (outcome.ok === true) {
               const prom = await h.promoteEmittedTreeTested(project, res.dir, outcome);
+              const lt = prom.project.lastTest;
+              deliveryEvidenceHash = lt && typeof lt.evidenceHash === "string" ? lt.evidenceHash : null;
               if (prom.promoted) {
-                const lt = prom.project.lastTest;
                 payload.tested = {
                   promoted: true,
                   label: "tested",
-                  evidenceHash: lt && typeof lt.evidenceHash === "string" ? lt.evidenceHash : null,
+                  evidenceHash: deliveryEvidenceHash,
                 };
                 if (typeof args.project === "string" && args.project.trim()) {
                   try {
@@ -2401,11 +2627,18 @@ async function main() {
               };
             }
             if (withheld) {
+              // C1-08 (campaign #1): the withheld sub-envelope's own `code`
+              // must name the DECIDING reason, exactly as the top-level code
+              // does. Before this, `git.code` preferred a leg's earlier code:
+              // office-invoice-tracker's banner emit carried
+              // `git.reason:"substance-empty"` beside `git.code:
+              // "RT_E_TREE_RUN_FAILED"` (the run leg's code) — an inconsistent
+              // record. The withheld reason owns BOTH codes.
               payload.git = {
                 committed: false,
                 skipped: true,
                 reason: withheld.reason,
-                code: typeof payload.code === "string" ? payload.code : withheld.code,
+                code: withheld.code,
                 error: withheld.error,
               };
               payload.ok = false;
@@ -2422,17 +2655,35 @@ async function main() {
               }
             } else {
               const landed = await h.landEmittedTree(project, res.dir, { files: res.files });
-              payload.git = landed.ok
-                ? {
-                    dir: landed.dir,
-                    message: landed.message,
-                    committed: landed.committed,
-                    noop: landed.noop,
-                    commit: landed.commit,
-                    files: landed.files,
-                    foreign: landed.foreign,
-                  }
-                : { ok: false, reason: landed.reason, code: landed.code ?? "RT_E_INTERNAL", error: landed.error };
+              if (landed.ok) {
+                // C1-06: state what the landed commit ACTUALLY verified. A
+                // commit is not a verified product; the record names the
+                // tree-run verdict + verdictHash, the promoted evidenceHash and
+                // whether the mounted UI calls a real generated export, and
+                // flags the honest gaps when it does not.
+                const verification = await deliveryVerification(h, {
+                  dir: res.dir,
+                  runVerdict,
+                  evidenceHash: deliveryEvidenceHash,
+                });
+                payload.git = {
+                  dir: landed.dir,
+                  message: landed.message,
+                  committed: landed.committed,
+                  noop: landed.noop,
+                  commit: landed.commit,
+                  files: landed.files,
+                  foreign: landed.foreign,
+                  verifiedProduct: verification.verifiedProduct,
+                  verification,
+                };
+                if (verification.verifiedProduct !== true) {
+                  payload.git.verificationNote =
+                    "the commit landed, but the emitted product is NOT fully verified — read git.verification.unverifiedReasons";
+                }
+              } else {
+                payload.git = { ok: false, reason: landed.reason, code: landed.code ?? "RT_E_INTERNAL", error: landed.error };
+              }
               if (!landed.ok) {
                 payload.ok = false;
                 payload.code = landed.code ?? "RT_E_INTERNAL";
@@ -5247,7 +5498,7 @@ const USAGE = {
   description: "File-based headless RapidTool driver (no browser).",
   help: "help | --help | -h [<verb>]   # print this synopsis as a SUCCESS envelope (ok:true, exit 0); name a verb (`--help emit`) to narrow `usage.commands` to that verb's line — a help request is never a coded failure",
   commands: {
-    create: "create --brief <text|@file> [--name <text>] [--advisory] [--out <file.json>]   # --brief @<path> reads the file (a YAML-front-matter corpus fixture's `brief:` scalar is unwrapped); a bare value naming an EXISTING readable file is REFUSED (RT_E_VALIDATION) — a path is never silently used as prose; default out: <slug>.json in the CWD (intermediate control file); --advisory: advisory DoD gates even when DEEPSEEK_API_KEY is set (keyed runs default enforceDod ON)",
+    create: "create --brief <text|file> [--name <text>] [--advisory] [--out <file.json>]   # --brief <path> (or the @<path> form) naming an EXISTING readable file READS it (a YAML-front-matter corpus fixture's `brief:` scalar is unwrapped); any other value is the brief prose (a path is never silently used as prose); default out: <slug>.json in the CWD (intermediate control file); --advisory: advisory DoD gates even when DEEPSEEK_API_KEY is set (keyed runs default enforceDod ON)",
     run: "run --project <file.json> [--live] [--unattended] [--knowledge <store.json>]   # advance one phase; --unattended = autopilot+live forced until parked (the scheduler-facing twin is the `unattended` verb); --knowledge seeds the P6 expansion with human-accepted cross-project lesson rows (proven), same store->rows resolver as `packet`",
     gate: "gate --project <file.json> [--autopilot] [--live] [--unattended] [--resynthesize] [--knowledge <store.json>]  # advance until parked; --unattended forces autopilot+live; --resynthesize re-opens a red RUNNING P6 (retry) and re-enters the P6 journey LIVE once, bounded, from the recorded unmet requirements (the recovery door for BL-003; without it a red running P6 re-parks at 0 steps); --knowledge as on run",
     resume: "resume --project <file.json|dir> [--autopilot] [--live]  # T-107.7: read the per-phase checkpoint written beside the project dir by run/gate, admit it (identity + mode + integer phase sanity), hydrate it, and re-enter the drive at the recorded phase; prints the snapshot age — exit taxonomy identical to gate (2 = parked). Never a silent resume",

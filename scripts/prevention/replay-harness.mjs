@@ -362,6 +362,7 @@ const SRC = {
   treeInv: "../guards/tree-invariants.mjs",
   readme: "../guards/readme-parity.mjs",
   runlock: "../guards/runlock-preflight.mjs",
+  campaign: "../guards/campaign-invariants.mjs",
 };
 
 const ERRORS_SRC = join(REPO_ROOT, "src", "lib", "errors.ts");
@@ -612,6 +613,17 @@ const SEAM_CHECKS = {
       evidence: { truncated: /TRUNCATED/.test(pkt), bytes: pkt.length },
     };
   },
+
+  // C1-01 — a sealed tree below the floor must carry RT_E_PLAN_UNDERPRODUCED.
+  "C1-01": async (ctx) => campaignSeam(ctx, "C1-01"),
+  // C1-02 — a declared UI must mount a real generated export.
+  "C1-02": async (ctx) => campaignSeam(ctx, "C1-02"),
+  // C1-05 — a skip-dominated oracle cannot satisfy the behavioural/tested bar.
+  "C1-05": async (ctx) => campaignSeam(ctx, "C1-05"),
+  // C1-06 — a delivery claim must state its verification or say unverified.
+  "C1-06": async (ctx) => campaignSeam(ctx, "C1-06"),
+  // C1-08 — a withheld git envelope's code names the deciding reason.
+  "C1-08": async (ctx) => campaignSeam(ctx, "C1-08"),
 };
 
 /** Read a text file, "" on failure (never throws). @param {string} p */
@@ -621,6 +633,39 @@ function safeReadText(p) {
   } catch {
     return "";
   }
+}
+
+// --- Campaign #1 (PR-28) seam -------------------------------------------------
+// The four campaign guard controls (C1-01/02/05/06) are the mutation-proven
+// detector checks exported by scripts/guards/campaign-invariants.mjs. That
+// module owns the detectors + the wired-console / injected-code / mostly-live /
+// uiWired mutations; the harness does not re-implement them.
+let CAMPAIGN_CONTROLS;
+/** @param {any} _ctx @returns {Promise<Record<string, any>|null>} */
+async function campaignControlsFor(_ctx) {
+  if (CAMPAIGN_CONTROLS !== undefined) return CAMPAIGN_CONTROLS;
+  const mod = await importCached(SRC.campaign);
+  if (mod.__error || typeof mod.campaignControls !== "function" || typeof mod.resolveCampaignRoot !== "function") {
+    CAMPAIGN_CONTROLS = null;
+    return null;
+  }
+  const root = mod.resolveCampaignRoot();
+  CAMPAIGN_CONTROLS = root ? await mod.campaignControls(root) : null;
+  return CAMPAIGN_CONTROLS;
+}
+
+/** @param {any} ctx @param {string} id */
+async function campaignSeam(ctx, id) {
+  const ctl = await campaignControlsFor(ctx);
+  if (!ctl || !ctl[id]) return ABSENT("campaign-invariants campaignControls unavailable for " + id);
+  const r = ctl[id];
+  return { present: true, wired: r.wired === undefined ? !!r.fired : !!r.wired, mutationRed: !!r.mutationRed, evidence: { ...r } };
+}
+
+/** Extract the campaign slug from a registry fixture/control path. @param {string} spec */
+function campaignFixtureSlug(spec) {
+  const m = String(spec).replace(/\\/g, "/").match(/campaign1\/([^/]+)/);
+  return m ? m[1] : null;
 }
 
 /** Evaluate a guard's live-seam (fix-presence) signal. @param {any} g @param {any} ctx */
@@ -700,8 +745,8 @@ const DETECTOR_CODE = {
   "use-before-declaration": "RT_E_USE_BEFORE_DECL",
   "money-semantics": "RT_E_MONEY_SEMANTICS",
 };
-/** @type {{inv:any, readme:any, runlock:any}} */
-const PB = { inv: undefined, readme: undefined, runlock: undefined };
+/** @type {{inv:any, readme:any, runlock:any, campaign:any}} */
+const PB = { inv: undefined, readme: undefined, runlock: undefined, campaign: undefined };
 
 /** @param {string[]} args */
 function spawnNode(args) {
@@ -748,6 +793,16 @@ function runRunlockSelftest() {
   const r = spawnNode([file, "--selftest"]);
   PB.runlock = { present: true, status: r.status, stdout: String(r.stdout || ""), stderr: String(r.stderr || "") };
   return PB.runlock;
+}
+/** Spawn the campaign guard tool once; its JSON is the fixture-integrity signal. */
+function runCampaignInvariants(_ctx) {
+  if (PB.campaign !== undefined) return PB.campaign;
+  const file = join(REPO_ROOT, "scripts", "guards", "campaign-invariants.mjs");
+  if (!existsSync(file)) { PB.campaign = { present: false }; return PB.campaign; }
+  const r = spawnNode([file, "--json"]);
+  const json = parseJsonFromStdout(r.stdout);
+  PB.campaign = json ? { present: true, json, status: r.status } : { present: false, error: String(r.stderr || "").slice(0, 400), status: r.status };
+  return PB.campaign;
 }
 
 /** @type {Record<string, (ctx:any, guard:any)=>Promise<{fired:boolean,controlClean:boolean,skipped?:boolean,evidence:any}>>} */
@@ -983,6 +1038,30 @@ DRIVERS["pb-runlock"] = async () => {
   };
 };
 
+// C1-01/C1-02/C1-05/C1-06 — the fixture-integrity signal is the guard tool's own
+// JSON over the frozen campaign artifacts; the mutation control (when no real
+// clean campaign fixture exists) comes from the in-process campaignControls.
+DRIVERS["campaign-invariants"] = async (ctx, g) => {
+  const inv = runCampaignInvariants(ctx);
+  if (!inv.present) return { fired: false, controlClean: false, evidence: "campaign-invariants.mjs absent" };
+  const code = g.expectedCode;
+  const findings = Array.isArray(inv.json.findings) ? inv.json.findings : [];
+  const codesFor = (slug) => findings.filter((f) => f.slug === slug).map((f) => f.code);
+  const fixtures = [g.historicalFixture, ...(Array.isArray(g.historicalFixtures) ? g.historicalFixtures : [])].filter(Boolean);
+  const firedOn = fixtures.filter((f) => {
+    const s = campaignFixtureSlug(f);
+    return s && codesFor(s).includes(code);
+  });
+  const controlSlug = g.cleanControl ? campaignFixtureSlug(g.cleanControl) : null;
+  let controlClean;
+  if (controlSlug) controlClean = !codesFor(controlSlug).includes(code);
+  else {
+    const ctl = await campaignControlsFor(ctx);
+    controlClean = !!(ctl && ctl[g.id] && ctl[g.id].controlClean);
+  }
+  return { fired: firedOn.length > 0, controlClean, evidence: { code, firedOn, control: controlSlug } };
+};
+
 DRIVERS["arch-failclosed"] = async (ctx) => {
   const dod = await import("../../src/lib/dod.ts");
   const proj = readJsonFile(join(ctx.runRoot, "office-stock-tracker", "emitted", ".rapidtool", "project.json"));
@@ -1015,6 +1094,12 @@ export function defaultGuards() {
     { id: "C-14", title: "p6-arch fail-closed on a keyed attempt with no tree", incident: "INC-29", driver: "arch-failclosed", file: "scripts/guards/gate-invariants.test.mjs" },
     { id: "C-15", title: "Deepen / approve honesty gate", incident: "INC-14/INC-24", driver: "deepen-honesty", file: "scripts/guards/gate-invariants.test.mjs" },
     { id: "C-04", title: "Typecheck-before-accept + monotonic repair", incident: "INC-18/30", driver: "repair-monotonic", file: "scripts/guards/repair-monotonic.test.mjs" },
+    // Campaign #1 residuals (PR-28) — the campaign guard tool is the driver.
+    { id: "C1-01", title: "Floor reachability: a sealed tree below minimumTreeFileCount carries RT_E_PLAN_UNDERPRODUCED", incident: "C1-01", driver: "campaign-invariants", file: "scripts/guards/campaign-invariants.mjs" },
+    { id: "C1-02", title: "Mounted UI must call a real generated export", incident: "C1-02", driver: "campaign-invariants", file: "scripts/guards/campaign-invariants.mjs" },
+    { id: "C1-05", title: "Skip-dominated oracle cannot satisfy the behavioural/tested bar", incident: "C1-05", driver: "campaign-invariants", file: "scripts/guards/campaign-invariants.mjs" },
+    { id: "C1-06", title: "A delivery claim states real verification or says unverified", incident: "C1-06", driver: "campaign-invariants", file: "scripts/guards/campaign-invariants.mjs" },
+    { id: "C1-08", title: "Withheld git envelope code names the deciding reason", incident: "C1-08", driver: "campaign-invariants", file: "scripts/guards/campaign-invariants.mjs" },
   ];
 }
 
@@ -1045,6 +1130,9 @@ const ID_TO_DRIVER = {
   "c-09": "pb-readme-parity", "c-11": "pb-runlock", "c-12": "classifier",
   "c-13": "pb-tree-invariants", "c-14": "arch-failclosed", "c-16": "name-clean",
   "c-17": "entity-decode", "c-18": "packet-sections", "c-15": "deepen-honesty",
+  "c1-01": "campaign-invariants", "c1-02": "campaign-invariants",
+  "c1-05": "campaign-invariants", "c1-06": "campaign-invariants",
+  "c1-08": "campaign-invariants",
 };
 
 /** @param {any} g @returns {string|null} */
@@ -1180,8 +1268,9 @@ export async function verifyHeldOut(cassettes, heldOut, ctx) {
 // ---------------------------------------------------------------------------
 
 /** Pinned floor: removing a registry entry must fail the gate of record (§4.6-3).
- *  Overridable by `countFloor` in the registry. */
-export const GUARD_COUNT_FLOOR = 15;
+ *  Overridable by `countFloor` in the registry (now 20 — the 15 W346 guards plus
+ *  the five campaign #1 residual guards C1-01/02/05/06/08). */
+export const GUARD_COUNT_FLOOR = 20;
 
 /** @param {any} ctx */
 export async function runAll(ctx) {

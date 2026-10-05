@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "cmd": "emit",
+  "ok": true,
+  "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign1\\bakery-florist-orders\\emitted",
+  "count": 21,
+  "moduleEmbedded": false,
+  "summary": "21 files ┬╖ kind webapp ┬╖ packet 2e46bb83-e070-408e-ba2b-1b81f8dcc6cf ΓÇö tree files already on disk ┬╖ generatedTree: 5 files assembled, 4 job nodes unmaterialised (never bridged ΓÇö see warnings), 3 non-job bridges",
+  "quarantined": [],
+  "quarantineDir": null,
+  "treeRun": {
+    "ok": true,
+    "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign1\\bakery-florist-orders\\emitted",
+    "sandbox": false,
+    "compile": {
+      "ok": true,
+      "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign1\\bakery-florist-orders\\emitted",
+      "checked": 12,
+      "passed": 12,
+      "failed": 0,
+      "skipped": 10,
+      "verdicts": [
+        {
+          "file": "src/api/routes.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/domain/web_marketing.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/confirm-order.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/list-orders.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/list-products.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/aggregate.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/main.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/state/store.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/ui/console.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "tests/oracle.spec.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "vite.config.ts",
+          "verdict": "pass"
+        }
+      ]
+    },
+    "tests": [
+      {
+        "file": "tests/oracle.spec.ts",
+        "compile": "pass",
+        "tests": {
+          "pass": 2,
+          "fail": 0
+        },
+        "run": "pass",
+        "durationMs": 522,
+        "behavioural": true
+      }
+    ],
+    "run": {
+      "kind": "ui-shell",
+      "run": "skip",
+      "detail": "UI shell ΓÇö not executable headless"
+    },
+    "core": {
+      "kind": "generated-core",
+      "entry": "src/jobs/aggregate.ts",
+      "run": "pass",
+      "durationMs": 207
+    },
+    "project": {
+      "ok": true,
+      "typecheck": {
+        "script": "typecheck",
+        "run": "pass",
+        "durationMs": 2238,
+        "command": "tsc --noEmit",
+        "scriptPolicy": "argv-only ┬╖ tsc.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "test": {
+        "script": "test",
+        "run": "pass",
+        "durationMs": 410,
+        "command": "node --experimental-strip-types --test tests/oracle.spec.ts",
+        "scriptPolicy": "argv-only ┬╖ node (no shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "build": {
+        "script": "build",
+        "run": "pass",
+        "durationMs": 1008,
+        "command": "vite build",
+        "scriptPolicy": "argv-only ┬╖ vite.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "declaredScriptsVerified": true
+    },
+    "note": "the declared project scripts were resolved from the RapidTool repo's own node_modules/ (offline, no install) ΓÇö the emitted tree's declared devDependency versions were NOT installed",
+    "dependencySource": {
+      "toolchain": "repo-shared",
+      "treeInstalled": false,
+      "note": "the declared project scripts were resolved from the RapidTool repo's own node_modules/ (offline, no install) ΓÇö the emitted tree's declared devDependency versions were NOT installed"
+    },
+    "declaredScriptsVerified": true,
+    "unverifiedEntry": "UI shell ΓÇö not executable headless",
+    "substance": {
+      "stubs": 0,
+      "reexports": 0,
+      "real": 1,
+      "files": [
+        {
+          "path": "src/jobs/aggregate.ts",
+          "kind": "real"
+        }
+      ],
+      "verdict": "real",
+      "greenWhileStubbed": false,
+      "oracleStubTrap": false
+    },
+    "verdictHash": "4277985170"
+  },
+  "substance": {
+    "stubs": 0,
+    "reexports": 0,
+    "real": 1,
+    "verdict": "real",
+    "greenWhileStubbed": false
+  },
+  "declaredScriptsVerified": true,
+  "git": {
+    "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign1\\bakery-florist-orders\\emitted",
+    "message": "feat(crumb-bloom): # Crumb & Bloom ΓÇö Combined Order & Inventory Back-Office",
+    "committed": true,
+    "noop": false,
+    "commit": {
+      "hash": "6b390ba07e0320f9aa2f46edfe40be16ceefa1a1",
+      "subject": "feat(crumb-bloom): # Crumb & Bloom ΓÇö Combined Order & Inventory Back-Office"
+    },
+    "files": [
+      ".env.example",
+      ".gitignore",
+      ".rapidtool/project.json",
+      "DEPLOY.md",
+      "README.md",
+      "index.html",
+      "package.json",
+      "src/api/routes.ts",
+      "src/domain/web_marketing.ts",
+      "src/generated.ts",
+      "src/generated/confirm-order.ts",
+      "src/generated/list-orders.ts",
+      "src/generated/list-products.ts",
+      "src/jobs/aggregate.ts",
+      "src/main.tsx",
+      "src/state/store.ts",
+      "src/styles.css",
+      "src/ui/console.tsx",
+      "tests/oracle.spec.ts",
+      "tsconfig.json",
+      "vite.config.ts"
+    ],
+    "foreign": []
+  },
+  "exit_code": 0
+}

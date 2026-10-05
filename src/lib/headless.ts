@@ -62,7 +62,7 @@ import { applyWrite, rollback, snapshotPaths } from "./write-set.ts";
 import { classifyError, type ErrorCode } from "./errors.ts";
 import { CHECKPOINT_CAPS, checkpointAdmits, clearCheckpoint, readCheckpoint, writeCheckpoint } from "./checkpoint.server.ts";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 // R14-f01 (W33 lane F1): Node-side Auto-Review supervisor binding — headless IS
@@ -90,6 +90,14 @@ import type {
 import type { RtEventSeed } from "./rt-events.ts";
 
 import { isKeyUnusableCode, type DoctorLastKeyed, type DoctorLlmKey, type DoctorSpend } from "./doctor.ts";
+import {
+  fleetAcceptanceFromProjects,
+  fleetAlarms,
+  fleetMetrics,
+  type FleetAcceptance,
+  type FleetAlarms,
+  type FleetMetrics,
+} from "./acceptance.ts";
 import type { SpendSlice, TokenLedger, TokenSpend } from "./token-ledger.ts";
 // T5.5 (OV-41 spend half, W43 · H6): the summary envelope's spend half reads
 // the PROCESS session budget — the SAME T-107.6 accessor `recordSessionSpend`
@@ -4907,6 +4915,17 @@ export type DoctorStatus = {
      *  the same evidence as `autonomousSoftwareFactory`; it never flips that
      *  latch and never mints a human stamp. Fail-closed. */
     awaitingHumanAcceptance: boolean;
+    /** PR-31 / §4.8 Option A: the SEPARATE machine-verified acceptance reading
+     *  (acceptance.ts). It never flips `autonomousSoftwareFactory` (the human
+     *  door stays byte-untouched) and is grounded only in persisted machine
+     *  `lastTest` evidence. */
+    autonomousFactoryV2: boolean;
+    /** PR-31: the fleet aggregate detail behind `autonomousFactoryV2`. */
+    fleetAcceptance: FleetAcceptance;
+    /** PR-32: the fleet observability metrics over the project's run telemetry. */
+    fleetMetrics: FleetMetrics;
+    /** PR-32: the threshold alarms; `fleetAlarms.tripped` is a hard failure. */
+    fleetAlarms: FleetAlarms;
     leftoverJobsAreReexportsOrStubs: boolean;
     chatHasSlashToolsOnly: boolean;
     runnerIsSandbox: false;
@@ -4998,6 +5017,162 @@ export function collectJobSources(treeDir: string): Array<{ path: string; source
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// C1-06 (campaign #1): the STATIC UI-wiring reading an emit --git delivery
+// record carries. "committed" is not "verified": the campaign's real-substance
+// trees committed while their mounted console imported a generated module and
+// never called one. This is a read-only call-presence scan (a name, NOT
+// behaviour): the mounted console (`src/ui/console.tsx`, the module
+// `src/main.tsx` mounts) must CALL an export of the generated module it
+// imports, and that export must not be a NOT-IMPLEMENTED/TODO stub (following
+// `export * from` barrels). Any failure to determine wiring reads honestly as
+// not-wired with its reason — never a fabricated true.
+// ---------------------------------------------------------------------------
+
+/** Resolve a relative module specifier to an emitted file and collect its
+ *  exported names (and which of them are TODO/NOT-IMPLEMENTED stubs), following
+ *  `export * from` re-exports up to `depth`. Null when unresolved. */
+function expandEmittedModule(
+  rootAbs: string,
+  baseAbs: string,
+  spec: string,
+  depth = 0,
+): { exports: Set<string>; stubs: Set<string> } | null {
+  if (depth > 3 || !spec.startsWith(".")) return null;
+  const rootPrefix = rootAbs.endsWith(sep) ? rootAbs : rootAbs + sep;
+  const candidates = [spec, `${spec}.ts`, `${spec}.tsx`, `${spec}.js`, `${spec}.mjs`, join(spec, "index.ts")];
+  let file: string | null = null;
+  for (const cand of candidates) {
+    const abs = resolve(baseAbs, cand);
+    // Containment: never follow a specifier out of the emitted tree.
+    if (abs !== rootAbs && !abs.startsWith(rootPrefix)) continue;
+    try {
+      if (existsSync(abs) && statSync(abs).isFile()) {
+        file = abs;
+        break;
+      }
+    } catch {
+      /* unreadable candidate — try the next */
+    }
+  }
+  if (file === null) return null;
+  let src = "";
+  try {
+    src = readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  const exports = new Set<string>();
+  const stubs = new Set<string>();
+  const isStub = (name: string): boolean => {
+    const at = src.search(new RegExp(`export\\s+(?:async\\s+)?(?:function|const|let|var|class)\\s+${name}\\b`));
+    if (at < 0) return false;
+    return /TODO\(E-15\)|NOT IMPLEMENTED|not implemented/i.test(src.slice(at, at + 600));
+  };
+  for (const m of src.matchAll(/export\s+(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z_$][\w$]*)/g)) {
+    exports.add(m[1]);
+    if (isStub(m[1])) stubs.add(m[1]);
+  }
+  for (const m of src.matchAll(/export\s*\{([^}]*)\}/g)) {
+    for (const part of m[1].split(",")) {
+      const seg = part.trim().split(/\s+as\s+/);
+      const name = (seg[1] ?? seg[0] ?? "").trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(name)) {
+        exports.add(name);
+        if (isStub(name)) stubs.add(name);
+      }
+    }
+  }
+  for (const m of src.matchAll(/export\s+\*\s+from\s+["']([^"']+)["']/g)) {
+    const sub = expandEmittedModule(rootAbs, dirname(file), m[1], depth + 1);
+    if (sub) {
+      for (const n of sub.exports) exports.add(n);
+      for (const n of sub.stubs) stubs.add(n);
+    }
+  }
+  return { exports, stubs };
+}
+
+/**
+ * C1-06: does the emitted tree's mounted UI call a real generated export?
+ * Read-only; never throws. `detail` states exactly what was and was not found
+ * (static call-presence — a name, never behaviour). `wired:false` is the honest
+ * floor on any ambiguity.
+ */
+export function emittedUiWiring(dir: string): { wired: boolean; entry: string | null; detail: string } {
+  const root = resolve(dir);
+  const consoleRel = ["src/ui/console.tsx", "src/ui/console.ts", "src/ui/console.jsx", "src/ui/console.js"].find((p) =>
+    existsSync(join(root, p)),
+  );
+  if (!consoleRel) {
+    return { wired: false, entry: null, detail: "no mounted UI console module found (src/ui/console.{tsx,ts})" };
+  }
+  let consoleSrc = "";
+  try {
+    consoleSrc = readFileSync(join(root, consoleRel), "utf8");
+  } catch {
+    return { wired: false, entry: consoleRel, detail: "the mounted UI console could not be read" };
+  }
+  const imp = /import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+["']([^"']+)["']/.exec(consoleSrc);
+  if (!imp) {
+    return {
+      wired: false,
+      entry: consoleRel,
+      detail: "the mounted UI console imports no generated namespace (import * as ns from …)",
+    };
+  }
+  const ns = imp[1];
+  const spec = imp[2];
+  const mod = expandEmittedModule(root, dirname(join(root, consoleRel)), spec);
+  if (!mod) {
+    return { wired: false, entry: consoleRel, detail: `the mounted UI console's import "${spec}" does not resolve to an emitted module` };
+  }
+  const called = new Set<string>();
+  const re = new RegExp(`\\b${ns}\\s*\\.\\s*([A-Za-z_$][\\w$]*)\\s*\\(`, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(consoleSrc)) !== null) called.add(m[1]);
+  if (called.size === 0) {
+    return {
+      wired: false,
+      entry: consoleRel,
+      detail: `the mounted UI imports "${spec}" but never calls an exported function (static call-presence)`,
+    };
+  }
+  const real = [...called].filter((n) => mod.exports.has(n) && !mod.stubs.has(n));
+  if (real.length === 0) {
+    const stubs = [...called].filter((n) => mod.stubs.has(n));
+    return {
+      wired: false,
+      entry: consoleRel,
+      detail:
+        stubs.length > 0
+          ? `the mounted UI only calls stub export(s) (${stubs.join(", ")}) — a NOT-IMPLEMENTED seam is not a wired product`
+          : `the mounted UI calls ${[...called].join(", ")}, but none is an export of "${spec}"`,
+    };
+  }
+  return {
+    wired: true,
+    entry: consoleRel,
+    detail: `the mounted UI calls real generated export(s): ${real.join(", ")} (static call-presence, not behaviour)`,
+  };
+}
+
+/**
+ * C1-10 (KD-8): this PROCESS's measured session spend — the tokens/calls every
+ * keyed call in this CLI invocation recorded into the one process-scoped
+ * session ledger (token-ledger.ts). The cross-process campaign ledger appends
+ * this delta per invocation; a fresh process starts at zero, so it measures
+ * THIS invocation, exactly what a campaign bound needs. Never throws.
+ */
+export function sessionSpendTotal(): { tokens: number; calls: number } {
+  try {
+    const ledger = sessionTokenBudget().ledger;
+    return { tokens: totalTokens(ledger), calls: typeof ledger.calls === "number" ? ledger.calls : 0 };
+  } catch {
+    return { tokens: 0, calls: 0 };
+  }
 }
 
 /** OPS-8 (W42 · L4/G9): the pre-import floor's honest spend — byte-mirror of
@@ -5392,6 +5567,13 @@ export async function doctorStatus(opts?: {
   let factory: DoctorStatus["factory"] = {
     autonomousSoftwareFactory: false,
     awaitingHumanAcceptance: false,
+    // X follow-up: the machine acceptance reading + fleet metrics/alarms surface
+    // on the doctor envelope (a field pass-through from acceptance.ts — no
+    // logic change). The empty floor refuses, exactly as the aggregate does.
+    autonomousFactoryV2: false,
+    fleetAcceptance: fleetAcceptanceFromProjects([]),
+    fleetMetrics: fleetMetrics([]),
+    fleetAlarms: fleetAlarms([]),
     leftoverJobsAreReexportsOrStubs: true,
     chatHasSlashToolsOnly: true,
     runnerIsSandbox: false,
@@ -5439,6 +5621,10 @@ export async function doctorStatus(opts?: {
     factory = {
       autonomousSoftwareFactory: claim.autonomousSoftwareFactory,
       awaitingHumanAcceptance: claim.awaitingHumanAcceptance,
+      autonomousFactoryV2: claim.autonomousFactoryV2,
+      fleetAcceptance: claim.fleetAcceptance,
+      fleetMetrics: claim.fleetMetrics,
+      fleetAlarms: claim.fleetAlarms,
       leftoverJobsAreReexportsOrStubs: claim.leftoverJobsAreReexportsOrStubs,
       chatHasSlashToolsOnly: claim.chatHasSlashToolsOnly,
       runnerIsSandbox: false,

@@ -326,6 +326,30 @@ test("deliveryProved — a commit alone is NOT a delivery; the emitted tree must
   const legacy = deliveryEvidence({ treeRun: { ok: true } });
   assert.equal(legacy.treeRun.verdictHash, null);
   assert.equal(legacy.verdictHash, null);
+
+  // C1-06 (campaign #1): the delivery record must state whether the UI is wired
+  // and whether this is a fully verified product — a commit over a green tree
+  // with an unwired UI (the campaign's flower-shop / bfo / mobile) is NOT one.
+  const withWiredUi = deliveryEvidence({
+    ...committed,
+    git: { committed: true, verification: { uiWired: true, unverifiedReasons: [] } },
+  });
+  assert.equal(withWiredUi.uiWired, true);
+  assert.equal(withWiredUi.verifiedProduct, true, "a green, toolchain-verified, UI-wired tree is a verified product");
+
+  const unwired = deliveryEvidence({
+    ...committed,
+    git: { committed: true, verification: { uiWired: false, unverifiedReasons: ["mounted UI imports … but never calls an exported function"] } },
+  });
+  assert.equal(unwired.uiWired, false);
+  assert.equal(unwired.verifiedProduct, false, "committed:true with an unwired UI is NOT a verified product (C1-06)");
+  assert.deepEqual(unwired.unverifiedReasons, ["mounted UI imports … but never calls an exported function"]);
+
+  // An older envelope with no git.verification keeps honoured nulls (never a
+  // fabricated true) and is not presented as a verified product.
+  const noVerification = deliveryEvidence(committed);
+  assert.equal(noVerification.uiWired, null);
+  assert.equal(noVerification.verifiedProduct, false);
 });
 
 test("runProved / classifyDeliverFailure — a red delivery-time tree-run is a commitless `stalled`", () => {

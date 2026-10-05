@@ -320,8 +320,10 @@ export type TreeSpecVerdict = {
   compile: CompileVerdict;
   /** Assertions that actually executed (node:test TAP summary). A file whose
    *  load crashes reports the crash as run=fail with 0/0 — never a number
-   *  the runner did not print. */
-  tests: { pass: number; fail: number };
+   *  the runner did not print. `skipped` is the TAP `# skipped` count, present
+   *  only when the spec carried at least one `test.skip`/`test.todo` case, so a
+   *  0-skip spec keeps its legacy `{pass, fail}` bytes (C1-05). */
+  tests: { pass: number; fail: number; skipped?: number };
   /** Execution verdict of the spec under the bounded runner. */
   run: TreeRunVerdict;
   /** 346 E1 (item 2): true when the spec's source carries at least one
@@ -1422,17 +1424,34 @@ async function runSpecFile(
     // is NOT a behavioural pass either.
     const behavioural = specSourceHasBehaviouralAssert(source);
     const noTapPass = !summary || summary.pass === 0 || summary.tests === 0;
-    if (!behavioural || noTapPass) {
+    // C1-05 (campaign #1): a `# SKIP` case is NOT a run. A spec whose LIVE
+    // passing cases are ≤ its skipped cases is skip-dominated — the campaign's
+    // hollow oracles exited 0 on 2/9 (bfo) or 1/8 live cases while every real
+    // oracle row was `test.skip`, and that minted a pass. Counting a skip as a
+    // pass would let a spec whose live assertions ≤ the skip count satisfy the
+    // behavioural bar, so force it red here (the mint downstream reads
+    // run==="pass"). A genuinely behavioural spec with 0 skips is untouched.
+    const skipped = summary ? summary.skipped : 0;
+    const skipDominated = summary !== null && skipped > 0 && summary.pass <= skipped;
+    if (!behavioural || noTapPass || skipDominated) {
       return {
         ...base,
-        tests: { pass: 0, fail: tests.fail },
+        tests: skipDominated ? { pass: summary.pass, fail: tests.fail, skipped } : { pass: 0, fail: tests.fail },
         run: "fail",
         behavioural: false,
-        detail: "no behavioral assertion ran",
+        detail: skipDominated
+          ? `skip-dominated spec: ${summary.pass} live case(s) ≤ ${skipped} skipped — a skip is not a pass`
+          : "no behavioral assertion ran",
         durationMs: duration(),
       };
     }
-    return { ...base, tests, run: "pass", behavioural: true, durationMs: duration() };
+    return {
+      ...base,
+      tests: skipped > 0 ? { ...tests, skipped } : tests,
+      run: "pass",
+      behavioural: true,
+      durationMs: duration(),
+    };
   }
   const maskedFail =
     status === 0 && summary && summary.fail > 0

@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "cmd": "emit",
+  "ok": false,
+  "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign1\\office-scheduler\\emitted",
+  "count": 19,
+  "moduleEmbedded": true,
+  "summary": "19 files ┬╖ kind webapp ┬╖ packet 2f9d62cb-1e39-4a81-b3ab-d3ccef005d82 ΓÇö tree files already on disk ┬╖ generatedTree: 3 files assembled, 5 job nodes unmaterialised (never bridged ΓÇö see warnings), 3 non-job bridges",
+  "quarantined": [],
+  "quarantineDir": null,
+  "redTreeBanner": true,
+  "redTree": {
+    "failures": 3,
+    "lastFailure": "tests/oracle.spec.ts: fail ΓÇö no behavioral assertion ran"
+  },
+  "treeRun": {
+    "ok": false,
+    "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign1\\office-scheduler\\emitted",
+    "sandbox": false,
+    "compile": {
+      "ok": true,
+      "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign1\\office-scheduler\\emitted",
+      "checked": 10,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 10,
+      "verdicts": [
+        {
+          "file": "src/api/routes.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/domain/custom_software.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/chunk-2.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/chunk.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/main.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/state/store.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/ui/console.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "tests/oracle.spec.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "vite.config.ts",
+          "verdict": "pass"
+        }
+      ]
+    },
+    "tests": [
+      {
+        "file": "tests/oracle.spec.ts",
+        "compile": "pass",
+        "tests": {
+          "pass": 0,
+          "fail": 0
+        },
+        "run": "fail",
+        "durationMs": 497,
+        "behavioural": false,
+        "detail": "no behavioral assertion ran"
+      }
+    ],
+    "run": {
+      "kind": "ui-shell",
+      "run": "skip",
+      "detail": "UI shell ΓÇö not executable headless"
+    },
+    "core": {
+      "kind": "generated-core",
+      "entry": "src/generated.ts",
+      "run": "pass",
+      "durationMs": 185
+    },
+    "project": {
+      "ok": true,
+      "typecheck": {
+        "script": "typecheck",
+        "run": "pass",
+        "durationMs": 1979,
+        "command": "tsc --noEmit",
+        "scriptPolicy": "argv-only ┬╖ tsc.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "test": {
+        "script": "test",
+        "run": "pass",
+        "durationMs": 367,
+        "command": "node --experimental-strip-types --test tests/oracle.spec.ts",
+        "scriptPolicy": "argv-only ┬╖ node (no shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "build": {
+        "script": "build",
+        "run": "pass",
+        "durationMs": 978,
+        "command": "vite build",
+        "scriptPolicy": "argv-only ┬╖ vite.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "declaredScriptsVerified": true
+    },
+    "note": "the declared project scripts were resolved from the RapidTool repo's own node_modules/ (offline, no install) ΓÇö the emitted tree's declared devDependency versions were NOT installed",
+    "dependencySource": {
+      "toolchain": "repo-shared",
+      "treeInstalled": false,
+      "note": "the declared project scripts were resolved from the RapidTool repo's own node_modules/ (offline, no install) ΓÇö the emitted tree's declared devDependency versions were NOT installed"
+    },
+    "declaredScriptsVerified": false,
+    "unverifiedEntry": "UI shell ΓÇö not executable headless",
+    "substance": {
+      "stubs": 0,
+      "reexports": 0,
+      "real": 0,
+      "files": [],
+      "verdict": "empty",
+      "greenWhileStubbed": false,
+      "oracleStubTrap": false
+    },
+    "verdictHash": "2974346152"
+  },
+  "substance": {
+    "stubs": 0,
+    "reexports": 0,
+    "real": 0,
+    "verdict": "empty",
+    "greenWhileStubbed": false
+  },
+  "error": "git delivery refused: the emitted tree has no substantive job modules (substance verdict \"empty\") ΓÇö a commit is evidence of a substantive, verified product, so no commit was issued and the emitted tree is kept on disk. Synthesize the missing surface and re-emit to green, or pass --allow-empty to land a deliberate scaffold-only commit.",
+  "code": "RT_E_SUBSTANCE_EMPTY",
+  "declaredScriptsVerified": false,
+  "git": {
+    "committed": false,
+    "skipped": true,
+    "reason": "substance-empty",
+    "code": "RT_E_TREE_RUN_FAILED",
+    "error": "git delivery refused: the emitted tree has no substantive job modules (substance verdict \"empty\") ΓÇö a commit is evidence of a substantive, verified product, so no commit was issued and the emitted tree is kept on disk. Synthesize the missing surface and re-emit to green, or pass --allow-empty to land a deliberate scaffold-only commit."
+  },
+  "remedy": "Do not treat the run as product-complete: read the substance census (core-noun hits, real vs stub/alias modules), re-synthesize the missing surface, and re-run; never lower the bar to make a hollow tree pass.",
+  "exit_code": 1
+}

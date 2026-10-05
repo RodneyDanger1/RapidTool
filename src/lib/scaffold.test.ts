@@ -6,6 +6,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { exportProjectJson, slugName } from "./io.ts";
 import { ERROR_CODES } from "./errors.ts";
@@ -1983,7 +1986,7 @@ describe("W346-A4 brief-driven website shell", () => {
     assert.ok(parsesTsx(ui), "the emitted shell parses as TSX");
   });
 
-  it("a param-bearing render export still yields the multi-section shell but is never called with fabricated args", () => {
+  it("a render export whose args cannot be soundly supplied still yields the shell but is never called", () => {
     const p: Project = {
       ...seedProject({ name: "Badge Shop", kind: "app" }),
       generatedSource: "",
@@ -1991,7 +1994,7 @@ describe("W346-A4 brief-driven website shell", () => {
         { path: "src/generated.ts", source: 'export * from "./generated/render-badge.ts";\n', hash: "h0", attempt: 0 },
         {
           path: "src/generated/render-badge.ts",
-          source: 'export function renderBadge(changes: unknown[]): string { return String(changes.length); }\n',
+          source: 'export function renderBadge(changes: { id: string }): string { return changes.id; }\n',
           hash: "h1",
           attempt: 0,
         },
@@ -2037,6 +2040,142 @@ describe("W346-A10 README manifest honesty", () => {
       );
       assert.ok(!okFiles(result).some((f) => f.path === `src/jobs/${label}.ts`), `${label}.ts is truly absent`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR-28 lane S2 — C1-02 (mounted UI never calls a real generated export) and
+// C1-03 (generated console.tsx references the removed global JSX namespace).
+// The replay reads the read-only campaign1 / historical testruns/<slug>
+// artifacts; the synthetic pin replays the EXACT campaign shape (a tree barrel
+// plus a first-job file) so the defect is RED before the fix and GREEN after.
+// ---------------------------------------------------------------------------
+describe("PR-28 C1-02/C1-03 — the mounted shell calls a real generated export, JSX-free", () => {
+  const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  const TESTRUNS_ROOT = join(REPO_ROOT, "..", "testruns");
+  const APP_SLUGS = [
+    "bakery-website", "flower-shop-website", "bakery-florist-orders", "mobile-companion",
+    "office-invoice-tracker", "office-scheduler", "office-stock-tracker",
+  ];
+
+  /** The one generated module the emitted webapp shell imports (`null` for a non-webapp shell). */
+  function mountedImport(ui: string): { ns: string; spec: string } | null {
+    const m = /import\s+\*\s+as\s+(\w+)\s+from\s+"([^"]+)"/.exec(ui);
+    return m ? { ns: m[1]!, spec: m[2]! } : null;
+  }
+
+  /** Resolve a POSIX relative specifier from an emitted tree file. */
+  function resolveFrom(fromFile: string, spec: string): string {
+    const parts = fromFile.split("/");
+    parts.pop();
+    for (const seg of spec.split("/")) {
+      if (seg === "." || seg === "") continue;
+      if (seg === "..") parts.pop();
+      else parts.push(seg);
+    }
+    return parts.join("/");
+  }
+
+  /** The export surface of an emitted file, following `export *` (the barrel). */
+  function exportsOf(result: ScaffoldResult, path: string, seen = new Set<string>()): Set<string> {
+    const out = new Set<string>();
+    if (seen.has(path) || !result.ok) return out;
+    seen.add(path);
+    const src = result.files.find((f) => f.path === path)?.body ?? "";
+    for (const m of src.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)) out.add(m[1]!);
+    for (const m of src.matchAll(/^export\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)/gm)) out.add(m[1]!);
+    for (const m of src.matchAll(/^export\s*\{([^}]*)\}/gm)) {
+      for (const part of m[1]!.split(",")) {
+        const name = (part.trim().split(/\s+as\s+/).pop() ?? "").trim();
+        if (name) out.add(name);
+      }
+    }
+    for (const m of src.matchAll(/^[ \t]*export\s+\*\s+from\s+["']([^"']+)["']/gm)) {
+      for (const name of exportsOf(result, resolveFrom(path, m[1]!), seen)) out.add(name);
+    }
+    return out;
+  }
+
+  /** A real generated render / page export the tree ships (declared or re-exported). */
+  function treeHasRenderExport(project: Project): boolean {
+    return (project.generatedTree ?? []).some(
+      (f) => /function\s+render[A-Z_]/.test(f.source) || /export\s*\{[^}]*\brender[A-Z_]/.test(f.source),
+    );
+  }
+
+  it("C1-02 (RED before the fix): a barrel-plus-first-job-file tree wires the barrel's render export", () => {
+    const p: Project = {
+      ...primed(),
+      generatedSource: "",
+      generatedTree: [
+        {
+          path: "src/generated.ts",
+          source: 'export * from "./generated/render-home.ts";\nexport * from "./jobs/serve.ts";\n',
+          hash: "h0",
+          attempt: 0,
+        },
+        {
+          path: "src/generated/render-home.ts",
+          source: "export function renderHome(viewportWidth: 360 | 430): string { return String(viewportWidth); }\n",
+          hash: "h1",
+          attempt: 0,
+        },
+        {
+          path: "src/jobs/serve.ts",
+          source: 'export function serveOrder(): string { return "ok"; }\n',
+          hash: "h2",
+          attempt: 0,
+        },
+      ],
+      specGraph: {
+        nodes: [
+          { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" },
+          { id: "job-0", file: "src/jobs/serve.ts", purpose: 'Implement job "serve" against the contract', dependsOn: [], owner: "implementer" },
+        ],
+        order: ["ui", "job-0"],
+      },
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.match(ui, /import \* as generated from "\.\.\/generated\.ts";/, "imports the tree barrel, not the job module");
+    assert.match(ui, /generated\.renderHome\(360\)/, "calls the barrel's real render export with a sound literal");
+    assert.ok(!/\bJSX\s*\./.test(ui), "C1-03: no removed global JSX namespace");
+    assert.match(ui, /import type \{ ReactNode \} from "react";/, "C1-03: the node type comes from react");
+  });
+
+  it("replays every recorded campaign1 + historical webapp tree (no JSX namespace; generated import is used)", () => {
+    if (!existsSync(TESTRUNS_ROOT)) return; // frozen checkout with no sibling testruns
+    let checked = 0;
+    let wired = 0;
+    for (const slug of APP_SLUGS) {
+      for (const root of [join(TESTRUNS_ROOT, "campaign1", slug), join(TESTRUNS_ROOT, slug)]) {
+        const file = join(root, "build.json");
+        if (!existsSync(file)) continue;
+        const project = JSON.parse(readFileSync(file, "utf8")) as Project;
+        if (projectKindOf(project) !== "webapp") continue; // the shell under test is the webapp one
+        const result = scaffoldProject(project);
+        assert.ok(result.ok, `${root}: the emitter produces a tree`);
+        const ui = bodyOf(result, "src/ui/console.tsx");
+        assert.ok(!/\bJSX\s*\./.test(ui), `${root}: C1-03 the emitted shell never references the global JSX namespace`);
+        if (ui.includes("ReactNode")) {
+          assert.match(ui, /import type \{ ReactNode \} from "react";/, `${root}: ReactNode is imported from react`);
+        }
+        const mounted = mountedImport(ui);
+        assert.ok(mounted, `${root}: the webapp shell imports its generated entry`);
+        assert.ok(mounted.spec.includes("generated"), `${root}: C1-02 imports the generated barrel (got ${mounted.spec})`);
+        const exports = exportsOf(result, resolveFrom("src/ui/console.tsx", mounted.spec));
+        const calls = [...ui.matchAll(new RegExp(`\\b${mounted.ns}\\.([A-Za-z_$][\\w$]*)\\(`, "g"))].map((m) => m[1]!);
+        for (const name of calls) {
+          assert.ok(exports.has(name), `${root}: C1-02 called ${name} is a real export of the mounted module`);
+        }
+        if (treeHasRenderExport(project)) {
+          assert.ok(calls.length > 0, `${root}: C1-02 a render export exists ⇒ the shell calls a real export`);
+          wired += 1;
+        }
+        checked += 1;
+      }
+    }
+    assert.ok(checked > 0, "the campaign/historical webapp fixtures resolved");
+    assert.ok(wired >= 3, `C1-02: the render-bearing trees are wired (got ${wired})`);
   });
 });
 

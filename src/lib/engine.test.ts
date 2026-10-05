@@ -30,7 +30,10 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { applyPhaseResult, approveHitl, deepenResearch, emptyProject, databaseSchemaSql, deliveryKindOf, filterOffIntentResearch, hydrateProject, inferDomain, inferName, isOffIntentResearch, liveLayer, rejectHitl, repairPhases, researchQueryText, stripOutOfScope, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { applyPhaseResult, approveHitl, deepenResearch, emptyProject, databaseSchemaSql, declaresUiSurface, deliveryKindOf, filterOffIntentResearch, hydrateProject, inferDomain, inferName, isOffIntentResearch, liveLayer, rejectHitl, repairPhases, researchQueryText, stripOutOfScope, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
 import { exportProjectJson, importProject } from "./io.ts";
 import { recordSessionSpend, resetSessionBudget, type TokenSpend } from "./token-ledger.ts";
 import { wildResumeRun } from "./headless.ts";
@@ -460,6 +463,74 @@ describe("346 T1 — surface-word classification (no stem collisions)", () => {
       "library",
     );
     assert.equal(deliveryKindOf(emptyProject({ name: "Hook", brief: "A webhook worker API for billing" })), "service");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W62 · C1-07 (R-08) — the held-out brief must classify as a UI product, not a
+// lending library. The proof is the REAL brief texts: the held-out community
+// tool-library brief resolves {custom-software, app} while the seven campaign /
+// historical briefs (byte-identical) keep their corrected labels. The rule is
+// falsifiable, never keyed to the fixture: a genuine library brief still
+// resolves `library`, and the SAME library noun with a declared UI surface
+// resolves `app`.
+// ---------------------------------------------------------------------------
+describe("W62 C1-07 — the held-out tool-library brief is a UI app, not a lending library", () => {
+  const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  const TESTRUNS = join(REPO_ROOT, "..", "testruns");
+  const CAMPAIGN = join(TESTRUNS, "campaign1");
+  const EXPECTED: Record<string, { domain: string; kind: string }> = {
+    "bakery-website": { domain: "web-marketing", kind: "app" },
+    "flower-shop-website": { domain: "web-marketing", kind: "app" },
+    "bakery-florist-orders": { domain: "web-marketing", kind: "app" },
+    "mobile-companion": { domain: "mobile", kind: "app" },
+    "office-invoice-tracker": { domain: "finance-ops", kind: "app" },
+    "office-scheduler": { domain: "custom-software", kind: "app" },
+    "office-stock-tracker": { domain: "operations", kind: "app" },
+    "held-out-community-tool-library": { domain: "custom-software", kind: "app" },
+  };
+  const briefOf = (slug: string): string | null => {
+    for (const root of [CAMPAIGN, TESTRUNS]) {
+      const file = join(root, slug, "brief.md");
+      if (existsSync(file)) return readFileSync(file, "utf8");
+    }
+    return null;
+  };
+
+  it("classifies the real held-out brief {custom-software, app} and never analytics/library", () => {
+    const brief = briefOf("held-out-community-tool-library");
+    if (!brief) return; // frozen checkout without the external fixtures: nothing to pin
+    const domain = inferDomain(brief);
+    const kind = deliveryKindOf({ brief, domain, lattice: null });
+    assert.equal(domain, "custom-software", "the held-out tool-library brief is software, not analytics");
+    assert.equal(kind, "app", "a declared UI surface is never kind:library");
+  });
+
+  it("keeps the seven campaign briefs' corrected labels (no regression)", () => {
+    let checked = 0;
+    for (const slug of Object.keys(EXPECTED).filter((s) => s !== "held-out-community-tool-library")) {
+      const brief = briefOf(slug);
+      if (!brief) continue;
+      const domain = inferDomain(brief);
+      const kind = deliveryKindOf({ brief, domain, lattice: null });
+      assert.equal(domain, EXPECTED[slug]!.domain, `${slug}: domain`);
+      assert.equal(kind, EXPECTED[slug]!.kind, `${slug}: kind`);
+      checked++;
+    }
+    assert.ok(checked === 0 || checked === 7, `expected all seven fixtures or none, checked ${checked}`);
+  });
+
+  it("the rule keys on the declared surface, not the fixture nouns", () => {
+    const lib = "A kanban board library exposing a typed board client";
+    assert.equal(declaresUiSurface(lib), false);
+    assert.equal(deliveryKindOf(emptyProject({ name: "KanbanLib", brief: lib })), "library");
+    const uiLib = "A kanban board library that ships a dashboard screen";
+    assert.equal(declaresUiSurface(uiLib), true);
+    assert.equal(
+      deliveryKindOf(emptyProject({ name: "KanbanLibUi", brief: uiLib })),
+      "app",
+      "the same library noun with a UI surface is a UI product",
+    );
   });
 });
 

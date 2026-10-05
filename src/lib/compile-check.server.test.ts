@@ -2500,6 +2500,84 @@ describe("346 E1 item 2 - a shape-only spec is not a behavioural pass", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // C1-05 (campaign #1 defect): the campaign's own oracle exited 0 with 7-8 of
+  // 9 cases `# SKIP` and minted a pass. A `# SKIP` case never ran, so a spec
+  // whose live cases are ≤ its skipped cases cannot satisfy the behavioural
+  // bar. Replayed with the campaign oracle's exact shape: a shape-only
+  // `tree.entry` + ONE real job-module call beside seven `test.skip` rows
+  // (bakery-florist-orders/emitted/tests/oracle.spec.ts: pass=2, skipped=7).
+  it("C1-05: a skip-dominated spec (live cases ≤ skipped) is NOT a pass; the whole tree is red", async () => {
+    const dir = tempDir();
+    try {
+      const skips = [2, 3, 4, 5, 6, 7, 8]
+        .map((n) => `test.skip("orc-${n} - NOT IMPLEMENTED", () => { assert.fail("not implemented"); });`)
+        .join("\n");
+      writeEmittedTree(
+        dir,
+        [
+          `import { test } from "node:test";`,
+          `import assert from "node:assert/strict";`,
+          `import * as m from "../src/main.ts";`,
+          `test("tree.entry", () => { assert.ok(Object.keys(m).length > 0); });`,
+          `test("orc-1", () => { assert.equal(m.boot(), "ok"); });`,
+          skips,
+          ``,
+        ].join("\n"),
+      );
+      const r = await treeRunAsConsumer(dir);
+      const spec = r.tests[0]!;
+      assert.equal(spec.tests.pass, 2, "two live cases passed (the campaign oracle's shape)");
+      assert.equal(spec.tests.skipped, 7, "the seven skipped rows are recorded, never folded into a pass");
+      assert.equal(spec.run, "fail", "live cases (2) ≤ skipped (7) — skip-dominated, so NOT a pass");
+      assert.equal(spec.behavioural, false, "the behavioural bar is not satisfied by a skip-dominated spec");
+      assert.match(String(spec.detail), /skip-dominated spec: 2 live case\(s\) ≤ 7 skipped/);
+      assert.equal(r.ok, false, "a skip-dominated tree is not green");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // FALSE-RED control: one skip beside a majority of live behavioural cases is
+  // NOT skip-dominated — the genuine spec keeps its green (3 > 1).
+  it("C1-05 control: a real spec with fewer skips than live cases stays green", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(
+        dir,
+        [
+          `import { test } from "node:test";`,
+          `import assert from "node:assert/strict";`,
+          `import * as m from "../src/main.ts";`,
+          `test("orc-1", () => { assert.equal(m.boot(), "ok"); });`,
+          `test("orc-2", () => { assert.equal(typeof m.boot(), "string"); });`,
+          `test("orc-3", () => { assert.match(m.boot(), /ok/); });`,
+          `test.skip("orc-4 - NOT IMPLEMENTED", () => { assert.fail("not implemented"); });`,
+          ``,
+        ].join("\n"),
+      );
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(r.tests[0]!.tests.pass, 3);
+      assert.equal(r.tests[0]!.tests.skipped, 1);
+      assert.equal(r.tests[0]!.run, "pass", "3 live cases > 1 skip — still a genuine behavioural pass");
+      assert.equal(r.ok, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The zero-skip spec keeps its exact legacy `{pass, fail}` shape (no
+  // `skipped` key), so pre-C1-05 envelope bytes are byte-identical.
+  it("C1-05: a 0-skip spec keeps the legacy tests shape (no skipped key)", async () => {
+    const dir = tempDir();
+    try {
+      writeEmittedTree(dir, PASSING_SPEC);
+      const r = await treeRunAsConsumer(dir);
+      assert.deepEqual(r.tests[0]!.tests, { pass: 2, fail: 0 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

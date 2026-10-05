@@ -1469,11 +1469,6 @@ function uiRenderLike(c: UiCallable): boolean {
   return /^(?:render[A-Z_$]|.*Page$|get[A-Za-z0-9_$]*Screen$)/.test(c.name) && c.async !== true;
 }
 
-/** A4: a render-like export the shell may actually CALL — no required params, not async. */
-function uiRenderCallable(c: UiCallable): boolean {
-  return uiRenderLike(c) && c.params.filter((p) => !p.rest).length === 0;
-}
-
 /**
  * 341-1: the keyed chunked synthesis materialises its entry as an ESM BARREL
  * of `export * from "./x.ts"` lines (codegen `materializeImportableTree`), so
@@ -1574,7 +1569,10 @@ function uiGeneratedEntrySource(project: Project): string | null {
   accepted.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   if (accepted.length > 0) {
     const byPath = new Map(accepted.map((f) => [f.path, f]));
-    const entry = byPath.get(rolePath) ?? byPath.get("src/generated.ts") ?? accepted[0];
+    // C1-02: resolve the SAME entry the emitted shell imports — the tree barrel
+    // when present (see treeEntryPath), so the callables discovered here are
+    // genuinely re-exported by the module `emitUi` imports.
+    const entry = byPath.get("src/generated.ts") ?? byPath.get(rolePath) ?? accepted[0];
     return entry ? uiFollowStarExports(entry, byPath) : null;
   }
   const generated = (project.generatedSource ?? "").trim();
@@ -1636,26 +1634,29 @@ function uiDomainFields(
   return fields.slice(0, UI_FIELD_CAP);
 }
 
+/** C1-02: a render export the shell may call, with its sound call arguments. */
+type UiRenderCall = { name: string; args: string[] };
+
 /**
  * A4 (SYNTHSPEC P5b): the multi-section shell for a website/marketing brief — a
  * <nav> from the briefed page titles and one <section> per page. A page whose
- * discovered render export is callable with no arguments calls it and renders
- * the result (a string via a <div>; a JSX node directly); a page with no such
- * export gets an honest "not implemented" note. Never fabricates data; never a
- * <canvas>. The H1 is the markdown-stripped display name.
+ * discovered render export is callable with sound arguments calls it and
+ * renders the result (a string via a <div>; a node via the ReactNode cast); a
+ * page with no such export gets an honest "not implemented" note. Never
+ * fabricates data; never a <canvas>. The H1 is the markdown-stripped display name.
  */
-function defaultUiShellBody(project: Project, pages: UiPage[], renderCallables: UiCallable[]): string[] {
+function defaultUiShellBody(project: Project, pages: UiPage[], renderCalls: UiRenderCall[]): string[] {
   const lines: string[] = [];
   const nodeExpr: string[] = [];
   const used = new Set<string>();
   for (const page of pages) {
     const key = page.id.toLowerCase().replace(/_/g, "");
     const rc =
-      renderCallables.find((c) => !used.has(c.name) && c.name.toLowerCase().replace(/_/g, "").includes(key)) ??
-      renderCallables.find((c) => !used.has(c.name));
+      renderCalls.find((c) => !used.has(c.name) && c.name.toLowerCase().replace(/_/g, "").includes(key)) ??
+      renderCalls.find((c) => !used.has(c.name));
     if (rc !== undefined) {
       used.add(rc.name);
-      lines.push(`  const ${`__page_${page.id}`}: unknown = generated.${rc.name}();`);
+      lines.push(`  const ${`__page_${page.id}`}: unknown = generated.${rc.name}(${rc.args.join(", ")});`);
       nodeExpr.push(`__page_${page.id}`);
     } else {
       nodeExpr.push("null");
@@ -1673,13 +1674,62 @@ function defaultUiShellBody(project: Project, pages: UiPage[], renderCallables: 
     `      {pages.map((p, i) => (`,
     `        <section key={p.id}>`,
     `          <h2>{p.title}</h2>`,
-    `          {typeof pageNodes[i] === "string" ? <div>{pageNodes[i] as string}</div> : (pageNodes[i] as JSX.Element | null)}`,
+    `          {typeof pageNodes[i] === "string" ? <div>{pageNodes[i] as string}</div> : (pageNodes[i] as ReactNode)}`,
     `        </section>`,
     `      ))}`,
     `    </main>`,
     `  );`,
   );
   return lines;
+}
+
+/**
+ * C1-02: a sound scalar literal for a render export parameter, from its own
+ * declared type text — a primitive (`string`/`number`/`boolean`), the first
+ * member of a literal union, `[]` for an array type, or `null` for
+ * `any`/`unknown`/`null`/`undefined`. A type-alias identifier or an
+ * object/function type returns null: the shell must never call a render export
+ * with an argument it cannot prove assignable (the pre-seal tsc gate would
+ * refuse the whole tree).
+ */
+function uiLiteralArg(type: string): string | null {
+  const t = String(type ?? "").trim();
+  if (!t) return null;
+  const parts = t.split("|").map((p) => p.trim()).filter(Boolean);
+  if (parts.some((p) => /^(any|unknown)$/.test(p))) return "null";
+  const strLit = parts.find((p) => /^'[^']*'$/.test(p) || /^"[^"]*"$/.test(p));
+  if (strLit !== undefined) return strLit;
+  const numLit = parts.find((p) => /^-?\d+(?:\.\d+)?$/.test(p));
+  if (numLit !== undefined) return numLit;
+  // An empty array is assignable to every `T[]` / `Array<T>` / `ReadonlyArray<T>`
+  // (but never to a tuple), so a renderer that iterates its input can be called
+  // with the honest empty dataset rather than left unwired.
+  const arr = parts.find(
+    (p) =>
+      /^(?!\[)[A-Za-z0-9_$<>,[\] .'"]*\[\]$/.test(p) ||
+      /^(readonly\s+)?(Readonly)?Array\s*<.+>$/.test(p),
+  );
+  if (arr !== undefined) return "[]";
+  if (parts.every((p) => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(p))) {
+    if (parts.includes("string")) return '""';
+    if (parts.includes("number")) return "0";
+    if (parts.includes("boolean")) return "false";
+    if (parts.includes("null") || parts.includes("undefined")) return "null";
+  }
+  return null;
+}
+
+/** C1-02: the call arguments for a render export, or null when one cannot be soundly supplied. */
+function uiRenderCallArgs(c: UiCallable): string[] | null {
+  if (c.async === true) return null;
+  const args: string[] = [];
+  for (const p of c.params) {
+    if (p.rest) return null;
+    const arg = uiLiteralArg(p.type);
+    if (arg === null) return null;
+    args.push(arg);
+  }
+  return args;
 }
 
 /**
@@ -1718,12 +1768,22 @@ const defaultUiGeneration = ({
   // actually CALLED; a param-bearing one still yields its honest section.
   const renderLike = callables.filter(uiRenderLike);
   if (renderLike.length > 0) {
+    // C1-02: call a render export with SOUND arguments where its own declared
+    // parameter types permit (a zero-arg renderer, or one whose params are
+    // primitives / literal unions) so the shell mounts a real generated export.
+    // A render export whose args cannot be proven assignable is left uncalled —
+    // its page keeps the honest null node, never a fabricated argument.
+    const renderCalls: UiRenderCall[] = [];
+    for (const c of renderLike) {
+      const args = uiRenderCallArgs(c);
+      if (args !== null) renderCalls.push({ name: c.name, args });
+    }
     const pages = uiBriefPages(project);
     const shellPages =
       pages.length > 0
         ? pages
         : renderLike.map((c) => ({ id: ident(c.name.replace(/^render/, "") || c.name, "page"), title: c.name }));
-    return defaultUiShellBody(project, shellPages, renderLike.filter(uiRenderCallable));
+    return defaultUiShellBody(project, shellPages, renderCalls);
   }
   // Prefer a callable whose own surface can carry ≥2 real fields.
   const callable =
@@ -1868,6 +1928,13 @@ function emitUi(
       generatedNamespace: genEntry ? "generated" : null,
     };
     const genBody = uiGeneration(uiRequest) ?? defaultUiGeneration(uiRequest);
+    // C1-03: a render-bearing shell renders an unknown page node as a
+    // `ReactNode` child. Under @types/react v19 the global `JSX` namespace is
+    // gone, so the emitted type must come from `react` itself; the import is
+    // added only when the body actually names it (unused otherwise).
+    const reactTypeImport = genBody.join("\n").includes("ReactNode")
+      ? [`import type { ReactNode } from "react";`]
+      : [];
     return [
       ...sourceHeader(node.file, node.purpose, project, [
         "// Operator surfaces bound to generated modules (P8). Not a stub wall:",
@@ -1875,6 +1942,7 @@ function emitUi(
         "// when P6 produced one — never a path nothing writes.",
       ]),
       ...(genEntry ? [] : [`import { useState } from "react";`]),
+      ...reactTypeImport,
       ...genImport,
       `export function Console() {`,
       ...genBody,
@@ -4020,7 +4088,14 @@ export function scaffoldProject(project: Project, options: ScaffoldOptions = {})
           ? safeNodePath(jobEntry.node.file, jobEntry.node.id, jobEntry.index)
           : "src/generated.ts";
         const byPath = new Map(treeAccepted.map((f) => [f.path, f]));
-        const entry = byPath.get(rolePath) ?? byPath.get("src/generated.ts") ?? treeAccepted[0];
+        // C1-02: prefer the tree's ESM BARREL `src/generated.ts` (codegen
+        // `materializeImportableTree` writes it for EVERY tree) over the
+        // first-job role path. The barrel `export *`s every tree module, so the
+        // UI shell that imports it can genuinely call a real generated export —
+        // a first-job role path that the tree happens to contain exposes only
+        // that one job module and left the shell unwired. The role path stays
+        // the fallback for a hand-built tree with no barrel.
+        const entry = byPath.get("src/generated.ts") ?? byPath.get(rolePath) ?? treeAccepted[0];
         return entry ? entry.path : null;
       })()
     : null;

@@ -275,6 +275,37 @@ export function stripOutOfScope(text: string): string {
   return out.join("\n").replace(/\bmulti-[a-z][a-z-]*\b/gi, " ");
 }
 
+/**
+ * W62 · C1-07 (R-08): the explicit UI/app SURFACE vocabulary. A brief that
+ * declares one of these has a user-facing surface — proof it is a product to
+ * USE, not an importable package. Deliberately NARROWER than the `app` keyword
+ * row: generic container nouns a library brief also writes ("board", "tab",
+ * "module") are excluded so a kanban *library* that declares a "board" stays a
+ * library (scaffold 341-1). Domain-agnostic — the SURFACE is detected, not the
+ * vertical.
+ */
+const UI_SURFACE_WORDS = [
+  "ui", "screen", "screens", "dashboard", "desk", "portal",
+  "site", "website", "web", "page", "pages", "menu",
+  "catalogue", "catalog", "shop", "storefront",
+];
+
+/** True when the brief (minus out-of-scope / negated text) declares an explicit
+ *  UI/app surface. The brief's own spec is the surface context `deliveryKindOf`
+ *  carries: planSpecGraph (algorithms.ts) always emits a `ui` node, so the real
+ *  SpecGraph cannot discriminate — the brief's declared surfaces can. */
+export function declaresUiSurface(brief: string): boolean {
+  const tokens = new Set(
+    stripOutOfScope(typeof brief === "string" ? brief : "").toLowerCase().match(/[a-z0-9]+/g) ?? [],
+  );
+  const hit = (h: string): boolean =>
+    tokens.has(h) ||
+    tokens.has(`${h}s`) ||
+    tokens.has(`${h}es`) ||
+    (h.endsWith("y") && tokens.has(`${h.slice(0, -1)}ies`));
+  return UI_SURFACE_WORDS.some(hit);
+}
+
 export function deliveryKindOf(
   project: Pick<Project, "kind" | "brief" | "domain" | "lattice">,
 ): DeliveryKind {
@@ -293,7 +324,14 @@ export function deliveryKindOf(
     tokens.has(`${h}s`) ||
     tokens.has(`${h}es`) ||
     (h.endsWith("y") && tokens.has(`${h.slice(0, -1)}ies`));
+  // C1-07: a declared UI/app surface is proof of a user-facing product, so the
+  // `library`/`tool` rows may not capture it — a "library" noun in the brief is
+  // a tool LENDING library / a component library, not an importable package
+  // (the plan's rule: a spec-graph UI node is never library/tool). Genuine
+  // library briefs carry no UI surface, so they keep their library kind.
+  const uiSurface = declaresUiSurface(String(project.brief ?? ""));
   for (const row of DELIVERY_KIND_KEYWORDS) {
+    if (uiSurface && (row.kind === "library" || row.kind === "tool")) continue;
     if (row.words.some(hit)) return row.kind;
   }
   return "app";
@@ -336,7 +374,12 @@ const DOMAIN_TERMS: Record<string, string[]> = {
   "health-ops": ["clinic", "patient", "health", "clinician", "hipaa", "phi", "intake"],
   logistics: ["fleet", "dispatch", "route", "driver", "tech"],
   "finance-ops": ["invoice", "billing", "ledger", "quote", "payments"],
-  analytics: ["dashboard", "analytics", "kpi", "report"],
+  // W62 · C1-07: "dashboard"/"report" are generic UI SURFACE nouns, not
+  // analytics-domain nouns. Keeping them here typed any brief with a status
+  // dashboard or a damage report as `analytics` (PREVENTION INC-07, the
+  // office-stock-tracker v1 mis-catch; the held-out tool-library brief).
+  // Analytics now needs its own vocabulary.
+  analytics: ["analytics", "kpi"],
   // 118 P-D3: real-estate / property + construction/trades registers. A flipper
   // brief ("flip houses, track ARV, run comps, renovate") must classify here,
   // never as analytics/finance-ops — the previous register had zero REI vocab so
@@ -409,7 +452,15 @@ export function inferDomain(brief: string): string {
       bestCount = count;
     }
   }
-  return best;
+  // W62 · C1-07 (BUGLEDGER root cause): a single incidental register noun must
+  // not claim a whole vertical — "One incidental word therefore wins the whole
+  // brief with count=1 vs 0." For a brief that declares a UI/app surface (the
+  // software context), a vertical needs ≥2 distinct register hits; a lone
+  // incidental noun otherwise drops to the honest `custom-software` default.
+  // (The seven fixtures carry ≥2 or 0 for their declared domain.)
+  return declaresUiSurface(typeof brief === "string" ? brief : "") && bestCount < 2
+    ? "custom-software"
+    : best;
 }
 
 /**
