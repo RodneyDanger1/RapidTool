@@ -379,25 +379,34 @@ export function projectDiagnosisStages(
         } else if (o.gate === null) {
           acc.sawGate = true; // explicit null = the phase recorded no gate
         }
-        acc.keyed = acc.keyed ?? keyedOf(o.keyed);
+        // 350 (F1): the driver writes the phase's measured spend to `spend`
+        // (SpendSlice). Read it first; `keyed` stays as the forward-compatible
+        // alias a future emitter may use. Absent ⇒ null, never fabricated.
+        acc.keyed = acc.keyed ?? keyedOf(o.spend) ?? keyedOf(o.keyed);
         acc.treeRun = acc.treeRun ?? treeRunOf(o.treeRun);
         acc.substance = acc.substance ?? substanceOf(o.substance);
       }
       if (junk > 0) gaps.push(`${junk} malformed phase record(s) skipped`);
     }
 
-    // Project-level treeRun/substance: attribute to the phase they name.
-    const projTree = treeRunOf(root?.treeRun);
-    const projSub = substanceOf(root?.substance);
-    if (projTree && root) {
-      const ph = numOrNull(root.treeRun && (root.treeRun as Record<string, unknown>).phase);
-      if (ph !== null) ensure(ph).treeRun = ensure(ph).treeRun ?? projTree;
-      else gaps.push("project treeRun carries no phase — not attributed");
-    }
-    if (projSub && root) {
-      const ph = numOrNull(root.substance && (root.substance as Record<string, unknown>).phase);
-      if (ph !== null) ensure(ph).substance = ensure(ph).substance ?? projSub;
-      else gaps.push("project substance carries no phase — not attributed");
+    // Project-level treeRun/substance. The persisted P6 verdict carries no
+    // `phase` of its own (347 gap 4), so it is attributed to its OWNING phase 6
+    // — the phase that produces/verifies the generated tree (348's
+    // withTreeRunVerdict writes these during the P6 edge). An explicit `phase`
+    // on the blob wins when a future emitter adds one.
+    if (root) {
+      const projTree = treeRunOf(root.treeRun);
+      if (projTree) {
+        const named = numOrNull((root.treeRun as Record<string, unknown> | null)?.phase);
+        const ph = named !== null && Number.isInteger(named) ? named : 6;
+        ensure(ph).treeRun = ensure(ph).treeRun ?? projTree;
+      }
+      const projSub = substanceOf(root.substance);
+      if (projSub) {
+        const named = numOrNull((root.substance as Record<string, unknown> | null)?.phase);
+        const ph = named !== null && Number.isInteger(named) ? named : 6;
+        ensure(ph).substance = ensure(ph).substance ?? projSub;
+      }
     }
 
     // Coded refusals + parks, attributed by row.phase.
@@ -508,6 +517,11 @@ export function auditFromProject(project: unknown): DiagnosisAudit {
   if (p.tokenUsage && typeof p.tokenUsage === "object" && !Array.isArray(p.tokenUsage)) {
     audit.tokenUsage = p.tokenUsage;
   }
+  // 350 (F1): the P6 tree-run/substance verdict persisted by W2 (348) is on the
+  // project, not on a phase record — pass it through so the projector can
+  // attribute it to phase 6 instead of reading an honest-but-empty unknown.
+  if (p.treeRun && typeof p.treeRun === "object" && !Array.isArray(p.treeRun)) audit.treeRun = p.treeRun;
+  if (p.substance && typeof p.substance === "object" && !Array.isArray(p.substance)) audit.substance = p.substance;
   return audit;
 }
 

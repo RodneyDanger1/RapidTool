@@ -108,6 +108,44 @@ function formatSpend(s: RunReportSpend | undefined): string {
   return parts.length > 0 ? parts.join(", ") : NOT_RECORDED;
 }
 
+/** 350 (F1): the per-phase keyed spend a driver MEASURED onto the phase record
+ *  (`PhaseRecord.spend`). A record without one (or with a non-object blob)
+ *  yields undefined, so the phase keeps reading "not recorded"; a partial slice
+ *  reports only the counts it really carries — never a fabricated 0. */
+function persistedPhaseSpend(project: Project, phase: number): RunReportSpend | undefined {
+  const rec = Array.isArray(project.phases) ? project.phases.find((r) => r && r.id === phase) : undefined;
+  const s = rec?.spend;
+  if (!s || typeof s !== "object") return undefined;
+  const out: RunReportSpend = {};
+  if (typeof s.calls === "number") out.calls = s.calls;
+  if (typeof s.promptTokens === "number") out.promptTokens = s.promptTokens;
+  if (typeof s.completionTokens === "number") out.completionTokens = s.completionTokens;
+  return out.calls !== undefined || out.promptTokens !== undefined || out.completionTokens !== undefined
+    ? out
+    : undefined;
+}
+
+/** 350 (F1): the P6 tree-run verdict persisted by W2 (348) — `ok`/`verdict` +
+ *  an optional evidence hash. Absent ⇒ "not recorded" (never invented). */
+function treeRunText(project: Project): string {
+  const t = project.treeRun;
+  if (!t || typeof t !== "object") return NOT_RECORDED;
+  const parts: string[] = [];
+  if (typeof t.verdict === "string" && t.verdict.length > 0) parts.push(t.verdict);
+  else if (typeof t.ok === "boolean") parts.push(t.ok ? "pass" : "fail");
+  if (typeof t.verdictHash === "string" && t.verdictHash.length > 0) {
+    parts.push(`(evidence hash \`${t.verdictHash}\`)`);
+  }
+  return parts.length > 0 ? parts.join(" ") : NOT_RECORDED;
+}
+
+/** 350 (F1): the P6 generated-tree substance census label persisted by W2 (348). */
+function substanceText(project: Project): string {
+  const s = project.substance;
+  const v = s && typeof s === "object" && typeof s.verdict === "string" ? oneLine(s.verdict) : "";
+  return v.length > 0 ? v : NOT_RECORDED;
+}
+
 /** Render the whole run as plain-English markdown. PURE. */
 export function renderRunReport(project: Project, opts: RunReportOptions = {}): string {
   const review = buildPipelineReview(project);
@@ -162,7 +200,9 @@ export function renderRunReport(project: Project, opts: RunReportOptions = {}): 
     } else {
       lines.push(`- **Artifacts (${stage.artifacts.length}):** ${stage.artifacts.join("; ")}`);
     }
-    const perPhase = opts.spendByPhase ? opts.spendByPhase[stage.id] : undefined;
+    // A caller-supplied slice wins; otherwise read the spend the driver MEASURED
+    // onto the phase record (350 F1). Absent ⇒ the honest run-total fallback.
+    const perPhase = opts.spendByPhase?.[stage.id] ?? persistedPhaseSpend(project, stage.id);
     if (perPhase) {
       lines.push(`- **Keyed spend:** ${formatSpend(perPhase)}`);
     } else if (review.spend.measured) {
@@ -175,6 +215,13 @@ export function renderRunReport(project: Project, opts: RunReportOptions = {}): 
       );
     } else {
       lines.push("- **Keyed spend:** not recorded");
+    }
+    // The generated-tree verdicts are P6-owned (348's withTreeRunVerdict writes
+    // them project-level); render them on P6 so the phase no longer reports
+    // "unknown". Every other phase has no tree-run to show.
+    if (stage.id === 6) {
+      lines.push(`- **Tree run:** ${treeRunText(project)}`);
+      lines.push(`- **Substance:** ${substanceText(project)}`);
     }
     lines.push("");
   }

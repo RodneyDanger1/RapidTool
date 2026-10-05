@@ -33,9 +33,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyPhaseResult, approveHitl, deepenResearch, emptyProject, databaseSchemaSql, declaresUiSurface, deliveryKindOf, filterOffIntentResearch, hydrateProject, inferDomain, inferName, isOffIntentResearch, liveLayer, rejectHitl, repairPhases, researchQueryText, stripOutOfScope, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
+import { applyPhaseResult, approveHitl, deepenResearch, emptyProject, databaseSchemaSql, declaresUiSurface, deliveryKindOf, filterOffIntentResearch, hydrateProject, inferDomain, inferName, isOffIntentResearch, liveLayer, recordPhaseSpend, rejectHitl, repairPhases, researchQueryText, stripOutOfScope, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
 import { exportProjectJson, importProject } from "./io.ts";
-import { recordSessionSpend, resetSessionBudget, type TokenSpend } from "./token-ledger.ts";
+import { normalizeLedger, recordSessionSpend, resetSessionBudget, sessionTokenBudget, type TokenSpend } from "./token-ledger.ts";
 import { wildResumeRun } from "./headless.ts";
 import { PHASES } from "./phases.ts";
 import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
@@ -793,6 +793,24 @@ describe("346 K3 - wildStep surfaces the step measured session-ledger usage to o
     const seen: TokenSpend[] = [];
     await wildStep(spendP6Fixture(), { reviewer: notConfigured, p6Edge: floorEdge, onUsage: (u) => seen.push(u) });
     assert.equal(seen.length, 0, "an unmeasured step calls no sink - nothing to record");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 350 (F1) — the console phase-run twin: runPhaseAsync folds the phase's
+// MEASURED session-ledger delta onto its PhaseRecord.spend (the engine helper
+// is the same arithmetic as headless.recordPhaseSpend, pinned directly here).
+// ---------------------------------------------------------------------------
+describe("350 F1 - engine.recordPhaseSpend writes only a measured delta", () => {
+  it("folds a measured delta and no-ops an empty one", () => {
+    resetSessionBudget();
+    const p = emptyProject({ name: "PhaseSpend", brief: "a brief with enough vocabulary for the engine" });
+    const baseline = normalizeLedger(sessionTokenBudget().ledger);
+    recordSessionSpend({ promptTokens: 77, completionTokens: 9 });
+    const measured = recordPhaseSpend(p, 6 as PhaseId, baseline);
+    assert.deepEqual(measured.phases.find((r) => r.id === 6)!.spend, { promptTokens: 77, completionTokens: 9, calls: 1 });
+    const baseline2 = normalizeLedger(sessionTokenBudget().ledger);
+    assert.equal(recordPhaseSpend(measured, 6 as PhaseId, baseline2), measured, "an empty delta leaves the record untouched");
   });
 });
 

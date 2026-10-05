@@ -65,10 +65,13 @@ import { research } from "./research.ts";
 // read-only session-ledger delta the `wildStep` wrapper surfaces to a caller's
 // spend sink (`onUsage`) — same pure module, no new dependency.
 import {
+  accumulateSpend,
   normalizeLedger,
   recordSessionSpend,
   sessionTokenBudget,
   spendDelta,
+  totalTokens,
+  type TokenLedger,
   type TokenSpend,
 } from "./token-ledger.ts";
 import { runCode } from "./exec.ts";
@@ -4105,6 +4108,23 @@ async function viaHeadlessP6Edge(project: Project): Promise<Project | null> {
 }
 
 /**
+ * 350 (F1): fold the keyed spend a phase just MEASURED onto its PhaseRecord —
+ * the console/UI twin of `headless.recordPhaseSpend` (same arithmetic, same
+ * honesty): `baseline` is the process session ledger cloned before the phase
+ * ran, the measured delta is ACCUMULATED onto any spend already recorded (a
+ * rejected re-run folds), and an empty delta leaves the record byte-identical.
+ * No number is estimated; absent stays absent. Never reads/sets a cap.
+ */
+export function recordPhaseSpend(project: Project, phase: PhaseId, baseline: TokenLedger): Project {
+  const delta = spendDelta(sessionTokenBudget().ledger, baseline);
+  if (totalTokens(delta) === 0 && delta.calls === 0) return project;
+  return {
+    ...project,
+    phases: project.phases.map((r) => (r.id === phase ? { ...r, spend: accumulateSpend(r.spend, delta) } : r)),
+  };
+}
+
+/**
  * Async entry point that wires optional real research (and an optional LLM phase
  * narrative) into the deterministic engine — exactly `liveLayer` with a hard
  * safety net. For research phases it fetches real data and layers it on top of the
@@ -4115,8 +4135,13 @@ async function viaHeadlessP6Edge(project: Project): Promise<Project | null> {
  * the fallback is RECORDED as a bounded `p<phase>.live.failed` warn row (fixes/217f
  * G2: a degraded live pass stays distinguishable from a deliberately deterministic
  * one), never swallowed silently.
+ *
+ * 350 (F1): the whole body runs under a session-ledger baseline so the measured
+ * per-phase delta is folded onto the phase record on every exit (success, P6
+ * edge, and the deterministic floor).
  */
 export async function runPhaseAsync(project: Project, phase: PhaseId): Promise<Project> {
+  const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
   try {
     // W-02 (fixes/271 · §R1-f02): the console's per-phase live path must reach
     // the same tested-mint seam run/gate/wild use. Phase 6 + keyed ⇒ route
@@ -4124,15 +4149,19 @@ export async function runPhaseAsync(project: Project, phase: PhaseId): Promise<P
     // keyless/browser (probe false) ⇒ the existing liveLayer path, unchanged.
     if (phase === 6 && keyedDeepSeekConfigured()) {
       const reached = await viaHeadlessP6Edge(project);
-      if (reached !== null) return reached;
+      if (reached !== null) return recordPhaseSpend(reached, phase, spendBaseline);
     }
-    return await liveLayer(project, phase);
+    return recordPhaseSpend(await liveLayer(project, phase), phase, spendBaseline);
   } catch (err) {
     // Any unexpected error must never break a run — the deterministic path is the floor.
     // G2 (216y §2.3): the floor is the OUTCOME, never the whole story — log the failure
     // on the returned project so the degradation is visible in the record.
     const floor = applyPhaseResult(project, phase);
-    return { ...floor, logs: [...floor.logs, liveLayerFailureRow(phase, err)].slice(-200) };
+    return recordPhaseSpend(
+      { ...floor, logs: [...floor.logs, liveLayerFailureRow(phase, err)].slice(-200) },
+      phase,
+      spendBaseline,
+    );
   }
 }
 

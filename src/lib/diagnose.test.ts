@@ -813,4 +813,59 @@ test("348 (W1): auditFromProject is fail-soft — junk input yields an empty aud
   assert.ok(/audit\.phases is not an array/.test(diag.project.stagesGap ?? ""), "an empty audit names the missing phases");
 });
 
+// ---------------------------------------------------------------------------
+// fixes/350 (F1) — the per-phase telemetry residuals close:
+//   · PhaseRecord.spend (the driver's measured keyed delta) → real stage.keyed;
+//   · the persisted P6 treeRun/substance verdict → attributed to phase 6.
+// ---------------------------------------------------------------------------
+
+test("350 (F1): a phase record's MEASURED spend turns stage.keyed real; a record without it stays unknown", () => {
+  const withSpend = { ...REAL_P6_PHASE, spend: { promptTokens: 57727, completionTokens: 33263, calls: 14 } };
+  const diag = buildDiagnosis(baseInput({ audit: { phases: [withSpend] } }));
+  const p6 = diag.project.stages!.find((s) => s.phase === 6)!;
+  assert.deepEqual(p6.keyed, { calls: 14, promptTokens: 57727, completionTokens: 33263 }, "the measured slice projects verbatim");
+  assert.equal(p6.unknown.includes("keyed"), false, "the old 'keyed' unknown is gone once the fact exists");
+  // The SAME real record without a spend slice keeps the honest unknown.
+  const bare = buildDiagnosis(baseInput({ audit: { phases: [REAL_P6_PHASE] } }));
+  assert.equal(bare.project.stages!.find((s) => s.phase === 6)!.keyed, null);
+  assert.ok(bare.project.stages!.find((s) => s.phase === 6)!.unknown.includes("keyed"));
+});
+
+test("350 (F1): auditFromProject carries the persisted treeRun/substance; the projector attributes them to P6", () => {
+  const project = {
+    phases: [REAL_P6_PHASE],
+    artifacts: REAL_P6_ARTIFACTS,
+    tokenUsage: REAL_TOKEN_USAGE,
+    treeRun: { ok: false, verdict: "fail", verdictHash: "689887517" },
+    substance: { verdict: "stub" },
+  };
+  const audit = auditFromProject(project);
+  assert.deepEqual(Object.keys(audit).sort(), ["artifacts", "phases", "substance", "tokenUsage", "treeRun"]);
+
+  const diag = buildDiagnosis(baseInput({ audit }));
+  const p6 = diag.project.stages!.find((s) => s.phase === 6)!;
+  assert.equal(p6.treeRun!.ok, false);
+  assert.equal(p6.treeRun!.verdict, "fail");
+  assert.equal(p6.treeRun!.verdictHash, "689887517");
+  assert.deepEqual(p6.substance, { verdict: "stub" });
+  assert.equal(p6.unknown.includes("treeRun"), false, "the persisted P6 verdict clears the treeRun unknown");
+  assert.equal(p6.unknown.includes("substance"), false);
+});
+
+test("350 (F1): an explicitly phased project verdict is honoured; junk treeRun/substance never throws", () => {
+  const diag = buildDiagnosis(
+    baseInput({
+      audit: { phases: [REAL_P6_PHASE], treeRun: { ok: true, verdict: "pass", phase: 6 }, substance: { verdict: "real" } },
+    }),
+  );
+  const p6 = diag.project.stages!.find((s) => s.phase === 6)!;
+  assert.equal(p6.treeRun!.verdict, "pass");
+  assert.deepEqual(p6.substance, { verdict: "real" });
+  // Junk blobs are ignored (no throw), leaving the fact unknown.
+  const junk = buildDiagnosis(baseInput({ audit: { phases: [REAL_P6_PHASE], treeRun: "nope", substance: 3 } }));
+  assert.equal(junk.ok, true);
+  assert.equal(junk.project.stages!.find((s) => s.phase === 6)!.treeRun, null);
+  assert.equal(junk.project.stages!.find((s) => s.phase === 6)!.substance, null);
+});
+
 

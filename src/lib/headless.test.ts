@@ -41,6 +41,7 @@ import {
   runPhase,
   runP6Edge,
   runUntilGate,
+  recordPhaseSpend,
   saveProject,
   writeRunDocuments,
   summary,
@@ -69,7 +70,7 @@ import { recordGateInto, runGate } from "./dod.ts";
 import { IMPORT_MAX_CHARS, importProject } from "./io.ts";
 import { checkpointPath, readCheckpoint } from "./checkpoint.server.ts";
 import { evaluatePolicy } from "./policy.ts";
-import { recordSessionSpend, resetSessionBudget, sessionTokenBudget } from "./token-ledger.ts";
+import { normalizeLedger, recordSessionSpend, resetSessionBudget, sessionTokenBudget } from "./token-ledger.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
 import { PHASES } from "./phases.ts";
 import { ERROR_CODES } from "./errors.ts";
@@ -5682,6 +5683,72 @@ describe("Lane 1 (349) — run documents", () => {
       assert.equal(res.artifactPaths.length, project.artifacts.length, "one document per persisted artifact");
       const real = readdirSync(join(dir, "artifacts"));
       assert.equal(real.length, res.artifactPaths.length);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lane F1 (350): per-phase keyed telemetry — the measured session-ledger delta
+// is folded onto the phase record (PhaseRecord.spend). Real arithmetic over the
+// process ledger, never an estimate; an empty delta writes NOTHING.
+// ---------------------------------------------------------------------------
+describe("Lane F1 (350) — per-phase telemetry", () => {
+  const CAMPAIGN3_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "testruns", "campaign3");
+
+  it("recordPhaseSpend folds the session delta onto the phase record; an empty delta writes nothing", () => {
+    resetSessionBudget();
+    const p = createProject({ brief: FIXTURE_BRIEF });
+    const phase = 6 as PhaseId;
+
+    const baseline = normalizeLedger(sessionTokenBudget().ledger);
+    recordSessionSpend({ promptTokens: 120, completionTokens: 30 });
+    const measured = recordPhaseSpend(p, phase, baseline);
+    assert.deepEqual(
+      measured.phases.find((r) => r.id === phase)!.spend,
+      { promptTokens: 120, completionTokens: 30, calls: 1 },
+      "the delta the phase measured is recorded verbatim",
+    );
+
+    // No call between baseline and now ⇒ the record is returned unchanged
+    // (absent stays absent — never a fabricated 0).
+    const baseline2 = normalizeLedger(sessionTokenBudget().ledger);
+    assert.equal(recordPhaseSpend(measured, phase, baseline2), measured, "an empty delta is a no-op");
+
+    // A second measured run ACCUMULATES onto the existing slice (a re-run folds).
+    recordSessionSpend({ promptTokens: 5, completionTokens: 1 });
+    assert.deepEqual(
+      recordPhaseSpend(measured, phase, baseline2).phases.find((r) => r.id === phase)!.spend,
+      { promptTokens: 125, completionTokens: 31, calls: 2 },
+      "the phase's spend is the sum of its measured attempts",
+    );
+  });
+
+  it("REAL persisted fixture: measured per-phase spend + P6 verdicts round-trip through save/load", () => {
+    const build = join(CAMPAIGN3_ROOT, "bakery-florist-orders", "build.json");
+    if (!existsSync(build)) return; // the atlas lives outside the repo; skip when absent
+    const real = loadProject(build);
+    resetSessionBudget();
+    const baseline = normalizeLedger(sessionTokenBudget().ledger);
+    recordSessionSpend({ promptTokens: 321, completionTokens: 54 });
+    const measured = recordPhaseSpend(real, 6 as PhaseId, baseline);
+    const withVerdict: Project = {
+      ...measured,
+      treeRun: { ok: false, verdict: "fail", verdictHash: "689887517" },
+      substance: { verdict: "stub" },
+    };
+    const dir = tempDir();
+    try {
+      saveProject(join(dir, "build.json"), withVerdict, { documents: false });
+      const reloaded = loadProject(join(dir, "build.json"));
+      assert.deepEqual(
+        reloaded.phases.find((r) => r.id === 6)!.spend,
+        { promptTokens: 321, completionTokens: 54, calls: 1 },
+        "the measured per-phase spend survives serialization",
+      );
+      assert.deepEqual(reloaded.treeRun, { ok: false, verdict: "fail", verdictHash: "689887517" });
+      assert.deepEqual(reloaded.substance, { verdict: "stub" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

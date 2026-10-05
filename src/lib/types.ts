@@ -346,6 +346,16 @@ export type PhaseRecord = {
   rejectionHistory?: { note: string; at: number }[];
   /** Machine-checkable DoD gate verdict recorded at phase completion (T8). */
   gate?: { passed: boolean; unmet: string[]; evidenceHash: string; checkedAt: number } | null;
+  /**
+   * 350 (F1): the keyed spend THIS phase MEASURED while it ran — the process
+   * session-ledger delta across the phase's own run boundary, recorded verbatim
+   * by the driver (`headless.recordPhaseSpend` at runReady / `engine.recordPhaseSpend`
+   * at runPhaseAsync). ADDITIVE and optional: a phase that made no measured call
+   * carries no slice (absent ⇒ "not recorded per phase", never a fabricated 0),
+   * and legacy records without it parse and read exactly as before. Persisting
+   * spend NEVER feeds the cap — the cap stays the process ledger's business.
+   */
+  spend?: import("./token-ledger.ts").SpendSlice;
 };
 
 export type IntentNode = {
@@ -578,6 +588,17 @@ export type Project = {
    *  what `accumulateSpend` actually stores (`calls` / cache keys). Optional
    *  keys stay optional: a legacy 2-key slice is a valid measured spend. */
   tokenUsage?: import("./token-ledger.ts").SpendSlice;
+
+  /**
+   * 348 (W2) persisted the P6 tree-run verdict here (`headless.withTreeRunVerdict`
+   * — `ok`/`verdict` mirror the TreeRunOutcome, `verdictHash` only when the run
+   * minted one); 350 (F1) TYPES it so the run report + diagnosis can attribute
+   * the P6 verdict to phase 6. Absent on legacy/deterministic records ⇒ unknown.
+   */
+  treeRun?: { ok: boolean; verdict: "pass" | "fail"; verdictHash?: string };
+  /** 348 (W2): the P6 generated-tree substance census label (`"real"`/`"stub"`/
+   *  `"empty"`/`"unknown"`), persisted only when the run produced a census. */
+  substance?: { verdict: string };
 
   /** W48 · 334-2: the last keyed-call outcome, persisted so a FRESH process can
    *  see that the previous run's key was refused. The tap is process-local, so

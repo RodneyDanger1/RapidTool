@@ -105,6 +105,39 @@ describe("run-report: renderRunReport", () => {
     assert.ok(without.includes("**Keyed spend:** not recorded"), "unmeasured per-phase spend stays honest");
   });
 
+  it("350 (F1): reads the per-phase spend MEASURED onto the record instead of 'not recorded per phase'", async () => {
+    const p = await runP0();
+    const measured: Project = {
+      ...p,
+      phases: p.phases.map((r) =>
+        r.id === 0 ? { ...r, spend: { promptTokens: 321, completionTokens: 54, calls: 2 } } : r,
+      ),
+    };
+    const md = renderRunReport(measured);
+    assert.ok(
+      md.includes("**Keyed spend:** 2 call(s), 321 prompt token(s), 54 completion token(s)"),
+      "the measured per-phase slice renders as REAL numbers, not 'not recorded per phase'",
+    );
+    assert.ok(!md.includes("not recorded per phase"), "a measured phase never falls back to the run-total notice");
+    // The same run without a measured slice stays honest.
+    assert.ok(!renderRunReport(p).includes("321 prompt token(s)"));
+  });
+
+  it("350 (F1): renders the persisted P6 tree-run/substance verdict; absent stays honestly 'not recorded'", async () => {
+    const p = await runP0();
+    const without = renderRunReport(p);
+    assert.ok(without.includes("**Tree run:** not recorded"), "no persisted verdict ⇒ honest not recorded");
+    assert.ok(without.includes("**Substance:** not recorded"));
+    const withVerdict: Project = {
+      ...p,
+      treeRun: { ok: false, verdict: "fail", verdictHash: "689887517" },
+      substance: { verdict: "stub" },
+    };
+    const md = renderRunReport(withVerdict);
+    assert.ok(md.includes("**Tree run:** fail (evidence hash `689887517`)"), "the persisted P6 verdict is attributed to P6");
+    assert.ok(md.includes("**Substance:** stub"), "the persisted substance census label is real on P6");
+  });
+
   it("is pure and deterministic — same record, byte-identical report", async () => {
     const p = await runP0();
     assert.equal(renderRunReport(p), renderRunReport(p));

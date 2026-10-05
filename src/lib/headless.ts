@@ -876,6 +876,26 @@ function advanceTo(project: Project, next: PhaseId): Project {
   };
 }
 
+/**
+ * 350 (F1): fold the keyed spend a phase just MEASURED onto its PhaseRecord.
+ *
+ * `baseline` is the process session ledger cloned immediately before the phase's
+ * synthesis ran; `spendDelta` is the field-wise difference now that it finished.
+ * The measured delta is ACCUMULATED onto any spend already on the record (a
+ * rejected phase re-run folds, it never erases the earlier attempt) via the
+ * ledger's own `accumulateSpend`, so no number is estimated or invented. A phase
+ * with no measured call (delta empty) leaves the record byte-identical — absent
+ * stays absent, never a fabricated 0. Pure arithmetic; never reads/sets a cap.
+ */
+export function recordPhaseSpend(project: Project, phase: PhaseId, baseline: TokenLedger): Project {
+  const delta = spendDelta(sessionTokenBudget().ledger, baseline);
+  if (totalTokens(delta) === 0 && delta.calls === 0) return project;
+  return {
+    ...project,
+    phases: project.phases.map((r) => (r.id === phase ? { ...r, spend: accumulateSpend(r.spend, delta) } : r)),
+  };
+}
+
 async function runReady(
   project: Project,
   phase: PhaseId,
@@ -901,8 +921,13 @@ async function runReady(
     ),
     status: "running" as const,
   };
+  // 350 (F1): snapshot the session ledger BEFORE the phase synthesizes, then
+  // fold the measured delta onto the phase record after it finishes — the
+  // per-phase keyed spend the audit/report used to read as `unknown`.
+  const spendBaseline = normalizeLedger(sessionTokenBudget().ledger);
   const updated = await runPhase(running, phase, { live, researchLive, p6Deps, proven });
-  return finishPhase(updated, phase, autopilot, machineGates);
+  const finished = finishPhase(updated, phase, autopilot, machineGates);
+  return { ...finished, project: recordPhaseSpend(finished.project, phase, spendBaseline) };
 }
 
 function finishPhase(
