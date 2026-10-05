@@ -42,6 +42,7 @@ import {
   runP6Edge,
   runUntilGate,
   saveProject,
+  writeRunDocuments,
   summary,
   treeRunFailureFiles,
   treeVerdictScore,
@@ -70,6 +71,7 @@ import { checkpointPath, readCheckpoint } from "./checkpoint.server.ts";
 import { evaluatePolicy } from "./policy.ts";
 import { recordSessionSpend, resetSessionBudget, sessionTokenBudget } from "./token-ledger.ts";
 import { FIXTURE_BRIEF } from "./testing/fixtures.ts";
+import { PHASES } from "./phases.ts";
 import { ERROR_CODES } from "./errors.ts";
 import { fnv1a } from "./algorithms.ts";
 import type { PhaseId, Project, WildPlan } from "./types.ts";
@@ -5583,6 +5585,105 @@ describe("D3 (campaign #2) - R2-01 floor seal / R2-02 canonical wiring / R2-06 h
       assert.equal(v.verifiedProduct, supports, `${slug}: verifiedProduct mirrors the recorded evidence`);
       assert.equal(v.verifiedProduct, false, `${slug}: the un-executed kind entry keeps it honestly false`);
       assert.match(String(j.git.verificationNote), /NOT fully verified/, `${slug}: the note points at the reasons`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lane 1 (fixes/349): every run emits real, visible, plain-English documents.
+//   · writeRunDocuments writes RUN_REPORT.md + artifacts/*.md, fail-soft;
+//   · saveProject wires them beside the persisted project for started runs;
+//   · a REAL persisted fixture round-trips through the writer (skipped when the
+//     out-of-repo atlas is absent, exactly like the campaign #2 block above).
+// ---------------------------------------------------------------------------
+describe("Lane 1 (349) — run documents", () => {
+  it("writeRunDocuments writes RUN_REPORT.md naming all phases plus one artifacts/*.md per artifact", async () => {
+    const dir = tempDir();
+    try {
+      const run = await runUntilGate(createProject({ brief: FIXTURE_BRIEF }), { maxSteps: 2 });
+      const res = writeRunDocuments(dir, run.project);
+      assert.equal(res.ok, true, res.ok ? "" : res.reason);
+      if (!res.ok) return;
+      assert.ok(existsSync(join(dir, "RUN_REPORT.md")), "RUN_REPORT.md is written");
+      const report = readFileSync(join(dir, "RUN_REPORT.md"), "utf8");
+      for (const def of PHASES) {
+        assert.ok(report.includes(`### ${def.code} — ${def.title}`), `report names ${def.code}`);
+      }
+      assert.ok(res.artifactPaths.length > 0, "a synthesized run has artifacts to write");
+      for (const rel of res.artifactPaths) {
+        assert.match(rel, /^artifacts\/P\d+-.+\.md$/);
+        assert.ok(existsSync(join(dir, rel)), `artifact file written: ${rel}`);
+      }
+      assert.deepEqual(
+        readdirSync(join(dir, "artifacts")).sort(),
+        res.artifactPaths.map((p) => p.replace(/^artifacts\//, "")).sort(),
+        "the artifact dir holds exactly the reported files",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("saveProject writes the run documents for a started run, and never for a fresh project", async () => {
+    const dir = tempDir();
+    try {
+      const run = await runUntilGate(createProject({ brief: FIXTURE_BRIEF }), { maxSteps: 2 });
+      saveProject(join(dir, "build.json"), run.project);
+      assert.ok(existsSync(join(dir, "RUN_REPORT.md")), "a started run's save emits RUN_REPORT.md");
+      assert.ok(existsSync(join(dir, "artifacts")), "a started run's save emits artifacts/");
+
+      const freshDir = tempDir();
+      try {
+        saveProject(join(freshDir, "build.json"), createProject({ brief: FIXTURE_BRIEF }));
+        assert.ok(!existsSync(join(freshDir, "RUN_REPORT.md")), "an unstarted project must not sprout run documents");
+        assert.deepEqual(readdirSync(freshDir), ["build.json"], "the unstarted dir stays byte-identical");
+      } finally {
+        rmSync(freshDir, { recursive: true, force: true });
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writeRunDocuments is fail-soft: it refuses to clobber an unrelated file and never throws", async () => {
+    const dir = tempDir();
+    try {
+      // An unrelated regular file where the artifacts/ directory would go.
+      writeFileSync(join(dir, "artifacts"), "not ours\n", "utf8");
+      const run = await runUntilGate(createProject({ brief: FIXTURE_BRIEF }), { maxSteps: 1 });
+      let res: ReturnType<typeof writeRunDocuments>;
+      try {
+        res = writeRunDocuments(dir, run.project);
+      } catch (err) {
+        assert.fail(`writeRunDocuments must never throw into the run: ${String(err)}`);
+      }
+      assert.equal(res.ok, false, "a non-directory artifacts path is refused");
+      if (!res.ok) assert.match(res.reason, /not a directory/);
+      assert.equal(readFileSync(join(dir, "artifacts"), "utf8"), "not ours\n", "the unrelated file is untouched");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("REAL fixture: office-scheduler/build.json round-trips to RUN_REPORT.md + artifacts/*.md", () => {
+    const build = join(CAMPAIGN2_ROOT, "office-scheduler", "build.json");
+    if (!existsSync(build)) return; // the atlas lives outside the repo; skip when absent
+    const project = loadProject(build);
+    const dir = mkdtempSync(join(tmpdir(), "rt-run-docs-"));
+    try {
+      const res = writeRunDocuments(dir, project);
+      assert.equal(res.ok, true, res.ok ? "" : res.reason);
+      if (!res.ok) return;
+      const report = readFileSync(join(dir, "RUN_REPORT.md"), "utf8");
+      for (const def of PHASES) {
+        assert.ok(report.includes(`### ${def.code} — ${def.title}`), `report names ${def.code} ${def.title}`);
+      }
+      assert.ok(res.artifactPaths.length > 0, `real fixture artifacts written: ${res.artifactPaths.length}`);
+      assert.equal(res.artifactPaths.length, project.artifacts.length, "one document per persisted artifact");
+      const real = readdirSync(join(dir, "artifacts"));
+      assert.equal(real.length, res.artifactPaths.length);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

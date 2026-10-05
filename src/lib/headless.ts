@@ -118,10 +118,88 @@ import {
   totalTokens,
 } from "./token-ledger.ts";
 import { packetBudgetBoundary, type PacketBudget } from "./packet.ts";
+// Lane 1 (fixes/349): plain-English run documents — the pure report renderer and
+// the artifact materializer; headless owns the run's filesystem, so it writes
+// them beside the persisted project (writeRunDocuments below). Both modules are
+// PURE and this file only READS them (never mutates the engine).
+import { renderRunReport } from "./run-report.ts";
+import { materializeArtifacts } from "./artifacts.ts";
 
 // ---------------------------------------------------------------------------
 // File persistence (atomic write via write-then-rename).
 // ---------------------------------------------------------------------------
+
+/** Does this record represent a run that actually started? A fresh
+ *  `createProject` (phase 0 "ready", no artifacts) is not — it must not sprout
+ *  run documents. Used as the default gate for the document side-write so a
+ *  plain save of an unstarted project stays byte-identical on disk. */
+function runHasDocuments(project: Project): boolean {
+  const phases = Array.isArray(project?.phases) ? project.phases : [];
+  const started = phases.some(
+    (r) =>
+      r &&
+      (r.startedAt != null ||
+        r.status === "complete" ||
+        r.status === "rejected" ||
+        r.status === "awaiting_hitl"),
+  );
+  const hasArtifacts = Array.isArray(project?.artifacts) && project.artifacts.length > 0;
+  return started || hasArtifacts;
+}
+
+export type RunDocumentsResult =
+  | { ok: true; reportPath: string; artifactPaths: string[] }
+  | { ok: false; reason: string };
+
+/**
+ * Lane 1 (fixes/349): materialize the run's visible documents into `runDir` —
+ * `RUN_REPORT.md` (run-report.renderRunReport) plus one `artifacts/*.md` per
+ * phase artifact (artifacts.materializeArtifacts). FAIL-SOFT BY CONTRACT: it
+ * never throws and never pretends — a partial/failed write returns
+ * `{ ok:false, reason }` so the caller can record the reason on the project.
+ * The only paths it will ever write are `RUN_REPORT.md` and files under
+ * `artifacts/`; an existing non-directory at either location is refused rather
+ * than clobbered, so an unrelated file is never overwritten.
+ */
+export function writeRunDocuments(runDir: string, project: Project): RunDocumentsResult {
+  try {
+    const dir = resolve(runDir);
+    mkdirSync(dir, { recursive: true });
+
+    // Never overwrite an unrelated file: both destinations must be absent or
+    // the shape we own (a file for the report, a directory for artifacts/).
+    const reportPath = join(dir, "RUN_REPORT.md");
+    try {
+      if (statSync(reportPath).isDirectory()) {
+        return { ok: false, reason: `RUN_REPORT.md exists as a directory at ${reportPath}` };
+      }
+    } catch {
+      /* absent — the normal case */
+    }
+    const artifactsDir = join(dir, "artifacts");
+    try {
+      if (!statSync(artifactsDir).isDirectory()) {
+        return { ok: false, reason: `artifacts path exists and is not a directory at ${artifactsDir}` };
+      }
+    } catch {
+      /* absent — created below */
+    }
+
+    const report = renderRunReport(project);
+    const docs = materializeArtifacts(project);
+    if (docs.length > 0) mkdirSync(artifactsDir, { recursive: true });
+
+    const written: string[] = [];
+    for (const d of docs) {
+      writeFileSync(join(dir, d.path), d.body, "utf8");
+      written.push(d.path);
+    }
+    writeFileSync(reportPath, report, "utf8");
+    return { ok: true, reportPath, artifactPaths: written };
+  } catch (err) {
+    return { ok: false, reason: `run-document write failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
 
 /** Load a project from a JSON file (parse + validate + hydrate via io.importProject).
  *  W49 · 335-2: the byte source is a local file `readFileSync` already loaded in
@@ -255,7 +333,7 @@ function acquireExclusiveLock(lockPath: string): number | null {
 
 /** Persist a project to `path` atomically (write temp file, then rename over target).
  *  174-13: exclusive `.lock` (O_EXCL) so two writers cannot interleave. */
-export function saveProject(path: string, project: Project): string {
+export function saveProject(path: string, project: Project, opts?: { documents?: boolean }): string {
   const target = resolve(path);
   mkdirSync(dirname(target), { recursive: true });
   const lockPath = `${target}.lock`;
@@ -268,9 +346,51 @@ export function saveProject(path: string, project: Project): string {
     (e as Error & { code?: string }).code = "RT_E_BUSY";
     throw e;
   }
+  // Lane 1 (fixes/349): write the run's visible documents beside the project.
+  // Default fires only for records an actual run produced (runHasDocuments);
+  // an explicit `documents:false` suppresses it. Additive + fail-soft: a write
+  // failure lands a coded warn row on the persisted record and NEVER throws
+  // into the save. The project bytes are otherwise untouched.
+  let toPersist = project;
+  if (opts?.documents ?? runHasDocuments(project)) {
+    try {
+      const res = writeRunDocuments(dirname(target), project);
+      if (!res.ok) {
+        toPersist = {
+          ...project,
+          logs: [
+            ...(project.logs ?? []),
+            {
+              ts: Date.now(),
+              phase: project.currentPhase,
+              level: "warn" as const,
+              event: "run.documents.failed",
+              detail: res.reason,
+            },
+          ].slice(-200),
+        };
+      }
+    } catch (err) {
+      // writeRunDocuments is already fail-soft; this is the belt-and-braces
+      // net so a document write can never abort the project save.
+      toPersist = {
+        ...project,
+        logs: [
+          ...(project.logs ?? []),
+          {
+            ts: Date.now(),
+            phase: project.currentPhase,
+            level: "warn" as const,
+            event: "run.documents.failed",
+            detail: `run-document write threw: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ].slice(-200),
+      };
+    }
+  }
   const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
   try {
-    writeFileSync(tmp, exportProjectJson(project), "utf8");
+    writeFileSync(tmp, exportProjectJson(toPersist), "utf8");
     renameSync(tmp, target);
   } catch (err) {
     try {
