@@ -89,7 +89,11 @@ export function formatShadowWarning(
 export function tailOf(secret: string | null | undefined, n = 4): string {
   const s = typeof secret === "string" ? secret : "";
   if (s.length === 0) return "";
-  return s.length > n ? s.slice(-n) : "*".repeat(Math.max(n, 4));
+  // A non-positive/non-finite width must never reach slice(-0)/slice(-(-n)),
+  // which returns the WHOLE secret from a tail-only diagnostics helper —
+  // fall back to the safe 4-char tail.
+  const width = typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 4;
+  return s.length > width ? s.slice(-width) : "*".repeat(Math.max(width, 4));
 }
 
 /** Trim to a usable key, or `null` for blank/absent/non-string input. */

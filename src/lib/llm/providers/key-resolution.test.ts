@@ -29,6 +29,16 @@ describe("W45 331-1 tailOf (secrecy contract)", () => {
     assert.equal(tailOf(""), "");
     assert.equal(tailOf(null), "");
   });
+
+  it("never echoes a long secret when the tail width is non-positive", () => {
+    // n <= 0 must fall back to the safe 4-char tail, not slice(-0)/slice(-(-1))
+    // which would return the WHOLE secret from a diagnostics helper.
+    for (const n of [0, -1, -100]) {
+      const got = tailOf(FUNDED, n);
+      assert.equal(got, "19b3", `tailOf(secret, ${n}) must not echo the secret`);
+      assert.ok(!got.includes(FUNDED), "the full secret never appears");
+    }
+  });
 });
 
 describe("W45 331-1 parseEnvFile", () => {

@@ -6235,6 +6235,27 @@ describe("W346-A1 brief-driven minimum file set", () => {
     assert.equal(merged.length, base.length);
   });
 
+  it("the brief floor is total when the project carries no lattice domain and no contracted entities", () => {
+    // A noun-rich brief with no spec-graph nodes, no lattice.domain and no
+    // contract entities: the floor fallback still needs a domain label and must
+    // not dereference an absent contracts.entities[0].
+    const project = {
+      brief:
+        "a flower shop website with bouquets, delivery, occasions, wedding flowers, gift wrapping, care tips and subscriptions",
+      specGraph: { nodes: [] },
+      lattice: { jobs: [], entities: ["bouquet"] },
+      contracts: null,
+    };
+    const spec = { typeSignatures: [] as string[] };
+    assert.ok(briefModuleFloor(project) >= 2, "the noun floor engages");
+    const merged = mergeMinimumPlan([], deriveRequiredModules(project, spec), {
+      minimum: briefModuleFloor(project),
+      project,
+    });
+    assert.ok(merged.length >= 2, "the floor fallback materialised modules");
+    assert.ok(merged.every((m) => typeof m.path === "string" && m.path.length > 0));
+  });
+
   it("every declared spec-graph job is a required module (planned >= declared)", () => {
     const project = {
       brief: "a ledger with rent, lease and tenant records, payment tracking and property reminders",

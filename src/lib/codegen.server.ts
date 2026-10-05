@@ -2555,7 +2555,7 @@ function floorFallbackModules(
   );
   const domainName =
     (typeof project?.lattice?.domain === "string" && project.lattice.domain.trim()) ||
-    (contracted[0]!.name ?? "").trim() ||
+    (contracted[0]?.name ?? "").trim() ||
     "domain";
   const nouns = briefNounHits(typeof project?.brief === "string" ? project.brief : "").required;
   const out: RequiredModule[] = [
