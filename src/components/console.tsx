@@ -7059,7 +7059,10 @@ function GateVerdictDetail({
   phase: PhaseId;
   gate: NonNullable<PhaseRecord["gate"]>;
 }) {
-  const unmet = gate.unmet ?? [];
+  // fixes/350 U1: a gate on an imported/hand-edited record can be partial — a
+  // non-array `unmet` must read as the honest empty list, never `.map` a junk
+  // value (the foreign-object class the F3 sweep guarded for prompt generation).
+  const unmet = Array.isArray(gate.unmet) ? gate.unmet : [];
   const registry = DOD[phase] ?? [];
   const criterionById = new Map(registry.map((g) => [g.id, g.criterion]));
   return (
@@ -7096,7 +7099,10 @@ function GateVerdictDetail({
       <p className="text-faint">advisory — recorded, not blocking</p>
       {unmet.includes("p7-research") ? <DeepenResearchButton project={project} phase={phase} /> : null}
       <p className="text-faint">
-        checked {gate.checkedAt ? agoLabel(gate.checkedAt) : "n/a"} · evidence {gate.evidenceHash}
+        checked {gate.checkedAt ? agoLabel(gate.checkedAt) : "n/a"} · evidence{" "}
+        {typeof gate.evidenceHash === "string" && gate.evidenceHash.length > 0
+          ? gate.evidenceHash
+          : "unrecorded"}
       </p>
     </div>
   );
@@ -7118,6 +7124,10 @@ function PhaseRecordView({
 }) {
   const def = PHASES[phase];
   const rec = project.phases[phase];
+  // fixes/350 U1: a gate on an imported/hand-edited record can be partial (no
+  // `unmet` array) — coerce it here so the summary never reads `.length` off a
+  // junk value (the foreign-object class the F3 sweep guarded for prompts).
+  const gateUnmet = rec.gate && Array.isArray(rec.gate.unmet) ? rec.gate.unmet : [];
   const meta =
     PHASE_STATUS_META[rec.status] ?? {
       glyph: null,
@@ -7176,9 +7186,15 @@ function PhaseRecordView({
               ) : (
                 <span className="text-danger">FAIL</span>
               )}
-              <span className="text-faint"> · {rec.gate.evidenceHash.slice(0, 8)}</span>
-              {rec.gate.unmet.length ? (
-                <span className="text-faint"> · {rec.gate.unmet.length} unmet</span>
+              <span className="text-faint">
+                {" "}
+                ·{" "}
+                {typeof rec.gate.evidenceHash === "string" && rec.gate.evidenceHash.length > 0
+                  ? rec.gate.evidenceHash.slice(0, 8)
+                  : "unrecorded"}
+              </span>
+              {gateUnmet.length ? (
+                <span className="text-faint"> · {gateUnmet.length} unmet</span>
               ) : null}
             </summary>
             <GateVerdictDetail project={project} phase={phase} gate={rec.gate} />

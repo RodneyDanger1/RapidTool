@@ -113,3 +113,35 @@ test("Run CTAs reflect the busy latch (346 T4 · UI-11)", () => {
     "the Artifacts empty-state Run CTA must use the shared canExecute predicate",
   );
 });
+
+test("Phase gate detail survives a PARTIAL foreign gate (350 · U1)", () => {
+  // repairPhases keeps a record's `gate` verbatim (`r.gate ?? null`), so a
+  // hand-edited/foreign build.json can carry `gate: { passed: false }` with no
+  // `unmet` array and no `evidenceHash`. Both phase-detail surfaces then threw
+  // `TypeError: Cannot read properties of undefined (reading 'slice')` and the
+  // PaneBoundary replaced the pane (browser-reproduced on an imported record:
+  // probe10). Each read must render an honest unknown, never throw.
+  assert.doesNotMatch(RAIL, /rec\.gate\.evidenceHash\.slice\(/, "rail must not slice a missing hash");
+  assert.match(
+    RAIL,
+    /typeof gate\.evidenceHash === "string" && gate\.evidenceHash\.length > 0/,
+    "rail must guard the evidence hash before slicing it",
+  );
+  assert.match(RAIL, /Array\.isArray\(gate\.unmet\) \? gate\.unmet : \[\]/, "rail must coerce a junk unmet");
+  assert.doesNotMatch(RAIL, /rec\.gate\.unmet\.length/, "rail must not read .length on a missing unmet");
+  assert.doesNotMatch(RAIL, /rec\.gate\.evidenceHash\.slice\(/, "rail must not slice an unguarded hash");
+
+  assert.match(
+    CONSOLE,
+    /typeof rec\.gate\.evidenceHash === "string" && rec\.gate\.evidenceHash\.length > 0/,
+    "record view must guard the evidence hash before slicing it",
+  );
+  assert.doesNotMatch(CONSOLE, /rec\.gate\.unmet\.length/, "record view must not read .length on a missing unmet");
+  assert.doesNotMatch(
+    CONSOLE,
+    /text-faint"> · \{rec\.gate\.evidenceHash\.slice\(0, 8\)\}/,
+    "record view must not render an unguarded evidence slice",
+  );
+  assert.match(CONSOLE, /Array\.isArray\(rec\.gate\.unmet\)/, "record view must coerce a junk unmet");
+  assert.match(CONSOLE, /Array\.isArray\(gate\.unmet\) \? gate\.unmet : \[\]/, "gate verdict must coerce a junk unmet");
+});

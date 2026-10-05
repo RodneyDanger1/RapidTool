@@ -116,6 +116,12 @@ function PhaseRecordDetail({
 }) {
   const def = PHASE_BY_ID.get(phase) ?? null;
   const rec = project.phases.find((r) => r.id === phase) ?? null;
+  // fixes/350 U1: a gate on an imported/hand-edited record can be PARTIAL (no
+  // `unmet` array, no `evidenceHash`). Reading those fields must render an
+  // honest unknown instead of throwing out of the detail pane (the same
+  // foreign-object class the F3 sweep guarded for prompt generation).
+  const gate = rec?.gate ?? null;
+  const gateUnmet = gate && Array.isArray(gate.unmet) ? gate.unmet : [];
   const arts = project.artifacts.filter((a) => a.phase === phase);
   const decisions = project.decisions.filter((d) => d.phase === phase);
   const isCurrent = project.currentPhase === phase;
@@ -155,26 +161,29 @@ function PhaseRecordDetail({
             {rec.completedAt !== undefined ? ` · completed ${agoLabel(rec.completedAt)} ago` : ""}
           </p>
 
-          {rec.gate ? (
+          {gate ? (
             <p className="mt-1.5 font-mono text-xs">
               <span className="text-muted">DoD </span>
-              {rec.gate.passed ? (
+              {gate.passed ? (
                 <span className="text-ok">PASS</span>
               ) : (
                 <span className="text-danger">FAIL</span>
               )}
               <span className="text-faint">
                 {" "}
-                · checked {agoLabel(rec.gate.checkedAt)} ago · evidence {rec.gate.evidenceHash.slice(0, 8)}
+                · checked {typeof gate.checkedAt === "number" ? `${agoLabel(gate.checkedAt)} ago` : "unknown"} · evidence{" "}
+                {typeof gate.evidenceHash === "string" && gate.evidenceHash.length > 0
+                  ? gate.evidenceHash.slice(0, 8)
+                  : "unrecorded"}
               </span>
-              {rec.gate.unmet.length ? <span className="text-warn"> · {rec.gate.unmet.length} unmet</span> : null}
+              {gateUnmet.length ? <span className="text-warn"> · {gateUnmet.length} unmet</span> : null}
             </p>
           ) : (
             <p className="mt-1.5 font-mono text-xs text-faint">No DoD gate verdict recorded yet.</p>
           )}
-          {rec.gate && rec.gate.unmet.length > 0 ? (
+          {gateUnmet.length > 0 ? (
             <ul className="mt-1 space-y-0.5 font-mono text-xs text-warn">
-              {rec.gate.unmet.map((u) => (
+              {gateUnmet.map((u) => (
                 <li key={u}>unmet: {u}</li>
               ))}
             </ul>
