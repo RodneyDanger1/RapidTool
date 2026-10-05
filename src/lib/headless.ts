@@ -3142,23 +3142,54 @@ async function defaultP6RunTree(project: Project, workDir?: string): Promise<Tre
   }
 }
 
+/**
+ * W2 · 348: persist the tree-run verdict the pipeline computed onto the project
+ * record, additively. The acceptance reader (acceptance.readMachineEvidence)
+ * reads `treeRun.verdictHash`, and the pipeline review reads `treeRun` +
+ * `substance`; before this seam both reported an honest `unknown` because
+ * neither field was ever written. The shape is deliberately minimal and
+ * factual: `ok`/`verdict` mirror the TreeRunOutcome, `verdictHash` is carried
+ * only when the run minted one, and `substance.verdict` is the census label
+ * only when the run produced a census. Absent on legacy records (unknown stays
+ * honest) — a value is never invented. This seam is reached only for a GREEN
+ * tree-run (the tested stamp is never minted for red), so a present `ok` is
+ * always the run's own verdict.
+ */
+function withTreeRunVerdict(project: Project, verdict: TreeRunOutcome): Project {
+  const verdictHash =
+    typeof verdict.verdictHash === "string" && verdict.verdictHash.length > 0 ? verdict.verdictHash : null;
+  const substanceVerdict = verdict.substance?.verdict;
+  return {
+    ...project,
+    treeRun: {
+      ok: verdict.ok === true,
+      verdict: verdict.ok === true ? "pass" : "fail",
+      ...(verdictHash !== null ? { verdictHash } : {}),
+    },
+    ...(typeof substanceVerdict === "string" ? { substance: { verdict: substanceVerdict } } : {}),
+  } as Project;
+}
+
 /** fixes/147 (E2): the tested-equivalent mint for a CONVERGED tree-run —
  *  delegates to codegen.server's mintTreeRunTested (the same seam run-eval's
  *  single-synthesis flow consumes), which mints lastTest {label:"tested"} ONLY
  *  when the tree-run actually executed specs; a UI-shell/no-spec green run
  *  falls back to the honest current state + a coded `p6.tree.tested.skipped`
  *  note. A codegen import failure degrades to the synthesized project — the
- *  P6 DoD gate is then recorded honestly (red p6-verified), never faked. */
+ *  P6 DoD gate is then recorded honestly (red p6-verified), never faked.
+ *  W2 · 348: the applied verdict is also persisted (withTreeRunVerdict) so the
+ *  record carries `treeRun`/`substance` instead of an honest-but-empty unknown. */
 async function applyTreeRunTestedMint(project: Project, verdict: TreeRunOutcome): Promise<Project> {
+  let minted = project;
   try {
     const codegen = (await import("./codegen.server.ts")) as {
       mintTreeRunTested?: (p: Project, o: TreeRunOutcome) => Project;
     };
-    if (typeof codegen.mintTreeRunTested === "function") return codegen.mintTreeRunTested(project, verdict);
+    if (typeof codegen.mintTreeRunTested === "function") minted = codegen.mintTreeRunTested(project, verdict);
   } catch {
     /* deterministic floor stands — the honest gate record still runs */
   }
-  return project;
+  return withTreeRunVerdict(minted, verdict);
 }
 
 /**

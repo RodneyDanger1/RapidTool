@@ -836,6 +836,56 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
     assert.ok(res.events.some((e) => e.includes("P6 journey converged")), "events trail says converged");
   });
 
+  it("W2 · 348: a converged tree-run persists treeRun {ok, verdictHash, verdict} + substance {verdict} on the record (and survives the persisted JSON round-trip)", async () => {
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    const verdict: TreeRunOutcome = {
+      ...greenVerdict,
+      verdictHash: "abc123hash",
+      substance: {
+        stubs: 0,
+        reexports: 0,
+        real: 2,
+        files: 2,
+        verdict: "real",
+        greenWhileStubbed: false,
+        oracleStubTrap: false,
+      },
+    };
+    const res = await driveP6Journey(base, {
+      deps: { synthesize: async (p) => withTree(p), runTree: async () => verdict, recordGate: greenGateRecord },
+    });
+    assert.equal(res.outcome, "converged", "the green verdict converges through the real seam");
+    // The additive fields are read off the returned (persistable) record.
+    const rec = res.project as unknown as {
+      treeRun?: { ok?: unknown; verdict?: unknown; verdictHash?: unknown };
+      substance?: { verdict?: unknown };
+    };
+    assert.deepEqual(
+      rec.treeRun,
+      { ok: true, verdict: "pass", verdictHash: "abc123hash" },
+      "the record carries the tree-run {ok, verdict, verdictHash} the run computed",
+    );
+    assert.equal(rec.substance?.verdict, "real", "the substance census label is persisted");
+    // The persisted project JSON keeps them (the same exportProjectJson the CLI saves).
+    const reread = importProject(exportJson(res.project));
+    assert.equal(reread.ok, true, "the persisted record re-imports");
+    if (reread.ok) {
+      const rr = reread.project as unknown as {
+        treeRun?: { verdictHash?: unknown; ok?: unknown };
+        substance?: { verdict?: unknown };
+      };
+      assert.equal(rr.treeRun?.verdictHash, "abc123hash", "verdictHash survives export→import");
+      assert.equal(rr.treeRun?.ok, true, "ok survives export→import");
+      assert.equal(rr.substance?.verdict, "real", "substance.verdict survives export→import");
+    }
+    // A record the pipeline never ran a tree for stays honest (absent, not invented).
+    assert.equal(
+      (base as unknown as { treeRun?: unknown }).treeRun,
+      undefined,
+      "an unrun record carries no treeRun (unknown stays unknown)",
+    );
+  });
+
   it("fixes/326 F1b: green tree-run + red fit-class gate → ONE bounded gate-repair cycle; the repaired tree re-records the gate green and converges (no shortcut)", async () => {
     const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
     const seen: { cycle: number; gateRepair?: string }[] = [];
