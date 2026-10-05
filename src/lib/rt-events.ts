@@ -4,8 +4,8 @@
 // Zero-dep, deterministic, side-effect-free: no window/process/fs imports, no
 // Date.now() at module scope, no auto-run path. Mirrors tracing.ts doctrine —
 // the PURE CORE defines shapes and rules; HOST GLUE (rt-client.ts for the
-// browser, scripts/log-sink.mjs for the CLI) stamps wall-clock time and owns
-// sinks/retention. Same inputs in ⇒ byte-identical outputs out.
+// browser, runtime-log.server.ts for the CLI/headless) stamps wall-clock time
+// and owns sinks/retention. Same inputs in ⇒ byte-identical outputs out.
 //
 // RtEvent (v1) is the single currency for crash/error/telemetry rows in both
 // hosts. Machine-first fields (event/code/scope/phase), human `message` prose
@@ -223,7 +223,7 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 // diagnose.ts / rt-timeline.ts / rapidtool-cli.mjs do NOT count), and none is
 // emitted server- or CLI-side under its exact name. Emit one, or trim it — a
 // registered name nothing emits is a guardrail only in prose.
-//   boot.start · boot.ready · sys.memory · sys.step_overdue ·
+//   boot.start · boot.ready · sys.memory ·
 //     boundary.crash · ui.action_error ·
 //     store.action_error · engine.phase_fallback · engine.phase_error ·
 //     wild.driver_cap · wild.driver_stall · wild.driver_start_refused ·
@@ -235,10 +235,10 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 //     persist.salvaged · persist.ok · watcher.error · watcher.refused ·
 //     harvest.error · search.unavailable · diagnose.ran
 // (cli.invocation left this list in W40/N5 — OPS-4 landed its real emitter,
-// rapidtool-cli.mjs:163 — so the never-set is 38, not the 39 N6 counted.
+// rapidtool-cli.mjs:325 — so the never-set is 38, not the 39 N6 counted.
 // A5 re-count at HEAD 2d2c74a (fixes/309_a5_evdocs.md; script ~/a5_census.py):
 // every non-test `event:` emit re-scanned — STILL 38 of 56; ui.boundary_crash
-// (the R1/297 +1 name, :144) is emitted at error-component.tsx:60 and is
+// (the R1/297 +1 name, :147) is emitted at error-component.tsx:60 and is
 // correctly absent above — the arithmetic is re-derived, not inherited, and
 // the list is byte-identical to the scan.
 // 312 C5 re-count 2026-09-29 (fixes/312_c5_trust.md; same script): catalogue 56 ·
@@ -263,6 +263,15 @@ export const RT_EVENT_NAMES: Record<string, RtScope> = {
 // emit-site literal), so sys.step_overdue moved onto the dead list above
 // (added there). No name was added or removed and no other list member changed;
 // the arithmetic is re-derived, not inherited.
+// W60 · 346 lane-4 re-count 2026-10-04 (same comment-aware non-test `event:`
+// scan pattern, HEAD c16220b): catalogue 60 · emitted 22 · dead 38 — the 346
+// P2-6 wiring gave engine.wildStep its `boundedStepWatch` consumer, which emits
+// tier-1 `sys.step_overdue` (engine.ts:5306) and tier-2 `wild.step_timeout`
+// (engine.ts:5319; console.tsx:1265 keeps its UI-poll producer). So
+// sys.step_overdue LEAVES the dead list above — the W56/343-3 count of 39 is
+// superseded — and no other member changed. `rt-events.test.ts`'s census pin
+// re-derives this exact partition from the live source on every run, so the
+// list cannot drift from the bytes without a red test.
 // ---------------------------------------------------------------------------
 
 /** True when the event string is a catalogue member. */
@@ -284,12 +293,15 @@ export const P6_PHASE_MAX_MS = 240_000;
  *  set the 2× stall latch on resolve — auto-pausing a healthy run mid-
  *  synthesis. Derived from the phase max + a scheduling margin. */
 export const WILD_STEP_BUDGET_MS = P6_PHASE_MAX_MS + 15_000;
-// TODO(N6-W6 · fixes/295_p4_sweeps.md): WILD_STEP_AUTOPAUSE_MS has 0
-// external refs (P4 re-count) — watchdog.ts:138's message promises
-// "auto-pause on resolve", but no consumer reads this constant. Wire the
-// real consumer or delete it with the doctrine text; gated by the EXPORT
-// SURFACE pin.
-export const WILD_STEP_AUTOPAUSE_MS = P6_PHASE_MAX_MS + 60_000;
+// W60 · 346 lane-4: WILD_STEP_AUTOPAUSE_MS is STRUCK — it was
+// P6_PHASE_MAX_MS + 60_000 (300 s) with 0 refs, and the old watchdog.ts:138
+// "auto-pause on resolve" message it pointed at no longer exists. The real
+// tier-2 is a RELATION, not a fixed ms: engine.wildStep passes
+// `autopauseMs: stepBudgetMs * 2` to boundedStepWatch (engine.ts:5300), where
+// stepBudgetMs is the caller's per-step override or WILD_STEP_BUDGET_MS
+// (normalizeStepBudgetMs, engine.ts:5043). The only truth is
+// `elapsedMs >= budgetMs * 2` in watchdogDecision (watchdog.ts); a constant
+// would imply a consumer this module never had, so it is deleted.
 export const CHAT_STEP_BUDGET_MS = 60_000;
 export const HEARTBEAT_MS = 1_000;
 export const HEARTBEAT_PERSIST_EVERY_MS = 5_000;
@@ -297,10 +309,11 @@ export const HEARTBEAT_LAG_WARN_MS = 3_000;
 export const STALL_CRITICAL_MS = 10_000;
 // TODO(N6-W6 · fixes/295_p4_sweeps.md; A5 strike — fixes/309_a5_evdocs.md):
 // both LONGTASK_* constants are DEAD — 0 external refs (P4 re-count; A5
-// re-verified at HEAD 2d2c74a): rt-client.ts:463 hardcodes the 250 ms report
-// floor, :465 coalesces on RT_COALESCE_MS (5 000 ms). The old "10 s coalesce"
-// claim at rt-client.ts:456 was STRUCK by A5 (the implemented §2.5 window is
-// the single coalescing constant for that path); wiring rt-client to THESE
+// re-verified at HEAD 2d2c74a). W60 re-anchored the byte refs at HEAD c16220b:
+// rt-client.ts:481 hardcodes the 250 ms report floor, :483 coalesces on
+// RT_COALESCE_MS (5 000 ms). The old "10 s coalesce" claim (formerly at
+// rt-client.ts:456) was STRUCK by A5 — the implemented §2.5 window is the
+// single coalescing constant for that path; wiring rt-client to THESE
 // constants (if the §5.4 draft's 1-row / 10 s cap is still wanted) or
 // deleting both remains an owner decision (fixes/307_b4_sweep.md §P3). Until
 // then §5.6's "single source of truth" is prose only for this pair. Gated by

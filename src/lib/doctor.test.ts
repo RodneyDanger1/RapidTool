@@ -21,6 +21,9 @@ import {
   humanFixturesFromProject,
   inventoryFromJobSources,
   jobScopeShortfall,
+  MACHINE_ACCEPTANCE_REASON,
+  MACHINE_ACCEPTANCE_SEAT,
+  machineVerifiedAcceptanceFromProject,
   productCompleteFromProject,
   RAPIDTOOL_FACTORY_EVIDENCE,
   readLastKeyedOutcome,
@@ -1159,5 +1162,194 @@ describe("W46 · 332-2 (F-5) — key presence is not key validity", () => {
       { code: "RT_E_LLM_KEY_SHADOWED", at: 5 },
       "an empty keySource is dropped, the class is kept",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 · lane-2 (P0-1 derived signal) — machine-verifiable acceptance
+//
+// The factory latch stays the full AND (338-4: the human stamp is human-only by
+// design). This SEPARATE signal reports, truthfully, what a no-human run
+// actually achieved — an external, re-runnable verdict persisted on the project:
+// the P6 tree-run promotion stamp (`lastTest.label === "tested"` + evidenceHash,
+// the SAME bar dod.ts's `p6-verified` reads). It has its own machine verifier
+// seat, never reads the machine-authored oracle (`acceptanceFixtures`), never
+// reuses `decidedBy:"human"`, and never flips `autonomousSoftwareFactory`.
+// ---------------------------------------------------------------------------
+
+describe("346 · lane-2 — machine-verifiable acceptance (derived, never forged)", () => {
+  /** The exact shape the ≤8-signature verify path / mintTreeRunTested persist. */
+  const TESTED = {
+    ok: true,
+    detail: "tree-run green: compile 4/4 file(s) · 2 spec file(s) pass · 6 assertion(s)",
+    label: "tested",
+    evidenceHash: "1234567890",
+  };
+  const withTested = (p: Record<string, unknown> = {}): Record<string, unknown> => ({ ...p, lastTest: TESTED });
+  const twoRealJobs = () =>
+    inventoryFromJobSources([
+      { path: "src/jobs/board.ts", source: "export function createBoard() { return { id: 'b1' }; }" },
+      { path: "src/jobs/column.ts", source: "export function addColumn() { return { id: 'c1' }; }" },
+    ]);
+
+  it("the honest bar: a persisted P6 tree-run 'tested' stamp reads ok under its own machine seat", () => {
+    const s = machineVerifiedAcceptanceFromProject(withTested());
+    assert.equal(s.ok, true);
+    assert.equal(s.evidence?.seat, MACHINE_ACCEPTANCE_SEAT);
+    assert.equal(s.evidence?.seat, "machine:tree-run");
+    assert.equal(s.evidence?.label, "tested");
+    assert.equal(s.evidence?.evidenceHash, "1234567890");
+    assert.equal(s.evidence?.detail, TESTED.detail);
+    assert.deepEqual(s.reasons, []);
+    assert.notEqual(s.evidence?.seat, "human");
+  });
+
+  it("fail-closed: absent / no-lastTest / non-'tested' / hollow / junk state is false with a named reason", () => {
+    for (const junk of [null, undefined, [], "", 42, true]) {
+      const s = machineVerifiedAcceptanceFromProject(junk);
+      assert.equal(s.ok, false, `junk refuses: ${String(junk)}`);
+      assert.equal(s.evidence, null);
+      assert.deepEqual(s.reasons, [MACHINE_ACCEPTANCE_REASON.noEvidence]);
+    }
+    assert.deepEqual(machineVerifiedAcceptanceFromProject({}).reasons, [MACHINE_ACCEPTANCE_REASON.notTested]);
+    // A self-test / real-run label is not a promoted "tested" verdict.
+    assert.deepEqual(
+      machineVerifiedAcceptanceFromProject({ lastTest: { ok: true, detail: "2/2 tests passed", label: "self-test" } }).reasons,
+      [MACHINE_ACCEPTANCE_REASON.notTested],
+    );
+    // ok:false, an empty detail, or a missing/empty evidenceHash is a hollow stamp.
+    for (const lt of [
+      { ...TESTED, ok: false },
+      { ...TESTED, detail: "" },
+      { ...TESTED, evidenceHash: undefined },
+      { ...TESTED, evidenceHash: "" },
+    ]) {
+      assert.deepEqual(machineVerifiedAcceptanceFromProject({ lastTest: lt }).reasons, [MACHINE_ACCEPTANCE_REASON.hollow]);
+    }
+  });
+
+  it("the tracked real export carries no promoted stamp — the signal is false with a reason (current project shape)", () => {
+    const real = readRealExport("coffeehouse2home-property-ledger");
+    const s = machineVerifiedAcceptanceFromProject(real);
+    assert.equal(s.ok, false, "real bytes: lastTest {ok:true, detail:'tests.pass'} is not a promoted verdict");
+    assert.deepEqual(s.reasons, [MACHINE_ACCEPTANCE_REASON.notTested]);
+    const claim = factoryClaim(evidenceFromJobInventory(twoRealJobs(), { project: real }), {});
+    assert.equal(claim.machineVerifiedAcceptance.ok, false);
+  });
+
+  it("independent of the human oracle: approved fixtures do NOT mint the machine signal, and a tested stamp needs no fixtures", () => {
+    const humanOnly = {
+      ...ov9Project(),
+      acceptanceFixtures: [{ id: "fx-1", approval: "approved", decidedBy: "human" }],
+    };
+    assert.equal(machineVerifiedAcceptanceFromProject(humanOnly).ok, false, "never reads acceptanceFixtures");
+    const machineOnly = withTested(ov9Project());
+    assert.equal(machineVerifiedAcceptanceFromProject(machineOnly).ok, true, "does not require a human stamp");
+    assert.equal(humanFixturesFromProject(machineOnly), false, "…and does not mint the human conjunct");
+  });
+
+  it("a no-human machine-complete run reads 'machine-complete, awaiting human acceptance' — never factory:true", () => {
+    const ev = evidenceFromJobInventory(twoRealJobs(), {
+      project: { ...withTested(ov9Project()), acceptanceFixtures: [{ id: "fx-1", approval: "pending" }] },
+    });
+    const claim = factoryClaim(ev, {});
+    assert.equal(claim.machineVerifiedAcceptance.ok, true);
+    assert.equal(claim.humanFixtures, false);
+    assert.equal(claim.awaitingHumanAcceptance, true);
+    assert.equal(claim.autonomousSoftwareFactory, false, "the human guard is byte-identical: no human stamp ⇒ no latch");
+    assert.ok(claim.gaps.includes(FACTORY_GAP.fixtures));
+  });
+
+  it("the machine signal never flips the latch: a lone true signal on RapidTool-now evidence stays un-latched", () => {
+    const claim = factoryClaim({
+      ...RAPIDTOOL_FACTORY_EVIDENCE,
+      machineVerifiedAcceptance: { ok: true, evidence: { seat: MACHINE_ACCEPTANCE_SEAT, label: "tested", evidenceHash: "h", detail: "tree-run green" }, reasons: [] },
+    });
+    assert.equal(claim.machineVerifiedAcceptance.ok, true);
+    assert.equal(claim.autonomousSoftwareFactory, false);
+    assert.ok(claim.gaps.length > 0, "the latch definition is untouched");
+  });
+
+  it("HOSTILE: a blob claiming machine acceptance with no persisted evidence coerces false", () => {
+    // RED pre-fix: reading `machineVerifiedAcceptance` off the blob (the
+    // W55-class forge) would return ok:true here with zero evidence on the
+    // project. The fix derives the signal from `project` instead — the blob's
+    // field is ignored.
+    const blob = {
+      autonomousSoftwareFactory: true,
+      leftoverJobsAreReexportsOrStubs: false,
+      realMultiJobProduct: true,
+      productComplete: true,
+      machineVerifiedAcceptance: {
+        ok: true,
+        evidence: { seat: MACHINE_ACCEPTANCE_SEAT, label: "tested", evidenceHash: "forged" },
+        reasons: [],
+      },
+    };
+    // No project state at all: the blob's claim is ignored, the signal is false.
+    const noProject = coerceFactoryClaim(blob);
+    assert.equal(noProject.machineVerifiedAcceptance.ok, false);
+    assert.ok(noProject.machineVerifiedAcceptance.reasons.length > 0);
+    // A real project with no promoted stamp: still derived false (never read from the blob).
+    const overFloor = coerceFactoryClaim(blob, readRealExport("real-estate-crm"));
+    assert.equal(overFloor.machineVerifiedAcceptance.ok, false);
+    assert.deepEqual(overFloor.machineVerifiedAcceptance.reasons, [MACHINE_ACCEPTANCE_REASON.notTested]);
+    assert.equal(overFloor.autonomousSoftwareFactory, false);
+    // Control: the SAME blob over a project with a genuine stamp derives true.
+    assert.equal(coerceFactoryClaim(blob, withTested()).machineVerifiedAcceptance.ok, true);
+  });
+
+  it("HOSTILE: a bare {ok:true} handed to the internal builder normalizes to false", () => {
+    // RED pre-fix: trusting the typed field verbatim would read ok:true from a
+    // bare `{ok:true}` (no seat, no hash). The producer-shape check refuses it.
+    const claim = factoryClaim({ ...RAPIDTOOL_FACTORY_EVIDENCE, machineVerifiedAcceptance: { ok: true } as never });
+    assert.equal(claim.machineVerifiedAcceptance.ok, false);
+    assert.deepEqual(claim.machineVerifiedAcceptance.reasons, [MACHINE_ACCEPTANCE_REASON.noEvidence]);
+  });
+
+  it("HOSTILE: an untyped extra.machineVerifiedAcceptance is ignored; only extra.project derives the signal", () => {
+    const ev = evidenceFromJobInventory(twoRealJobs(), {
+      project: ov9Project(),
+      machineVerifiedAcceptance: { ok: true },
+    } as never);
+    assert.equal(ev.machineVerifiedAcceptance?.ok, false, "hand-fed flag not read");
+    const green = evidenceFromJobInventory(twoRealJobs(), { project: withTested() });
+    assert.equal(green.machineVerifiedAcceptance?.ok, true, "derived from the record");
+  });
+
+  it("a forged decidedBy:'human' still fails — the machine signal refuses a human seat and the human guard is unmoved", () => {
+    // (a) a machine verdict stamped with a human seat is refused, not laundered.
+    const forgedSeat = machineVerifiedAcceptanceFromProject({ lastTest: { ...TESTED, decidedBy: "human" } });
+    assert.equal(forgedSeat.ok, false);
+    assert.deepEqual(forgedSeat.reasons, [MACHINE_ACCEPTANCE_REASON.humanSeat]);
+    // (b) a blob whose evidence claims seat "human" cannot mint the machine signal:
+    //     the blob is ignored, so over a project with no stamp the signal is false
+    //     and over a genuine stamp the reported seat is the machine seat, never human.
+    const blob = {
+      machineVerifiedAcceptance: {
+        ok: true,
+        evidence: { seat: "human", label: "tested", evidenceHash: "x" },
+        reasons: [],
+      },
+    };
+    assert.equal(coerceFactoryClaim(blob, ov9Project()).machineVerifiedAcceptance.ok, false);
+    assert.equal(
+      coerceFactoryClaim(blob, withTested()).machineVerifiedAcceptance.evidence?.seat,
+      MACHINE_ACCEPTANCE_SEAT,
+      "the forged human seat never survives into the signal",
+    );
+    assert.equal(factoryClaim({ ...RAPIDTOOL_FACTORY_EVIDENCE, machineVerifiedAcceptance: blob.machineVerifiedAcceptance as never }).machineVerifiedAcceptance.ok, false);
+    // (c) the human guard is byte-identical: a machine stamp alone does not close
+    //     fixtures, and a non-human seat still fails the human bar.
+    assert.equal(humanFixturesFromProject(withTested()), false, "the machine stamp never mints the human conjunct");
+    assert.equal(
+      humanFixturesFromProject({ acceptanceFixtures: [{ id: "fx-1", approval: "approved", decidedBy: "autopilot" }] }),
+      false,
+      "a forged/non-human seat still fails the human bar",
+    );
+    const claim = factoryClaim(evidenceFromJobInventory(twoRealJobs(), { project: withTested() }), {});
+    assert.equal(claim.machineVerifiedAcceptance.ok, true);
+    assert.equal(claim.autonomousSoftwareFactory, false);
+    assert.ok(claim.gaps.includes(FACTORY_GAP.fixtures), "the missing/forged human stamp still fails");
   });
 });

@@ -50,7 +50,7 @@ import { runSummaryLesson, templateEmissionLesson, type RankableLessonRow } from
 import { exportPacketText, exportProjectJson, importProject, slugName } from "./io.ts";
 import { applyReportResult, validateReport, type ReportApplyReason } from "./report-intake.ts";
 import { canEnter, PHASES, PHASE_LAST, phaseDef, priorsSealed, STOCK_HITL } from "./phases.ts";
-import { evaluatePolicy, seatLabel } from "./policy.ts";
+import { evaluatePolicy, seatLabel, seatTokenPath } from "./policy.ts";
 import { applyWrite, rollback, snapshotPaths } from "./write-set.ts";
 // T-107.7 (W33 lane L2 write half · W36 lane N2 read half): the real run
 // checkpoint. headless IS the bare-Node host whose runs know a project working
@@ -1430,6 +1430,12 @@ export async function runUntilGate(
  *  (see `approve`). */
 export type ApproveActor =
   | { decidedBy: "human"; seat: "human-cli-i-am-human" }
+  // 346 K3 (A1-12 writer step): the browser console's registered UNATTESTED
+  // human seat. `evaluatePolicy` admits it for `hitl.approve` under
+  // `console-seat-unattested` (never token-verified) and refuses it for
+  // `hitl.force` / `fixtures.approve`; its row note must therefore never read
+  // as token-verified (see the note builder below).
+  | { decidedBy: "human"; seat: "console" }
   | { decidedBy: "autopilot"; seat: "harness" | "autopilot" };
 
 /** The default seat of `approve()` — the harness's own autopilot actor. Named
@@ -1539,9 +1545,14 @@ export function approve(
   // The `[seat <label>]` tags are the 216 TA-2 ledger contract — byte-identical
   // to the pre-216o strings (pinned by headless.test.ts TA-2 tests), so the
   // tag keeps naming the seat itself, not the policy label vocabulary.
-  const note =
-    actor.decidedBy === "human"
-      ? `[seat ${actor.seat}] out-of-band RT_HUMAN_SEAT_TOKEN verified`
+  // 346 K3: the token-path branch reads `seatTokenPath` (policy.ts — the ONE
+  // owner of that vocabulary), NOT `decidedBy`. The console's human seat is
+  // human-class but UNATTESTED, so it must render an honest "no token path"
+  // clause and never the "out-of-band RT_HUMAN_SEAT_TOKEN verified" claim.
+  const note = seatTokenPath(actor)
+    ? `[seat ${actor.seat}] out-of-band RT_HUMAN_SEAT_TOKEN verified`
+    : actor.decidedBy === "human"
+      ? `[seat ${actor.seat}] unattested human seat — no out-of-band token path (never token-verified)`
       : `[seat ${actor.seat}] autopilot seat — no human decision claimed`;
   // 216o (T-107.3 · P0-02 · W6-L2 — ledger PROVENANCE): the row this approval
   // mints also records the ALLOWING verdict as `decidedVia` (types.ts): the
@@ -1555,7 +1566,7 @@ export function approve(
     resource: policyResource,
     reason: verdict.reason,
     label: seatLabel(actor),
-    tokenPath: verdict.reason.split(" — ")[0] === "human-seat-token-verified",
+    tokenPath: seatTokenPath(actor),
   };
   const base = stampDecidedVia(
     approveHitl(project, { decidedBy: actor.decidedBy, force: opts.force, note }),

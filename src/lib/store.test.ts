@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dedupeMemoryIds, emptyProject, hydrateProject } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
+import { runGate } from "./dod.ts";
 import { RT_COALESCE_MS, shouldCoalesce, WILD_STEP_BUDGET_MS, type RtEvent } from "./rt-events.ts";
 import type { Artifact, ChatLogRow, HitlRequest, JsonLog, PhaseId, Project, WildParkInfo, WildPlan } from "./types.ts";
 
@@ -44,6 +45,7 @@ class MemoryStorage {
 const {
   codedFailureText,
   convergeRealRun,
+  foldStepSpend,
   keyedRefusalSince,
   KEY_UNUSABLE_CODES,
   measuredSpendFromUsage,
@@ -2715,18 +2717,36 @@ test("L3-10/L3-11/L3-03/L3-05/L3-04: the console wires the new surfaces", () => 
   assert.match(CONSOLE_TSX, /isMeasuredSpend\(spend\)/, "spend renders only a measured slice");
 });
 
-test("A1-12: a console approve records an unattested human decision, never the token-verified seat", () => {
+test("A1-12 / 346 K3: a console approve is tagged [seat console] with truthful provenance and never reads token-verified", () => {
   const p = install(projectAtGate(4));
   const res = useRapid.getState().approve(p.id);
   assert.equal(res.ok, true);
   const after = current(p.id);
   const d = after.decisions[after.decisions.length - 1];
   assert.equal(d.decidedBy, "human", "the console is the designed human surface");
+  // 346 K3 writer step: the row is TAGGED with the unattested console seat and
+  // carries the policy's allowing verdict + tokenPath:false.
+  assert.match(d.note ?? "", /\[seat console\]/, "the row is tagged with the console seat");
   assert.ok(!/\[seat human/.test(d.note ?? ""), "the row never claims the token-verified CLI human seat");
+  assert.equal(d.decidedVia?.action, "hitl.approve");
+  assert.equal(d.decidedVia?.resource, "gate:P4");
+  assert.equal(d.decidedVia?.label, "human/console");
+  assert.equal(d.decidedVia?.tokenPath, false, "the console has no token path — never token-verified");
+  assert.match(String(d.decidedVia?.reason), /^console-seat-unattested — /);
+  assert.ok(
+    !String(d.decidedVia?.reason).includes("human-seat-token-verified"),
+    "the allow reason must never name the token-verified seat",
+  );
+  // End to end: the tagged console row satisfies the p4-approved DoD criterion
+  // (the classification + provenance check the batch-4 support landed).
+  assert.ok(
+    !runGate(after, 4).unmet.some((g) => g.id === "p4-approved"),
+    "a truthfully tagged console approval passes p4-approved",
+  );
   const seatRow = after.logs.find((l) => l.event === "hitl.console_decision");
   assert.ok(seatRow, "the console decision records its seat provenance on the ledger");
-  assert.match(String(seatRow?.detail), /human-seat-unverified/, "the seat policy's unverified verdict is recorded");
-  assert.match(String(seatRow?.detail), /no out-of-band RT_HUMAN_SEAT_TOKEN delivery seam/);
+  assert.match(String(seatRow?.detail), /console-seat-unattested/, "the seat policy's allowing verdict is recorded");
+  assert.match(String(seatRow?.detail), /never a token-verified one/);
 });
 
 // ---------------------------------------------------------------------------
@@ -2795,6 +2815,36 @@ test("P1-5: recordSpend writes measured spend and accumulates; nothing measured 
   });
   // An unknown id is a refused no-op, never a write.
   assert.equal(useRapid.getState().recordSpend("ghost", { promptTokens: 1, completionTokens: 1 }), false);
+});
+
+test("346 K3: foldStepSpend folds a measured session-ledger delta into tokenUsage; an empty delta writes nothing", () => {
+  const p = seedProject();
+  // Absent/empty/non-measured deltas never touch the project — no fabricated
+  // zero, so the SpendChip keeps its honest "spend not recorded".
+  for (const empty of [null, undefined, { promptTokens: 0, completionTokens: 0, calls: 0 }]) {
+    assert.equal(foldStepSpend(p, empty), p, `empty ${JSON.stringify(empty)} must be a no-op`);
+  }
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(p, "tokenUsage"),
+    false,
+    "a no-op fold adds no tokenUsage key at all",
+  );
+  const once = foldStepSpend(p, { promptTokens: 111, completionTokens: 22, calls: 1 });
+  assert.notEqual(once, p, "a measured delta returns a new project");
+  assert.deepEqual(once.tokenUsage, { promptTokens: 111, completionTokens: 22, calls: 1 });
+  // Accumulates onto already-persisted spend (field-wise sum, calls as-is).
+  const twice = foldStepSpend(once, { promptTokens: 5, completionTokens: 6, calls: 2 });
+  assert.deepEqual(twice.tokenUsage, { promptTokens: 116, completionTokens: 28, calls: 3 });
+});
+
+test("346 K3: startWildRun wires the engine's onUsage sink to the fold (source guard)", () => {
+  const STORE_TS = readFileSync(fileURLToPath(new URL("./store.ts", import.meta.url)), "utf8");
+  assert.match(STORE_TS, /onUsage: \(usage\) => \{/, "the wild driver passes the engine a usage sink");
+  assert.match(
+    STORE_TS,
+    /foldStepSpend\(res\.project, stepSpend\)/,
+    "the step's measured delta is folded into the committed project",
+  );
 });
 
 test("P1-5: the chat server-fn envelope carries the provider's REAL measured usage (no fabrication)", async () => {

@@ -17,6 +17,20 @@
 //                            / worker_threads / native addons are DENIED, and a
 //                            V8 heap cap is applied. REAL enforcement — the
 //                            generated-code path (exec.runCode) uses it.
+//   • confined bound (fixes/346 lane-1 runner-strictness) -> the SECOND tier,
+//                            `opts.isolation:"confined"`: the SAME Permission
+//                            Model + heap cap and the SAME fs-write confinement
+//                            to the per-run scratch dir, but child_process is
+//                            EXPLICITLY ALLOWED (`--allow-child-process`) so a
+//                            harness that must spawn its own tool (compile-check
+//                            runs `node --test`) is not blanket-denied. Node
+//                            propagates the permission flags to spawned Node
+//                            descendants, so their writes stay scratch-confined
+//                            too (a NON-Node child would not inherit them:
+//                            declared, and Node prints its own SecurityWarning
+//                            for this flag). Filesystem READS are allowed
+//                            broadly (`--allow-fs-read=*`): the harness legs
+//                            must read the emitted tree outside the scratch.
 //
 // Platform gap (declared, not hidden): Windows Job Objects would give OS
 // kernel-enforced memory/CPU/process-count caps, but Node exposes no Job Object
@@ -69,11 +83,13 @@ type NodeRunCore =
 
 /**
  * fixes/346 P1-4: the REAL resource/process bound actually applied to a run.
- * Present ONLY when `opts.isolation:"strict"` was requested (so the legacy
- * envelope stays byte-identical). `mechanism:"none"` + `enforced:false` is the
- * honest degradation when the runtime lacks the Permission Model flag — never
- * a pretend claim.
+ * Present ONLY when `opts.isolation:"strict" | "confined"` was requested (so
+ * the legacy envelope stays byte-identical). `mechanism:"none"` +
+ * `enforced:false` is the honest degradation when the runtime lacks the
+ * Permission Model flag — never a pretend claim.
  */
+export type RunnerIsolationTier = "strict" | "confined";
+
 export type RunnerBound = {
   mechanism: "node-permission-model" | "none";
   /** Pure capability probe: this runtime exposes the `--permission` flag. */
@@ -81,14 +97,24 @@ export type RunnerBound = {
   /** True only when the bound was APPLIED to this run. */
   enforced: boolean;
   fsWriteConfined: boolean;
+  /** True only for `strict` when enforced: child_process/workers/addons denied. */
   subprocessDenied: boolean;
   heapCapMb: number | null;
+  // --- confined-tier additive fields (absent on a strict envelope, which stays
+  // byte-identical to the pre-lane-1 shape) ---
+  /** Which tier was requested: `confined` explicitly allows child_process
+   *  (`compile-check` spawns `node --test`) while keeping fs-write confined. */
+  tier?: RunnerIsolationTier;
+  /** True for `confined`: the tier explicitly permits spawning a child. */
+  subprocessAllowed?: boolean;
+  /** Honest scope of the applied bound — names what IS and is NOT covered. */
+  note?: string;
 };
 
 export type NodeRunResult = NodeRunCore & { sandbox: false; bound?: RunnerBound };
 
 /** Stamp the honest non-sandbox advertisement on every runner envelope.
- *  `bound` rides only when a strict run actually requested/enforced one. */
+ *  `bound` rides only when a strict/confined run actually requested one. */
 function withSandbox(r: NodeRunCore, bound: RunnerBound | null = null): NodeRunResult {
   return bound ? { ...r, sandbox: false, bound } : { ...r, sandbox: false };
 }
@@ -97,8 +123,9 @@ function withSandbox(r: NodeRunCore, bound: RunnerBound | null = null): NodeRunR
  *  strongest zero-dependency resource/process boundary available on this
  *  platform). Verified accepted on Node 22.23.2 AND 24.15.0. */
 export const RUNNER_PERMISSION_FLAG = "--permission";
-/** fixes/346 P1-4: V8 heap cap (MB) applied to a strict run — a REAL memory
- *  bound against JS-heap bombs (external Buffers are not covered: declared). */
+/** fixes/346 P1-4: V8 heap cap (MB) applied to a tiered (strict/confined) run —
+ *  a REAL memory bound against JS-heap bombs (external Buffers are not covered:
+ *  declared). */
 export const RUNNER_STRICT_HEAP_CAP_MB = 512;
 
 /**
@@ -126,6 +153,88 @@ export function strictRunnerArgs(dir: string): string[] {
     `--allow-fs-write=${allow}`,
     `--max-old-space-size=${RUNNER_STRICT_HEAP_CAP_MB}`,
   ];
+}
+
+/**
+ * fixes/346 lane-1: the child-arg prefix for a `confined` run — the same
+ * Permission Model + heap cap and the same fs-write confinement to the scratch
+ * dir, but `--allow-child-process` (so the compile-check harness can spawn
+ * `node --test`) and broad fs-READ (the harness legs read the emitted tree
+ * outside the scratch). `extraWriteDirs` are ADDITIONAL caller-declared write
+ * roots — compile-check's run COPY is a temp workspace its emitted specs
+ * legitimately write into; writes everywhere else stay denied. Exported so the
+ * policy is observable/testable without spawning. `--allow-child-process` is
+ * deliberately NOT in `strictRunnerArgs`.
+ */
+export function confinedRunnerArgs(dir: string, extraWriteDirs: readonly string[] = []): string[] {
+  const norm = (p: string): string => p.replace(/\\/g, "/");
+  const writeFlags = [dir, ...extraWriteDirs]
+    .filter((p): p is string => typeof p === "string" && p.length > 0)
+    .map((p) => `--allow-fs-write=${norm(p)}`);
+  return [
+    RUNNER_PERMISSION_FLAG,
+    "--allow-fs-read=*",
+    ...writeFlags,
+    "--allow-child-process",
+    `--max-old-space-size=${RUNNER_STRICT_HEAP_CAP_MB}`,
+  ];
+}
+
+/**
+ * fixes/346 lane-1: the honest bound record for a requested tier. PURE (no
+ * probe, no spawn) so the degradation rule is directly testable without a mock:
+ * `permissionAvailable:false` ⇒ `mechanism:"none"`, `enforced:false`, and no
+ * confinement claim — never a pretend boundary. The `strict` arm returns
+ * EXACTLY the pre-lane-1 strict shape (no new keys); the `confined` arm adds
+ * `tier`/`subprocessAllowed`/`note`.
+ */
+export function tierBound(
+  tier: RunnerIsolationTier,
+  permissionAvailable: boolean,
+  extraWriteDirs: readonly string[] = [],
+): RunnerBound {
+  const base: RunnerBound = {
+    mechanism: permissionAvailable ? "node-permission-model" : "none",
+    available: permissionAvailable,
+    enforced: permissionAvailable,
+    fsWriteConfined: permissionAvailable,
+    subprocessDenied: tier === "strict" && permissionAvailable,
+    // The heap cap rides the fallback args even when the Permission Model is
+    // absent, so it stays a real number for a requested tier.
+    heapCapMb: RUNNER_STRICT_HEAP_CAP_MB,
+  };
+  // Strict is byte-identical to the pre-lane-1 bound: no added keys.
+  if (tier === "strict") return base;
+  const extra =
+    extraWriteDirs.filter((d) => typeof d === "string" && d.length > 0).length > 0
+      ? ` plus ${extraWriteDirs.length} caller-declared workspace dir(s)`
+      : "";
+  const note = permissionAvailable
+    ? "harness runs under Node's Permission Model: filesystem writes are confined to the per-run scratch " +
+      `dir${extra} and filesystem reads are allowed broadly (the harness legs read the emitted tree), ` +
+      "child_process is EXPLICITLY ALLOWED (the compile-check harness spawns `node --test`), and a V8 heap " +
+      `cap (${RUNNER_STRICT_HEAP_CAP_MB} MB) is applied. Spawned Node descendants inherit these flags; a ` +
+      "NON-Node child would not. Not network denial and not an OS sandbox."
+    : `the runtime does not expose Node's Permission Model flag (${RUNNER_PERMISSION_FLAG}); the requested ` +
+      `"${tier}" bound was NOT applied — only the wall-clock timeout + output cap are enforced.`;
+  return { ...base, tier, subprocessAllowed: true, note };
+}
+
+/**
+ * fixes/346 lane-1: the flags prepended BEFORE `-e <code>` for a tier. PURE.
+ * With `permissionAvailable:false` the Permission-Model flags are SKIPPED and
+ * only the heap cap remains (never a pretend boundary), matching `tierBound`.
+ */
+export function tierRunnerArgs(
+  tier: RunnerIsolationTier,
+  dir: string,
+  permissionAvailable: boolean,
+  extraWriteDirs: readonly string[] = [],
+): string[] {
+  if (!permissionAvailable) return [`--max-old-space-size=${RUNNER_STRICT_HEAP_CAP_MB}`];
+  return tier === "strict"
+    ? strictRunnerArgs(dir)
+    : confinedRunnerArgs(dir, extraWriteDirs);
 }
 
 /**
@@ -405,13 +514,29 @@ export type NodeRunOptions = {
    */
   verdictChannel?: boolean;
   /**
-   * fixes/346 P1-4: `"strict"` engages the REAL resource/process bound (Node
-   * Permission Model: fs writes confined to the scratch dir, child_process /
-   * workers / addons denied, V8 heap cap). Omitted / `"none"` preserves the
-   * legacy timeout + output-cap behaviour byte-for-byte. The generated-code
-   * path (`exec.runCode`) always requests strict.
+   * fixes/346 P1-4 + lane-1: the isolation tier.
+   *   `"strict"`   — Node Permission Model: fs writes confined to the scratch
+   *                  dir, child_process / workers / addons denied, V8 heap cap.
+   *   `"confined"` — same fs-write confinement + heap cap, but child_process is
+   *                  EXPLICITLY ALLOWED (compile-check's harness spawns
+   *                  `node --test`) and fs READ is allowed broadly (the harness
+   *                  reads the emitted tree outside the scratch).
+   * Omitted / `"none"` preserves the legacy timeout + output-cap behaviour
+   * byte-for-byte. The generated-code path (`exec.runCode`) always requests
+   * strict; `verify.server.ts` requests strict; `compile-check.server.ts`
+   * requests confined.
    */
-  isolation?: "strict" | "none";
+  isolation?: RunnerIsolationTier | "none";
+  /**
+   * fixes/346 lane-1: additional directories a `confined` child (and its Node
+   * descendants) may WRITE into, on top of the per-run scratch dir. This is how
+   * a harness whose workspace is a temp COPY declares that workspace — the
+   * emitted specs legitimately write into the copy, so confining them to the
+   * runner's private scratch alone would break the trusted harness. Writes
+   * everywhere else (the subject tree included) stay denied. Ignored by
+   * `strict`/legacy runs.
+   */
+  isolationWriteDirs?: string[];
 };
 
 export async function runNodeBounded(
@@ -457,20 +582,25 @@ export async function runNodeBounded(
   }
 
   const verdictChannel = opts?.verdictChannel === true;
-  // fixes/346 P1-4: the strict bound. Probed (never assumed) so an unsupported
-  // host degrades to the legacy bounds with an honest `bound` record.
-  const strict = opts?.isolation === "strict";
-  const permissionAvailable = strict ? permissionModelAvailable() : false;
-  const bound: RunnerBound | null = strict
-    ? {
-        mechanism: permissionAvailable ? "node-permission-model" : "none",
-        available: permissionAvailable,
-        enforced: permissionAvailable,
-        fsWriteConfined: permissionAvailable,
-        subprocessDenied: permissionAvailable,
-        heapCapMb: RUNNER_STRICT_HEAP_CAP_MB,
-      }
-    : null;
+  // fixes/346 P1-4 + lane-1: the isolation tier. Probed (never assumed) so an
+  // unsupported host degrades to the legacy bounds with an honest `bound`
+  // record. `strict` denies child_process; `confined` allows it (compile-check
+  // spawns `node --test`) while keeping fs writes confined to the scratch.
+  const tier: RunnerIsolationTier | null =
+    opts?.isolation === "strict"
+      ? "strict"
+      : opts?.isolation === "confined"
+        ? "confined"
+        : null;
+  const permissionAvailable = tier !== null ? permissionModelAvailable() : false;
+  // Extra write roots are honored ONLY by the confined tier (strict never
+  // widens its scratch confinement).
+  const extraWriteDirs =
+    tier === "confined" && Array.isArray(opts?.isolationWriteDirs)
+      ? opts.isolationWriteDirs.filter((d): d is string => typeof d === "string" && d.length > 0)
+      : [];
+  const bound: RunnerBound | null =
+    tier !== null ? tierBound(tier, permissionAvailable, extraWriteDirs) : null;
   const started = Date.now();
   let child: ChildProcess;
   try {
@@ -492,12 +622,13 @@ export async function runNodeBounded(
         ? ["pipe", "pipe", "pipe", "pipe"]
         : ["ignore", "pipe", "pipe"],
     } as import("node:child_process").SpawnOptions & { maxBuffer: number };
-    // fixes/346 P1-4: a strict run prepends the Permission-Model flags + heap
-    // cap BEFORE `-e`; everything else is identical to the legacy invocation.
-    const childArgs = strict && permissionAvailable
-      ? [...strictRunnerArgs(dir), "-e", code]
-      : strict
-        ? [`--max-old-space-size=${RUNNER_STRICT_HEAP_CAP_MB}`, "-e", code]
+    // fixes/346 P1-4 + lane-1: a strict/confined run prepends the Permission-
+    // Model flags + heap cap BEFORE `-e`; everything else is identical to the
+    // legacy invocation. When the runtime lacks the flag the tier degrades to
+    // the heap-cap-only invocation (never a pretend boundary).
+    const childArgs =
+      tier !== null
+        ? [...tierRunnerArgs(tier, dir, permissionAvailable, extraWriteDirs), "-e", code]
         : ["-e", code];
     child = spawn(process.execPath, childArgs, spawnOpts);
   } catch (err) {

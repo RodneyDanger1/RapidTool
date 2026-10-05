@@ -61,8 +61,16 @@ import type { WildClassifierResult, WildReviewContext } from "./wild-mode.server
 import { complete, llmStatus } from "./llm.ts";
 import { research } from "./research.ts";
 // CF-SE2-3b (312 · E2): process-ledger completeness for the research narrative
-// (recordSessionSpend; client-safe pure module — no node:fs).
-import { recordSessionSpend } from "./token-ledger.ts";
+// (recordSessionSpend; client-safe pure module — no node:fs). 346 K3 adds the
+// read-only session-ledger delta the `wildStep` wrapper surfaces to a caller's
+// spend sink (`onUsage`) — same pure module, no new dependency.
+import {
+  normalizeLedger,
+  recordSessionSpend,
+  sessionTokenBudget,
+  spendDelta,
+  type TokenSpend,
+} from "./token-ledger.ts";
 import { runCode } from "./exec.ts";
 import type { ExecResult } from "./exec.ts";
 import { extractConstraints, phaseNarrative } from "./llm-tasks.ts";
@@ -4014,6 +4022,18 @@ export type WildStepOptions = {
    *  pure `shouldAutopause` decision. A small test value pins the wrap without
    *  waiting the production budget; non-finite/≤0 falls back to the default. */
   stepBudgetMs?: number;
+  /**
+   * 346 K3 (console phase-run spend) — the caller's spend SINK. The engine
+   * meters every model call it makes during a step into the process session
+   * ledger (`recordSessionSpend` / codegen's `sessionTokenBudget().ledger`),
+   * and this wrapper hands the caller the step's measured DELTA so a driver
+   * (store `startWildRun`) can fold it into `Project.tokenUsage`. Called at
+   * most once per step, and ONLY when the delta is non-zero — absent usage
+   * never calls it, so a caller writes nothing (no fabricated zero). Pure
+   * observation: the step's own bytes and behavior are identical with or
+   * without a sink (DG-8), and an absent sink costs nothing.
+   */
+  onUsage?: (usage: TokenSpend) => void;
   /** 313 D1 — test seam for the P7 live-research edge (mirrors `p6Edge`).
    *  Present ⇒ phase 7 executes through THIS function in ANY key state; absent
    *  ⇒ the production guard (keyed ⇒ `wildLiveEdge` — the same live layer the
@@ -5057,8 +5077,36 @@ function normalizeStepBudgetMs(ms: number | undefined): number {
  * budget is the §5.2 pause-on-resolve tier and parks the run coded. The wrap
  * never cancels the await (watchdog.ts §5.1) and never emits without a sink,
  * so a fast step's bytes are untouched.
+ *
+ * 346 K3 (console phase-run spend): this exported wrapper measures the step's
+ * process session-ledger DELTA and hands it to `opts.onUsage` (see
+ * WildStepOptions). The sink is pure observation — the wrapped step's bytes
+ * and outcome are identical whether or not one is present (DG-8); with no
+ * sink the body is called directly, so the fast path is byte-identical and
+ * zero-overhead.
  */
 export async function wildStep(
+  project: Project,
+  opts?: WildStepOptions,
+): Promise<WildStepResult> {
+  const onUsage = opts?.onUsage;
+  if (typeof onUsage !== "function") return wildStepBody(project, opts);
+  const baseline = normalizeLedger(sessionTokenBudget().ledger);
+  const result = await wildStepBody(project, opts);
+  const usage = spendDelta(sessionTokenBudget().ledger, baseline);
+  // Nothing measured ⇒ the sink is never called, so a driver writes nothing
+  // (never a fabricated zero). A sink that throws cannot fail the step.
+  if (usage.promptTokens > 0 || usage.completionTokens > 0 || usage.calls > 0) {
+    try {
+      onUsage(usage);
+    } catch {
+      /* a usage sink never throws into the step it observes (DG-8) */
+    }
+  }
+  return result;
+}
+
+async function wildStepBody(
   project: Project,
   opts?: WildStepOptions,
 ): Promise<WildStepResult> {

@@ -3,9 +3,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import * as rtEvents from "./rt-events.ts";
 import {
+  P6_PHASE_MAX_MS,
   RT_EVENT_NAMES,
   RT_SCOPES,
+  WILD_STEP_BUDGET_MS,
   flattenStack,
   isKnownRtEvent,
   messageHash,
@@ -105,6 +111,159 @@ test("catalogue: every event name maps to a legal scope (sync pin, mirrors error
   );
   assert.equal(isKnownRtEvent("wild.step_ok"), true);
   assert.equal(isKnownRtEvent("wild.invented"), false);
+});
+
+// ---------------------------------------------------------------------------
+// W60 census pin (346 lane-4). The dead-list comment in rt-events.ts §2.4
+// claims an exact live/dead partition of RT_EVENT_NAMES. Re-derive it from the
+// real non-test `event: "..."` emit literals under src/ and scripts/ (comment
+// text excluded) so the comment can never drift from the bytes silently:
+// adding/removing an emitter without updating the census fails here.
+// ---------------------------------------------------------------------------
+
+/** Every non-test `event: "..."` string literal emitted in src/ + scripts/. */
+function scanEmittedEventNames(): Set<string> {
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const roots = [resolve(repoRoot, "src"), resolve(repoRoot, "scripts")];
+  const exts = new Set([".ts", ".tsx", ".mjs", ".js", ".mts"]);
+  const skipDirs = new Set(["node_modules", ".git", ".grok", "research", "fixes", "wave_plans", "dist", "build"]);
+  const files: string[] = [];
+  const walk = (dir: string): void => {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      const path = join(dir, name);
+      let isDir: boolean;
+      try {
+        isDir = statSync(path).isDirectory();
+      } catch {
+        continue;
+      }
+      if (isDir) {
+        if (!skipDirs.has(name)) walk(path);
+      } else if (exts.has(extname(name)) && !/\.test\.[^/\\]+$/.test(path)) {
+        files.push(path);
+      }
+    }
+  };
+  for (const root of roots) walk(root);
+
+  const names = new Set<string>();
+  const re = /event:\s*["']([^"']+)["']/g;
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    let match: RegExpExecArray | null;
+    re.lastIndex = 0;
+    while ((match = re.exec(text)) !== null) {
+      const lineStart = text.lastIndexOf("\n", match.index) + 1;
+      const lineEnd = text.indexOf("\n", match.index);
+      const before = text.slice(lineStart, match.index);
+      const line = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd).trimStart();
+      // Emits only: skip `//`/`/*` comments and JSDoc `*` lines so prose that
+      // quotes an `event: "..."` (like the W56 note) is not a producer.
+      if (before.includes("//") || before.includes("/*") || line.startsWith("*")) continue;
+      names.add(match[1]);
+    }
+  }
+  return names;
+}
+
+// The exact partition the §2.4 census comment records at HEAD c16220b.
+const CENSUS_LIVE = [
+  "cli.invocation",
+  "eval.run_end",
+  "eval.run_error",
+  "eval.run_start",
+  "hydrate.recovered_corrupt",
+  "persist.quota_failed",
+  "sys.heartbeat",
+  "sys.heartbeat_lag",
+  "sys.longtask",
+  "sys.mainthread_stall",
+  "sys.previous_session_crash",
+  "sys.step_overdue",
+  "sys.uncaught_error",
+  "sys.unhandled_rejection",
+  "ui.boundary_crash",
+  "ui.pane_crash",
+  "wild.paused_policy",
+  "wild.step_error",
+  "wild.step_ok",
+  "wild.step_paused",
+  "wild.step_start",
+  "wild.step_timeout",
+];
+const CENSUS_DEAD = [
+  "boot.ready",
+  "boot.start",
+  "boundary.crash",
+  "chat.send_error",
+  "cli.error",
+  "crew.turn_error",
+  "crew.turn_ok",
+  "diagnose.ran",
+  "engine.phase_error",
+  "engine.phase_fallback",
+  "harvest.error",
+  "hydrate.empty",
+  "hydrate.ok",
+  "llm.late_settle",
+  "llm.not_configured",
+  "llm.ok",
+  "llm.rejected",
+  "llm.timeout",
+  "llm.transport_error",
+  "persist.ok",
+  "persist.salvaged",
+  "runner.failed",
+  "runner.ok",
+  "runner.unavailable",
+  "search.unavailable",
+  "store.action_error",
+  "sys.memory",
+  "ui.action_error",
+  "verify.error",
+  "verify.ok",
+  "watcher.error",
+  "watcher.refused",
+  "wild.driver_cap",
+  "wild.driver_error",
+  "wild.driver_paused_auto",
+  "wild.driver_resumed",
+  "wild.driver_stall",
+  "wild.driver_start_refused",
+];
+
+test("census pin: live/dead partition matches the real non-test emit sites", () => {
+  const emitted = scanEmittedEventNames();
+  const all = Object.keys(RT_EVENT_NAMES).sort();
+  const live = all.filter((name) => emitted.has(name));
+  const dead = all.filter((name) => !emitted.has(name));
+  assert.deepEqual(live, CENSUS_LIVE, "live set drifted — update the §2.4 census comment and this pin");
+  assert.deepEqual(dead, CENSUS_DEAD, "dead set drifted — update the §2.4 census comment and this pin");
+  assert.equal(all.length, CENSUS_LIVE.length + CENSUS_DEAD.length, "partition is complete + disjoint");
+  // W60: the 346 P2-6 boundedStepWatch wiring re-livened these two.
+  assert.ok(live.includes("sys.step_overdue"), "engine.wildStep emits tier-1 sys.step_overdue (engine.ts:5306)");
+  assert.ok(live.includes("wild.step_timeout"), "tier-2 timeout has producers (engine.ts:5319 + console.tsx:1265)");
+});
+
+test("constants: budget relation is single-sourced; the drifted autopause constant stays struck", () => {
+  assert.equal(P6_PHASE_MAX_MS, 240_000);
+  assert.equal(WILD_STEP_BUDGET_MS, P6_PHASE_MAX_MS + 15_000);
+  assert.ok(WILD_STEP_BUDGET_MS > P6_PHASE_MAX_MS, "the step budget must clear a legal P6 synthesis step");
+  // W60 · 346 lane-4 struck WILD_STEP_AUTOPAUSE_MS (was P6_PHASE_MAX_MS + 60_000
+  // with 0 refs). The real tier-2 is 2× the effective step budget — a relation
+  // the engine computes inline (engine.ts:5300), not a fixed ms this table can
+  // hold; keeping the name would imply a consumer the module never had.
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(rtEvents, "WILD_STEP_AUTOPAUSE_MS"),
+    false,
+    "a fixed autopause constant would imply a consumer the module does not have",
+  );
 });
 
 test("coalesce window math: same fingerprint within 5s coalesces, after it does not", () => {

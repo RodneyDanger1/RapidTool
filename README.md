@@ -10,16 +10,17 @@ and a file-based headless CLI (`scripts/rapidtool-cli.mjs`, **39 verbs** — re-
 `grep -c 'case "' scripts/rapidtool-cli.mjs` = 39) that drives the same
 pure engine with no browser and no server.
 
-> **Status (2026-09-26 — the W12 boundary gate is the latest full gate of record, `fixes/218` §5; the W29–W38 era is uncommitted):**
-> `bash scripts/gate.sh` → **`ok:true`** (typecheck 0 · lint 0 · assertion-gap lint 0 ·
-> scripts **261/261** + src **1957/1957** tests (1 by-design skip) · build 0). All of that is re-runnable by you:
-> the gate script emits a single JSON verdict. Everything since HEAD `0f85c32` — the W29–W37 audit/coder/shell
-> era — is **uncommitted working tree**; the next full boundary (re-run the gates on the current tree, then
-> commit the era) is scheduled in `wave_plans/W38/NEW-SESSION-PROMPT.md` Phase 1. RapidTool is **not yet** an
-> autonomous software factory that beats Codex/OpenHands/Claude Code — and it **tells you that itself**:
-> `doctor` reports `autonomousSoftwareFactory: false` with named `gaps[]`. The remaining
-> code-level work is catalogued wave-by-wave in **[`remainingwaves.md`](remainingwaves.md)** and
-> shell-by-shell in `finalsprint.md` (working tree).
+> **Status (2026-10-04, committed HEAD `c16220b` + the K1–K6 lanes).** The full boundary gate on the
+> frozen tree is GREEN: `bash scripts/gate.sh` → `ok:true` (typecheck 0 · lint 0 · assertion-gap lint 0
+> · scripts **452/0** + lib **3507 pass / 0 fail / 2 skipped** · build 0). An earlier mid-wave run in
+> this session returned `ok:false` on one child-spawn `compile-check.server` test that passes standalone
+> and in isolation (the documented load-sensitive flake class) while sibling lanes were editing
+> `src/**`; the exact JSON is in `fixes/346_batch5_notes.md` §1. The
+> gate script emits a
+> single JSON verdict; every number here is re-runnable by you. RapidTool is **not yet** an autonomous
+> software factory that beats Codex/OpenHands/Claude Code — and it **tells you that itself**: `doctor`
+> reports `autonomousSoftwareFactory: false` with named `gaps[]`. The remaining code-level work is
+> catalogued wave-by-wave in **[`remainingwaves.md`](remainingwaves.md)**.
 
 ---
 
@@ -160,7 +161,7 @@ brief ──► intake ──► P0..P12 phase engine (pure, deterministic, head
                         ├─ P0-P6  research → architecture → interface → SYNTHESIS (the build)
                         │           · chunked LLM synthesis, validated + bounded repair
                         │           · compile-check, oracle rows (A7), tree-run verdicts
-                        ├─ P7-P12 packet/tail artifacts (see "limits" — candidly partial)
+                        ├─ P7-P12 tail artifacts (gate-blind edge; the default advisory driver advances them)
                         │
                         └─► DoD gates (evidence-hashed) · decision ledger (append-only)
                             · verify-fix loop (machine) · Agent Packet (paste-ready)
@@ -183,7 +184,8 @@ brief ──► intake ──► P0..P12 phase engine (pure, deterministic, head
 
 Key files: `src/lib/engine.ts` · `headless.ts` · `codegen.server.ts` (P6 + chunk planning) ·
 `scaffold.ts` (tree writer) · `compile-check.server.ts` + `node-runner.server.ts` (bounded
-runner — **not a sandbox**) · `verify.server.ts` + `dod.ts` (oracles) · `doctor.ts` (environment
+runner — applies Node's Permission Model to generated code, still **not a security sandbox**) ·
+`verify.server.ts` + `dod.ts` (oracles) · `doctor.ts` (environment
 truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-cli.mjs` (39 verbs).
 
 ---
@@ -220,19 +222,30 @@ truth) · `packet.ts` + `phases.ts` · `console.tsx` (UI) · `scripts/rapidtool-
    (`{0,4,1}`, host `schedule.ts`). The all-reexport vintage `{0,5,0}` lives in
    `…run-2026-09-10`. Until a run covers the other job paths with real modules, RapidTool
    does **not** emit a real multi-job product, and it must not be claimed to.
-2. **P7–P12 phases often produce no artifacts.** The engine reports this honestly now
-   ("Phase coverage: N of 13 / M artifacts from P7–P12" in every packet). Unblocking them is
-   roadmap, not reality.
-3. **No real isolation.** The bounded runner executes with timeouts + scrubbed env but it is
-   **not** a sandbox — no Docker/bwrap. Doctor says `sandbox: false`, and nothing may claim
-   otherwise.
+2. **P7–P12 coverage is honest, not uniform.** The phase edge is gate-blind: the default advisory
+   driver advances through P7–P12 after a red P6, and each tail phase writes its own artifact
+   (measured: 9 tail artifacts). Only an `enforceDod` run blocks at P6, on the two keyed criteria.
+   Every packet carries the real census ("Phase coverage: N of 13 / M artifacts from P7–P12", plus
+   `empty_phases`) so no surface implies all 13 ran.
+3. **The runner applies a real resource/process bound — but it is NOT a security sandbox.**
+   Generated code (`exec.runCode`) runs with `isolation:"strict"`: Node's Permission Model confines
+   filesystem writes to the per-run scratch dir, denies `child_process`/`worker_threads`/native
+   addons, and caps the V8 heap at 512 MB; timeouts + a scrubbed env still apply. What is NOT
+   provided (and must never be claimed): network denial, fs-READ confinement when strict is off, and
+   any OS boundary — Docker / bwrap / AppContainer / Windows Job Object (Node exposes no Job Object
+   API without a native addon this repo does not take). `doctor` says `isolation.sandbox: false` with
+   the real `isolation.bound` named honestly.
 4. **Git landing and checkpoint+resume are now REAL** (updated 2026-10-03 by the 345-F1 docs-truth
    fix — this limit was written before `emit --git` landed in the 343-3 wave and before
    `resume`/`unattended` landed in W36). `emit --git` lands the emitted tree as one
    Conventional-Commits commit (`src/lib/git.server.ts: gitLandEmitted`), idempotently and with the
    host repo structurally un-landable; `resume`/`unattended` re-enter from the per-phase checkpoint
-   under `<dir>/.rapidtool/`. What is still roadmap: no in-product scheduler/daemon (an external
-   Windows Task Scheduler / cron hook invokes `unattended`) and no branch/remote/push/PR delivery.
+   under `<dir>/.rapidtool/`. **Delivery proof (346):** the walk-away orchestrator
+   (`scripts/factory-watch.mjs`, `npm run factory`) re-executes the emitted tree (`emit --run`) and
+   requires `treeRun.ok === true` before it issues `emit --git`, and the CLI `emit --run --git` guard
+   refuses the commit when this invocation's `--run` verdict is red (`RT_E_TREE_RUN_FAILED`).
+   What is still roadmap: no in-product scheduler/daemon (an external Windows Task Scheduler / cron
+   hook is the scheduler by design) and no branch/remote/push/PR delivery.
 5. **LLM work needs a key.** Without `DEEPSEEK_API_KEY` the phases that call a model skip
    honestly; a *keyed* full run also costs tokens — budgets/ledger unification is roadmap
    (T-107.6).
@@ -326,6 +339,32 @@ values re-derived from the bytes today:
   lib 3261 pass / 0 fail / 2 skipped**, `gate.sh` `ok:true`, `hardFails:[]`, `flakes:[]` — the
   398/2736 values above are the 2026-10-02 record, not the current one.
 
+**Corrections in force — appended 2026-10-04 (346 wave; HEAD `c16220b`):** this block supersedes the
+counts and limits above. All values re-derived from the bytes this session.
+
+- **Gate:** GREEN on the frozen tree (HEAD `c16220b` + the K1–K6 lanes) — scripts 452/0 · lib **3507
+  pass / 0 fail / 2 skipped**, `ok:true`, `flakes:[]`, `hardFails:[]`. An earlier mid-wave run in this
+  session returned `ok:false` on one child-spawn `compile-check.server` test that passes standalone and
+  in isolation (the documented load-sensitive flake class) while sibling lanes were editing `src/**`,
+  so it was not a controlled frozen-tree result. Exact JSON: `fixes/346_batch5_notes.md` §1.
+- **Tracked counts (`git ls-files`):** total **1,951** · `src` 250 · `src/lib` 239 (112 test suites) ·
+  `scripts` 52 (26 tools + 26 `*.test.mjs`) · `fixes` 759 · `wave_plans` 139 · `research/multiagent` 103.
+  The 1,933 / fixes 744 / scripts 49 values above are superseded. New this wave:
+  `scripts/factory-watch.mjs` + `factory-watch.test.mjs`, `scripts/store-crosstab.test.mjs`.
+- **What landed this wave (346):** the walk-away orchestrator `scripts/factory-watch.mjs` (bounded
+  intake → `create` → `unattended` → `emit --git`, durable checkpoint/resume, honest refusal, idempotent
+  skip; `npm run factory`); the real Permission-Model bound for generated code (`isolation:"strict"`);
+  tree/oracle behavioural parity (SB-2); injective knowledge fingerprints (SB-1); cross-tab lost-update
+  fix + corrupt-blob rescue; console spend chip + honest seat provenance; CLI `emit --run --git` red-tree
+  commit guard; honest P7–P12 coverage naming. Details: `fixes/346_e1…e4`, `346_v1/v2`,
+  `fixes/346_batch5_notes.md`.
+- **Honest limits that remain:** keyed P6 synthesis can still miss the P6 DoD and stall a keyed run;
+  cross-family failover is NOT implemented (the un-armed switch was deleted; `RAPIDTOOL_FALLBACK_PROVIDERS`
+  is inert); the autonomy flag needs a human-approved fixture row (`autonomousSoftwareFactory:false` by
+  design — see `fixes/346_audit_autonomy.md`); the console approval still lacks an out-of-band
+  seat-delivery seam (provenance recorded, not verified); Windows Job Objects are unavailable from pure
+  Node; P7 `p7-research` is offline; prettier drift (244 `[warn]` files) is measured but NOT gated.
+
 ## Progress so far (the paper trail)
 
 Five multi-agent waves ran 2026-09-16 (25 flash subagents, every wave closed with `gate.sh`-class
@@ -373,12 +412,12 @@ re-run. Where reality is behind, the docs say so, the packets say so, and `docto
 
 ---
 
-# THE CATALOG — every tracked file (1,933 today)
+# THE CATALOG — every tracked file (1,951 today)
 
 **What this is:** the literal catalog of the repository's tracked universe. Counts re-derived
-2026-10-03 by the 345-F1 docs-truth fix (HEAD `06cb089`): `git ls-files | wc -l` = **1,933** (the
-prior 2026-09-30 value, 1,908, and the 342-6 correction's 2,096, are superseded — `.t4scratch/` is
-no longer tracked). Every **root file, every script, every route,
+2026-10-04 (346 wave; HEAD `c16220b`) by the lane-5 docs-truth re-derivation: `git ls-files | wc -l` =
+**1,951** (the prior 2026-10-03 value, 1,933, and the earlier 1,908/2,096 values are superseded —
+`.t4scratch/` is no longer tracked). Every **root file, every script, every route,
 every migration, every config** is named below; mass-produced classes (tests, wave plans, fix
 logs, vault notes, eval trees, vault/E2E outputs) are described **by convention with their full
 membership derivable from one command** — stated inline — because each member's purpose is its
@@ -389,18 +428,18 @@ staged changes (re-derived 2026-09-30 by the W44 wave — the W44 commit moved `
 `wave_plans/`, `scripts/` and root + Total together: 7 lane logs, 5 probe relocations, and the
 eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth).
 
-## 10.1 Census (tracked, re-derived 2026-10-03 at `06cb089` by the 345-F1 docs-truth fix)
+## 10.1 Census (tracked, re-derived 2026-10-04 at `c16220b` by the lane-5 docs-truth re-derivation)
 
 | Area | Files | What it is |
 |---|---:|---|
 | `research/` | 476 | Analysis program + eval corpus + eval outputs (`multiagent/` 103 · `eval-corpus/` 23 · `eval-out/` 345 · 5 top-level research docs) |
-| `fixes/` | 744 | Append-only per-lane landing logs (§10.9) |
+| `fixes/` | 759 | Append-only per-lane landing logs (§10.9) |
 | `src/` | 250 | The product: engine + UI (§10.6) |
 | `wave_plans/` | 139 | Per-lane dispatch plans, W4–W24 · W26–W38 · W40 · W42 · W43 + the convention README (§10.10) |
 | `.grok/` | 89 | Legacy platform chrome — **do not build on it** (§10.12) |
 | `builds/` | 50 | Legacy sample build outputs (vault export + sample project) (§10.11) |
 | `vault-e2e/` | 47 | Vault export of the HVAC Dispatch E2E project (§10.11) |
-| `scripts/` | 49 | CLI + gates + guards + tooling + their tests (§10.7) |
+| `scripts/` | 52 | CLI + gates + guards + tooling + their tests (§10.7) |
 | root | 41 | Every root file named in §10.2 |
 | `screenshots/` | 16 | QA/app screenshots (§10.11) |
 | `public/` | 10 | Static assets served as-is (§10.4) |
@@ -411,7 +450,7 @@ eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth
 | `.github/` | 1 | CI workflow (§10.3) |
 | `attachments/` · `artifacts/` · `.audit-g2/` | 1 + 1 + 1 | Historical artifact + stored image + G2 probe (§10.12) |
 | `.t4scratch/` | 0 | Untracked/removed (was 192 tracked at `ac6b151`; stripped in the 342 wave, `73f660a`) |
-| **Total** | **1,933** | `git ls-files \| wc -l` |
+| **Total** | **1,951** | `git ls-files \| wc -l` |
 
 ## 10.2 Root files (all 41 tracked — named)
 
@@ -496,7 +535,7 @@ eval/telemetry + MAX_FILES + store + seal/nit files. Re-count for the live truth
 - `src/routes/` (3): `__root.tsx` (root layout + auth provider), `index.tsx` (HomeScreen from
   `console.tsx`), `run.$id.tsx` (RunScreen from `console.tsx`).
 
-## 10.6 `src/lib/` — the engine (239 files = 123 modules + 112 colocated tests; re-derived 2026-10-03 at `06cb089`)
+## 10.6 `src/lib/` — the engine (239 files = 127 non-test + 112 colocated tests; re-derived 2026-10-04 by lane-5)
 
 **90 direct `.ts` modules** (one line each; the module's comments read 2026-09-26/27; re-counted 2026-10-03):
 
@@ -589,7 +628,7 @@ engine's contracts are pinned from `headless.test.ts`, `gates.test.ts`, `judgmen
 others). (The enumerated names above are the last full hand-list; the count of record is the live
 `git ls-files src/lib | grep -c '\.test\.'` = 112 — re-derive rather than trusting this list.)
 
-## 10.7 `scripts/` — CLI, gates, guards, tooling (49 tracked = 25 tools + 24 tests; re-derived 2026-10-03)
+## 10.7 `scripts/` — CLI, gates, guards, tooling (52 tracked = 26 tools + 26 tests; re-derived 2026-10-04)
 
 - **CLI:** `rapidtool-cli.mjs` — the headless driver, **39 verbs** (count source of truth:
   `grep -c 'case "'`), one JSON object per call, exit taxonomy 0/1/2/3/4/**5**.
@@ -597,8 +636,13 @@ others). (The enumerated names above are the last full hand-list; the count of r
   sections; doc-contract tested). `README-cli.test.mjs` — that doc-contract test: binds the
   README-cli headline count + verb list + USAGE parity + edit/emit sections to the dispatcher's
   bytes (do not edit either file without re-running it).
+- **Factory/orchestration:** `factory-watch.mjs` — the walk-away orchestrator (346): ONE bounded tick
+  that drains a brief intake through `create → unattended → emit --run (verify) → emit --git
+  (deliver)`, with durable checkpoint/resume, idempotence, honest refusal, and corrupt-state refusal;
+  `npm run factory` runs it. Not a daemon — a host hook (Task Scheduler / cron) is the scheduler.
 - **Gate:** `gate.sh` — the stability gate: typecheck → lint → assertion-gap lint → both test
-  legs → build; one JSON verdict on stdout; `--double` = flake detector (exit 3).
+  legs → build; one JSON verdict on stdout; `--double` = flake detector (exit 3); `--quarantine` =
+  bounded opt-in retry for the allowlisted load-sensitive child-spawn class (default OFF).
 - **Eval:** `run-eval.mjs` — the maker-loop eval driver (keyless deterministic floor; `--keyed`
   for real runs; grades corpus fixtures, writes `results.json` + `history.json` into `--out`
   (or `EVAL_OUT_DIR`); a bare run against the tracked `research/eval-out` is **refused with
@@ -620,7 +664,9 @@ others). (The enumerated names above are the last full hand-list; the count of r
   · `install-page.html` (the Home-Screen install tutorial page).
 - **Guards:** `check-assertion-gaps.mjs` (T-17 tautology/zero-assertion lint, wired into
   gate.sh) · `check-auth-invariant.mjs` (dev-vs-build `VITE_AUTH_ENABLED` agreement: fail loudly).
-- **Test suites (24):** `README-cli.test.mjs` (CLI doc-contract) · `rapidtool-cli-edit.test.mjs` +
+- **Test suites (26):** `README-cli.test.mjs` (CLI doc-contract) · `factory-watch.test.mjs`
+  (orchestrator contract + keyless E2E) · `store-crosstab.test.mjs` (cross-tab store merges) ·
+  `rapidtool-cli-edit.test.mjs` +
   `rapidtool-cli-lesson.test.mjs` (verb contracts) · `rapidtool-cli-fixtures.test.mjs` (fixtures
   verb contract) · `cli-exit-taxonomy.test.mjs` (exit-code class guard, OPS-3) ·
   `cli-run-busy.test.mjs` (busy-flag exits + the crew `--max-steps` key leg, H7/317) ·
@@ -685,7 +731,7 @@ others). (The enumerated names above are the last full hand-list; the count of r
   `03_tech_deep_dives_research.md` (the origin research set, 2026-09-04) · `deepseek-api.md`
   (live-verified API spec) · `runtime-integration.md` (runtime/hosting research).
 
-## 10.9 `fixes/` — the append-only landing-log ledger (744 tracked; re-derived 2026-10-03)
+## 10.9 `fixes/` — the append-only landing-log ledger (759 tracked; re-derived 2026-10-04)
 
 **Convention:** one `fixes/NN_<lane>.md` per lane per wave; append-only; each log carries
 what/why + `file:line` evidence + before/after. The numbering is chronological: the newest number

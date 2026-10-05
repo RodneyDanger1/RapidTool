@@ -547,6 +547,39 @@ function briefFitUnmetReason(p: Project): string {
   return `generated source is missing the brief's required nouns${tail}`;
 }
 
+// --- P7 live-research waiver evidence (346 L6) --------------------------------
+
+/** The coded row `engine.liveLayer` / `headless.bareNodeLiveOverlay` append when
+ *  a REAL research fetch was attempted and the backend could not serve it
+ *  (`liveDegradeRow`). Event is phase-scoped; the detail leads with the code. */
+const LIVE_RESEARCH_ATTEMPT_FAILED_EVENT = "p7.live.research.failed";
+
+/**
+ * 346 L6 (P7 honesty): true when THIS project's P7 live research pass ran and
+ * the backend was UNAVAILABLE — a coded `p7.live.research.failed` warn row
+ * carrying `RT_E_RESEARCH_UNAVAILABLE` proves a real fetch was attempted
+ * (either the engine live layer or the bare-Node research overlay) and failed.
+ * That is precisely the `p7-research` waiver condition the criterion documents
+ * ("a P7 whose live pass was ATTEMPTED but the backend was unavailable").
+ *
+ * A run that NEVER attempted live research — the deterministic/keyless floor,
+ * the keyless wild edge, the CLI's default advisory path — writes no such row,
+ * so the criterion stays honestly unmet: the waiver is never fabricated. This
+ * is the state the probe previously could not see, which left a genuine offline
+ * attempt red for a reason that read like "we never tried".
+ *
+ * Pure and deterministic: reads only project log content (phase/event/detail).
+ */
+export function liveResearchAttemptUnavailable(p: Project): boolean {
+  return (p.logs ?? []).some(
+    (l) =>
+      l?.phase === 7 &&
+      l.event === LIVE_RESEARCH_ATTEMPT_FAILED_EVENT &&
+      typeof l.detail === "string" &&
+      l.detail.startsWith("RT_E_RESEARCH_UNAVAILABLE"),
+  );
+}
+
 // --- DoD registry -------------------------------------------------------------
 
 /**
@@ -788,7 +821,20 @@ export const DOD: Record<PhaseId, GateItem[]> = {
       // P7 whose live pass was attempted but the backend was unavailable
       // (no key / network failure, engine.liveLayer stamps meta.liveUnavailable)
       // must not hard-block an enforceDod project forever.
-      probe: (p) => (p.research?.length ?? 0) > 0 || p.meta?.liveUnavailable === true,
+      //
+      // 346 L6: the waiver has TWO honest producers, and the second was missing.
+      // The engine live layer stamps `meta.liveUnavailable`; the bare-Node
+      // research overlay (`headless.bareNodeLiveOverlay`, the eval/`--live`
+      // research path) instead records a coded `p7.live.research.failed` row
+      // and stamps no meta — so a genuine offline attempt there stayed red
+      // without ever applying the documented waiver. `liveResearchAttemptUnavailable`
+      // reads that coded evidence, so an ATTEMPTED-but-unavailable pass is
+      // waived while a never-attempted floor (which writes no row) stays
+      // honestly RED — no fabricated waiver (wild-step.test.ts pins the floor).
+      probe: (p) =>
+        (p.research?.length ?? 0) > 0 ||
+        p.meta?.liveUnavailable === true ||
+        liveResearchAttemptUnavailable(p),
     },
   ],
   8: [

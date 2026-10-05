@@ -2790,6 +2790,28 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
       assert.match(String(row?.decidedVia?.reason), /^autopilot-seat — hitl\.approve on gate:P4/);
     });
 
+    it("PIN — 346 K3: a console-seat approve is tagged [seat console] and NEVER renders the token-verified clause", async () => {
+      let p = createProject({ brief: FIXTURE_BRIEF });
+      p = (await runUntilGate(p)).project; // parked at P4
+      const out = approve(p, { actor: { decidedBy: "human", seat: "console" } });
+      const row = out.decisions.at(-1);
+      assert.equal(row?.decidedBy, "human", "the console is a human-class seat");
+      assert.match(
+        String(row?.note),
+        /^\[seat console\] unattested human seat/,
+        "the note names the unattested console seat",
+      );
+      assert.ok(
+        !/out-of-band RT_HUMAN_SEAT_TOKEN verified/.test(String(row?.note)),
+        "a console actor must never render the token-verified clause",
+      );
+      assert.equal(row?.decidedVia?.action, "hitl.approve");
+      assert.equal(row?.decidedVia?.resource, "gate:P4");
+      assert.equal(row?.decidedVia?.label, "human/console");
+      assert.equal(row?.decidedVia?.tokenPath, false, "the console has no token path");
+      assert.match(String(row?.decidedVia?.reason), /^console-seat-unattested — /);
+    });
+
     it("CLI — a non-TTY approve mints NO row: no provenance may land from a machine", () => {
       // R5-f12 Track 1 (see the TA-2 re-point above): a child process cannot
       // furnish the human seat's second channel, so the CLI mints nothing.

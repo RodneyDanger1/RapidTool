@@ -10,7 +10,8 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { recordGateInto, runGate } from "./dod.ts";
+import { liveResearchAttemptUnavailable, recordGateInto, runGate } from "./dod.ts";
+import { runUntilGate } from "./headless.ts";
 import { mintTreeRunTested } from "./codegen.server.ts";
 import { emptyProject } from "./engine.ts";
 import { buildPhase6Module } from "./sandbox.ts";
@@ -327,5 +328,176 @@ describe("346 L3 (A1-12) — a `[seat console]` row is attributed and routed tru
       },
     });
     assert.equal(p4ApprovedMet(withDecision(row)), true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 L6 — the P7 `p7-research` waiver: ATTEMPTED-but-unavailable vs never-tried.
+//
+// The pre-existing waiver read only `meta.liveUnavailable` (the engine live
+// layer's stamp). The bare-Node research overlay (`headless.bareNodeLiveOverlay`,
+// the `--live` / eval research path) instead records a coded
+// `p7.live.research.failed` row and stamps NO meta — so a genuine offline
+// attempt there stayed RED without ever applying the documented waiver, and the
+// project carried a `liveUnavailable`-less record that reads like "we never
+// tried". These pins fix the honest distinction: a real attempt whose backend
+// was unavailable is waived; a run that never attempted stays RED (the waiver
+// is never fabricated — see wild-step.test.ts's keyless-floor pin).
+// ---------------------------------------------------------------------------
+const p7Project = (over: Partial<Project> = {}): Project => ({
+  ...emptyProject({ name: "P7Waiver", brief: "A dispatch board for field service." }),
+  competitors: [
+    { name: "A", class: "tool", strength: "x", gap: "y", source: "illustrative" },
+    { name: "B", class: "tool", strength: "x", gap: "y", source: "illustrative" },
+  ],
+  phases: [{ id: 7 as PhaseId, status: "complete" }],
+  ...over,
+});
+
+/** The coded row `liveDegradeRow` writes for a failed research backend. */
+const researchFailedRow = (
+  over: Partial<{ phase: PhaseId; event: string; detail: string }> = {},
+): Project["logs"][number] => ({
+  ts: 1,
+  phase: 7 as PhaseId,
+  level: "warn",
+  event: "p7.live.research.failed",
+  detail:
+    "RT_E_RESEARCH_UNAVAILABLE · live research failed: Free web search unavailable — all providers failed — deterministic result used instead",
+  ...over,
+});
+
+const p7ResearchUnmet = (p: Project) => runGate(p, 7).unmet.find((g) => g.id === "p7-research");
+
+describe("346 L6 — p7-research waives a real attempted-but-unavailable live pass, never a fabricated one", () => {
+  it("no attempt (deterministic/keyless floor): p7-research stays RED and the criterion stays VERBATIM", () => {
+    const p = p7Project();
+    const item = p7ResearchUnmet(p);
+    assert.ok(item, "the never-attempted floor is honestly unmet");
+    // Deliberate: no `unmetReason` is added. `runGate` appends a reason to the
+    // criterion, and the recorded `p7.seal.unmet` digest pins this criterion
+    // verbatim (lesson-writers.test.ts — not this lane's file). The criterion
+    // already names the missing artifact precisely; the state is carried by the
+    // probe's own waiver contract, not by a reworded digest.
+    assert.equal(item!.criterion, "Live research corpus exists for P7 (≥1 fetched finding)");
+    assert.equal(item!.reason, undefined, "no state line is appended to the pinned digest");
+    assert.equal(liveResearchAttemptUnavailable(p), false, "no attempt ⇒ no waiver evidence");
+  });
+
+  it("a genuine ATTEMPT whose backend was UNAVAILABLE (coded row) is WAIVED", () => {
+    const p = p7Project({ logs: [researchFailedRow()] });
+    assert.equal(liveResearchAttemptUnavailable(p), true);
+    assert.ok(!p7ResearchUnmet(p), "the documented waiver applies to a real offline attempt");
+    assert.equal(runGate(p, 7).pass, true, "the whole P7 gate passes");
+  });
+
+  it("the engine's meta.liveUnavailable waiver is unchanged (the live:true producer)", () => {
+    assert.ok(!p7ResearchUnmet(p7Project({ meta: { liveUnavailable: true } })));
+  });
+
+  it("a live pass that RAN but found nothing (no failure row) stays RED — an attempt is not a corpus", () => {
+    const p = p7Project();
+    assert.equal(liveResearchAttemptUnavailable(p), false);
+    assert.ok(p7ResearchUnmet(p));
+  });
+
+  it("HOSTILE: a wrong phase, a non-research live row, or a non-unavailable code never waives", () => {
+    assert.equal(
+      liveResearchAttemptUnavailable(p7Project({ logs: [researchFailedRow({ phase: 0 as PhaseId })] })),
+      false,
+      "another phase's live failure is not P7's attempt",
+    );
+    assert.equal(
+      liveResearchAttemptUnavailable(p7Project({ logs: [researchFailedRow({ event: "p7.live.failed" })] })),
+      false,
+      "the unclassified live-layer row is not a research-backend attempt",
+    );
+    assert.equal(
+      liveResearchAttemptUnavailable(
+        p7Project({
+          logs: [
+            researchFailedRow({
+              detail: "RT_E_VALIDATION · live research failed: empty query — deterministic result used instead",
+            }),
+          ],
+        }),
+      ),
+      false,
+      "a caller-bug code is not a backend-unavailable attempt",
+    );
+  });
+
+  it("a real corpus still satisfies the probe regardless of a failure row (the OR arm is intact)", () => {
+    const p = p7Project({
+      research: [{ query: "q", items: [{ title: "t", url: "https://e/x", content: "c" }] }],
+      logs: [researchFailedRow()],
+    });
+    assert.ok(!p7ResearchUnmet(p));
+  });
+
+  it("the recorded gate for the waived phase carries a clean PASSING verdict", () => {
+    const recorded = recordGateInto(p7Project({ logs: [researchFailedRow()] }), 7);
+    const gate = recorded.phases.find((r) => r.id === 7)?.gate;
+    assert.ok(gate, "the P7 gate is recorded");
+    assert.equal(gate!.passed, true, "the waiver is visible in the recorded verdict");
+    assert.equal(gate!.unmet.length, 0);
+  });
+
+  it("REAL headless offline run: `researchLive:true` records a waived P7; the never-attempted default stays RED", async () => {
+    const realFetch = globalThis.fetch;
+    const savedKey = process.env.DEEPSEEK_API_KEY;
+    const savedTavily = process.env.TAVILY_API_KEY;
+    // Offline: every fetch rejects; both keys cleared. No network, no keyed call.
+    globalThis.fetch = (async () => {
+      throw new TypeError("network down (offline P7 pin)");
+    }) as typeof fetch;
+    delete process.env.DEEPSEEK_API_KEY;
+    delete process.env.TAVILY_API_KEY;
+    const p7Ready = (): Project => {
+      const p = emptyProject({ name: "P7Offline", brief: "A dispatch board for field service." });
+      p.currentPhase = 7;
+      p.phases = Array.from({ length: 13 }, (_, id) => ({
+        id,
+        status: id <= 6 ? ("complete" as const) : id === 7 ? ("ready" as const) : ("locked" as const),
+      })) as Project["phases"];
+      return p;
+    };
+    try {
+      const attempted = await runUntilGate(p7Ready(), { researchLive: true, maxSteps: 2 });
+      const p7 = attempted.project.phases.find((r) => r.id === 7);
+      assert.equal(
+        (attempted.project.research ?? []).length,
+        0,
+        "the offline attempt fetched no corpus — the gate is not satisfied by a fabricated corpus",
+      );
+      assert.ok(
+        (attempted.project.logs ?? []).some((l) => l.event === "p7.live.research.failed"),
+        "the coded research-failure row is on the record (the waiver's evidence)",
+      );
+      assert.equal(p7?.gate?.passed, true, "the ATTEMPTED offline P7 is waived, not an unexplained red");
+      assert.notEqual(
+        attempted.project.meta?.liveUnavailable,
+        true,
+        "the waiver is evidence-backed, never a fabricated meta stamp",
+      );
+
+      const floor = await runUntilGate(p7Ready(), { maxSteps: 2 });
+      assert.equal(
+        floor.project.phases.find((r) => r.id === 7)?.gate?.passed,
+        false,
+        "a run that never attempted live research stays honestly RED",
+      );
+      assert.equal(
+        liveResearchAttemptUnavailable(floor.project),
+        false,
+        "no attempt ⇒ no waiver evidence",
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+      if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = savedKey;
+      if (savedTavily === undefined) delete process.env.TAVILY_API_KEY;
+      else process.env.TAVILY_API_KEY = savedTavily;
+    }
   });
 });

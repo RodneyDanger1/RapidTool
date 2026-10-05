@@ -446,7 +446,9 @@ fail-open rationale in `parseGateTreeRows`' docstring before changing it.
 - A **stale** verification stamp is as dishonest as a fake one — that is what T-06 fixed.
 - **Strike rather than ship:** if a task can't be verified, strike it and record the exact command
   that showed it unsupported (T2.3 was struck this way).
-- **Never claim Docker/bwrap** — isolation is honestly `sandbox:false`.
+- **Never claim Docker/bwrap** — isolation is honestly `sandbox:false`. (346: generated code DOES run
+  under Node's Permission Model — a real fs-write/subprocess/heap bound — so say that; still never claim
+  network denial or any OS job/appcontainer boundary.)
 
 ### 5.5 Concurrency discipline (learned the hard way)
 
@@ -809,3 +811,38 @@ Do not re-derive them by hand — copy this block's commands.
   `node_modules/` is **verified** (`declaredScriptsVerified: true`, exit 0) — not automatically
   unverified.
 - **`tsconfig.scripts.json` is CLEAN** (`tsc -p tsconfig.scripts.json --noEmit` exits 0).
+
+---
+
+## CORRECTION — 2026-10-04 (346 wave; HEAD `c16220b`)
+
+The 345-F1 block and every dated snapshot above are superseded by these byte-derived values.
+
+- **Gate:** GREEN on the frozen tree (HEAD `c16220b` + the K1–K6 lanes) — scripts 452/0 · lib **3507
+  pass / 0 fail / 2 skipped**, `ok:true`, `flakes:[]`, `hardFails:[]`. An earlier mid-wave run in this
+  session returned `ok:false` on one child-spawn `compile-check.server` test that passes standalone and
+  in isolation (the documented load-sensitive flake class) while sibling lanes were editing `src/**`,
+  so it was not a controlled frozen-tree result. Exact JSON: `fixes/346_batch5_notes.md` §1.
+- **Tracked counts (`git ls-files`):** total **1,951** · `src` 250 · `src/lib` 239 (112 test suites) ·
+  `scripts` 52 (26 tools + 26 tests) · `fixes` 759 · `wave_plans` 139.
+- **346 wave landed:** `scripts/factory-watch.mjs` (the walk-away orchestrator; `npm run factory`), the
+  real Permission-Model bound (`exec.runCode` → `isolation:"strict"`), tree/oracle behavioural parity
+  (SB-2), injective knowledge fingerprints (SB-1), cross-tab lost-update fix + corrupt-blob rescue,
+  console spend chip + honest seat provenance, CLI `emit --run --git` red-tree commit guard, and honest
+  P7–P12 coverage naming. See `fixes/346_0_parent.md` §6, `fixes/346_e1…e4`, and
+  `fixes/346_batch5_notes.md`.
+- **§4 item 8 (T-14 "P7–P12 produced 0 artifacts") is superseded:** the phase edge is gate-blind; the
+  default advisory driver advances P7–P12 after a red P6 and each tail phase writes its own artifact
+  (measured: 9); only an `enforceDod` run blocks at P6. The packet reports the real census.
+- **§5.4 isolation rule, strengthened:** "never claim Docker/bwrap" still holds, and generated code now
+  also runs under Node's Permission Model (real fs-write confinement to the scratch dir + subprocess
+  denial + a 512 MB heap cap) while `doctor`'s `isolation.sandbox` stays **false**. Do not claim network
+  denial or any OS boundary; Windows Job Objects are unavailable from pure Node.
+- **Autonomy:** `doctor` still reports `autonomousSoftwareFactory:false` (the bar requires a
+  human-approved fixture row); `fixes/346_audit_autonomy.md` refutes the "100% autonomous factory"
+  claim and lists the prioritized remaining work.
+- **Known honest gaps unchanged:** keyed P6 synthesis can still miss the DoD and stall a keyed run;
+  cross-family failover is unimplemented (the un-armed switch was deleted;
+  `RAPIDTOOL_FALLBACK_PROVIDERS` is inert); the console approval lacks an out-of-band seat-delivery
+  seam (provenance recorded, not verified); P7 `p7-research` is offline; prettier drift (244 `[warn]`
+  files) is measured but NOT gated.

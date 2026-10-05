@@ -292,6 +292,12 @@ export function compileCheckDir(dir: string): CompileCheckResult {
 //     module inside a runNodeBounded child (a load that throws = fail + tail).
 //   * hard caps reused: the runner's wall-clock timeout + 1MB output slice +
 //     maxBuffer; wrapper output is a compact JSON envelope on stdout.
+//   * isolation (fixes/346 lane-1): the spec + entry legs run under the
+//     runner's `confined` tier — Node Permission Model with fs-writes confined
+//     to the runner scratch + the run copy, child_process explicitly allowed
+//     (the spec leg spawns `node --test`). The declared-script + installer legs
+//     legitimately write outside the run copy (npm cache, emitted artifacts),
+//     so they stay on the legacy bounded tier (declared, not silently claimed).
 //   * kind resolution is STRUCTURAL + record-first: a root index.html means
 //     webapp/game (vite boot shell — "UI shell — not executable headless",
 //     an honest skip); headless kinds resolve their entry from package.json
@@ -1322,7 +1328,17 @@ async function runSpecFile(
     run: "error",
     durationMs: 0,
   };
-  const run = await runNodeBounded(specRunnerCode(abs, innerTimeout, dir), { timeoutMs });
+  const run = await runNodeBounded(specRunnerCode(abs, innerTimeout, dir), {
+    timeoutMs,
+    // fixes/346 lane-1: the spec leg must spawn its own `node --test`, so it
+    // takes the `confined` tier (fs-write confined, child_process explicitly
+    // allowed) instead of the full-deny `strict`. The run COPY is declared as
+    // the workspace write root — emitted specs legitimately write into the copy
+    // (never the subject), so the runner's private scratch alone would be too
+    // narrow; writes outside the scratch + copy stay denied.
+    isolation: "confined",
+    isolationWriteDirs: [dir],
+  });
   if (!run.ok) {
     if (run.reason === "timeout") {
       return { ...base, run: "timeout", detail: `spec killed after ${timeoutMs / 1000}s`, durationMs: duration() };
@@ -1559,7 +1575,14 @@ async function runEntryFile(dir: string, rel: string, kind: string, timeoutMs: n
   const duration = (): number => Date.now() - started;
   const abs = join(dir, rel);
   const base: TreeEntryVerdict = { kind, entry: rel, run: "error", durationMs: 0 };
-  const run = await runNodeBounded(entryRunnerCode(abs), { timeoutMs });
+  // fixes/346 lane-1: the entry smoke runs emitted (untrusted) code, so it
+  // takes the `confined` tier — fs-write confined to the runner scratch + this
+  // run copy (the entry may also spawn a Node child, which inherits the flags).
+  const run = await runNodeBounded(entryRunnerCode(abs), {
+    timeoutMs,
+    isolation: "confined",
+    isolationWriteDirs: [dir],
+  });
   if (!run.ok) {
     if (run.reason === "timeout") {
       return { ...base, run: "timeout", detail: `entry smoke killed after ${timeoutMs / 1000}s`, durationMs: duration() };
@@ -1616,6 +1639,13 @@ async function runProjectScript(
   }
   const innerTimeout = Math.max(500, timeoutMs - INNER_TIMEOUT_MARGIN_MS);
   const plan = planScriptExec(root, script, raw);
+  // fixes/346 lane-1: this leg runs the tree's DECLARED toolchain (tsc/vite/npm),
+  // which legitimately writes OUTSIDE the run copy — a declared build emits a
+  // sentinel/artifact anywhere npm's toolchain chooses, and npm writes its own
+  // cache. The `confined` tier confines fs-writes to the runner scratch + the
+  // run copy, so it would deny those writes and break real builds. This leg is
+  // therefore NOT confinable and stays on the legacy (timeout + output cap)
+  // bound — declared, not silently claimed as confined.
   const run = await runNodeBounded(projectScriptRunnerCode(plan, root, innerTimeout), { timeoutMs });
   if (!run.ok) {
     if (run.reason === "timeout") {
@@ -2368,6 +2398,10 @@ async function runInstallStep(
         }),
   };
   const innerTimeout = Math.max(500, timeoutMs - INNER_TIMEOUT_MARGIN_MS);
+  // fixes/346 lane-1: like the declared-script leg, an install command writes
+  // outside the run copy (node_modules plus npm's own cache), so the `confined`
+  // tier would deny it. Kept on the legacy bounded (timeout + output cap) tier —
+  // declared here rather than claimed as confined.
   const run = await runNodeBounded(cmdRunnerCode(command, copy, innerTimeout), { timeoutMs });
   if (!run.ok) {
     if (run.reason === "timeout") {

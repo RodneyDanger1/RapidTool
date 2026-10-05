@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { SUPPLY_CHAIN_AUDIT_COMMAND, compileCheckDir, installToolFor, parseVerdictForSource, specExitIsGreen, specSourceHasBehaviouralAssert, supplyChainFloorFor, treeRun, treeSubstanceOf, treeVerdictHash, typecheckDir, verifyKindDir } from "./compile-check.server.ts";
@@ -525,6 +525,50 @@ describe("treeRun — execute the emitted tree in-loop (fixes/144 M3/B3)", () =>
       assert.equal(r.sandbox, false, "treeRun advertises sandbox:false");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // fixes/346 lane-1 — the spec leg runs under the `confined` tier. REAL
+  // subprocess proof at the consumer level: the spec still spawns its own
+  // `node --test` (every green test above), and a spec whose write lands
+  // OUTSIDE the run copy is DENIED by the Permission Model — while a write
+  // inside the copy (the purity test above) still succeeds. Failing-first:
+  // under the legacy (unconfined) runner the outside write succeeds and the
+  // spec's `assert.throws` never fires, reddening this tree.
+  it("346 lane-1: a spec child runs node --test but cannot write outside its run copy (confined)", async () => {
+    const dir = tempDir();
+    const outside = tempDir();
+    const escape = join(outside, "escape.txt");
+    try {
+      writeEmittedTree(
+        dir,
+        [
+          `import { test } from "node:test";`,
+          `import assert from "node:assert/strict";`,
+          `import { writeFileSync } from "node:fs";`,
+          `import * as m from "../src/main.ts";`,
+          `test("outside write is denied by the runner bound", () => {`,
+          `  assert.throws(`,
+          `    () => writeFileSync(${JSON.stringify(escape)}, "pwned"),`,
+          `    (e) => e.code === "ERR_ACCESS_DENIED",`,
+          `  );`,
+          `  assert.equal(m.boot(), "ok");`,
+          `});`,
+          ``,
+        ].join("\n"),
+      );
+      const r = await treeRunAsConsumer(dir);
+      assert.equal(
+        r.ok,
+        true,
+        `the spec proved the denial and still ran under node --test: ${JSON.stringify(r.tests)}`,
+      );
+      assert.equal(r.tests[0]?.run, "pass");
+      assert.equal(existsSync(escape), false, "the escape file must never land on disk");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 

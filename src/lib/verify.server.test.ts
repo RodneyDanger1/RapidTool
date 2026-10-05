@@ -26,6 +26,9 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   behaviouralOracleExpression,
   buildOracleCasesPrompt,
@@ -49,7 +52,7 @@ import type { VerifyCase } from "./verify.server.ts";
 // 346 cross-lane: the tree-lane assertion floor, exercised head-to-head against
 // behaviouralOracleExpression over one shared corpus (cross-lane parity pin).
 import { specSourceHasBehaviouralAssert } from "./compile-check.server.ts";
-import { runnerAvailable } from "./node-runner.server.ts";
+import { runnerAvailable, permissionModelAvailable } from "./node-runner.server.ts";
 import { createTokenBudget, emptyLedger } from "./token-ledger.ts";
 import { oracleToCaseSeeds } from "./dod.ts";
 import type { OracleTest, Project } from "./types.ts";
@@ -538,6 +541,54 @@ describe("fixes/327 L5 — harness compile verdict (stdout is non-authoritative)
     const res = await runCases("exports.add = (", [{ id: "add", expression: "add(2,3) === 5" }]);
     assert.equal(res.pass, false);
     assert.equal(res.compileError, "source failed to compile in the harness");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/346 lane-1 — the candidate module `runCases` executes now runs under
+// the full `strict` bound (fs-write confined to the per-run scratch, no
+// subprocess/worker/addon). REAL subprocess proof: the module reaches fs via
+// `process.getBuiltinModule('fs')` (no `require` needed — the harness passes a
+// no-op require), writes a sibling of the scratch dir (denied) and the scratch
+// itself (allowed). Failing-first: under the legacy (unconfined) runner the
+// outside write SUCCEEDS, `outside()` returns "ESCAPED", the case is false and
+// `res.pass` is false.
+// ---------------------------------------------------------------------------
+describe("fixes/346 lane-1 — runCases executes under the strict isolation bound", () => {
+  const strictReady = available && permissionModelAvailable();
+
+  it("denies a module write OUTSIDE the runner scratch, allows one inside it (real child)", { skip: !strictReady }, async () => {
+    const escape = join(tmpdir(), `rapidtool-346-verify-escape-${process.pid}-${Date.now()}.txt`);
+    try {
+      const src = [
+        "exports.outside = function () {",
+        "  try { var fs = process.getBuiltinModule('fs');",
+        `    fs.writeFileSync(${JSON.stringify(escape)}, 'pwned'); return 'ESCAPED';`,
+        "  } catch (e) { return 'DENIED:' + (e && e.code); }",
+        "};",
+        "exports.inside = function () {",
+        "  try { var fs = process.getBuiltinModule('fs');",
+        "    fs.writeFileSync('./verify-inside.txt', 'ok'); return 'WROTE';",
+        "  } catch (e) { return 'FAILED:' + (e && e.code); }",
+        "};",
+      ].join("\n");
+      const res = await runCases(src, [
+        { id: "outside", expression: "outside() === 'DENIED:ERR_ACCESS_DENIED'" },
+        { id: "inside", expression: "inside() === 'WROTE'" },
+      ]);
+      assert.equal(
+        res.pass,
+        true,
+        `strict must deny the outside write and allow the scratch write: ${JSON.stringify(res)}`,
+      );
+      assert.equal(existsSync(escape), false, "the escape file must never exist on disk");
+    } finally {
+      try {
+        rmSync(escape, { force: true });
+      } catch {
+        /* nothing to clean */
+      }
+    }
   });
 });
 

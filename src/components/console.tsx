@@ -7167,11 +7167,14 @@ function StatusChip({
 }
 
 /** L3-04 (346 E4): the run's recorded token spend. `Project.tokenUsage` is
- *  written by the CLI/headless run path (`headless.accumulateSpend`) and, since
- *  P1-5 (346 L2), by the console's own model calls — `store.recordSpend` folds
- *  the REAL usage a successful chat server-fn reply carries. Measured spend (a
- *  console chat turn, an imported or CLI-produced record) renders as a chip;
- *  absence renders an honest "not recorded" chip (never a fabricated zero). */
+ *  written by the CLI/headless run path (`headless.accumulateSpend`), by the
+ *  console's own model calls (P1-5 · 346 L2: `store.recordSpend` folds the REAL
+ *  usage a successful chat server-fn reply carries), and by the console PHASE
+ *  run (346 K3: `engine.wildStep`'s `onUsage` hands `store.startWildRun` the
+ *  step's measured session-ledger delta, folded via `accumulateSpend`). Measured
+ *  spend (a console chat turn or phase run, an imported or CLI-produced record)
+ *  renders as a chip; absence renders an honest "not recorded" chip (never a
+ *  fabricated zero). */
 function SpendChip({ project }: { project: Project }) {
   const spend = project.tokenUsage;
   if (isMeasuredSpend(spend)) {
@@ -7183,7 +7186,7 @@ function SpendChip({ project }: { project: Project }) {
         className="rounded-sm border border-border px-2 py-1 tabular-nums text-ok"
         title={`Recorded run spend (persisted Project.tokenUsage): prompt + completion tokens${
           calls !== null ? ` over ${calls} call(s)` : ""
-        }. Measured by the console's chat replies and the CLI/headless run path.`}
+        }. Measured by the console's chat replies and phase runs, and the CLI/headless run path.`}
       >
         spent {total.toLocaleString()} tok
         {calls !== null ? ` · ${calls} call${calls === 1 ? "" : "s"}` : ""}
@@ -7193,7 +7196,7 @@ function SpendChip({ project }: { project: Project }) {
   return (
     <span
       className="rounded-sm border border-border px-2 py-1 text-faint"
-      title="No measured run spend is recorded on this build. A console chat turn records the provider-measured usage of its reply here; with no measured model call (keyless, or none sent) there is nothing to record — this chip never fabricates a zero. A CLI run or an imported CLI record also carries Project.tokenUsage."
+      title="No measured run spend is recorded on this build. A console chat turn or phase run records the provider-measured usage it sees here; with no measured model call (keyless, or none sent) there is nothing to record — this chip never fabricates a zero. A CLI run or an imported CLI record also carries Project.tokenUsage."
     >
       spend not recorded
     </span>
@@ -7668,9 +7671,9 @@ function ShellSurfacesCard({ project }: { project: Project }) {
           </p>
           <p
             className="mt-0.5 text-xs text-muted"
-            title="R8-f09 / A1-12: the browser console IS the designed human surface, but it has no out-of-band RT_HUMAN_SEAT_TOKEN delivery seam, so a console approval is recorded as an UNATTESTED human decision — the seat policy's verdict (deny, human-seat-unverified) is written to the ledger as a hitl.console_decision row, never a token-verified human claim. The planned seat seam (S4 seat.ts / a delivery code) is not on disk (TODO S4); the CLI's out-of-band token remains the only verified human seat."
+            title="A1-12 (346 K3 writer step): the browser console IS the designed human surface, but it has no out-of-band RT_HUMAN_SEAT_TOKEN delivery seam, so an approval is recorded through the registered UNATTESTED console human seat — the seat policy admits hitl.approve under `console-seat-unattested`, the decision row is tagged `[seat console]`, and its `decidedVia` records tokenPath:false, so the p4/p5/p8/p9 criteria pass on a truthful provenance and the row can never read as token-verified. A forced P6-sandbox override is refused for the console seat (force-requires-human-seat) and the row records that refusal. The CLI's out-of-band token remains the only verified human seat."
           >
-            console approvals are recorded as unattested human decisions (no token path);
+            console approvals are recorded under the unattested console human seat (<span className="font-mono">[seat console]</span>, no token path);
             the CLI carries the verified out-of-band seat.
           </p>
         </li>

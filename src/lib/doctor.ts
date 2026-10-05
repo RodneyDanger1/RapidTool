@@ -19,6 +19,12 @@
  * apart from a real defect. It never flips `autonomousSoftwareFactory` and never
  * mints a human stamp.
  *
+ * 346 · lane-2 (P0-1): `machineVerifiedAcceptance` is the SEPARATE, derived
+ * reading of what a no-human run actually achieved — an external, re-runnable
+ * persisted verdict (the P6 tree-run `lastTest` promotion stamp) reported under
+ * its own machine seat. It is additive: like `awaitingHumanAcceptance` it never
+ * flips `autonomousSoftwareFactory` and never touches the human stamp.
+ *
  * 185-H1: this envelope has no `ok`/`error` pair — never dual-channel.
  *
  * Client-safe: sandbox-policy + token-ledger + the pure p6-arch trace seam
@@ -75,6 +81,10 @@ export type FactoryEvidence = {
   /** OV-9: derived — `productCompleteFromProject` over the project's own tree
    *  bytes. Never read from a caller's flag. */
   productComplete?: boolean;
+  /** 346 · lane-2: the project's persisted machine-verification verdict, read
+   *  through `machineVerifiedAcceptanceFromProject`. Never hand-fed through an
+   *  untrusted seam; absent ⇒ the signal fails closed (no evidence). */
+  machineVerifiedAcceptance?: MachineVerifiedAcceptance;
   chatHasSlashToolsOnly?: boolean;
   isolation?: unknown;
   inventory?: JobInventory | null;
@@ -89,6 +99,16 @@ export type DoctorFactory = {
    *  and never mints a human stamp. False whenever the state is absent, garbled,
    *  already machine-decided, or any other gap also stands. */
   awaitingHumanAcceptance: boolean;
+  /** 346 · lane-2 (P0-1 derived signal): the INDEPENDENT machine-verifiable
+   *  acceptance reading, derived from the project's persisted P6 tree-run
+   *  verdict — never hand-fed. It never flips `autonomousSoftwareFactory` and
+   *  never mints a human stamp; see `machineVerifiedAcceptanceFromProject`. */
+  machineVerifiedAcceptance: MachineVerifiedAcceptance;
+  /** W52 · 338-3: the derived human-acceptance conjunct (the project record's
+   *  `decidedBy:"human"` stamp). Surfaced beside the machine signal so a
+   *  no-human run reads "machine-complete, human stamp pending" instead of
+   *  being indistinguishable from a defect. Never a caller flag. */
+  humanFixtures: boolean;
   leftoverJobsAreReexportsOrStubs: boolean;
   chatHasSlashToolsOnly: boolean;
   runnerIsSandbox: false;
@@ -388,6 +408,150 @@ export function humanFixturesFromProject(project: unknown): boolean {
   return humanApproved;
 }
 
+// ---------------------------------------------------------------------------
+// 346 · lane-2 (P0-1 derived signal) — machine-verifiable acceptance
+//
+// The factory latch's human conjunct is human-only BY DESIGN (338-4): a machine
+// may not set the acceptance bar it is then graded against, so that guard stays
+// byte-identical and a no-human run stays `autonomousSoftwareFactory:false`.
+// What was missing is an HONEST, SEPARATE reading of what a no-human run DID
+// achieve. This signal reports that from EXTERNAL, re-runnable evidence
+// persisted on the project — the P6 tree-run promotion stamp
+// (`lastTest.label === "tested"` with a non-empty `evidenceHash`, the SAME bar
+// dod.ts's `p6-verified` probe reads). It carries its OWN verifier seat
+// ("machine:tree-run"), never reuses `decidedBy:"human"`, and never reads the
+// machine-authored acceptance oracle (`acceptanceFixtures`). It is additive: it
+// never flips `autonomousSoftwareFactory`.
+// ---------------------------------------------------------------------------
+
+/** The verifier seat this signal reports under — a machine seat, never `human`. */
+export const MACHINE_ACCEPTANCE_SEAT = "machine:tree-run" as const;
+
+export type MachineAcceptanceEvidence = {
+  /** Verifier seat that produced the verdict — never `human`. */
+  seat: typeof MACHINE_ACCEPTANCE_SEAT;
+  label: "tested";
+  /** FNV-1a evidence hash over the deterministic tree-run summary (integrity,
+   *  not cryptography). An external verifier re-runs the tree and recomputes it. */
+  evidenceHash: string;
+  detail: string;
+};
+
+export type MachineVerifiedAcceptance = {
+  ok: boolean;
+  evidence: MachineAcceptanceEvidence | null;
+  reasons: string[];
+};
+
+/** Why the machine signal is false — one coded sentence per precondition. */
+export const MACHINE_ACCEPTANCE_REASON = {
+  noEvidence:
+    "no persisted machine tree-run verdict — no external, re-runnable evidence exists on the project, so machine acceptance is unproven",
+  notTested:
+    'the project carries no promoted tree-run verdict — lastTest.label is not "tested" (the P6 machine-verification stamp is absent)',
+  hollow:
+    'the "tested" stamp is hollow — lastTest.ok/detail or its evidenceHash is missing, so no verifier could re-run and reproduce it',
+  humanSeat:
+    "the recorded verdict claims a human seat — machine acceptance never rides a human stamp; that door is the human-approved fixtures (decided out-of-band), not this signal",
+} as const;
+
+/**
+ * 346 · lane-2: the ONE producer of the machine-verifiable acceptance signal.
+ * Reads ONLY the project's persisted `lastTest` stamp — never the acceptance
+ * fixtures (the machine-authored oracle it is graded against), so it cannot
+ * self-certify. The bar is `dod.ts`'s `p6-verified`: `ok === true`, a non-empty
+ * `detail`, `label === "tested"`, and a non-empty `evidenceHash` — the stamp
+ * only `mintTreeRunTested` (or the ≤8-signature verify path) writes after a
+ * genuinely green, spec-executing tree-run. A verdict stamped with a human seat
+ * is refused outright (a human claim never becomes machine evidence). Absent,
+ * non-object, or non-"tested" state ⇒ false with a named reason (fail-closed).
+ */
+export function machineVerifiedAcceptanceFromProject(project: unknown): MachineVerifiedAcceptance {
+  if (!project || typeof project !== "object" || Array.isArray(project)) {
+    return { ok: false, evidence: null, reasons: [MACHINE_ACCEPTANCE_REASON.noEvidence] };
+  }
+  const lt = (project as { lastTest?: unknown }).lastTest;
+  if (!lt || typeof lt !== "object" || Array.isArray(lt)) {
+    return { ok: false, evidence: null, reasons: [MACHINE_ACCEPTANCE_REASON.notTested] };
+  }
+  const l = lt as {
+    ok?: unknown;
+    detail?: unknown;
+    label?: unknown;
+    evidenceHash?: unknown;
+    decidedBy?: unknown;
+    seat?: unknown;
+  };
+  // Never reuse a human stamp: a verdict that claims a human seat is not machine
+  // evidence, so refuse it rather than laundering it through this signal.
+  if (l.decidedBy === "human" || l.seat === "human") {
+    return { ok: false, evidence: null, reasons: [MACHINE_ACCEPTANCE_REASON.humanSeat] };
+  }
+  if (l.label !== "tested") {
+    return { ok: false, evidence: null, reasons: [MACHINE_ACCEPTANCE_REASON.notTested] };
+  }
+  if (
+    l.ok !== true ||
+    typeof l.detail !== "string" ||
+    l.detail.length === 0 ||
+    typeof l.evidenceHash !== "string" ||
+    l.evidenceHash.length === 0
+  ) {
+    return { ok: false, evidence: null, reasons: [MACHINE_ACCEPTANCE_REASON.hollow] };
+  }
+  return {
+    ok: true,
+    evidence: { seat: MACHINE_ACCEPTANCE_SEAT, label: "tested", evidenceHash: l.evidenceHash, detail: l.detail },
+    reasons: [],
+  };
+}
+
+/** Fail-closed normalization for the internal typed field: only the producer's
+ *  shape (seat + `tested` label + non-empty hash) reads `ok:true`; a hand-fed,
+ *  garbled, or absent value reads as the honest no-evidence signal. */
+function normalizeMachineVerifiedAcceptance(v: unknown): MachineVerifiedAcceptance {
+  if (!v || typeof v !== "object" || Array.isArray(v)) {
+    return { ok: false, evidence: null, reasons: [MACHINE_ACCEPTANCE_REASON.noEvidence] };
+  }
+  const m = v as { ok?: unknown; evidence?: unknown; reasons?: unknown };
+  if (m.ok !== true) {
+    // Preserve the producer's named refusal reasons; only an unreadable value
+    // falls back to the generic no-evidence sentence.
+    const reasons =
+      Array.isArray(m.reasons) && m.reasons.length > 0 && m.reasons.every((r) => typeof r === "string")
+        ? (m.reasons as string[])
+        : [MACHINE_ACCEPTANCE_REASON.noEvidence];
+    return { ok: false, evidence: null, reasons };
+  }
+  const ev = m.evidence;
+  const hash =
+    ev && typeof ev === "object" && !Array.isArray(ev)
+      ? (ev as { evidenceHash?: unknown }).evidenceHash
+      : undefined;
+  const valid =
+    ev !== null &&
+    typeof ev === "object" &&
+    !Array.isArray(ev) &&
+    (ev as { seat?: unknown }).seat === MACHINE_ACCEPTANCE_SEAT &&
+    (ev as { label?: unknown }).label === "tested" &&
+    typeof hash === "string" &&
+    hash.length > 0;
+  if (!valid) {
+    return { ok: false, evidence: null, reasons: [MACHINE_ACCEPTANCE_REASON.noEvidence] };
+  }
+  const detail = (ev as { detail?: unknown }).detail;
+  return {
+    ok: true,
+    evidence: {
+      seat: MACHINE_ACCEPTANCE_SEAT,
+      label: "tested",
+      evidenceHash: hash as string,
+      detail: typeof detail === "string" ? detail : "",
+    },
+    reasons: [],
+  };
+}
+
 /**
  * W52 · 338-3: the factory evidence a persisted project RECORD supports WITHOUT
  * a job-file census (the `--project <record>` path with no emitted tree to
@@ -405,6 +569,7 @@ export function evidenceFromProjectRecord(project: unknown): FactoryEvidence {
     humanFixtures: humanFixturesFromProject(project),
     acceptance: liveAcceptanceState(project),
     productComplete: productCompleteFromProject(project),
+    machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(project),
     chatHasSlashToolsOnly: true,
   };
 }
@@ -425,11 +590,16 @@ export function evidenceFromProjectRecord(project: unknown): FactoryEvidence {
  * human stamp by passing `{humanFixtures:true}` (the pre-fix forge).
  * W53 · 340-2: `acceptance` is DERIVED from `extra.project` like `productComplete`
  * — it is not in the `extra` type and a hand-passed value is ignored at runtime,
- * so the awaiting signal can never be handed in.
+ * so the awaiting signal can never be handed in. 346 · lane-2:
+ * `machineVerifiedAcceptance` is likewise DERIVED from `extra.project` and
+ * omitted from `extra`, so the machine signal cannot be handed in either.
  */
 export function evidenceFromJobInventory(
   inv: JobInventory,
-  extra?: Omit<Partial<FactoryEvidence>, "productComplete" | "inventory" | "acceptance" | "humanFixtures"> &
+  extra?: Omit<
+    Partial<FactoryEvidence>,
+    "productComplete" | "inventory" | "acceptance" | "humanFixtures" | "machineVerifiedAcceptance"
+  > &
     ProductStateEvidence,
 ): FactoryEvidence {
   const leftover = inv.stubs + inv.reexports > 0 || inv.real === 0;
@@ -440,6 +610,7 @@ export function evidenceFromJobInventory(
     humanFixtures: humanFixturesFromProject(extra?.project),
     acceptance: liveAcceptanceState(extra?.project),
     productComplete: productCompleteFromProject(extra?.project) && realMulti && !leftover,
+    machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(extra?.project),
     chatHasSlashToolsOnly: extra?.chatHasSlashToolsOnly !== false,
     isolation: extra?.isolation,
     inventory: inv,
@@ -453,6 +624,7 @@ export const RAPIDTOOL_FACTORY_EVIDENCE: FactoryEvidence = Object.freeze({
   realMultiJobProduct: false,
   productComplete: false,
   chatHasSlashToolsOnly: true,
+  machineVerifiedAcceptance: { ok: false, evidence: null, reasons: [MACHINE_ACCEPTANCE_REASON.noEvidence] },
 });
 
 export const FACTORY_GAP = {
@@ -555,6 +727,8 @@ export function factoryClaim(
   return {
     autonomousSoftwareFactory,
     awaitingHumanAcceptance,
+    machineVerifiedAcceptance: normalizeMachineVerifiedAcceptance(evidence.machineVerifiedAcceptance),
+    humanFixtures: human,
     leftoverJobsAreReexportsOrStubs: leftover,
     chatHasSlashToolsOnly: evidence.chatHasSlashToolsOnly !== false,
     runnerIsSandbox: false,
@@ -581,7 +755,10 @@ export function factoryClaim(
  * flag is IGNORED — pre-fix it ORed straight into the evidence and let a raw
  * claim mint the one conjunct 338-4 reserved for a real human stamp.
  * W53 · 340-2: the live `acceptance` state is derived the same way, and none
- * of these three is read from the blob.
+ * of these three is read from the blob. 346 · lane-2: `machineVerifiedAcceptance`
+ * is DERIVED from the project's persisted tree-run verdict
+ * (`machineVerifiedAcceptanceFromProject`) — a blob claiming machine acceptance
+ * with no such evidence is coerced false, never trusted.
  *
  * OV-41 (W23 · L4): `spend` is NOT read from the blob — a raw claim can no
  * more mint a dollar figure than it can a capability. The honest
@@ -598,10 +775,11 @@ export function coerceFactoryClaim(raw?: unknown, project?: unknown): DoctorFact
         acceptance: liveAcceptanceState(project),
         realMultiJobProduct: blob.realMultiJobProduct === true,
         productComplete: productCompleteFromProject(project),
+        machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(project),
         chatHasSlashToolsOnly: blob.chatHasSlashToolsOnly !== false,
         isolation: blob.isolation,
       }
-    : { ...RAPIDTOOL_FACTORY_EVIDENCE, productComplete: productCompleteFromProject(project), humanFixtures: humanFixturesFromProject(project), acceptance: liveAcceptanceState(project) };
+    : { ...RAPIDTOOL_FACTORY_EVIDENCE, productComplete: productCompleteFromProject(project), humanFixtures: humanFixturesFromProject(project), acceptance: liveAcceptanceState(project), machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(project) };
   return factoryClaim(evidence);
 }
 

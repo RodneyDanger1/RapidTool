@@ -985,7 +985,17 @@ export async function runCases(
     return { pass: false, results: [], compileError: "local bounded runner unavailable" };
   }
   const harness = buildHarness(source, validated);
-  const run = await runNodeBounded(harness, { timeoutMs, verdictChannel: true });
+  // fixes/346 lane-1: the machine cases run the UNTRUSTED candidate module
+  // (turned into an executable harness), so they request the full `strict`
+  // bound — fs-write confined to the per-run scratch dir, child_process /
+  // workers / addons denied, heap capped. Availability degrades honestly: on a
+  // runtime without the Permission Model the run carries `bound.enforced:false`
+  // rather than a pretend boundary.
+  const run = await runNodeBounded(harness, {
+    timeoutMs,
+    verdictChannel: true,
+    isolation: "strict",
+  });
   if (!run.ok) {
     return { pass: false, results: [], compileError: `${run.reason}${run.error ? `: ${run.error}` : ""}` };
   }

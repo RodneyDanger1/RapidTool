@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,6 +16,9 @@ import {
   clampRunnerOutput,
   permissionModelAvailable,
   strictRunnerArgs,
+  confinedRunnerArgs,
+  tierBound,
+  tierRunnerArgs,
   RUNNER_STRICT_HEAP_CAP_MB,
 } from "./node-runner.server.ts";
 import {
@@ -389,5 +392,258 @@ describe("runNodeBounded strict isolation (346 P1-4)", () => {
 
   it("the doctor's advertised heap cap matches the runner's (drift guard)", () => {
     assert.equal(RUNNER_BOUND_HEAP_CAP_MB, RUNNER_STRICT_HEAP_CAP_MB);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixes/346 lane-1 — the SECOND isolation tier (`confined`) and the honest
+// availability degradation. `confined` keeps fs writes confined to the per-run
+// scratch dir and the heap cap, but EXPLICITLY ALLOWS child_process (the
+// compile-check harness spawns `node --test`) and allows broad fs reads. The
+// tests below spawn REAL children: can-spawn, cannot-escape, and — pinned
+// without a mock — the exact bound/args produced when the Permission Model is
+// unavailable (never a pretend boundary).
+// ---------------------------------------------------------------------------
+describe("runNodeBounded confined isolation tier (346 lane-1)", () => {
+  const confinedReady = runnerAvailable() && permissionModelAvailable();
+
+  it("confinedRunnerArgs names the exact flags: fs-confine + heap cap + child_process allowed", () => {
+    const args = confinedRunnerArgs("C:\\tmp\\rapidtool-run-abc");
+    assert.ok(args.includes("--permission"));
+    assert.ok(args.includes("--allow-fs-read=*"), "reads are allowed broadly — the harness reads the emitted tree");
+    assert.ok(args.includes("--allow-fs-write=C:/tmp/rapidtool-run-abc"), "writes stay confined to the scratch dir");
+    assert.ok(args.includes("--allow-child-process"), "the tier must allow spawning");
+    assert.ok(args.includes(`--max-old-space-size=${RUNNER_STRICT_HEAP_CAP_MB}`));
+    assert.equal(args.includes("--allow-worker"), false, "workers stay denied — only child_process is opened");
+    // A caller-declared workspace adds a WRITE root only (never a read-scope widen).
+    const withWs = confinedRunnerArgs("C:\\tmp\\rapidtool-run-abc", ["C:\\tmp\\rt-ws"]);
+    assert.ok(withWs.includes("--allow-fs-write=C:/tmp/rt-ws"));
+    assert.equal(withWs.filter((a) => a === "--allow-fs-read=*").length, 1);
+    // The strict tier must NEVER gain --allow-child-process (byte-identical).
+    assert.equal(strictRunnerArgs("C:\\tmp\\x").includes("--allow-child-process"), false);
+  });
+
+  it("tierBound: confined allows child_process; strict denies; both degrade honestly", () => {
+    const confined = tierBound("confined", true);
+    assert.equal(confined.tier, "confined");
+    assert.equal(confined.mechanism, "node-permission-model");
+    assert.equal(confined.enforced, true);
+    assert.equal(confined.fsWriteConfined, true, "fs writes stay confined under confined");
+    assert.equal(confined.subprocessAllowed, true, "confined explicitly allows a child");
+    assert.equal(confined.subprocessDenied, false);
+    assert.equal(confined.heapCapMb, RUNNER_STRICT_HEAP_CAP_MB);
+    assert.match(confined.note ?? "", /child_process is EXPLICITLY ALLOWED/);
+    assert.match(confined.note ?? "", /not an OS sandbox/i);
+    assert.match(
+      tierBound("confined", true, ["C:\\ws"]).note ?? "",
+      /caller-declared workspace dir/,
+      "a declared workspace root is named in the bound",
+    );
+
+    const strict = tierBound("strict", true);
+    assert.equal(strict.subprocessDenied, true);
+    assert.equal("tier" in strict, false, "the strict bound stays byte-identical (no new keys)");
+    assert.equal("subprocessAllowed" in strict, false);
+
+    // Availability degrades honestly — no flags, no pretend boundary.
+    const degradedConfined = tierBound("confined", false);
+    assert.equal(degradedConfined.tier, "confined");
+    assert.equal(degradedConfined.subprocessAllowed, true, "the requested tier is still named");
+    for (const tier of ["strict", "confined"] as const) {
+      const degraded = tierBound(tier, false);
+      assert.equal(degraded.mechanism, "none");
+      assert.equal(degraded.available, false);
+      assert.equal(degraded.enforced, false, `${tier}: never a pretend boundary`);
+      assert.equal(degraded.fsWriteConfined, false, `${tier}: no confinement claimed`);
+      assert.equal(degraded.subprocessDenied, false, `${tier}: strict cannot deny without the flag`);
+      if (tier === "confined") assert.match(degraded.note ?? "", /was NOT applied/);
+      else assert.equal("note" in degraded, false, "strict bound carries no note (byte-identical)");
+    }
+  });
+
+  it("tierRunnerArgs skips every Permission-Model flag when unavailable (heap cap only)", () => {
+    const dir = "C:\\tmp\\rapidtool-run-xyz";
+    for (const tier of ["strict", "confined"] as const) {
+      assert.deepEqual(tierRunnerArgs(tier, dir, false), [
+        `--max-old-space-size=${RUNNER_STRICT_HEAP_CAP_MB}`,
+      ]);
+    }
+    assert.deepEqual(tierRunnerArgs("confined", dir, true), confinedRunnerArgs(dir));
+    assert.deepEqual(tierRunnerArgs("strict", dir, true), strictRunnerArgs(dir));
+  });
+
+  it("CAN still spawn `node --test` in its scratch dir (the compile-check need) — real child", { skip: !confinedReady }, async () => {
+    const code = [
+      "const fs=require('node:fs');",
+      "fs.writeFileSync('./confined-spec.test.mjs','import {test} from \"node:test\";import assert from \"node:assert\";test(\"t\",()=>{assert.equal(1,1)});');",
+      "const cp=require('node:child_process');",
+      "const r=cp.spawnSync(process.execPath,['--test','--test-reporter=tap','./confined-spec.test.mjs'],{encoding:'utf8'});",
+      "console.log('SPAWN-STATUS:'+r.status);",
+      "console.error(String(r.stderr).slice(0,300));",
+    ].join("\n");
+    const res = await runNodeBounded(code, { timeoutMs: 20_000, isolation: "confined" });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(res.exitCode, 0, `the spawned node --test must run: ${res.stderr}`);
+    assert.match(res.stdout, /SPAWN-STATUS:0/);
+    assert.equal(res.bound?.tier, "confined");
+    assert.equal(res.bound?.subprocessAllowed, true);
+  });
+
+  it("denies a filesystem write OUTSIDE the per-run scratch dir (real child)", { skip: !confinedReady }, async () => {
+    const escape = join(tmpdir(), `rapidtool-346-confined-escape-${process.pid}-${Date.now()}.txt`);
+    try {
+      const code =
+        `const fs=require('node:fs');` +
+        `try{fs.writeFileSync(${JSON.stringify(escape)},'pwned');console.log('ESCAPED')}` +
+        `catch(e){console.error('DENIED:'+e.code);process.exit(9)}`;
+      const res = await runNodeBounded(code, { timeoutMs: 15_000, isolation: "confined" });
+      assert.equal(res.ok, true, "the child runs — it is the WRITE that must be denied");
+      if (!res.ok) return;
+      assert.equal(res.exitCode, 9, "the child observed and reported the denial");
+      assert.match(res.stderr, /ERR_ACCESS_DENIED/);
+      assert.doesNotMatch(res.stdout, /ESCAPED/);
+      assert.equal(existsSync(escape), false, "the escape file must NOT exist on disk");
+      assert.equal(res.bound?.mechanism, "node-permission-model");
+      assert.equal(res.bound?.fsWriteConfined, true);
+      assert.equal(res.bound?.enforced, true);
+    } finally {
+      try {
+        rmSync(escape, { force: true });
+      } catch {
+        /* nothing to clean */
+      }
+    }
+  });
+
+  it("allows a write INSIDE the scratch dir — confinement, not blanket denial (real child)", { skip: !confinedReady }, async () => {
+    const code =
+      `const fs=require('node:fs');` +
+      `fs.writeFileSync('./confined-inside.txt','ok');` +
+      `console.log('WROTE:'+fs.readFileSync('./confined-inside.txt','utf8'));`;
+    const res = await runNodeBounded(code, { timeoutMs: 15_000, isolation: "confined" });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(res.exitCode, 0, res.stderr);
+    assert.match(res.stdout, /WROTE:ok/);
+  });
+
+  it("honors a caller-declared workspace WRITE root but still denies outside it (real child)", { skip: !confinedReady }, async () => {
+    const ws = mkdtempSync(join(tmpdir(), "rapidtool-346-ws-"));
+    const outside = mkdtempSync(join(tmpdir(), "rapidtool-346-out-"));
+    const wsFile = join(ws, "allowed.txt");
+    const outFile = join(outside, "denied.txt");
+    try {
+      const code =
+        `const fs=require('node:fs');` +
+        `fs.writeFileSync(${JSON.stringify(wsFile)},'ws-ok');console.log('WROTE-WS');` +
+        `try{fs.writeFileSync(${JSON.stringify(outFile)},'pwned');console.log('WROTE-OUTSIDE')}` +
+        `catch(e){console.error('DENIED-OUTSIDE:'+e.code)}`;
+      const res = await runNodeBounded(code, {
+        timeoutMs: 15_000,
+        isolation: "confined",
+        isolationWriteDirs: [ws],
+      });
+      assert.equal(res.ok, true);
+      if (!res.ok) return;
+      assert.equal(res.exitCode, 0, res.stderr);
+      assert.match(res.stdout, /WROTE-WS/);
+      assert.doesNotMatch(res.stdout, /WROTE-OUTSIDE/);
+      assert.match(res.stderr, /DENIED-OUTSIDE:ERR_ACCESS_DENIED/);
+      assert.equal(existsSync(wsFile), true, "the declared workspace root is writable");
+      assert.equal(existsSync(outFile), false, "a sibling dir outside the declared roots stays denied");
+      assert.match(res.bound?.note ?? "", /caller-declared workspace dir/);
+    } finally {
+      for (const d of [ws, outside]) {
+        try {
+          rmSync(d, { recursive: true, force: true });
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
+  });
+
+  it("strict ignores isolationWriteDirs — its confinement never widens", { skip: !(runnerAvailable() && permissionModelAvailable()) }, async () => {
+    const ws = mkdtempSync(join(tmpdir(), "rapidtool-346-strictws-"));
+    const wsFile = join(ws, "denied-under-strict.txt");
+    try {
+      const code =
+        `const fs=require('node:fs');` +
+        `try{fs.writeFileSync(${JSON.stringify(wsFile)},'x');console.log('WROTE')}` +
+        `catch(e){console.error('DENIED:'+e.code);process.exit(5)}`;
+      const res = await runNodeBounded(code, {
+        timeoutMs: 15_000,
+        isolation: "strict",
+        isolationWriteDirs: [ws],
+      });
+      assert.equal(res.ok, true);
+      if (!res.ok) return;
+      assert.equal(res.exitCode, 5, "strict must not honor a caller write root");
+      assert.match(res.stderr, /ERR_ACCESS_DENIED/);
+      assert.equal(existsSync(wsFile), false);
+    } finally {
+      try {
+        rmSync(ws, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
+    }
+  });
+
+  it("confined envelope carries its bound; the legacy envelope gains NO new field", async () => {
+    if (!runnerAvailable()) return;
+    const confined = await runNodeBounded("console.log('confined-ok')", {
+      timeoutMs: 15_000,
+      isolation: "confined",
+    });
+    assert.equal(confined.ok, true);
+    assert.ok(confined.bound, "a confined run carries its bound record");
+    assert.equal(confined.bound?.tier, "confined");
+    assert.equal(confined.bound?.subprocessAllowed, true);
+    assert.equal(confined.bound?.subprocessDenied, false);
+    assert.equal(confined.bound?.heapCapMb, RUNNER_STRICT_HEAP_CAP_MB);
+    const legacy = await runNodeBounded("console.log('legacy-ok')", { timeoutMs: 15_000 });
+    assert.equal("bound" in legacy, false, "the legacy envelope gains NO new field");
+  });
+
+  it("legacy (isolation omitted) is unchanged: the SAME outside write succeeds — the tier is what confines", async () => {
+    if (!runnerAvailable()) return;
+    const escape = join(tmpdir(), `rapidtool-346-legacy-escape-${process.pid}-${Date.now()}.txt`);
+    try {
+      const code =
+        `const fs=require('node:fs');` +
+        `fs.writeFileSync(${JSON.stringify(escape)},'pwned');console.log('ESCAPED');`;
+      const res = await runNodeBounded(code, { timeoutMs: 15_000 });
+      assert.equal(res.ok, true);
+      if (!res.ok) return;
+      assert.match(res.stdout, /ESCAPED/);
+      assert.equal(existsSync(escape), true, "legacy has no confinement — it is the tier that changes behaviour");
+      assert.equal("bound" in res, false);
+    } finally {
+      try {
+        rmSync(escape, { force: true });
+      } catch {
+        /* nothing to clean */
+      }
+    }
+  });
+
+  it("strict + verdictChannel compose: an authenticated fd-3 verdict still arrives under the bound (real child)", { skip: !(runnerAvailable() && permissionModelAvailable()) }, async () => {
+    const code =
+      "(function(){var fs=require('node:fs');var w=fs.writeSync.bind(fs);" +
+      "var n='';try{n=String(fs.readFileSync(0,'utf8')).trim()}catch(e){n=''};" +
+      "w(3,n+' HARNESS_COMPILE pass\\n');w(3,n+' ORACLE_RESULT c1 pass true\\n');})();";
+    const res = await runNodeBounded(code, {
+      timeoutMs: 15_000,
+      verdictChannel: true,
+      isolation: "strict",
+    });
+    assert.equal(res.ok, true, `the harness must run under strict: ${res.ok ? "" : res.error}`);
+    if (!res.ok) return;
+    assert.match(res.verdict ?? "", /HARNESS_COMPILE pass/);
+    assert.match(res.verdict ?? "", /ORACLE_RESULT c1 pass true/);
+    assert.equal(res.bound?.subprocessDenied, true);
+    assert.equal("tier" in (res.bound ?? {}), false, "strict bound stays byte-identical");
   });
 });

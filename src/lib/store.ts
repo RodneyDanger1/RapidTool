@@ -34,10 +34,12 @@ import { peekStall, releaseWildStart, reportRt, tryStartWild } from "./rt-client
 // latch requires an explicit human act (or crossed the 2× pause-on-resolve tier).
 import { requiresHumanResume, shouldAutopause } from "./watchdog.ts";
 import { WILD_STEP_BUDGET_MS } from "./rt-events.ts";
-// A1-12 (346 E4): the console asks the ONE seat policy for the truthful verdict
-// on a browser human-seat claim (it has no out-of-band token), so the ledger can
-// record what the bytes actually support instead of a bare human stamp.
-import { evaluatePolicy } from "./policy.ts";
+// A1-12 (346 E4 → K3 writer step): the console asks the ONE seat policy for the
+// truthful verdict on a browser human-seat claim (it has no out-of-band token),
+// so the ledger can record what the bytes actually support instead of a bare
+// human stamp. `seatLabel`/`seatTokenPath` are that seam's single-source
+// provenance vocabulary (`[seat console]` tag + `decidedVia.tokenPath`).
+import { evaluatePolicy, seatLabel, seatTokenPath } from "./policy.ts";
 // R14-f01 (W33 lane F1): the Node-side Auto-Review supervisor binding — null
 // on every host/key state that must keep the engine's existing default.
 import { createNodeWildReviewer } from "./wild-review.ts";
@@ -52,8 +54,9 @@ import type {
 } from "./types";
 import { classifyError, type ErrorCode } from "./errors.ts";
 // P1-5 (346 L2): the persisted-run-spend arithmetic is client-safe (token-ledger
-// has no node: import). `accumulateSpend` folds ONE measured model call into
-// `Project.tokenUsage`; `SpendSlice` is that slot's shape.
+// has no node: import). `accumulateSpend` folds ONE measured model call (or one
+// wild step's session-ledger delta, 346 K3) into `Project.tokenUsage`;
+// `SpendSlice` is that slot's shape.
 import { accumulateSpend, type SpendSlice } from "./token-ledger.ts";
 
 export type ApproveResult =
@@ -148,6 +151,24 @@ export function measuredSpendFromUsage(usage: unknown): SpendSlice | null {
       ? { cachedPromptTokens: Math.floor(cached) }
       : {}),
   };
+}
+
+/**
+ * 346 K3 (console phase-run spend): fold ONE wild step's measured session-ledger
+ * delta (the engine's `onUsage` sink) into the project's persisted
+ * `Project.tokenUsage`. An absent/empty delta returns the SAME project
+ * reference — no write at all, so a run that measured nothing never gains a
+ * fabricated zero (the SpendChip keeps saying "spend not recorded"). Pure;
+ * exported so the fold is unit-pinned without a browser.
+ */
+export function foldStepSpend(project: Project, step: SpendSlice | null | undefined): Project {
+  if (!step || typeof step !== "object") return project;
+  const measured =
+    (typeof step.promptTokens === "number" && step.promptTokens > 0) ||
+    (typeof step.completionTokens === "number" && step.completionTokens > 0) ||
+    (typeof step.calls === "number" && step.calls > 0);
+  if (!measured) return project;
+  return { ...project, tokenUsage: accumulateSpend(project.tokenUsage, step) };
 }
 
 /**
@@ -1791,15 +1812,23 @@ export const useRapid = create<RapidState>()(
             // caller dropped opts.onEvent, so finishStep's wild.step_* emits
             // never fired. The store's driver feeds them to the same ring the
             // console reads (reportRt, the file's own rt seam).
+            // 346 K3: the engine hands back the model usage it metered into the
+            // process session ledger for THIS step (`onUsage`); it fires only
+            // when something was measured, so an unmeasured run folds nothing.
+            let stepSpend: SpendSlice | null = null;
             const res = await wildStep(cur, {
               ...(reviewer ? { reviewer } : {}),
               onEvent: (seed) => reportRt(seed),
+              onUsage: (usage) => {
+                stepSpend = stepSpend === null ? usage : accumulateSpend(stepSpend, usage);
+              },
             });
-            const merged = commitWild(res.project, prev);
+            const resProject = foldStepSpend(res.project, stepSpend);
+            const merged = commitWild(resProject, prev);
             // Continue from the MERGED generation, not the raw step output:
             // the next step's input then already carries the concurrent rows
             // this commit adopted, so a later union can never re-add them.
-            cur = merged ?? res.project;
+            cur = merged ?? resProject;
             if (!res.ran) break;
             ran += 1;
             if (cur.wildRun?.pause) {
@@ -2331,40 +2360,52 @@ export const useRapid = create<RapidState>()(
               "Overriding a FAILED P6 sandbox requires a rationale — at least 12 characters (pass { note }).",
           };
         }
-        // A1-12 (346 E4 — honesty). The browser console is the product's designed
-        // HUMAN surface, but it has no out-of-band RT_HUMAN_SEAT_TOKEN delivery
-        // seam, so the minted row must never be read as the token-verified CLI
-        // seat. Ask the ONE seat policy (`evaluatePolicy`) for the truthful
-        // verdict on that claim — without the token it DENIES — and record the
-        // verdict on the ledger as a `hitl.console_decision` row, so the human
-        // stamp is qualified by exactly what the bytes support: an unattested
-        // console human decision, not a verified human seat. (The console is
-        // still the trusted human surface by design; a seat-delivery seam that
-        // would make the claim verifiable is TODO(R8-f09) and out of this lane.)
-        const consoleVerdict = evaluatePolicy(
-          opts?.force === true ? "hitl.force" : "hitl.approve",
-          `gate:P${project.currentPhase}`,
-          { actor: { decidedBy: "human", seat: "human-cli-i-am-human" } },
-        );
+        // A1-12 (346 K3 — the WRITER step). Route the console decision through
+        // the ONE seat policy under the console's OWN registered, UNATTESTED
+        // human seat. A stock gate approval is ADMITTED under the distinct
+        // `console-seat-unattested` reason id — the row is tagged `[seat console]`
+        // and its `decidedVia` records `tokenPath:false`, so the p4/p5/p8/p9
+        // `*approved` criteria pass on a TRUTHFUL provenance and the decision can
+        // never read as the token-verified CLI seat. A force (`hitl.force`) is
+        // refused for the console seat by the same seam; the store still honours
+        // the operator's explicit override (a recorded DF-09 rationale) but stamps
+        // the refusal reason + `tokenPath:false`, so a forced console decision is
+        // an honest UNATTESTED override, never a verified human one.
+        const consoleActor = { decidedBy: "human", seat: "console" } as const;
+        const policyAction = opts?.force === true ? "hitl.force" : "hitl.approve";
+        const policyResource = `gate:P${project.currentPhase}`;
+        const consoleVerdict = evaluatePolicy(policyAction, policyResource, { actor: consoleActor });
+        const decidedVia = {
+          action: policyAction,
+          resource: policyResource,
+          reason: consoleVerdict.reason,
+          label: seatLabel(consoleActor),
+          tokenPath: seatTokenPath(consoleActor),
+        };
         const seatRow: JsonLog = {
           ts: Date.now(),
           phase: project.currentPhase,
           level: "info",
           event: "hitl.console_decision",
           detail:
-            `P${project.currentPhase} approved from the browser console under the human seat` +
+            `P${project.currentPhase} approved from the browser console under the unattested console human seat` +
             (opts?.force === true ? " (operator override with rationale)" : "") +
-            ` — the seat policy reports this claim as ${consoleVerdict.decision} (${consoleVerdict.reason}); ` +
-            `the console has no out-of-band RT_HUMAN_SEAT_TOKEN delivery seam, so this row records an ` +
-            `unattested console human decision, never a token-verified one.`,
+            ` — the seat policy reports ${policyAction} as ${consoleVerdict.decision} (${consoleVerdict.reason}); ` +
+            `the console has no out-of-band RT_HUMAN_SEAT_TOKEN path, so this row records an UNATTESTED console ` +
+            `human decision, never a token-verified one.`,
         };
         // Engine stamps the packet + packet artifact + A4 trace on approval (B-19); the journal
-        // entry records the human actor (T2).
+        // entry records the human actor (T2). A standard approval carries the `[seat console]`
+        // tag (an untagged row reads as legacy provenance); a forced override keeps the caller's
+        // rationale VERBATIM (DF-09's observable) and rides `decidedVia` instead.
         const approved = approveHitl(project, {
           decidedBy: "human",
           force: opts?.force,
           requestedAt: opts?.requestedAt,
-          note: opts?.note,
+          note: opts?.force
+            ? opts?.note
+            : `[seat console] ${opts?.note?.trim() || "approved from the browser console"}`,
+          decidedVia,
         });
         // T8: the just-approved gate phase gets its DoD verdict recorded too.
         const recorded = recordGate(approved, project.currentPhase);

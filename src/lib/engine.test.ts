@@ -31,6 +31,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { approveHitl, emptyProject, databaseSchemaSql, deliveryKindOf, hydrateProject, liveLayer, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
+import { recordSessionSpend, resetSessionBudget, type TokenSpend } from "./token-ledger.ts";
 import { wildResumeRun } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
 import type { RtEventSeed } from "./rt-events.ts";
@@ -592,5 +593,72 @@ describe("346 P2-6 — the wild step is watched by boundedStepWatch", () => {
     assert.deepEqual(normalize(large.project), normalize(within.project), "byte-identical modulo wall-clock");
     assert.equal(large.outcome, within.outcome);
     assert.equal(large.code, within.code);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 K3 — console PHASE-run spend. The engine meters every model call it makes
+// during a step into the PROCESS session ledger; the exported `wildStep`
+// wrapper surfaces the step's measured DELTA to `opts.onUsage`, so a driver
+// (store.startWildRun) can fold it into `Project.tokenUsage`. The sink is pure
+// observation: a step with a sink produces the same result as one without it,
+// and an unmeasured step never calls the sink (no fabricated zero).
+// ---------------------------------------------------------------------------
+describe("346 K3 - wildStep surfaces the step measured session-ledger usage to onUsage", () => {
+  /** A P6-ready wild fixture: priors 0-5 sealed, cursor on a ready phase 6. */
+  function spendP6Fixture(): Project {
+    const p = emptyProject({ name: "SpendWild", brief: "A governed wild-loop brief with enough vocabulary." });
+    p.wildMode = true;
+    p.wildRun = {
+      active: true,
+      phase: 6,
+      startedAt: Date.now(),
+      lastAutoLog: "Wild run at P6",
+      lastAutoAt: Date.now(),
+      stoppedAt: null,
+      pause: false,
+    };
+    p.currentPhase = 6;
+    p.status = "running";
+    p.phases = p.phases.map((r) =>
+      r.id < 6 ? { ...r, status: "complete" as const } : r.id === 6 ? { ...r, status: "ready" as const } : r,
+    );
+    return p;
+  }
+
+  it("hands the REAL metered delta to onUsage and leaves the step result unchanged", async () => {
+    resetSessionBudget();
+    /** The injected edge stands in for a model call: it meters a REAL session spend. */
+    const meteringEdge = async (q: Project): Promise<Project> => {
+      recordSessionSpend({ promptTokens: 111, completionTokens: 22 });
+      return { ...q, lastTest: { ok: true, detail: "edge metered one call" } };
+    };
+
+    const seen: TokenSpend[] = [];
+    const withSink = await wildStep(spendP6Fixture(), {
+      reviewer: notConfigured,
+      p6Edge: meteringEdge,
+      onUsage: (u) => seen.push(u),
+    });
+    assert.equal(seen.length, 1, "the sink fires exactly once for a measured step");
+    assert.deepEqual(seen[0], { promptTokens: 111, completionTokens: 22, calls: 1 }, "the delta is the REAL metered usage");
+
+    // Control: the SAME step with no sink behaves identically (pure observation).
+    resetSessionBudget();
+    const without = await wildStep(spendP6Fixture(), { reviewer: notConfigured, p6Edge: meteringEdge });
+    assert.equal(withSink.outcome, without.outcome, "the sink never changes the outcome");
+    assert.equal(withSink.code, without.code, "the sink never changes the code");
+    assert.equal(withSink.ran, without.ran, "the sink never changes progress");
+    assert.equal(withSink.summary?.action, without.summary?.action, "the sink never changes what the step did");
+    assert.equal(withSink.summary?.completedPhase, without.summary?.completedPhase);
+    assert.equal(withSink.summary?.advancedTo, without.summary?.advancedTo);
+  });
+
+  it("never calls onUsage when nothing was metered (no fabricated zero)", async () => {
+    resetSessionBudget();
+    const floorEdge = async (q: Project): Promise<Project> => ({ ...q, lastTest: { ok: true, detail: "floor edge" } });
+    const seen: TokenSpend[] = [];
+    await wildStep(spendP6Fixture(), { reviewer: notConfigured, p6Edge: floorEdge, onUsage: (u) => seen.push(u) });
+    assert.equal(seen.length, 0, "an unmeasured step calls no sink - nothing to record");
   });
 });
