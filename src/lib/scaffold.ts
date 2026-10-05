@@ -117,6 +117,12 @@ export type UiGenerationHook = (request: UiGenerationRequest) => string[] | null
 export type ScaffoldOptions = {
   /** A3-f07: the emitted-UI generation hook (default = `defaultUiGeneration`). */
   uiGeneration?: UiGenerationHook;
+  /** R2-04: INTERNAL candidate emits (the pre-seal self-typecheck) pass `true`
+   *  so a below-floor PARTIAL is still materialized and its REAL tsc can judge
+   *  it — the pre-seal gate must see the candidate bytes, not the ship-time
+   *  floor guard. The SHIP path (`emitProject` → the CLI) leaves it unset and
+   *  the below-floor partial is refused. */
+  allowUnderProduced?: boolean;
 };
 
 export type ScaffoldResult =
@@ -162,7 +168,14 @@ export type ScaffoldResult =
         uiPath: string;
       };
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /** R2-04: the registered code for a coded refusal (absent for a
+       *  generic invalid-project error). The emit seal (lane D) can forward
+       *  this instead of parsing the error string (R2-01). */
+      code?: ErrorCode;
+    };
 
 const KIND_LABEL: Record<ProjectKind, string> = {
   webapp: "web app",
@@ -2360,6 +2373,16 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       wired: ctx.wiredJobLabels,
       endpoints,
     });
+  // R2-05: stop emitting a SKIP-DOMINATED oracle. When more pinned rows are
+  // NOT IMPLEMENTED than assert a real current surface, the emitted spec used
+  // to be `test.skip`-dominated (the measured 1-live/7-9-skip shape a tree
+  // could present as its "test evidence"). Skip-domination is decided from the
+  // SAME census the README prints (one source of truth): a dominated oracle
+  // emits its NOT IMPLEMENTED rows as REAL failing tests — 0 skips, an honest
+  // red — never a green-looking skip wall. A non-dominated (mixed or all-live)
+  // oracle keeps the existing skip form byte-for-byte.
+  const oracleCensus = censusOracleRows(rows, surface);
+  const skipDominated = oracleCensus.notImplemented.length > oracleCensus.assertable;
   const storeOk =
     !treeEntryOk && typeof ctx.storePath === "string" && /\.ts$/.test(ctx.storePath);
   const apiOk = surface.apiOk;
@@ -2468,6 +2491,14 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     "//     never an always-true assertion; node:test reports it as skipped (never",
     "//     a pass) and the README counts it separately from the assertable rows;",
     "//   * nothing here pretends a stub satisfies its brief.",
+    ...(skipDominated
+      ? [
+          "// R2-05: this oracle is SKIP-DOMINATED (more pinned rows are NOT",
+          "// IMPLEMENTED than assert a real surface), so those rows are emitted as",
+          "// REAL failing tests below — 0 skips, an honest red. A skip-dominated",
+          "// spec is never presented as evidence.",
+        ]
+      : []),
     "// Run: node --experimental-strip-types --test tests/oracle.spec.ts",
     ...(treeEntryOk
       ? [
@@ -2651,8 +2682,12 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
   lines.push(
     "// ---------------------------------------------------------------------------",
     "// 4. Oracle rows (A7) — one test per row under its PINNED id; a row with no",
-    "// emitted module surface is a visible test.skip(\"<id> — NOT IMPLEMENTED\")",
-    "// (fixes/216b) — skipped, never green, and counted by the README census.",
+    skipDominated
+      ? "// emitted module surface is a REAL failing test (R2-05: this oracle is"
+      : "// emitted module surface is a visible test.skip(\"<id> — NOT IMPLEMENTED\")",
+    skipDominated
+      ? "// skip-dominated, so no skip is emitted) — counted by the README census."
+      : "// (fixes/216b) — skipped, never green, and counted by the README census.",
     "// ---------------------------------------------------------------------------",
     "",
   );
@@ -2682,10 +2717,16 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
     // keeps the bare pinned id as its test name (E-08 — verified rows match on
     // it); a row without one appends the visible NOT IMPLEMENTED marker.
     const skipRow = kind === "not-implemented" || (kind === "endpoint-stub" && !ep);
+    // R2-05: on a skip-dominated oracle a not-implemented row is a REAL failing
+    // test under its pinned id (assertable rows are already real, async tests).
+    const emitSkip = skipRow && !skipDominated;
+    const liveAssertable = !skipRow;
     lines.push(
-      skipRow
+      emitSkip
         ? `test.skip(${jstr(`${id} — NOT IMPLEMENTED`)}, () => {`
-        : `test(${jstr(id)}, async () => {`,
+        : liveAssertable
+          ? `test(${jstr(id)}, async () => {`
+          : `test(${jstr(id)}, () => {`,
       `  // A7 row ${jstr(id)} ${name ? `"${name}"` : ""} — ${given} => ${expect}`,
     );
     if (kind === "bridged-host") {
@@ -2822,8 +2863,11 @@ function emitOracleSpec(project: Project, ctx: OracleSurfaceCtx = {}): string {
       lines.push(
         `  // NOT IMPLEMENTED: no emitted module surface targets this row yet (106`,
         `  // T-08 / F-05). The pre-fix emission asserted ${jstr(`${id}`)}.length > 0 —`,
-        `  // which cannot fail, so it was not evidence; this row is skipped instead.`,
-        `  // Replace the skip with the row's real acceptance assertion when the`,
+        `  // which cannot fail, so it was not evidence.`,
+        emitSkip
+          ? `  // This row is skipped instead (the oracle is not skip-dominated).`
+          : `  // R2-05: this oracle IS skip-dominated, so the row is a REAL failing test.`,
+        `  // Replace it with the row's real acceptance assertion when the`,
         `  // seam (HTTP endpoint or P6 host) lands.`,
         `  assert.fail(${jstr(`${id} is NOT IMPLEMENTED — replace this skip with the row's real acceptance assertion`)});`,
       );
@@ -3942,6 +3986,52 @@ function trailVerdictOf(project: Project): { redTree: boolean; partial: boolean 
 }
 
 /**
+ * R2-04 / BF-1: the coded UNDER-PRODUCTION refusal this emitter must HONOR.
+ * The C1-01 floor (codegen `underProducedRefusal`) already journals a phase-6
+ * `p6.synthesis.refused` naming `RT_E_PLAN_UNDERPRODUCED` + the missing
+ * declared modules, but the below-floor PARTIAL (prior chunks' real files) was
+ * still emitted as a runnable-looking tree. The scaffold reads that recorded
+ * refusal off the project's own durable trail and REFUSES the emission
+ * instead. Returns the recorded under-production detail (its registered code
+ * prefix included) when the FINAL synthesis verdict is a refusal AND an
+ * under-production refusal was recorded on the trail AND real generated
+ * substance exists; else null. Pure; absent log ⇒ null (byte-identical legacy
+ * emissions — pre-C1-01 persisted projects carry no such row).
+ */
+export function underProductionRefusalOf(project: Project): string | null {
+  const hasSubstance =
+    String(project.generatedSource ?? "").trim().length > 0 ||
+    (Array.isArray(project.generatedTree) && project.generatedTree.length > 0);
+  if (!hasSubstance) return null;
+  const rows = Array.isArray(project.logs) ? project.logs : [];
+  // Two recorded facts, both required:
+  //  1. the FINAL synthesis verdict is a REFUSAL — a journey that refused on
+  //     cycle 1 but sealed a full tree on cycle 2 (`p6.synthesis` success,
+  //     flower-shop/scheduler) must still emit. `p6.synthesis` = the treeUpgraded
+  //     success stamp; a later one clears the refusal.
+  //  2. an under-production refusal was recorded on the trail — the coded
+  //     `RT_E_PLAN_UNDERPRODUCED` whose detail names the missing declared
+  //     modules. A below-floor tree keeps its best partial even when the FINAL
+  //     cycle refused for another coded reason (office-stock-tracker: the model
+  //     legally refused on cycle 3 after an under-production cycle 2).
+  let finalRefused = false;
+  let underDetail: string | null = null;
+  for (const row of rows) {
+    if (row === null || typeof row !== "object" || row.phase !== 6) continue;
+    if (row.event === "p6.synthesis") {
+      finalRefused = false;
+    } else if (row.event === "p6.synthesis.refused") {
+      finalRefused = true;
+      const detail = typeof row.detail === "string" ? row.detail : "";
+      if (detail.startsWith("RT_E_PLAN_UNDERPRODUCED") || detail.includes("RT_E_PLAN_UNDERPRODUCED")) {
+        underDetail = detail;
+      }
+    }
+  }
+  return finalRefused && underDetail !== null ? underDetail : null;
+}
+
+/**
  * Derive the full file tree for one project. Pure: returns {path, body} pairs
  * (the CLI writes them); deterministic: same project ⇒ same bytes. File order:
  * root docs → env/package → .rapidtool → boot files (webapp/game) → game
@@ -3951,6 +4041,27 @@ function trailVerdictOf(project: Project): { redTree: boolean; partial: boolean 
 export function scaffoldProject(project: Project, options: ScaffoldOptions = {}): ScaffoldResult {
   const check = validProject(project);
   if (!check.ok) return check;
+
+  // R2-04 / BF-1: a below-floor PARTIAL is REFUSED, not emitted. The floor
+  // refusal is already recorded on the project's trail (RT_E_PLAN_UNDERPRODUCED
+  // + the missing declared modules); honoring it here is what stops the
+  // scaffold from hand-writing a runnable-looking 2–3-file tree for an
+  // under-produced plan. Lane D's emit seal surfaces the coded error; this side
+  // never produces the files. Absent the recorded refusal ⇒ byte-identical
+  // legacy emission (a pre-C1-01 project, or a synthetic fixture). The
+  // pre-seal self-typecheck (an INTERNAL candidate emit) opts out via
+  // `allowUnderProduced` so it can still run the candidate's real tsc.
+  if (options.allowUnderProduced !== true) {
+    const underProduced = underProductionRefusalOf(project);
+    if (underProduced !== null) {
+      const reason = underProduced.replace(/^RT_E_PLAN_UNDERPRODUCED\s*·\s*/, "");
+      return {
+        ok: false,
+        code: "RT_E_PLAN_UNDERPRODUCED",
+        error: `RT_E_PLAN_UNDERPRODUCED · artifact refused (below-floor plan): ${reason}`,
+      };
+    }
+  }
 
   // Callers may hand-build sparse projects (validProject only demands a
   // name). Normalize the three collection fields the emitters iterate so a

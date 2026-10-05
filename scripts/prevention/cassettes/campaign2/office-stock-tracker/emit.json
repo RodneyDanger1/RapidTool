@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "cmd": "emit",
+  "ok": false,
+  "error": "emit refused: the project's tree-run trail is RED (3 failed tree-runs, no green run since) ΓÇö reach a green tree-run (rapidtool tree-run) or emit with redTree:\"banner\" to ship the unmissable banner. Last failure: tests/oracle.spec.ts: fail ΓÇö skip-dominated spec: 1 live case(s) Γëñ 8 skipped ΓÇö a skip is not a pass",
+  "code": "RT_E_TREE_RUN_FAILED",
+  "remedy": "Read the tree-run outcome (compile verdicts, per-spec tests, entry run), fix the generator or re-emit, then re-run the tree before treating P6 as verified. A GREEN run is still not product-complete when the verdict's `substance` census shows stubs/reexports, so read `substance` (stubs:N reexports:N real:N) and its SUBSTANCE MARKING note (K3: exit 0 is never product quality).",
+  "campaignLedger": {
+    "path": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\ledger.json",
+    "cap": 3000000,
+    "spent": 512619,
+    "calls": 90,
+    "remaining": 2487381
+  },
+  "exit_code": 1
+}

@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "cmd": "emit",
+  "ok": false,
+  "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\held-out-community-tool-library\\emitted",
+  "count": 18,
+  "moduleEmbedded": true,
+  "summary": "18 files ┬╖ kind webapp ┬╖ packet c5066148-b486-45dd-a5cb-7d1f0ec6766a ΓÇö tree files already on disk ┬╖ generatedTree: 2 files assembled, 5 job nodes unmaterialised (never bridged ΓÇö see warnings), 3 non-job bridges",
+  "quarantined": [],
+  "quarantineDir": null,
+  "redTreeBanner": true,
+  "redTree": {
+    "failures": 3,
+    "lastFailure": "tests/oracle.spec.ts: fail ΓÇö skip-dominated spec: 1 live case(s) Γëñ 9 skipped ΓÇö a skip is not a pass"
+  },
+  "treeRun": {
+    "ok": false,
+    "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\held-out-community-tool-library\\emitted",
+    "sandbox": false,
+    "compile": {
+      "ok": true,
+      "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\held-out-community-tool-library\\emitted",
+      "checked": 9,
+      "passed": 9,
+      "failed": 0,
+      "skipped": 10,
+      "verdicts": [
+        {
+          "file": "src/api/routes.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/domain/custom_software.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/list-tools.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/main.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/state/store.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/ui/console.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "tests/oracle.spec.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "vite.config.ts",
+          "verdict": "pass"
+        }
+      ]
+    },
+    "tests": [
+      {
+        "file": "tests/oracle.spec.ts",
+        "compile": "pass",
+        "tests": {
+          "pass": 1,
+          "fail": 0,
+          "skipped": 9
+        },
+        "run": "fail",
+        "durationMs": 486,
+        "behavioural": false,
+        "detail": "skip-dominated spec: 1 live case(s) Γëñ 9 skipped ΓÇö a skip is not a pass"
+      }
+    ],
+    "run": {
+      "kind": "ui-shell",
+      "run": "skip",
+      "detail": "UI shell ΓÇö not executable headless"
+    },
+    "core": {
+      "kind": "generated-core",
+      "entry": "src/generated.ts",
+      "run": "pass",
+      "durationMs": 179
+    },
+    "project": {
+      "ok": true,
+      "typecheck": {
+        "script": "typecheck",
+        "run": "pass",
+        "durationMs": 2029,
+        "command": "tsc --noEmit",
+        "scriptPolicy": "argv-only ┬╖ tsc.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "test": {
+        "script": "test",
+        "run": "pass",
+        "durationMs": 376,
+        "command": "node --experimental-strip-types --test tests/oracle.spec.ts",
+        "scriptPolicy": "argv-only ┬╖ node (no shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "build": {
+        "script": "build",
+        "run": "pass",
+        "durationMs": 967,
+        "command": "vite build",
+        "scriptPolicy": "argv-only ┬╖ vite.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "declaredScriptsVerified": true
+    },
+    "note": "the declared project scripts were resolved from the RapidTool repo's own node_modules/ (offline, no install) ΓÇö the emitted tree's declared devDependency versions were NOT installed",
+    "dependencySource": {
+      "toolchain": "repo-shared",
+      "treeInstalled": false,
+      "note": "the declared project scripts were resolved from the RapidTool repo's own node_modules/ (offline, no install) ΓÇö the emitted tree's declared devDependency versions were NOT installed"
+    },
+    "declaredScriptsVerified": false,
+    "unverifiedEntry": "UI shell ΓÇö not executable headless",
+    "substance": {
+      "stubs": 0,
+      "reexports": 0,
+      "real": 0,
+      "files": [],
+      "verdict": "empty",
+      "greenWhileStubbed": false,
+      "oracleStubTrap": false
+    },
+    "verdictHash": "1232300622"
+  },
+  "substance": {
+    "stubs": 0,
+    "reexports": 0,
+    "real": 0,
+    "verdict": "empty",
+    "greenWhileStubbed": false
+  },
+  "error": "git delivery refused: the emitted tree has no substantive job modules (substance verdict \"empty\") ΓÇö a commit is evidence of a substantive, verified product, so no commit was issued and the emitted tree is kept on disk. Synthesize the missing surface and re-emit to green, or pass --allow-empty to land a deliberate scaffold-only commit.",
+  "code": "RT_E_SUBSTANCE_EMPTY",
+  "declaredScriptsVerified": false,
+  "git": {
+    "committed": false,
+    "skipped": true,
+    "reason": "substance-empty",
+    "code": "RT_E_SUBSTANCE_EMPTY",
+    "error": "git delivery refused: the emitted tree has no substantive job modules (substance verdict \"empty\") ΓÇö a commit is evidence of a substantive, verified product, so no commit was issued and the emitted tree is kept on disk. Synthesize the missing surface and re-emit to green, or pass --allow-empty to land a deliberate scaffold-only commit."
+  },
+  "remedy": "Do not treat the run as product-complete: read the substance census (core-noun hits, real vs stub/alias modules), re-synthesize the missing surface, and re-run; never lower the bar to make a hollow tree pass.",
+  "campaignLedger": {
+    "path": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\ledger.json",
+    "cap": 3000000,
+    "spent": 616329,
+    "calls": 109,
+    "remaining": 2383671
+  },
+  "exit_code": 1
+}

@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,6 +94,7 @@ import {
   deriveRequiredModules,
   freezeFileExports,
   jsxHits,
+  jsxNamespaceHits,
   materializedExportNames,
   mergeMinimumPlan,
   minimumTreeFileCount,
@@ -102,6 +103,7 @@ import {
   normalizeTreeFiles,
   offenderClass,
   p6SynthesisJsxRepairPrompt,
+  p6SynthesisJsxNamespaceRepairPrompt,
   p6SynthesisMoneyRepairPrompt,
   registryNamesFor,
   suppressionPragmaHit,
@@ -6384,7 +6386,118 @@ describe("W346-A12 JSX-in-.ts module contract", () => {
     assert.equal(suppressionPragmaHit("// @ts-nocheck\nconst x = 1;"), "@ts-nocheck");
     assert.equal(suppressionPragmaHit("const x = 1;"), null);
   });
+
+  // R2-03: the real campaign2 bakery-website chunk referenced `JSX.Element`
+  // with no bound namespace and red its own `tsc` (TS2503) though the console
+  // shell was JSX-free. Raw-element detection never saw it.
+  it("R2-03: jsxNamespaceHits flags the real bakery-website byte (RED before the fix)", () => {
+    // testruns\campaign2\bakery-website\emitted\src\generated\validate-order-form.ts:304
+    const real =
+      "function renderHomePage(props: HomePageProps): JSX.Element {\n" +
+      "  const status: string = isOpenNow(props.hours, props.now, props.closures);\n" +
+      "  return { type: 'main', props: { className: 'home' }, children: [] };\n" +
+      "}\n" +
+      "/** @returns a JSX.Element tree */\n";
+    assert.equal(jsxHits(real).length, 0, "raw-element detection never sees a pure namespace reference");
+    const hits = jsxNamespaceHits(real);
+    assert.deepEqual(hits, [1], "the unbound : JSX.Element return type is flagged at line 1");
+    // A JSDoc mention is masked, never a hit.
+    assert.deepEqual(jsxNamespaceHits("/** @returns a JSX.Element tree */\nexport const x = 1;\n"), []);
+    // A module that BINDS the namespace (the compiling historical shape) is not flagged.
+    assert.deepEqual(jsxNamespaceHits("declare namespace JSX { type Element = unknown; }\nfunction f(): JSX.Element { return null as never; }\n"), []);
+    assert.deepEqual(jsxNamespaceHits("import type { JSX } from 'react';\nfunction f(): JSX.Element { return null as never; }\n"), []);
+    // Generics/comparisons never trip either detector.
+    assert.deepEqual(jsxNamespaceHits("const x: Promise<Record<string, number>> = f();\nif (a < b) { return c; }\n"), []);
+  });
+
+  it("R2-03: the validator refuses an unbound JSX namespace; the repair prompt names the lines", () => {
+    const v = validateSynthesisModule(
+      "export function renderX(): JSX.Element { return null as never; }\n",
+      ["renderX"],
+      ["renderX"],
+    );
+    assert.ok(!v.ok, "the .ts module is refused");
+    if (!v.ok) {
+      assert.match(v.error, /JSX in a \.ts module/);
+      assert.match(v.error, /unbound JSX namespace reference at line 1/);
+    }
+    assert.match(p6SynthesisJsxNamespaceRepairPrompt([304, 433]), /304, 433/);
+  });
+
+  it("R2-03 replay: the real campaign2/historical emitted .ts modules are JSX-namespace-clean or refused", () => {
+    const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+    const C2 = join(REPO_ROOT, "..", "testruns", "campaign2");
+    const H = join(REPO_ROOT, "..", "testruns");
+    const slugs = [
+      "bakery-website", "flower-shop-website", "bakery-florist-orders", "mobile-companion",
+      "office-invoice-tracker", "office-scheduler", "office-stock-tracker", "held-out-community-tool-library",
+    ];
+    if (!existsSync(C2)) return; // frozen checkout with no sibling testruns
+    let flagged = 0;
+    let clean = 0;
+    let checked = 0;
+    for (const slug of slugs) {
+      const emitted = join(C2, slug, "emitted");
+      if (!existsSync(emitted)) continue;
+      for (const file of walkTs(emitted)) {
+        checked += 1;
+        const ns = jsxNamespaceHits(readFileSync(file, "utf8"));
+        if (ns.length > 0) {
+          flagged += 1;
+          assert.ok(
+            file.replace(/\\/g, "/").endsWith("campaign2/bakery-website/emitted/src/generated/validate-order-form.ts"),
+            `only the measured bakery chunk is JSX-namespace-dirty (got ${file})`,
+          );
+        } else {
+          clean += 1;
+        }
+      }
+    }
+    assert.ok(checked > 10, "the campaign2 emitted .ts fixtures resolved");
+    assert.equal(flagged, 1, "R2-03: exactly the measured bakery chunk is flagged (RED before: 0)");
+    assert.ok(clean > 10, "R2-03: the other emitted modules stay clean");
+    // Historical control: the ORIGINAL mobile-companion tree shipped the same
+    // TS2503 defect in a job module (`jobs/alert.ts` references `JSX.Element`
+    // with no binding — it exits tsc 2), while the sibling that DECLARES the
+    // namespace locally is not flagged. The detector matches the tsc truth.
+    const histAlert = join(H, "mobile-companion", "emitted", "src", "jobs", "alert.ts");
+    if (existsSync(histAlert)) {
+      assert.ok(jsxNamespaceHits(readFileSync(histAlert, "utf8")).length >= 1, `${histAlert}: the unbound historical job module is flagged`);
+      const histBound = join(H, "mobile-companion", "emitted", "src", "generated", "render-tab-bar.ts");
+      if (existsSync(histBound)) {
+        assert.deepEqual(jsxNamespaceHits(readFileSync(histBound, "utf8")), [], `${histBound}: a locally-bound namespace module is not flagged`);
+      }
+    }
+  });
 });
+
+/** Every `.ts` file under a directory (recursive, node_modules-free). Pure-ish. */
+function walkTs(dir: string): string[] {
+  const out: string[] = [];
+  const stack = [dir];
+  while (stack.length > 0) {
+    const d = stack.pop()!;
+    let entries: string[];
+    try {
+      entries = readdirSync(d);
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (e === "node_modules" || e === ".git") continue;
+      const p = join(d, e);
+      let st;
+      try {
+        st = statSync(p);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) stack.push(p);
+      else if (p.endsWith(".ts")) out.push(p);
+    }
+  }
+  return out;
+}
 
 describe("W346-A5 money semantics (BF-5)", () => {
   // Shape of testruns\mobile-companion\emitted\src\generated\compute-cart-total-pence.ts:
@@ -6454,7 +6567,7 @@ describe("W346-A5 money semantics (BF-5)", () => {
       "module.exports.computeCartTotalPence = computeCartTotalPence;",
       "module.exports.listProducts = listProducts;",
     ].join("\n");
-    const GOOD = BAD.replace(
+    const _GOOD = BAD.replace(
       "total = total + cart[i].quantity;",
       "total = total + Math.floor(cart[i].quantity * cart[i].pricePence);",
     );
@@ -6512,3 +6625,71 @@ describe("W346-A6b per-chunk fail-fast (A6/PR-13)", () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// I7 (PR-16, O-01) � resumeAccepted: a later cycle REUSES the chunks it already
+// paid for. Absent/empty must stay byte-identical to legacy chunked synthesis.
+// ---------------------------------------------------------------------------
+describe("I7 � resumeAccepted chunk reuse (O-01)", () => {
+  /** Reconstruct a resume set from a synthesized tree (path + source + the
+   *  module's materialized export names). */
+  /** Reconstruct a run's RAW accepted set (path + pre-materialization source +
+   *  envelope export names) from the fake's prompts and the sealed tree order —
+   *  exactly what the journey carries forward as resumeAccepted. */
+  function rawResumeFrom(d1: ReturnType<typeof chunkedDeps>, q1: Project) {
+    const synthPrompts = d1.prompts.filter((p) => p.includes("TYPE SIGNATURES (must export"));
+    const chunkPaths = (q1.generatedTree ?? []).map((f) => f.path).filter((p) => p !== TREE_ENTRY_PATH);
+    const namesByChunk = synthPrompts.map((prompt) =>
+      demandedSignatureLines(prompt)
+        .map((s) => signatureFunctionNames([s])[0])
+        .filter((n): n is string => typeof n === "string"),
+    );
+    return {
+      paths: chunkPaths,
+      prompts: synthPrompts,
+      resume: chunkPaths.map((path, i) => ({
+        path,
+        source: chunkModule(namesByChunk[i]!, i > 0 ? namesByChunk[i - 1]![0] : undefined),
+        exports: namesByChunk[i]!,
+      })),
+    };
+  }
+
+  it("present ? every planned path is reused with 0 synthesis calls; absent ? byte-identical", async () => {
+    const d1 = chunkedDeps();
+    const q1 = await liveP6Synthesis(p6Base(LEDGER_BRIEF), d1.deps);
+    const synth1 = d1.prompts.filter((p) => p.includes("TYPE SIGNATURES (must export")).length;
+    assert.ok(synth1 > 1, `the fixture synthesizes more than one chunk (got ${synth1})`);
+    assert.ok((q1.generatedTree?.length ?? 0) > 1, "run 1 sealed a multi-file tree");
+    assert.equal(q1.lastTest, null, "synthesis alone never mints tested");
+
+    // Run 2 resumes every chunk from run 1: no synthesis prompt is issued.
+    const reconstructed = rawResumeFrom(d1, q1);
+    assert.equal(
+      reconstructed.paths.length,
+      reconstructed.prompts.length,
+      "one accepted file per synthesis prompt",
+    );
+    const resume = reconstructed.resume;
+    const d2 = chunkedDeps();
+    const q2 = await liveP6Synthesis(p6Base(LEDGER_BRIEF), { ...d2.deps, resumeAccepted: resume });
+    const synth2 = d2.prompts.filter((p) => p.includes("TYPE SIGNATURES (must export")).length;
+    assert.equal(synth2, 0, "every planned path was resumed � 0 synthesis calls");
+    assert.deepEqual(q2.generatedTree, q1.generatedTree, "the reused tree is byte-identical to the accepted one");
+    assert.equal(q2.generatedSource, q1.generatedSource, "the reused assembled entry is byte-identical");
+    assert.ok(
+      q2.logs.some((l) => l.event === "p6.synthesis.reused"),
+      "each reused chunk is recorded with the p6.synthesis.reused event",
+    );
+
+    // Control: absent (and explicitly undefined) ? the legacy chunked path.
+    const d3 = chunkedDeps();
+    const q3 = await liveP6Synthesis(p6Base(LEDGER_BRIEF), { ...d3.deps, resumeAccepted: undefined });
+    assert.equal(
+      d3.prompts.filter((p) => p.includes("TYPE SIGNATURES (must export")).length,
+      synth1,
+      "absent resumeAccepted re-synthesizes every chunk (byte-identical behaviour)",
+    );
+    assert.deepEqual(q3.generatedTree, q1.generatedTree, "absent resumeAccepted is byte-identical to legacy");
+  });
+});

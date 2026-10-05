@@ -158,7 +158,8 @@ test("single command: the two signals are reported and the gate of record is exa
   assert.deepEqual(verdict.skipped, [], "a skip is a hard failure");
   assert.equal(verdict.guards, registry.guards.length, "every registered guard is evaluated");
   assert.ok(verdict.count >= verdict.countFloor, `count ${verdict.count} must meet the pinned floor ${verdict.countFloor}`);
-  assert.equal(verdict.countFloor, 20, "the guard-count floor is pinned (deleting a guard fails)");
+  assert.equal(verdict.countFloor, 24, "the guard-count floor is pinned at 24 (deleting a guard fails)");
+  assert.equal(verdict.guards, 24, "24 guards: 15 W346 + 5 campaign1 + 4 campaign2 tourniquets");
   assert.deepEqual(verdict.controlMissed, [], "every fired guard has a clean control");
   // TWO orthogonal signals on every guard.
   for (const r of verdict.detail) {
@@ -166,15 +167,23 @@ test("single command: the two signals are reported and the gate of record is exa
     assert.ok(r.fixtureIntegrity && typeof r.fixtureIntegrity.fired === "boolean", `${r.id}: fixture-integrity signal`);
     assert.ok(r.fixPresence && typeof r.fixPresence.present === "boolean" && typeof r.fixPresence.wired === "boolean", `${r.id}: fix-presence signal`);
   }
-  // Every historical detector fires AND every live seam is wired: the gate of
-  // record is green on the landed tree.
+  // Every historical detector fires; the gate of record is RED because the
+  // campaign-2 tourniquets' owners have not landed their fixes on the
+  // gate-of-record surface. The pending list NAMES each red pin.
   assert.deepEqual(verdict.missed, [], "no fixture-integrity miss");
-  assert.deepEqual(verdict.pending, [], "no fix-presence pending (all live seams wired)");
+  assert.deepEqual([...verdict.pending].sort(), ["C1-02", "R2-01", "R2-03", "R2-05", "R2-06"], "the named pins left red pending their owners");
+  for (const id of ["R2-01", "R2-03", "R2-05", "R2-06"]) {
+    const r = verdict.detail.find((x) => x.id === id);
+    assert.equal(r.fixtureIntegrity.fired, true, `${id} fires on the real campaign2 defect bytes`);
+    assert.equal(r.fixPresence.present, false, `${id} fix is not yet on the gate-of-record surface (HEAD)`);
+    assert.equal(r.fixPresence.mutationRed, true, `${id} retains a working mutation control`);
+  }
+  assert.equal(verdict.detail.find((r) => r.id === "C1-02").fixtureIntegrity.fired, true, "C1-02 fires on the campaign1 bytes (R2-02 guard re-pointed)");
   const c04 = verdict.detail.find((r) => r.id === "C-04");
   assert.equal(c04.fixtureIntegrity.fired, true, "the historical non-monotonic defect is visible");
   assert.equal(c04.fixPresence.present, true, "the live comparator seam is present (lane D PR-07)");
   assert.equal(c04.fixPresence.wired, true, "the comparator is wired");
-  assert.equal(verdict.ok, true, "the gate of record is green when missed/pending/skipped are empty and count meets the floor");
+  assert.equal(verdict.ok, false, "the gate of record is RED while any owner pin is pending (missed/pending/skipped/count semantics)");
 });
 
 test("fix-presence: a status:pending entry always fails the gate of record", async () => {

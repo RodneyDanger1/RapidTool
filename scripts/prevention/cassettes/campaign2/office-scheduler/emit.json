@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "cmd": "emit",
+  "ok": true,
+  "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\office-scheduler\\emitted",
+  "count": 25,
+  "moduleEmbedded": true,
+  "summary": "25 files ┬╖ kind webapp ┬╖ packet f4026e8e-b2a7-4f80-a573-14b42884ce61 ΓÇö tree files already on disk ┬╖ generatedTree: 9 files assembled, 3 non-job bridges",
+  "quarantined": [],
+  "quarantineDir": null,
+  "treeRun": {
+    "ok": true,
+    "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\office-scheduler\\emitted",
+    "sandbox": false,
+    "compile": {
+      "ok": true,
+      "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\office-scheduler\\emitted",
+      "checked": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 10,
+      "verdicts": [
+        {
+          "file": "src/api/routes.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/domain/custom-software.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/domain/custom_software.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/render-weekly-rota.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/validate-attendee-count.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/approve.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/assign.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/scan.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/schedule.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/sync.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/main.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/state/store.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/ui/console.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "tests/oracle.spec.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "vite.config.ts",
+          "verdict": "pass"
+        }
+      ]
+    },
+    "tests": [
+      {
+        "file": "tests/oracle.spec.ts",
+        "compile": "pass",
+        "tests": {
+          "pass": 30,
+          "fail": 0,
+          "skipped": 1
+        },
+        "run": "pass",
+        "durationMs": 712,
+        "behavioural": true
+      }
+    ],
+    "run": {
+      "kind": "ui-shell",
+      "run": "skip",
+      "detail": "UI shell ΓÇö not executable headless"
+    },
+    "core": {
+      "kind": "generated-core",
+      "entry": "src/jobs/approve.ts",
+      "run": "pass",
+      "durationMs": 220
+    },
+    "project": {
+      "ok": true,
+      "typecheck": {
+        "script": "typecheck",
+        "run": "pass",
+        "durationMs": 2135,
+        "command": "tsc --noEmit",
+        "scriptPolicy": "argv-only ┬╖ tsc.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "test": {
+        "script": "test",
+        "run": "pass",
+        "durationMs": 569,
+        "command": "node --experimental-strip-types --test tests/oracle.spec.ts",
+        "scriptPolicy": "argv-only ┬╖ node (no shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "build": {
+        "script": "build",
+        "run": "pass",
+        "durationMs": 1002,
+        "command": "vite build",
+        "scriptPolicy": "argv-only ┬╖ vite.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "declaredScriptsVerified": true
+    },
+    "note": "the declared project scripts were resolved from the RapidTool repo's own node_modules/ (offline, no install) ΓÇö the emitted tree's declared devDependency versions were NOT installed",
+    "dependencySource": {
+      "toolchain": "repo-shared",
+      "treeInstalled": false,
+      "note": "the declared project scripts were resolved from the RapidTool repo's own node_modules/ (offline, no install) ΓÇö the emitted tree's declared devDependency versions were NOT installed"
+    },
+    "declaredScriptsVerified": true,
+    "unverifiedEntry": "UI shell ΓÇö not executable headless",
+    "substance": {
+      "stubs": 0,
+      "reexports": 0,
+      "real": 5,
+      "files": [
+        {
+          "path": "src/jobs/approve.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/assign.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/scan.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/schedule.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/sync.ts",
+          "kind": "real"
+        }
+      ],
+      "verdict": "real",
+      "greenWhileStubbed": false,
+      "oracleStubTrap": false
+    },
+    "verdictHash": "781045204"
+  },
+  "substance": {
+    "stubs": 0,
+    "reexports": 0,
+    "real": 5,
+    "verdict": "real",
+    "greenWhileStubbed": false
+  },
+  "declaredScriptsVerified": true,
+  "git": {
+    "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\office-scheduler\\emitted",
+    "message": "feat(shiftline): Provide a 7-day rota grid (Monday through Sunday) rendering shifts perΓÇª",
+    "committed": true,
+    "noop": false,
+    "commit": {
+      "hash": "94b1796c5b06b5f03dbb223f6a563c9d0f842744",
+      "subject": "feat(shiftline): Provide a 7-day rota grid (Monday through Sunday) rendering shifts perΓÇª"
+    },
+    "files": [
+      ".env.example",
+      ".gitignore",
+      ".rapidtool/project.json",
+      "DEPLOY.md",
+      "README.md",
+      "index.html",
+      "package.json",
+      "src/api/routes.ts",
+      "src/domain/custom-software.ts",
+      "src/domain/custom_software.ts",
+      "src/generated.ts",
+      "src/generated/render-weekly-rota.ts",
+      "src/generated/validate-attendee-count.ts",
+      "src/jobs/approve.ts",
+      "src/jobs/assign.ts",
+      "src/jobs/scan.ts",
+      "src/jobs/schedule.ts",
+      "src/jobs/sync.ts",
+      "src/main.tsx",
+      "src/state/store.ts",
+      "src/styles.css",
+      "src/ui/console.tsx",
+      "tests/oracle.spec.ts",
+      "tsconfig.json",
+      "vite.config.ts"
+    ],
+    "foreign": [],
+    "verifiedProduct": false,
+    "verification": {
+      "verifiedProduct": false,
+      "committed": true,
+      "treeRunOk": true,
+      "treeRunVerdictHash": "781045204",
+      "treeRunTests": [
+        {
+          "file": "tests/oracle.spec.ts",
+          "run": "pass",
+          "pass": 30,
+          "fail": 0,
+          "skipped": 1
+        }
+      ],
+      "declaredScriptsVerified": true,
+      "evidenceHash": "1693023032",
+      "uiWired": true,
+      "uiWiringEntry": "src/ui/console.tsx",
+      "unverifiedReasons": [
+        "kind entry not executed: UI shell ΓÇö not executable headless"
+      ]
+    },
+    "verificationNote": "the commit landed, but the emitted product is NOT fully verified ΓÇö read git.verification.unverifiedReasons"
+  },
+  "campaignLedger": {
+    "path": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\ledger.json",
+    "cap": 3000000,
+    "spent": 482716,
+    "calls": 85,
+    "remaining": 2517284
+  },
+  "exit_code": 0
+}

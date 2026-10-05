@@ -11,7 +11,10 @@
  *          not the registered floor code, INC C1-01).
  *   C1-02  RT_E_UI_UNWIRED          a tree whose spec graph declares a UI but
  *          whose mounted console never CALLS a real generated export
- *          (INC C1-02; `uiWired:false` on 8/8 campaign trees).
+ *          (INC C1-02; `uiWired:false` on 8/8 campaign trees). R2-02: the
+ *          decision is DELEGATED to the single product seam
+ *          `headless.realGeneratedExportWiring` — no parallel census that can
+ *          contradict the shipped seam.
  *   C1-05  RT_E_SPEC_SKIP_VACUOUS   an oracle spec whose live tests are
  *          dominated by `test.skip`/`test.todo` rows, so a green run is
  *          vacuity, not behaviour (INC C1-05; 7-8/9 SKIP).
@@ -22,10 +25,11 @@
  *
  * The guards read REAL bytes: the emitted tree on disk, the persisted
  * `.rapidtool/project.json`, the emitted `tests/oracle.spec.ts`, the mounted
- * `src/ui/*` console, and the sealed `emit*.json` envelopes. The floor and the
- * real-module census come from the REAL seams (`minimumTreeFileCount` from
- * `src/lib/codegen.server.ts`, `treeSubstanceOf` from
- * `src/lib/compile-check.server.ts`) — nothing here mocks the object under test.
+ * `src/ui/*` console, and the sealed `emit*.json` envelopes. The floor comes
+ * from `minimumTreeFileCount` (`src/lib/codegen.server.ts`); the UI-wiring
+ * decision is the product predicate `realGeneratedExportWiring`
+ * (`src/lib/headless.ts`) — nothing here mocks the object under test and no
+ * detector keeps a competing copy of a shipped seam.
  *
  * Every finding names the exact campaign slug/tree it fired on. Each detector
  * has a clean/mutation control in `campaign-invariants.test.mjs`; the P-A
@@ -41,10 +45,10 @@
  */
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { maskCommentsOnly, maskLiteralsAndComments } from "./tree-invariants.mjs";
+import { maskLiteralsAndComments } from "./tree-invariants.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(HERE, "..", "..");
@@ -52,6 +56,7 @@ export const CAMPAIGN_CASSETTE_DIR = join(REPO_ROOT, "scripts", "prevention", "c
 
 const FLOOR_CODE = "RT_E_PLAN_UNDERPRODUCED";
 const UI_CODE = "RT_E_UI_UNWIRED";
+const UI_SEAM = "headless.realGeneratedExportWiring";
 const SKIP_CODE = "RT_E_SPEC_SKIP_VACUOUS";
 const CLAIM_CODE = "RT_E_CLAIM_UNVERIFIED";
 const GIT_CODE = "RT_E_GIT_CODE_INCONSISTENT";
@@ -193,11 +198,12 @@ export function sealEnvelopes(slugDir) {
 // ---------------------------------------------------------------------------
 
 let seamsCache = null;
-/** Import the REAL floor + substance seams once. @returns {Promise<{minimumTreeFileCount:any, treeSubstanceOf:any, error:string|null}>} */
+/** Import the REAL floor + substance + UI-wiring seams once. @returns {Promise<{minimumTreeFileCount:any, treeSubstanceOf:any, realGeneratedExportWiring:any, error:string|null}>} */
 export async function loadCampaignSeams() {
   if (seamsCache) return seamsCache;
   let minimumTreeFileCount = null;
   let treeSubstanceOf = null;
+  let realGeneratedExportWiring = null;
   let error = null;
   try {
     const cg = await import(new URL("../../src/lib/codegen.server.ts", import.meta.url).href);
@@ -211,7 +217,13 @@ export async function loadCampaignSeams() {
   } catch (e) {
     error = (error ? error + "; " : "") + `compile-check.server.ts: ${String(e && e.message ? e.message : e)}`;
   }
-  seamsCache = { minimumTreeFileCount, treeSubstanceOf, error };
+  try {
+    const hl = await import(new URL("../../src/lib/headless.ts", import.meta.url).href);
+    realGeneratedExportWiring = typeof hl.realGeneratedExportWiring === "function" ? hl.realGeneratedExportWiring : null;
+  } catch (e) {
+    error = (error ? error + "; " : "") + `headless.ts: ${String(e && e.message ? e.message : e)}`;
+  }
+  seamsCache = { minimumTreeFileCount, treeSubstanceOf, realGeneratedExportWiring, error };
   return seamsCache;
 }
 
@@ -241,106 +253,6 @@ export function walkTreeSources(treeDir) {
   };
   walk(treeDir);
   return out.sort();
-}
-
-/** Relative POSIX path of `file` under `root`. */
-function relPosix(root, file) {
-  const r = resolve(root);
-  const f = resolve(file);
-  const p = f.startsWith(r) ? f.slice(r.length) : f;
-  return p.replace(/\\/g, "/").replace(/^\/+/, "");
-}
-
-const EXPORT_DECL_RE = /(^|\n)[ \t]*export\s+(?:async\s+)?(?:function|const|let|var|class|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
-const EXPORT_LIST_RE = /(^|\n)[ \t]*export\s*\{([^}]*)\}/g;
-
-/** Top-level exported names of a module (masked source). */
-export function exportedNames(source) {
-  const masked = maskLiteralsAndComments(source);
-  const out = new Set();
-  EXPORT_DECL_RE.lastIndex = 0;
-  let m;
-  while ((m = EXPORT_DECL_RE.exec(masked)) !== null) out.add(m[2]);
-  EXPORT_LIST_RE.lastIndex = 0;
-  while ((m = EXPORT_LIST_RE.exec(masked)) !== null) {
-    for (const part of m[2].split(",")) {
-      const t = part.trim();
-      if (!t) continue;
-      const bits = t.split(/\s+as\s+/);
-      const name = (bits.length === 2 ? bits[1] : bits[0]).trim();
-      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) out.add(name);
-    }
-  }
-  return out;
-}
-
-/** Resolve a relative import specifier to a real source file inside the tree. */
-export function resolveTreeSpecifier(spec, fromFile) {
-  if (!spec.startsWith(".")) return null;
-  const base = resolve(dirname(fromFile), spec);
-  const candidates = [base];
-  if (!extname(base)) {
-    candidates.push(`${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.jsx`, `${base}.mjs`, join(base, "index.ts"));
-  } else if (base.endsWith(".js")) {
-    candidates.push(`${base.slice(0, -3)}.ts`, `${base.slice(0, -3)}.tsx`);
-  }
-  for (const c of candidates) {
-    try {
-      if (statSync(c).isFile()) return c;
-    } catch {
-      /* next candidate */
-    }
-  }
-  return null;
-}
-
-/** Relative `export * from` / `export {..} from` targets of a module (strings intact). */
-function reexportTargets(source) {
-  const masked = maskCommentsOnly(source);
-  const out = [];
-  for (const m of masked.matchAll(/(^|\n)[ \t]*export\s*\*\s*from\s*["']([^"']+)["']/g)) out.push({ spec: m[2], names: null });
-  for (const m of masked.matchAll(/(^|\n)[ \t]*export\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
-    const names = m[2]
-      .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .map((x) => (x.split(/\s+as\s+/).pop() || "").trim())
-      .filter(Boolean);
-    out.push({ spec: m[3], names });
-  }
-  return out;
-}
-
-/**
- * Expand a resolved module to the tree modules that actually PROVIDE an export
- * named `name` (barrels followed transitively). Returns absolute provider paths.
- */
-export function realProvidersOf(targetFile, name) {
-  const source = safeRead(targetFile);
-  const own = exportedNames(source);
-  const targets = reexportTargets(source);
-  if (targets.length === 0) return own.has(name) ? [targetFile] : [];
-  const providers = [];
-  const seen = new Set();
-  const visit = (file) => {
-    if (seen.has(file)) return;
-    seen.add(file);
-    const src = safeRead(file);
-    const names = exportedNames(src);
-    const inner = reexportTargets(src);
-    if (names.has(name)) providers.push(file);
-    for (const t of inner) {
-      if (t.names && !t.names.includes(name)) continue;
-      const next = resolveTreeSpecifier(t.spec, file);
-      if (next) visit(next);
-    }
-  };
-  for (const t of targets) {
-    if (t.names && !t.names.includes(name)) continue;
-    const next = resolveTreeSpecifier(t.spec, targetFile);
-    if (next) visit(next);
-  }
-  return providers;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,22 +299,6 @@ export function detectFloorReachability(slugDir, treeDir, floorOf) {
 // Detector C1-02 — mounted UI must call a real generated export.
 // ---------------------------------------------------------------------------
 
-/** The real generated modules of a tree (kind === "real" in the substance census). */
-function realModuleSet(treeDir, treeSubstanceOf) {
-  const set = new Set();
-  if (typeof treeSubstanceOf !== "function") return set;
-  let census;
-  try {
-    census = treeSubstanceOf(treeDir, { green: true });
-  } catch {
-    return set;
-  }
-  for (const f of Array.isArray(census.files) ? census.files : []) {
-    if (f && f.kind === "real" && typeof f.path === "string") set.add(f.path.replace(/\\/g, "/"));
-  }
-  return set;
-}
-
 /** Does the spec graph declare a UI surface? */
 function declaresUi(project) {
   const nodes = Array.isArray(project?.specGraph?.nodes) ? project.specGraph.nodes : [];
@@ -414,91 +310,61 @@ function declaresUi(project) {
   );
 }
 
-/** Parsed generated imports of a console source (bindings + specifier). */
-export function parseUiImports(source) {
-  const masked = maskCommentsOnly(source);
-  const out = [];
-  for (const m of masked.matchAll(/(^|\n)[ \t]*import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+["']([^"']+)["']/g)) {
-    out.push({ ns: m[2], names: [], spec: m[3] });
-  }
-  for (const m of masked.matchAll(/(^|\n)[ \t]*import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
-    const names = m[2]
-      .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .map((x) => (x.split(/\s+as\s+/).pop() || "").trim())
-      .filter(Boolean);
-    out.push({ ns: null, names, spec: m[3] });
-  }
-  return out;
-}
-
-/** Named exports the source CALLS from `ns` (namespace member calls). */
-function nsCalls(source, ns) {
-  const masked = maskLiteralsAndComments(source);
-  const out = new Set();
-  const re = new RegExp(`\\b${ns.replace(/\$/g, "\\$")}\\s*\\.\\s*([A-Za-z_$][\\w$]*)\\s*\\(`, "g");
-  for (const m of masked.matchAll(re)) out.add(m[1]);
-  return out;
-}
-
-/** Names the source CALLS directly (bare call sites). */
-function bareCalls(source, names) {
-  const masked = maskLiteralsAndComments(source);
-  const out = new Set();
-  for (const name of names) {
-    const re = new RegExp(`(^|[^.[\\w$])${name.replace(/\$/g, "\\$")}\\s*\\(`, "m");
-    if (re.test(masked)) out.add(name);
-  }
-  return out;
-}
-
 /**
  * A tree whose spec graph declares a UI must mount at least one REAL generated
- * export: a console/entry module that imports a generated module and CALLS an
- * export that resolves (through barrels) to a module the substance census reads
- * as real. Otherwise the UI is a stub wall (C1-02).
- * @param {string} treeDir @param {(dir:string,opts:any)=>any} treeSubstanceOf @param {string} [slug]
+ * export. The decision is delegated to the ONE product seam — the predicate
+ * `realGeneratedExportWiring` exported by `src/lib/headless.ts`, the same
+ * predicate the `emit --git` delivery record consumes. The guard keeps NO
+ * parallel `realModuleSet` census (R2-02): a guard that can disagree with the
+ * product seam is worse than no guard. When the seam is absent the guard fails
+ * closed and NAMES the interface it needs, so the pin stays RED.
+ * @param {string} treeDir
+ * @param {((dir:string)=>{wired:boolean,entry?:string|null,detail?:string})|null|undefined} wiringOf
+ * @param {string} [slug]
  */
-export function detectUiWiring(treeDir, treeSubstanceOf, slug) {
+export function detectUiWiring(treeDir, wiringOf, slug) {
   const label = slug || basename(dirname(treeDir));
   const project = readJsonArtifact(join(treeDir, ".rapidtool", "project.json"));
   if (!project || !declaresUi(project)) return [];
-  const uiFiles = walkTreeSources(treeDir).filter((f) => /[\\/]src[\\/](?:ui[\\/]|main\.[tj]sx?$)/.test(f));
-  if (uiFiles.length === 0) {
-    return [{ code: UI_CODE, slug: label, tree: "emitted", detail: "spec graph declares a UI but no src/ui or src/main entry exists" }];
+  if (typeof wiringOf !== "function") {
+    return [
+      {
+        code: UI_CODE,
+        slug: label,
+        tree: "emitted",
+        seam: UI_SEAM,
+        wired: false,
+        detail: `spec graph declares a UI but the canonical seam ${UI_SEAM} (src/lib/headless.ts) is not exported — the guard cannot agree with the product seam (R2-02)`,
+      },
+    ];
   }
-  const real = realModuleSet(treeDir, treeSubstanceOf);
-  for (const file of uiFiles) {
-    const source = safeRead(file);
-    for (const imp of parseUiImports(source)) {
-      const target = resolveTreeSpecifier(imp.spec, file);
-      if (!target) continue;
-      if (imp.ns) {
-        for (const called of nsCalls(source, imp.ns)) {
-          const providers = realProvidersOf(target, called);
-          if (providers.some((p) => real.has(relPosix(treeDir, p)))) {
-            return [];
-          }
-        }
-      }
-      if (imp.names.length > 0) {
-        for (const called of bareCalls(source, imp.names)) {
-          const providers = realProvidersOf(target, called);
-          if (providers.some((p) => real.has(relPosix(treeDir, p)))) {
-            return [];
-          }
-        }
-      }
-    }
+  let reading = null;
+  try {
+    reading = wiringOf(treeDir);
+  } catch (e) {
+    return [
+      {
+        code: UI_CODE,
+        slug: label,
+        tree: "emitted",
+        seam: UI_SEAM,
+        wired: false,
+        detail: `${UI_SEAM} threw on this tree: ${String(e && e.message ? e.message : e)}`,
+      },
+    ];
   }
+  if (reading && reading.wired === true) return [];
   return [
     {
       code: UI_CODE,
       slug: label,
       tree: "emitted",
-      realModules: [...real],
-      detail: `spec graph declares a UI but no mounted console/entry CALLS an export of a real generated module (real modules: ${[...real].join(", ") || "none"})`,
+      seam: UI_SEAM,
+      wired: false,
+      entry: reading && reading.entry != null ? reading.entry : null,
+      detail:
+        (reading && reading.detail) ||
+        `spec graph declares a UI but the mounted UI does not CALL an export of a real generated module (${UI_SEAM})`,
     },
   ];
 }
@@ -643,12 +509,12 @@ export function detectGitCodeInconsistency(slugDir) {
 
 /** Run every detector over the campaign trees. */
 export async function scanCampaign(root, only = null) {
-  const { minimumTreeFileCount, treeSubstanceOf, error } = await loadCampaignSeams();
+  const { minimumTreeFileCount, realGeneratedExportWiring, error } = await loadCampaignSeams();
   const slugs = listCampaignSlugs(root);
   const findings = [];
   const run = {
     floor: (slug, slugDir, treeDir) => (typeof minimumTreeFileCount === "function" ? detectFloorReachability(slugDir, treeDir, minimumTreeFileCount) : []),
-    ui: (slug, _slugDir, treeDir) => detectUiWiring(treeDir, treeSubstanceOf, slug),
+    ui: (slug, _slugDir, treeDir) => detectUiWiring(treeDir, realGeneratedExportWiring, slug),
     skip: (slug, _slugDir, treeDir) => detectSkipVacuity(treeDir, slug),
     claim: (_slug, slugDir, treeDir) => detectUnverifiedClaim(slugDir, treeDir),
     git: (_slug, slugDir) => detectGitCodeInconsistency(slugDir),
@@ -723,7 +589,7 @@ function copyTree(source, dest) {
  * @param {string} root
  */
 export async function campaignControls(root) {
-  const { minimumTreeFileCount, treeSubstanceOf } = await loadCampaignSeams();
+  const { minimumTreeFileCount, realGeneratedExportWiring } = await loadCampaignSeams();
   const controls = {};
   const stockTree = campaignTreeDir(root, "office-stock-tracker");
   const flowerTree = campaignTreeDir(root, "flower-shop-website");
@@ -740,17 +606,26 @@ export async function campaignControls(root) {
       return detectFloorReachability(slugDir, join(slugDir, "emitted"), minimumTreeFileCount).length === 0;
     }),
   };
-  // C1-02: unwired console (fires) vs a console calling a real job export (silent).
-  const uiMutation = scratch((d) => {
-    const treeDir = join(d, "emitted");
-    copyTree(flowerTree, treeDir);
-    writeFileSync(join(treeDir, "src", "ui", "console.tsx"), WIRED_CONSOLE);
-    return detectUiWiring(treeDir, treeSubstanceOf, "flower-shop-website").length === 0;
-  });
+  // C1-02: the guard consumes the ONE product seam (`realGeneratedExportWiring`,
+  // lane D). When the seam is exported, an unwired console fires and a console
+  // calling a real generated export is silent; until then the guard fails closed
+  // and the pin is RED, NAMING the interface it needs (R2-02).
+  const uiSeamPresent = typeof realGeneratedExportWiring === "function";
+  const uiMutation = uiSeamPresent
+    ? scratch((d) => {
+        const treeDir = join(d, "emitted");
+        copyTree(flowerTree, treeDir);
+        writeFileSync(join(treeDir, "src", "ui", "console.tsx"), WIRED_CONSOLE);
+        return detectUiWiring(treeDir, realGeneratedExportWiring, "flower-shop-website").length === 0;
+      })
+    : false;
   controls["C1-02"] = {
-    fired: detectUiWiring(schedulerTree, treeSubstanceOf, "office-scheduler").length > 0,
-    controlClean: uiMutation,
-    mutationRed: uiMutation,
+    fired: detectUiWiring(schedulerTree, realGeneratedExportWiring, "office-scheduler").length > 0,
+    controlClean: uiSeamPresent ? uiMutation : true,
+    mutationRed: uiSeamPresent ? uiMutation : false,
+    wired: uiSeamPresent,
+    seam: UI_SEAM,
+    seamPending: uiSeamPresent ? null : UI_SEAM,
   };
   // C1-05: skip-dominated oracle (fires) vs a mostly-live spec (silent).
   const skipMutation = scratch((d) => {

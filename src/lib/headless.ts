@@ -89,7 +89,7 @@ import type {
 // RtEventSeed the engine emits and the CLI's cliLogEvent consumes.
 import type { RtEventSeed } from "./rt-events.ts";
 
-import { isKeyUnusableCode, type DoctorLastKeyed, type DoctorLlmKey, type DoctorSpend } from "./doctor.ts";
+import { classifyJobSource, isKeyUnusableCode, type DoctorLastKeyed, type DoctorLlmKey, type DoctorSpend } from "./doctor.ts";
 import {
   fleetAcceptanceFromProjects,
   fleetAlarms,
@@ -2511,7 +2511,21 @@ export async function emitProject(
   // projects return the same reference: byte-identical emits.
   const emitProjectInput = await materializeEmitTree(project);
   const result = scaffold.scaffoldProject(emitProjectInput);
-  if (!result.ok) return { ok: false, error: result.error };
+  if (!result.ok) {
+    // R2-01 (campaign #2): a scaffold refusal is coded. The below-floor refusal
+    // already carries `RT_E_PLAN_UNDERPRODUCED` as its error's registered code
+    // prefix (scaffold.underProductionRefusalOf); without lifting it onto
+    // `code` the CLI collapsed the seal to RT_E_VALIDATION and the floor
+    // vanished from the delivery envelope. Lift the ERRORS' own registered code
+    // (never invent one) so the seal names the deciding reason.
+    return {
+      ok: false,
+      error: result.error,
+      ...(typeof result.error === "string" && /^RT_E_[A-Z0-9_]+/.test(result.error)
+        ? { code: /^(RT_E_[A-Z0-9_]+)/.exec(result.error)![1] as ErrorCode }
+        : {}),
+    };
+  }
   // 216 (T-07): under the `banner` policy the banner is prepended to the
   // README.md body BEFORE the lock and the file loop below, so it lands
   // atomically with — and cannot drift from — the rest of the emit.
@@ -5020,142 +5034,276 @@ export function collectJobSources(treeDir: string): Array<{ path: string; source
 }
 
 // ---------------------------------------------------------------------------
-// C1-06 (campaign #1): the STATIC UI-wiring reading an emit --git delivery
-// record carries. "committed" is not "verified": the campaign's real-substance
-// trees committed while their mounted console imported a generated module and
-// never called one. This is a read-only call-presence scan (a name, NOT
-// behaviour): the mounted console (`src/ui/console.tsx`, the module
-// `src/main.tsx` mounts) must CALL an export of the generated module it
-// imports, and that export must not be a NOT-IMPLEMENTED/TODO stub (following
-// `export * from` barrels). Any failure to determine wiring reads honestly as
-// not-wired with its reason — never a fabricated true.
+// R2-02 (campaign #2): the ONE canonical "the mounted UI calls a real generated
+// export" predicate. The CLI delivery record (`emittedUiWiring`) and the
+// campaign-invariants UI guard previously disagreed: this seam accepted any
+// non-stub export reachable through the emitted barrel, while the guard's
+// `realModuleSet` counted only the substance census's JOB modules — so the
+// guard fired RT_E_UI_UNWIRED on the campaign trees whose console genuinely
+// calls a real `src/generated/*` render export. This predicate is the single
+// definition both seams consume: it walks the emitted barrels to the PROVIDING
+// module and classifies that module with doctor.classifyJobSource (the census's
+// own real/stub/reexport classifier). Read-only; never throws; any ambiguity
+// reads as not-wired with its reason — never a fabricated true.
 // ---------------------------------------------------------------------------
 
-/** Resolve a relative module specifier to an emitted file and collect its
- *  exported names (and which of them are TODO/NOT-IMPLEMENTED stubs), following
- *  `export * from` re-exports up to `depth`. Null when unresolved. */
-function expandEmittedModule(
-  rootAbs: string,
-  baseAbs: string,
-  spec: string,
-  depth = 0,
-): { exports: Set<string>; stubs: Set<string> } | null {
-  if (depth > 3 || !spec.startsWith(".")) return null;
+/** The emitted UI entry modules the predicate scans: every `src/ui/*` source,
+ *  plus the app's own `src/main.*` when present (the guard's uiFiles set). */
+function emittedUiEntryFiles(rootAbs: string): string[] {
+  const out: string[] = [];
+  const uiDir = join(rootAbs, "src", "ui");
+  try {
+    if (existsSync(uiDir)) {
+      for (const name of readdirSync(uiDir).sort()) {
+        if (/\.(?:ts|tsx|js|jsx|mjs)$/.test(name)) out.push(join("src", "ui", name));
+      }
+    }
+  } catch {
+    /* unreadable ui dir — treated as no UI files */
+  }
+  for (const name of ["main.tsx", "main.ts", "main.jsx", "main.js"]) {
+    if (existsSync(join(rootAbs, "src", name))) {
+      out.push(join("src", name));
+      break;
+    }
+  }
+  return out;
+}
+
+/** Resolve a relative specifier to a file inside the emitted tree (containment
+ *  enforced), or null when it resolves outside / does not exist. */
+function resolveEmittedFile(rootAbs: string, baseAbs: string, spec: string): string | null {
+  if (!spec.startsWith(".")) return null;
   const rootPrefix = rootAbs.endsWith(sep) ? rootAbs : rootAbs + sep;
-  const candidates = [spec, `${spec}.ts`, `${spec}.tsx`, `${spec}.js`, `${spec}.mjs`, join(spec, "index.ts")];
-  let file: string | null = null;
+  const candidates = [spec, `${spec}.ts`, `${spec}.tsx`, `${spec}.js`, `${spec}.jsx`, `${spec}.mjs`, join(spec, "index.ts")];
   for (const cand of candidates) {
     const abs = resolve(baseAbs, cand);
-    // Containment: never follow a specifier out of the emitted tree.
     if (abs !== rootAbs && !abs.startsWith(rootPrefix)) continue;
     try {
-      if (existsSync(abs) && statSync(abs).isFile()) {
-        file = abs;
-        break;
-      }
+      if (existsSync(abs) && statSync(abs).isFile()) return abs;
     } catch {
       /* unreadable candidate — try the next */
     }
   }
-  if (file === null) return null;
-  let src = "";
+  return null;
+}
+
+/** The emitted files that PROVIDE `name` as an export, following `export *`
+ *  / `export { name } from` barrels transitively (absolute, deduped). A
+ *  barrel that only re-exports does not provide the body itself. */
+function emittedExportProviders(rootAbs: string, fileAbs: string, name: string, depth = 0, seen = new Set<string>()): string[] {
+  if (depth > 4 || seen.has(fileAbs)) return [];
+  seen.add(fileAbs);
+  let source = "";
   try {
-    src = readFileSync(file, "utf8");
+    source = readFileSync(fileAbs, "utf8");
   } catch {
-    return null;
+    return [];
   }
-  const exports = new Set<string>();
-  const stubs = new Set<string>();
-  const isStub = (name: string): boolean => {
-    const at = src.search(new RegExp(`export\\s+(?:async\\s+)?(?:function|const|let|var|class)\\s+${name}\\b`));
-    if (at < 0) return false;
-    return /TODO\(E-15\)|NOT IMPLEMENTED|not implemented/i.test(src.slice(at, at + 600));
-  };
-  for (const m of src.matchAll(/export\s+(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z_$][\w$]*)/g)) {
-    exports.add(m[1]);
-    if (isStub(m[1])) stubs.add(m[1]);
+  const out: string[] = [];
+  for (const m of source.matchAll(/export\s+(?:async\s+)?(?:function|const|let|var|class|enum)\s+([A-Za-z_$][\w$]*)/g)) {
+    if (m[1] === name) out.push(fileAbs);
   }
-  for (const m of src.matchAll(/export\s*\{([^}]*)\}/g)) {
+  for (const m of source.matchAll(/export\s*\{([^}]*)\}(?!\s*from\b)/g)) {
     for (const part of m[1].split(",")) {
-      const seg = part.trim().split(/\s+as\s+/);
-      const name = (seg[1] ?? seg[0] ?? "").trim();
-      if (/^[A-Za-z_$][\w$]*$/.test(name)) {
-        exports.add(name);
-        if (isStub(name)) stubs.add(name);
+      const bits = part.trim().split(/\s+as\s+/);
+      const pub = (bits[1] ?? bits[0] ?? "").trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(pub) && pub === name) out.push(fileAbs);
+    }
+  }
+  for (const m of source.matchAll(/export\s*\*\s*from\s*["']([^"']+)["']/g)) {
+    const next = resolveEmittedFile(rootAbs, dirname(fileAbs), m[1]);
+    if (next) out.push(...emittedExportProviders(rootAbs, next, name, depth + 1, seen));
+  }
+  for (const m of source.matchAll(/export\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
+    const names = m[1].split(",").map((x) => (x.trim().split(/\s+as\s+/).pop() || "").trim());
+    if (!names.includes(name)) continue;
+    const next = resolveEmittedFile(rootAbs, dirname(fileAbs), m[2]);
+    if (next) out.push(...emittedExportProviders(rootAbs, next, name, depth + 1, seen));
+  }
+  return out;
+}
+
+/** The namespace/named imports of a UI source (bindings + specifier). */
+function uiImportBindings(source: string): Array<{ ns: string | null; names: string[]; spec: string }> {
+  const out: Array<{ ns: string | null; names: string[]; spec: string }> = [];
+  for (const m of source.matchAll(/(^|\n)\s*import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+["']([^"']+)["']/g)) {
+    out.push({ ns: m[2], names: [], spec: m[3] });
+  }
+  for (const m of source.matchAll(/(^|\n)\s*import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
+    const names = m[2]
+      .split(",")
+      .map((x) => (x.trim().split(/\s+as\s+/).pop() || "").trim())
+      .filter((x) => /^[A-Za-z_$][\w$]*$/.test(x));
+    out.push({ ns: null, names, spec: m[3] });
+  }
+  return out;
+}
+
+/** R2-02: the ONE canonical UI-wiring reading every seam consumes. `wired` is
+ *  true iff a mounted UI entry CALLS (static call-presence — never behaviour)
+ *  an export whose providing module classifyJobSource reads as `real`. */
+export type RealGeneratedExportWiring = { wired: boolean; entry: string | null; exports: string[]; reason: string };
+
+export function realGeneratedExportWiring(dir: string): RealGeneratedExportWiring {
+  const root = resolve(dir);
+  const entries = emittedUiEntryFiles(root);
+  if (entries.length === 0) {
+    return {
+      wired: false,
+      entry: null,
+      exports: [],
+      reason: "no mounted UI console/entry module found (src/ui/* or src/main.*)",
+    };
+  }
+  let firstEntry: string | null = null;
+  // The most-specific not-wired reason found wins, so a console that imports a
+  // generated module and never calls it is not masked by a sibling main.tsx
+  // that imports no generated module at all. 3 = called but none real,
+  // 2 = imported but never called, 1 = no generated import.
+  let bestPriority = 0;
+  let bestReason = "";
+  let bestEntry: string | null = null;
+  const consider = (priority: number, entry: string, reason: string): void => {
+    if (priority > bestPriority) {
+      bestPriority = priority;
+      bestReason = reason;
+      bestEntry = entry;
+    }
+  };
+  for (const rel of entries) {
+    const relPosix = rel.replace(/\\/g, "/");
+    const abs = join(root, rel);
+    if (firstEntry === null) firstEntry = relPosix;
+    let source = "";
+    try {
+      source = readFileSync(abs, "utf8");
+    } catch {
+      consider(1, relPosix, `the mounted UI entry ${relPosix} could not be read`);
+      continue;
+    }
+    let sawImport = false;
+    for (const imp of uiImportBindings(source)) {
+      const target = resolveEmittedFile(root, dirname(abs), imp.spec);
+      if (!target) continue;
+      sawImport = true;
+      const called = new Set<string>();
+      if (imp.ns) {
+        const re = new RegExp(`\\b${imp.ns.replace(/\$/g, "\\$")}\\s*\\.\\s*([A-Za-z_$][\\w$]*)\\s*\\(`, "g");
+        for (const m of source.matchAll(re)) called.add(m[1]);
       }
+      for (const name of imp.names) {
+        const re = new RegExp(`(^|[^.[\\w$])${name.replace(/\$/g, "\\$")}\\s*\\(`, "m");
+        if (re.test(source)) called.add(name);
+      }
+      if (called.size === 0) {
+        consider(
+          2,
+          relPosix,
+          `the mounted UI (${relPosix}) imports "${imp.spec}" but never calls an exported function (static call-presence)`,
+        );
+        continue;
+      }
+      const real: string[] = [];
+      for (const name of called) {
+        for (const provider of emittedExportProviders(root, target, name)) {
+          let providerSource = "";
+          try {
+            providerSource = readFileSync(provider, "utf8");
+          } catch {
+            continue;
+          }
+          if (classifyJobSource(providerSource) === "real") {
+            real.push(name);
+            break;
+          }
+        }
+      }
+      if (real.length > 0) {
+        const exports = [...new Set(real)];
+        return {
+          wired: true,
+          entry: relPosix,
+          exports,
+          reason: `the mounted UI (${relPosix}) calls real generated export(s): ${exports.join(", ")} (static call-presence, not behaviour)`,
+        };
+      }
+      consider(
+        3,
+        relPosix,
+        `the mounted UI (${relPosix}) calls ${[...called].join(", ")}, but none resolves to a real generated module`,
+      );
     }
+    if (!sawImport) consider(1, relPosix, `the mounted UI (${relPosix}) imports no generated namespace/module`);
   }
-  for (const m of src.matchAll(/export\s+\*\s+from\s+["']([^"']+)["']/g)) {
-    const sub = expandEmittedModule(rootAbs, dirname(file), m[1], depth + 1);
-    if (sub) {
-      for (const n of sub.exports) exports.add(n);
-      for (const n of sub.stubs) stubs.add(n);
-    }
-  }
-  return { exports, stubs };
+  if (bestPriority > 0) return { wired: false, entry: bestEntry ?? firstEntry, exports: [], reason: bestReason };
+  return { wired: false, entry: firstEntry, exports: [], reason: "the mounted UI entry imports no generated module" };
 }
 
 /**
- * C1-06: does the emitted tree's mounted UI call a real generated export?
- * Read-only; never throws. `detail` states exactly what was and was not found
- * (static call-presence — a name, never behaviour). `wired:false` is the honest
- * floor on any ambiguity.
+ * C1-06 back-compat wrapper: the delivery-record reading. Delegates to the ONE
+ * canonical predicate (`realGeneratedExportWiring`) so the CLI record and the
+ * campaign guard cannot drift. `detail` is the predicate's `reason`.
  */
 export function emittedUiWiring(dir: string): { wired: boolean; entry: string | null; detail: string } {
-  const root = resolve(dir);
-  const consoleRel = ["src/ui/console.tsx", "src/ui/console.ts", "src/ui/console.jsx", "src/ui/console.js"].find((p) =>
-    existsSync(join(root, p)),
+  const r = realGeneratedExportWiring(dir);
+  return { wired: r.wired, entry: r.entry, detail: r.reason };
+}
+
+// ---------------------------------------------------------------------------
+// R2-01 (campaign #2): the delivery-time floor seal. codegen journals the
+// under-production refusal (RT_E_PLAN_UNDERPRODUCED) onto the project record,
+// but the emit seal never echoed it — a below-floor tree could be materialized
+// (e.g. `--red-tree banner`) and read as a normal artifact. This reads the
+// project's OWN P6 journal and re-derives the floor with codegen's ONE
+// predicate: a project whose record names RT_E_PLAN_UNDERPRODUCED and whose
+// delivered tree is still below the brief-driven floor returns the coded seal
+// the emit arm must refuse delivery on. Pure over the record + the tree rows;
+// a legacy/at-floor record returns null.
+// ---------------------------------------------------------------------------
+
+/** R2-01: the coded seal the emit arm withholds on. */
+export type PlanUnderproductionSeal = {
+  code: "RT_E_PLAN_UNDERPRODUCED";
+  floor: number;
+  emitted: number;
+  modules: number;
+  missing: Array<{ path: string; label: string; source: string }>;
+  detail: string;
+};
+
+export async function planUnderproductionSeal(project: Project): Promise<PlanUnderproductionSeal | null> {
+  const logs = Array.isArray(project?.logs) ? project.logs : [];
+  const journaled = logs.some(
+    (l) =>
+      l !== null &&
+      typeof l === "object" &&
+      typeof (l as { detail?: unknown }).detail === "string" &&
+      (l as { detail: string }).detail.includes("RT_E_PLAN_UNDERPRODUCED"),
   );
-  if (!consoleRel) {
-    return { wired: false, entry: null, detail: "no mounted UI console module found (src/ui/console.{tsx,ts})" };
-  }
-  let consoleSrc = "";
-  try {
-    consoleSrc = readFileSync(join(root, consoleRel), "utf8");
-  } catch {
-    return { wired: false, entry: consoleRel, detail: "the mounted UI console could not be read" };
-  }
-  const imp = /import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+["']([^"']+)["']/.exec(consoleSrc);
-  if (!imp) {
-    return {
-      wired: false,
-      entry: consoleRel,
-      detail: "the mounted UI console imports no generated namespace (import * as ns from …)",
-    };
-  }
-  const ns = imp[1];
-  const spec = imp[2];
-  const mod = expandEmittedModule(root, dirname(join(root, consoleRel)), spec);
-  if (!mod) {
-    return { wired: false, entry: consoleRel, detail: `the mounted UI console's import "${spec}" does not resolve to an emitted module` };
-  }
-  const called = new Set<string>();
-  const re = new RegExp(`\\b${ns}\\s*\\.\\s*([A-Za-z_$][\\w$]*)\\s*\\(`, "g");
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(consoleSrc)) !== null) called.add(m[1]);
-  if (called.size === 0) {
-    return {
-      wired: false,
-      entry: consoleRel,
-      detail: `the mounted UI imports "${spec}" but never calls an exported function (static call-presence)`,
-    };
-  }
-  const real = [...called].filter((n) => mod.exports.has(n) && !mod.stubs.has(n));
-  if (real.length === 0) {
-    const stubs = [...called].filter((n) => mod.stubs.has(n));
-    return {
-      wired: false,
-      entry: consoleRel,
-      detail:
-        stubs.length > 0
-          ? `the mounted UI only calls stub export(s) (${stubs.join(", ")}) — a NOT-IMPLEMENTED seam is not a wired product`
-          : `the mounted UI calls ${[...called].join(", ")}, but none is an export of "${spec}"`,
-    };
-  }
+  if (!journaled) return null;
+  const spec = project.implementationSpec ?? { typeSignatures: [] };
+  const codegen = (await import("./codegen.server.ts")) as unknown as {
+    TREE_ENTRY_PATH: string;
+    minimumTreeFileCount: (p: Project, s: { typeSignatures: readonly string[] }) => number;
+    underProducedRefusal: (
+      p: Project,
+      s: { typeSignatures: readonly string[] },
+      accepted: readonly string[],
+    ) => { code: "RT_E_PLAN_UNDERPRODUCED"; detail: string; missing: Array<{ path: string; label: string; source: string }> } | null;
+  };
+  const tree = Array.isArray(project.generatedTree) ? project.generatedTree.map((f) => f.path) : [];
+  const accepted = tree.filter((p) => p !== codegen.TREE_ENTRY_PATH);
+  const under = codegen.underProducedRefusal(project, spec, accepted);
+  if (under === null) return null;
+  const floor = codegen.minimumTreeFileCount(project, spec);
   return {
-    wired: true,
-    entry: consoleRel,
-    detail: `the mounted UI calls real generated export(s): ${real.join(", ")} (static call-presence, not behaviour)`,
+    code: under.code,
+    floor,
+    emitted: tree.length,
+    modules: accepted.length,
+    missing: under.missing.map((m) => ({ path: m.path, label: m.label, source: String(m.source) })),
+    detail: under.detail,
   };
 }
 

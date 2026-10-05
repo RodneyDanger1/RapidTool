@@ -1066,7 +1066,14 @@ async function deliveryVerification(h, { dir, runVerdict, evidenceHash }) {
   const declared = run && typeof run.declaredScriptsVerified === "boolean" ? run.declaredScriptsVerified : null;
   let ui = { wired: false, entry: null, detail: "UI-wiring scan unavailable" };
   try {
-    if (typeof h.emittedUiWiring === "function") ui = h.emittedUiWiring(dir);
+    // R2-02: the ONE canonical predicate (headless.realGeneratedExportWiring).
+    // The old `emittedUiWiring` accepted any non-stub barrel export while the
+    // campaign guard counted only job modules — the two seams disagreed. The
+    // record now reads the same definition the guard is being moved onto.
+    if (typeof h.realGeneratedExportWiring === "function") {
+      const w = h.realGeneratedExportWiring(dir);
+      ui = { wired: w.wired === true, entry: w.entry ?? null, detail: w.reason };
+    }
   } catch (err) {
     ui = { wired: false, entry: null, detail: `UI-wiring scan failed: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -2344,7 +2351,36 @@ async function main() {
             ...(typeof redTree === "string" ? { redTree } : {}),
           });
           if (!res.ok) {
-            respond({ ok: false, error: res.error, code: res.code ?? "RT_E_VALIDATION", foreign: res.foreign, ...(res.quarantineFailed ? { quarantineFailed: res.quarantineFailed, judgingSkipped: res.judgingSkipped } : {}) }, 1);
+            // R2-01: a below-floor scaffold refusal must seal the floor code as
+            // the DECIDING reason (the pre-write partial is never materialized).
+            // Carry the same diagnostic + withheld-git shape the post-write
+            // floor seal uses, so every seal surface names it identically.
+            const floorRefused = res.code === "RT_E_PLAN_UNDERPRODUCED";
+            const refusal = /** @type {Record<string, any>} */ ({
+              ok: false,
+              error: res.error,
+              code: res.code ?? "RT_E_VALIDATION",
+              foreign: res.foreign,
+              ...(res.quarantineFailed ? { quarantineFailed: res.quarantineFailed, judgingSkipped: res.judgingSkipped } : {}),
+            });
+            if (floorRefused) {
+              try {
+                const seal = await h.planUnderproductionSeal(project);
+                if (seal !== null) refusal.planUnderproduced = seal;
+              } catch {
+                /* the refusal already carries its registered code */
+              }
+              if (flag(args, "git")) {
+                refusal.git = {
+                  committed: false,
+                  skipped: true,
+                  reason: "plan-underproduced",
+                  code: "RT_E_PLAN_UNDERPRODUCED",
+                  error: res.error,
+                };
+              }
+            }
+            respond(refusal, 1);
             return;
           }
           const payload = {
@@ -2542,6 +2578,38 @@ async function main() {
           // envelope still carries `unverified` / `declaredScriptsVerified` /
           // `unverifiedDeclaredScripts`, so the honest signal is preserved and a
           // hard gate passes --require-verified to get exit 5.
+          // R2-01 (campaign #2): the floor seal. codegen journals
+          // RT_E_PLAN_UNDERPRODUCED onto the project record (build.json), but
+          // the emit seal never echoed it — a below-floor tree materialized
+          // under `--red-tree banner` read as a normal artifact. Re-derive the
+          // floor from the project's own P6 journal + codegen's ONE
+          // under-production predicate; when the delivered tree is still below
+          // the floor, the floor code becomes the DECIDING delivery reason
+          // (top-level `code` + the withheld git reason below) — never a silent
+          // partial. `--allow-empty` remains the explicit scaffold-only escape,
+          // exactly as for the substance-empty gate.
+          const planUnder = await h.planUnderproductionSeal(project);
+          if (planUnder !== null) {
+            payload.planUnderproduced = {
+              code: planUnder.code,
+              floor: planUnder.floor,
+              emitted: planUnder.emitted,
+              modules: planUnder.modules,
+              missing: planUnder.missing,
+              detail: planUnder.detail,
+            };
+            if (!flag(args, "allow-empty")) {
+              payload.ok = false;
+              if (typeof payload.code !== "string" || payload.code !== planUnder.code) {
+                payload.code = planUnder.code;
+                payload.error =
+                  `emit refused at delivery: ${planUnder.detail} — a tree below the brief-driven floor ` +
+                  `(${planUnder.emitted} file(s), ${planUnder.modules} module(s), floor ${planUnder.floor}) is an ` +
+                  "under-produced plan, never a normal artifact; the emitted tree is kept on disk — synthesize " +
+                  "the missing module(s) and re-emit to green.";
+              }
+            }
+          }
           // fixes/343_3 · git-native delivery: `emit --git` lands the just-
           // emitted tree as ONE Conventional-Commits commit through
           // headless.landEmittedTree → git.server's §6b seam (emitted-product
@@ -2560,7 +2628,19 @@ async function main() {
             // evidence of a clean, verified tree, so a red `--check` must
             // withhold exactly as a red `--run` does.
             let withheld = null;
-            if (foreignLeftInPlace) {
+            if (!flag(args, "allow-empty") && planUnder !== null) {
+              // R2-01: the floor is the DECIDING reason — a below-floor tree is
+              // an under-produced plan, not a merely-empty or red one. Checked
+              // first so the sealed git sub-envelope names the floor code too.
+              withheld = {
+                reason: "plan-underproduced",
+                code: planUnder.code,
+                error:
+                  `git delivery refused: ${planUnder.detail} — a tree below the brief-driven floor is an ` +
+                  "under-produced plan, never a normal artifact; no commit was issued and the emitted tree is " +
+                  "kept on disk. Synthesize the missing module(s) and re-emit to green.",
+              };
+            } else if (foreignLeftInPlace) {
               withheld = {
                 reason: "foreign-files-left-in-place",
                 code: "RT_E_FOREIGN_FILES",

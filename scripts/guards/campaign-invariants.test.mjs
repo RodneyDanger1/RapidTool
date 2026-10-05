@@ -36,9 +36,11 @@ const CAMPAIGN = resolveCampaignRoot();
 assert.ok(CAMPAIGN, "the campaign root (cassette copy or live testruns/campaign1) must resolve");
 
 const SLUGS = listCampaignSlugs(CAMPAIGN);
-const { minimumTreeFileCount, treeSubstanceOf } = await loadCampaignSeams();
+const { minimumTreeFileCount, realGeneratedExportWiring } = await loadCampaignSeams();
 assert.equal(typeof minimumTreeFileCount, "function", "the real minimumTreeFileCount seam loads");
-assert.equal(typeof treeSubstanceOf, "function", "the real treeSubstanceOf seam loads");
+// R2-02: the UI detector consumes the ONE product seam. It has not landed yet
+// (lane D), so the assertion below is conditional and the pin stays RED.
+const UI_SEAM = "headless.realGeneratedExportWiring";
 
 const treeDir = (slug) => {
   const dir = campaignTreeDir(CAMPAIGN, slug);
@@ -66,12 +68,26 @@ test("C1-01 floor reachability: fires on the real below-floor sealed trees, sile
   assert.deepEqual(finding.sealCodes.sort(), ["RT_E_SUBSTANCE_EMPTY", "RT_E_TREE_RUN_FAILED"], "the seal codes are generic — the floor code is absent");
 });
 
-test("C1-02 UI wiring: fires on all 8 campaign trees (no mounted real generated export)", () => {
-  const fired = firedSlugs((s) => detectUiWiring(treeDir(s), treeSubstanceOf, s));
-  assert.deepEqual(fired, SLUGS.slice().sort(), "every campaign tree declares a UI but mounts no real generated export");
-  const invoice = detectUiWiring(treeDir("office-invoice-tracker"), treeSubstanceOf, "office-invoice-tracker")[0];
-  assert.equal(invoice.code, "RT_E_UI_UNWIRED");
-  assert.deepEqual(invoice.realModules, [], "office-invoice's console calls generated.computeDueDate but its module is a hollow stub");
+test("C1-02 UI wiring (R2-02): the detector CONSUMES the one product seam", () => {
+  if (typeof realGeneratedExportWiring === "function") {
+    // R2-02: the guard's verdict must equal the product seam's verdict for every
+    // tree — the two can no longer disagree.
+    for (const s of SLUGS) {
+      const dir = treeDir(s);
+      const seam = realGeneratedExportWiring(dir);
+      const fired = detectUiWiring(dir, realGeneratedExportWiring, s);
+      assert.equal(fired.length > 0, seam.wired === false, `${s}: the guard fires iff the product seam reads unwired`);
+      if (fired.length > 0) assert.equal(fired[0].seam, UI_SEAM, `${s}: the finding names the canonical seam`);
+    }
+    const wiredSlugs = SLUGS.filter((s) => realGeneratedExportWiring(treeDir(s)).wired === true);
+    assert.deepEqual(wiredSlugs, ["office-invoice-tracker"], "the canonical seam reads exactly one campaign1 tree wired");
+  } else {
+    // D's predicate is absent (e.g. the gate-of-record surface): fail closed and name it.
+    const fired = firedSlugs((s) => detectUiWiring(treeDir(s), realGeneratedExportWiring, s));
+    assert.deepEqual(fired, SLUGS.slice().sort(), "seam absent: the guard fires on every declared UI");
+    const finding = detectUiWiring(treeDir("office-invoice-tracker"), realGeneratedExportWiring, "office-invoice-tracker")[0];
+    assert.equal(finding.seam, UI_SEAM, "the pin names the canonical interface it needs (R2-02)");
+  }
 });
 
 test("C1-05 skip vacuity: fires on the 6 skip-dominated oracles, silent on the live-dense ones", () => {
@@ -126,6 +142,12 @@ test("campaign guards: every detector fires on its real defect AND its mutation 
     assert.ok(c, `${id} declares a control`);
     assert.equal(c.fired, true, `${id} must fire on the real campaign artifact`);
     assert.equal(c.controlClean, true, `${id} must stay silent on its clean control`);
+    if (id === "C1-02" && c.wired === false) {
+      // R2-02: the canonical seam is absent, so the mutation control cannot run
+      // yet — the pin is RED and must NAME the interface (checked in the harness).
+      assert.equal(c.seamPending, UI_SEAM, "C1-02 names the pending realGeneratedExportWiring seam");
+      continue;
+    }
     assert.equal(c.mutationRed, true, `${id} must be silenced by its injected clean mutation (the guard can fail)`);
   }
   // C1-08's live seam is the CLI's withheld-envelope builder naming the deciding code.

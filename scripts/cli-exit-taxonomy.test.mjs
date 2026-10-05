@@ -3467,3 +3467,56 @@ test("C1-10 — the cross-process campaign ledger bounds a campaign, refuses pas
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Leg 17 (W346 · D3 / campaign #2): the delivery/recovery residuals at the CLI
+// boundary.
+//   R2-01  a below-floor emit must SEAL RT_E_PLAN_UNDERPRODUCED as the deciding
+//          reason (codegen journals it; the seal used to drop it, so a partial
+//          materialized under --red-tree banner read as a normal artifact).
+//          Behavioral spawn over a COPY of the real campaign2 below-floor
+//          project; skipped when the sibling atlas is absent.
+//   R2-02  the delivery record consumes the ONE canonical wiring predicate
+//          (headless.realGeneratedExportWiring), never the old second seam.
+// ---------------------------------------------------------------------------
+test("W346 R2-01 - a below-floor emit seals RT_E_PLAN_UNDERPRODUCED (not a silent partial)", () => {
+  const campaign2 = fileURLToPath(new URL("../../testruns/campaign2", import.meta.url));
+  const below = join(campaign2, "bakery-website", "build.json");
+  if (!existsSync(below)) return; // artifacts live outside the repo; skip when absent
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-floor-seal-"));
+  const env = { ...process.env };
+  for (const key of ["DEEPSEEK_API_KEY", "RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR", "RAPIDTOOL_LEDGER_FILE", "RAPIDTOOL_CAMPAIGN_TOKEN_CAP"]) {
+    delete env[key];
+  }
+  try {
+    const proj = join(cwd, "build.json");
+    writeFileSync(proj, readFileSync(below));
+    const res = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", CLI_PATH, "emit", "--project", proj, "--out", join(cwd, "out"), "--red-tree", "banner", "--git"],
+      { cwd, env, encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(res.error, undefined, `spawn failed: ${String(res.error)}`);
+    const stderr = res.stderr ?? "";
+    assert.ok(!/(^|\n)\s+at\s/.test(stderr), `the floor seal must never print a Node stack:\n${stderr}`);
+    assert.equal(res.status, 1, `a below-floor emit refuses at exit 1.\nstdout: ${res.stdout}\nstderr: ${stderr}`);
+    const json = JSON.parse(res.stdout);
+    assert.equal(json.ok, false, "a below-floor emit is a refusal envelope");
+    assert.equal(json.code, "RT_E_PLAN_UNDERPRODUCED", "the floor code is the DECIDING delivery reason");
+    assert.ok(json.planUnderproduced && json.planUnderproduced.code === "RT_E_PLAN_UNDERPRODUCED", "the envelope names the floor seal");
+    assert.equal(json.git && json.git.committed, false, "no commit is issued for a below-floor tree");
+    assert.equal(json.git && json.git.reason, "plan-underproduced");
+    assert.equal(json.git && json.git.code, "RT_E_PLAN_UNDERPRODUCED", "the withheld sub-envelope names the same deciding code");
+    assert.ok(Array.isArray(json.planUnderproduced.missing) && json.planUnderproduced.missing.length > 0, "the seal names the missing modules");
+    assert.equal(json.exit_code, res.status, "the envelope's exit_code must equal the process exit");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("W346 R2-02 - the delivery record consumes the ONE canonical wiring predicate", () => {
+  const arm = cliText.match(/async function deliveryVerification\([\s\S]*?\n\}/);
+  assert.ok(arm, "deliveryVerification seam not found - re-derive this guard");
+  assert.match(arm[0], /h\.realGeneratedExportWiring\(/, "deliveryVerification must read headless.realGeneratedExportWiring (the canonical predicate)");
+  assert.ok(!/h\.emittedUiWiring\(/.test(arm[0]), "the delivery record must not also read the old second seam");
+});

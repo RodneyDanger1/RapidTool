@@ -15,7 +15,7 @@ import { ERROR_CODES } from "./errors.ts";
 import { inventoryFromJobSources } from "./doctor.ts";
 import { ALL_PHASES, runHeadless, seedProject } from "./testing/fixtures.ts";
 import type { Project, SpecGraph } from "./types.ts";
-import { DEPLOY_HONESTY_STAMP, deployNotes, deplyNotes, projectKindOf, scaffoldProject } from "./scaffold.ts";
+import { DEPLOY_HONESTY_STAMP, deployNotes, deplyNotes, projectKindOf, scaffoldProject, underProductionRefusalOf } from "./scaffold.ts";
 import type { ScaffoldFile, ScaffoldResult } from "./scaffold.ts";
 import { deliveryKindOf, withDeliveryKind } from "./engine.ts";
 import { compileFixtureAssertion, fixtureMatchHelperSource } from "./brief-fixtures.ts";
@@ -2179,3 +2179,138 @@ describe("PR-28 C1-02/C1-03 — the mounted shell calls a real generated export,
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// R2-04 (P1) � a below-floor PARTIAL is refused, not emitted. The C1-01 floor
+// refusal is already recorded on the project's trail (RT_E_PLAN_UNDERPRODUCED);
+// the scaffold honors it so a 2�3-file runnable-looking tree is never written.
+// R2-05 (P1) � a skip-dominated oracle is never presented as test evidence.
+// ---------------------------------------------------------------------------
+describe("R2-04 � the scaffold refuses a below-floor partial (BF-1)", () => {
+  const C2_ROOT = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "..", "testruns", "campaign2");
+
+  /** A primed project carrying a recorded under-production refusal + substance. */
+  function underProduced(over: Partial<Project> = {}): Project {
+    const base = primed();
+    return {
+      ...base,
+      generatedSource: "export const probe = 1;\n",
+      generatedTree: [{ path: "src/generated/probe.ts", source: "export const probe = 1;\n", hash: "h", attempt: 0 }],
+      ...over,
+      logs: [
+        ...(base.logs ?? []),
+        {
+          ts: 1,
+          phase: 6,
+          level: "warn",
+          event: "p6.synthesis.refused",
+          detail:
+            "RT_E_PLAN_UNDERPRODUCED � chunk 2/8 refused � accepted tree has 1 module(s) but the brief demands >= 8 � the plan is under-produced; missing module(s): src/jobs/show.ts (job:show)",
+        },
+        ...(over.logs ?? []),
+      ],
+    };
+  }
+
+  it("underProductionRefusalOf: present only while the FINAL synthesis verdict is a refusal", () => {
+    assert.ok(underProductionRefusalOf(underProduced()) !== null, "an under-produced final verdict is detected");
+    const superseded = underProduced({
+      logs: [{ ts: 2, phase: 6, level: "info", event: "p6.synthesis", detail: "Chunked synthesis: 9 file(s) in 8 chunk(s)" }],
+    });
+    assert.equal(underProductionRefusalOf(superseded), null, "a later p6.synthesis success clears the refusal (flower-shop/scheduler)");
+    assert.equal(underProductionRefusalOf(primed()), null, "no refusal row ? no under-production verdict");
+    // No substance ? nothing runnable to refuse.
+    assert.equal(underProductionRefusalOf({ ...underProduced(), generatedTree: [], generatedSource: "" }), null);
+  });
+
+  it("scaffoldProject refuses the below-floor partial, naming RT_E_PLAN_UNDERPRODUCED", () => {
+    const result = scaffoldProject(underProduced());
+    assert.ok(!result.ok, "a below-floor partial is refused, not emitted");
+    if (!result.ok) {
+      assert.match(result.error, /RT_E_PLAN_UNDERPRODUCED/);
+      assert.match(result.error, /under-produced|below-floor/);
+      assert.equal(result.code, "RT_E_PLAN_UNDERPRODUCED", "the coded refusal rides the result interface");
+    }
+    // Control: the same project after a success verdict emits normally.
+    const superseded = underProduced({
+      logs: [{ ts: 2, phase: 6, level: "info", event: "p6.synthesis", detail: "Chunked synthesis: 9 file(s) in 8 chunk(s)" }],
+    });
+    assert.ok(scaffoldProject(superseded).ok, "a superseded refusal does not block the emission");
+  });
+
+  it("INTERNAL candidate emits opt out — the pre-seal self-typecheck still materializes the partial", () => {
+    // The pre-seal gate (codegen.defaultTreeTypecheck) passes allowUnderProduced
+    // so a multi-cycle repair can still run the candidate's REAL tsc; without
+    // the opt-out every repair cycle would be preempted by the ship-time guard.
+    const r = scaffoldProject(underProduced(), { allowUnderProduced: true });
+    assert.ok(r.ok, "allowUnderProduced materializes the candidate for its tsc verdict");
+  });
+
+  it("replay: the recorded campaign2 below-floor trees refuse; the at-floor trees still emit", () => {
+    if (!existsSync(C2_ROOT)) return; // frozen checkout with no sibling testruns
+    const belowFloor = ["bakery-website", "bakery-florist-orders", "mobile-companion", "office-invoice-tracker", "office-stock-tracker", "held-out-community-tool-library"];
+    const atFloor = ["flower-shop-website", "office-scheduler"];
+    let refused = 0;
+    let emitted = 0;
+    for (const slug of [...belowFloor, ...atFloor]) {
+      const file = join(C2_ROOT, slug, "build.json");
+      if (!existsSync(file)) continue;
+      const project = JSON.parse(readFileSync(file, "utf8")) as Project;
+      const under = underProductionRefusalOf(project);
+      if (belowFloor.includes(slug)) {
+        assert.ok(under !== null, `${slug}: the below-floor partial carries a final under-production refusal`);
+        const r = scaffoldProject(project);
+        assert.ok(!r.ok, `${slug}: the scaffold REFUSES the below-floor partial (no runnable-looking tree)`);
+        if (!r.ok) {
+          assert.match(r.error, /RT_E_PLAN_UNDERPRODUCED/);
+          assert.equal(r.code, "RT_E_PLAN_UNDERPRODUCED", `${slug}: the refusal carries its registered code`);
+        }
+        refused += 1;
+      } else {
+        assert.equal(under, null, `${slug}: an at-floor tree (a later p6.synthesis success) is not under-produced`);
+        assert.ok(scaffoldProject(project).ok, `${slug}: the at-floor tree still emits`);
+        emitted += 1;
+      }
+    }
+    assert.ok(refused >= 5, `R2-04: the recorded below-floor class is refused (got ${refused})`);
+    assert.ok(emitted >= 2, `R2-04 control: the at-floor trees still emit (got ${emitted})`);
+  });
+});
+
+describe("R2-05 � no skip-dominated oracle is emitted as evidence", () => {
+  /** A project every oracle row has NO emitted surface for (job/api/host all absent). */
+  function noSurface(): Project {
+    return {
+      ...seedProject({ kind: "app" }),
+      specGraph: { nodes: [], order: [] },
+      contracts: { entities: [], endpoints: [] },
+      lattice: { domain: "x", jobs: [], entities: [], constraints: [], nodes: [], complexity: 1 },
+      generatedTree: [],
+      generatedSource: "",
+    };
+  }
+
+  it("a skip-dominated oracle emits REAL failing tests � zero skips", () => {
+    const result = scaffoldProject(noSurface());
+    const spec = bodyOf(result, "tests/oracle.spec.ts");
+    const skips = spec.split("\n").filter((l) => l.trimStart().startsWith("test.skip("));
+    assert.equal(skips.length, 0, "R2-05: a skip-dominated oracle emits no skip at all");
+    const live = spec.split("\n").filter((l) => /^\s*test\(/.test(l));
+    assert.ok(live.length > 0, "R2-05: the NOT IMPLEMENTED rows land as real tests");
+    assert.ok(spec.includes("assert.fail("), "R2-05: and they fail loudly � an honest red, never a green skip wall");
+    assert.ok(
+      spec.includes("R2-05: this oracle IS skip-dominated"),
+      "the emitted spec states why the rows are failing, not skipped",
+    );
+  });
+
+  it("control: a non-dominated (mixed) oracle keeps its visible skip", () => {
+    const spec = bodyOf(scaffoldProject(primed()), "tests/oracle.spec.ts");
+    const skips = spec.split("\n").filter((l) => l.trimStart().startsWith("test.skip("));
+    assert.ok(skips.length > 0, "a mixed oracle still marks its NOT IMPLEMENTED row with a skip");
+    assert.ok(
+      skips.every((l) => l.includes("NOT IMPLEMENTED")),
+      "every remaining skip is visibly marked",
+    );
+  });
+});

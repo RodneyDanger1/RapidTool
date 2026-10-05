@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "cmd": "emit",
+  "ok": true,
+  "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\flower-shop-website\\emitted",
+  "count": 25,
+  "moduleEmbedded": true,
+  "summary": "25 files ┬╖ kind webapp ┬╖ packet 62580054-957f-4f7b-b895-be5d17ece912 ΓÇö tree files already on disk ┬╖ generatedTree: 9 files assembled, 3 non-job bridges",
+  "quarantined": [],
+  "quarantineDir": null,
+  "treeRun": {
+    "ok": true,
+    "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\flower-shop-website\\emitted",
+    "sandbox": false,
+    "compile": {
+      "ok": true,
+      "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\flower-shop-website\\emitted",
+      "checked": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 10,
+      "verdicts": [
+        {
+          "file": "src/api/routes.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/domain/web-marketing.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/domain/web_marketing.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/check-same-day-eligibility.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated/render-home-page.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/generated.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/serve.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/show.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/track.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/update.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/jobs/validate.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/main.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/state/store.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "src/ui/console.tsx",
+          "verdict": "pass"
+        },
+        {
+          "file": "tests/oracle.spec.ts",
+          "verdict": "pass"
+        },
+        {
+          "file": "vite.config.ts",
+          "verdict": "pass"
+        }
+      ]
+    },
+    "tests": [
+      {
+        "file": "tests/oracle.spec.ts",
+        "compile": "pass",
+        "tests": {
+          "pass": 31,
+          "fail": 0,
+          "skipped": 1
+        },
+        "run": "pass",
+        "durationMs": 1844,
+        "behavioural": true
+      }
+    ],
+    "run": {
+      "kind": "ui-shell",
+      "run": "skip",
+      "detail": "UI shell ΓÇö not executable headless"
+    },
+    "core": {
+      "kind": "generated-core",
+      "entry": "src/jobs/validate.ts",
+      "run": "pass",
+      "durationMs": 607
+    },
+    "project": {
+      "ok": true,
+      "typecheck": {
+        "script": "typecheck",
+        "run": "pass",
+        "durationMs": 4906,
+        "command": "tsc --noEmit",
+        "scriptPolicy": "argv-only ┬╖ tsc.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "test": {
+        "script": "test",
+        "run": "pass",
+        "durationMs": 1053,
+        "command": "node --experimental-strip-types --test tests/oracle.spec.ts",
+        "scriptPolicy": "argv-only ┬╖ node (no shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "build": {
+        "script": "build",
+        "run": "pass",
+        "durationMs": 2085,
+        "command": "vite build",
+        "scriptPolicy": "argv-only ┬╖ vite.cmd via cmd.exe host (no outer shell) ΓÇö lifecycle scripts denied ΓÇö the tree's pre/post hooks and install scripts never run in this leg",
+        "executed": true,
+        "exitCode": 0
+      },
+      "declaredScriptsVerified": true
+    },
+    "note": "the declared project scripts were resolved from the RapidTool repo's own node_modules/ (offline, no install) ΓÇö the emitted tree's declared devDependency versions were NOT installed",
+    "dependencySource": {
+      "toolchain": "repo-shared",
+      "treeInstalled": false,
+      "note": "the declared project scripts were resolved from the RapidTool repo's own node_modules/ (offline, no install) ΓÇö the emitted tree's declared devDependency versions were NOT installed"
+    },
+    "declaredScriptsVerified": true,
+    "unverifiedEntry": "UI shell ΓÇö not executable headless",
+    "substance": {
+      "stubs": 0,
+      "reexports": 0,
+      "real": 5,
+      "files": [
+        {
+          "path": "src/jobs/serve.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/show.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/track.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/update.ts",
+          "kind": "real"
+        },
+        {
+          "path": "src/jobs/validate.ts",
+          "kind": "real"
+        }
+      ],
+      "verdict": "real",
+      "greenWhileStubbed": false,
+      "oracleStubTrap": false
+    },
+    "verdictHash": "1903527125"
+  },
+  "substance": {
+    "stubs": 0,
+    "reexports": 0,
+    "real": 5,
+    "verdict": "real",
+    "greenWhileStubbed": false
+  },
+  "declaredScriptsVerified": true,
+  "git": {
+    "dir": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\flower-shop-website\\emitted",
+    "message": "feat(wildstem-florist): The Home page must render a hero image, a banner stating 'same-dayΓÇª",
+    "committed": true,
+    "noop": false,
+    "commit": {
+      "hash": "45b6cb927e3d96e3f9a0a5140e4410ce7f0ddfb8",
+      "subject": "feat(wildstem-florist): The Home page must render a hero image, a banner stating 'same-dayΓÇª"
+    },
+    "files": [
+      ".env.example",
+      ".gitignore",
+      ".rapidtool/project.json",
+      "DEPLOY.md",
+      "README.md",
+      "index.html",
+      "package.json",
+      "src/api/routes.ts",
+      "src/domain/web-marketing.ts",
+      "src/domain/web_marketing.ts",
+      "src/generated.ts",
+      "src/generated/check-same-day-eligibility.ts",
+      "src/generated/render-home-page.ts",
+      "src/jobs/serve.ts",
+      "src/jobs/show.ts",
+      "src/jobs/track.ts",
+      "src/jobs/update.ts",
+      "src/jobs/validate.ts",
+      "src/main.tsx",
+      "src/state/store.ts",
+      "src/styles.css",
+      "src/ui/console.tsx",
+      "tests/oracle.spec.ts",
+      "tsconfig.json",
+      "vite.config.ts"
+    ],
+    "foreign": [],
+    "verifiedProduct": false,
+    "verification": {
+      "verifiedProduct": false,
+      "committed": true,
+      "treeRunOk": true,
+      "treeRunVerdictHash": "1903527125",
+      "treeRunTests": [
+        {
+          "file": "tests/oracle.spec.ts",
+          "run": "pass",
+          "pass": 31,
+          "fail": 0,
+          "skipped": 1
+        }
+      ],
+      "declaredScriptsVerified": true,
+      "evidenceHash": "1709540120",
+      "uiWired": true,
+      "uiWiringEntry": "src/ui/console.tsx",
+      "unverifiedReasons": [
+        "kind entry not executed: UI shell ΓÇö not executable headless"
+      ]
+    },
+    "verificationNote": "the commit landed, but the emitted product is NOT fully verified ΓÇö read git.verification.unverifiedReasons"
+  },
+  "campaignLedger": {
+    "path": "C:\\Users\\mnril\\Desktop\\testruns\\campaign2\\ledger.json",
+    "cap": 3000000,
+    "spent": 138586,
+    "calls": 24,
+    "remaining": 2861414
+  },
+  "exit_code": 0
+}

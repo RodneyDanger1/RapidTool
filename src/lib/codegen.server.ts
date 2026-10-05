@@ -1471,6 +1471,23 @@ export function p6SynthesisJsxRepairPrompt(hits: readonly number[], treeFailure?
 }
 
 /**
+ * R2-03 (TS2503): repair re-prompt for an UNBOUND `JSX` namespace TYPE
+ * reference in a `.ts` module. Names the offending lines and asks for a plain
+ * element type; it never declares a fake namespace and never strips the
+ * annotation blindly.
+ */
+export function p6SynthesisJsxNamespaceRepairPrompt(hits: readonly number[], treeFailure?: string): string {
+  const lines = [...new Set((Array.isArray(hits) ? hits : []).filter((n) => Number.isFinite(n)))].sort((a, b) => a - b);
+  return [
+    "Your previous module references the JSX TYPE NAMESPACE (`JSX.Element`), but this is a `.ts` chunk — the namespace is not in scope, so the module fails its own `tsc` with TS2503: Cannot find namespace 'JSX'.",
+    `Offending line(s): ${lines.slice(0, 12).join(", ") || "(unknown)"}.`,
+    "Rewrite the module as JSX-free plain TypeScript: either type the value with your OWN local element/return type, or return a string/plain object/record and let the UI shell render it. Do NOT reference `JSX.Element` (or any `JSX.*` type) and do NOT rely on a global JSX namespace.",
+    'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
+    "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no prose, no markdown fences.",
+  ].join("\n") + repairTreeFailureTail(treeFailure);
+}
+
+/**
  * BF-5 (SYNTHSPEC A5): repair re-prompt for a money-semantics violation — a
  * money-named export that sums a QUANTITY field as if it were the amount
  * (the measured `computeCartTotalPence` returned `4` for 3×£2.50 + 1×£4.00).
@@ -3090,6 +3107,40 @@ export function jsxHits(module: string): number[] {
   return out;
 }
 
+/**
+ * R2-03 (TS2503): line numbers referencing the `JSX` TYPE NAMESPACE in a module
+ * that never binds it (1-based). `jsxHits` catches raw elements (TS1005/TS2503
+ * on a raw node), but a `.ts` module can reference `JSX.Element` as a return
+ * type with no element at all — the measured bakery-website chunk did
+ * (`: JSX.Element` on nine renderers) and red its own `tsc` with TS2503 even
+ * though the console shell was JSX-free. A module that DECLARES the namespace
+ * in the same file (`namespace JSX` / `declare namespace JSX` — the compiling
+ * shape the historical `render-tab-bar.ts` used) or imports it
+ * (`import type { JSX } from "react"`) is bound and is not flagged. Lexical +
+ * comment/literal-masked, so a JSDoc mention never trips. Pure + deterministic.
+ */
+export function jsxNamespaceHits(module: string): number[] {
+  const src = typeof module === "string" ? module : "";
+  if (!src.trim()) return [];
+  const masked = maskLiteralsAndComments(src);
+  const JSX_NAMESPACE_BOUND =
+    /(?:\bdeclare\s+)?\bnamespace\s+JSX\b|\bimport\s+(?:type\s+)?\{[^}]*\bJSX\b[^}]*\}|\bimport\s+\*\s+as\s+JSX\b/;
+  if (JSX_NAMESPACE_BOUND.test(masked)) return [];
+  // Match on the mask (comments/literals never trip), then map each match's
+  // CHAR INDEX to a line in the RAW source: masking preserves length but folds
+  // block-comment newlines to spaces, so a masked-line count would under-report
+  // every line after a multi-line JSDoc block (the measured bakery byte shifted
+  // by ~54 lines). Index alignment is exact.
+  const re = /\bJSX\s*\.\s*[A-Za-z_$][\w$]*/g;
+  const out: number[] = [];
+  for (let m = re.exec(masked); m !== null; m = re.exec(masked)) {
+    const line = src.slice(0, m.index).split("\n").length;
+    if (out[out.length - 1] !== line) out.push(line);
+    if (re.lastIndex === m.index) re.lastIndex += 1;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // BF-5 (SYNTHSPEC A5) — MONEY SEMANTICS.
 //
@@ -4215,6 +4266,20 @@ export function validateSynthesisModule(
       error: `JSX in a .ts module (raw element at line${jsx.length === 1 ? "" : "s"} ${jsx.slice(0, 6).join(", ")}) — the generated chunk contract is JSX-free plain-TS logic; return the value as a string/data and let the UI shell render it`,
     };
   }
+  // R2-03 (TS2503): the same `.ts` contract rejects an UNBOUND `JSX` TYPE
+  // namespace reference (`: JSX.Element`) — the measured bakery-website chunk
+  // red its own tsc on it though the console shell was already JSX-free. Every
+  // validated module (job chunks included) passes through this gate; a module
+  // that declares/imports the namespace (the compiling historical shape) is
+  // unaffected. Checked beside raw JSX so the refusal priority is preserved.
+  const jsxNs = jsxNamespaceHits(module);
+  if (jsxNs.length > 0) {
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error: `JSX in a .ts module (unbound JSX namespace reference at line${jsxNs.length === 1 ? "" : "s"} ${jsxNs.slice(0, 6).join(", ")}) — a generated .ts chunk cannot resolve the global JSX namespace (TS2503); type the value with a local/plain element type and let the UI shell render it`,
+    };
+  }
   // BF-5 (SYNTHSPEC A5): a money-named export that sums a quantity field is the
   // measured `computeCartTotalPence` defect. Checked after the load-time gates
   // (suppression/forbidden/nondeterminism/prose/JSX) so their refusal priority
@@ -4375,6 +4440,15 @@ export type P6SynthesisDeps = {
    *  `opts.proven`. Absent/empty ⇒ each site passes `proven: undefined` and
    *  produces byte-identical legacy prompts (the additive-field discipline). */
   proven?: readonly RankableLessonRow[];
+  /** PR-16 (I7, O-01): the previous cycle's ACCEPTED chunks, carried by the
+   *  journey's ctx→deps mapping (`headless.p6CycleLiveDeps`) so a later
+   *  synthesis cycle REUSES the chunks it already paid for instead of
+   *  re-buying every one (baker-florist-orders burned 419k tokens on
+   *  byte-identical re-synthesis). A plan row whose path appears here is taken
+   *  verbatim (source + exports) with no model call; absent/empty ⇒ the
+   *  chunked path is byte-identical to legacy. Keyed by plan path; an entry
+   *  for a path this plan does not contain is ignored. */
+  resumeAccepted?: readonly { path: string; source: string; exports: string[] }[];
   /** fixes/341-1 (the measured P6 defect): the PRE-SEAL self-typecheck gate.
    *  Before a synthesized tree is accepted/sealed, the candidate emitted tree
    *  is materialized into a scratch dir and its OWN declared `typecheck` runs
@@ -4612,7 +4686,11 @@ export function typecheckOffenderPaths(detail: string | undefined): string[] {
 export async function defaultTreeTypecheck(project: Project): Promise<P6TreeTypecheckVerdict> {
   let files: { path: string; body: string }[];
   try {
-    const scaffold = scaffoldProject(project);
+    // R2-04: this is an INTERNAL candidate emit — the candidate carries the
+    // previous cycle's `p6.synthesis.refused` logs, so the ship-time
+    // under-production guard must NOT preempt the real tsc verdict (a
+    // multi-cycle repair would otherwise be unable to re-typecheck and recover).
+    const scaffold = scaffoldProject(project, { allowUnderProduced: true });
     if (!scaffold.ok) {
       return { run: "fail", detail: `scaffold refused the candidate tree before its declared typecheck: ${scaffold.error}` };
     }
@@ -5203,6 +5281,9 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   // ranked with the memory lessons at every lesson site below; absent/empty ⇒
   // opts.proven is undefined ⇒ byte-identical legacy prompts.
   const proven = deps?.proven;
+  // PR-16 (I7, O-01): the previous cycle's accepted chunks. Absent/empty ⇒
+  // undefined ⇒ the chunked path is byte-identical to legacy.
+  const resumeAccepted = Array.isArray(deps?.resumeAccepted) && deps.resumeAccepted.length > 0 ? deps.resumeAccepted : undefined;
   // fixes/343-1: the opt-in best-of-N sample count. `deps.candidates` wins over
   // `P6_SYNTH_CANDIDATES`; the resolver clamps to 1..P6_SYNTH_CANDIDATES_MAX and
   // defaults to 1, so an unset env keeps every byte and model call below legacy.
@@ -5301,7 +5382,7 @@ export async function liveP6Synthesis(project: Project, deps?: Partial<P6Synthes
   // INSIDE — the caller no longer passes a flat grouping. Job-keyed chunks land
   // at their spec-graph `src/jobs/*.ts` paths; a job-less graph keeps the
   // pre-216k index-keyed mapping byte-for-byte (treeChunkPlan's legacy branch).
-  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair, synthesisRefusal, proven, typecheck, candidates);
+  return synthesizeChunkedTree(project, brief, specRecord, complete, treeFailure, patchRepairs, gateRepair, synthesisRefusal, proven, typecheck, candidates, resumeAccepted);
 }
 
 /**
@@ -5512,6 +5593,11 @@ async function synthesizeSingleModule(
     // BF-5 (SYNTHSPEC A5): the money-semantics class — a money-named export that
     // sums a quantity field instead of price × quantity. ONE bounded repair.
     const money = moneySemanticsHits(envelope.module);
+    // A12/R2-03: raw JSX and an UNBOUND JSX namespace type reference in the
+    // single-module path too — every validated module gets the one bounded
+    // JSX-free re-prompt, not only the chunked tree's job modules.
+    const jsx = jsxHits(envelope.module);
+    const jsxNs = jsxNamespaceHits(envelope.module);
     // W46/332-1 (P1): the un-awaited-async-value class for the single-module
     // path (its own `async function` used as a value without await).
     const asyncUses = unawaitedAsyncValueUses(envelope.module, asyncNamesInScope(envelope.module));
@@ -5563,7 +5649,7 @@ async function synthesizeSingleModule(
     }
     if (
       !patchLanded &&
-      (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || asyncUses.length > 0 || money.length > 0)
+      (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || asyncUses.length > 0 || jsx.length > 0 || jsxNs.length > 0 || money.length > 0)
     ) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
@@ -5577,7 +5663,11 @@ async function synthesizeSingleModule(
                 ? p6SynthesisProseRepairPrompt(prose, treeFailure)
                 : asyncUses.length > 0
                   ? p6SynthesisAsyncAwaitRepairPrompt(asyncUses, treeFailure)
-                  : p6SynthesisMoneyRepairPrompt(money, treeFailure);
+                  : jsx.length > 0
+                    ? p6SynthesisJsxRepairPrompt(jsx, treeFailure)
+                    : jsxNs.length > 0
+                      ? p6SynthesisJsxNamespaceRepairPrompt(jsxNs, treeFailure)
+                      : p6SynthesisMoneyRepairPrompt(money, treeFailure);
       const repair = await completeCall(repairPrompt, repairOpts);
       // FM-03 (W37 Y1): metered like every bounded repair call.
       const repairStop = accountRepairUsage(repair);
@@ -5780,6 +5870,11 @@ async function synthesizeChunkedTree(
   /** fixes/343-1: opt-in best-of-N sample count for the compiler-named chunks
    *  (1 ⇒ legacy single re-synthesis, byte-identical). */
   candidates = 1,
+  /** PR-16 (I7, O-01): the previous cycle's accepted chunks (see
+   *  P6SynthesisDeps.resumeAccepted). A plan row whose path is present is
+   *  reused verbatim with NO model call; absent/empty ⇒ legacy byte-identical
+   *  chunked synthesis. */
+  resumeAccepted?: readonly { path: string; source: string; exports: string[] }[],
 ): Promise<Project> {
   const opts: DeepSeekCompleteOptions = {
     model: P6_SYNTH_MODEL,
@@ -5801,6 +5896,16 @@ async function synthesizeChunkedTree(
   };
   const accepted: { path: string; source: string; exports: string[]; reqTrace: Record<string, string> }[] = [];
   const prior: ChunkPriorFile[] = [];
+  // PR-16 (I7, O-01): path → a previously-accepted chunk. Only a non-empty
+  // supply materializes the map; absent/empty leaves the loop byte-identical.
+  const resumeByPath = new Map<string, { path: string; source: string; exports: string[] }>();
+  if (Array.isArray(resumeAccepted)) {
+    for (const r of resumeAccepted) {
+      if (r !== null && typeof r === "object" && typeof r.path === "string" && typeof r.source === "string") {
+        if (!resumeByPath.has(r.path)) resumeByPath.set(r.path, r);
+      }
+    }
+  }
   // T5.4: the SERVED model id of the first accepted chunk's primary synthesis
   // call — every chunk of one tree uses the same opts/model resolution, so the
   // first served id is the tree's served id. Null until a chunk is accepted
@@ -5921,6 +6026,48 @@ async function synthesizeChunkedTree(
 
   for (let i = 0; i < plan.length; i++) {
     const chunk = plan[i]!;
+    // PR-16 (I7, O-01): reuse a previously-accepted chunk for THIS plan path —
+    // no prompt, no model call, no per-chunk fail-fast. The chunk is taken
+    // verbatim (its source + exports were validated on the cycle that accepted
+    // it); it still enters `accepted`/`prior`/the frozen registry so the plan,
+    // the floor, and every later chunk's context are unchanged. A path absent
+    // from the resume set falls through to legacy synthesis.
+    if (resumeByPath.size > 0) {
+      const resumed = resumeByPath.get(chunk.path);
+      if (resumed !== undefined) {
+        const moduleSource = resumed.source;
+        const claimed = Array.isArray(resumed.exports) ? [...resumed.exports] : [];
+        const frozenNames = materializedExportNames(moduleSource, claimed);
+        const frozen = freezeFileExports(registry, { path: chunk.path, source: moduleSource, exports: claimed });
+        registry = frozen.reg;
+        if (frozen.collisions.length > 0) {
+          pushAttemptLog(attemptLogs, {
+            ts: Date.now(),
+            phase: 6 as PhaseId,
+            level: "warn",
+            event: "p6.tree.registry.collision",
+            detail: `chunk ${i + 1}/${plan.length} (reused): name(s) already frozen by an earlier file: ${frozen.collisions
+              .map((c) => `${c.name}←${c.priorPath}`)
+              .join(", ")}`,
+          });
+        }
+        accepted.push({ path: chunk.path, source: moduleSource, exports: frozenNames, reqTrace: {} });
+        prior.push({
+          path: chunk.path,
+          exports: registryNamesFor(registry, chunk.path),
+          reqTrace: {},
+          asyncExports: asyncExportNames(moduleSource, claimed),
+        });
+        pushAttemptLog(attemptLogs, {
+          ts: Date.now(),
+          phase: 6 as PhaseId,
+          level: "info",
+          event: "p6.synthesis.reused",
+          detail: `chunk ${i + 1}/${plan.length}: reused the previously-accepted module at ${chunk.path} (I7/O-01) — 0 synthesis calls`,
+        });
+        continue;
+      }
+    }
     const lessonLines = lessonLinesForBrief(
       brief,
       selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
@@ -6459,6 +6606,9 @@ async function synthesizeChunkEnvelope(
     const prose = proseLineHits(envelope.module);
     // A12: raw JSX in a `.ts` module gets ONE bounded JSX-free rewrite re-prompt.
     const jsx = jsxHits(envelope.module);
+    // R2-03 (TS2503): an unbound `JSX` namespace TYPE reference gets the same
+    // one bounded JSX-free re-prompt (the class raw-element detection missed).
+    const jsxNs = jsxNamespaceHits(envelope.module);
     // BF-5 (SYNTHSPEC A5): the money-semantics class (one bounded repair).
     const money = moneySemanticsHits(envelope.module);
     // T-107.1 (216r · W7-L1): the patch-first delta repair, ONLY when the
@@ -6506,7 +6656,7 @@ async function synthesizeChunkEnvelope(
     }
     if (
       !patchLanded &&
-      (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || dup.length > 0 || asyncUses.length > 0 || jsx.length > 0 || money.length > 0)
+      (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || dup.length > 0 || asyncUses.length > 0 || jsx.length > 0 || jsxNs.length > 0 || money.length > 0)
     ) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
@@ -6524,7 +6674,9 @@ async function synthesizeChunkEnvelope(
                     ? p6SynthesisAsyncAwaitRepairPrompt(asyncUses, treeFailure)
                     : jsx.length > 0
                       ? p6SynthesisJsxRepairPrompt(jsx, treeFailure)
-                      : p6SynthesisMoneyRepairPrompt(money, treeFailure);
+                      : jsxNs.length > 0
+                        ? p6SynthesisJsxNamespaceRepairPrompt(jsxNs, treeFailure)
+                        : p6SynthesisMoneyRepairPrompt(money, treeFailure);
       const repair = await completeCall(repairPrompt, repairOpts);
       // FM-03 (W37 Y1): metered like every bounded repair call.
       const repairStop = accountRepairUsage(repair);

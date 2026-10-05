@@ -48,6 +48,8 @@ import {
   treeVerdictScoreOf,
   failureSignature,
   emittedUiWiring,
+  realGeneratedExportWiring,
+  planUnderproductionSeal,
   sessionSpendTotal,
   runlockEditViolations,
   vaultSearch,
@@ -5226,5 +5228,99 @@ describe("C1-06 (campaign #1) - emittedUiWiring + sessionSpendTotal", () => {
     assert.equal(typeof s.tokens, "number");
     assert.equal(typeof s.calls, "number");
     assert.ok(s.tokens >= 0 && s.calls >= 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D3 (W346 · campaign #2): the delivery/recovery residuals pinned over the REAL
+// `testruns/campaign2` envelopes (skipped when that sibling atlas is absent —
+// the artifacts live outside the repo, exactly as the campaign #1 replay does).
+//   R2-01  the below-floor floor seal reaches the emit seal (planUnderproductionSeal)
+//   R2-02  the ONE canonical UI-wiring predicate both seams consume
+//   R2-06  the committed verification record states exactly what was/was not verified
+// ---------------------------------------------------------------------------
+const CAMPAIGN2_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "testruns", "campaign2");
+const CAMPAIGN2_BELOW_FLOOR = [
+  "bakery-website",
+  "bakery-florist-orders",
+  "mobile-companion",
+  "office-invoice-tracker",
+  "office-stock-tracker",
+  "held-out-community-tool-library",
+];
+const CAMPAIGN2_AT_FLOOR = ["flower-shop-website", "office-scheduler"];
+
+describe("D3 (campaign #2) - R2-01 floor seal / R2-02 canonical wiring / R2-06 honest record", () => {
+  it("R2-01: the real below-floor projects carry the under-production seal; the at-floor projects do not", async () => {
+    if (!existsSync(CAMPAIGN2_ROOT)) return; // artifacts live outside the repo; skip when absent
+    for (const slug of CAMPAIGN2_BELOW_FLOOR) {
+      const build = join(CAMPAIGN2_ROOT, slug, "build.json");
+      if (!existsSync(build)) continue;
+      const project = JSON.parse(readFileSync(build, "utf8"));
+      const seal = await planUnderproductionSeal(project);
+      assert.ok(seal, `${slug}: a below-floor project must surface the floor seal`);
+      assert.equal(seal.code, "RT_E_PLAN_UNDERPRODUCED");
+      assert.ok(seal.emitted < seal.floor, `${slug}: the seal names a below-floor tree`);
+      assert.ok(seal.missing.length > 0, `${slug}: the seal names the missing modules`);
+      // The seal is the record, not a new claim: the project's own bytes journal it.
+      assert.ok(JSON.stringify(project).includes("RT_E_PLAN_UNDERPRODUCED"), `${slug}: the code is journaled`);
+    }
+    for (const slug of CAMPAIGN2_AT_FLOOR) {
+      const build = join(CAMPAIGN2_ROOT, slug, "build.json");
+      if (!existsSync(build)) continue;
+      const project = JSON.parse(readFileSync(build, "utf8"));
+      assert.equal(await planUnderproductionSeal(project), null, `${slug}: an at-floor project is not refused`);
+    }
+  });
+
+  it("R2-02: the canonical predicate reads the two wired trees as wired and the four hollow ones as unwired", () => {
+    if (!existsSync(CAMPAIGN2_ROOT)) return;
+    const wired = new Set(["flower-shop-website", "office-scheduler", "bakery-website", "bakery-florist-orders"]);
+    for (const slug of [
+      ...wired,
+      "mobile-companion",
+      "office-invoice-tracker",
+      "office-stock-tracker",
+      "held-out-community-tool-library",
+    ]) {
+      const tree = join(CAMPAIGN2_ROOT, slug, "emitted");
+      if (!existsSync(tree)) continue;
+      const r = realGeneratedExportWiring(tree);
+      assert.equal(r.wired, wired.has(slug), `${slug}: canonical wiring verdict`);
+      if (r.wired) assert.ok(r.exports.length > 0, `${slug}: a wired tree names the real export(s) it calls`);
+      else assert.ok(r.reason.length > 0, `${slug}: an unwired tree states why`);
+      // The delivery-record alias must read the SAME predicate (no second seam).
+      const alias = emittedUiWiring(tree);
+      assert.equal(alias.wired, r.wired, `${slug}: emittedUiWiring delegates to the canonical predicate`);
+      assert.equal(alias.entry, r.entry);
+    }
+  });
+
+  it("R2-06: a committed tree's record is honest — verifiedProduct is exactly the recorded evidence conjunction", () => {
+    if (!existsSync(CAMPAIGN2_ROOT)) return;
+    for (const slug of CAMPAIGN2_AT_FLOOR) {
+      const emit = join(CAMPAIGN2_ROOT, slug, "emit.json");
+      if (!existsSync(emit)) continue;
+      // The campaign envelopes were captured through a shell redirect, so the
+      // bytes may be UTF-16LE (or UTF-8); decode both, never guess the schema.
+      const buf = readFileSync(emit);
+      const text = buf[0] === 0xff && buf[1] === 0xfe ? buf.toString("utf16le") : buf.toString("utf8");
+      const j = JSON.parse(text.replace(/^\uFEFF/, ""));
+      const v = j?.git?.verification;
+      assert.ok(v, `${slug}: a landed commit carries its verification record`);
+      assert.equal(j.git.committed, true, `${slug}: the tree committed`);
+      // The record states each axis explicitly.
+      assert.equal(typeof v.treeRunOk, "boolean");
+      assert.equal(typeof v.declaredScriptsVerified, "boolean");
+      assert.equal(typeof v.uiWired, "boolean");
+      assert.ok(Array.isArray(v.unverifiedReasons));
+      // verifiedProduct is TRUE only when every recorded axis supports it — the
+      // kind entry did not execute, so the record must read false and say why.
+      const kindUnverified = v.unverifiedReasons.some((r: unknown) => String(r).startsWith("kind entry not executed"));
+      const supports = v.treeRunOk === true && v.declaredScriptsVerified === true && v.uiWired === true && !kindUnverified;
+      assert.equal(v.verifiedProduct, supports, `${slug}: verifiedProduct mirrors the recorded evidence`);
+      assert.equal(v.verifiedProduct, false, `${slug}: the un-executed kind entry keeps it honestly false`);
+      assert.match(String(j.git.verificationNote), /NOT fully verified/, `${slug}: the note points at the reasons`);
+    }
   });
 });

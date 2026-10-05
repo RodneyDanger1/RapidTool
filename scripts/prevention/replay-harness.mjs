@@ -363,6 +363,7 @@ const SRC = {
   readme: "../guards/readme-parity.mjs",
   runlock: "../guards/runlock-preflight.mjs",
   campaign: "../guards/campaign-invariants.mjs",
+  campaign2: "../guards/campaign2-invariants.mjs",
 };
 
 const ERRORS_SRC = join(REPO_ROOT, "src", "lib", "errors.ts");
@@ -616,14 +617,65 @@ const SEAM_CHECKS = {
 
   // C1-01 — a sealed tree below the floor must carry RT_E_PLAN_UNDERPRODUCED.
   "C1-01": async (ctx) => campaignSeam(ctx, "C1-01"),
-  // C1-02 — a declared UI must mount a real generated export.
-  "C1-02": async (ctx) => campaignSeam(ctx, "C1-02"),
+  // C1-02 — R2-02: the guard consumes the ONE product seam
+  // (`headless.realGeneratedExportWiring`), which must be on the gate-of-record
+  // surface; until it is, the pin is RED and NAMES the interface.
+  "C1-02": async (ctx) => {
+    const landed = gateHeadContains("src/lib/headless.ts", "export function realGeneratedExportWiring");
+    const ctl = await campaignControlsFor(ctx);
+    const c = ctl && ctl["C1-02"];
+    return {
+      present: landed === true,
+      wired: landed === true,
+      mutationRed: !!(c && c.mutationRed),
+      evidence: {
+        ownerInterface: "src/lib/headless.ts#realGeneratedExportWiring",
+        gateOfRecordHasInterface: landed,
+        detectorFires: !!(c && c.fired),
+        detectorAgreesWithWorkingTreeSeam: !!(c && c.wired),
+        seam: "headless.realGeneratedExportWiring",
+      },
+    };
+  },
   // C1-05 — a skip-dominated oracle cannot satisfy the behavioural/tested bar.
   "C1-05": async (ctx) => campaignSeam(ctx, "C1-05"),
   // C1-06 — a delivery claim must state its verification or say unverified.
   "C1-06": async (ctx) => campaignSeam(ctx, "C1-06"),
   // C1-08 — a withheld git envelope's code names the deciding reason.
   "C1-08": async (ctx) => campaignSeam(ctx, "C1-08"),
+
+  // --- R2-01/03/05/06 (campaign #2) tourniquet seams --------------------------
+  // The guards' fixture-integrity is green (they fire on the real campaign2
+  // bytes); fix-presence is pending until the fixer lane lands the named
+  // interface on the gate-of-record surface.
+  "R2-01": async () =>
+    campaign2Seam(
+      "R2-01",
+      "scripts/rapidtool-cli.mjs",
+      "planUnderproductionSeal",
+      "the emit seal must surface RT_E_PLAN_UNDERPRODUCED (headless.planUnderproductionSeal consumed by scripts/rapidtool-cli.mjs)",
+    ),
+  "R2-03": async () =>
+    campaign2Seam(
+      "R2-03",
+      "src/lib/codegen.server.ts",
+      "JSX namespace",
+      "codegen.server.ts must reject the JSX namespace in a .ts chunk (the jsxHits/validateSynthesisModule contract extended beyond raw tags)",
+    ),
+  "R2-05": async () =>
+    campaign2Seam(
+      "R2-05",
+      "src/lib/scaffold.ts",
+      "skip-dominated",
+      "scaffold.ts oracle generation must not emit a skip-dominated spec (live rows must dominate)",
+    ),
+  "R2-06": async () =>
+    campaign2Seam(
+      "R2-06",
+      "scripts/rapidtool-cli.mjs",
+      "uiEntryExecuted",
+      "the committed tree's UI entry must actually execute so deliveryVerification.verifiedProduct can become true (not merely recorded false)",
+    ),
 };
 
 /** Read a text file, "" on failure (never throws). @param {string} p */
@@ -668,6 +720,72 @@ function campaignFixtureSlug(spec) {
   return m ? m[1] : null;
 }
 
+/** Extract the campaign2 slug from a registry fixture/control path. @param {string} spec */
+function campaign2FixtureSlug(spec) {
+  const m = String(spec).replace(/\\/g, "/").match(/campaign2\/([^/]+)/);
+  return m ? m[1] : null;
+}
+
+// --- Campaign #2 (Q3) tourniquet seams ---------------------------------------
+// The R2 guards' fix-presence is measured against the GATE-OF-RECORD surface
+// (`git show HEAD:<file>`), not another lane's dirty working tree: the gate of
+// record is HEAD, and a seam that exists only uncommitted is not delivered. The
+// mutation control is the guard's own `campaign2Controls` proof (real artifacts).
+let CAMPAIGN2_CONTROLS;
+/** @returns {Promise<Record<string, any>|null>} */
+async function campaign2ControlsFor() {
+  if (CAMPAIGN2_CONTROLS !== undefined) return CAMPAIGN2_CONTROLS;
+  const mod = await importCached(SRC.campaign2);
+  if (mod.__error || typeof mod.campaign2Controls !== "function" || typeof mod.resolveCampaign2Root !== "function") {
+    CAMPAIGN2_CONTROLS = null;
+    return null;
+  }
+  const root = mod.resolveCampaign2Root();
+  CAMPAIGN2_CONTROLS = root ? await mod.campaign2Controls(root) : null;
+  return CAMPAIGN2_CONTROLS;
+}
+
+/**
+ * Does the committed gate-of-record surface (`HEAD:<file>`) contain `needle`?
+ * `null` when git cannot be consulted (the caller fails closed to "not landed").
+ * @param {string} file @param {string} needle @returns {boolean|null}
+ */
+function gateHeadContains(file, needle) {
+  const r = spawnSync("git", ["show", `HEAD:${file}`], { cwd: REPO_ROOT, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+  if (r.error || r.status !== 0 || typeof r.stdout !== "string") return null;
+  return r.stdout.includes(needle);
+}
+
+/**
+ * A campaign2 tourniquet's fix-presence: the owner's interface must be on the
+ * gate-of-record surface, and the guard's own mutation control must prove the
+ * detector discriminates. `pending` until the owner lands the fix.
+ * @param {string} id @param {string} file @param {string} needle @param {string} ownerInterface
+ */
+async function campaign2Seam(id, file, needle, ownerInterface) {
+  const landed = gateHeadContains(file, needle);
+  // Transparency: the fixer's working tree may already carry the interface even
+  // though the gate-of-record surface (HEAD) does not. Report both — the pin is
+  // RED until the owner COMMITS the fix.
+  const working = safeReadText(join(REPO_ROOT, file)).includes(needle);
+  const ctl = await campaign2ControlsFor();
+  const c = ctl && ctl[id];
+  return {
+    present: landed === true,
+    wired: landed === true,
+    mutationRed: !!(c && c.mutationRed),
+    evidence: {
+      ownerInterface,
+      gateOfRecordHasInterface: landed,
+      workingTreeHasInterface: working,
+      interfaceLandedForGate: landed === true,
+      detectorFires: !!(c && c.fired),
+      controlClean: !!(c && c.controlClean),
+      mutationRed: !!(c && c.mutationRed),
+    },
+  };
+}
+
 /** Evaluate a guard's live-seam (fix-presence) signal. @param {any} g @param {any} ctx */
 export async function evaluateSeam(g, ctx) {
   const id = String(g.id ?? "").toUpperCase();
@@ -705,13 +823,6 @@ export function withScratch(files, fn) {
   }
 }
 
-/** Split a top-level TS tree into {relPath: source} for a scratch copy. */
-function readTreeFiles(dir) {
-  const out = {};
-  for (const f of walkCode(dir)) out[relative(dir, f).split(/[\\/]/).join("/")] = readFileSync(f, "utf8");
-  return out;
-}
-
 // ---------------------------------------------------------------------------
 // Drivers. Each returns `{ fired, controlClean, evidence }` where `fired` means
 // "the guard alarmed on the historical defect in the frozen artifact", and
@@ -745,8 +856,8 @@ const DETECTOR_CODE = {
   "use-before-declaration": "RT_E_USE_BEFORE_DECL",
   "money-semantics": "RT_E_MONEY_SEMANTICS",
 };
-/** @type {{inv:any, readme:any, runlock:any, campaign:any}} */
-const PB = { inv: undefined, readme: undefined, runlock: undefined, campaign: undefined };
+/** @type {{inv:any, readme:any, runlock:any, campaign:any, campaign2:any}} */
+const PB = { inv: undefined, readme: undefined, runlock: undefined, campaign: undefined, campaign2: undefined };
 
 /** @param {string[]} args */
 function spawnNode(args) {
@@ -803,6 +914,16 @@ function runCampaignInvariants(_ctx) {
   const json = parseJsonFromStdout(r.stdout);
   PB.campaign = json ? { present: true, json, status: r.status } : { present: false, error: String(r.stderr || "").slice(0, 400), status: r.status };
   return PB.campaign;
+}
+/** Spawn the campaign2 tourniquet guard once; its JSON is the fixture-integrity signal. */
+function runCampaign2Invariants() {
+  if (PB.campaign2 !== undefined) return PB.campaign2;
+  const file = join(REPO_ROOT, "scripts", "guards", "campaign2-invariants.mjs");
+  if (!existsSync(file)) { PB.campaign2 = { present: false }; return PB.campaign2; }
+  const r = spawnNode([file, "--json"]);
+  const json = parseJsonFromStdout(r.stdout);
+  PB.campaign2 = json ? { present: true, json, status: r.status } : { present: false, error: String(r.stderr || "").slice(0, 400), status: r.status };
+  return PB.campaign2;
 }
 
 /** @type {Record<string, (ctx:any, guard:any)=>Promise<{fired:boolean,controlClean:boolean,skipped?:boolean,evidence:any}>>} */
@@ -913,7 +1034,7 @@ DRIVERS["behavioural-spec"] = async (ctx) => {
   return { fired: result === false, controlClean: controlResult === true, evidence: { officeInvoiceHasBehaviouralAssert: result, controlHasBehaviouralAssert: controlResult } };
 };
 
-DRIVERS["runlock"] = async (ctx) => {
+DRIVERS["runlock"] = async (_ctx) => {
   const c = readJsonFile(join(CASSETTE_DIR, "runlock-bl010.json"));
   if (!c) return { fired: false, controlClean: false, evidence: "runlock cassette missing" };
   const start = Date.parse(c.run.createdAt);
@@ -982,7 +1103,8 @@ DRIVERS["deepen-honesty"] = async (ctx) => {
 };
 
 DRIVERS["repair-monotonic"] = async (ctx) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the monotonic seam (lane B/D) may not be exported yet; probing it must not break the typecheck.
+  // The monotonic seam (lane B/D) may not be exported yet; probing it must not
+  // break the typecheck, so the dynamic import is cast to `any`.
   const headless = /** @type {any} */ (await import("../../src/lib/headless.ts"));
   const hasSeam = typeof headless.treeVerdictScore === "function" && typeof headless.failureSignature === "function";
   const repair = readJsonFile(join(ctx.runDir("bakery-florist-orders"), "repair.json"));
@@ -1062,6 +1184,30 @@ DRIVERS["campaign-invariants"] = async (ctx, g) => {
   return { fired: firedOn.length > 0, controlClean, evidence: { code, firedOn, control: controlSlug } };
 };
 
+// R2-01/R2-03/R2-05/R2-06 — the campaign2 tourniquet guards' fixture-integrity
+// is the guard tool's own JSON over the frozen campaign2 artifacts; the mutation
+// control comes from the in-process campaign2Controls.
+DRIVERS["campaign2-invariants"] = async (_ctx, g) => {
+  const inv = runCampaign2Invariants();
+  if (!inv.present) return { fired: false, controlClean: false, evidence: "campaign2-invariants.mjs absent" };
+  const code = g.expectedCode;
+  const findings = Array.isArray(inv.json.findings) ? inv.json.findings : [];
+  const codesFor = (slug) => findings.filter((f) => f.slug === slug).map((f) => f.code);
+  const fixtures = [g.historicalFixture, ...(Array.isArray(g.historicalFixtures) ? g.historicalFixtures : [])].filter(Boolean);
+  const firedOn = fixtures.filter((f) => {
+    const s = campaign2FixtureSlug(f);
+    return s && codesFor(s).includes(code);
+  });
+  const controlSlug = g.cleanControl ? campaign2FixtureSlug(g.cleanControl) : null;
+  let controlClean;
+  if (controlSlug) controlClean = !codesFor(controlSlug).includes(code);
+  else {
+    const ctl = await campaign2ControlsFor();
+    controlClean = !!(ctl && ctl[g.id] && ctl[g.id].controlClean);
+  }
+  return { fired: firedOn.length > 0, controlClean, evidence: { code, firedOn, control: controlSlug } };
+};
+
 DRIVERS["arch-failclosed"] = async (ctx) => {
   const dod = await import("../../src/lib/dod.ts");
   const proj = readJsonFile(join(ctx.runRoot, "office-stock-tracker", "emitted", ".rapidtool", "project.json"));
@@ -1133,6 +1279,8 @@ const ID_TO_DRIVER = {
   "c1-01": "campaign-invariants", "c1-02": "campaign-invariants",
   "c1-05": "campaign-invariants", "c1-06": "campaign-invariants",
   "c1-08": "campaign-invariants",
+  "r2-01": "campaign2-invariants", "r2-03": "campaign2-invariants",
+  "r2-05": "campaign2-invariants", "r2-06": "campaign2-invariants",
 };
 
 /** @param {any} g @returns {string|null} */
@@ -1241,9 +1389,9 @@ export function verifyRubricBaselines(cassettes, baselines, runRoot) {
  * projects, and carry a brief plus expected labels. The live classification is
  * recorded as evidence so an over-fit is visible; it does not by itself fail the
  * sweep (the hard classification gate is C-12's live-seam check).
- * @param {any[]} cassettes @param {any[]} heldOut @param {any} ctx
+ * @param {any[]} cassettes @param {any[]} heldOut @param {any} _ctx
  */
-export async function verifyHeldOut(cassettes, heldOut, ctx) {
+export async function verifyHeldOut(cassettes, heldOut, _ctx) {
   if (!heldOut || heldOut.length === 0) return { ok: false, present: false, evidence: "no held-out cassette present" };
   const slugs = new Set(cassettes.map((c) => c.slug));
   const h = heldOut[0];
@@ -1268,9 +1416,10 @@ export async function verifyHeldOut(cassettes, heldOut, ctx) {
 // ---------------------------------------------------------------------------
 
 /** Pinned floor: removing a registry entry must fail the gate of record (§4.6-3).
- *  Overridable by `countFloor` in the registry (now 20 — the 15 W346 guards plus
- *  the five campaign #1 residual guards C1-01/02/05/06/08). */
-export const GUARD_COUNT_FLOOR = 20;
+ *  Overridable by `countFloor` in the registry (now 24 — the 15 W346 guards, the
+ *  five campaign #1 residual guards C1-01/02/05/06/08, and the four campaign #2
+ *  tourniquets R2-01/03/05/06). */
+export const GUARD_COUNT_FLOOR = 24;
 
 /** @param {any} ctx */
 export async function runAll(ctx) {

@@ -22,7 +22,7 @@ const EMPTY = (extra) => ({
   ok: false,
   guards: 0,
   count: 0,
-  countFloor: 20,
+  countFloor: 24,
   historical: 0,
   fixtureIntegrity: { fired: [], missed: [] },
   fixPresence: { enforced: [], pending: [] },

@@ -549,13 +549,21 @@ tree still exists on disk**, so the failure is in delivery, never in the build.
 > a red/suppressed one WITHHOLDS it — the envelope stays `ok:false`, `git` reports
 > `{ committed:false, skipped:true, reason, code }` and a loud `error`, and the
 > emitted tree is still written to disk (delivery withheld, the build kept). The
-> reason names the leg: `tree-run-red` (a red `--run`, code
-> `RT_E_TREE_RUN_FAILED`; W346 · P0-3), `check-red` (a red `--check`, code
-> `RT_E_CHECK_FAILED`), `verify-kind-red` (a red `--verify-kind`, code
+> reason names the leg: `plan-underproduced` (R2-01: the delivered tree is below
+> the brief-driven floor and the project's own P6 journal records
+> `RT_E_PLAN_UNDERPRODUCED`, code `RT_E_PLAN_UNDERPRODUCED` — checked FIRST, so a
+> below-floor tree refuses as an under-produced plan, never as merely empty; the
+> envelope also carries `planUnderproduced: { code, floor, emitted, modules,
+> missing[], detail }` naming the missing declared modules), `tree-run-red` (a red
+> `--run`, code `RT_E_TREE_RUN_FAILED`; W346 · P0-3), `check-red` (a red `--check`,
+> code `RT_E_CHECK_FAILED`), `verify-kind-red` (a red `--verify-kind`, code
 > `RT_E_VERIFY_KIND_FAILED`), `substance-empty` (W61 B1: with `--run`, the
 > tree's substance verdict is `"empty"` — no job modules — or the project carries
 > an uncleared red tree-run trail, code `RT_E_SUBSTANCE_EMPTY`), or
-> `foreign-files-left-in-place` (a supported quarantine left the tree mixed). The
+> `foreign-files-left-in-place` (a supported quarantine left the tree mixed). When
+> the floor refusal fires the scaffold refuses the below-floor partial **before it
+> is written**, so the top-level `code` is `RT_E_PLAN_UNDERPRODUCED` with no
+> partial materialized at all. The
 > substance hold is checked before `tree-run-red`, so an empty tree refuses with
 > its own specific code. The withheld `git` block's own `code` always matches its
 > `reason` (C1-08: it used to carry a leg's earlier code beside a different
