@@ -1236,21 +1236,39 @@ export function b18Tail(): string {
 // `buildOracleCasesPrompt` PREPENDS the seeds, and a returned case list that
 // drops a pinned id is refused. These helpers remain pure; the consumer is live.
 
-/** Render each A7 oracle row as a `# orc-<id> <name> — <given> ⇒ <expect>` seed line. */
+/** Render each A7 oracle row as a `# orc-<id> <name> — <given> ⇒ <expect>` seed line.
+ *  Junk rows (null / non-object / invalid id) are skipped: `engine.hydrateProject`
+ *  preserves raw oracle rows, so a persisted or hand-edited payload can carry one,
+ *  and dereferencing `row.id` on it threw a TypeError out of the LIVE keyed P6
+ *  verify seam (codegen.server/headless pass `project.oracle` straight in). */
 export function oracleToCaseSeeds(oracle: OracleTest[]): string {
-  return oracle
-    .filter((row) => typeof row.id === "string" && row.id.length > 0)
+  return (Array.isArray(oracle) ? oracle : [])
+    .filter(
+      (row): row is OracleTest =>
+        !!row && typeof row === "object" && typeof row.id === "string" && row.id.length > 0,
+    )
     .map((row) => `# ${row.id} ${row.name} — ${row.given} ⇒ ${row.expect}`)
     .join("\n");
 }
 
 /**
  * Seeded oracle ids (in oracle order) that a returned case list dropped.
- * Extra/unseeded returned ids are ignored — only pinned rows matter.
+ * Extra/unseeded returned ids are ignored — only pinned rows matter. Applies the
+ * SAME valid-id filter as `oracleToCaseSeeds` (they are the paired E-08 seam; the
+ * verify-side mirror `droppedPinnedOracleIds` filters invalid ids too), so a junk
+ * row is never reported as a "dropped" id that was never seeded.
  */
 export function missingOracleCaseIds(returnedIds: string[], oracle: OracleTest[]): string[] {
-  const have = new Set(returnedIds);
-  return oracle.map((row) => row.id).filter((id) => !have.has(id));
+  const have = new Set(
+    (Array.isArray(returnedIds) ? returnedIds : []).filter((s): s is string => typeof s === "string"),
+  );
+  return (Array.isArray(oracle) ? oracle : [])
+    .filter(
+      (row): row is OracleTest =>
+        !!row && typeof row === "object" && typeof row.id === "string" && row.id.length > 0,
+    )
+    .map((row) => row.id)
+    .filter((id) => !have.has(id));
 }
 
 // --- P10 hard-DoD enforcement helpers (pure) --------------------------------

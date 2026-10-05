@@ -13,7 +13,14 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { archTrace, liveResearchAttemptUnavailable, recordGateInto, runGate } from "./dod.ts";
+import {
+  archTrace,
+  liveResearchAttemptUnavailable,
+  missingOracleCaseIds,
+  oracleToCaseSeeds,
+  recordGateInto,
+  runGate,
+} from "./dod.ts";
 import { runUntilGate } from "./headless.ts";
 import { mintTreeRunTested } from "./codegen.server.ts";
 import { emptyProject } from "./engine.ts";
@@ -27,7 +34,7 @@ import {
   implementationIdentifierHits,
   maskModuleReexports,
 } from "./sandbox.ts";
-import type { HitlDecision, PhaseId, Project } from "./types.ts";
+import type { HitlDecision, OracleTest, PhaseId, Project } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 
 const base = (): Project => emptyProject({ name: "Dod334", brief: "A dispatch board for field service." });
@@ -670,6 +677,33 @@ describe("W61 C14 - p6-arch fails closed on dead re-export bridges", () => {
   it("a re-export clause alone is not an implementation identifier (unit)", () => {
     assert.deepEqual(implementationIdentifierHits(["board"], 'export { board } from "./x";'), []);
     assert.deepEqual(implementationIdentifierHits(["board"], "export function board() {}"), ["board"]);
+  });
+});
+
+describe("E-08 oracle helpers — junk-row tolerance (hostile persisted payload)", () => {
+  // engine.hydrateProject keeps `project.oracle` rows raw (engine.ts:2953), and
+  // codegen.server/headless pass that array straight to oracleToCaseSeeds at the
+  // keyed P6 verify seam, so ONE null/foreign row threw a TypeError out of the
+  // live seam. These pins enforce the same non-throwing floor the sibling
+  // str()/rows() helpers (packet.ts) document.
+  const junkyOracle = [
+    { id: "orc-1", name: "happy", given: "g", expect: "e", job: "j" },
+    null,
+    { id: "", name: "blank", given: "g", expect: "e", job: "j" },
+    { id: "orc-2", name: "sad", given: "g2", expect: "e2", job: "j" },
+  ] as unknown as OracleTest[];
+
+  it("oracleToCaseSeeds skips junk rows instead of throwing", () => {
+    assert.equal(
+      oracleToCaseSeeds(junkyOracle),
+      "# orc-1 happy — g ⇒ e\n# orc-2 sad — g2 ⇒ e2",
+    );
+    assert.equal(oracleToCaseSeeds(null as unknown as OracleTest[]), "");
+  });
+
+  it("missingOracleCaseIds never reports a junk/unseeded row as dropped", () => {
+    assert.deepEqual(missingOracleCaseIds([], junkyOracle), ["orc-1", "orc-2"]);
+    assert.deepEqual(missingOracleCaseIds(["orc-1"], junkyOracle), ["orc-2"]);
   });
 });
 
