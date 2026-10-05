@@ -1,0 +1,76 @@
+{
+  "slug": "office-invoice-tracker",
+  "briefFile": "office-invoice-tracker/brief.md",
+  "brief": "# Ledgeline — Office Invoice & Expense Tracker\n\n## What this is\nAn internal office tool for tracking supplier invoices and staff expenses from\nreceipt through to payment. It replaces a spreadsheet and gives the office\nmanager a single ageing view of what is owed and what is overdue.\n\n## Users\n- **Office manager** — enters invoices, marks them paid, chases overdue.\n- **Employee** — submits an expense claim with a receipt reference.\n- **Approver** — approves or rejects expense claims.\n\n## Core domain\n- **Supplier**: id, name, email, payment terms (days).\n- **Invoice**: id, number, supplier, issue date, due date, amount (integer\n  pence), tax amount, status (Draft | Submitted | Approved | Paid | Overdue |\n  Cancelled), notes.\n- **ExpenseClaim**: id, employee name, date incurred, category (Travel |\n  Meals | Equipment | Software | Other), amount (pence), receipt reference,\n  status (Draft | Submitted | Approved | Rejected | Reimbursed), decision note.\n\n## Required features\n1. **Invoice list** — table with supplier, number, dates, amount, status, and an\n   \"age\" column (days since due; overdue highlighted). Filter by status and\n   supplier, search by number/supplier, sort by due date or amount.\n2. **Add / edit invoice** — validate: number required and unique, supplier\n   required, amount > 0, tax >= 0 and <= amount, due date on/after issue date.\n   Computes due date from the supplier's terms when not given explicitly.\n3. **Status ageing** — an invoice becomes Overdue automatically when its due\n   date has passed and it is not Paid/Cancelled; a \"refresh\" recomputes this\n   from the data (never a manual flag alone).\n4. **Expense claims** — submit, approve, reject (rejection requires a note of at\n   least 8 characters), and mark reimbursed. A rejected claim cannot be\n   reimbursed; an approved claim cannot be re-approved.\n5. **Dashboard** — totals: total outstanding, total overdue, count by status,\n   and expenses awaiting approval. A simple bar breakdown by supplier of the\n   top five outstanding.\n6. **Export** — a CSV of the currently filtered invoice list (columns: number,\n   supplier, issue, due, amount, tax, status, age).\n\n## Functional requirements\n- All money in integer pence; arithmetic (totals, outstanding, overdue sums) is\n  exact; display in GBP.\n- Ageing and dashboard totals derive from the stored records each time they are\n  requested (no stale cached totals).\n- Status transitions constrained: Draft→Submitted→Approved→Paid; Submitted→\n  Cancelled; a Paid invoice is terminal.\n- Expense rejection note rule enforced (>= 8 chars) with a clear error.\n- CSV export must quote fields containing commas/quotes correctly.\n\n## Non-functional requirements\n- Desktop-first, usable to 768px; accessible data tables with proper headers.\n- Deterministic core calculations separated from UI for unit testing.\n- Local persistence; no external services needed to run.\n\n## Explicitly out of scope\n- Bank feed / open-banking integration.\n- Real OCR of receipts.\n- Multi-currency (GBP only).\n- Payroll or tax filing.\n",
+  "persisted": {
+    "name": "# Ledgeline — Office",
+    "domain": "finance-ops",
+    "kind": "app"
+  },
+  "expected": {
+    "domain": "finance-ops",
+    "kind": "app",
+    "name": "Ledgeline",
+    "incidents": [
+      "INC-13",
+      "INC-14",
+      "INC-22",
+      "INC-27"
+    ]
+  },
+  "trees": [
+    "emitted"
+  ],
+  "historicalDefects": [
+    "INC-13",
+    "INC-14",
+    "INC-22",
+    "INC-27"
+  ],
+  "failureSignatures": [
+    {
+      "file": "unattended.out.json",
+      "ok": true,
+      "exit_code": 2,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "unattended2.out.json",
+      "ok": false,
+      "exit_code": 1,
+      "code": "RT_E_GATES_FAILED",
+      "error": "run sealed complete with 1 failed DoD gate(s): P6(Last template self-test run passed,Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash),Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no ",
+      "unmet": [
+        "Last template self-test run passed",
+        "Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)",
+        "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)"
+      ]
+    },
+    {
+      "file": "emit.out.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "treerun.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "build.json",
+      "ok": null,
+      "exit_code": null,
+      "code": null,
+      "error": null,
+      "unmet": []
+    }
+  ]
+}

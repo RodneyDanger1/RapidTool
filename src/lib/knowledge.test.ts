@@ -46,6 +46,13 @@ import {
   LESSON_OUTCOME_MIN_N,
   LESSON_CENSUS_CAP,
   COLLISION_TAG,
+  defectClassOf,
+  defectRepairLesson,
+  selectDefectRepairLessons,
+  applyLessonDemotion,
+  defectTag,
+  DEFECT_REPAIR_CLASS,
+  DEFECT_REMEDIATION,
 } from "./knowledge.ts";
 import { seedProject } from "./testing/fixtures.ts";
 import { fnv1a } from "./algorithms.ts";
@@ -1713,5 +1720,70 @@ describe("fixes/346 H3 — id-collision detection (fail loud, never silently mer
     } finally {
       cleanup(file);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W61 lane C - C7: the defect->repair learning loop. A coded defect mints a
+// structured `defect-repair` lesson with a deterministic remediation; the
+// selection path feeds the matching rows into the next run deterministically
+// (no LLM judge); demotion is deterministic (recurrence != causation).
+// ---------------------------------------------------------------------------
+describe("W61 C7 - defect->repair learning loop", () => {
+  it("defectClassOf maps coded evidence to a DefectClass (and null otherwise)", () => {
+    assert.equal(defectClassOf("src/generated.ts(3,1): error TS2308: ... already exported"), "TS2308:barrel-dup-export");
+    assert.equal(defectClassOf("TS2448: Block-scoped variable 'store' used before its declaration"), "TS2448:use-before-decl");
+    assert.equal(defectClassOf("error TS1005: '>' expected"), "TS1005:jsx-in-ts");
+    assert.equal(defectClassOf("unawaited async call used as a value"), "validation:unawaited-async");
+    assert.equal(defectClassOf("p6-brief-fit core missing (0/9)"), "probe:p6-brief-fit:core-noun");
+    assert.equal(defectClassOf("something entirely unrelated"), null);
+  });
+
+  it("defectRepairLesson mints a deterministic, class-keyed remediation row", () => {
+    const p = seedProject();
+    const a = defectRepairLesson(p, "TS2308:barrel-dup-export");
+    const b = defectRepairLesson(p, "TS2308:barrel-dup-export");
+    assert.equal(a.id, b.id, "same defect => same content-addressed id");
+    assert.ok((a.tags ?? []).includes(LESSON_TAG), "tagged as a lesson");
+    assert.ok((a.tags ?? []).includes(DEFECT_REPAIR_CLASS), "classShort tag is defect-repair");
+    assert.ok((a.tags ?? []).includes(defectTag("TS2308:barrel-dup-export")), "the coded defect tag is present");
+    assert.ok(a.text.includes(DEFECT_REMEDIATION["TS2308:barrel-dup-export"]), "body is the deterministic remediation");
+    assert.notEqual(defectRepairLesson(p, "TS2448:use-before-decl").id, a.id, "distinct defects => distinct rows");
+  });
+
+  it("selectDefectRepairLessons returns the matching rows deterministically, phase-first", () => {
+    const p = seedProject();
+    const dup = defectRepairLesson(p, "TS2308:barrel-dup-export", { phase: 6 });
+    const ubd6 = defectRepairLesson(p, "TS2448:use-before-decl", { phase: 6 });
+    const ubd4 = defectRepairLesson(p, "TS2448:use-before-decl", { phase: 4 });
+    const memory = [dup, ubd6, ubd4];
+    const sel6 = selectDefectRepairLessons(memory, 6, ["TS2308:barrel-dup-export", "TS2448:use-before-decl"], 2);
+    assert.deepEqual(sel6.map((m) => m.id).sort(), [dup.id, ubd6.id].sort(), "phase-6 rows win for phase 6");
+    const sel4 = selectDefectRepairLessons(memory, 4, ["TS2448:use-before-decl"], 2);
+    assert.deepEqual(sel4.map((m) => m.id), [ubd4.id]);
+    assert.deepEqual(selectDefectRepairLessons(memory, 6, ["validation:money-semantics"]), [], "no match => empty");
+    // Deterministic: identical inputs => identical order.
+    assert.deepEqual(
+      selectDefectRepairLessons(memory, 6, ["TS2308:barrel-dup-export", "TS2448:use-before-decl"], 2).map((m) => m.id),
+      sel6.map((m) => m.id),
+    );
+  });
+
+  it("applyLessonDemotion demotes only a repeatedly-injected, never-passing lesson", () => {
+    const p = seedProject();
+    const row = defectRepairLesson(p, "TS2448:use-before-decl", { score: 0.8 });
+    const other = defectRepairLesson(p, "TS2308:barrel-dup-export", { score: 0.8 });
+    const demoted = applyLessonDemotion([row, other], {
+      [defectTag("TS2448:use-before-decl")]: { injected: 3, passed: 0 },
+    });
+    const byCls = (r: MemoryEntry) => (r.tags ?? []).find((t: string) => t.startsWith("defect:"));
+    assert.equal(demoted.find((r) => byCls(r) === defectTag("TS2448:use-before-decl"))?.score, 0.6, "no-pass row loses penalty");
+    assert.equal(demoted.find((r) => byCls(r) === defectTag("TS2308:barrel-dup-export"))?.score, 0.8, "untracked row untouched");
+    // Insufficient evidence (below minInjections) is NOT demoted.
+    const few = applyLessonDemotion([row], { [defectTag("TS2448:use-before-decl")]: { injected: 1, passed: 0 } });
+    assert.equal(few[0].score, 0.8, "recurrence != causation below the evidence floor");
+    // A single pass keeps full weight.
+    const helped = applyLessonDemotion([row], { [defectTag("TS2448:use-before-decl")]: { injected: 5, passed: 1 } });
+    assert.equal(helped[0].score, 0.8, "a lesson that helped keeps its weight");
   });
 });

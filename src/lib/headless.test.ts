@@ -27,6 +27,7 @@ import {
   mineDir,
   nextAction,
   p6CycleLiveDeps,
+  isRedRunningP6,
   packet,
   promoteEmittedTreeTested,
   promoteRepairedDirTested,
@@ -43,6 +44,10 @@ import {
   saveProject,
   summary,
   treeRunFailureFiles,
+  treeVerdictScore,
+  treeVerdictScoreOf,
+  failureSignature,
+  runlockEditViolations,
   vaultSearch,
   wildPauseRun,
   wildResumeRun,
@@ -1153,8 +1158,15 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
       tails.push(ctx.treeFailureTail ?? "");
       return withTree(p);
     };
-    const alwaysRed = redVerdict("src/api/board.spec.ts", "dispatchBoard never converges");
-    const res = await driveP6Journey(base, { deps: { synthesize, runTree: async () => alwaysRed } });
+    // PR-12: a BUDGET-EXHAUSTION case needs a failure that PROGRESSES (a
+    // different tail each cycle) — otherwise the no-progress abort correctly
+    // stops at cycle 2. The repeated-signature abort is its own pin.
+    let run = 0;
+    const runTree = async (): Promise<TreeRunOutcome> => {
+      run += 1;
+      return redVerdict("src/api/board.spec.ts", `dispatchBoard never converges (cycle ${run})`);
+    };
+    const res = await driveP6Journey(base, { deps: { synthesize, runTree } });
     assert.equal(res.outcome, "failed");
     assert.equal(res.cycles, 3, "default budget 3 burned entirely");
     assert.ok(res.treeTail!.includes("dispatchBoard never converges"));
@@ -1181,6 +1193,260 @@ describe("fixes/144 (M4-2) — driveP6Journey (fake-deps: deterministic, no key/
       if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
       else process.env.DEEPSEEK_API_KEY = savedKey;
     }
+  });
+
+  it("W61 B2 — a later, WORSE tree is never returned (best tree by fewest TS#### errors, tie-break more files)", async () => {
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    const treeA = [{ path: "src/generated.ts", source: "export const a = 1;", hash: "a", attempt: 0 }];
+    const treeB = [
+      { path: "src/generated.ts", source: "export const a = 1;", hash: "a", attempt: 0 },
+      { path: "src/extra.ts", source: "export const b = 2;", hash: "b", attempt: 0 },
+    ];
+    const withTrees = (p: Project, tree: typeof treeA): Project => ({ ...p, generatedTree: tree });
+    let cycle = 0;
+    const synthesize = async (p: Project): Promise<Project> => {
+      cycle += 1;
+      return withTrees(p, cycle === 1 ? treeA : treeB);
+    };
+    // Cycle 1 (tree A): ONE TS error. Cycle 2 (tree B): TWO — a regression.
+    const oneTs: TreeRunOutcome = {
+      ok: false,
+      dir: "",
+      compile: { ok: false, dir: "", checked: 1, passed: 0, failed: 1, skipped: 0, verdicts: [{ file: "src/generated.ts", verdict: "fail", detail: "error TS2322: type mismatch" }] },
+      tests: [],
+      run: null,
+    };
+    const twoTs: TreeRunOutcome = {
+      ok: false,
+      dir: "",
+      compile: { ok: false, dir: "", checked: 2, passed: 0, failed: 2, skipped: 0, verdicts: [{ file: "src/extra.ts", verdict: "fail", detail: "error TS2322: a\nerror TS2345: b" }] },
+      tests: [],
+      run: null,
+    };
+    let run = 0;
+    const runTree = async (): Promise<TreeRunOutcome> => {
+      run += 1;
+      return run === 1 ? oneTs : twoTs;
+    };
+    const res = await driveP6Journey(base, { budget: 2, deps: { synthesize, runTree } });
+    assert.equal(res.outcome, "failed");
+    assert.equal(res.cycles, 2, "both cycles burned (the regression is on cycle 2)");
+    assert.deepEqual(
+      res.project.generatedTree,
+      treeA,
+      "the journey returned the BEST tree (cycle 1: one TS error), never the cycle-2 regression (two)",
+    );
+    assert.ok(
+      (res.project.logs ?? []).some((l) => l.event === "p6.journey.best-tree-kept"),
+      "the best-tree recovery is recorded loudly",
+    );
+  });
+
+  it("W61 B2 — an identical repair context re-uses the accepted tree instead of re-synthesizing (O-01)", async () => {
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    let synthCalls = 0;
+    const synthesize = async (p: Project): Promise<Project> => {
+      synthCalls += 1;
+      return withTree(p);
+    };
+    // The failure TAIL is constant ("tree-run not ok" — a compile-row-only red
+    // carries no top-level error/tests/declared-script leg), so cycles 2→3
+    // present an identical repair context. The OFFENDER FILE varies per cycle,
+    // so the PR-12 failure signature differs cycle-to-cycle and the no-progress
+    // abort does not preempt the reuse this test pins.
+    let run = 0;
+    const redAt = (): TreeRunOutcome => {
+      run += 1;
+      return {
+        ok: false,
+        dir: "",
+        compile: {
+          ok: false,
+          dir: "",
+          checked: 1,
+          passed: 0,
+          failed: 1,
+          skipped: 0,
+          verdicts: [{ file: `src/cycle${run}.ts`, verdict: "fail", detail: "error TS2322: type mismatch" }],
+        },
+        tests: [],
+        run: null,
+      };
+    };
+    const res = await driveP6Journey(base, { budget: 3, deps: { synthesize, runTree: async () => redAt() } });
+    assert.equal(res.outcome, "failed");
+    assert.equal(res.cycles, 3, "the loop still accounts for all three cycles");
+    assert.equal(synthCalls, 2, "cycle 3 presented the identical repair context — synthesis skipped, tree reused (O-01)");
+    assert.ok(
+      res.events.some((e) => e.includes("identical repair context") && e.includes("O-01")),
+      "the skip is named on the events trail",
+    );
+    assert.ok((res.project.logs ?? []).some((l) => l.event === "p6.journey.exhausted"), "exhaustion is still recorded");
+  });
+
+  it("PR-12 (BF-2) — a repeated failure signature aborts instead of spending the remaining budget", async () => {
+    const base = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    let synthCalls = 0;
+    const synthesize = async (p: Project): Promise<Project> => {
+      synthCalls += 1;
+      return withTree(p);
+    };
+    // Byte-identical failure every cycle: same tail AND same offender file, so
+    // cycle 2 reproduces cycle 1's signature (the dead end bfo hit 3/3).
+    const constantRed: TreeRunOutcome = {
+      ok: false,
+      dir: "",
+      compile: {
+        ok: false,
+        dir: "",
+        checked: 1,
+        passed: 0,
+        failed: 1,
+        skipped: 0,
+        verdicts: [{ file: "src/generated.ts", verdict: "fail", detail: "error TS2322: type mismatch" }],
+      },
+      tests: [],
+      run: null,
+    };
+    const res = await driveP6Journey(base, { budget: 5, deps: { synthesize, runTree: async () => constantRed } });
+    assert.equal(res.outcome, "failed");
+    assert.equal(res.cycles, 2, "cycle 2 reproduced cycle 1's signature — abort, never reaching cycle 5");
+    assert.equal(synthCalls, 2, "the abort happened after the second fresh synthesis");
+    assert.ok(
+      res.events.some((e) => e.includes("no progress")),
+      "the abort names the repeated failure signature",
+    );
+    assert.ok(
+      (res.project.logs ?? []).some((l) => l.event === "p6.journey.no-progress"),
+      "the abort is recorded loudly",
+    );
+    assert.ok(
+      !(res.project.logs ?? []).some((l) => l.event === "p6.journey.exhausted"),
+      "it is an honest early abort, not a budget exhaustion",
+    );
+  });
+});
+
+describe("PR-07 (BF-2 / C-04) — the exported tree comparator + failure signature", () => {
+  const metric = (ok: boolean, ts: number, files: number) => ({ ok, ts, files });
+
+  it("ranks green > fewer TS diagnostics > more files, and isBetterTree is the scalar order", () => {
+    const green = metric(true, 9, 1);
+    const redOneErr = metric(false, 1, 1);
+    const redTwoErr = metric(false, 2, 99);
+    const redOneErrMoreFiles = metric(false, 1, 7);
+    assert.ok(treeVerdictScoreOf(green) > treeVerdictScoreOf(redOneErr), "green dominates any red");
+    assert.ok(treeVerdictScoreOf(redOneErr) > treeVerdictScoreOf(redTwoErr), "fewer TS errors ranks higher");
+    assert.ok(treeVerdictScoreOf(redOneErrMoreFiles) > treeVerdictScoreOf(redOneErr), "equal errors: more files ranks higher");
+    // `isBetterTree ≡ score(a) > score(b)` is exercised through the outcome API.
+    const red = (failed: number): TreeRunOutcome => ({
+      ok: false,
+      dir: "",
+      compile: { ok: false, dir: "", checked: 1, passed: 0, failed, skipped: 0, verdicts: [] },
+      tests: [],
+      run: null,
+    });
+    assert.ok(treeVerdictScore(red(0)) > treeVerdictScore(red(5)), "the C-04 guard's contract: fewer failures > more");
+    assert.ok(treeVerdictScore(red(7)) <= treeVerdictScore(red(3)), "more failures never ranks higher");
+    assert.ok(treeVerdictScore(null) < treeVerdictScore(red(0)), "no verdict is the worst state");
+  });
+
+  it("failureSignature is stable, hex-hashed, and order-independent in the offender set", () => {
+    const a = failureSignature({ refusal: "RT_E_REPAIR_FAILED", treeTail: "error TS2308", offenderFiles: ["src/b.ts", "src/a.ts"] });
+    const b = failureSignature({ refusal: "RT_E_REPAIR_FAILED", treeTail: "error TS2308", offenderFiles: ["src/a.ts", "src/b.ts"] });
+    const c = failureSignature({ refusal: "RT_E_REPAIR_FAILED", treeTail: "error TS2308", offenderFiles: ["src/a.ts", "src/c.ts"] });
+    assert.equal(a, b, "the offender set is order-independent");
+    assert.notEqual(a, c, "a different offender set is a different signature");
+    assert.notEqual(
+      a,
+      failureSignature({ refusal: "RT_E_REPAIR_FAILED", treeTail: "error TS2322", offenderFiles: ["src/a.ts", "src/b.ts"] }),
+      "a different failure tail is a different signature",
+    );
+    assert.equal(a, failureSignature({ refusal: "RT_E_REPAIR_FAILED", treeTail: "error TS2308", offenderFiles: ["src/b.ts", "src/a.ts"] }), "pure");
+  });
+});
+
+describe("PR-16 (B5/C-11/I7) — the in-run RUNLOCK guard + resumeAccepted threading", () => {
+  it("names a repo file edited after the run start and passes a frozen window", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-runlock-"));
+    try {
+      mkdirSync(join(dir, "src", "lib"), { recursive: true });
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      const old = join(dir, "src", "lib", "old.ts");
+      const edited = join(dir, "scripts", "edited.mjs");
+      writeFileSync(old, "export const a = 1;\n", "utf8");
+      writeFileSync(edited, "export const b = 2;\n", "utf8");
+      const base = Date.now() - 10_000;
+      utimesSync(old, new Date(base - 5_000), new Date(base - 5_000));
+      utimesSync(edited, new Date(base - 5_000), new Date(base - 5_000));
+      assert.deepEqual(runlockEditViolations(dir, base), [], "a frozen window has no violations");
+      utimesSync(edited, new Date(base + 5_000), new Date(base + 5_000));
+      assert.deepEqual(
+        runlockEditViolations(dir, base),
+        ["scripts/edited.mjs"],
+        "the file edited DURING the window is named (BL-010)",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("p6CycleLiveDeps: resumeAccepted absent ⇒ no key (byte-identical); present ⇒ forwarded", () => {
+    assert.equal(p6CycleLiveDeps({ cycle: 2 }), undefined, "no context ⇒ the legacy byte-identical deps");
+    const accepted = [{ path: "src/generated/a.ts", source: "export const a = 1;", exports: ["a"] }];
+    assert.deepEqual(
+      p6CycleLiveDeps({ cycle: 2, resumeAccepted: accepted }),
+      { resumeAccepted: accepted },
+      "the accepted chunks ride the deps object verbatim",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W61 B3 — the recovery doors: a keyed P6 that fails leaves the project
+// `running` with a red P6 (no rejected record), which the blocked-only retry
+// used to refuse, and the gate loop used to spin to the iteration bound.
+// ---------------------------------------------------------------------------
+describe("W61 B3 - recovery doors (retry + no-progress gate)", () => {
+  it("retry reopens a red running P6; a healthy running project is untouched", async () => {
+    const done = await drainToComplete(createProject({ brief: FIXTURE_BRIEF }));
+    const red: Project = {
+      ...done,
+      status: "running",
+      currentPhase: 6,
+      hitl: null,
+      lastTest: { label: "failed", ok: false, detail: "red P6" } as never,
+      logs: [
+        ...(done.logs ?? []),
+        { ts: 1, phase: 6, level: "warn", event: "p6.tree.failure", detail: "red trail" },
+      ],
+      phases: done.phases.map((r) =>
+        r.id === 6
+          ? { ...r, status: "running" as const, gate: { passed: false, unmet: ["p6-verified"], evidenceHash: "dead", checkedAt: 1 } }
+          : r,
+      ),
+    };
+    assert.equal(isRedRunningP6(red), true, "the red running P6 shape is recognised");
+    const reopened = retry(red);
+    assert.notEqual(reopened, red, "retry actually changed the project (never a silent no-op)");
+    assert.equal(reopened.phases.find((r) => r.id === 6)?.status, "ready", "P6 is re-opened for another attempt");
+    assert.equal(reopened.hitl, null);
+    assert.equal(reopened.status, "running");
+
+    const healthy: Project = {
+      ...done,
+      status: "running",
+      currentPhase: 6,
+      lastTest: null,
+      logs: [],
+      phases: done.phases.map((r) =>
+        r.id === 6
+          ? { ...r, status: "running" as const, gate: { passed: true, unmet: [], evidenceHash: "ok", checkedAt: 1 } }
+          : r,
+      ),
+    };
+    assert.equal(isRedRunningP6(healthy), false, "a green running project is not a stall");
+    assert.equal(retry(healthy), healthy, "retry leaves a healthy project byte-identical (same reference)");
   });
 });
 
@@ -2270,6 +2536,26 @@ describe("E-25 — CLI machine contract (exit codes + envelope + doctor)", () =>
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("W61 B3 — tree-mode verify routes to the tree-run path (never RT_E_PHASE_ILLEGAL for a missing generatedSource)", async () => {
+    // A tree-mode project may carry no `generatedSource` at all; the legacy
+    // single-module path threw RT_E_PHASE_ILLEGAL ("no generatedSource"), and
+    // the CLI surfaced the ESM runner failure as RT_E_UNKNOWN. Tree mode must
+    // instead RUN the emitted tree and return an honest typed verdict.
+    const p: Project = {
+      ...createProject({ brief: FIXTURE_BRIEF }),
+      generatedTree: [
+        { path: "src/generated.ts", source: "export const duration = (ms: number): string => String(ms);\n", hash: "h1", attempt: 0 },
+      ],
+    };
+    const outcome = await verifyGeneratedSource(p);
+    assert.ok(
+      outcome.status === "passed" || outcome.status === "failed",
+      `tree-mode verify returns an honest tree verdict, not a refusal (got ${outcome.status})`,
+    );
+    assert.equal(typeof outcome.evidence, "string");
+    assert.ok(outcome.evidence.length > 0, "the tree verdict carries evidence");
   });
 
   it("emit --run: treeRun{compile,tests,run} rides the envelope; a fresh tree is VERIFIED and exits 0 (fixes/147 E-15 / 338-2)", async () => {
@@ -4566,9 +4852,21 @@ describe("W50 · 336-2 — the minted record's own packet describes the mint", (
       status: id <= 6 ? ("complete" as const) : id === 7 ? ("ready" as const) : ("locked" as const),
     })) as Project["phases"];
     p.generatedSource = "export const probe = 1;";
+    // W61 lane C (C1): the create-time ALGORITHMS attach a demo lattice +
+    // contracts ("deliver-core-workflow", entities Operator/Record/…) and a
+    // spec graph (console/oracle/spec) that the C1 core-noun bar now weighs.
+    // A fixture tree of two toy exports no longer carries those grounded
+    // nouns, so name them in the tree (the mint re-stamps the algorithms, so
+    // the grounding is re-attached on every cycle — nulling it cannot hold).
     p.generatedTree = [
       { path: "src/index.ts", source: "export const probe = 1;", hash: "h1", attempt: 0 },
       { path: "src/domain/core.ts", source: "export function deliverCoreWorkflow() { return 1; }", hash: "h2", attempt: 0 },
+      {
+        path: "src/domain/operator.ts",
+        source: "export const operatorConsole = 1;\nexport function renderOracleSpec() { return 1; }",
+        hash: "h3",
+        attempt: 0,
+      },
     ];
     p.artifacts = [{ id: "code-6", phase: 6, kind: "code", title: "P6 code", body: "export const probe = 1;" }];
     p.lastTest = null;

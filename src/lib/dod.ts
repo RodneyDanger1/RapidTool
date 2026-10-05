@@ -24,10 +24,11 @@ import { canonicalStem, fnv1a } from "./algorithms.ts";
 import { evaluatePolicy, seatLabel, seatTokenPath, type PolicySeat } from "./policy.ts";
 import {
   BRIEF_STOPWORDS,
-  briefNounHits,
+  briefFitCoverage,
+  briefFitSubstancePasses,
   briefTokens,
   buildPhase6Module,
-  identifierHits,
+  implementationIdentifierHits,
 } from "./sandbox.ts";
 
 export type GateItem = {
@@ -315,29 +316,65 @@ function resolveTreeSpecifier(spec: string, fromPath: string): string {
   return stack.join("/");
 }
 
-/** fixes/255 §P2: true when a reexport-only file's EVERY specifier resolves to
- *  another file of the SAME tree (node-style candidates: exact, extensionless
- *  → .ts/.tsx//index.ts, .js/.jsx → .ts/.tsx). A leftover job pointing outside
- *  the tree (the E-15 `./host.ts` fixture) returns false and stays a stub. */
-function reexportTargetsAllInTree(
+/** Node-style candidate paths for a relative module specifier (exact,
+ *  extensionless → .ts/.tsx//index.ts, .js/.jsx → .ts/.tsx). */
+function treeSpecifierCandidates(spec: string, fromPath: string): string[] {
+  if (!spec.startsWith("./") && !spec.startsWith("../")) return [];
+  const base = resolveTreeSpecifier(spec, fromPath);
+  const candidates = [base];
+  if (!/\.[A-Za-z0-9]+$/.test(base)) {
+    candidates.push(`${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`);
+  } else if (base.endsWith(".js")) {
+    candidates.push(`${base.slice(0, -3)}.ts`, `${base.slice(0, -3)}.tsx`);
+  } else if (base.endsWith(".jsx")) {
+    candidates.push(`${base.slice(0, -4)}.tsx`);
+  }
+  return candidates;
+}
+
+/** The tree file a relative specifier resolves to, or null (out-of-tree). */
+function resolveTreeTarget(
+  spec: string,
+  fromPath: string,
+  byPath: ReadonlyMap<string, { path: string; source: string }>,
+): { path: string; source: string } | null {
+  for (const c of treeSpecifierCandidates(spec, fromPath)) {
+    const hit = byPath.get(c);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** fixes/255 §P2 + W61 C14: true when a reexport-only file's every specifier
+ *  resolves to a REAL implementation in the same tree, transitively. A dead
+ *  re-export bridge — a chain of re-exports ending in a stub, an out-of-tree
+ *  target, or a cycle with no real base — returns false and stays a stub
+ *  (FINDINGS O-03: pure alias chains used to be exempt and passed p6-arch). */
+function reexportTargetsResolveToReal(
   file: { path: string; source: string },
-  paths: ReadonlySet<string>,
+  byPath: ReadonlyMap<string, { path: string; source: string }>,
 ): boolean {
   const specs = reexportSpecifiers(file.source);
   if (specs.length === 0) return false;
-  return specs.every((s) => {
-    if (!s.startsWith("./") && !s.startsWith("../")) return false;
-    const base = resolveTreeSpecifier(s, file.path);
-    const candidates = [base];
-    if (!/\.[A-Za-z0-9]+$/.test(base)) {
-      candidates.push(`${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`);
-    } else if (base.endsWith(".js")) {
-      candidates.push(`${base.slice(0, -3)}.ts`, `${base.slice(0, -3)}.tsx`);
-    } else if (base.endsWith(".jsx")) {
-      candidates.push(`${base.slice(0, -4)}.tsx`);
-    }
-    return candidates.some((c) => paths.has(c));
-  });
+  return specs.every((s) => targetResolvesToReal(s, file.path, byPath, new Set([file.path])));
+}
+
+function targetResolvesToReal(
+  spec: string,
+  fromPath: string,
+  byPath: ReadonlyMap<string, { path: string; source: string }>,
+  visiting: Set<string>,
+): boolean {
+  const target = resolveTreeTarget(spec, fromPath, byPath);
+  if (!target) return false;
+  if (visiting.has(target.path)) return false; // cycle with no real base
+  if (!isReexportOnlySource(target.source)) return !hasTodoMarker(target.source);
+  visiting.add(target.path);
+  const ok = reexportSpecifiers(target.source).some((s) =>
+    targetResolvesToReal(s, target.path, byPath, visiting),
+  );
+  visiting.delete(target.path);
+  return ok;
 }
 
 /** Product-complete tree: present, not skipped, no missing caps, no stub files. */
@@ -450,20 +487,21 @@ export function archTrace(p: Project): ArchTrace {
   }
   const files = tree.filter((f) => f && typeof f.source === "string" && f.source.length > 0);
   const stubs = templateStubTexts(p);
-  const paths = new Set(files.map((f) => f.path));
+  const byPath = new Map(files.map((f) => [f.path, f] as const));
   const stubFiles = files
     .filter((f) => {
       if (stubs.has(f.source)) return true; // deterministic template floor
-      // fixes/255 §P2: the reexport-only arm is target-resolution-aware — a
-      // pure reexport file is a stub ONLY when ≥1 of its targets does not
-      // resolve to another file of this tree. The engine's own assembled entry
-      // barrel (`src/generated.ts` = `export * from "./generated/chunk-0.ts"`)
-      // is machine assembly, not a leftover job; a leftover pointing outside
-      // the tree (E-15 `./host.ts`) stays a stub. An explicit TODO(E-15) /
-      // throw-TODO marker still dominates — the exemption can never rescue a
-      // file that declares itself unfinished (the barrel never carries one).
+      // fixes/255 §P2 + W61 C14: the reexport-only arm is target-resolution-and-
+      // realisation-aware — a pure reexport file is a stub unless every target
+      // chain resolves to a REAL in-tree implementation. The engine's assembled
+      // entry barrel (`src/generated.ts` = `export * from "./generated/chunk-0.ts"`)
+      // is machine assembly, not a leftover job; a leftover pointing outside the
+      // tree (E-15 `./host.ts`) stays a stub, and a DEAD re-export bridge (a pure
+      // alias chain with no real base) now does too. An explicit TODO(E-15) /
+      // throw-TODO marker still dominates — the exemption can never rescue a file
+      // that declares itself unfinished (the barrel never carries one).
       if (isReexportOnlySource(f.source) && !hasTodoMarker(f.source)) {
-        return !reexportTargetsAllInTree(f, paths);
+        return !reexportTargetsResolveToReal(f, byPath);
       }
       return isStubSource(f.source);
     })
@@ -473,8 +511,11 @@ export function archTrace(p: Project): ArchTrace {
   for (const cap of archCapabilities(p)) {
     if (cap.groups.length === 0) continue; // no identifier demand — nothing to map
     const forms = [...new Set(cap.groups.flat())];
+    // W61 C14: a capability is "carried" only by IMPLEMENTATION code — a name
+    // appearing solely in `export { … } from "./x"` does not count, so a tree
+    // of alias re-exports can no longer satisfy the architecture probe.
     const fileHits = files
-      .map((f) => ({ path: f.path, found: identifierHits(forms, f.source) }))
+      .map((f) => ({ path: f.path, found: implementationIdentifierHits(forms, f.source) }))
       .filter((h) => h.found.length > 0);
     const found = new Set<string>(fileHits.flatMap((h) => h.found));
     const allMet = cap.groups.every((g) => g.some((form) => found.has(form)));
@@ -520,14 +561,21 @@ function briefFitSource(p: Project): string {
  *  Pure and total: reads only project state. A vocabulary-free brief never
  *  reaches here (the probe passes vacuously). */
 function briefFitUnmetReason(p: Project): string {
-  const { required } = briefNounHits(p.brief);
   const source = briefFitSource(p);
-  const hits = identifierHits(required, source);
-  const missing = required.filter((t) => !hits.includes(t));
-  const tail =
-    missing.length > 0
-      ? ` (missing: ${missing.slice(0, 12).join(", ")}${missing.length > 12 ? ", …" : ""})`
+  const cov = briefFitCoverage(p.brief, source, p);
+  // W61 lane C (C1): name the CORE miss (the product nouns) and the advisory
+  // miss separately, so a failed fit names what the brief asked for — not verbs.
+  const fmt = (list: string[]): string =>
+    `${list.slice(0, 12).join(", ")}${list.length > 12 ? ", …" : ""}`;
+  const coreTail =
+    cov.missingCore.length > 0 ? ` core missing (${cov.coreHits.length}/${cov.core.length}): ${fmt(cov.missingCore)}` : "";
+  // NOTE: never use " · " here — the lesson-evidence digest splits on that
+  // separator, so a reason containing it corrupts the atomic class-clause fit.
+  const advisoryTail =
+    cov.missingAdvisory.length > 0
+      ? `; advisory missing (${cov.advisoryHits.length}/${cov.advisory.length}): ${fmt(cov.missingAdvisory)}`
       : "";
+  const tail = `${coreTail}${advisoryTail}`;
   const tree = Array.isArray(p.generatedTree) ? p.generatedTree : [];
   // The deterministic floor's exact shape: runGenerated's template contract,
   // the same signature sandbox.runGenerated admits (tree absent, source = the
@@ -765,22 +813,20 @@ export const DOD: Record<PhaseId, GateItem[]> = {
         "Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode)",
       unmetReason: briefFitUnmetReason,
       probe: (p) => {
-        const { required } = briefNounHits(p.brief);
-        if (required.length === 0) return true;
         // fixes/255 §P1: in tree mode generatedSource is the ESM BARREL
         // (`export * from …` only) — measured 0 brief hits on a fully
         // synthesized tree. Read the union of the barrel + every generatedTree
         // file: the SAME artifact the engine's pre-acceptance fit check
         // measures (codegen assembleTreeEntry). The union can only ADD hits,
         // so no verdict flips PASS→FAIL.
-        const hits = identifierHits(required, briefFitSource(p));
-        // 322 X1 (P6-C, parent pick): ½ → 0.35. The half-bar assumed
-        // entity-heavy briefs (fixes/97 kanban fixtures); prose-heavy product
-        // briefs carry flavor words no honest implementation names identifiers
-        // after. Measured honest coverage (TS-truth mask, stem-tolerant):
-        // 40–50% ⇒ 0.35 keeps ≥1 hit of margin on every measured artifact for
-        // stochastic keyed re-runs; anti-vacuity preserved (placeholders ≈ 0).
-        return hits.length >= Math.max(1, Math.ceil(required.length * 0.35));
+        //
+        // W61 lane C (C1 · R1 P0-5): the flat 0.35 count-bar let a 2-file
+        // hollow tree pass on generic words. The bar is now the hard CORE bar
+        // (ceil(core×0.6)) over the project-grounded product nouns — the
+        // contract entities / lattice jobs / spec-graph capability labels /
+        // H1 proper nouns / bold labels — see sandbox.briefNounCore. The union
+        // read is unchanged and still monotone.
+        return briefFitSubstancePasses(p.brief, briefFitSource(p), p);
       },
     },
     {
@@ -804,7 +850,19 @@ export const DOD: Record<PhaseId, GateItem[]> = {
         "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)",
       probe: (p) => {
         const t = archTrace(p);
-        return t.missing.length === 0 && t.stubFiles.length === 0;
+        if (t.present) return t.missing.length === 0 && t.stubFiles.length === 0;
+        // W61 C8 (FINDINGS O-03): an absent tree is a legitimate SKIP only on
+        // the keyless floor. When the NEWEST `p6.synthesis.*` log is a bare
+        // `attempt` with no terminal outcome recorded, a keyed synthesis dangled
+        // and landed no tree — the probe FAILS CLOSED rather than passing
+        // vacuously over exactly the under-production it exists to catch. A
+        // recorded terminal (`refused`, etc.) or no synthesis log at all (the
+        // deterministic floor) leaves the legacy pass.
+        const synthLogs = (p.logs ?? []).filter(
+          (l) => typeof l?.event === "string" && l.event.startsWith("p6.synthesis."),
+        );
+        const newest = synthLogs[synthLogs.length - 1];
+        return !(newest && newest.event === "p6.synthesis.attempt");
       },
     },
   ],

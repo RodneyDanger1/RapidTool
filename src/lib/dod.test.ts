@@ -10,11 +10,23 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { liveResearchAttemptUnavailable, recordGateInto, runGate } from "./dod.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { archTrace, liveResearchAttemptUnavailable, recordGateInto, runGate } from "./dod.ts";
 import { runUntilGate } from "./headless.ts";
 import { mintTreeRunTested } from "./codegen.server.ts";
 import { emptyProject } from "./engine.ts";
-import { buildPhase6Module } from "./sandbox.ts";
+import {
+  briefFitCoverage,
+  briefFitSubstancePasses,
+  briefNounCore,
+  briefNounHits,
+  buildPhase6Module,
+  identifierHits,
+  implementationIdentifierHits,
+  maskModuleReexports,
+} from "./sandbox.ts";
 import type { HitlDecision, PhaseId, Project } from "./types.ts";
 import type { TreeRunOutcome } from "./compile-check.server.ts";
 
@@ -163,7 +175,7 @@ describe("339-3 (W53) — p6-brief-fit names the floor state and is satisfiable 
     const item = p6BriefFitUnmet(p);
     assert.match(item?.reason ?? "", /generated source is missing the brief's required nouns/);
     assert.ok(!/deterministic floor state/.test(item?.reason ?? ""), "a real module is not the floor");
-    assert.match(item?.reason ?? "", /missing: /);
+    assert.match(item?.reason ?? "", /core missing \(/, "the state line names the missing core nouns");
   });
 
   it("keyed tree synthesis that dropped the nouns names the tree state", () => {
@@ -176,9 +188,16 @@ describe("339-3 (W53) — p6-brief-fit names the floor state and is satisfiable 
   });
 
   it("a legitimate module carrying the brief's nouns as identifiers passes (the other half)", () => {
+    // W61 C1: the core bar measures the project-grounded nouns (entities +
+    // lattice jobs), so a genuinely brief-faithful module names them all —
+    // dispatch/board/service plus the grounded tech/parts/dispatcher.
     const p = floorProject({
       generatedSource:
-        "export function dispatchBoard() { return 1; }\nexport function fieldService() { return 2; }",
+        "export function dispatchBoard() { return 1; }\n" +
+        "export function fieldService() { return 2; }\n" +
+        "export function dispatcher() { return 3; }\n" +
+        "export function techAssignments() { return []; }\n" +
+        "export function serviceParts() { return []; }",
     });
     assert.ok(
       !runGate(p, 6).unmet.some((g) => g.id === "p6-brief-fit"),
@@ -499,5 +518,157 @@ describe("346 L6 — p7-research waives a real attempted-but-unavailable live pa
       if (savedTavily === undefined) delete process.env.TAVILY_API_KEY;
       else process.env.TAVILY_API_KEY = savedTavily;
     }
+  });
+});
+// ---------------------------------------------------------------------------
+// W61 lane C - C1 (p6-brief-fit core-noun calibration, R1 P0-5) and C14
+// (p6-arch fail-closed on dead re-export bridges). Every first case is a
+// RED->GREEN pin against the measured defect; the controls pin that honest
+// trees are NOT over-blocked.
+// ---------------------------------------------------------------------------
+
+const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+const TESTRUNS_ROOT = join(REPO_ROOT, "..", "testruns");
+
+/** Load a persisted emitted Project from the sibling testruns fixtures, or null
+ *  when the fixtures are absent (frozen CI checkout) - the pin then skips. */
+function loadTestrun(rel: string): Project | null {
+  const file = join(TESTRUNS_ROOT, rel, ".rapidtool", "project.json");
+  if (!existsSync(file)) return null;
+  return JSON.parse(readFileSync(file, "utf8")) as Project;
+}
+
+const unionOf = (p: Project): string =>
+  (typeof p.generatedSource === "string" ? p.generatedSource : "") +
+  "\n" +
+  (Array.isArray(p.generatedTree) ? p.generatedTree : []).map((f) => f?.source ?? "").join("\n");
+
+describe("W61 C1 - p6-brief-fit core-noun calibration (R1 P0-5)", () => {
+  // The wave's mandated acceptance: the two hollow 2-file trees that cleared
+  // the retired flat 0.35 bar now FAIL the core bar; flower-shop still fails;
+  // the real bakery-website v2 tree PASSES.
+  const FIXTURES: { rel: string; expect: boolean }[] = [
+    { rel: "office-stock-tracker/emitted", expect: false },
+    { rel: "office-scheduler/emitted", expect: false },
+    { rel: "flower-shop-website/emitted", expect: false },
+    { rel: "bakery-website/emitted.v2", expect: true },
+  ];
+
+  it("replays the real fixtures: hollow trees fail the core bar, the real tree passes", () => {
+    let checked = 0;
+    for (const fx of FIXTURES) {
+      const p = loadTestrun(fx.rel);
+      if (!p) continue;
+      checked++;
+      assert.equal(
+        briefFitSubstancePasses(p.brief, unionOf(p), p),
+        fx.expect,
+        `${fx.rel} core bar (expected ${fx.expect ? "PASS" : "fail"})`,
+      );
+    }
+    assert.ok(checked === 0 || checked === FIXTURES.length, "fixtures resolve all-or-none");
+  });
+
+  it("the retired flat 0.35 bar passed office-stock-tracker/emitted; the core bar now fails it", () => {
+    const p = loadTestrun("office-stock-tracker/emitted");
+    if (!p) return;
+    const src = unionOf(p);
+    const { required } = briefNounHits(p.brief);
+    const oldHits = identifierHits(required, src).length;
+    assert.ok(
+      oldHits >= Math.max(1, Math.ceil(required.length * 0.35)),
+      `precondition (R1 P0-5): the flat bar passed (${oldHits} >= ceil(${required.length}x0.35))`,
+    );
+    assert.equal(briefFitSubstancePasses(p.brief, src, p), false, "the core bar fails the hollow tree");
+    const item = runGate(p, 6).unmet.find((g) => g.id === "p6-brief-fit");
+    assert.ok(item, "runGate surfaces the fit failure");
+    assert.match(item!.reason ?? "", /core missing \(/, "the state line names the missing product nouns");
+  });
+
+  it("briefNounCore grounds core in the project and partitions advisory", () => {
+    const p = loadTestrun("office-stock-tracker/emitted");
+    if (!p) return;
+    const { core, advisory } = briefNounCore(p.brief, p);
+    assert.ok(core.includes("inventory") || core.includes("stock"), "grounded product nouns are core");
+    assert.ok(core.length > 0 && advisory.length > 0, "both partitions are populated");
+    const cov = briefFitCoverage(p.brief, unionOf(p), p);
+    assert.equal(cov.need, Math.max(1, Math.ceil(cov.core.length * 0.6)), "the hard bar is ceil(core x 0.6)");
+    assert.ok(cov.missingCore.length > 0, "the hollow tree misses core nouns");
+  });
+
+  it("an honest module naming the core nouns passes (control: no over-block)", () => {
+    const brief =
+      "# Officestock - Office Supplies Inventory Tracker\n\n## Core domain\n- **Item**, **Movement**, **PurchaseRequest**.\n\n## Required features\n- **Stocktake** and **Reorder**.";
+    const { core } = briefNounCore(brief, null);
+    assert.ok(core.length > 0, "the H1/heading nouns form a core");
+    // A genuinely faithful module names every core noun.
+    const src = core.map((n) => `export function ${n}Handler() { return 1; }`).join("\n");
+    const cov = briefFitCoverage(brief, src, null);
+    assert.ok(cov.pass, `honest coverage ${cov.coreHits.length}/${cov.core.length} clears the bar`);
+  });
+});
+
+describe("W61 C14 - p6-arch fails closed on dead re-export bridges", () => {
+  const kanbanSpec: Project["implementationSpec"] = {
+    requirements: [],
+    typeSignatures: [
+      "export function createBoard(name: string): Board",
+      "export function addColumn(board: Board, title: string): Column",
+    ],
+    edgeCases: [],
+  } as unknown as Project["implementationSpec"];
+
+  const bridgeProject = (): Project =>
+    ({
+      ...emptyProject({ name: "Bridge", brief: "a kanban board" }),
+      implementationSpec: kanbanSpec,
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./impl.ts";\n', hash: "b0", attempt: 0 },
+        { path: "src/impl.ts", source: 'export { createBoard, addColumn } from "./impl2.ts";\n', hash: "b1", attempt: 0 },
+        { path: "src/impl2.ts", source: "export const nothing = 1;\n", hash: "b2", attempt: 0 },
+      ],
+    }) as Project;
+
+  it("a pure alias re-export chain no longer maps capabilities (dead bridge fails p6-arch)", () => {
+    assert.equal(
+      maskModuleReexports('export { createBoard } from "          ";').includes("createBoard"),
+      false,
+      "the re-export clause head is masked",
+    );
+    const t = archTrace(bridgeProject());
+    assert.deepEqual(t.missing.sort(), [
+      "export function addColumn(board: Board, title: string): Column",
+      "export function createBoard(name: string): Board",
+    ]);
+    assert.ok(runGate(bridgeProject(), 6).unmet.some((g) => g.id === "p6-arch"), "the bridge tree fails p6-arch");
+  });
+
+  it("the machine-assembled entry barrel over real in-tree chunks still passes (no false block)", () => {
+    const real: Project = {
+      ...emptyProject({ name: "Real", brief: "a kanban board" }),
+      implementationSpec: kanbanSpec,
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./domain/board.ts";\n', hash: "r0", attempt: 0 },
+        {
+          path: "src/domain/board.ts",
+          source:
+            "export type Board = { id: string };\n" +
+            "export type Column = { id: string };\n" +
+            "export function createBoard(name: string): Board { return { id: name }; }\n" +
+            "export function addColumn(board: Board, title: string): Column { return { id: title }; }\n",
+          hash: "r1",
+          attempt: 0,
+        },
+      ],
+    };
+    const t = archTrace(real);
+    assert.deepEqual(t.missing, [], "every capability maps to the real chunk");
+    assert.deepEqual(t.stubFiles, [], "the in-tree barrel is not a stub");
+    assert.ok(!runGate(real, 6).unmet.some((g) => g.id === "p6-arch"), "p6-arch passes");
+  });
+
+  it("a re-export clause alone is not an implementation identifier (unit)", () => {
+    assert.deepEqual(implementationIdentifierHits(["board"], 'export { board } from "./x";'), []);
+    assert.deepEqual(implementationIdentifierHits(["board"], "export function board() {}"), ["board"]);
   });
 });

@@ -211,7 +211,17 @@ function slug(s: string) {
  */
 const DELIVERY_KIND_KEYWORDS: { kind: DeliveryKind; words: string[] }[] = [
   { kind: "library", words: ["library", "package", "sdk", "npm", "module", "statistics"] },
-  { kind: "app", words: ["ui", "dashboard", "board", "desk", "portal"] },
+  // W61 C2 (R1 / SYNTHSPEC P5a/F9): real website/marketing/retail/mobile surface
+  // nouns map to the `app` kind. A brief that names one of these MUST NOT fall
+  // through to a bare default; `library` stays first so a genuine library wins.
+  {
+    kind: "app",
+    words: [
+      "ui", "dashboard", "board", "desk", "portal",
+      "site", "website", "web", "page", "pages", "screen", "screens", "tab", "tabs",
+      "menu", "catalogue", "catalog", "shop", "storefront", "retail", "mobile", "ios", "android",
+    ],
+  },
   {
     kind: "tool",
     words: ["cli", "command-line", "commandline", "terminal", "console-tool", "parse", "convert", "agent", "script"],
@@ -223,7 +233,51 @@ const DELIVERY_KIND_KEYWORDS: { kind: DeliveryKind; words: string[] }[] = [
   { kind: "service", words: ["api", "service", "webhook", "worker"] },
 ];
 
-export function deliveryKindOf(project: Pick<Project, "kind" | "brief" | "domain" | "lattice">): DeliveryKind {
+/**
+ * W61 C2: strip out-of-scope / negated text before any classifier reads the
+ * brief. A line under an "out of scope"-style heading (or carrying an inline
+ * negation) must not donate its nouns — the residual defect where a bakery
+ * brief's *"Out of scope: multi-tenant"* line matched `tenant` and typed the
+ * project real-estate (R1 BL-001). Deterministic; newlines preserved so the H1
+ * region is unaffected.
+ */
+export function stripOutOfScope(text: string): string {
+  const NEG_INLINE =
+    /\b(?:out\s+of\s+scope|not\s+(?:required|included|needed|supported|part\s+of)|no\s+longer|excluded?|excluding|non-?goals?)\b/i;
+  const OOS_HEADING =
+    /^#{1,6}\s*.*(?:out\s+of\s+scope|non-?goals?|not\s+in\s+scope|excluded|will\s+not|won'?t)/i;
+  const HEADING = /^#{1,6}\s/;
+  const out: string[] = [];
+  let inOos = false;
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    if (HEADING.test(line)) {
+      inOos = OOS_HEADING.test(line);
+      out.push(line);
+      continue;
+    }
+    if (inOos) {
+      out.push("");
+      continue;
+    }
+    // Drop only the negated SENTENCE/CLAUSE, never the whole line: an inline
+    // "… take orders, manage inventory and stock. Multi-tenant is out of scope."
+    // must keep its first sentence's nouns while losing the negated one.
+    out.push(
+      line
+        .split(/(?<=[.;!?])\s+/)
+        .map((sentence) => (NEG_INLINE.test(sentence) ? "" : sentence))
+        .join(" "),
+    );
+  }
+  // A hyphenated `multi-<scope>` qualifier is a cross-cutting scope modifier,
+  // not a domain noun ("multi-tenant"/"multi-branch" must not match `tenant`
+  // and type the project real-estate). `multifamily` (no hyphen) is untouched.
+  return out.join("\n").replace(/\bmulti-[a-z][a-z-]*\b/gi, " ");
+}
+
+export function deliveryKindOf(
+  project: Pick<Project, "kind" | "brief" | "domain" | "lattice">,
+): DeliveryKind {
   const declared = project.kind;
   if (declared !== undefined && declared !== null && (DELIVERY_KINDS as readonly string[]).includes(declared)) {
     return declared;
@@ -232,7 +286,8 @@ export function deliveryKindOf(project: Pick<Project, "kind" | "brief" | "domain
   // never stemmed forms. tokenizeWords canonicalizes, so the old stem match
   // fired on unrelated words: "packaging"→"package" (library), "field-level"→
   // "level" (game), "works"→"worker" (service) — mis-typing real runs.
-  const tokens = new Set(([project.brief, project.domain ?? "", Array.isArray(project.lattice?.jobs) ? project.lattice.jobs.join(" ") : ""].join(" ").toLowerCase().match(/[a-z0-9]+/g) ?? []));
+  // W61 C2: classify the brief WITHOUT its out-of-scope / negated lines.
+  const tokens = new Set(([stripOutOfScope(String(project.brief ?? "")), project.domain ?? "", Array.isArray(project.lattice?.jobs) ? project.lattice.jobs.join(" ") : ""].join(" ").toLowerCase().match(/[a-z0-9]+/g) ?? []));
   const hit = (h: string): boolean =>
     tokens.has(h) ||
     tokens.has(`${h}s`) ||
@@ -301,6 +356,22 @@ const DOMAIN_TERMS: Record<string, string[]> = {
     "plumber", "carpenter", "framing", "drywall", "roofing", "hvac", "permit",
     "subcontractor", "punch", "bid", "material",
   ],
+  // W61 C2 (R1): the missing web/retail/mobile registers. Deliberately narrow —
+  // only words a brief of that domain actually names (no bare "phone"/"app",
+  // which appear in marketing briefs and would hijack them). Added LAST so an
+  // existing specific register still wins a tie.
+  "web-marketing": [
+    "website", "site", "marketing", "landing", "seo", "brand", "content",
+    "blog", "catalogue", "catalog", "brochure",
+  ],
+  retail: [
+    "shop", "retail", "storefront", "checkout", "basket", "cart", "pos",
+    "till", "counter", "shelf",
+  ],
+  mobile: [
+    "mobile", "ios", "android", "tablet", "native", "touchscreen", "viewport",
+    "one-handed", "tab-bar",
+  ],
 };
 const DOMAIN_ORDER = Object.keys(DOMAIN_TERMS);
 
@@ -313,7 +384,9 @@ export function inferDomain(brief: string): string {
   // runs were mislabeled (a bakery marketing site became real-estate and its
   // P0/P7/P11 research returned rental/lease sources). A register term now only
   // fires on itself (or its plural).
-  const tokens = new Set((typeof brief === "string" ? brief : "").toLowerCase().match(/[a-z0-9]+/g) ?? []);
+  // W61 C2: an out-of-scope / negated line never donates a domain term (the
+  // "Out of scope: multi-tenant" line typed a bakery brief real-estate).
+  const tokens = new Set(stripOutOfScope(typeof brief === "string" ? brief : "").toLowerCase().match(/[a-z0-9]+/g) ?? []);
   const hit = (term: string): boolean =>
     tokens.has(term) ||
     tokens.has(`${term}s`) ||
@@ -339,13 +412,30 @@ export function inferDomain(brief: string): string {
   return best;
 }
 
+/**
+ * C3 (R1 BL-013): derive a product name from a brief without leaking raw
+ * markdown. Every stored `name` used to begin with `# ` (`"# Golden Crust
+ * Bakery"`, `"# Wildstem Florist —"`) because the H1 heading marker was taken
+ * as a token. Strip the leading heading marker / list bullet, then take the H1
+ * product name — the text BEFORE a ` — ` subtitle separator (so `"# Crumb &
+ * Bloom — Combined …"` names `"Crumb & Bloom"`), else the heading with any
+ * trailing separator removed — and cap at the first 4 WORDS (never mid-word).
+ */
 export function inferName(brief: string): string {
-  const first = brief.split(/[.\n]/)[0]?.trim() ?? "Untitled system";
-  const words = first
+  const firstLine = String(brief ?? "").split(/\r?\n/)[0] ?? "";
+  const heading = firstLine
+    .replace(/^\s*#{1,6}\s*/, "")
+    .replace(/^\s*[-*+]\s+/, "")
+    .trim();
+  const beforeSubtitle = heading.split(/\s+[—–-]\s+/)[0] ?? heading;
+  const firstSentence = beforeSubtitle.split(".")[0]?.trim() || beforeSubtitle;
+  const cleaned = firstSentence
     .replace(/^(build|create|make|design|develop)\s+/i, "")
-    .split(/\s+/)
-    .slice(0, 4);
-  return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ") || "Untitled system";
+    .replace(/[\s—–\-|:,]+$/, "")
+    .trim();
+  const words = cleaned.split(/\s+/).filter(Boolean).slice(0, 4);
+  const name = words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  return name || "Untitled system";
 }
 
 function scorecard(project: Project): FeasibilityScorecard {
@@ -2941,7 +3031,15 @@ export function hydrateProject(raw: Project, opts?: { preserveWildRun?: boolean 
       },
     ].slice(-200);
   }
-  if (filled.packet && filled.lattice && filled.specGraph && !anyRepaired && !hw.stopped) {
+  // W61 C4 (C-18): a persisted packet that is MISSING the always-rendered
+  // `## Exit criteria (DoD)` section is a STALE render (produced by an older
+  // truncation that dropped it). Re-stamp it rather than shipping the stale
+  // bytes — the same staleness-repair class as A1-21.
+  const packetStale =
+    typeof filled.packet === "string" &&
+    filled.packet.length > 0 &&
+    !filled.packet.includes("## Exit criteria (DoD)");
+  if (filled.packet && filled.lattice && filled.specGraph && !anyRepaired && !hw.stopped && !packetStale) {
     // A1-21: the same flag list the repair log above used — every repair
     // re-stamps (attachAlgorithms) instead of shipping a stale packet.
     return filled;
@@ -3085,29 +3183,33 @@ function researchBriefNouns(
     .slice(0, cap);
 }
 
-/**
- * Build ONE deterministic, pollution-guarded research query for a project.
- * `topic` is the phase-specific tail ("architecture feasibility 2026" for P0,
- * a phase title for the crew researcher, …). Exported so the headless live
- * overlay and the crew researcher build byte-identical queries to the engine's
- * corpus entries (no mirror drift — fixes/128_x6 single-sources the builder).
- */
-export function researchQueryText(project: Project, topic: string): string {
-  const words: string[] = [];
-  const seen = new Set<string>();
-  const add = (w: string): void => {
-    const t = w.trim().toLowerCase();
-    if (t && !seen.has(t)) {
-      seen.add(t);
-      words.push(t);
-    }
-  };
+/** W61 C9 (PR-17): at most this many domain qualifiers follow the intent. A bag
+ *  of ~15 domain nouns used to LEAD the query, so the bakery/flower runs were
+ *  grounded in property rental/lease documents (BL-001 recurrence). */
+export const RESEARCH_MAX_QUALIFIERS = 3;
+
+/** W61 C9: deterministic research qualifiers (≤ cap), most specific first. The
+ *  brief's own frequency-ranked content nouns lead (product vocabulary), then
+ *  the domain register/domain words guarantee a category signal when the brief
+ *  yields none, then distinctive name fragments. Pure; collision-free by
+ *  construction through the shared `seen` set. */
+function researchQueryQualifiers(project: Project, cap: number): string[] {
   const name = (project.name ?? "").trim();
   const domain = (project.domain ?? "").trim();
   const brief = (project.brief ?? "").trim();
   const nameFragments = new Set(researchNameTokens(name));
-
-  // 1) Domain register + domain words (the product category, guaranteed).
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (w: string): void => {
+    const t = w.trim().toLowerCase();
+    if (!t || seen.has(t) || RESEARCH_STOPWORDS.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  // 1) The product's actual vocabulary (frequency-ranked) — the most on-intent
+  //    qualifiers, and the ones the domain bag used to crowd out.
+  for (const w of researchBriefNouns(brief, cap, nameFragments)) add(w);
+  // 2) Domain register + domain words — the guaranteed category fallback.
   const domainKey = domain.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const register = RESEARCH_DOMAIN_REGISTER[domainKey];
   if (register) {
@@ -3115,25 +3217,88 @@ export function researchQueryText(project: Project, topic: string): string {
     for (const w of domainKey.split(" ")) add(w);
   } else {
     for (const w of researchNameTokens(domain)) {
-      if (!RESEARCH_BRAND_NOISE.has(w) && !RESEARCH_STOPWORDS.has(w)) add(w);
+      if (!RESEARCH_BRAND_NOISE.has(w)) add(w);
     }
   }
-
-  // 2) Brief register padding — the product's actual vocabulary.
-  for (const w of researchBriefNouns(brief, 8, nameFragments)) add(w);
-
-  // 3) Distinctive name fragments only (brand/dictionary noise already dropped).
-  for (const w of nameFragments) {
-    if (!RESEARCH_BRAND_NOISE.has(w) && !RESEARCH_STOPWORDS.has(w)) add(w);
-  }
-
-  if (words.length === 0) {
+  // 3) Distinctive name fragments only (brand/dictionary noise dropped).
+  for (const w of nameFragments) if (!RESEARCH_BRAND_NOISE.has(w)) add(w);
+  if (out.length === 0) {
     // Last-resort floor — never empty, never fabricated.
     for (const w of nameFragments) add(w);
-    if (words.length === 0) add(domainKey || "product");
+    if (out.length === 0) add(domainKey || "product");
   }
-  const topicTail = topic.trim();
-  return topicTail ? `${words.join(" ")} ${topicTail}` : words.join(" ");
+  return out.slice(0, cap);
+}
+
+/**
+ * Build ONE deterministic, pollution-guarded research query for a project.
+ * `topic` is the phase-specific intent ("architecture feasibility 2026" for P0,
+ * a phase title for the crew researcher, …).
+ *
+ * W61 C9 (PR-17): the phase INTENT leads. It is the subject; the project's
+ * domain is only a qualifier (D3's researcher rule). The pre-fix builder put
+ * the domain noun bag first and the intent last, so a bakery brief whose
+ * classifier mislabeled it real-estate researched "property rental tenant lease
+ * … architecture feasibility" and returned rental/lease category pages (BL-001).
+ * Exported so the headless live overlay and the crew researcher build
+ * byte-identical queries to the engine's corpus entries (no mirror drift —
+ * fixes/128_x6 single-sources the builder).
+ */
+export function researchQueryText(project: Project, topic: string): string {
+  const intent = String(topic ?? "").trim();
+  const qualifiers = researchQueryQualifiers(project, RESEARCH_MAX_QUALIFIERS);
+  return [intent, ...qualifiers].filter((w) => w.length > 0).join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// W61 C9 (PR-17) — deterministic off-intent research filter.
+//
+// The query fix above stops the domain bag LEADING, but a model/back-end can
+// still return a business-domain CATEGORY page (rent/lease/tenant listings) for
+// an ENGINEERING phase. The engine's corpus must not ground P0 architecture /
+// P11 tooling work in a listings page. Pure + deterministic (no LLM, no
+// network): the blocklist applies only when the phase intent is engineering,
+// matches the term in the result's title or URL (where category pages name it),
+// and keeps a page that is itself about building software (a tutorial that
+// merely mentions the domain term). The researcher persona flags the same class
+// (D3); this is the engine-side deterministic drop.
+// ---------------------------------------------------------------------------
+
+/** Engineering/feasibility intent markers — the blocklist only applies under these. */
+const ENGINEERING_INTENT_TERMS =
+  /\b(architecture|feasibilit\w*|api|apis|sdk|software|developer|development|framework|implementation|programming|database|cloud|backend|frontend|library|libraries|tooling|tools|stack|code|coding|engineering|augmentation|integration)\b/i;
+
+/** Off-intent business-domain CATEGORY terms (listing/marketplace pages). */
+const OFF_INTENT_RESULT_TERMS =
+  /\b(rental|rentals|rent|renting|lease|leases|tenant|tenants|landlord|landlords|apartment|apartments|realtor|mortgage|escrow|condo|condos|duplex|zillow|trulia|hotpads|rentcafe|rightmove|zoopla)\b/i;
+
+/** Minimal structural shape the filter reads (a research finding or any subset). */
+export type ResearchResultLike = { title?: unknown; url?: unknown; content?: unknown };
+
+/** W61 C9: is one result off-intent for the given phase topic? */
+export function isOffIntentResearch(topic: string, item: ResearchResultLike): boolean {
+  const intent = String(topic ?? "");
+  if (!ENGINEERING_INTENT_TERMS.test(intent)) return false;
+  const title = String(item?.title ?? "");
+  const url = String(item?.url ?? "");
+  const content = String(item?.content ?? "");
+  if (!OFF_INTENT_RESULT_TERMS.test(`${title} ${url}`)) return false;
+  // Keep a genuinely software-building page; drop the listing/category page.
+  return !ENGINEERING_INTENT_TERMS.test(`${title} ${content}`);
+}
+
+/** W61 C9: partition results into accepted / dropped, preserving input order. */
+export function filterOffIntentResearch<T extends ResearchResultLike>(
+  topic: string,
+  items: readonly T[],
+): { accepted: T[]; dropped: T[] } {
+  const accepted: T[] = [];
+  const dropped: T[] = [];
+  for (const item of items) {
+    if (isOffIntentResearch(topic, item)) dropped.push(item);
+    else accepted.push(item);
+  }
+  return { accepted, dropped };
 }
 
 /** Phase-topic tail per research phase (deterministic; only research phases carry a tail). */
@@ -3187,9 +3352,12 @@ async function fetchResearch(
   let provider: string | null = null;
   let unavailable = false;
   try {
-    const result = await research(researchQueryFor(project, phase));
+    const query = researchQueryFor(project, phase);
+    const result = await research(query);
     if (result && result.ok === true && (result.items ?? []).length > 0) {
-      items = result.items as ResearchFinding[];
+      // W61 C9 (PR-17): drop off-intent category pages (rent/lease/tenant
+      // listings for an engineering phase) before they earn the corpus.
+      items = filterOffIntentResearch(query, result.items as ResearchFinding[]).accepted;
       // M-01: remember which backend actually served the findings (for project.research).
       provider = result.provider ?? null;
     } else if (!result || result.ok !== true) {
@@ -3636,11 +3804,27 @@ export async function deepenResearch(
       artifacts = [...artifacts, a];
     }
   }
+  // W61 C6 (R1 BL-011 residual / E3 OOS-6): refuse an EMPTY-CORPUS deepen before
+  // it stamps anything. engine.deepenResearch used to stamp meta.liveUnavailable
+  // and re-record the phase gate, and the p7-research probe WAIVES on that flag
+  // — heaping a FAILED gate to PASS with no corpus. The 346-T2 fix guarded only
+  // the store.ts wrapper; the CLI `deepen` verb shares this engine seam, so the
+  // guard belongs HERE. A deepen that lands findings (or an idempotent re-run
+  // over an existing corpus) is unaffected.
+  if ((next.research?.length ?? 0) === 0) {
+    const err = new Error(
+      "Live research returned no findings — nothing to deepen; the phase gate was not re-recorded.",
+    ) as Error & { code?: string };
+    err.code = "RT_E_RESEARCH_UNAVAILABLE";
+    throw err;
+  }
   // 99 §6 (fixes/128_x6): liveUnavailable is the explained dead-end flag and
   // must never coexist with a corpus that landed — a deepen that brings real
   // findings in clears a stale flag from an earlier failed attempt, and a
   // deepen that really ran an LLM narrative stamps the honest route (E-14).
-  if (res.unavailable && res.items.length === 0) {
+  // (With the empty-corpus refusal above, this stamp is now unreachable from a
+  // deepen — an unavailable fetch with no corpus throws, never commits.)
+  if (res.unavailable && res.items.length === 0 && (next.research?.length ?? 0) === 0) {
     next = { ...next, meta: { ...(next.meta ?? {}), liveUnavailable: true } };
   } else if (res.items.length > 0 && next.meta?.liveUnavailable === true) {
     const meta = { ...next.meta };

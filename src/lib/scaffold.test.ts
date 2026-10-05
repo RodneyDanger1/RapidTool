@@ -1917,3 +1917,126 @@ describe("A3-f07 / W-14 — default emitted-UI generator (real fields + interact
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// W346 lane A - A4 brief-driven website shell pin.
+// ---------------------------------------------------------------------------
+describe("W346-A4 brief-driven website shell", () => {
+  function parsesTsx(source: string): boolean {
+    const out = ts.transpileModule(source, {
+      fileName: "console.tsx",
+      reportDiagnostics: true,
+      compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    });
+    return (out.diagnostics ?? []).filter((d) => d.category !== ts.DiagnosticCategory.Message).length === 0;
+  }
+
+  it("a generated render* export yields a multi-section shell, calls it, and strips the H1 markdown", () => {
+    const p: Project = {
+      ...seedProject({ name: "# Wildstem Florist -", kind: "app" }),
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./generated/render-home.ts";\n', hash: "h0", attempt: 0 },
+        {
+          path: "src/generated/render-home.ts",
+          source: 'export function renderHome(): string { return "Wildstem Florist"; }\n',
+          hash: "h1",
+          attempt: 0,
+        },
+      ],
+      specGraph: {
+        nodes: [
+          { id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" },
+          { id: "job-order", file: "src/jobs/order.ts", purpose: 'Implement job "order" against the contract', dependsOn: [], owner: "implementer" },
+          { id: "job-deliver", file: "src/jobs/deliver.ts", purpose: 'Implement job "deliver" against the contract', dependsOn: [], owner: "implementer" },
+        ],
+        order: ["ui", "job-order", "job-deliver"],
+      },
+      lattice: {
+        domain: "retail",
+        jobs: ["order", "deliver", "subscribe"],
+        entities: ["home", "bouquet", "occasion"],
+        constraints: [],
+        nodes: [],
+        complexity: 1,
+      },
+      contracts: {
+        entities: [
+          { name: "home", fields: [] },
+          { name: "bouquet", fields: [] },
+          { name: "occasion", fields: [] },
+        ],
+        endpoints: [],
+      },
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.ok(ui.includes("<section key={p.id}>"), "a section per page (rendered from the pages map)");
+    assert.ok(
+      (ui.match(/\{ id: "/g) ?? []).length >= 3,
+      `at least 3 briefed pages (got ${(ui.match(/\{ id: "/g) ?? []).length})`,
+    );
+    assert.ok(ui.includes("<nav>"), "a nav from the page titles");
+    assert.ok(/generated\.renderHome\(\)/.test(ui), "calls the real generated render export");
+    assert.ok(!ui.includes("# Wildstem"), "the H1 markdown is stripped");
+    assert.ok(ui.includes('{"Wildstem Florist"}'), "the H1 is the display name");
+    assert.ok(!ui.includes("<canvas"), "no canvas for a website brief");
+    assert.ok(parsesTsx(ui), "the emitted shell parses as TSX");
+  });
+
+  it("a param-bearing render export still yields the multi-section shell but is never called with fabricated args", () => {
+    const p: Project = {
+      ...seedProject({ name: "Badge Shop", kind: "app" }),
+      generatedSource: "",
+      generatedTree: [
+        { path: "src/generated.ts", source: 'export * from "./generated/render-badge.ts";\n', hash: "h0", attempt: 0 },
+        {
+          path: "src/generated/render-badge.ts",
+          source: 'export function renderBadge(changes: unknown[]): string { return String(changes.length); }\n',
+          hash: "h1",
+          attempt: 0,
+        },
+      ],
+      specGraph: {
+        nodes: [{ id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces", dependsOn: [], owner: "implementer" }],
+        order: ["ui"],
+      },
+      lattice: { domain: "retail", jobs: [], entities: ["badge"], constraints: [], nodes: [], complexity: 1 },
+      contracts: { entities: [{ name: "badge", fields: [] }], endpoints: [] },
+    };
+    const ui = bodyOf(scaffoldProject(p), "src/ui/console.tsx");
+    assert.ok(ui.includes("<section key={p.id}>"), "the multi-section shell is used");
+    assert.ok(!/generated\.renderBadge\(/.test(ui), "never calls a render export it cannot supply args for");
+    assert.ok(parsesTsx(ui), "the emitted shell parses as TSX");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W346 lane A - A10 README manifest honesty (specRows filtered to disk).
+// ---------------------------------------------------------------------------
+describe("W346-A10 README manifest honesty", () => {
+  it("a declared-but-unemitted job is NOT in 'What ships'; it is in 'Declared, NOT emitted'", () => {
+    const result = scaffoldProject({
+      ...fullRun(),
+      generatedTree: [
+        { path: "src/generated.ts", source: "export function declared() { return 2; }\n", hash: "h-ok", attempt: 0 },
+      ],
+    });
+    const readme = bodyOf(result, "README.md");
+    const declaredAt = readme.indexOf("### Declared, NOT emitted");
+    const ships = readme.slice(readme.indexOf("## What ships in this scaffold"), declaredAt);
+    const declared = readme.slice(declaredAt, readme.indexOf("## Phase rail"));
+    assert.ok(declared.length > 0, "the declared-not-emitted sub-table renders");
+    for (const label of ["dispatch", "reroute", "scan"] as const) {
+      assert.ok(
+        !ships.includes(`\`src/jobs/${label}.ts\``),
+        `${label}.ts is NOT advertised as shipping (no file on disk)`,
+      );
+      assert.ok(
+        declared.includes(`\`src/jobs/${label}.ts\``),
+        `${label}.ts IS listed under Declared, NOT emitted`,
+      );
+      assert.ok(!okFiles(result).some((f) => f.path === `src/jobs/${label}.ts`), `${label}.ts is truly absent`);
+    }
+  });
+});
+

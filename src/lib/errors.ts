@@ -115,6 +115,41 @@ export const ERROR_CODES = [
   // keeps the observed size and the effective cap. Append-only; consumers match
   // string literals, never array position.
   "RT_E_IMPORT_TOO_LARGE",
+  // W61 lane C (C1): the brief-fit substance floor. A generated tree can pass
+  // the shallow arch/brief probes while shipping a hollow skeleton (a couple
+  // of files, alias-only modules) that does not substantively answer the
+  // brief. This code names that class — a tree whose core-noun coverage is
+  // empty or only connective prose, NOT one that merely trips a raw count.
+  // Append-only; consumers match string literals, never array position.
+  "RT_E_SUBSTANCE_EMPTY",
+  // W61 lane C (C1): the plan-underproduction refusal. The brief demands more
+  // deliverable surface (features/entities/artifacts) than the run planned or
+  // emitted — the plan is under-produced relative to the brief, named
+  // explicitly rather than sealed as COMPLETE. Append-only; consumers match
+  // string literals, never array position.
+  "RT_E_PLAN_UNDERPRODUCED",
+  // W61 P0 (PR-03): the five defect-class codes the prevention guards already
+  // reference by `expectedCode` (scripts/guards/guard-registry.json,
+  // scripts/guards/*.mjs, scripts/prevention/replay-harness.mjs). They were
+  // CONSUMED as strings but absent from this registry, so AGENTS.md's "every
+  // surfaced failure carries a code from ERROR_CODE_DOC" was aspirational for
+  // them. Registering them is additive-only; consumers match string literals,
+  // never array position.
+  //   - DUPLICATE_EXPORT: a barrel `export *` re-exports one member from two
+  //     providers (TS2308) — the bfo cross-chunk collision.
+  //   - USE_BEFORE_DECL: a block-scoped binding is read in another generated
+  //     module before its declaration (TS2448) — the mobile TDZ.
+  //   - MONEY_SEMANTICS: a money-named/doc'd export accumulates a quantity with
+  //     no price/unit-cost operand — wrong arithmetic, gate-green.
+  //   - README_PARITY: an emitted README "What ships" manifest row names a path
+  //     that is not on disk.
+  //   - SRC_EDITED_DURING_RUN: `src/**`/`scripts/**` changed after the run began
+  //     (RUNLOCK/BL-010) — the run's own evidence is suspect.
+  "RT_E_DUPLICATE_EXPORT",
+  "RT_E_USE_BEFORE_DECL",
+  "RT_E_MONEY_SEMANTICS",
+  "RT_E_README_PARITY",
+  "RT_E_SRC_EDITED_DURING_RUN",
 ] as const;
 
 /**
@@ -595,5 +630,47 @@ export const ERROR_CODE_DOC: Record<ErrorCode, { meaning: string; agentAction: s
       "An import payload exceeded the paste-size cap (in characters) before any parse work — a hostile or corrupt paste the tool refuses to allocate.",
     agentAction:
       "Shrink the payload, or — only for a byte source that already holds it (the file loader) — raise the cap via importProject(…, { maxChars }); never parse an unbounded paste.",
+  },
+  RT_E_SUBSTANCE_EMPTY: {
+    meaning:
+      "A generated run/tree carries no substantive coverage of the brief — its core-noun hits are empty or only connective prose, even though a shallow file/arch count may have passed.",
+    agentAction:
+      "Do not treat the run as product-complete: read the substance census (core-noun hits, real vs stub/alias modules), re-synthesize the missing surface, and re-run; never lower the bar to make a hollow tree pass.",
+  },
+  RT_E_PLAN_UNDERPRODUCED: {
+    meaning:
+      "The brief demands more deliverable surface (features/entities/artifacts) than the plan produced — the run planned or emitted fewer substantively-covered items than the brief requires.",
+    agentAction:
+      "Read the per-brief requirement census, expand synthesis to cover the named deliverables, and re-run; never seal under-production as COMPLETE or trim the brief to match a thin plan.",
+  },
+  RT_E_DUPLICATE_EXPORT: {
+    meaning:
+      "A generated barrel re-exports the SAME member from two providers (TypeScript TS2308 / a duplicate export) — the module collides at load, not merely at typecheck.",
+    agentAction:
+      "Resolve the collision through the frozen export registry (one canonical provider per name) or refuse the offending chunk — never drop the export that satisfies a required signature to silence the error, and never rewrite the barrel by hand.",
+  },
+  RT_E_USE_BEFORE_DECL: {
+    meaning:
+      "A block-scoped binding is read in a generated module before its declaration (TypeScript TS2448) — the tree loads into a temporal-dead-zone error even when the per-chunk check passed.",
+    agentAction:
+      "Run the deterministic tree normalizer's dependency order / pure store hoist; if the read cannot be ordered without changing semantics, refuse with the bounded repair — never reorder a side-effecting declaration.",
+  },
+  RT_E_MONEY_SEMANTICS: {
+    meaning:
+      "A money-named or money-documented export accumulates a quantity (qty/quantity/count) with no price/unit-cost operand — arithmetic that is syntactically valid and brief-worded but returns the wrong amount.",
+    agentAction:
+      "Re-derive the helper from the entity's price field, or run the one bounded money-semantics repair; never accept the quantity-sum as a green result, and never let a deterministic validator pass arithmetic it did not measure.",
+  },
+  RT_E_README_PARITY: {
+    meaning:
+      "An emitted README's \"What ships in this scaffold\" manifest lists a path that does not exist on disk — the artifact contradicts itself about its own contents.",
+    agentAction:
+      "Filter the manifest rows to the files actually emitted and render an explicit \"declared, NOT emitted\" sub-table for the rest; never leave a manifest row that reads as shipped when the file is absent.",
+  },
+  RT_E_SRC_EDITED_DURING_RUN: {
+    meaning:
+      "A run observed `src/**` (or `scripts/**`) modified after the run began (RUNLOCK / BL-010) — the run's build artifacts and verdicts were produced against a tree that changed underneath it.",
+    agentAction:
+      "Discard the suspect run's evidence: stop the run, name the changed file(s), re-run against the frozen tree; never treat a concurrently-edited run as a clean measurement.",
   },
 };

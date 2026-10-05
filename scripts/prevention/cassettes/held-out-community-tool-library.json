@@ -1,0 +1,21 @@
+{
+  "slug": "held-out-community-tool-library",
+  "heldOut": true,
+  "provenance": "PR-25 held-out brief (R-08 anti-overfitting). NOT one of the seven historical testruns projects and NOT referenced by any guard fixture; it exists so the classifier and the replay harness cannot be tuned to the seven known briefs.",
+  "briefFile": null,
+  "brief": "# Rivertown Tool Library — Member Lending Tracker\n\n## What this is\nA small community tool library lets members borrow shared tools (drills, ladders, garden equipment) instead of buying them. Volunteers run the desk and keep the inventory honest.\n\n## Users\n- **Member** — browse the catalogue and reserve a tool.\n- **Volunteer** — check tools in and out, record damage.\n- **Coordinator** — manage the catalogue and overdue loans.\n\n## Core domain\n- **Tool**: id, name, category, condition, replacement cost (integer pence), loan length, active.\n- **Loan**: id, tool, member, checked out at, due at, returned at, status (Reserved | Out | Returned | Overdue).\n- **Member**: id, name, email, standing (Good | Restricted), join date.\n\n## Required features\n1. **Catalogue** — searchable, filterable by category and availability; each row shows condition and due-back date.\n2. **Reserve a tool** — reserve an available tool; refuse if already out.\n3. **Check out / in** — volunteer records a loan and its return; overdue loans are flagged.\n4. **Damage report** — record a damaged return with a note and a replacement-charge estimate in pence.\n5. **Overdue dashboard** — loans past due, sorted by lateness; a member with overdue tools cannot reserve another.\n\n## Non-functional requirements\n- Desktop-first, accessible tables and forms.\n- Deterministic lending logic separated from UI for unit testing.\n- Local persistence; no external services required.\n\n## Explicitly out of scope\n- Payment processing or online fines.\n- Multi-branch / multi-tenant support.\n- Barcode or RFID scanning.\n",
+  "persisted": {
+    "name": null,
+    "domain": null,
+    "kind": null
+  },
+  "expected": {
+    "domain": "custom-software",
+    "kind": "app",
+    "name": "Rivertown Tool Library",
+    "incidents": []
+  },
+  "trees": [],
+  "historicalDefects": [],
+  "failureSignatures": []
+}

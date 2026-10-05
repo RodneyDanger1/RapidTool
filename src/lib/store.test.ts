@@ -65,6 +65,13 @@ const { clearStall, peekStall, setStallLatch } = await import("./rt-client.ts");
 await new Promise((r) => setTimeout(r, 10));
 
 beforeEach(() => {
+  // Test hygiene: several tests save/restore DEEPSEEK_API_KEY with
+  // `process.env.K = savedKey`; when the ambient value was absent (keyless, the
+  // wave contract) that assigns the STRING "undefined", which reads as a
+  // configured key and flips emptyProject's enforceDod default to true for
+  // later tests. Normalize any such leak back to absent so the suite is
+  // deterministically keyless.
+  if (process.env.DEEPSEEK_API_KEY === "undefined") delete process.env.DEEPSEEK_API_KEY;
   useRapid.setState({ projects: [], activeId: null, hydrated: true, autopilot: false, projectTombstones: [] });
 });
 
@@ -122,6 +129,12 @@ function projectAtGate(
   };
   return {
     ...p,
+    // Pin the advisory default: `emptyProject`'s enforceDod is keyed-env
+    // dependent (engine.keyedDeepSeekConfigured), so a stray DEEPSEEK_API_KEY
+    // in the test env would otherwise flip these HITL-mechanics fixtures into
+    // Hard-DoD and make C5's legit refusal turn them red. Tests that exercise
+    // Hard-DoD set enforceDod explicitly after the spread.
+    enforceDod: false,
     phases,
     currentPhase: phase,
     status: "awaiting_hitl" as const,
@@ -3181,4 +3194,33 @@ test("346 P2-6: a stall latch owned by another project does not block this proje
     clearStall();
     process.env.DEEPSEEK_API_KEY = savedKey;
   }
+});
+
+// ---------------------------------------------------------------------------
+// W61 lane C - C5: under Hard DoD (enforceDod) an approve may not advance a gate
+// with unmet criteria (R1 BL-012: approve --seat autopilot advanced a P6 gate
+// with 3 unmet). An explicit `force` override remains the honest escape.
+// ---------------------------------------------------------------------------
+test("W61 C5: under enforceDod, approve refuses to advance a gate with unmet criteria", () => {
+  const seed = projectAtGate(4);
+  const p = install({ ...seed, enforceDod: true, artifacts: [] });
+  assert.equal(runGate(current(p.id), 4).pass, false, "precondition: the P4 gate is red");
+  const res = useRapid.getState().approve(p.id);
+  assert.equal(res.ok, false, "the bare approve is refused");
+  if (!res.ok) assert.equal(res.code, "RT_E_GATE_PENDING");
+  const after = current(p.id);
+  assert.equal(after.currentPhase, 4, "the cursor did not advance past the red gate");
+  assert.ok(
+    after.artifacts.some((a) => a.kind === "docs" && a.title.startsWith("Hard DoD block")),
+    "the hard-DoD block is stamped for evidence",
+  );
+  assert.equal(after.decisions.length, 0, "no approval row was fabricated");
+});
+
+test("W61 C5: with enforceDod off, the same approve still advances (advisory semantics unchanged)", () => {
+  const seed = projectAtGate(4);
+  const p = install({ ...seed, enforceDod: false, artifacts: [] });
+  const res = useRapid.getState().approve(p.id);
+  assert.equal(res.ok, true, "advisory mode is unchanged");
+  assert.equal(current(p.id).currentPhase, 5);
 });

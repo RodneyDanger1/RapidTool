@@ -11,10 +11,13 @@
 //      (fail loudly if the markers move — never silently skip);
 //   2. write fixture `results` + gate logs into a temp dir;
 //   3. invoke the program exactly as gate.sh does:
-//      node - results startMs double tclog lintlog s1 l1 s2 l2 bldlog
+//      node - results startMs double tclog lintlog s1 l1 s2 l2 bldlog prevlog quarantine
 //   4. assert the four cases A/B/C/D below.
 //
-// Case A is RED at HEAD (the P1 proof) and green after the exit-condition fix.
+// The stage set mirrors gate.sh's real `run` sequence, including the PR-26
+// `prevention` stage (its JSON fields ok/missed/pending/skipped/count/countFloor
+// are what the program parses). A fixture that omits a real stage would spell
+// that stage's exit as 1 (missing ⇒ red) and no longer describe an all-green run.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -27,7 +30,12 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const GATE_SH = path.join(HERE, "gate.sh");
 
-const GATE_IDS = ["typecheck", "lint", "assertionGaps", "testsScripts", "testsLib", "build"];
+const GATE_IDS = ["typecheck", "lint", "assertionGaps", "prevention", "testsScripts", "testsLib", "build"];
+
+// The PR-26 prevention stage's two shapes, exactly as `verify-prevention.mjs`
+// prints them (one JSON object on the last stdout line).
+const PREVENTION_GREEN = JSON.stringify({ ok: true, guards: 15, count: 15, countFloor: 15, missed: [], pending: [], skipped: [] });
+const PREVENTION_RED = JSON.stringify({ ok: false, guards: 15, count: 15, countFloor: 15, missed: [], pending: ["C-04"], skipped: [] });
 
 // ---------------------------------------------------------------------------
 // gate.sh program extraction — the heredoc between `<<'NODE'` and a line `NODE`.
@@ -84,6 +92,10 @@ function runVerdict({ exits, double = false, logs = {}, quarantine = false, env 
   const s2 = double ? logPath("testsScripts2.log", "") : "";
   const l2 = double ? logPath("testsLib2.log", "") : "";
   const buildLog = logPath("build.log", "");
+  // PR-26: the prevention stage runs for real in gate.sh; a case that does not
+  // name it defaults to the legitimately-green 15/15 JSON, so an "all green"
+  // simulation is genuinely all-green.
+  const preventionLog = logPath("prevention.log", PREVENTION_GREEN);
 
   const program = extractVerdictProgram();
   const startMs = String(Date.now());
@@ -101,6 +113,7 @@ function runVerdict({ exits, double = false, logs = {}, quarantine = false, env 
       s2,
       l2,
       buildLog,
+      preventionLog,
       quarantine ? "1" : "0",
     ],
     { input: program, encoding: "utf8", env: { ...process.env, ...env } },
@@ -168,6 +181,14 @@ test("C: all gates green → ok:true, exit 0", () => {
   assert.equal(verdict.ok, true);
   assert.deepEqual(verdict.hardFails, []);
   assert.deepEqual(verdict.flakes, []);
+  // PR-26: the prevention stage is part of the all-green simulation and its
+  // parsed two-signal fields are green.
+  assert.equal(verdict.gates.prevention.ok, true, "the prevention stage is green");
+  assert.deepEqual(verdict.gates.prevention.missed, []);
+  assert.deepEqual(verdict.gates.prevention.pending, []);
+  assert.deepEqual(verdict.gates.prevention.skipped, []);
+  assert.equal(verdict.gates.prevention.count, 15);
+  assert.equal(verdict.gates.prevention.countFloor, 15);
 });
 
 // ---------------------------------------------------------------------------
@@ -359,4 +380,35 @@ test("F: exit-0 leg with zero '# pass' lines → ok:false, exit 1 (no green off 
     verdict.hardFails.some((n) => n.startsWith("testsScripts (exit 0 but zero '# pass' lines")),
     `hardFails must name the silent leg; got ${JSON.stringify(verdict.hardFails)}`,
   );
+});
+
+// ---------------------------------------------------------------------------
+// L · PR-26 — the prevention stage's failure semantics. A non-green prevention
+// stage (missed/pending/skipped/count-below-floor) is a red NON-TEST gate: the
+// whole verdict is ok:false + exit 1 and the parsed two-signal fields name the
+// outstanding guards. Missing/unparseable likewise never reads green.
+// ---------------------------------------------------------------------------
+test("L: a non-green prevention stage (pending guard) → ok:false, exit 1, reason named", () => {
+  const { status, verdict } = runVerdict({
+    exits: { prevention: 1 },
+    logs: { "prevention.log": PREVENTION_RED },
+  });
+  assert.equal(status, 1, "a red prevention stage fails the whole gate");
+  assert.equal(verdict.ok, false, "the verdict is red");
+  assert.equal(verdict.gates.prevention.ok, false, "the red stage is recorded");
+  assert.deepEqual(verdict.gates.prevention.pending, ["C-04"], "the outstanding guard is named");
+  assert.deepEqual(verdict.gates.prevention.missed, []);
+  assert.deepEqual(verdict.gates.prevention.skipped, []);
+  assert.equal(verdict.gates.prevention.count, 15);
+  assert.equal(verdict.gates.prevention.countFloor, 15);
+});
+
+test("L2: a prevention stage with no parseable verdict line is still red (never silently green)", () => {
+  const { status, verdict } = runVerdict({
+    exits: { prevention: 1 },
+    logs: { "prevention.log": "harness crashed before printing a verdict\n" },
+  });
+  assert.equal(status, 1, "an unparseable prevention log cannot read green");
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.gates.prevention.ok, false);
 });

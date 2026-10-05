@@ -143,6 +143,50 @@ export function jitteredBackoffDelayMs(
   return Math.floor(cap * clamped);
 }
 
+/**
+ * W61 lane D (D4 / research/deepseek-api.md §5, "Parser contract for the build
+ * agents"): the documented `choices[0].finish_reason` taxonomy —
+ * `stop | length | content_filter | tool_calls | insufficient_system_resource`.
+ * `content_filter` is a NON-RETRY refusal; `insufficient_system_resource` is a
+ * transient capacity interruption (retry with backoff); `length` is truncation.
+ * Unknown/absent → "other". Pure; never throws.
+ */
+export type FinishReasonClass =
+  | "stop"
+  | "length"
+  | "content_filter"
+  | "tool_calls"
+  | "insufficient_system_resource"
+  | "other";
+
+export function classifyFinishReason(reason: unknown): FinishReasonClass {
+  switch (reason) {
+    case "stop":
+    case "length":
+    case "content_filter":
+    case "tool_calls":
+    case "insufficient_system_resource":
+      return reason;
+    default:
+      return "other";
+  }
+}
+
+/** The `finish_reason` of a raw 200 body, or null when unreadable/absent. Pure. */
+export function finishReasonOf(rawBody: string): FinishReasonClass | null {
+  if (typeof rawBody !== "string" || rawBody.trim() === "") return null;
+  try {
+    const body: unknown = JSON.parse(rawBody);
+    if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+    const choices = (body as { choices?: unknown }).choices;
+    if (!Array.isArray(choices)) return null;
+    const first = choices[0] as { finish_reason?: unknown } | undefined;
+    return first && "finish_reason" in first ? classifyFinishReason(first.finish_reason) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function deepseekApiKey(): string | undefined {
   // W45·331-1: the key read goes through the shared resolver, so any server-side
   // entry point that declared a `.env` file (dev server / CLI) gets the same
@@ -515,20 +559,31 @@ async function completeDeepSeekInner(
       sleep: opts.sleep ?? defaultDeps.sleep,
       random: opts.random ?? defaultDeps.random,
     };
-    const { response: res, attempts } = await postWithRetry(
-      `${DEEPSEEK_BASE_URL}/chat/completions`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json",
-          authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
+    const requestInit: RequestInit = {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+        authorization: `Bearer ${key}`,
       },
-      deps,
-    );
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    };
+    // W61 lane D (D4 / research/deepseek-api.md §5): `insufficient_system_resource`
+    // rides a 200 BODY, not an HTTP status — `postWithRetry`'s status set cannot
+    // see it. Retry it here with the SAME full-jitter policy, bounded at
+    // MAX_ATTEMPTS and sharing the caller's absolute abort deadline. Every other
+    // finish_reason (incl. the non-retry `content_filter`) is read once below.
+    let issued = await postWithRetry(`${DEEPSEEK_BASE_URL}/chat/completions`, requestInit, deps);
+    let rawSuccess = issued.response.ok ? await issued.response.text().catch(() => "") : "";
+    for (let bodyAttempt = 1; bodyAttempt < MAX_ATTEMPTS && issued.response.ok; bodyAttempt++) {
+      if (finishReasonOf(rawSuccess) !== "insufficient_system_resource") break;
+      await deps.sleep(jitteredBackoffDelayMs(bodyAttempt, deps.random));
+      issued = await postWithRetry(`${DEEPSEEK_BASE_URL}/chat/completions`, requestInit, deps);
+      rawSuccess = issued.response.ok ? await issued.response.text().catch(() => "") : "";
+    }
+    const res = issued.response;
+    const attempts = issued.attempts;
 
     if (!res.ok) {
       // Retry-count honesty: a call that exhausted its transient retries says
@@ -574,8 +629,8 @@ async function completeDeepSeekInner(
     // provider had in fact answered. Read the raw text ONCE and parse
     // defensively: the same discipline describeError() already applies on the
     // error path (:240-254). A non-JSON 200 now surfaces honestly as
-    // RT_E_INTERNAL with a bounded excerpt.
-    const rawSuccess = await res.text().catch(() => "");
+    // RT_E_INTERNAL with a bounded excerpt. (rawSuccess was read once above so
+    // the D4 insufficient_system_resource retry could inspect finish_reason.)
     let parsed: DeepSeekChatBody;
     try {
       const body: unknown = JSON.parse(rawSuccess);
@@ -603,15 +658,31 @@ async function completeDeepSeekInner(
       // (finish_reason "length"), or a genuinely silent model.
       const reasoning = parsed.choices?.[0]?.message?.reasoning_content;
       const reason = parsed.choices?.[0]?.finish_reason;
+      const finishClass = classifyFinishReason(reason);
       const reasoningNote =
         typeof reasoning === "string" && reasoning.trim()
           ? `; model returned reasoning only (${reasoning.trim().length} chars of reasoning_content, content empty)`
           : "";
-      const lengthNote = reason === "length" ? "; stopped at max_tokens (finish_reason length)" : "";
+      const lengthNote = finishClass === "length" ? "; stopped at max_tokens (finish_reason length)" : "";
+      // W61 lane D (D4): the documented taxonomy, classified — a `content_filter`
+      // refusal is NOT retryable and is named as such; `insufficient_system_resource`
+      // reached this point only after the bounded retry above was exhausted.
+      if (finishClass === "content_filter") {
+        return {
+          ok: false,
+          reason: "error",
+          error: `DeepSeek refused the request (finish_reason content_filter)${reasoningNote}`,
+          code: "RT_E_LLM_REJECTED",
+        };
+      }
+      const capacityNote =
+        finishClass === "insufficient_system_resource"
+          ? "; capacity interrupted (finish_reason insufficient_system_resource) after retries"
+          : "";
       return {
         ok: false,
         reason: "error",
-        error: `DeepSeek returned no text content${reasoningNote}${lengthNote}`,
+        error: `DeepSeek returned no text content${reasoningNote}${lengthNote}${capacityNote}`,
         code: "RT_E_LLM_REJECTED",
       };
     }

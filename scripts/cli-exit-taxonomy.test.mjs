@@ -3099,3 +3099,236 @@ test(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// W61 B1 — the substance delivery gate. `emit --run --git` must WITHHOLD the
+// commit (RT_E_SUBSTANCE_EMPTY) when the tree's substance verdict is "empty"
+// (no job modules) or the project carries an uncleared red tree-run trail,
+// unless the caller passes the explicit `--allow-empty` opt-in. Pinned with
+// real keyless emits + REAL git, no mocks.
+// ---------------------------------------------------------------------------
+test(
+  "W61 B1 — `emit --run --git` withholds RT_E_SUBSTANCE_EMPTY on empty substance / a red trail; --allow-empty commits",
+  { skip: GIT_AVAILABLE ? false : "git is not available on this box (the delivery lane needs a real git)", timeout: 600_000 },
+  () => {
+    const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-substance-"));
+    const env = { ...process.env, DEEPSEEK_API_KEY: "" };
+    for (const key of ["RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+    const runNode = (argv) =>
+      spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...argv], {
+        cwd,
+        env,
+        encoding: "utf8",
+        timeout: 600_000,
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    const runEmit = (argv) => runNode(["emit", ...argv]);
+    const BRIEF = "A tiny library that formats durations as human-readable strings.";
+    try {
+      // (A) EMPTY substance verdict: a generatedTree with no `src/jobs` module
+      // (the census reads `src/jobs`/`jobs` only).
+      const emptyProj = join(cwd, "empty.json");
+      assert.equal(
+        runNode(["create", "--brief", "A tiny module that formats durations.", "--name", "EmptyPin", "--out", emptyProj]).status,
+        0,
+      );
+      const ej = JSON.parse(readFileSync(emptyProj, "utf8"));
+      ej.generatedTree = [
+        { path: "src/generated.ts", source: 'export const duration = (ms: number): string => String(ms) + "ms";\n', hash: "abc123", attempt: 0 },
+      ];
+      writeFileSync(emptyProj, `${JSON.stringify(ej, null, 2)}\n`, "utf8");
+      const emptyDir = join(cwd, "empty-emitted");
+      const emptyRun = runEmit(["--project", emptyProj, "--out", emptyDir, "--run", "--git"]);
+      assert.ok(!/(^|\n)\s+at\s/.test(emptyRun.stderr ?? ""), `a substance refusal must never print a stack:\n${emptyRun.stderr}`);
+      assert.equal(
+        emptyRun.status,
+        1,
+        `an empty-substance tree must withhold the commit.\nstdout: ${emptyRun.stdout}\nstderr: ${emptyRun.stderr}`,
+      );
+      const ejr = JSON.parse(emptyRun.stdout);
+      assert.equal(ejr.substance?.verdict, "empty", "precondition: the census reads the tree empty");
+      assert.equal(ejr.code, "RT_E_SUBSTANCE_EMPTY", "the empty-substance refusal carries its own code, not the generic tree-run-red");
+      assert.equal(ejr.git?.committed, false, "no commit over an empty-substance tree");
+      assert.equal(ejr.git?.reason, "substance-empty", "the withheld reason names the substance class");
+      assert.ok(String(ejr.git?.error).includes("no commit was issued"), `the refusal must be loud: ${ejr.git?.error}`);
+      assert.equal(existsSync(join(emptyDir, ".git")), false, "no commit may land over an empty-substance tree");
+      assert.equal(existsSync(join(emptyDir, "src", "generated.ts")), true, "the emitted tree is still kept on disk");
+
+      // (B) RED TRAIL: a GREEN run over a project whose durable trail is red.
+      const trailProj = join(cwd, "trail.json");
+      assert.equal(runNode(["create", "--brief", BRIEF, "--name", "TrailPin", "--out", trailProj]).status, 0);
+      const tj = JSON.parse(readFileSync(trailProj, "utf8"));
+      tj.logs = [
+        ...(Array.isArray(tj.logs) ? tj.logs : []),
+        { ts: Date.now(), phase: 6, level: "warn", event: "p6.tree.failure", detail: "W61 B1 pin: injected red trail" },
+      ];
+      writeFileSync(trailProj, `${JSON.stringify(tj, null, 2)}\n`, "utf8");
+      const trailDir = join(cwd, "trail-emitted");
+      const trailRun = runEmit(["--project", trailProj, "--out", trailDir, "--red-tree", "banner", "--run", "--git"]);
+      assert.equal(
+        trailRun.status,
+        1,
+        `a red trail over a green run must withhold.\nstdout: ${trailRun.stdout}\nstderr: ${trailRun.stderr}`,
+      );
+      const tjr = JSON.parse(trailRun.stdout);
+      assert.equal(tjr.treeRun?.ok, true, "precondition: the run itself is GREEN");
+      assert.equal(tjr.code, "RT_E_SUBSTANCE_EMPTY", "the red-trail hold carries the substance code");
+      assert.equal(tjr.git?.committed, false);
+      assert.equal(existsSync(join(trailDir, ".git")), false, "no commit over a red-trail tree");
+
+      // (C) --allow-empty opts into the deliberate scaffold-only commit.
+      const allowDir = join(cwd, "trail-allow");
+      const allowRun = runEmit([
+        "--project",
+        trailProj,
+        "--out",
+        allowDir,
+        "--red-tree",
+        "banner",
+        "--run",
+        "--git",
+        "--allow-empty",
+      ]);
+      assert.equal(
+        allowRun.status,
+        0,
+        `--allow-empty must land the commit.\nstdout: ${allowRun.stdout}\nstderr: ${allowRun.stderr}`,
+      );
+      const ajr = JSON.parse(allowRun.stdout);
+      assert.equal(ajr.ok, true);
+      assert.equal(ajr.git?.committed, true, "--allow-empty lifts the substance/red-trail hold");
+      assert.equal(existsSync(join(allowDir, ".git")), true, "the deliberate commit is real");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// W61 B3 — recovery doors at the CLI: `retry` accepts the red-running-P6 shape
+// (no rejected record), and a `gate` that advances nothing refuses coded
+// instead of re-parking silently at 0 steps. Fixtures are crafted project JSON
+// (hydrated on load); no keyed calls.
+// ---------------------------------------------------------------------------
+test("W61 B3 — `retry` reopens a red running P6; a healthy running project refuses", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-retry-b3-"));
+  const env = { ...process.env, DEEPSEEK_API_KEY: "" };
+  for (const key of ["RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  const runNode = (argv) =>
+    spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...argv], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 300_000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  const rewind = (p, mode) => {
+    const completeUpTo = (n) =>
+      p.phases.map((r) =>
+        r.id < n ? { ...r, status: "complete", startedAt: r.startedAt ?? 1, completedAt: r.completedAt ?? 2 } : r,
+      );
+    if (mode === "redp6") {
+      p.status = "running";
+      p.currentPhase = 6;
+      p.hitl = null;
+      p.lastTest = { label: "failed", ok: false, detail: "W61 B3 fixture red P6" };
+      p.phases = completeUpTo(6).map((r) =>
+        r.id === 6 ? { ...r, status: "running", gate: { passed: false, unmet: ["p6-verified"], evidenceHash: "dead", checkedAt: 1 } } : r,
+      );
+      p.logs = [
+        ...(Array.isArray(p.logs) ? p.logs : []),
+        { ts: Date.now(), phase: 6, level: "warn", event: "p6.tree.failure", detail: "W61 B3 fixture red trail" },
+      ];
+    } else {
+      // healthy running P6: complete priors, green gate, no red signal
+      p.status = "running";
+      p.currentPhase = 6;
+      p.hitl = null;
+      p.lastTest = null;
+      p.logs = [];
+      p.phases = completeUpTo(6).map((r) =>
+        r.id === 6 ? { ...r, status: "running", gate: { passed: true, unmet: [], evidenceHash: "ok", checkedAt: 1 } } : r,
+      );
+    }
+    return p;
+  };
+  try {
+    const redProj = join(cwd, "red.json");
+    assert.equal(runNode(["create", "--brief", "Build an office scheduler for a clinic.", "--name", "RedPin", "--out", redProj]).status, 0);
+    writeFileSync(redProj, `${JSON.stringify(rewind(JSON.parse(readFileSync(redProj, "utf8")), "redp6"), null, 2)}\n`, "utf8");
+    const red = runNode(["retry", "--project", redProj]);
+    assert.equal(red.status, 0, `retry must reopen the red running P6.\nstdout: ${red.stdout}\nstderr: ${red.stderr}`);
+    const rj = JSON.parse(red.stdout);
+    assert.equal(rj.ok, true);
+    const after = JSON.parse(readFileSync(redProj, "utf8"));
+    assert.equal((after.phases.find((r) => r.id === 6) || {}).status, "ready", "retry marked P6 ready");
+
+    const healthyProj = join(cwd, "healthy.json");
+    assert.equal(runNode(["create", "--brief", "Build an office scheduler for a clinic.", "--name", "HealthyPin", "--out", healthyProj]).status, 0);
+    writeFileSync(healthyProj, `${JSON.stringify(rewind(JSON.parse(readFileSync(healthyProj, "utf8")), "healthy"), null, 2)}\n`, "utf8");
+    const healthy = runNode(["retry", "--project", healthyProj]);
+    assert.equal(healthy.status, 1, "a healthy running project has nothing to retry");
+    assert.equal(JSON.parse(healthy.stdout).code, "RT_E_PHASE_ILLEGAL");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("W61 B3 — the CLI `gate` no-progress refusal is coded (source pin)", () => {
+  assert.match(
+    cliText,
+    /!parked && res\.steps === 0 && res\.outcome !== "complete"[\s\S]{0,400}RT_E_GATE_PENDING/,
+    "a gate/run that advances nothing must refuse coded (RT_E_GATE_PENDING), never report a silent ok:0 park",
+  );
+});
+
+test("PR-22 — `gate --resynthesize` re-opens a red running P6 and re-enters (never the 0-step park)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "rapidtool-cli-resynth-"));
+  const env = { ...process.env, DEEPSEEK_API_KEY: "" };
+  for (const key of ["RT_HUMAN_SEAT_TOKEN", "RAPIDTOOL_ACTOR", "RAPIDTOOL_LOG_DIR"]) delete env[key];
+  const runNode = (argv) =>
+    spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH, ...argv], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 300_000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  try {
+    const proj = join(cwd, "red-resynth.json");
+    assert.equal(
+      runNode(["create", "--brief", "Build an office scheduler for a clinic.", "--name", "ResynthPin", "--out", proj]).status,
+      0,
+    );
+    const p = JSON.parse(readFileSync(proj, "utf8"));
+    p.status = "running";
+    p.currentPhase = 6;
+    p.hitl = null;
+    p.lastTest = { label: "failed", ok: false, detail: "PR-22 fixture red P6" };
+    p.phases = p.phases.map((r) =>
+      r.id < 6
+        ? { ...r, status: "complete", startedAt: r.startedAt ?? 1, completedAt: r.completedAt ?? 2 }
+        : r.id === 6
+          ? { ...r, status: "running", gate: { passed: false, unmet: ["p6-verified"], evidenceHash: "dead", checkedAt: 1 } }
+          : r,
+    );
+    p.logs = [
+      ...(Array.isArray(p.logs) ? p.logs : []),
+      { ts: Date.now(), phase: 6, level: "warn", event: "p6.tree.failure", detail: "PR-22 fixture red trail" },
+    ];
+    writeFileSync(proj, `${JSON.stringify(p, null, 2)}\n`, "utf8");
+
+    const res = runNode(["gate", "--project", proj, "--resynthesize"]);
+    const j = JSON.parse(res.stdout);
+    assert.notEqual(j.code, "RT_E_PHASE_ILLEGAL", "the door must accept the red running P6, never refuse as illegal phase");
+    assert.ok(
+      j.ok === true || (typeof j.steps === "number" && j.steps >= 1),
+      `the door re-enters P6 (a step ran) instead of the 0-step park.\nstdout: ${res.stdout}`,
+    );
+    // The re-opened P6 is persisted (the ledger absorbed the re-entry).
+    const after = JSON.parse(readFileSync(proj, "utf8"));
+    assert.ok((after.phases ?? []).some((r) => r.id === 6), "the P6 record survives the re-entry");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

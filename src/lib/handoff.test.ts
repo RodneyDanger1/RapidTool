@@ -18,8 +18,12 @@ const fullRun = () => runHeadless(seedProject(), ALL_PHASES);
 const promote = (p: ReturnType<typeof fullRun>) =>
   ({
     ...p,
+    // W61 C1: the core-noun bar requires the fixture to name the brief's
+    // project-grounded nouns (dispatch/board/techs/parts/reroute/scan/warehouse/
+    // service), not just a generic subset.
     generatedSource:
-      "function dispatchJobs(){ } function listTechs(){ } function orderParts(){ } function planReroutes(){ } function warehouseScan(){ }",
+      "function dispatchBoard(){ } function trackJobs(){ } function assignTechs(){ } function orderParts(){ } " +
+      "function rerouteSameDay(){ } function offlineScan(){ } function warehouseSync(){ } function fieldService(){ }",
     lastTest: {
       ...(p.lastTest ?? { ok: true, detail: "fixture self-test" }),
       label: "tested" as const,

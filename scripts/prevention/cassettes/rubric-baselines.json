@@ -1,0 +1,20 @@
+{
+  "provenance": "PR-25 rubric baselines. Derived verbatim from the frozen testruns/RUNBOOK/SYNTH_SCORE.json (the deterministic synthesis-quality replay over the 13 emitted trees). These are the HISTORICAL baselines a fixed RapidTool must not fall below; a future re-grade of the same tree whose total drops below its baseline is a regression and must fail. The score is the /20 synthesis-quality total from RUNBOOK/tools/synthesis-score.mjs.",
+  "source": "testruns/RUNBOOK/SYNTH_SCORE.json",
+  "treeCount": 13,
+  "baselines": [
+    { "slug": "bakery-website", "variant": "emitted", "score": 14, "ui": "canvas-game", "substance": "real" },
+    { "slug": "bakery-website", "variant": "emitted.v2", "score": 13, "ui": "placeholder", "substance": "real" },
+    { "slug": "flower-shop-website", "variant": "emitted", "score": 10, "ui": "placeholder", "substance": "empty" },
+    { "slug": "flower-shop-website", "variant": "emitted.v2", "score": 6, "ui": "placeholder", "substance": "n/a" },
+    { "slug": "bakery-florist-orders", "variant": "emitted", "score": 12, "ui": "form-wired", "substance": "n/a" },
+    { "slug": "bakery-florist-orders", "variant": "emitted.v2", "score": 8, "ui": "placeholder", "substance": "n/a" },
+    { "slug": "mobile-companion", "variant": "emitted", "score": 8, "ui": "library-stub", "substance": "n/a" },
+    { "slug": "mobile-companion", "variant": "emitted.v2", "score": 8, "ui": "placeholder", "substance": "n/a" },
+    { "slug": "office-invoice-tracker", "variant": "emitted", "score": 16, "ui": "form-wired", "substance": "empty" },
+    { "slug": "office-scheduler", "variant": "emitted", "score": 14, "ui": "form-wired", "substance": "empty" },
+    { "slug": "office-scheduler", "variant": "emitted.v2", "score": 14, "ui": "form-wired", "substance": "empty" },
+    { "slug": "office-stock-tracker", "variant": "emitted", "score": 11, "ui": "placeholder", "substance": "empty" },
+    { "slug": "office-stock-tracker", "variant": "emitted.v2", "score": 12, "ui": "placeholder", "substance": "empty" }
+  ]
+}

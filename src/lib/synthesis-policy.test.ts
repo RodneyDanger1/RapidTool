@@ -8,9 +8,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  adaptiveChunkSize,
   candidatesLogDetail,
   P6_SYNTH_CANDIDATES_DEFAULT,
   P6_SYNTH_CANDIDATES_MAX,
+  P6_SYNTH_CHUNK_MAX,
+  P6_SYNTH_CHUNK_MIN,
+  P6_SYNTH_MODULE_BUDGET,
   resolveSynthesisCandidates,
   selectBestOfN,
 } from "./synthesis-policy.ts";
@@ -102,5 +106,24 @@ describe("fixes/343-1 selectBestOfN (lazy, deterministic)", () => {
     assert.match(one, /^chunk 1\/2 · candidates 4 · winner 2 · candidate 1: rejected/);
     const none = candidatesLogDetail("single-module", 2, null, ["candidate 1: rejected — brief-fit missing board"]);
     assert.match(none, /winner none/);
+  });
+});
+
+describe("A9/PR-15 adaptiveChunkSize (clamp(floor(budget/avgSigChars), 4, 12))", () => {
+  it("clamps into [4,12]; empty/no-signature input keeps the legacy default 8", () => {
+    assert.equal(P6_SYNTH_CHUNK_MIN, 4);
+    assert.equal(P6_SYNTH_CHUNK_MAX, 12);
+    assert.equal(adaptiveChunkSize([]), 8, "no signatures ⇒ legacy default");
+    assert.equal(adaptiveChunkSize(["   ", ""], P6_SYNTH_MODULE_BUDGET), 8, "blank rows are not signatures");
+    assert.equal(adaptiveChunkSize(["x".repeat(60)]), 8, "budget 480 / 60 chars = 8 (legacy parity)");
+    assert.equal(adaptiveChunkSize(["x".repeat(120)]), 4, "long signatures shrink a chunk to the floor");
+    assert.equal(adaptiveChunkSize(["x".repeat(40)]), 12, "short signatures grow a chunk to the ceiling");
+  });
+
+  it("a non-positive / non-finite budget falls back to the default budget; hostile input never throws", () => {
+    assert.equal(adaptiveChunkSize(["x".repeat(100)], 0), adaptiveChunkSize(["x".repeat(100)]));
+    assert.equal(adaptiveChunkSize(["x".repeat(100)], Number.NaN), adaptiveChunkSize(["x".repeat(100)]));
+    assert.equal(adaptiveChunkSize(null as unknown as string[], undefined), 8);
+    assert.equal(adaptiveChunkSize(["ok"], 1_000_000), P6_SYNTH_CHUNK_MAX);
   });
 });

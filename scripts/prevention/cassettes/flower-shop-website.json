@@ -1,0 +1,91 @@
+{
+  "slug": "flower-shop-website",
+  "briefFile": "flower-shop-website/brief.md",
+  "brief": "# Wildstem Florist — Marketing Website\n\n## What this is\nA marketing website for an independent florist, Wildstem. It showcases bouquets,\nexplains delivery, suggests flowers for occasions, and lets a visitor send an\nenquiry for a bespoke arrangement.\n\n## Audience\n- People buying a gift for a birthday, anniversary, new baby, or sympathy.\n- Local customers who want same-day delivery.\n- Corporate clients ordering recurring office flowers.\n\n## Required pages / sections\n1. **Home** — hero image, a \"same-day delivery if ordered before 1pm\" banner,\n   three featured bouquets, and trust signals (years in business, review stars).\n2. **Bouquets** — a catalogue grid. Each bouquet has a name, price, size options\n   (Small / Classic / Grand with different prices), a colour palette, the\n   flowers it contains, and an occasion tag list. Filter by occasion and by\n   price band; sort by price ascending/descending.\n3. **Delivery** — the delivery zones with postcode prefixes, a per-zone delivery\n   fee and cutoff time, and a same-day eligibility checker: enter a postcode and\n   the current time, and it reports whether same-day delivery is still possible\n   and the fee.\n4. **Occasions** — one section per occasion (Birthday, Anniversary, New Baby,\n   Sympathy, Thank You) with recommended bouquets and a short note on etiquette\n   (e.g. sympathy: no bright reds).\n5. **Contact / Enquiry** — a bespoke-order form: sender name, recipient name,\n   delivery postcode, delivery date, budget range, occasion, and a message for\n   the card. Validate the postcode against the served zones, require a delivery\n   date in the future, and cap the card message at 250 characters.\n\n## Functional requirements\n- The same-day eligibility checker must combine the postcode zone's cutoff time\n  with the current time and return eligible/not-eligible plus the fee.\n- Bouquet size selection must update the displayed price without a page reload\n  and must carry the chosen size into the enquiry.\n- Filters (occasion + price band) and sort must compose and show an empty state.\n- The enquiry form must validate every required field, reject unknown postcodes\n  and past dates, and produce a confirmation with a reference.\n- Prices in GBP, two decimals.\n\n## Non-functional requirements\n- Responsive, mobile-first, 320px–1440px.\n- Accessible forms and controls (labelled inputs, keyboard-operable filters,\n  WCAG AA contrast).\n- Core catalogue and delivery info readable without JavaScript.\n- Fast: no heavy images, lazy-load below-the-fold images.\n\n## Explicitly out of scope\n- Real payment processing.\n- User accounts.\n- Inventory or stock management (that is a separate back-office tool).\n- Real-time courier tracking.\n",
+  "persisted": {
+    "name": "# Wildstem Florist —",
+    "domain": "real-estate",
+    "kind": "app"
+  },
+  "expected": {
+    "domain": "web-marketing",
+    "kind": "app",
+    "name": "Wildstem Florist",
+    "incidents": [
+      "INC-03",
+      "INC-08",
+      "INC-09",
+      "INC-10",
+      "INC-20",
+      "INC-28"
+    ]
+  },
+  "trees": [
+    "emitted",
+    "emitted.v2"
+  ],
+  "historicalDefects": [
+    "INC-03",
+    "INC-08",
+    "INC-09",
+    "INC-10",
+    "INC-20",
+    "INC-28"
+  ],
+  "failureSignatures": [
+    {
+      "file": "unattended.out.json",
+      "ok": false,
+      "exit_code": 1,
+      "code": "RT_E_GATE_PENDING",
+      "error": "P6 DoD unmet ΓÇö hard gate blocks advance: p6-brief-fit, p6-arch. ΓÇö resolve the unmet DoD criteria before advancing.",
+      "unmet": [
+        "Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) ΓÇö keyed tree synthesis ran (2 file(s)) but its union dropped the brief's required nouns (missing: wildstem, florist, marketing, website, independent, showcases, explains, delivery, suggests, lets, visitor, send, ΓÇª)",
+        "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)"
+      ]
+    },
+    {
+      "file": "gate-retry.json",
+      "ok": false,
+      "exit_code": 1,
+      "code": "RT_E_GATE_PENDING",
+      "error": "P6 DoD unmet ΓÇö hard gate blocks advance: p6-brief-fit, p6-arch. ΓÇö resolve the unmet DoD criteria before advancing.",
+      "unmet": [
+        "Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) ΓÇö keyed tree synthesis ran (2 file(s)) but its union dropped the brief's required nouns (missing: wildstem, florist, marketing, website, independent, showcases, explains, delivery, suggests, lets, visitor, send, ΓÇª)",
+        "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)"
+      ]
+    },
+    {
+      "file": "retry.json",
+      "ok": false,
+      "exit_code": 1,
+      "code": "RT_E_PHASE_ILLEGAL",
+      "error": "Nothing to retry (status: running) ΓÇö retry applies to rejected/blocked projects.",
+      "unmet": null
+    },
+    {
+      "file": "emit.out.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "treerun.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "build.json",
+      "ok": null,
+      "exit_code": null,
+      "code": null,
+      "error": null,
+      "unmet": []
+    }
+  ]
+}

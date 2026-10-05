@@ -40,6 +40,17 @@
  * OV-41 (W23 · L4, fixes/262): measured spend (`DoctorSpend` / `doctorSpend`)
  * is read from the T-107.6 token ledger — its fields and its own helpers only,
  * never recomputed, never fabricated.
+ *
+ * PR-31 / PR-32 (design §4.8 Option A — the recorded owner decision: build an
+ * independent machine-verified acceptance reading BESIDE the human door rather
+ * than redefine the bar). `autonomousFactoryV2` + `fleetAcceptance` are the
+ * ADDITIVE machine reading over per-brief persisted tree-run evidence
+ * (`acceptance.ts`); `fleetMetrics` / `fleetAlarms` are PR-32 observability.
+ * Rationale: the human conjunct is deliberate and may not be deleted
+ * unilaterally (What-NOT-To-Do #18), so the machine reading gets its own flag
+ * and its own seat. It never flips `autonomousSoftwareFactory`, never touches
+ * `awaitingHumanAcceptance` or the fixture door, and every value it emits is
+ * `decidedBy:"machine"` — a forged human stamp is refused, never laundered.
  */
 import {
   coerceIsolationClaim,
@@ -53,6 +64,18 @@ import type { TokenLedger, TokenPrices, TokenSpend } from "./token-ledger.ts";
 import { archProductComplete, archTrace } from "./dod.ts";
 import { fnv1a } from "./algorithms.ts";
 import { fixtureAcceptanceState, type FixtureAcceptanceState } from "./fixtures.ts";
+// PR-31/PR-32 (design §4.8 Option A): the additive machine acceptance aggregate
+// and fleet observability. Pure + client-safe (no node: imports) so the static
+// graph here is unchanged. It never reads the human acceptance door.
+import {
+  fleetAcceptanceFromProjects,
+  fleetAlarms,
+  fleetMetrics,
+  MACHINE_ACCEPTANCE_SEAT as ACCEPTANCE_MACHINE_SEAT,
+  type FleetAcceptance,
+  type FleetAlarms,
+  type FleetMetrics,
+} from "./acceptance.ts";
 // 345 L2-X1: the acceptance gate's placeholder rule, shared so the doctor's
 // fixtures bar and maker-score's M1/M2 cannot disagree about one bar.
 import { fixturesHavePlaceholder } from "./brief-fixtures.ts";
@@ -85,6 +108,15 @@ export type FactoryEvidence = {
    *  through `machineVerifiedAcceptanceFromProject`. Never hand-fed through an
    *  untrusted seam; absent ⇒ the signal fails closed (no evidence). */
   machineVerifiedAcceptance?: MachineVerifiedAcceptance;
+  /** PR-31: the fleet's persisted project records, from which the INDEPENDENT
+   *  machine acceptance aggregate is DERIVED. Evidence records, never a boolean
+   *  claim; absent ⇒ empty aggregate (fail-closed). Set from a trusted record
+   *  by the builders — never read from an untrusted blob. */
+  fleet?: readonly unknown[];
+  /** PR-32: per-run telemetry rows for the fleet metrics/alarms. Absent ⇒ no
+   *  telemetry (zeroed metrics, untripped alarms). Read-only aggregation, so it
+   *  is safe to attach at the `factoryClaim` call. */
+  fleetTelemetry?: readonly unknown[];
   chatHasSlashToolsOnly?: boolean;
   isolation?: unknown;
   inventory?: JobInventory | null;
@@ -104,6 +136,20 @@ export type DoctorFactory = {
    *  verdict — never hand-fed. It never flips `autonomousSoftwareFactory` and
    *  never mints a human stamp; see `machineVerifiedAcceptanceFromProject`. */
   machineVerifiedAcceptance: MachineVerifiedAcceptance;
+  /** PR-31 (Option A, design §4.8): the ADDITIVE, independent machine acceptance
+   *  reading over per-brief persisted tree-run evidence. It is satisfied by
+   *  machine evidence alone; it NEVER flips `autonomousSoftwareFactory` and
+   *  NEVER mints `decidedBy:"human"`. False when that external evidence is
+   *  absent (fail-closed). */
+  autonomousFactoryV2: boolean;
+  /** PR-31: the fleet aggregate detail behind `autonomousFactoryV2` (seat,
+   *  accepted briefs, coded refusals). Always `decidedBy:"machine"`. */
+  fleetAcceptance: FleetAcceptance;
+  /** PR-32: fleet metrics derived from the supplied run telemetry (spend,
+   *  cache, calls, rubric). `estimatedCostUsd` is always null. */
+  fleetMetrics: FleetMetrics;
+  /** PR-32: threshold alarms; `fleetAlarms.tripped` is a hard failure. */
+  fleetAlarms: FleetAlarms;
   /** W52 · 338-3: the derived human-acceptance conjunct (the project record's
    *  `decidedBy:"human"` stamp). Surfaced beside the machine signal so a
    *  no-human run reads "machine-complete, human stamp pending" instead of
@@ -424,8 +470,10 @@ export function humanFixturesFromProject(project: unknown): boolean {
 // never flips `autonomousSoftwareFactory`.
 // ---------------------------------------------------------------------------
 
-/** The verifier seat this signal reports under — a machine seat, never `human`. */
-export const MACHINE_ACCEPTANCE_SEAT = "machine:tree-run" as const;
+/** The verifier seat this signal reports under — a machine seat, never `human`.
+ *  PR-31: single-sourced from `acceptance.ts` (the fleet aggregate reports under
+ *  the same seat); the exported NAME and VALUE are byte-identical to pre-PR-31. */
+export const MACHINE_ACCEPTANCE_SEAT = ACCEPTANCE_MACHINE_SEAT;
 
 export type MachineAcceptanceEvidence = {
   /** Verifier seat that produced the verdict — never `human`. */
@@ -570,6 +618,9 @@ export function evidenceFromProjectRecord(project: unknown): FactoryEvidence {
     acceptance: liveAcceptanceState(project),
     productComplete: productCompleteFromProject(project),
     machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(project),
+    // PR-31: the record is the fleet evidence for the machine acceptance
+    // aggregate (derived, never a caller's boolean).
+    fleet: project ? [project] : [],
     chatHasSlashToolsOnly: true,
   };
 }
@@ -598,7 +649,13 @@ export function evidenceFromJobInventory(
   inv: JobInventory,
   extra?: Omit<
     Partial<FactoryEvidence>,
-    "productComplete" | "inventory" | "acceptance" | "humanFixtures" | "machineVerifiedAcceptance"
+    | "productComplete"
+    | "inventory"
+    | "acceptance"
+    | "humanFixtures"
+    | "machineVerifiedAcceptance"
+    | "fleet"
+    | "fleetTelemetry"
   > &
     ProductStateEvidence,
 ): FactoryEvidence {
@@ -611,6 +668,8 @@ export function evidenceFromJobInventory(
     acceptance: liveAcceptanceState(extra?.project),
     productComplete: productCompleteFromProject(extra?.project) && realMulti && !leftover,
     machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(extra?.project),
+    // PR-31: derived from the trusted project record, never a hand-fed flag.
+    fleet: extra?.project ? [extra.project] : [],
     chatHasSlashToolsOnly: extra?.chatHasSlashToolsOnly !== false,
     isolation: extra?.isolation,
     inventory: inv,
@@ -724,8 +783,17 @@ export function factoryClaim(
     human === false &&
     evidence.acceptance?.state === "pending";
   const cap = tokenCapFromEnv(env);
+  // PR-31/PR-32: derived (never hand-fed as a boolean) from the fleet evidence
+  // set + run telemetry the builders attach. The aggregate is machine-decided
+  // by construction and cannot flip `autonomousSoftwareFactory` above.
+  const fleetAcceptance = fleetAcceptanceFromProjects(evidence.fleet ?? []);
+  const fleetTelemetry = evidence.fleetTelemetry ?? [];
   return {
     autonomousSoftwareFactory,
+    autonomousFactoryV2: fleetAcceptance.autonomousFactoryV2,
+    fleetAcceptance,
+    fleetMetrics: fleetMetrics(fleetTelemetry),
+    fleetAlarms: fleetAlarms(fleetTelemetry),
     awaitingHumanAcceptance,
     machineVerifiedAcceptance: normalizeMachineVerifiedAcceptance(evidence.machineVerifiedAcceptance),
     humanFixtures: human,
@@ -776,10 +844,14 @@ export function coerceFactoryClaim(raw?: unknown, project?: unknown): DoctorFact
         realMultiJobProduct: blob.realMultiJobProduct === true,
         productComplete: productCompleteFromProject(project),
         machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(project),
+        // PR-31: derived from the TRUSTED `project` argument — the untrusted
+        // blob's `fleet` key is never read, so a raw claim cannot mint the
+        // machine acceptance reading.
+        fleet: project ? [project] : [],
         chatHasSlashToolsOnly: blob.chatHasSlashToolsOnly !== false,
         isolation: blob.isolation,
       }
-    : { ...RAPIDTOOL_FACTORY_EVIDENCE, productComplete: productCompleteFromProject(project), humanFixtures: humanFixturesFromProject(project), acceptance: liveAcceptanceState(project), machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(project) };
+    : { ...RAPIDTOOL_FACTORY_EVIDENCE, productComplete: productCompleteFromProject(project), humanFixtures: humanFixturesFromProject(project), acceptance: liveAcceptanceState(project), machineVerifiedAcceptance: machineVerifiedAcceptanceFromProject(project), fleet: project ? [project] : [] };
   return factoryClaim(evidence);
 }
 

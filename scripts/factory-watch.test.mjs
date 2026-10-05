@@ -248,6 +248,7 @@ test("deliveryProved — a commit alone is NOT a delivery; the emitted tree must
     tests: [{ file: "tests/oracle.spec.ts", run: "pass", tests: { pass: 1, fail: 0 } }],
     run: { kind: "library", run: "skip", detail: "no entry to smoke" },
     declaredScriptsVerified: true,
+    verdictHash: "verdict-hash-1",
   };
   const committed = {
     ok: true,
@@ -318,7 +319,13 @@ test("deliveryProved — a commit alone is NOT a delivery; the emitted tree must
   assert.equal(ev.treeRun.ok, true);
   assert.equal(ev.treeRun.declaredScriptsVerified, true);
   assert.deepEqual(ev.treeRun.specs, { total: 1, passed: 1 });
+  assert.equal(ev.treeRun.verdictHash, "verdict-hash-1", "PR-21: the verdict hash proves a rebuilt/tested artifact");
+  assert.equal(ev.verdictHash, "verdict-hash-1");
   assert.equal(ev.evidenceHash, "ev1dence");
+  // An older envelope without a verdict hash persists null — never fabricated.
+  const legacy = deliveryEvidence({ treeRun: { ok: true } });
+  assert.equal(legacy.treeRun.verdictHash, null);
+  assert.equal(legacy.verdictHash, null);
 });
 
 test("runProved / classifyDeliverFailure — a red delivery-time tree-run is a commitless `stalled`", () => {

@@ -502,6 +502,14 @@ export type TreeRunOutcome = {
    *  machine verdict is unchanged; a different hash means it is not.
    *  Integrity, not cryptography (the repo's standing hash contract). */
   verdictHash?: string;
+  /** PR-34 (B4): machine-readable dependency provenance — present ONLY when a
+   *  declared NON-runtime script (tsc/vite/…) actually executed from the
+   *  RapidTool repo's SHARED `node_modules/` rather than the emitted tree's own
+   *  install. It scopes `declaredScriptsVerified`: the scripts really ran, but
+   *  the tree's DECLARED devDependency versions were NOT installed, so no
+   *  consumer may read this as a from-declared-deps verification. Absent ⇒ the
+   *  tree ran its own (or no) toolchain — the envelope stays byte-identical. */
+  dependencySource?: { toolchain: "repo-shared"; treeInstalled: false; note: string };
   /** W43 · J1 (fixes/317_j1_oracle · 316_h5_oracle · T6.3): the tree-declared
    *  behavioral contract verdict — present ONLY when the emitted
    *  `.rapidtool/project.json` declares `expectedBehavior` rows (evaluated by
@@ -1103,6 +1111,35 @@ function specSourceHasAssert(source: string): boolean {
   return /\bassert\s*\.\s*[A-Za-z]/.test(stripped) || /\bassert\s*\(/.test(stripped);
 }
 
+/**
+ * W61 B6 (FINDINGS F-02): blank out every `test.skip(...)` / `test.todo(...)`
+ * call — and the `it`/`describe` spellings — so an `assert.*` inside a test
+ * that NEVER RUNS cannot count as a behavioural pass. The scanner is
+ * paren-balanced (nested callbacks included) and blanks in place; the input is
+ * already literal/comment-masked, so a quoted or commented `test.skip(` is
+ * spaces by now. Without this, an emitted spec whose only LIVE assertion is a
+ * shape probe could ride a skipped behavioural row to `lastTest:"tested"`.
+ */
+function maskSkippedTests(masked: string): string {
+  const out = masked.split("");
+  const re = /\b(?:test|it|describe)\s*\.\s*(?:skip|todo)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(masked)) !== null) {
+    const open = m.index + m[0].length - 1;
+    let depth = 0;
+    let i = open;
+    for (; i < masked.length; i++) {
+      const ch = masked[i];
+      if (ch === "(") depth++;
+      else if (ch === ")" && --depth === 0) break;
+    }
+    const stop = Math.min(i + 1, masked.length);
+    for (let k = open; k < stop; k++) out[k] = " ";
+    re.lastIndex = stop; // continue past the blanked call
+  }
+  return out.join("");
+}
+
 /** 346 E1 (item 2): every `assert.<name>(args)` call in a masked spec source. */
 function assertCallsIn(masked: string): { name: string; args: string }[] {
   const out: { name: string; args: string }[] = [];
@@ -1248,6 +1285,10 @@ const ASSERT_EQUALITY = new Set([
  * `match` observe a call outcome and are never shape-only. Pure.
  */
 function assertionIsShapeOnly(name: string, args: string): boolean {
+  // W61 B6 (FINDINGS F-02): `assert.fail` is an UNCONDITIONAL throw — the
+  // scaffold's NOT-IMPLEMENTED stub marker — never an observation of the
+  // module under test, so it can never certify behaviour on its own.
+  if (name === "fail") return true;
   const parts = splitTopLevelArgs(args);
   if (name === "ok" || name === "notOk") {
     const first = parts[0] ?? "";
@@ -1274,7 +1315,10 @@ function assertionIsShapeOnly(name: string, args: string): boolean {
  * commented assert cannot count.
  */
 export function specSourceHasBehaviouralAssert(source: string): boolean {
-  const masked = maskLiteralsAndComments(typeof source === "string" ? source : "");
+  // W61 B6 (FINDINGS F-02): skipped/todo test bodies are masked FIRST — an
+  // assert inside a `test.skip`/`test.todo` never executes, so it cannot make
+  // a live shape-only spec read as behavioural.
+  const masked = maskSkippedTests(maskLiteralsAndComments(typeof source === "string" ? source : ""));
   if (!specSourceHasAssert(masked)) return false;
   return assertCallsIn(masked).some((c) => !assertionIsShapeOnly(c.name, c.args));
 }
@@ -2004,6 +2048,9 @@ export async function treeRun(dir: string, opts?: { timeoutMs?: number }): Promi
         "the declared project scripts were resolved from the RapidTool repo's own node_modules/ " +
         "(offline, no install) — the emitted tree's declared devDependency versions were NOT installed";
       outcome.note = outcome.note ? `${outcome.note} · ${clause}` : clause;
+      // PR-34 (B4): the same scope, machine-readable, so a consumer never has to
+      // parse the prose to know the declared deps were not installed.
+      outcome.dependencySource = { toolchain: "repo-shared", treeInstalled: false, note: clause };
     }
     // W43 · J1 (fixes/317_j1_oracle · 316_h5_oracle · T6.3 · 311_sd_product
     // K3/K4): the tree's OWN declared `expectedBehavior` contract — the

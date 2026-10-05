@@ -1,0 +1,70 @@
+{
+  "slug": "mobile-companion",
+  "briefFile": "mobile-companion/brief.md",
+  "brief": "# Crumb & Bloom Companion — Mobile App\n\n## What this is\nA mobile-optimised companion for the Crumb & Bloom back-office. It is a\nphone-first version of the counter workflow: staff on their feet take orders,\ncheck stock at a glance, and receive alerts when something needs restocking.\n\n## Form factor\n- Designed for a 360–430px portrait viewport; works one-handed.\n- Bottom tab bar navigation with four tabs: **Today**, **New Order**, **Stock**,\n  **Alerts**.\n- Large tap targets (min 44×44px), sticky primary action button per screen.\n\n## Required screens\n1. **Today** — a summary card set: orders due today, revenue today, items sold\n   today, and a prominent \"low stock\" count that links to Alerts. A reverse-\n   chronological list of today's orders with status chips.\n2. **New Order** — a fast counter flow: search products (big search field),\n   tap to add, adjust quantities with +/- steppers, see a sticky running total,\n   pick a customer (or quick-add name+phone), choose a fulfilment date, and\n   place the order. Placing validates stock and shows a success toast with the\n   order id.\n3. **Stock** — a searchable list of products with a stock badge (green / amber /\n   red vs reorder level). Tapping opens a sheet to receive stock (＋ quantity) or\n   record spoilage (－ quantity with a reason), each writing a stock movement.\n4. **Alerts** — low-stock items to reorder, newest first, with a suggested\n   quantity and a one-tap \"mark reordered\" that records a note (it must NOT\n   change stock — receiving does that).\n\n## Functional requirements\n- Offline-tolerant: the app reads a local snapshot; a clearly labelled pending\n  badge shows changes not yet synced. No fake sync success.\n- The New Order flow must prevent adding more of a product than is in stock and\n  must show the shortfall if it happens.\n- Money in integer pence, shown as GBP.\n- Stock and order logic must reuse the same contracts as the back-office\n  (products, orders, movements) so the two tools agree.\n\n## Non-functional requirements\n- Touch-first: no hover-only affordances; visible focus for keyboard.\n- Works in a mobile browser; no app-store packaging required.\n- Fast first paint; skeleton states while data loads.\n- Accessible: labelled controls, WCAG AA contrast, respects reduced motion.\n\n## Explicitly out of scope\n- Native iOS/Android builds.\n- Payment processing.\n- Push notifications from a server (alerts are in-app).\n- Multi-branch support.\n",
+  "persisted": {
+    "name": "# Crumb & Bloom",
+    "domain": "real-estate",
+    "kind": "library"
+  },
+  "expected": {
+    "domain": "mobile",
+    "kind": "app",
+    "name": "Crumb & Bloom Companion",
+    "incidents": [
+      "INC-05",
+      "INC-16",
+      "INC-20",
+      "INC-21",
+      "INC-26"
+    ]
+  },
+  "trees": [
+    "emitted",
+    "emitted.v2"
+  ],
+  "historicalDefects": [
+    "INC-05",
+    "INC-16",
+    "INC-20",
+    "INC-21",
+    "INC-26"
+  ],
+  "failureSignatures": [
+    {
+      "file": "unattended.out.json",
+      "ok": false,
+      "exit_code": 1,
+      "code": "RT_E_GATE_PENDING",
+      "error": "P6 DoD unmet ΓÇö hard gate blocks advance: p6-verified, p6-arch. ΓÇö resolve the unmet DoD criteria before advancing.",
+      "unmet": [
+        "Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)",
+        "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)"
+      ]
+    },
+    {
+      "file": "emit-git.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "treerun.json",
+      "ok": false,
+      "exit_code": 1,
+      "code": "RT_E_TREE_RUN_FAILED",
+      "error": "the emitted project's own `npm run typecheck` fail (exit 2) ΓÇö src/generated/suggest-reorder-quantity.ts(69,40): error TS2448: Block-scoped variable 'globalThisStore' used before its declaration.\r\nsrc/generated/suggest-reorder-quantity.ts(69,72): error TS2448: Block-scoped variable 'globalThisStore",
+      "unmet": null
+    },
+    {
+      "file": "build.json",
+      "ok": null,
+      "exit_code": null,
+      "code": null,
+      "error": null,
+      "unmet": []
+    }
+  ]
+}

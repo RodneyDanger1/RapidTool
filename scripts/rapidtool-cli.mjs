@@ -457,6 +457,10 @@ const DRIVER_PATH = pathToFileURL(
   join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "headless.ts"),
 ).href;
 
+// PR-16 (B5/C-11): the RapidTool repo root this CLI belongs to — the base the
+// in-run RUNLOCK guard scans for `src/**`/`scripts/**` edits during a run.
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
 let headless = null;
 async function driver() {
   if (!headless) headless = await import(DRIVER_PATH);
@@ -1176,14 +1180,25 @@ async function main() {
         // machine actor — a genuine human gate (forceHuman) or a red DoD gate
         // still parks (exit 2), never a fake completion.
         const unattended = flag(args, "unattended");
+        // PR-22: `gate --resynthesize` — the named recovery door out of a red
+        // running P6. It re-opens the phase (retry) and re-enters the P6
+        // journey LIVE, bounded by the driver's own iteration cap, using the
+        // recorded unmet requirements as the next cycle's context. Without
+        // it, `gate` re-parks at 0 steps on a red running P6 (BL-003).
+        const resynthesize = cmd === "gate" && flag(args, "resynthesize");
+        const runProject = resynthesize && h.isRedRunningP6(project) ? h.retry(project) : project;
         const autopilot = unattended ? true : cmd === "gate" ? flag(args, "autopilot") : false;
-        const live = unattended ? true : flag(args, "live");
+        const live = unattended ? true : resynthesize ? true : flag(args, "live");
         const maxSteps = cmd === "run" && !unattended ? 1 : undefined; // run = single step; gate/unattended = until parked
         // 330 Switchboard (T4): optional `--knowledge <store.json>` seeds the
         // expansion chain with accepted cross-project lessons (the driver's
         // `proven` option — the same rows the packet arm threads).
         const proven = await resolveProvenRows(cmd, args, project);
-        const res = await h.runUntilGate(project, {
+        // PR-16 (B5/C-11): stamp the run window for the in-run RUNLOCK guard —
+        // a repo `src/**`/`scripts/**` mtime newer than this means the run
+        // overlapped a code edit (BL-010) and its bytes are suspect.
+        const runlockStartMs = Date.now();
+        const res = await h.runUntilGate(runProject, {
           autopilot,
           live,
           maxSteps,
@@ -1240,6 +1255,36 @@ async function main() {
         // can never present byte-identical output to a clean one. (This is the
         // run/gate completion branch — the parked-2 branch above is untouched.)
         const sealed = h.summary(res.project);
+        // PR-16 (B5/C-11) in-run RUNLOCK guard: if the repo's own `src/**` or
+        // `scripts/**` changed while this run was executing, the run overlapped
+        // a code edit (BL-010) — refuse honestly with the named file(s) instead
+        // of presenting a clean result produced against a moving tree.
+        const runlockViolations =
+          typeof h.runlockEditViolations === "function"
+            ? h.runlockEditViolations(REPO_ROOT, runlockStartMs)
+            : [];
+        if (runlockViolations.length > 0) {
+          respond(
+            {
+              ok: false,
+              path,
+              ...(unattended ? { unattended: true } : {}),
+              code: "RT_E_SRC_EDITED_DURING_RUN",
+              error:
+                `the run overlapped a repo source edit (RUNLOCK): ${runlockViolations
+                  .slice(0, 5)
+                  .join(", ")}${runlockViolations.length > 5 ? ` (+${runlockViolations.length - 5} more)` : ""} ` +
+                "— the run's artifacts were produced against a moving tree; freeze the tree and re-run.",
+              runlock: { runStartMs: runlockStartMs, violations: runlockViolations },
+              steps: res.steps,
+              stopped: res.stopped,
+              outcome: res.outcome,
+              summary: sealed,
+            },
+            1,
+          );
+          return;
+        }
         if (res.outcome === "dod") {
           respond(
             {
@@ -1281,6 +1326,35 @@ async function main() {
               stopped: res.stopped,
               events: res.events,
               sealedWithFailures: true,
+            },
+            1,
+          );
+          return;
+        }
+        // W61 B3 (recovery door): a gate/run that made NO progress and did not
+        // reach a designed park or a clean seal is STUCK (a red P6 the loop
+        // cannot advance). Returning ok:true / exit 0 here silently re-parked
+        // at 0 steps and hid the stall; surface the honest state coded instead.
+        if (!parked && res.steps === 0 && res.outcome !== "complete") {
+          const lastEvent =
+            Array.isArray(res.events) && res.events.length > 0 ? res.events[res.events.length - 1] : null;
+          respond(
+            {
+              ok: false,
+              path,
+              ...(unattended ? { unattended: true } : {}),
+              code: "RT_E_GATE_PENDING",
+              error:
+                (typeof lastEvent === "string" && lastEvent.length > 0
+                  ? lastEvent
+                  : `${cmd} made no progress`) +
+                ` — ${cmd} ran but advanced nothing (steps: 0, outcome: ${res.outcome}). ` +
+                "Resolve the stuck phase (a red P6 stall is reopened with `retry`) before re-running.",
+              summary: sealed,
+              steps: res.steps,
+              stopped: res.stopped,
+              events: res.events,
+              outcome: res.outcome,
             },
             1,
           );
@@ -1780,17 +1854,31 @@ async function main() {
 
       case "retry": {
         const project = loadProjectFor("retry");
-        if (project.status !== "blocked") {
+        // W61 B3 (recovery door): the old guard accepted only `blocked`, so a
+        // keyed P6 that failed and left the project `running` (no rejected
+        // record) could not be retried — the ONE door that applies refused.
+        // Accept the red-running-P6 shape too; headless.retry owns the reset.
+        if (project.status !== "blocked" && !h.isRedRunningP6(project)) {
           return respond(
             {
               ok: false,
-              error: `Nothing to retry (status: ${project.status}) — retry applies to rejected/blocked projects.`,
+              error: `Nothing to retry (status: ${project.status}) — retry applies to rejected/blocked projects and a stalled red P6.`,
               code: "RT_E_PHASE_ILLEGAL",
             },
             1,
           );
         }
         const updated = h.retry(project);
+        if (updated === project) {
+          return respond(
+            {
+              ok: false,
+              error: `Nothing to retry (status: ${project.status}, phase ${project.currentPhase}) — no rejected phase and no red P6 stall to re-open.`,
+              code: "RT_E_PHASE_ILLEGAL",
+            },
+            1,
+          );
+        }
         h.saveProject(requireProjectPath(args, "retry"), updated);
         respond({ ok: true, path: requireProjectPath(args, "retry"), summary: h.summary(updated) }, 0);
         return;
@@ -2137,6 +2225,9 @@ async function main() {
             const cc = await checkDriver();
             const outcome = await cc.treeRun(res.dir);
             runVerdict = outcome;
+            // PR-21: `treeRun` sets `outcome.verdictHash` (compile-check
+            // treeVerdictHash over the decisive fields), so the emit envelope's
+            // treeRun already carries it for the delivery record to persist.
             payload.treeRun = outcome;
             // W43 · C6/E4 (fixes/312_c6_ux · 311_sd_product K3): self-qualification —
             // a green --run must never read as "the product works" while the census
@@ -2252,6 +2343,35 @@ async function main() {
                   "tree is still mixed — no commit was issued and the tree is kept on disk; resolve " +
                   "the quarantine failure and re-emit before landing it.",
               };
+            } else if (
+              !flag(args, "allow-empty") &&
+              flag(args, "run") &&
+              runVerdict !== null &&
+              ((runVerdict.substance && runVerdict.substance.verdict === "empty") ||
+                (runVerdict.ok === true && h.treeRunTrail(project).last === "red"))
+            ) {
+              // W61 B1 (delivery): a commit is evidence of a substantive,
+              // verified product. A tree the census reads as hollow (no job
+              // modules — substance verdict "empty"), or a green run over a
+              // project carrying an uncleared red tree-run trail, is not that.
+              // WITHHOLD the commit, coded + loud, unless the caller explicitly
+              // opts in with --allow-empty (a deliberate scaffold-only
+              // delivery). The emitted tree is still kept on disk. Checked
+              // BEFORE the run-red branch so an empty tree refuses with its OWN
+              // specific code, never the generic tree-run-red.
+              const why =
+                runVerdict.substance && runVerdict.substance.verdict === "empty"
+                  ? 'the emitted tree has no substantive job modules (substance verdict "empty")'
+                  : "the project carries an uncleared red tree-run trail";
+              withheld = {
+                reason: "substance-empty",
+                code: "RT_E_SUBSTANCE_EMPTY",
+                error:
+                  `git delivery refused: ${why} — a commit is evidence of a substantive, ` +
+                  "verified product, so no commit was issued and the emitted tree is kept on disk. " +
+                  "Synthesize the missing surface and re-emit to green, or pass --allow-empty " +
+                  "to land a deliberate scaffold-only commit.",
+              };
             } else if (flag(args, "run") && runVerdict !== null && runVerdict.ok !== true) {
               withheld = {
                 reason: "tree-run-red",
@@ -2289,8 +2409,17 @@ async function main() {
                 error: withheld.error,
               };
               payload.ok = false;
-              if (typeof payload.code !== "string") payload.code = withheld.code;
-              if (typeof payload.error !== "string") payload.error = withheld.error;
+              // W61 B1: the WITHHELD reason owns the envelope's code when it
+              // differs from a leg's own code. The empty-substance refusal is
+              // checked before the run-red branch, so payload.code may already
+              // read RT_E_TREE_RUN_FAILED from THAT leg — the more specific
+              // substance class (and its loud message) must win. Every other
+              // withheld leg already carries payload.code === withheld.code, so
+              // this is a no-op for them.
+              if (typeof payload.code !== "string" || payload.code !== withheld.code) {
+                payload.code = withheld.code;
+                payload.error = withheld.error;
+              }
             } else {
               const landed = await h.landEmittedTree(project, res.dir, { files: res.files });
               payload.git = landed.ok
@@ -2721,6 +2850,11 @@ async function main() {
         const dirArg = requireArg(args, "dir", "repair");
         if (dirArg.error !== undefined) return respond({ ok: false, error: dirArg.error, code: "RT_E_VALIDATION" }, 1);
         const project = loadProjectFor("repair");
+        // PR-22: `repair --from-gate` — the same one bounded re-entry, scoped to
+        // the EDITED dir: re-open a red running P6 first so the repair cycle can
+        // target the recorded unmet state instead of refusing as illegal.
+        const repairProject =
+          flag(args, "from-gate") && h.isRedRunningP6(project) ? h.retry(project) : project;
         const path = requireProjectPath(args, "repair");
         const budget =
           typeof args.budget === "string" && /^\d+$/.test(args.budget)
@@ -2737,7 +2871,7 @@ async function main() {
           );
         }
         try {
-          const res = await h.repairTreeDir(project, resolve(dirArg.value), { budget, checkpointDir: dirname(resolve(path)) });
+          const res = await h.repairTreeDir(repairProject, resolve(dirArg.value), { budget, checkpointDir: dirname(resolve(path)) });
           const importSummary = {
             imported: res.import.imported.length,
             changed: res.import.changed,
@@ -5115,7 +5249,7 @@ const USAGE = {
   commands: {
     create: "create --brief <text|@file> [--name <text>] [--advisory] [--out <file.json>]   # --brief @<path> reads the file (a YAML-front-matter corpus fixture's `brief:` scalar is unwrapped); a bare value naming an EXISTING readable file is REFUSED (RT_E_VALIDATION) — a path is never silently used as prose; default out: <slug>.json in the CWD (intermediate control file); --advisory: advisory DoD gates even when DEEPSEEK_API_KEY is set (keyed runs default enforceDod ON)",
     run: "run --project <file.json> [--live] [--unattended] [--knowledge <store.json>]   # advance one phase; --unattended = autopilot+live forced until parked (the scheduler-facing twin is the `unattended` verb); --knowledge seeds the P6 expansion with human-accepted cross-project lesson rows (proven), same store->rows resolver as `packet`",
-    gate: "gate --project <file.json> [--autopilot] [--live] [--unattended] [--knowledge <store.json>]  # advance until parked; --unattended forces autopilot+live; --knowledge as on run",
+    gate: "gate --project <file.json> [--autopilot] [--live] [--unattended] [--resynthesize] [--knowledge <store.json>]  # advance until parked; --unattended forces autopilot+live; --resynthesize re-opens a red RUNNING P6 (retry) and re-enters the P6 journey LIVE once, bounded, from the recorded unmet requirements (the recovery door for BL-003; without it a red running P6 re-parks at 0 steps); --knowledge as on run",
     resume: "resume --project <file.json|dir> [--autopilot] [--live]  # T-107.7: read the per-phase checkpoint written beside the project dir by run/gate, admit it (identity + mode + integer phase sanity), hydrate it, and re-enter the drive at the recorded phase; prints the snapshot age — exit taxonomy identical to gate (2 = parked). Never a silent resume",
     unattended: "unattended --project <file.json|dir> [--knowledge <store.json>]  # W-47: scheduler-facing drive — re-enter from a checkpoint when one exists (crash recovery), else start from the named project file; autopilot + live; a stock HITL gate (P4/P5/P8/P9) whose DoD passes is cleared through the ledgered machine actor (`approve --seat autopilot`), so only a forceHuman gate (or any red DoD gate) still parks (exit 2); NOT a daemon (a host hook — Windows Task Scheduler / cron — invokes it on a cadence); --knowledge as on run/gate",
     approve: "approve --project <file.json> (--i-am-human | --seat autopilot) [--force]   # the seat is never guessed, name exactly one: --i-am-human = human-seat claim — needs a TTY re-entry of the out-of-band RT_HUMAN_SEAT_TOKEN (refused on non-TTY); --seat autopilot = explicit MACHINE attribution (`decidedBy:\"autopilot\"`, seat harness; works non-TTY — the documented agent door for a parked gate); --agent-seal is REFUSED here (RT_E_VALIDATION) — the seal is a wild-run concept: `wild --start|--resume --agent-seal`",
@@ -5124,11 +5258,11 @@ const USAGE = {
     ingest: "ingest --project <file.json> --report <json|@file.json|->  # @file or '-' = stdin",
     packet: "packet --project <file.json> [--out <file.md>] [--knowledge <store.json>]  # --knowledge seeds the Ranked-memory section with cross-project accepted lesson rows (tier-1, advisory)",
     export: "export --project <file.json> [--out <file.json>]",
-    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified] [--git]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok, exit 0 when it is ok (the envelope always carries declaredScriptsVerified/unverifiedDeclaredScripts when a declared script did not run); --require-verified opts into exit 5 for that green-but-unverified state; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse); --git lands the emitted tree as ONE Conventional-Commits delivery commit (feat(<slug>): <brief>) — emitted files only, a foreign file is reported not committed, the host repo is never a target, and a clean tree is a no-op (envelope `git`)",
+    emit: "emit --project <file.json> [--out <dir>] [--check] [--run] [--red-tree refuse|banner] [--verify-kind] [--force] [--require-verified] [--allow-empty] [--git]   # write the runnable scaffold; default out: <home>/RapidTool Software/<slug>/ (--out overrides); --check adds per-file compile verdicts; --run adds the TreeRunOutcome (compile + tests + entry smoke), exit 1 when the tree is not ok, exit 0 when it is ok (the envelope always carries declaredScriptsVerified/unverifiedDeclaredScripts when a declared script did not run); --require-verified opts into exit 5 for that green-but-unverified state; --red-tree banner admits an uncleared red tree-run WITH the unmissable banner on the emitted README (default refuse); --git lands the emitted tree as ONE Conventional-Commits delivery commit (feat(<slug>): <brief>) — emitted files only, a foreign file is reported not committed, the host repo is never a target, and a clean tree is a no-op (envelope `git`); with --run, --git WITHHOLDS the commit (RT_E_SUBSTANCE_EMPTY) when the tree's substance verdict is \"empty\" or the project carries an uncleared red trail, unless --allow-empty opts into a deliberate scaffold-only commit",
     fixtures: "fixtures --project <file.json> (--draft | --approve --ids id1,id2 | --approve-all)  # draft brief-derived acceptance fixtures (always pending) OR approve selected/all ids — never auto-approves: --approve routes through the policy seam's human seat (--i-am-human + a TTY re-entry of RT_HUMAN_SEAT_TOKEN; a denied verdict writes nothing and stamps no decidedBy)",
     eval: "eval [--dir <eval-out>] [--history <history.json>] [--slug <slug>]  # T5.3 read-only eval scorecard: M1-M9 rubric + per-case rows + history deltas/trend read from research/eval-out/results.json + history.json (default dir <repo>/research/eval-out; $EVAL_OUT_DIR honored like run-eval.mjs; --dir overrides; --history overrides just the trend file; --slug filters to one corpus case). No keyed calls, nothing fabricated — the eval-out documents are never written (like every verb, the exit stamps one NDJSON telemetry row under <cwd>/.rapidtool/logs/); a missing history prints as 'no history', never a fake 0 delta",
     "tree-run": "tree-run --dir <dir> [--project <file.json>] [--require-verified]  # fixes/149 P0-1 emit→edit→re-emit oracle: compile-check treeRun over an EXISTING emitted dir — read-only, never re-emits over the dir (an edited file is never clobbered); green → 0 (the envelope still names an unverified declared toolchain; --require-verified turns that state into exit 5); red → 1 with the first not-ok tail + RT_E_TREE_RUN_FAILED; --project adds the hash-checked dirDirty divergence report (read-only, never persisted)",
-    repair: "repair --dir <dir> --project <file.json> [--budget N]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (path→content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun → red tail → one bounded synthesis repair call with deps.treeFailure → apply repaired files in place → re-import → treeRun again); green → tested-equivalent mint + honest P6 gate + converged (0); budget exhausted → honest failed (1, RT_E_REPAIR_FAILED); the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
+    repair: "repair --dir <dir> --project <file.json> [--budget N] [--from-gate]  # fixes/149 P0-1 continuation seam: re-import the EDITED tree files from the dir into project.generatedTree (path→content, hash-checked per file; refused paths are warnings, never silent drops) + run the journey's bounded repair cycle AGAINST the dir (treeRun → red tail → one bounded synthesis repair call with deps.treeFailure → apply repaired files in place → re-import → treeRun again); green → tested-equivalent mint + honest P6 gate + converged (0); budget exhausted → honest failed (1, RT_E_REPAIR_FAILED); PR-22 --from-gate re-opens a red RUNNING P6 first so the cycle targets the recorded unmet state instead of refusing as illegal; the dir is the artifact, the project JSON the ledger (persisted after every completed run); default budget 3",
     edit: "edit --dir <dir> --file <relpath> --find <old> --replace <new> [--write] [--project <file.json>]  # 216s (108-T1): ONE in-place str_replace on an emitted tree file — DRY-RUN by default (the diff + would-be hashes are returned, nothing is written); --write (requires --project) applies atomically only after evaluatePolicy(\"repair.apply\", tree:<dir>) allows the seat, then lands ONE attributed ledger row (actor + decidedVia provenance + patch + before/after hashes); ambiguous / missing / no-op matches are coded refusals",
     summary: "summary --project <file.json>   # envelope: ok + summary incl. nextAction {kind,cmd,phase,why} — the SAME 7-arm vocabulary the console renders (run/approve/retry/done/running/fix-gate/unknown)",
     vault: "vault --project <file.json> [--out <dir>]   # one .md per note + _index.md MOC (default <home>/RapidTool Software/<slug>/vault)",

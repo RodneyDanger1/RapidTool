@@ -346,6 +346,220 @@ export function identifierHits(required: string[], source: string): string[] {
   return out;
 }
 
+/**
+ * W61 lane C (C14): mask `export … from` / `import … from` clause heads so the
+ * NAMES they carry are not read as implementations. A `createBoard` identifier
+ * that appears ONLY in `export { createBoard } from "./x.ts"` is a re-export,
+ * not a definition — counting it let a tree of pure re-export bridges satisfy
+ * p6-arch (FINDINGS O-03). Operates on text ALREADY masked by
+ * maskLiteralsAndComments, so every module specifier is spaces and the clause
+ * head (`export { … } from` / `import … from`) is matched lexically.
+ */
+export function maskModuleReexports(maskedCode: string): string {
+  return String(maskedCode ?? "")
+    .replace(/\bexport\s+(?:\{[^}]*\}|\*)\s*(?:as\s+[A-Za-z_$][A-Za-z0-9_$]*\s*)?\bfrom\b/g, " ")
+    .replace(/\bimport\b[^;\n]*?\bfrom\b/g, " ");
+}
+
+/**
+ * W61 lane C (C14): `identifierHits` for IMPLEMENTATION code — re-export/import
+ * clause identifiers are masked first, so a capability is "carried by a tree
+ * file" only when a real definition mentions it. Used by dod.archTrace so a
+ * dead re-export bridge can never map a capability.
+ */
+export function implementationIdentifierHits(required: string[], source: string): string[] {
+  return identifierHits(required, maskModuleReexports(maskLiteralsAndComments(typeof source === "string" ? source : "")));
+}
+
+/**
+ * W61 lane C (C1) — the p6-brief-fit CORE-noun calibration (R1 P0-5). The flat
+ * 0.35 bar over EVERY non-stopword token treated generic verbs the same as
+ * product nouns, so a 2-file hollow tree cleared it while dropping the
+ * distinguishing nouns (`office-stock-tracker` v1 passed fit on 2 files and
+ * failed only `p6-arch`). The fix partitions the brief's nouns into CORE
+ * (grounded product vocabulary) and ADVISORY, and holds the CORE to a high bar
+ * — never lowering the flat bar, but measuring the meaningful set.
+ *
+ * Core = tokens in the project's contract-entity names / lattice jobs /
+ * spec-graph capability labels, the brief's H1-heading proper nouns, and its
+ * bold (**…**) labels (the entity/feature headings the briefs actually carry).
+ * Advisory = the remaining `briefNounHits(brief).required`. Pure + deterministic.
+ */
+export type BriefNounCoreContext = {
+  contracts?: { entities?: { name?: unknown }[] } | null;
+  lattice?: { jobs?: unknown[]; entities?: unknown[] } | null;
+  specGraph?: { nodes?: { id?: unknown; file?: unknown; purpose?: unknown }[] } | null;
+};
+
+/**
+ * C1: the product/domain REGISTER — brief tokens that name a business domain
+ * object even when they are not contract entities (R1 P0-5 "DOMAIN_TERMS
+ * register hits"). Mirrors the CURRENT `engine.ts` `DOMAIN_TERMS` values plus
+ * the delivery-kind nouns; `sandbox` cannot import `engine` (engine depends on
+ * sandbox), so this is the one maintained copy. `engine.test.ts` pins that every
+ * live DOMAIN_TERMS value is present here, so the two cannot silently drift.
+ */
+export const BRIEF_CORE_REGISTER: ReadonlySet<string> = new Set([
+  // engine.DOMAIN_TERMS (verbatim values)
+  "crm", "pipeline", "lead", "sales",
+  "inventory", "warehouse", "sku", "stock",
+  "marketplace", "listing", "buyer", "seller", "storefront", "checkout",
+  "agent", "orchestrat", "mcp", "llm", "crew",
+  "clinic", "patient", "health", "clinician", "hipaa", "phi", "intake",
+  "fleet", "dispatch", "route", "driver", "tech",
+  "invoice", "billing", "ledger", "quote", "payments", "expense", "receipt",
+  "dashboard", "analytics", "kpi", "report",
+  "house", "property", "estate", "showing", "flip", "arv", "rental", "tenant",
+  "lease", "landlord", "mortgage", "appraisal", "escrow", "closing", "deed",
+  "condo", "duplex", "multifamily", "comps", "beds", "baths", "sqft", "realtor",
+  "contractor", "renovation", "renovate", "rehab", "trades", "electrician",
+  "plumber", "carpenter", "framing", "drywall", "roofing", "hvac", "permit",
+  "subcontractor", "punch", "bid", "material",
+  // delivery-kind / surface nouns (engine.DELIVERY_KIND_KEYWORDS + web/retail/mobile)
+  "library", "package", "sdk", "npm", "module", "statistics",
+  "ui", "dashboard", "board", "desk", "portal",
+  "cli", "commandline", "terminal", "script",
+  "game", "arcade", "service", "webhook", "worker", "api",
+  "website", "site", "marketing", "mobile", "screen", "tab", "page",
+  "shop", "retail", "catalogue", "catalog", "menu", "product", "order",
+  "price", "enquiry", "alert", "restock", "booking", "shift", "rota",
+  "appointment", "calendar", "scheduler", "flower", "florist", "bouquet",
+  "bakery", "bread", "delivery",
+]);
+
+/** Identifier-valid, non-stopword tokens of one raw label (lowercased). */
+function labelTokens(raw: unknown): string[] {
+  const out: string[] = [];
+  for (const t of briefTokens(String(raw ?? ""))) {
+    if (t.length > 1 && !BRIEF_STOPWORDS.has(t) && /^[a-z_$][a-z0-9_$]*$/.test(t)) out.push(t);
+  }
+  return out;
+}
+
+/**
+ * C1: partition a brief's nouns into `core` (grounded product vocabulary) and
+ * `advisory` (the rest). When `context` (the project's contracts/lattice/
+ * spec-graph) is supplied, its grounded nouns are folded into core — the
+ * signal that catches an under-produced tree (a declared job/entity the tree
+ * never materialised). Without a context the brief's own H1 proper nouns and
+ * bold labels carry the core. Empty when neither yields a noun (vacuity).
+ */
+export function briefNounCore(
+  brief: string,
+  context?: BriefNounCoreContext | null,
+): { core: string[]; advisory: string[] } {
+  const { required } = briefNounHits(brief);
+  const core = new Set<string>();
+  const add = (raw: unknown) => {
+    for (const t of labelTokens(raw)) core.add(t);
+  };
+  if (context && typeof context === "object") {
+    for (const e of context.contracts?.entities ?? []) add(e?.name);
+    for (const j of context.lattice?.jobs ?? []) add(j);
+    // Every spec-graph CAPABILITY node's label + file stem (the structural
+    // schema/api/store nodes are generic scaffolding, not product nouns).
+    for (const n of context.specGraph?.nodes ?? []) {
+      const id = String(n?.id ?? "");
+      if (id === "schema" || id === "api" || id === "store") continue;
+      const file = String(n?.file ?? "");
+      if (file) add(file.replace(/^.*\//, "").replace(/\.[^.]+$/, ""));
+      const m = /[\u201c"]([^\u201d"]+)[\u201d"]/.exec(String(n?.purpose ?? ""));
+      if (m) add(m[1]);
+    }
+  }
+  // H1/heading region proper nouns (capitalised tokens before the first "##").
+  const headRegion = String(brief ?? "").split(/\n##\s/)[0] ?? "";
+  for (const m of headRegion.matchAll(/\b[A-Z][a-zA-Z0-9]{2,}\b/g)) add(m[0]);
+  // Bold labels (**Item**, **Staff**, **Purchase requests** …).
+  for (const m of String(brief ?? "").matchAll(/\*\*([^*]+)\*\*/g)) add(m[1]);
+  // Domain-register hits anywhere in the brief (R1 P0-5 core signal (c)).
+  for (const t of briefTokens(brief)) if (BRIEF_CORE_REGISTER.has(t)) core.add(t);
+  const coreList = required.filter((t) => core.has(t));
+  const coreSet = new Set(core);
+  // Core is not limited to `required` — a project-grounded entity/job noun is a
+  // core demand even when the brief's prose phrased it differently.
+  const grounded = [...core].filter((t) => !BRIEF_STOPWORDS.has(t));
+  const merged = [...new Set([...coreList, ...grounded])].sort();
+  const advisory = required.filter((t) => !coreSet.has(t));
+  return { core: merged, advisory };
+}
+
+/** C1: the hard core bar — ≥ ceil(core × 0.6), min 1 (a higher coverage of the
+ *  smaller, meaningful set; the advisory 0.35 is diagnostics only). */
+export const BRIEF_FIT_CORE_BAR = 0.6;
+export function briefFitCoreNeed(coreLength: number): number {
+  return Math.max(1, Math.ceil(coreLength * BRIEF_FIT_CORE_BAR));
+}
+
+/**
+ * C1: the p6-brief-fit coverage over the core/advisory split. `pass` is the
+ * hard core bar (vacuously true when the core is empty). Advisory counts are
+ * reported for diagnosis only and never flip the verdict.
+ */
+export function briefFitCoverage(
+  brief: string,
+  source: string,
+  context?: BriefNounCoreContext | null,
+): {
+  core: string[];
+  coreHits: string[];
+  missingCore: string[];
+  advisory: string[];
+  advisoryHits: string[];
+  missingAdvisory: string[];
+  need: number;
+  pass: boolean;
+} {
+  const src = typeof source === "string" ? source : "";
+  // Vacuity FIRST (R1 P0-5 step 4): a brief with NO content vocabulary passes
+  // without consulting project grounding — a stopword-only brief never demands
+  // identifiers, even though the fallback lattice still has demo jobs/entities.
+  const { required } = briefNounHits(brief);
+  if (required.length === 0) {
+    return {
+      core: [],
+      coreHits: [],
+      missingCore: [],
+      advisory: [],
+      advisoryHits: [],
+      missingAdvisory: [],
+      need: 0,
+      pass: true,
+    };
+  }
+  const { core, advisory } = briefNounCore(brief, context);
+  // A vocabulary-bearing brief always has a measured core: if nothing grounds
+  // (no context, no H1/bold/register), fall back to the full required set so
+  // the brief is never auto-passed.
+  const measured = core.length > 0 ? core : required;
+  const coreHits = identifierHits(measured, src);
+  const advisoryHits = identifierHits(advisory, src);
+  const coreHitSet = new Set(coreHits);
+  const advisoryHitSet = new Set(advisoryHits);
+  const need = briefFitCoreNeed(measured.length);
+  const pass = coreHits.length >= need;
+  return {
+    core: measured,
+    coreHits,
+    missingCore: measured.filter((t) => !coreHitSet.has(t)),
+    advisory,
+    advisoryHits,
+    missingAdvisory: advisory.filter((t) => !advisoryHitSet.has(t)),
+    need,
+    pass,
+  };
+}
+
+/** C1: the single p6-brief-fit predicate — dod's probe and its state line read
+ *  THIS so they can never drift. Vacuity preserved (empty core ⇒ pass). */
+export function briefFitSubstancePasses(
+  brief: string,
+  source: string,
+  context?: BriefNounCoreContext | null,
+): boolean {
+  return briefFitCoverage(brief, source, context).pass;
+}
+
 // ---------------------------------------------------------------------------
 // Worker-isolate executor (R1/B-01) — DEPRECATED as a product execution path
 // (E-29, choice b). It has zero product call sites and cannot run on the Node

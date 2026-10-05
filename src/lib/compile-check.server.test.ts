@@ -1111,6 +1111,10 @@ describe("T2 (332-3) — a declared-but-unverified project tool is never a pass"
       assert.equal(r.unverifiedDeclaredScripts, undefined, "nothing is unverified once the toolchain ran");
       assert.match(r.note ?? "", /repo's own node_modules/, "the shared toolchain root is named on the verdict");
       assert.match(r.note ?? "", /declared devDependency versions were NOT installed/);
+      // PR-34 (B4): the same scope is machine-readable, not prose-only.
+      assert.equal(r.dependencySource?.toolchain, "repo-shared", "PR-34: the shared-toolchain provenance is structured");
+      assert.equal(r.dependencySource?.treeInstalled, false);
+      assert.match(r.dependencySource?.note ?? "", /NOT installed/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1146,6 +1150,7 @@ describe("T2 (332-3) — a declared-but-unverified project tool is never a pass"
       assert.equal(r.declaredScriptsVerified, true, "every declared script ran");
       assert.equal(r.unverifiedDeclaredScripts, undefined, "nothing unverified");
       assert.equal(r.project!.unverifiedDeclaredScripts, undefined);
+      assert.equal(r.dependencySource, undefined, "PR-34: a runtime-only toolchain carries no shared-deps provenance");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -2494,5 +2499,55 @@ describe("346 E1 item 2 - a shape-only spec is not a behavioural pass", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W61 B6 (FINDINGS F-02): an emitted spec whose only LIVE assertion is a shape
+// check used to mint `lastTest:"tested"` because the behavioural scan counted
+// asserts inside `test.skip`/`test.todo` bodies and treated `assert.fail` (an
+// unconditional stub throw) as an observation. Skipped bodies are now masked
+// and `assert.fail` is non-behavioural.
+// ---------------------------------------------------------------------------
+describe("W61 B6 - skipped/todo bodies and assert.fail are not behavioural", () => {
+  it("masks skipped/todo bodies; assert.fail is a stub marker", () => {
+    const skipOnly = [
+      `test.skip("no-oracle - NOT IMPLEMENTED", () => {`,
+      `  assert.fail("no A7 oracle rows recorded - nothing to assert yet");`,
+      `});`,
+    ].join("\n");
+    assert.equal(specSourceHasBehaviouralAssert(skipOnly), false, "a skip-only spec certifies nothing");
+    assert.equal(
+      specSourceHasBehaviouralAssert(
+        `test.skip("later", () => { assert.equal(m.run(), 42); });\ntest("shape", () => { assert.ok(typeof m.run === "function"); });`,
+      ),
+      false,
+      "a behavioural assert inside test.skip cannot carry a live shape-only test",
+    );
+    assert.equal(
+      specSourceHasBehaviouralAssert(`test("stub", () => { assert.fail("NOT IMPLEMENTED"); });`),
+      false,
+      "assert.fail is an unconditional throw - never an observation of the module",
+    );
+    assert.equal(specSourceHasBehaviouralAssert(`test.todo("todo row");`), false, "a todo body never executes");
+    assert.equal(
+      specSourceHasBehaviouralAssert(
+        `describe.skip("suite", () => { test("t", () => { assert.equal(m.run(), 42); }); });`,
+      ),
+      false,
+      "a skipped describe masks its nested live-looking tests",
+    );
+    // FALSE-RED controls: a LIVE behavioural assert still counts, even beside a skip.
+    assert.equal(
+      specSourceHasBehaviouralAssert(
+        `test.skip("later", () => { assert.equal(m.run(), 42); });\ntest("live", () => { assert.equal(m.run(), 42); });`,
+      ),
+      true,
+      "a live behavioural assert beside a skip still certifies",
+    );
+    assert.equal(
+      specSourceHasBehaviouralAssert(`test("x", () => { assert.throws(() => f(), /boom/); });`),
+      true,
+    );
   });
 });

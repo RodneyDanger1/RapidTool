@@ -17,6 +17,10 @@ import {
   rankBriefLessons,
   lessonLinesForBrief,
   provenToLessonRow,
+  repairSystemPrompt,
+  REPAIR_PRESERVED_RULES,
+  REPAIR_FORBIDDEN_PRIMITIVE_NAMES,
+  REPAIR_REFUSAL_ENVELOPE,
   type ExpandedSpec,
   EXPAND_BRIEF_MAX_CHARS,
   EXPAND_POLICY_MAX_CHARS,
@@ -25,6 +29,23 @@ import {
   EXPAND_LESSON_MAX_COUNT,
   EXPAND_LESSON_RANK_LIMIT,
 } from "./prompt-engine.ts";
+// PR-18 prompt/validator parity: the validator side lives in codegen.server.ts
+// (S's file) — imported READ-ONLY so the pure repair prompt's advertised rules
+// can be checked against the checks that actually enforce them.
+import {
+  crossChunkDuplicateDeclarations,
+  forbiddenPrimitiveHit,
+  FORBIDDEN_PRIMITIVE_NAMES,
+  missingSignatureNames,
+  nondeterministicPrimitiveHit,
+  p6SynthesisBriefFitRepairPrompt,
+  p6SynthesisExportRepairPrompt,
+  p6SynthesisForbiddenRepairPrompt,
+  p6SynthesisRepairPrompt,
+  p6SynthesisSignatureRepairPrompt,
+  proseLineHits,
+  unawaitedAsyncValueUses,
+} from "./codegen.server.ts";
 import { LESSON_TEXT_MAX, lessonRow } from "./knowledge.ts";
 import { BRIEF_TEMPLATES } from "./templates.ts";
 import type { MemoryEntry } from "./types.ts";
@@ -833,5 +854,93 @@ describe("applyPolicies", () => {
     assert.equal(JSON.stringify(out.requirements), JSON.stringify(spec.requirements), "requirements untouched");
     assert.equal(JSON.stringify(out.dataFlow), JSON.stringify(spec.dataFlow));
     assert.equal(JSON.stringify(out.errorHandling), JSON.stringify(spec.errorHandling));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR-18 — the pure dedicated repair prompt + the prompt/validator parity
+// extension. Drift-proof: the repair prompt may not advertise a rule the
+// validators do not enforce, and may not omit one they do (the repo's 215b
+// principle). Every advertised rule family is linked to its live validator, and
+// every codegen repair re-prompt is checked against the same contract.
+// ---------------------------------------------------------------------------
+describe("PR-18 — dedicated repair prompt + prompt/validator parity", () => {
+  it("carries the pure repair contract: delta first, full envelope second, no success claims, checks protected, refusal channel", () => {
+    const s = repairSystemPrompt();
+    assert.ok(s.includes("bounded repair agent"), "repair persona named");
+    assert.ok(s.includes('{"patch"'), "delta form offered");
+    assert.ok(s.includes('{"module"'), "full-envelope form offered");
+    assert.ok(s.includes("may not claim the repair succeeded"), "success claims forbidden");
+    assert.ok(s.includes("may not weaken"), "checks protected");
+    assert.ok(s.includes(REPAIR_REFUSAL_ENVELOPE), "the legal refusal channel is advertised verbatim");
+    for (const rule of REPAIR_PRESERVED_RULES) {
+      assert.ok(s.includes(rule), `the advertised rule list omits: ${rule}`);
+    }
+  });
+
+  it("is pure: identical calls produce an identical string", () => {
+    assert.equal(repairSystemPrompt(), repairSystemPrompt());
+  });
+
+  it("names EVERY validator-enforced forbidden primitive, and the mirrored list cannot drift", () => {
+    assert.deepEqual(
+      [...REPAIR_FORBIDDEN_PRIMITIVE_NAMES],
+      [...FORBIDDEN_PRIMITIVE_NAMES],
+      "the mirrored primitive list must equal codegen's validator list",
+    );
+    const s = repairSystemPrompt();
+    for (const name of FORBIDDEN_PRIMITIVE_NAMES) {
+      assert.ok(
+        s.includes(name),
+        `repair prompt omits forbidden primitive \`${name}\` — the model would be blind-sided by the validator`,
+      );
+    }
+  });
+
+  it("every advertised rule family is backed by a LIVE validator (no unenforced advertising)", () => {
+    for (const name of FORBIDDEN_PRIMITIVE_NAMES) {
+      const hit = forbiddenPrimitiveHit(name);
+      assert.ok(
+        hit.hard !== null || hit.soft !== null,
+        `\`${name}\` is advertised but no validator matches it`,
+      );
+    }
+    assert.ok(
+      nondeterministicPrimitiveHit("const x = Math.random();") !== null,
+      "Math.random has a live validator",
+    );
+    assert.ok(
+      proseLineHits("I will write the code now and make sure it works.").length > 0,
+      "prose-in-code has a live validator",
+    );
+    assert.ok(
+      unawaitedAsyncValueUses("async function f(){}\nfunction g(): number { return f().ok; }", ["f"]).length > 0,
+      "un-awaited async has a live validator",
+    );
+    assert.ok(
+      crossChunkDuplicateDeclarations("function estimateARV(): number { return 1; }", [
+        { path: "a.ts", exports: ["estimateARV"] },
+      ]).length > 0,
+      "cross-chunk duplicate declaration has a live validator",
+    );
+    assert.deepEqual(
+      missingSignatureNames(["a"], ["a", "b"]),
+      ["b"],
+      "the missing-signature rule has a live validator",
+    );
+  });
+
+  it("EACH codegen repair re-prompt restates the preserved-rules contract (parity across every repair prompt)", () => {
+    const prompts: [string, string][] = [
+      ["resend", p6SynthesisRepairPrompt()],
+      ["export-binding", p6SynthesisExportRepairPrompt(["createBoard"])],
+      ["forbidden-primitive", p6SynthesisForbiddenRepairPrompt("fetch")],
+      ["signature", p6SynthesisSignatureRepairPrompt(["createBoard"])],
+      ["brief-fit", p6SynthesisBriefFitRepairPrompt(["lease"])],
+    ];
+    for (const [name, prompt] of prompts) {
+      assert.match(prompt, /forbidden primitive/i, `${name}: names the forbidden-primitive rule`);
+      assert.match(prompt, /no markdown fences|JSON ONLY/i, `${name}: restates the JSON-only output contract`);
+    }
   });
 });

@@ -30,13 +30,13 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { applyPhaseResult, approveHitl, emptyProject, databaseSchemaSql, deliveryKindOf, hydrateProject, inferDomain, liveLayer, rejectHitl, repairPhases, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
+import { applyPhaseResult, approveHitl, deepenResearch, emptyProject, databaseSchemaSql, deliveryKindOf, filterOffIntentResearch, hydrateProject, inferDomain, inferName, isOffIntentResearch, liveLayer, rejectHitl, repairPhases, researchQueryText, stripOutOfScope, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
 import { exportProjectJson, importProject } from "./io.ts";
 import { recordSessionSpend, resetSessionBudget, type TokenSpend } from "./token-ledger.ts";
 import { wildResumeRun } from "./headless.ts";
 import type { RankableLessonRow } from "./knowledge.ts";
 import type { RtEventSeed } from "./rt-events.ts";
-import type { Project, WildParkInfo } from "./types.ts";
+import type { PhaseId, Project, WildParkInfo } from "./types.ts";
 
 /** An ACTIVE wild-run project parked on the P0 approval gate (wild-seal.test.ts shape). */
 function sealedFixture(): Project {
@@ -416,7 +416,11 @@ describe("346 T1 — surface-word classification (no stem collisions)", () => {
   it("a marketing-site brief is not typed real-estate by its Home page", () => {
     const brief =
       "A marketing website for a neighbourhood bakery. Home page, a menu with allergen tags, an opening-hours badge, and an order form with field-level validation.";
-    assert.equal(inferDomain(brief), "custom-software");
+    // W61 C2: the new `web-marketing` register names this correctly (it was
+    // `custom-software` before the register existed); the 346 point stands — it
+    // is NOT real-estate.
+    assert.equal(inferDomain(brief), "web-marketing");
+    assert.notEqual(inferDomain(brief), "real-estate");
   });
 
   it("a back-office with a product list and multi-tenant scope is operations, not real-estate", () => {
@@ -822,5 +826,191 @@ describe("engine refusals carry their RT_E_* code (never an uncoded throw)", () 
     const p = emptyProject({ name: "Coded", brief: "a coded refusal brief" });
     p.lattice = null;
     assert.equal(codeOf(() => synthesizePhase(p, 0)), "RT_E_INTERNAL");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W61 lane C - C2 (classifier taxonomy + negation stripping) and C3 (inferName
+// markdown strip). RED before the change: the negation fixture matched tenant
+// from an out-of-scope line; every name began with "# ".
+// ---------------------------------------------------------------------------
+describe("W61 C2 - classifier registers + out-of-scope stripping", () => {
+  it("an out-of-scope 'multi-tenant' line no longer forces real-estate", () => {
+    const brief =
+      "An internal back-office to take orders, manage inventory and stock, and show a product list. Multi-tenant support is out of scope.";
+    assert.equal(inferDomain(brief), "operations");
+    assert.notEqual(inferDomain(brief), "real-estate");
+    // The negated sentence is dropped; the first sentence's nouns survive.
+    const stripped = stripOutOfScope(brief);
+    assert.ok(stripped.includes("inventory"), "the kept sentence survives");
+    assert.ok(!/multi-?tenant/i.test(stripped), "the negated sentence is removed");
+  });
+
+  it("drops an entire 'Explicitly out of scope' section (barcode/supplier never become core)", () => {
+    const brief =
+      "# Tracker\n\n## What this is\nTrack items and reorder stock.\n\n## Explicitly out of scope\n- Barcode scanning.\n- Supplier ordering.\n";
+    const stripped = stripOutOfScope(brief);
+    assert.ok(stripped.includes("reorder"), "in-scope text survives");
+    assert.ok(!/barcode/i.test(stripped), "out-of-scope barcode removed");
+    assert.ok(!/supplier/i.test(stripped), "out-of-scope supplier removed");
+  });
+
+  it("the new web/retail/mobile registers classify, not fall through to a bare default", () => {
+    assert.equal(inferDomain("A marketing website with a landing page and brand content"), "web-marketing");
+    assert.equal(inferDomain("A retail shop with a storefront, checkout cart and till"), "retail");
+    assert.equal(inferDomain("A mobile app for ios and android with a touchscreen-friendly viewport"), "mobile");
+  });
+
+  it("a website/mobile brief is an app kind (the surface nouns are explicit)", () => {
+    assert.equal(deliveryKindOf(emptyProject({ name: "Site", brief: "A marketing website with pages and a menu" })), "app");
+    assert.equal(deliveryKindOf(emptyProject({ name: "App", brief: "A mobile app with a bottom tab bar" })), "app");
+  });
+});
+
+describe("W61 C3 - inferName strips markdown without truncating mid-word", () => {
+  it("strips the H1 marker and the subtitle separator", () => {
+    assert.equal(inferName("# Golden Crust Bakery - Marketing Website\n\nBody text."), "Golden Crust Bakery");
+    assert.equal(inferName("# Wildstem Florist - Marketing Website"), "Wildstem Florist");
+    assert.equal(inferName("# Officestock - Office Supplies Inventory Tracker"), "Officestock");
+  });
+
+  it("never returns a leading '#' or a trailing separator", () => {
+    for (const brief of [
+      "# Crumb & Bloom Companion - Mobile App",
+      "# Shiftline - Office Shift & Appointment Scheduler",
+      "# Ledgeline - Office Invoice & Expense Tracker",
+      "# Wildstem Florist -",
+    ]) {
+      const name = inferName(brief);
+      assert.ok(!name.startsWith("#"), `no leading # (${name})`);
+      assert.ok(!/[-\u2014|:]\s*$/.test(name), `no trailing separator (${name})`);
+      assert.ok(name.trim().length > 0 && name !== "Untitled system", `a real name (${name})`);
+    }
+  });
+
+  it("caps at four whole words, never mid-word", () => {
+    const name = inferName("# A Very Long Product Name That Keeps Going");
+    assert.equal(name, "A Very Long Product");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W61 lane C - C6: engine.deepenResearch must refuse an empty-corpus deepen
+// instead of stamping a liveUnavailable waiver + re-recording a FAILED gate to
+// PASS (R1 BL-011 residual; the 346-T2 fix guarded only the store wrapper).
+// ---------------------------------------------------------------------------
+describe("W61 C6 - deepenResearch empty-corpus guard", () => {
+  const p7Complete = (): Project => {
+    const p = emptyProject({ name: "Deep", brief: "A field-service research deepen brief with vocabulary." });
+    p.phases = p.phases.map((r) =>
+      r.id === 7
+        ? {
+            ...r,
+            status: "complete" as const,
+            gate: { passed: false, unmet: ["p7-research"], evidenceHash: "deadbeefcafe", checkedAt: 1 },
+          }
+        : r,
+    );
+    return p;
+  };
+
+  it("a no-findings deepen refuses (RT_E_RESEARCH_UNAVAILABLE) and records nothing", async () => {
+    const code = await deepenResearch(p7Complete(), 7 as PhaseId, async () => ({
+      items: [],
+      narrative: null,
+      provider: null,
+      unavailable: true,
+    })).then(
+      () => null,
+      (e: { code?: string }) => e.code ?? null,
+    );
+    assert.equal(code, "RT_E_RESEARCH_UNAVAILABLE", "the empty-corpus deepen is a coded refusal");
+  });
+
+  it("a deepen that lands findings still re-records (the guard is not over-broad)", async () => {
+    const out = await deepenResearch(p7Complete(), 7 as PhaseId, async () => ({
+      items: [{ title: "t", url: "https://e/x", content: "c" }],
+      narrative: null,
+      provider: "tavily",
+      unavailable: false,
+    }));
+    assert.ok((out.research ?? []).length > 0, "the corpus landed");
+    assert.notEqual(
+      out.phases.find((r) => r.id === 7)?.gate?.evidenceHash,
+      "deadbeefcafe",
+      "the gate was re-recorded over a real corpus",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W61 lane C - C9 (PR-17): intent-first research query + deterministic
+// off-intent filter. RED before the change: the domain noun bag LED the query,
+// so a bakery/flower P0 pass researched "property rental tenant lease …
+// architecture feasibility" and grounded itself in rental/lease category pages
+// (BL-001 recurrence); nothing dropped an off-intent category page from an
+// engineering-phase corpus.
+// ---------------------------------------------------------------------------
+describe("W61 C9 - intent-first research query + off-intent filter", () => {
+  const p0Intent = "architecture feasibility 2026";
+
+  it("the phase intent leads; at most 3 domain qualifiers follow", () => {
+    const p = emptyProject({
+      name: "Golden Crust Bakery",
+      brief:
+        "# Golden Crust Bakery\n\nA marketing website for a bakery: menu, order pickup, delivery zones, contact.",
+    });
+    p.domain = "web-marketing";
+    const q = researchQueryText(p, p0Intent);
+    assert.ok(q.startsWith(p0Intent), `the phase intent leads (got: ${q})`);
+    const qualifiers = q.slice(p0Intent.length).trim().split(/\s+/).filter(Boolean);
+    assert.ok(qualifiers.length >= 1, "at least one domain qualifier rides along");
+    assert.ok(
+      qualifiers.length <= 3,
+      `at most 3 domain qualifiers (got ${qualifiers.length}: ${qualifiers.join(" ")})`,
+    );
+  });
+
+  it("a mislabeled real-estate domain no longer makes the domain bag lead", () => {
+    const p = emptyProject({
+      name: "Wildstem Florist",
+      brief: "A florist website selling bouquets with delivery zones and an enquiry form.",
+    });
+    p.domain = "real-estate";
+    const q = researchQueryText(p, p0Intent);
+    assert.ok(q.startsWith(p0Intent), "the phase intent is the subject, never the domain");
+    // If a domain noun rides along at all it can only follow the intent.
+    const firstDomain = q.search(/\b(rental|tenant|lease|property)\b/);
+    assert.ok(firstDomain === -1 || firstDomain > 0, "domain nouns never precede the intent");
+  });
+
+  it("the blocklist drops a rental/lease category page for an engineering phase", () => {
+    const listing = {
+      title: "Apartments for Rent in Austin, TX",
+      url: "https://www.apartments.com/austin-tx/",
+      content: "Find your next rental home.",
+    };
+    const tutorial = {
+      title: "React architecture patterns for a property management app",
+      url: "https://example.com/blog/react-architecture",
+      content: "How to build the frontend and wire the API.",
+    };
+    assert.equal(isOffIntentResearch(p0Intent, listing), true, "the listings page is off-intent");
+    assert.equal(isOffIntentResearch(p0Intent, tutorial), false, "the software-building page is kept");
+    const { accepted, dropped } = filterOffIntentResearch(p0Intent, [listing, tutorial]);
+    assert.deepEqual(accepted, [tutorial], "only the on-intent result survives");
+    assert.deepEqual(dropped, [listing], "the off-intent result is dropped");
+  });
+
+  it("the blocklist is inert outside engineering phases (a competitor pass keeps domain pages)", () => {
+    const listing = {
+      title: "Best rental property management software",
+      url: "https://example.com/rental-software",
+    };
+    assert.equal(
+      isOffIntentResearch("competitors market landscape", listing),
+      false,
+      "P7 market-landscape research is not subject to the engineering blocklist",
+    );
   });
 });

@@ -1,0 +1,51 @@
+{
+  "slug": "bakery-website",
+  "briefFile": "bakery-website/brief.md",
+  "brief": "# Golden Crust Bakery — Marketing Website\n\n## What this is\nA marketing website for a neighbourhood bakery called Golden Crust. The site is\npublic, read-mostly, and exists to get a hungry visitor to walk in or place an\norder. It must be fast on a phone, work without JavaScript for the core content,\nand be trivially editable by the owner.\n\n## Audience\n- Local residents deciding where to buy bread and pastries today.\n- People ordering a celebration cake or a catering box ahead of time.\n- Tourists searching \"bakery near me\" on a phone.\n\n## Required pages / sections\n1. **Home** — hero with today's fresh-bake highlights, opening-hours badge that\n   shows Open/Closed computed from the current time and the hours table, and a\n   short story block.\n2. **Menu** — grouped products (Breads, Pastries, Cakes, Drinks). Each item has a\n   name, short description, price, and allergen tags (gluten, dairy, nuts, egg,\n   vegan). Filter by dietary tag and by category, plus a text search box.\n3. **Hours & Location** — a weekly table of opening hours, a holiday-closures\n   list, an embedded static map image, and a \"Get directions\" link.\n4. **Order form** — a celebration-cake / catering enquiry form: name, phone,\n   email, pickup date, product, quantity, and free-text notes. Must validate the\n   pickup date is at least 48 hours in the future, require either phone or email,\n   and show a clear confirmation with an order reference.\n5. **Contact** — phone, email, address, social links, and a short FAQ.\n\n## Functional requirements\n- Opening-hours logic must be a single source of truth reused by the Home badge\n  and the Hours page (compute Open/Closed from the same table).\n- The menu filter must combine category, dietary tag, and free-text query with\n  AND semantics, and show a friendly empty state when nothing matches.\n- The order form must reject a missing contact method, a pickup date under 48\n  hours away, and a quantity below 1; on success it generates a human-readable\n  order reference (e.g. GC-2026-0007) and echoes the full order back.\n- Prices are shown in GBP with two decimals; totals for quantity > 1 are\n  computed.\n- All form validation errors are field-level and accessible (associated with the\n  input, announced to screen readers).\n\n## Non-functional requirements\n- Responsive from 320px to 1440px; mobile-first.\n- Core content (menu, hours, contact) readable with JS disabled.\n- Semantic HTML landmarks, one h1 per page, alt text on every image.\n- Colour contrast at least WCAG AA.\n- No third-party trackers.\n\n## Explicitly out of scope\n- Online payment / card processing.\n- User accounts or login.\n- A real database or CMS backend — content is static data in the app.\n- Multi-language support.\n",
+  "persisted": {
+    "name": "# Golden Crust Bakery",
+    "domain": "real-estate",
+    "kind": "game"
+  },
+  "expected": {
+    "domain": "web-marketing",
+    "kind": "app",
+    "name": "Golden Crust Bakery",
+    "incidents": [
+      "INC-01",
+      "INC-02",
+      "INC-20",
+      "INC-22",
+      "INC-33"
+    ]
+  },
+  "trees": [
+    "emitted",
+    "emitted.v2"
+  ],
+  "historicalDefects": [
+    "INC-01",
+    "INC-02",
+    "INC-20",
+    "INC-22",
+    "INC-33"
+  ],
+  "failureSignatures": [
+    {
+      "file": "treerun.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "build.json",
+      "ok": null,
+      "exit_code": null,
+      "code": null,
+      "error": null,
+      "unmet": []
+    }
+  ]
+}

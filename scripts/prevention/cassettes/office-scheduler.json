@@ -1,0 +1,68 @@
+{
+  "slug": "office-scheduler",
+  "briefFile": "office-scheduler/brief.md",
+  "brief": "# Shiftline — Office Shift & Appointment Scheduler\n\n## What this is\nAn internal tool for scheduling office shifts and appointments. A manager builds\na weekly rota for staff and books rooms for appointments; staff see their own\nupcoming shifts and any conflicts are surfaced before they happen.\n\n## Users\n- **Manager** — builds the rota, assigns shifts, books appointments.\n- **Staff** — view their own shifts and request time off.\n- **Reception** — books appointments into rooms.\n\n## Core domain\n- **Staff**: id, name, role, weekly hour cap, active.\n- **Room**: id, name, capacity, active.\n- **Shift**: id, staff, date, start time, end time, role note.\n- **Appointment**: id, title, room, date, start time, end time, booked-by,\n  attendee count (must not exceed room capacity).\n- **TimeOffRequest**: id, staff, start date, end date, status (Requested |\n  Approved | Denied), note.\n\n## Required features\n1. **Weekly rota** — a 7-day grid (Monday–Sunday) with shifts per day per staff.\n   Add a shift by picking staff, date, start, end. Refuse overlapping shifts for\n   the same staff member on the same day.\n2. **Hour cap check** — when a shift would push a staff member over their weekly\n   hour cap, warn and refuse (or allow with an explicit override flag); show the\n   running weekly hours per staff.\n3. **Appointments** — book an appointment into a room; refuse double-booking the\n   same room at overlapping times and refuse attendee count over room capacity.\n4. **Conflict detector** — a screen that scans the week and lists every hard\n   conflict (double-booked room, overlapping staff shift, shift overlapping\n   approved time off) with the two offending entries named.\n5. **Staff view** — pick a staff member and see their shifts for the current week\n   plus approved/denied time off.\n6. **Time off** — request time off; manager approves or denies with a note. An\n   approved time-off range that overlaps an existing shift is flagged in the\n   conflict detector.\n\n## Functional requirements\n- Times are stored as minutes-from-midnight integers per date; durations and\n  overlaps are computed from integers (exact, no timezone ambiguity).\n- Overlap rule: two intervals overlap iff startA < endB && startB < endA.\n- Weekly hours sum shift durations against the staff cap.\n- All conflict checks are pure functions over the schedule data, unit-testable,\n  and reused by both the rota builder and the conflict screen.\n- Refusals name the specific conflicting entry.\n\n## Non-functional requirements\n- Desktop-first, usable to 1024px; keyboard-navigable grid.\n- Accessible: labelled time inputs, table/grid roles where appropriate.\n- Deterministic scheduling logic separated from UI.\n- Local persistence; no external calendar integration required.\n\n## Explicitly out of scope\n- Google/Outlook calendar sync.\n- Recurring shifts or RRULE expansion.\n- Payroll calculations from hours.\n- Notifications by email/SMS.\n",
+  "persisted": {
+    "name": "# Shiftline — Office",
+    "domain": "real-estate",
+    "kind": "app"
+  },
+  "expected": {
+    "domain": "custom-software",
+    "kind": "app",
+    "name": "Shiftline",
+    "incidents": [
+      "INC-06",
+      "INC-11",
+      "INC-20",
+      "INC-28"
+    ]
+  },
+  "trees": [
+    "emitted",
+    "emitted.v2"
+  ],
+  "historicalDefects": [
+    "INC-06",
+    "INC-11",
+    "INC-20",
+    "INC-28"
+  ],
+  "failureSignatures": [
+    {
+      "file": "unattended.out.json",
+      "ok": false,
+      "exit_code": 1,
+      "code": "RT_E_GATE_PENDING",
+      "error": "P6 DoD unmet ΓÇö hard gate blocks advance: p6-brief-fit, p6-arch. ΓÇö resolve the unmet DoD criteria before advancing.",
+      "unmet": [
+        "Brief-conformance: required brief nouns appear as identifiers in the generated source (single-module, or the union of the tree files in tree mode) ΓÇö keyed tree synthesis ran (2 file(s)) but its union dropped the brief's required nouns (missing: shiftline, office, scheduler, internal, scheduling, manager, builds, rota, see, own, upcoming, conflicts, ΓÇª)",
+        "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)"
+      ]
+    },
+    {
+      "file": "emit.out.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "treerun.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "build.json",
+      "ok": null,
+      "exit_code": null,
+      "code": null,
+      "error": null,
+      "unmet": []
+    }
+  ]
+}

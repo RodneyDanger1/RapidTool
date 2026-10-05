@@ -340,13 +340,20 @@ export function deliveryEvidence(envelope) {
   const tests = Array.isArray(tree?.tests) ? tree.tests : [];
   const entry = tree?.run;
   const hash = envelope?.tested?.evidenceHash;
+  // PR-21: persist the verdict hash the delivery-time re-run produced, so
+  // "delivered" proves a REBUILT/TESTED artifact (the decisive verdict fields,
+  // compile-check.treeVerdictHash) — not merely a landed commit. Absent on an
+  // older envelope ⇒ null, never fabricated.
+  const verdictHash = typeof tree?.verdictHash === "string" && tree.verdictHash ? tree.verdictHash : null;
   return {
     treeRun: {
       ok: tree?.ok === true,
       declaredScriptsVerified: tree?.declaredScriptsVerified === true,
       specs: { total: tests.length, passed: tests.filter((t) => t?.run === "pass").length },
       entry: entry ? { kind: entry.kind ?? null, run: entry.run ?? null } : null,
+      verdictHash,
     },
+    verdictHash,
     evidenceHash: typeof hash === "string" && hash ? hash : null,
   };
 }

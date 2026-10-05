@@ -2471,6 +2471,26 @@ export const useRapid = create<RapidState>()(
             : `[seat console] ${opts?.note?.trim() || "approved from the browser console"}`,
           decidedVia,
         });
+        // W61 C5 (R1 BL-012): under Hard DoD an approve may not advance a gate
+        // with unmet criteria. The gate only becomes fully evaluable AFTER the
+        // approval (its criteria include "HITL approved"), so the check runs on
+        // the approved candidate. An explicit `force` override (the recorded
+        // DF-09 P6-sandbox rationale) is the honest escape; a bare approve is
+        // refused and the hard-DoD block is stamped for evidence.
+        if (project.enforceDod === true && opts?.force !== true && approved !== project) {
+          const postGate = runGate(approved, project.currentPhase);
+          if (!postGate.pass) {
+            const blocked = hardDodBlockInto(project, project.currentPhase, postGate);
+            set((s) => ({
+              projects: s.projects.map((p) => (p.id === id ? blocked : p)),
+            }));
+            return {
+              ok: false,
+              error: hardDodMessage(project.currentPhase, postGate),
+              code: "RT_E_GATE_PENDING",
+            };
+          }
+        }
         // T8: the just-approved gate phase gets its DoD verdict recorded too.
         const recorded = recordGate(approved, project.currentPhase);
         // ST-1: re-stamp AFTER the gate verdict so the packet's System JSON

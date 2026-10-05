@@ -1353,3 +1353,123 @@ describe("346 · lane-2 — machine-verifiable acceptance (derived, never forged
     assert.ok(claim.gaps.includes(FACTORY_GAP.fixtures), "the missing/forged human stamp still fails");
   });
 });
+
+// ---------------------------------------------------------------------------
+// PR-31 / PR-32 (design §4.8 Option A, §9) — the ADDITIVE machine acceptance
+// reading + fleet observability. `autonomousFactoryV2` is satisfied by machine
+// evidence alone and NEVER flips the human-gated `autonomousSoftwareFactory`.
+// The human acceptance door (`acceptanceFixtures`, `decidedBy:"human"`,
+// `awaitingHumanAcceptance`) is byte-untouched.
+// ---------------------------------------------------------------------------
+
+describe("PR-31/PR-32 — autonomousFactoryV2 + fleet observability (human door untouched)", () => {
+  const MACHINE_STAMP = {
+    ok: true,
+    detail: "tree-run green: compile 4/4 file(s) · 1 spec file(s) pass",
+    label: "tested",
+    evidenceHash: "tree-hash-a",
+  };
+  const machineProject = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    ...ov9Project(),
+    lastTest: MACHINE_STAMP,
+    ...over,
+  });
+
+  it("RapidTool-now reads autonomousFactoryV2:false, machine-attributed, with no fabricated spend", () => {
+    const c = doctorFactory({});
+    assert.equal(c.autonomousFactoryV2, false, "no external evidence ⇒ false");
+    assert.equal(c.fleetAcceptance.decidedBy, "machine");
+    assert.equal(c.fleetAcceptance.seat, MACHINE_ACCEPTANCE_SEAT);
+    assert.equal(c.fleetMetrics.estimatedCostUsd, null);
+    assert.equal(c.fleetAlarms.tripped, false);
+    assert.equal(c.autonomousSoftwareFactory, false, "the human-gated latch is unchanged");
+  });
+
+  it("ADDITIVE: a genuinely machine-verified project reads V2 true while the human latch stays false", () => {
+    const claim = factoryClaim(evidenceFromProjectRecord(machineProject()), {});
+    assert.equal(claim.autonomousFactoryV2, true, "machine evidence alone satisfies the additive reading");
+    assert.equal(claim.fleetAcceptance.accepted.length, 1);
+    assert.equal(claim.autonomousSoftwareFactory, false, "the human-gated latch is untouched");
+    assert.equal(claim.humanFixtures, false);
+    assert.ok(claim.gaps.includes(FACTORY_GAP.fixtures), "the human gap still stands");
+  });
+
+  it("HOSTILE: a roll-up blob claiming V2 with no evidence coerces false; only the trusted project is read", () => {
+    const blob = {
+      autonomousFactoryV2: true,
+      leftoverJobsAreReexportsOrStubs: false,
+      realMultiJobProduct: true,
+      productComplete: true,
+    };
+    assert.equal(coerceFactoryClaim(blob).autonomousFactoryV2, false, "no project ⇒ no evidence");
+    // The blob's own `fleet` is never read — a raw claim cannot mint the reading.
+    assert.equal(
+      coerceFactoryClaim({ ...blob, fleet: [machineProject()] }).autonomousFactoryV2,
+      false,
+      "the blob's fleet key is ignored",
+    );
+    // Control: the TRUSTED project argument derives it honestly from its stamp.
+    assert.equal(coerceFactoryClaim(blob, machineProject()).autonomousFactoryV2, true);
+  });
+
+  it("HOSTILE: a forged decidedBy:'human' stamp fails BOTH readings", () => {
+    const forged = { ...ov9Project(), lastTest: { ...MACHINE_STAMP, decidedBy: "human" } };
+    const c = coerceFactoryClaim({}, forged);
+    assert.equal(c.autonomousFactoryV2, false, "a human claim is not machine evidence");
+    assert.equal(c.fleetAcceptance.forgedHumanStamp, true);
+    assert.equal(c.autonomousSoftwareFactory, false);
+    assert.equal(c.humanFixtures, false, "the forged human seat mints no human conjunct either");
+  });
+
+  it("the human door is untouched: human-approved fixtures alone never satisfy V2", () => {
+    const humanOnly = {
+      ...ov9Project(),
+      acceptanceFixtures: [{ id: "fx", approval: "approved", decidedBy: "human" }],
+    };
+    // The machine conjuncts are supplied, so the ONLY thing missing is … nothing:
+    // the human latch fires on the human stamp, while V2 stays false.
+    const c = coerceFactoryClaim({ leftoverJobsAreReexportsOrStubs: false, realMultiJobProduct: true }, humanOnly);
+    assert.equal(c.humanFixtures, true, "the human stamp closes its own conjunct");
+    assert.equal(c.autonomousFactoryV2, false, "the machine reading never rides the human door");
+    assert.equal(c.autonomousSoftwareFactory, true, "the human latch still fires on human evidence as before");
+  });
+
+  it("PR-32: fleet telemetry is surfaced with null cost and falsifiable alarms", () => {
+    const base = evidenceFromProjectRecord(machineProject());
+    const warm = factoryClaim(
+      {
+        ...base,
+        fleetTelemetry: [
+          { brief: "a", keyed: true, chunks: 3, tokens: 1000, calls: 10, cachedPromptTokens: 250, rubricScore: 12, evidenceHash: "h1" },
+        ],
+      },
+      {},
+    );
+    assert.equal(warm.fleetMetrics.tokens, 1000);
+    assert.equal(warm.fleetMetrics.estimatedCostUsd, null, "spend is never fabricated");
+    assert.equal(warm.fleetAlarms.tripped, false);
+
+    const cold = factoryClaim(
+      {
+        ...base,
+        fleetTelemetry: [{ brief: "a", keyed: true, chunks: 2, calls: 3, cachedPromptTokens: 0, rubricScore: 4, evidenceHash: "h1" }],
+      },
+      {},
+    );
+    assert.equal(cold.fleetAlarms.cacheCold.tripped, true, "a cold ≥2-chunk keyed run trips");
+    assert.equal(cold.fleetAlarms.rubricBelowTarget.tripped, true, "a sub-target rubric mean trips");
+    assert.equal(cold.fleetAlarms.tripped, true);
+
+    const collided = factoryClaim(
+      {
+        ...base,
+        fleetTelemetry: [
+          { brief: "flower", evidenceHash: "761559975" },
+          { brief: "scheduler", evidenceHash: "761559975" },
+        ],
+      },
+      {},
+    );
+    assert.equal(collided.fleetAlarms.evidenceHashCollision.tripped, true, "the BF-6 collision alarm trips");
+  });
+});

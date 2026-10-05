@@ -505,6 +505,41 @@ describe("ERROR_CODE_DOC", () => {
     // The action must name the real escape hatch (maxChars) an agent can use.
     assert.match(ERROR_CODE_DOC.RT_E_IMPORT_TOO_LARGE.agentAction, /maxChars/);
   });
+
+  it("W61 PR-03: the five guard-consumed defect codes are registered with honest docs", () => {
+    // RED before PR-03: these strings are referenced as `expectedCode` by
+    // scripts/guards/guard-registry.json + scripts/guards/*.mjs (and
+    // scripts/prevention/replay-harness.mjs) but were absent from ERROR_CODES,
+    // so the "every surfaced failure carries a registry code" invariant was
+    // aspirational for them.
+    const expectations: { code: string; meaning: RegExp }[] = [
+      { code: "RT_E_DUPLICATE_EXPORT", meaning: /TS2308|duplicate/i },
+      { code: "RT_E_USE_BEFORE_DECL", meaning: /TS2448|before/i },
+      { code: "RT_E_MONEY_SEMANTICS", meaning: /money|price|quantity/i },
+      { code: "RT_E_README_PARITY", meaning: /README|manifest/i },
+      { code: "RT_E_SRC_EDITED_DURING_RUN", meaning: /src|edit|RUNLOCK|BL-010/i },
+    ];
+    for (const { code, meaning } of expectations) {
+      assert.ok(
+        (ERROR_CODES as readonly string[]).includes(code),
+        `${code} missing from ERROR_CODES`,
+      );
+      const doc = ERROR_CODE_DOC[code as (typeof ERROR_CODES)[number]];
+      assert.ok(doc, `${code} missing from ERROR_CODE_DOC`);
+      assert.ok(doc.meaning.trim().length > 0, `${code} meaning is empty`);
+      assert.ok(doc.agentAction.trim().length > 0, `${code} agentAction is empty`);
+      assert.match(doc.meaning, meaning, `${code} meaning names the real class`);
+    }
+  });
+
+  it("W61 PR-03: RT_E_SUBSTANCE_EMPTY and RT_E_PLAN_UNDERPRODUCED are registered with docs", () => {
+    for (const code of ["RT_E_SUBSTANCE_EMPTY", "RT_E_PLAN_UNDERPRODUCED"] as const) {
+      assert.ok((ERROR_CODES as readonly string[]).includes(code), `${code} missing from ERROR_CODES`);
+      const doc = ERROR_CODE_DOC[code];
+      assert.ok(doc.meaning.trim().length > 0, `${code} meaning is empty`);
+      assert.ok(doc.agentAction.trim().length > 0, `${code} agentAction is empty`);
+    }
+  });
 });
 
 // ---- W15-L2 (fixes/241) — registry boundary: the C-2 open item (`RT_EVAL_STALL`

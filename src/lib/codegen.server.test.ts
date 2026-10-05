@@ -55,6 +55,9 @@ import {
   p6SynthesisSignatureRepairPrompt,
   p6SynthesisSystemPrompt,
   p6SynthesisUserPrompt,
+  p6RepairAgentSystemPrompt,
+  parseSynthesisRefusal,
+  synthesisRefusalDetail,
   P6_SYNTH_MAX_TOKENS,
   P6_SYNTH_CHUNK_SIZE,
   P6_SYNTH_PRIOR_MAX_FILES,
@@ -85,6 +88,23 @@ import {
   defaultTreeTypecheck,
   typecheckOffenderPaths,
   P6_TYPECHECK_REPAIR_MAX_CHUNKS,
+  // W346 lane A — A1/A2/A3/A6/A12 pins.
+  bindingLinesForCollision,
+  briefModuleFloor,
+  deriveRequiredModules,
+  freezeFileExports,
+  jsxHits,
+  materializedExportNames,
+  mergeMinimumPlan,
+  minimumTreeFileCount,
+  moneySemanticsHits,
+  normalizeTreeFiles,
+  offenderClass,
+  p6SynthesisJsxRepairPrompt,
+  p6SynthesisMoneyRepairPrompt,
+  registryNamesFor,
+  suppressionPragmaHit,
+  typecheckErrorCount,
   type AsyncUnawaitedUse,
   type ChunkPriorFile,
   type EnvelopeReadFailure,
@@ -100,7 +120,7 @@ import { fnv1a } from "./algorithms.ts";
 import { resetSessionBudget, sessionTokenBudget } from "./token-ledger.ts";
 import { oracleBriefGrounded } from "./verify.server.ts";
 import type { DeepSeekCompleteOptions } from "./deepseek.server.ts";
-import type { ExpandBriefResult } from "./prompt-engine.ts";
+import { repairSystemPrompt, type ExpandBriefResult } from "./prompt-engine.ts";
 import type { VerifyOutcome } from "./verify.server.ts";
 import type { LlmResult } from "./llm.ts";
 import type { GeneratedTreeFile, Project } from "./types.ts";
@@ -468,6 +488,94 @@ describe("p6Synthesis prompts (byte-stable contract)", () => {
     assert.match(u, /A kanban board tool/);
     assert.match(u, /1\. Users can create a board\./);
     assert.match(u, /export function createBoard\(name: string\): Board/);
+  });
+});
+
+describe("W61 lane D — cache-aware prompt order + legal refusal channel (D1/D5)", () => {
+  it("D5/A8: every project-stable block precedes the volatile TYPE SIGNATURES block", () => {
+    const spec = ledgerSpec(2);
+    const prior: ChunkPriorFile[] = [{ path: "src/generated.ts", exports: ["x"], reqTrace: {} }];
+    const p = p6SynthesisChunkUserPrompt(
+      LEDGER_BRIEF,
+      spec,
+      chunkTypeSignatures(spec.typeSignatures)[0]!,
+      prior,
+      [],
+    );
+    const sig = p.indexOf("TYPE SIGNATURES (must export");
+    assert.ok(sig > 0, "the volatile marker is present");
+    for (const marker of ["BRIEF:", "REQUIREMENTS (", "NEGATIVE CONSTRAINTS", "EDGE CASES", "ERROR HANDLING"]) {
+      const at = p.indexOf(marker);
+      assert.ok(at >= 0, `${marker} present`);
+      assert.ok(at < sig, `${marker} precedes the volatile TYPE SIGNATURES block`);
+    }
+  });
+
+  it("D5/A8: two chunks of one project share a byte-identical prefix up to TYPE SIGNATURES", () => {
+    const spec = ledgerSpec(20);
+    const groups = chunkTypeSignatures(spec.typeSignatures);
+    assert.ok(groups.length >= 2, "the fixture forces ≥2 chunks");
+    const a = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, groups[0]!);
+    const b = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, groups[1]!);
+    const marker = "TYPE SIGNATURES (must export";
+    assert.equal(
+      a.slice(0, a.indexOf(marker)),
+      b.slice(0, b.indexOf(marker)),
+      "the cacheable prefix is byte-stable across chunks",
+    );
+    assert.notEqual(a, b, "only the volatile block differs between chunks");
+  });
+
+  it("D1: the synthesizer system prompt advertises the legal refusal envelope", () => {
+    const s = p6SynthesisSystemPrompt();
+    assert.ok(s.includes('{"refusal"'), "refusal envelope shape advertised");
+    assert.ok(s.includes("LEGAL REFUSAL REPLY"), "refusal path named");
+  });
+
+  it("D1: the dedicated repair-agent prompt forbids success claims, protects checks, offers delta/full/refusal", () => {
+    const s = p6RepairAgentSystemPrompt();
+    assert.ok(s.includes("bounded repair agent"), "repair persona named");
+    assert.ok(s.includes('{"patch"'), "delta form offered");
+    assert.ok(s.includes('{"module"'), "full-envelope form offered");
+    assert.ok(s.includes("may not claim the repair succeeded"), "no success claims");
+    assert.ok(s.includes("may not weaken"), "checks protected");
+    assert.ok(s.includes('"refusal":"defect not present"'), "defect-absent refusal channel");
+  });
+
+  it("PR-19: the repair sites consume prompt-engine's pure contract (single source)", () => {
+    assert.equal(p6RepairAgentSystemPrompt(), repairSystemPrompt());
+  });
+
+  it("D1: parseSynthesisRefusal accepts a fenced refusal and rejects garbage", () => {
+    assert.deepEqual(
+      parseSynthesisRefusal('```json\n{"refusal":"spec and brief conflict","reason":"req-2 vs f1"}\n```'),
+      { refusal: "spec and brief conflict", reason: "req-2 vs f1" },
+    );
+    assert.deepEqual(parseSynthesisRefusal('{"refusal":"cannot"}'), { refusal: "cannot", reason: "" });
+    assert.equal(parseSynthesisRefusal("just prose"), null);
+    assert.equal(parseSynthesisRefusal('{"module":"x"}'), null);
+    assert.equal(parseSynthesisRefusal(42), null);
+    assert.match(synthesisRefusalDetail({ refusal: "cannot", reason: "r" }), /legal refusal: cannot/);
+  });
+
+  it("D1: a refusal envelope is not an unreadable reply — no read-failure sink, still null", () => {
+    const failures: unknown[] = [];
+    const env = parseSynthesisEnvelope('{"refusal":"cannot","reason":"r"}', (f) => failures.push(f));
+    assert.equal(env, null, "a refusal is not a synthesis envelope");
+    assert.equal(failures.length, 0, "a legal refusal is never reported as an unreadable reply");
+  });
+
+  it("D1: a legal refusal reply skips the repair call and records a coded p6.synthesis.refused", async () => {
+    const base = p6Base();
+    const { calls, deps } = fakeDeps({
+      completeText: '{"refusal":"spec and brief conflict","reason":"req-2 vs f1"}',
+    });
+    const q = await liveP6Synthesis(base, deps);
+    assert.equal(calls.filter((c) => c === "complete").length, 1, "a stated refusal costs no repair call");
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal, "the refusal is recorded, not swallowed");
+    assert.match(refusal.detail, /RT_E_LLM_REJECTED/);
+    assert.match(refusal.detail, /legal refusal: spec and brief conflict/);
   });
 });
 
@@ -1283,7 +1391,14 @@ describe("chunked synthesis pure helpers (fixes/144 M2 / S-01 T2)", () => {
     assert.ok(withC.includes("- House (id:ulid, arv:number)"));
     const without = p6SynthesisChunkUserPrompt(LEDGER_BRIEF, spec, spec.typeSignatures, [], []);
     assert.equal(without.includes("DATA CONTRACTS"), false, "no contract -> no block (legacy bytes)");
-    assert.ok(withC.startsWith(without), "the block is additive; the legacy bytes are the prefix");
+    // W61 lane D (D5/A8): the contract is a STABLE block, so it now rides in
+    // the cacheable prefix BEFORE the volatile per-chunk TYPE SIGNATURES block.
+    // ("TYPE SIGNATURES (must export" is the block marker — a bare "TYPE
+    // SIGNATURES" also appears inside the REQUIREMENTS prose above it.)
+    assert.ok(
+      withC.indexOf("DATA CONTRACTS") < withC.indexOf("TYPE SIGNATURES (must export"),
+      "the stable contract block precedes the volatile TYPE SIGNATURES block",
+    );
     // The 12-row cap is visible, never a silent cut.
     const many = {
       entities: Array.from({ length: 20 }, (_, i) => ({ name: `E${i}`, fields: [{ name: "id", type: "ulid" }] })),
@@ -3845,7 +3960,9 @@ describe("216f T-10 — prompt contract: signature ceiling vs requirement duty",
     for (let i = 1; i <= 10; i++) {
       assert.ok(chunk2.includes(`${i}. Capability ${i} must be provided.`), `requirement ${i} visible in the chunk prompt`);
     }
-    const sigBlock = chunk2.slice(chunk2.indexOf("TYPE SIGNATURES"), chunk2.indexOf("NEGATIVE CONSTRAINTS"));
+    // D5/A8: TYPE SIGNATURES is now the LAST spec block (stable blocks lead),
+    // so the sig block runs from its marker to the appended EARLIER FILES block.
+    const sigBlock = chunk2.slice(chunk2.indexOf("TYPE SIGNATURES (must export"), chunk2.indexOf("EARLIER FILES"));
     const listed = sigBlock.split("\n").filter((l) => l.startsWith("- export function"));
     assert.deepEqual(
       listed.map((l) => l.slice(2)),
@@ -5904,4 +6021,348 @@ describe("fixes/343-1 follow-up: the chunked P6 prompt carries the persisted rep
   });
 });
 
+
+
+// ---------------------------------------------------------------------------
+// W346 lane A � P6 synthesis remediation pins (A1/A2/A3/A6/A12). Every fixture
+// marked "real bytes" is copied verbatim from a persisted emitted tree under
+// testruns\<slug>\emitted(.v2)\ (the read-only cassettes). No key, no network.
+// ---------------------------------------------------------------------------
+describe("W346-A1 brief-driven minimum file set", () => {
+  it("a noun-rich brief below the model plan gets a brief-driven floor (RED before A1)", () => {
+    const project = {
+      brief:
+        "a flower shop website with bouquets, delivery, occasions, wedding flowers, gift wrapping, care tips and subscriptions",
+      specGraph: { nodes: [{ id: "ui", file: "src/ui/console.tsx", purpose: "Operator surfaces" }] },
+      lattice: { jobs: [], entities: ["bouquet"] },
+      contracts: { entities: [{ name: "bouquet" }] },
+    };
+    const spec = { typeSignatures: ["renderHome(): string", "listBouquets(): Promise<Bouquet[]>"] };
+    const base = treeChunkPlan(project, spec.typeSignatures);
+    const min = minimumTreeFileCount(project, spec);
+    assert.ok(min >= 2, `the brief floor demands >=2 modules (got ${min})`);
+    assert.ok(briefModuleFloor(project) >= 2, "the noun floor engages for a noun-rich brief");
+    const merged = mergeMinimumPlan(base, deriveRequiredModules(project, spec), { minimum: min, project });
+    assert.ok(merged.length >= min, `the merged plan reaches the floor (${merged.length} >= ${min})`);
+    for (const row of base) assert.ok(merged.some((m) => m.path === row.path), `base row kept: ${row.path}`);
+    for (const row of merged) {
+      if (!base.some((b) => b.path === row.path)) {
+        assert.notEqual(row.path, TREE_ENTRY_PATH, "the floor never claims the entry path");
+      }
+    }
+  });
+
+  it("a noun-thin brief keeps the model plan (no forced floor)", () => {
+    const project = { brief: "a kanban board tool", lattice: { jobs: [], entities: [] }, specGraph: { nodes: [] } };
+    assert.equal(briefModuleFloor(project), 0);
+    const spec = { typeSignatures: ["createBoard(name: string): void"] };
+    const base = treeChunkPlan(project, spec.typeSignatures);
+    const merged = mergeMinimumPlan(base, deriveRequiredModules(project, spec), {
+      minimum: minimumTreeFileCount(project, spec),
+      project,
+    });
+    assert.equal(merged.length, base.length);
+  });
+
+  it("every declared spec-graph job is a required module (planned >= declared)", () => {
+    const project = {
+      brief: "a ledger with rent, lease and tenant records, payment tracking and property reminders",
+      specGraph: {
+        nodes: [
+          { id: "job-track", file: "src/jobs/track.ts", purpose: 'Implement job "track" against the contract' },
+          { id: "job-record", file: "src/jobs/record.ts", purpose: 'Implement job "record" against the contract' },
+        ],
+      },
+      lattice: { jobs: ["track", "record"], entities: ["payment"] },
+      contracts: { entities: [{ name: "payment" }] },
+    };
+    const spec = { typeSignatures: ["collectRent(payment: Payment): Receipt"] };
+    const required = deriveRequiredModules(project, spec);
+    for (const t of specGraphJobTargets(project)) {
+      assert.ok(required.some((m) => m.path === t.path), `required: ${t.path}`);
+    }
+    assert.ok(minimumTreeFileCount(project, spec) >= specGraphJobTargets(project).length);
+  });
+});
+
+describe("W346-A2 frozen cross-chunk export registry + named barrel", () => {
+  it("bindingLinesForCollision sees residual-CJS bindings localBindingLines omits (RED before A2)", () => {
+    const src = "module.exports.getDailyRevenueByCategory = 1;\n";
+    assert.equal(localBindingLines(src).has("getDailyRevenueByCategory"), false, "localBindingLines omits the CJS shape");
+    assert.deepEqual(bindingLinesForCollision(src).get("getDailyRevenueByCategory"), [1]);
+  });
+
+  it("the duplicate detector catches the real getDailyRevenueByCategory class (RED before A2)", () => {
+    // testruns\bakery-florist-orders\emitted\src\generated\get-daily-revenue-by.ts:2,26
+    const later = "async function getDailyRevenueByCategory(range: DateRange) { return range; }\n";
+    const dup = crossChunkDuplicateDeclarations(later, [
+      { path: "src/generated/remove-order-line.ts", exports: ["getDailyRevenueByCategory"] },
+    ]);
+    assert.equal(dup.length, 1);
+    assert.equal(dup[0]!.name, "getDailyRevenueByCategory");
+  });
+
+  it("freezeFileExports unions the materialized surface and reports collisions", () => {
+    const reg = { entries: new Map(), files: new Map() };
+    const a = freezeFileExports(reg, { path: "src/generated/a.ts", source: "module.exports.shared = 1;", exports: [] });
+    assert.deepEqual(registryNamesFor(a.reg, "src/generated/a.ts"), ["shared"]);
+    const b = freezeFileExports(a.reg, { path: "src/generated/b.ts", source: "module.exports.shared = 2;", exports: [] });
+    assert.equal(b.collisions.length, 1);
+  });
+
+  it("materializedExportNames adds residual-CJS names to the claim", () => {
+    assert.deepEqual(materializedExportNames("module.exports.extra = 1;", ["claimed"]), ["claimed", "extra"]);
+  });
+
+  it("a NAMED barrel re-exports a colliding name once; the later file never imports its own binding", () => {
+    const files = [
+      { path: "src/generated/a.ts", source: "function shared() {}\nmodule.exports.shared = shared;", exports: ["shared"] },
+      { path: "src/generated/b.ts", source: "function shared() { return 2; }\nmodule.exports.shared = shared;", exports: ["shared"] },
+    ];
+    const m = materializeImportableTree(files);
+    const barrel = m.files.find((f) => f.path === TREE_ENTRY_PATH)!;
+    assert.equal(barrel.source.trim().split("\n").filter(Boolean).length, 1, "one provider line for the colliding name");
+    assert.ok(barrel.source.includes('export * from "./generated/a.ts"'), "first occurrence wins");
+    const later = m.files.find((f) => f.path === "src/generated/b.ts")!;
+    assert.ok(!/\bimport \{/.test(later.source), "no self-import (TS2440) of a name the file declares");
+  });
+});
+
+describe("W346-A3 deterministic tree normalizer", () => {
+  it("hoists a provably-pure store declaration above its reader (the globalThisStore TDZ)", () => {
+    // testruns\mobile-companion\emitted\src\generated\suggest-reorder-quantity.ts:69-70
+    const src = [
+      "const globalThisCounter: any = (typeof globalThisStore === 'object' && globalThisStore !== null) ? globalThisStore : null;",
+      "const globalThisStore: any = null;",
+    ].join("\n");
+    const out = normalizeTreeFiles([{ path: "src/generated/suggest-reorder-quantity.ts", source: src, exports: [] }]);
+    assert.equal(out.unresolved.length, 0);
+    assert.ok(out.changes.some((c) => c.kind === "hoist" && c.name === "globalThisStore"), "the store decl is hoisted");
+    const lines = out.files[0]!.source.split("\n");
+    const decl = lines.findIndex((l) => /^const globalThisStore\b/.test(l));
+    const reader = lines.findIndex((l) => /globalThisStore/.test(l) && /^const globalThisCounter\b/.test(l));
+    assert.ok(decl >= 0 && reader >= 0 && decl < reader, `decl (${decl}) precedes reader (${reader})`);
+  });
+
+  it("never reorders a side-effecting initializer", () => {
+    const out = normalizeTreeFiles([{ path: "src/x.ts", source: "const a = readGlobalStore();\nconst b = a;\n", exports: [] }]);
+    assert.equal(out.changes.filter((c) => c.kind === "hoist").length, 0);
+  });
+
+  it("drops byte-identical duplicate declarations and flags differing ones", () => {
+    const out = normalizeTreeFiles([{ path: "src/x.ts", source: "const x = 1;\nconst x = 1;\n", exports: [] }]);
+    assert.ok(out.changes.some((c) => c.kind === "drop-duplicate-decl" && c.name === "x"));
+    assert.equal(out.files[0]!.source.split("\n").filter((l) => l.trim() === "const x = 1;").length, 1);
+    const differing = "function f(a) { return 1; }\nfunction f(a, b) { return 2; }\n";
+    const out2 = normalizeTreeFiles([{ path: "src/y.ts", source: differing, exports: [] }]);
+    assert.ok(out2.unresolved.length > 0, "a differing redeclaration is surfaced, not guessed");
+  });
+
+  it("dedupes barrel specifiers", () => {
+    const src = 'export * from "./a.ts";\nexport * from "./a.ts";\n';
+    const out = normalizeTreeFiles([{ path: "src/generated.ts", source: src, exports: [] }]);
+    assert.ok(out.changes.some((c) => c.kind === "dedupe-barrel"));
+    assert.equal(out.files[0]!.source.split("\n").filter((l) => l.includes('export * from "./a.ts"')).length, 1);
+  });
+});
+
+describe("W346-A6 monotonic chunk repair", () => {
+  it("typecheckErrorCount counts TSxxxx diagnostics; offenderClass classifies paths", () => {
+    assert.equal(typecheckErrorCount("a.ts(1,1): error TS2749: x\nb.ts(2,2): error TS2322: y"), 2);
+    assert.equal(typecheckErrorCount(undefined), 0);
+    assert.equal(offenderClass(TREE_ENTRY_PATH), "barrel");
+    assert.equal(offenderClass("src/jobs/rent.ts"), "chunk");
+    assert.equal(offenderClass("tests/oracle.spec.ts"), "none");
+  });
+
+  it("a repair that does NOT strictly reduce the diagnostics is reverted, never written", async () => {
+    const base = { ...p6Base(), kind: "tool" as const };
+    base.specGraph = {
+      nodes: (base.specGraph?.nodes ?? []).filter((n) => !String(n.id).startsWith("job-")),
+    } as Project["specGraph"];
+    let tcCalls = 0;
+    const seam = async (): Promise<P6TreeTypecheckVerdict> => {
+      tcCalls += 1;
+      return tcCalls === 1
+        ? {
+            run: "fail",
+            detail: `${TREE_CHUNK0_RELOCATED_PATH}(1,1): error TS2749: x\n${TREE_CHUNK0_RELOCATED_PATH}(2,2): error TS2322: y`,
+            files: [TREE_CHUNK0_RELOCATED_PATH],
+          }
+        : {
+            run: "fail",
+            detail: `${TREE_CHUNK0_RELOCATED_PATH}(1,1): error TS2749: x\n${TREE_CHUNK0_RELOCATED_PATH}(2,2): error TS2322: y\n${TREE_CHUNK0_RELOCATED_PATH}(3,3): error TS2551: z`,
+            files: [TREE_CHUNK0_RELOCATED_PATH],
+          };
+    };
+    const complete = async () => ({ ok: true as const, text: JSON.stringify(KANBAN_ENVELOPE), model: "deepseek-v4-flash" });
+    const expand = async () => ({ ok: true as const, spec: KANBAN_SPEC });
+    const verifyLeg = async () => ({ status: "passed" as const, iterations: 0, evidence: "unused", finalSource: "", cases: [] });
+    const q = await liveP6Synthesis(base, { complete, expand, verify: verifyLeg, typecheckTree: seam });
+    assert.ok(
+      q.logs.some((l) => l.event === "p6.synthesis.monotonic"),
+      "the worsening substitution is recorded as reverted",
+    );
+    assert.ok(
+      !q.artifacts.some((a) => a.kind === "code" && a.title.includes("Generated source tree")),
+      "a reverted (non-improving) repair never seals",
+    );
+  });
+});
+
+describe("W346-A12 JSX-in-.ts module contract", () => {
+  it("jsxHits flags the real render-pending-badge bytes and is silent on generics/comparisons", () => {
+    // testruns\mobile-companion\emitted.v2\src\generated\render-pending-badge.ts:107-113
+    const jsx = [
+      "  return (",
+      "    <span",
+      '      className="pending-badge"',
+      '      role="status"',
+      "    >",
+      '      {"Pending: " + String(total)}',
+      "    </span>",
+      "  );",
+    ].join("\n");
+    assert.ok(jsxHits(jsx).length >= 1);
+    assert.deepEqual(jsxHits("const x: Promise<Record<string, number>> = f();\nif (a < b) { return c; }"), []);
+  });
+
+  it("validateSynthesisModule refuses JSX in a .ts module; the repair prompt names the lines", () => {
+    const v = validateSynthesisModule("export function renderX() { return <div>hi</div>; }", ["renderX"], ["renderX"]);
+    assert.ok(!v.ok);
+    if (!v.ok) assert.match(v.error, /JSX in a \.ts module/);
+    assert.match(p6SynthesisJsxRepairPrompt([107, 113]), /107, 113/);
+  });
+
+  it("suppressionPragmaHit refuses an injected pragma (a gate)", () => {
+    assert.equal(suppressionPragmaHit("// @ts-nocheck\nconst x = 1;"), "@ts-nocheck");
+    assert.equal(suppressionPragmaHit("const x = 1;"), null);
+  });
+});
+
+describe("W346-A5 money semantics (BF-5)", () => {
+  // Shape of testruns\mobile-companion\emitted\src\generated\compute-cart-total-pence.ts:
+  // a money-named export whose only accumulator is the line quantity.
+  const QTY_SUM = [
+    "type CartLine = { productId: string; quantity: number; unitPricePence: number };",
+    "function computeCartTotalPence(cart: CartLine[]): number {",
+    "  let total: number = 0;",
+    "  for (let i: number = 0; i < cart.length; i = i + 1) {",
+    "    const line: CartLine = cart[i];",
+    "    const qty: number = Math.floor(line.quantity);",
+    "    if (qty > 0) { total = total + qty; }",
+    "  }",
+    "  return total;",
+    "}",
+    "module.exports.computeCartTotalPence = computeCartTotalPence;",
+  ].join("\n");
+  const CORRECTED = QTY_SUM.replace(
+    "total = total + qty;",
+    "total = total + Math.floor(qty * line.unitPricePence);",
+  );
+
+  it("flags the quantity-summing money helper, exactly once, at its line (RED before BF-5)", () => {
+    const hits = moneySemanticsHits(QTY_SUM);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0]!.name, "computeCartTotalPence");
+    assert.equal(hits[0]!.line, 7, "the accumulation line is named");
+  });
+
+  it("accepts price × quantity; a count helper / a doc mention is never flagged", () => {
+    assert.deepEqual(moneySemanticsHits(CORRECTED), []);
+    assert.deepEqual(
+      moneySemanticsHits(
+        "function computeTotalCount(xs: { count: number }[]): number { let total = 0; for (const x of xs) { total = total + x.count; } return total; }",
+      ),
+      [],
+      "a bare `total` name with a pure count is not money",
+    );
+    assert.deepEqual(moneySemanticsHits('const note = "cart total in integer pence";'), []);
+  });
+
+  it("validateSynthesisModule refuses it with the money-semantics class; the repair prompt names it; corrected passes", () => {
+    const v = validateSynthesisModule(QTY_SUM, ["computeCartTotalPence"], ["computeCartTotalPence"]);
+    assert.ok(!v.ok);
+    if (!v.ok) assert.match(v.error, /money-semantics: "computeCartTotalPence"/);
+    assert.match(p6SynthesisMoneyRepairPrompt(moneySemanticsHits(QTY_SUM)), /computeCartTotalPence/);
+    assert.ok(
+      validateSynthesisModule(CORRECTED, ["computeCartTotalPence"], ["computeCartTotalPence"]).ok,
+      "the price × quantity form is accepted",
+    );
+  });
+
+  it("e2e single-module: the money defect gets ONE bounded repair, then refuses if the model repeats it", async () => {
+    const brief = "A shop cart with a product catalogue: compute the cart total in pence from product pricePence and quantity.";
+    const spec = {
+      requirements: ["Compute the cart total in pence from pricePence and quantity.", "List the product catalogue."],
+      edgeCases: ["An empty cart totals zero."],
+      errorHandling: ["Invalid lines are skipped."],
+      typeSignatures: ["computeCartTotalPence(cart: Product[]): number", "listProducts(): Product[]"],
+      dataFlow: ["product → cart → total"],
+      negativeConstraints: ["DO NOT invent prices."],
+    };
+    const BAD = [
+      "type Product = { id: string; pricePence: number; quantity: number };",
+      "function computeCartTotalPence(cart: Product[]): number { let total: number = 0; for (let i = 0; i < cart.length; i = i + 1) { total = total + cart[i].quantity; } return total; }",
+      "function listProducts(): Product[] { return []; }",
+      "module.exports.computeCartTotalPence = computeCartTotalPence;",
+      "module.exports.listProducts = listProducts;",
+    ].join("\n");
+    const GOOD = BAD.replace(
+      "total = total + cart[i].quantity;",
+      "total = total + Math.floor(cart[i].quantity * cart[i].pricePence);",
+    );
+    let calls = 0;
+    const complete = async (): Promise<LlmResult> => {
+      calls += 1;
+      return { ok: true, text: JSON.stringify({ module: BAD, exports: ["computeCartTotalPence", "listProducts"], reqTrace: {} }), model: "deepseek-v4-flash" };
+    };
+    const expand = async () => ({ ok: true as const, spec });
+    const verify = async () => ({ status: "passed" as const, iterations: 0, evidence: "unused", finalSource: "", cases: [] });
+    const project = applyPhaseResult(emptyProject({ name: "Shopcart", brief }), 6);
+    const q = await liveP6Synthesis(project, { complete, expand, verify });
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal, "a repeated money defect refuses");
+    assert.match(refusal!.detail, /money-semantics/);
+    assert.equal(calls, 2, "exactly one primary + one bounded repair call");
+    assert.equal(
+      q.generatedSource,
+      project.generatedSource,
+      "the deterministic floor stands — the money-bad module is never sealed",
+    );
+  });
+});
+
+describe("W346-A6b per-chunk fail-fast (A6/PR-13)", () => {
+  it("a red accepted prefix is repaired once; if it does not converge, chunk i+1 is never synthesized", async () => {
+    // The first planned chunk for the ledger is the job-keyed `src/jobs/rent.ts`
+    // (not the relocated entry chunk), so the compiler names that materialized
+    // path — exactly what the real tsc would report for the accepted prefix.
+    const seam = async (): Promise<P6TreeTypecheckVerdict> => ({
+      run: "fail",
+      detail: "src/jobs/rent.ts(1,1): error TS2322: Type 'string' is not assignable to type 'number'.",
+      files: ["src/jobs/rent.ts"],
+    });
+    const f = chunkedDeps();
+    const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), { ...f.deps, typecheckTree: seam });
+    const refusal = q.logs.find((l) => l.event === "p6.synthesis.refused");
+    assert.ok(refusal, "a non-converging fail-fast refuses");
+    assert.match(refusal!.detail, /never synthesized/);
+    assert.equal(
+      f.calls.filter((c) => c === "complete").length,
+      2,
+      "one primary chunk-0 call + one bounded fail-fast repair; chunks 2..N are never paid for",
+    );
+    assert.ok(q.logs.some((l) => l.event === "p6.synthesis.failfast"), "the fail-fast stop is recorded");
+    assert.ok(q.logs.some((l) => l.event === "p6.synthesis.monotonic"), "a non-improving repair is reverted");
+  });
+
+  it("a green prefix lets every chunk synthesize (control)", async () => {
+    const f = chunkedDeps();
+    const q = await liveP6Synthesis(p6Base(LEDGER_BRIEF), { ...f.deps, typecheckTree: async () => ({ run: "pass" as const }) });
+    assert.ok(!q.logs.some((l) => l.event === "p6.synthesis.failfast"), "no false fail-fast on a green prefix");
+    assert.equal(q.generatedTree?.length, 7, "all six chunks + barrel are sealed");
+    assert.equal(f.calls.filter((c) => c === "complete").length, 6, "every chunk was synthesized once");
+  });
+});
 

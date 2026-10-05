@@ -970,6 +970,55 @@ function clearRunCheckpoint(dir: string | undefined): void {
 }
 
 /**
+ * PR-16 (B5/C-11) — the in-run RUNLOCK guard. Return every file under the
+ * repo's `src/` + `scripts/` whose mtime is NEWER than the run's own start,
+ * repo-relative POSIX, sorted. A non-empty list means the run overlapped a
+ * source edit (BL-010: office-stock-tracker ran while `src/**` was edited), so
+ * the caller refuses with `RT_E_SRC_EDITED_DURING_RUN` instead of reporting a
+ * clean result produced against a moving tree. Bounded; never throws; a missing
+ * dir is simply absent. `node_modules`/`.git` are skipped.
+ */
+export function runlockEditViolations(
+  root: string,
+  runStartMs: number,
+  opts: { dirs?: readonly string[]; maxFiles?: number } = {},
+): string[] {
+  const base = typeof root === "string" ? root : "";
+  if (!base || !Number.isFinite(runStartMs)) return [];
+  const dirs = Array.isArray(opts.dirs) && opts.dirs.length > 0 ? opts.dirs : ["src", "scripts"];
+  const maxFiles =
+    typeof opts.maxFiles === "number" && opts.maxFiles > 0 ? Math.floor(opts.maxFiles) : 20_000;
+  const out: string[] = [];
+  let seen = 0;
+  const walk = (rel: string): void => {
+    if (seen > maxFiles) return;
+    let entries: import("node:fs").Dirent<string>[] = [];
+    try {
+      entries = readdirSync(join(base, rel), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const child = `${rel}/${e.name}`;
+      if (e.isDirectory()) {
+        if (e.name === "node_modules" || e.name === ".git") continue;
+        walk(child);
+        continue;
+      }
+      if (!e.isFile()) continue;
+      seen += 1;
+      try {
+        if (statSync(join(base, rel, e.name)).mtimeMs > runStartMs) out.push(child);
+      } catch {
+        /* a file removed mid-walk is not a violation */
+      }
+    }
+  };
+  for (const d of dirs) walk(d);
+  return out.sort();
+}
+
+/**
  * T-107.7 (W36 lane N2) — the READ side of the checkpoint seam: read → admit → hydrate, so the
  * CLI `resume`/`unattended` verbs share ONE implementation of the read-side law.
  *
@@ -1620,9 +1669,45 @@ export function reject(
   return rejectHitl(project, note, { decidedBy: actor.decidedBy });
 }
 
-/** Re-open a rejected phase for a retry (clears the block; note stays applied). */
+/** Re-open a rejected phase for a retry (clears the block; note stays applied).
+ *
+ *  W61 B3 (recovery door): a failed keyed P6 leaves the project `running` with
+ *  the P6 record still `running`/`awaiting_hitl`/`complete` and a red gate,
+ *  durable tree trail, or red `lastTest` — there is no `rejected` record for
+ *  `unlockRetry` to reopen, so the old retry was a silent no-op on exactly the
+ *  state that most needs it. Accept that red-P6 shape too (see
+ *  `isRedRunningP6`) and re-open the phase. */
 export function retry(project: Project): Project {
-  return unlockRetry(project);
+  const unlocked = unlockRetry(project);
+  if (unlocked !== project) return unlocked;
+  return recoverRedRunningP6(project);
+}
+
+/** W61 B3: the red-P6 stall `retry` must recover — project `running` on P6,
+ *  the record not rejected, and a red gate / tree trail / lastTest. Pure. */
+export function isRedRunningP6(project: Project): boolean {
+  if (project.status !== "running" || project.currentPhase !== 6) return false;
+  const rec = (project.phases ?? []).find((p) => p.id === 6);
+  if (!rec || (rec.status !== "running" && rec.status !== "awaiting_hitl" && rec.status !== "complete")) {
+    return false;
+  }
+  const gateRed = Boolean(rec.gate && rec.gate.passed === false);
+  const trailRed = treeRunTrail(project).last === "red";
+  const lt = project.lastTest as { ok?: boolean } | null | undefined;
+  const lastTestRed = lt != null && lt.ok === false;
+  return gateRed || trailRed || lastTestRed;
+}
+
+/** Re-open a stalled red P6: clear the parked hitl and mark P6 `ready` so the
+ *  next run/gate re-attempts it (the phase loop treats `ready` as runnable). */
+function recoverRedRunningP6(project: Project): Project {
+  if (!isRedRunningP6(project)) return project;
+  return {
+    ...project,
+    status: "running",
+    hitl: null,
+    phases: (project.phases ?? []).map((p) => (p.id === 6 ? { ...p, status: "ready" as const } : p)),
+  };
 }
 
 /**
@@ -2632,6 +2717,13 @@ export type P6JourneyCycleContext = {
    *  around it. Absent/empty ⇒ the directive is byte-identical to the legacy
    *  tail. Set only by the repair drivers. */
   repairTargets?: readonly string[];
+  /** PR-16 (I7, BF-2): the previous cycle's ACCEPTED chunks, carried so a
+   *  repair cycle can REUSE them instead of re-buying every chunk (baker
+   *  florist-orders burned 419k tokens re-synthesizing from zero — O-01).
+   *  Absent/empty ⇒ `p6CycleLiveDeps` materializes no key and the synthesis
+   *  call is byte-identical to legacy. Consumer: codegen liveP6Synthesis
+   *  (lane S, I7); the D-side only threads it. */
+  resumeAccepted?: readonly { path: string; source: string; exports: string[] }[];
 };
 
 /** fixes/153 (P2): deps.synthesisRefusal cap — the bounded refusal excerpt a
@@ -2673,6 +2765,10 @@ export type P6CycleLiveDepsShape = {
    *  carried verbatim onto engine.LiveLayerDeps.proven ⇒ codegen's lesson
    *  sites. Present ONLY when the campaign supplied at least one row. */
   proven?: readonly RankableLessonRow[];
+  /** PR-16 (I7): the previous cycle's accepted chunks (see
+   *  P6JourneyCycleContext.resumeAccepted). Present ONLY when a repair cycle
+   *  supplied them — absent ⇒ the deps object is byte-identical to legacy. */
+  resumeAccepted?: readonly { path: string; source: string; exports: string[] }[];
 };
 
 export function p6CycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDepsShape | undefined {
@@ -2680,12 +2776,22 @@ export function p6CycleLiveDeps(ctx: P6JourneyCycleContext): P6CycleLiveDepsShap
   const refusal = typeof ctx.refusal === "string" ? ctx.refusal : "";
   const gateRepair = typeof ctx.gateRepair === "string" ? ctx.gateRepair : "";
   const proven = Array.isArray(ctx.proven) && ctx.proven.length > 0 ? ctx.proven : null;
-  if (tail.length === 0 && refusal.length === 0 && gateRepair.length === 0 && proven === null) return undefined;
+  const resumeAccepted =
+    Array.isArray(ctx.resumeAccepted) && ctx.resumeAccepted.length > 0 ? ctx.resumeAccepted : null;
+  if (
+    tail.length === 0 &&
+    refusal.length === 0 &&
+    gateRepair.length === 0 &&
+    proven === null &&
+    resumeAccepted === null
+  )
+    return undefined;
   const deps: P6CycleLiveDepsShape = {};
   if (tail.length > 0) deps.treeFailure = tail;
   if (refusal.length > 0) deps.synthesisRefusal = refusal.slice(0, P6_JOURNEY_REFUSAL_MAX);
   if (gateRepair.length > 0) deps.gateRepair = gateRepair.slice(0, P6_JOURNEY_GATE_REPAIR_MAX);
   if (proven !== null) deps.proven = proven;
+  if (resumeAccepted !== null) deps.resumeAccepted = resumeAccepted;
   return deps;
 }
 /**
@@ -3140,6 +3246,158 @@ export function promoteRepairedDirTested(
  * sees the model's final reason. KEYLESS (no injected synthesize + no key) →
  * no-op passthrough returning the SAME project reference, byte-identical.
  */
+/**
+ * W61 B2 / PR-07 (BF-2, closes the C-04 interface) — the best-tree comparator.
+ *
+ * BEHAVIOUR NOTE (this is NOT a thin wrapper over a private helper): before
+ * PR-07 the comparator was the module-private `isBetterTree(a, b)` and there
+ * was no scalar score and no `failureSignature` at all. PR-07 EXPORTS the real
+ * `BestTreeMetric { ok, ts, files }` (as `TreeVerdictScore`), defines a NEW
+ * scalar projection `treeVerdictScore(outcome, files?)` that is HIGHER for a
+ * better tree, and REDEFINES `isBetterTree` to be exactly
+ * `treeVerdictScoreOf(a) > treeVerdictScoreOf(b)` so the numeric order the
+ * C-04 guard consumes and the boolean order the journey uses can never drift.
+ *
+ * Order: a GREEN verdict dominates (a spec-only failure carries no `TS####`
+ * and would otherwise tie a green tree at 0); then FEWER `TS####` diagnostics;
+ * then MORE files. The count scans every diagnostic string the tree verdict
+ * carries (top-level error, per-file compile verdicts, per-spec details), so a
+ * later synthesis that regressed the tree can never be the one the journey
+ * returns.
+ */
+export type BestTreeMetric = { ok: boolean; ts: number; files: number };
+/** PR-07 (BF-2): the exported name the C-04 interface (repair-monotonic) uses. */
+export type TreeVerdictScore = BestTreeMetric;
+
+/** Caps keep the scalar projection EXACT in a JS double (ok-span × ts-span ×
+ *  files-span < 2^53); ts beyond the cap is treated as equally worst, which is
+ *  self-consistent because `isBetterTree` is defined via the same score. */
+const TREE_VERDICT_TS_CAP = 1_000_000;
+const TREE_VERDICT_FILES_CAP = 1_000_000;
+const TREE_VERDICT_TS_SPAN = TREE_VERDICT_TS_CAP + 1;
+const TREE_VERDICT_FILES_SPAN = TREE_VERDICT_FILES_CAP + 1;
+
+/** PR-07 (BF-2): the scalar projection of `(ok, -ts, files)` — higher is the
+ *  better tree. Pure. `isBetterTree(a, b) ≡ treeVerdictScoreOf(a) > treeVerdictScoreOf(b)`. */
+export function treeVerdictScoreOf(metric: TreeVerdictScore): number {
+  const ok = metric?.ok === true ? 1 : 0;
+  const tsRaw = typeof metric?.ts === "number" && Number.isFinite(metric.ts) ? metric.ts : TREE_VERDICT_TS_CAP;
+  const ts = Math.min(Math.max(tsRaw, 0), TREE_VERDICT_TS_CAP);
+  const files = Math.min(Math.max(metric?.files ?? 0, 0), TREE_VERDICT_FILES_CAP);
+  return (ok * TREE_VERDICT_TS_SPAN + (TREE_VERDICT_TS_CAP - ts)) * TREE_VERDICT_FILES_SPAN + files;
+}
+
+function treeTsErrorCount(o: TreeRunOutcome): number {
+  const parts: string[] = [];
+  if (typeof o.error === "string") parts.push(o.error);
+  const verdicts = (o.compile as { verdicts?: { detail?: unknown }[] } | undefined)?.verdicts ?? [];
+  for (const v of verdicts) if (typeof v?.detail === "string") parts.push(v.detail);
+  for (const t of o.tests ?? []) {
+    const detail = (t as { detail?: unknown }).detail;
+    if (typeof detail === "string") parts.push(detail);
+  }
+  let n = 0;
+  for (const s of parts) n += (s.match(/TS\d{4}/g) ?? []).length;
+  return n;
+}
+
+/** PR-07 (BF-2): the compiler's own failing-file count (`compile.failed`), so
+ *  a candidate the compiler blames on more files always ranks worse even when
+ *  the diagnostic strings carry no `TS####` token (a load/smoke failure). */
+function treeCompileFailureCount(o: TreeRunOutcome): number {
+  const c = o?.compile as { failed?: unknown } | undefined;
+  return typeof c?.failed === "number" && Number.isFinite(c.failed) ? Math.max(0, Math.floor(c.failed)) : 0;
+}
+
+/** The monotone severity the comparator uses: every `TS####` diagnostic the
+ *  verdict carries PLUS the compiler's failing-file count. */
+function treeDiagnosticSeverity(o: TreeRunOutcome): number {
+  return treeTsErrorCount(o) + treeCompileFailureCount(o);
+}
+
+function bestTreeMetricOf(project: Project, verdict: TreeRunOutcome | null): BestTreeMetric {
+  return {
+    // A GREEN verdict always beats a red one, whatever the diagnostic text:
+    // a spec-only failure carries no `TS####` and would otherwise tie a green
+    // tree at 0 and let the file-count tie-break prefer the red tree.
+    ok: verdict?.ok === true,
+    ts: verdict === null ? TREE_VERDICT_TS_CAP : treeDiagnosticSeverity(verdict),
+    files: Array.isArray(project.generatedTree) ? project.generatedTree.length : 0,
+  };
+}
+
+/** PR-07 (BF-2, C-04): the exported scalar comparator. Accepts either a
+ *  tree-run outcome (`files` then names the tree file count; defaults to 0 for
+ *  the outcome-only caller) or an already-built `TreeVerdictScore` metric
+ *  (`{ok, ts, files}`) — the two shapes are discriminated by `compile`, which
+ *  every TreeRunOutcome carries and a bare metric does not. */
+export function treeVerdictScore(
+  outcome: TreeRunOutcome | TreeVerdictScore | null,
+  files = 0,
+): number {
+  if (
+    outcome !== null &&
+    typeof outcome === "object" &&
+    !("compile" in outcome) &&
+    typeof (outcome as TreeVerdictScore).ts === "number"
+  ) {
+    const metric = outcome as TreeVerdictScore;
+    return treeVerdictScoreOf({ ok: metric.ok === true, ts: metric.ts, files: metric.files });
+  }
+  const verdict = outcome as TreeRunOutcome | null;
+  return treeVerdictScoreOf({
+    ok: verdict?.ok === true,
+    ts: verdict === null ? TREE_VERDICT_TS_CAP : treeDiagnosticSeverity(verdict),
+    files: typeof files === "number" ? files : 0,
+  });
+}
+
+/** PR-07 (BF-2): `isBetterTree ≡ treeVerdictScoreOf(a) > treeVerdictScoreOf(b)`. */
+function isBetterTree(a: BestTreeMetric, b: BestTreeMetric): boolean {
+  return treeVerdictScoreOf(a) > treeVerdictScoreOf(b);
+}
+
+/** PR-07 (BF-2, C-04): a stable signature of "the SAME failure as last cycle"
+ *  — the coded refusal ‖ the failure tail ‖ the sorted offender-file set. The
+ *  journey aborts when a cycle reproduces the previous cycle's signature: the
+ *  repair carried zero new information, so spending the remaining budget would
+ *  re-buy a known-dead end. Pure; order-independent in the offender set. */
+export function failureSignature(cycle: {
+  refusal?: string | null;
+  treeTail?: string | null;
+  offenderFiles: readonly string[];
+}): string {
+  const refusal = typeof cycle?.refusal === "string" ? cycle.refusal : "";
+  const treeTail = typeof cycle?.treeTail === "string" ? cycle.treeTail : "";
+  const offenderFiles = Array.isArray(cycle?.offenderFiles)
+    ? cycle.offenderFiles.filter((f) => typeof f === "string").map(String).sort()
+    : [];
+  return String(fnv1a(`${refusal}\u0001${treeTail}\u0001${offenderFiles.join("\u0001")}`));
+}
+
+/** Graft the best-seen tree onto a project about to be returned as a FAILURE,
+ *  so the journey never hands back a strictly worse tree than an earlier
+ *  cycle already produced. Evidence/logs stay on the returned record. */
+function keepBestTree(
+  project: Project,
+  best: { project: Project; metric: BestTreeMetric } | null,
+  current: BestTreeMetric | null,
+  events: string[],
+): Project {
+  if (best === null) return project;
+  const cur = current ?? bestTreeMetricOf(project, null);
+  if (!isBetterTree(best.metric, cur)) return project;
+  events.push(
+    `best-tree-kept: earlier cycle had ${best.metric.ts} diagnostic(s) / ${best.metric.files} file(s) vs ${cur.ts} / ${cur.files} — returning the better tree`,
+  );
+  return p6JourneyLog(
+    { ...project, generatedTree: best.project.generatedTree },
+    "warn",
+    "p6.journey.best-tree-kept",
+    `kept the best tree (${best.metric.ts} diagnostic(s), ${best.metric.files} file(s)); the last cycle produced ${cur.ts} diagnostic(s), ${cur.files} file(s)`,
+  );
+}
+
 export async function driveP6Journey(
   project: Project,
   opts: {
@@ -3184,6 +3442,19 @@ export async function driveP6Journey(
   // fixes/326 F1b: at most ONE gate-repair diversion per journey.
   let gateRepair: string | null = null;
   let gateRepairUsed = false;
+  // W61 B2: the best tree seen so far and the last measured metric — a FAILED
+  // journey returns the best tree, never a later regression.
+  let bestTree: { project: Project; metric: BestTreeMetric } | null = null;
+  let lastMetric: BestTreeMetric | null = null;
+  // W61 B2 (O-01, no re-synthesis): the previous cycle's repair context + its
+  // synthesized project. An identical context would re-emit the same accepted
+  // chunks for zero new information, so reuse instead of spending another call.
+  let prevSynthKey: string | null = null;
+  let prevSynthProject: Project | null = null;
+  // PR-12 (BF-2, C-04): the previous cycle's failure signature — a repeat means
+  // the repair carried zero new information, so the journey aborts rather than
+  // spending the remaining budget re-buying a known-dead end.
+  let prevFailureSig: string | null = null;
   for (let cycle = 1; cycle <= budget; cycle++) {
     const ctx: P6JourneyCycleContext = { cycle };
     if (proven !== null) ctx.proven = proven;
@@ -3193,14 +3464,25 @@ export async function driveP6Journey(
       ctx.gateRepair = gateRepair;
       gateRepair = null; // consume-once: the diversion is exactly one cycle
     }
+    const synthKey = `${ctx.treeFailureTail ?? ""}\u0002${ctx.refusal ?? ""}\u0002${ctx.gateRepair ?? ""}`;
     let synthesized: Project;
-    try {
-      synthesized = await synthesize(p, ctx);
-    } catch (err) {
-      synthesized = p;
-      events.push(
-        `cycle ${cycle}: synthesis seam threw (${err instanceof Error ? err.message : String(err)}) — deterministic floor stands`,
-      );
+    if (prevSynthProject !== null && prevSynthKey === synthKey) {
+      // O-01: the repair input is byte-identical to the previous cycle, so the
+      // model would re-synthesize the same accepted tree (419k tokens for zero
+      // convergence). Reuse it; a cycle that carries NEW context still calls.
+      synthesized = prevSynthProject;
+      events.push(`cycle ${cycle}: identical repair context — synthesis skipped, accepted tree reused (O-01)`);
+    } else {
+      try {
+        synthesized = await synthesize(p, ctx);
+      } catch (err) {
+        synthesized = p;
+        events.push(
+          `cycle ${cycle}: synthesis seam threw (${err instanceof Error ? err.message : String(err)}) — deterministic floor stands`,
+        );
+      }
+      prevSynthProject = synthesized;
+      prevSynthKey = synthKey;
     }
     const ref = p6RefusalDetail(synthesized);
     if (ref !== null) refusal = ref;
@@ -3230,6 +3512,10 @@ export async function driveP6Journey(
         run: null,
         error: `tree-run seam threw: ${err instanceof Error ? err.message : String(err)}`,
       };
+    }
+    lastMetric = bestTreeMetricOf(synthesized, verdict);
+    if (bestTree === null || isBetterTree(lastMetric, bestTree.metric)) {
+      bestTree = { project: synthesized, metric: lastMetric };
     }
     if (verdict.ok === true) {
       // GREEN tree-run. Convergence is NOT automatic: fixes/155 §6/§8 (chain
@@ -3291,7 +3577,7 @@ export async function driveP6Journey(
               `tree-run ok + P6 gate green but fixtures pending (${pending.join(", ") || fx.length}) — never auto-approve`,
             );
             events.push(`cycle ${cycle}: fixtures pending — P6 journey FAILED`);
-            return { outcome: "failed", project: finalProject, cycles: cycle, budget, treeTail: null, refusal, gate, events };
+            return { outcome: "failed", project: keepBestTree(finalProject, bestTree, lastMetric, events), cycles: cycle, budget, treeTail: null, refusal, gate, events };
           }
           const spec = (verdict.tests ?? []).find((t) => t.file === "tests/oracle.spec.ts" || t.file.endsWith("oracle.spec.ts"));
           if (!spec || spec.run !== "pass" || spec.tests.pass === 0) {
@@ -3303,7 +3589,7 @@ export async function driveP6Journey(
               `approved fixtures did not pass under treeRun — ${why}`,
             );
             events.push(`cycle ${cycle}: fixtures red under treeRun — P6 journey FAILED`);
-            return { outcome: "failed", project: finalProject, cycles: cycle, budget, treeTail: null, refusal, gate, events };
+            return { outcome: "failed", project: keepBestTree(finalProject, bestTree, lastMetric, events), cycles: cycle, budget, treeTail: null, refusal, gate, events };
           }
         }
         finalProject = await applyTreeRunTestedMint(finalProject, verdict);
@@ -3360,10 +3646,25 @@ export async function driveP6Journey(
         `tree-run ok after ${cycle}/${budget} cycle(s) but ${gateReason} — journey FAILED, not converged (converged requires treeRun ok AND gate.passed)`,
       );
       events.push(`cycle ${cycle}: tree-run ok but ${gateReason} — P6 journey FAILED (converged requires gate.passed)`);
-      return { outcome: "failed", project: finalProject, cycles: cycle, budget, treeTail: null, refusal, gate, events };
+      return { outcome: "failed", project: keepBestTree(finalProject, bestTree, lastMetric, events), cycles: cycle, budget, treeTail: null, refusal, gate, events };
     }
     treeTail = treeRunFailureTail(verdict).slice(0, P6_JOURNEY_TAIL_MAX);
     p = p6JourneyLog(synthesized, "warn", "p6.tree.failure", treeTail);
+    // PR-12 (BF-2, C-04): a cycle that reproduces the previous cycle's failure
+    // signature carried no new information. Abort honestly — do not spend the
+    // remaining budget re-buying the same dead end.
+    const failSig = failureSignature({
+      refusal,
+      treeTail,
+      offenderFiles: treeRunFailureFiles(verdict),
+    });
+    if (prevFailureSig !== null && failSig === prevFailureSig) {
+      const detail = `no progress: cycle ${cycle} reproduced cycle ${cycle - 1}'s failure signature (${failSig}) — aborting with ${budget - cycle} cycle(s) unspent`;
+      p = p6JourneyLog(p, "error", "p6.journey.no-progress", detail);
+      events.push(detail);
+      return { outcome: "failed", project: keepBestTree(p, bestTree, lastMetric, events), cycles: cycle, budget, treeTail, refusal, gate: null, events };
+    }
+    prevFailureSig = failSig;
     events.push(`cycle ${cycle}: tree-run fail — ${treeTail.slice(0, 140)}`);
   }
   // Budget exhausted → honest FAILED outcome; the deterministic floor (the
@@ -3379,7 +3680,7 @@ export async function driveP6Journey(
       refusal !== null ? ` — last refusal: ${refusal.slice(0, 180)}` : ""
     }`,
   );
-  return { outcome: "failed", project: p, cycles: budget, budget, treeTail, refusal, gate: null, events };
+  return { outcome: "failed", project: keepBestTree(p, bestTree, lastMetric, events), cycles: budget, budget, treeTail, refusal, gate: null, events };
 }
 
 /**
@@ -4322,6 +4623,42 @@ import type { VerifyOutcomeShape } from "./verify.ts";
  * source's top-level functions before the loop runs.
  */
 export async function verifyGeneratedSource(project: Project): Promise<VerifyOutcomeShape> {
+  // W61 B3 (recovery door): a TREE-mode project's product IS its emitted ESM
+  // tree. The single-module harness (`verifyAndFixServer` binds oracle
+  // expressions through a CommonJS `with(exports)` over `generatedSource`)
+  // cannot load top-level `import`/`export`, and that runner failure surfaced
+  // as an opaque RT_E_UNKNOWN at the CLI. Route tree-mode verify to the REAL
+  // tree-run path — emit the tree to a probe dir and execute its own specs and
+  // entry. A red tree is an honest `failed` verdict; a tree-run seam that could
+  // not execute at all is a coded top-level RT_E_RUNNER_FAILED, never
+  // RT_E_UNKNOWN.
+  const tree = Array.isArray(project.generatedTree) ? project.generatedTree : [];
+  if (tree.length > 0) {
+    const outcome = await defaultP6RunTree(project);
+    if (outcome.ok === true) {
+      const evidence = [
+        `tree-run green: ${outcome.compile.passed}/${outcome.compile.checked} file(s) compile`,
+        `${outcome.tests.length} spec verdict(s)`,
+        outcome.run ? `entry ${outcome.run.run}` : "no entry",
+        outcome.substance ? `substance ${outcome.substance.verdict}` : "",
+      ]
+        .filter(Boolean)
+        .join("; ");
+      return { status: "passed", iterations: 0, evidence };
+    }
+    // The seam could not RUN the tree (emit failure / missing treeRun) — that
+    // is a backend runner failure, not a red product. Refuse with the correct
+    // top-level code so an agent branches on the class, not on prose.
+    if (
+      typeof outcome.error === "string" &&
+      /treeRun unavailable|seam threw|emit failed|runner unavailable/i.test(outcome.error)
+    ) {
+      const err = new Error(`verify (tree mode): ${outcome.error}`) as Error & { code?: ErrorCode };
+      err.code = "RT_E_RUNNER_FAILED";
+      throw err;
+    }
+    return { status: "failed", iterations: 0, evidence: treeRunFailureTail(outcome) };
+  }
   const source = typeof project.generatedSource === "string" ? project.generatedSource : "";
   if (!source.trim()) {
     // CLI parity (rapidtool-cli.mjs verify door): "no source yet" is a graph

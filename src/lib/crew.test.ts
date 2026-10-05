@@ -11,6 +11,8 @@ import {
   crewRegistryCompleter,
   crewRoleForModel,
   runCrewServer,
+  reviewerVerdict,
+  gateDisagreement,
 } from "./crew.server.ts";
 import type { CrewCompleter, CrewSearcher } from "./crew.server.ts";
 import type { CrewRole, CrewSession } from "./crew.ts";
@@ -558,6 +560,41 @@ describe("crew prompt quality — actionable, test-pushing, honest (fixes/95 F5)
     }
   });
 
+  it("W61 D1: the Delegator mandate carries evidence-per-step and the BLOCKED: token", () => {
+    const sys = ROLE_SPECS.planner.system;
+    assert.ok(sys.includes("DELEGATOR"), "named Delegator");
+    assert.ok(sys.includes("recorded evidence that proves it done"), "evidence per step");
+    assert.ok(sys.includes("BLOCKED: <what is missing>"), "unscopable steps use BLOCKED");
+    const ctx = ctxFor("planner");
+    assert.ok(ctx.includes("BLOCKED: <what is missing>"), "directive carries the BLOCKED token");
+    assert.ok(ctx.includes("recorded evidence that proves it done"), "directive: evidence per step");
+  });
+
+  it("W61 D1: the Verifier mandate is per-claim, evidence-bound, and never mints its own PASS", () => {
+    const sys = ROLE_SPECS.reviewer.system;
+    assert.ok(sys.includes("VERIFIER"), "named Verifier");
+    assert.ok(sys.includes("CLAIM → VERIFIED"), "per-claim verdict line");
+    assert.ok(sys.includes("REFUTED"), "refutation class present");
+    assert.ok(sys.includes("NOT VERIFIED"), "not-verified class present");
+    assert.ok(sys.includes("GATE-DISPUTED"), "gate dispute token present");
+    assert.ok(sys.includes("never mint your own PASS"), "anti-self-certification rule");
+    const ctx = ctxFor("reviewer");
+    assert.ok(ctx.includes("CLAIM → VERIFIED"), "directive carries the per-claim form");
+    assert.ok(ctx.includes("GATE-DISPUTED"), "directive forbids contradicting the gate silently");
+  });
+
+  it("W61 D1: the Researcher mandate is phase-intent-first and flags off-intent results", () => {
+    const sys = ROLE_SPECS.researcher.system;
+    assert.ok(sys.includes("phase intent is the subject"), "intent is the subject");
+    assert.ok(
+      sys.includes("No live source was found; reasoning from the packet only."),
+      "explicit no-source line",
+    );
+    assert.ok(sys.includes("exclude it from your findings"), "off-intent results excluded");
+    const ctx = ctxFor("researcher");
+    assert.ok(ctx.includes("Phase intent is the subject"), "directive states the intent rule");
+  });
+
   it("keeps every context probe within a sane budget after the directive expansion", () => {
     // Seed-project context ≈ 2.3k est tokens (packet-heavy); the 16k default
     // ceiling leaves huge headroom — this only guards against a runaway
@@ -1072,5 +1109,100 @@ describe("F2-10 crew budget seam (W42 · L2-P5)", () => {
     assert.equal(res.ok, false);
     if (!res.ok) assert.equal(res.code, "RT_E_BUDGET_EXHAUSTED");
     assert.equal(totalTokens(budget.ledger), 25, "both responses' usage stays on the ledger");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W61 lane D (D6 / R2 Row 8): crew.critic.disagreement — the advisory reviewer
+// is visible and measurable, and can never override the deterministic gate.
+// ---------------------------------------------------------------------------
+
+describe("crew.critic.disagreement — advisory judge never overrides the gate (W61 D6)", () => {
+  function projectWithGate(passed: boolean): Project {
+    const p = seedProject({ currentPhase: 6 });
+    return {
+      ...p,
+      phases: p.phases.map((r) =>
+        r.id === 6
+          ? {
+              ...r,
+              gate: { passed, unmet: passed ? [] : ["M4"], evidenceHash: "abcdef01", checkedAt: 1 },
+            }
+          : r,
+      ),
+    };
+  }
+
+  const VERIFIER_REPLY = (verdict: "PASS" | "FAIL"): LlmResult =>
+    okText(
+      JSON.stringify({
+        type: "review",
+        content: `Review verdict — ${verdict}: every claim checked.`,
+        artifacts: [{ title: `Review verdict — ${verdict}`, body: verdict }],
+      }),
+    );
+
+  it("reviewerVerdict parses only stated verdicts, never a bare pass/fail word", () => {
+    assert.equal(reviewerVerdict({ content: "Review verdict — FAIL: missing evidence." }), "FAIL");
+    assert.equal(reviewerVerdict({ content: "verdict: PASS" }), "PASS");
+    assert.equal(reviewerVerdict({ content: "the module looks passable" }), null);
+    assert.equal(reviewerVerdict({ artifacts: [{ title: "Review verdict — PASS" }] }), "PASS");
+    assert.equal(reviewerVerdict({ content: "no opinion" }), null);
+    assert.equal(reviewerVerdict({ content: 42 }), null);
+  });
+
+  it("gateDisagreement fires only when both sides are known and differ", () => {
+    assert.deepEqual(gateDisagreement(6, "PASS", false), {
+      event: "crew.critic.disagreement",
+      phase: 6,
+      claimed: "PASS",
+      gate: "FAIL",
+      detail:
+        "advisory reviewer claimed PASS while the recorded deterministic gate is FAIL — the gate stands; the crew verdict never overrides it",
+    });
+    assert.equal(gateDisagreement(6, "FAIL", false), null);
+    assert.equal(gateDisagreement(6, "PASS", null), null);
+    assert.equal(gateDisagreement(6, null, false), null);
+  });
+
+  it("a reviewer PASS against a recorded FAIL gate emits the row and never mutates the gate", async () => {
+    const project = projectWithGate(false);
+    Object.freeze(project);
+    const crew = createCrew(async (_prompt, cOpts) =>
+      cOpts?.system?.includes("VERIFIER") ? VERIFIER_REPLY("PASS") : okText("ok"),
+    );
+    const res = await crew.runCrew(project, {
+      phase: 6,
+      live: false,
+      roles: ["reviewer"],
+      maxSteps: 1,
+    });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.ok(Array.isArray(res.disagreements) && res.disagreements.length === 1);
+    assert.equal(res.disagreements[0].event, "crew.critic.disagreement");
+    assert.equal(res.disagreements[0].claimed, "PASS");
+    assert.equal(res.disagreements[0].gate, "FAIL");
+    assert.equal(
+      project.phases.find((r) => r.id === 6)?.gate?.passed,
+      false,
+      "the recorded gate is unchanged — the crew verdict never overrides it",
+    );
+  });
+
+  it("an agreeing reviewer produces no disagreement row", async () => {
+    const project = projectWithGate(false);
+    const crew = createCrew(async (_prompt, cOpts) =>
+      cOpts?.system?.includes("VERIFIER") ? VERIFIER_REPLY("FAIL") : okText("ok"),
+    );
+    const res = await crew.runCrew(project, {
+      phase: 6,
+      live: false,
+      roles: ["reviewer"],
+      maxSteps: 1,
+    });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    assert.equal(res.disagreements, undefined);
   });
 });

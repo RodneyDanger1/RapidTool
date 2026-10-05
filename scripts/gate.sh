@@ -9,6 +9,10 @@
 #   3. gaps        node scripts/check-assertion-gaps.mjs    (T-17 assertion-gap
 #                  lint — tautological assertions + zero-assertion tests; exits
 #                  1 on findings, and its exit is folded into the verdict)
+#   3b. prevention node scripts/prevention/verify-prevention.mjs --all --selftest
+#                  (PR-26, ADDITIVE): the keyless two-signal proof layer. Fails on
+#                  fixture-integrity missed, fix-presence pending, any skip, or a
+#                  guard count below the pinned floor.
 #   4. tests       scripts leg, then the src/lib suite ("lib suite") — same
 #                  order and commands as `npm test`, so gate.sh stays honest
 #                  about the chain npm test `&&`-s together
@@ -107,6 +111,7 @@ START="$(now_ms)"
 run typecheck "$TMP/typecheck.log" npm run typecheck > /dev/null
 run lint "$TMP/lint.log" npm run lint > /dev/null
 run assertionGaps "$TMP/assertionGaps.log" node scripts/check-assertion-gaps.mjs > /dev/null
+run prevention "$TMP/prevention.log" node scripts/prevention/verify-prevention.mjs --all --selftest > /dev/null
 run testsScripts "$TMP/testsScripts.log" node --test --test-reporter=tap "scripts/**/*.test.mjs" > /dev/null
 run testsLib "$TMP/testsLib.log" node --experimental-strip-types --test --test-reporter=tap \
   "src/lib/**/*.test.ts" > /dev/null
@@ -128,11 +133,11 @@ node - \
   "$WINTMP/typecheck.log" "$WINTMP/lint.log" \
   "$WINTMP/testsScripts.log" "$WINTMP/testsLib.log" \
   "$LOGS2_SCRIPTS" "$LOGS2_LIB" \
-  "$WINTMP/build.log" "$QUARANTINE" <<'NODE'
+  "$WINTMP/build.log" "$WINTMP/prevention.log" "$QUARANTINE" <<'NODE'
 const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 // Script comes from stdin (`node -`), so argv = [node, "-", ...args].
-const [resultsPath, startMs, doubleStr, tclog, lintlog, s1, l1, s2, l2, bldlog, quarantineStr] =
+const [resultsPath, startMs, doubleStr, tclog, lintlog, s1, l1, s2, l2, bldlog, prevlog, quarantineStr] =
   process.argv.slice(2);
 const double = doubleStr === "1";
 const quarantine = quarantineStr === "1";
@@ -172,6 +177,23 @@ for (const id of ["typecheck", "lint", "assertionGaps", "build"]) {
 }
 gates.lint.problems =
   Number((readLog(lintlog).match(/([0-9]+) problems/) || [])[1] || 0) || null;
+// PR-26: the keyless prevention harness is an ADDITIVE gate. It fails on
+// fixture-integrity missed, fix-presence pending, any skip, or a guard count
+// below the pinned floor; its JSON is parsed so the cause is named in the verdict.
+gates.prevention = { ok: exitOf("prevention") === 0, exit: exitOf("prevention"), ms: msOf("prevention") };
+{
+  const lines = readLog(prevlog).trim().split("\n").filter(Boolean);
+  try {
+    const j = JSON.parse(lines[lines.length - 1] || "");
+    gates.prevention.missed = j.missed ?? (j.fixtureIntegrity ? j.fixtureIntegrity.missed : []) ?? [];
+    gates.prevention.pending = j.pending ?? (j.fixPresence ? j.fixPresence.pending : []) ?? [];
+    gates.prevention.skipped = j.skipped ?? [];
+    gates.prevention.count = j.count ?? null;
+    gates.prevention.countFloor = j.countFloor ?? null;
+  } catch {
+    // No parseable verdict line: the exit code alone fails the gate (fail closed).
+  }
+}
 
 const flakes = [];
 const hardFails = [];
@@ -311,7 +333,7 @@ for (const [id, log1] of [["testsScripts", s1], ["testsLib", l1]]) {
 // OUTRANKS a --double flake: the flake branch must never mask a permanently-red
 // gate behind an exit-3 "retry" verdict (pre-fix, flake+red typecheck read 3).
 const nonTestGatesOk =
-  gates.typecheck.ok && gates.lint.ok && gates.assertionGaps.ok && gates.build.ok;
+  gates.typecheck.ok && gates.lint.ok && gates.assertionGaps.ok && gates.prevention.ok && gates.build.ok;
 const testLegsOk =
   (gates.testsScripts.ok || relieved.has("testsScripts")) &&
   (gates.testsLib.ok || relieved.has("testsLib"));
@@ -359,7 +381,7 @@ code=$?
 # W42 L4-G1(b): the --double legs (testsScripts2/testsLib2) are tailed too, but
 # ONLY when their .exit key exists — a missing key means the leg never ran
 # (single mode), which has no log to read and is not a failure.
-for id in typecheck lint assertionGaps testsScripts testsLib testsScripts2 testsLib2 build; do
+for id in typecheck lint assertionGaps prevention testsScripts testsLib testsScripts2 testsLib2 build; do
   ext="$(awk -F'\t' -v k="$id.exit" '$1 == k { print $2 }' "$RESULTS")"
   if [ -n "$ext" ] && [ "$ext" != "0" ]; then tail_log "$id" "$TMP/$id.log"; fi
 done

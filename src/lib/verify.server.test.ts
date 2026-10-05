@@ -47,6 +47,10 @@ import {
   sanitizeOracleExpression,
   shapeOnlyOracleCaseIds,
   verifyAndFixServer,
+  failingCaseIds,
+  isMonotoneFix,
+  frozenOracleCases,
+  COMPILE_FAILURE_CASE_ID,
 } from "./verify.server.ts";
 import type { VerifyCase } from "./verify.server.ts";
 // 346 cross-lane: the tree-lane assertion floor, exercised head-to-head against
@@ -661,6 +665,9 @@ describe("216i (112 T1/T2) — verify lesson loop (refusal · signature id · ac
     try {
       const outcome = await anchoredFailingRun();
       assert.equal(outcome.status, "failed", "3 failing pinned cases exhaust the run");
+      // W61 lane D (D2/I3): a failed machine run carries the runner-family code
+      // at the top level (the D→B contract).
+      assert.equal(outcome.code, "RT_E_RUNNER_FAILED", "failed carries RT_E_RUNNER_FAILED");
       assert.equal(outcome.lessonRefused, undefined, "an anchored failure is provable — never refused");
       const lesson = outcome.lesson;
       assert.ok(lesson, "the failing run mints the L3 signature row");
@@ -1556,6 +1563,9 @@ describe("340-3 — an ESM module is refused before any keyed work", () => {
       assert.equal(outcome.iterations, 0, "no machine run was minted");
       assert.equal(outcome.evidence, ESM_MODULE_UNSUPPORTED_REASON);
       assert.match(outcome.evidence, /RT_E_RUNNER_FAILED/, "the refusal is coded");
+      // W61 lane D (D2/I3): the code is the TOP-LEVEL contract, not only inside
+      // the lesson — the CLI branches on it instead of classifying to RT_E_UNKNOWN.
+      assert.equal(outcome.code, "RT_E_RUNNER_FAILED", "the real top-level code rides the outcome");
       assert.equal(outcome.lesson, undefined, "an unanchored pre-run refusal mints no lesson row");
       assert.equal(called, 0, "the structural refusal precedes case generation");
     } finally {
@@ -1577,6 +1587,18 @@ describe("340-3 — an ESM module is refused before any keyed work", () => {
     } finally {
       mock.restore();
       restoreKey();
+    }
+  });
+
+  it("D2: a not-configured outcome carries RT_E_LLM_NOT_CONFIGURED at the top level", async () => {
+    const saved = process.env.DEEPSEEK_API_KEY;
+    delete process.env.DEEPSEEK_API_KEY;
+    try {
+      const outcome = await verifyAndFixServer(SOURCE, BRIEF);
+      assert.equal(outcome.status, "not-configured");
+      assert.equal(outcome.code, "RT_E_LLM_NOT_CONFIGURED", "the real class is on the outcome");
+    } finally {
+      if (saved !== undefined) process.env.DEEPSEEK_API_KEY = saved;
     }
   });
 });
@@ -2026,5 +2048,114 @@ describe("346 E1 L2-X4 — a verdict-channel failure is not a module defect", ()
     assert.match(VERDICT_CHANNEL_FAILED_REASON, /verdict channel/i);
     assert.match(VERDICT_CHANNEL_FAILED_REASON, /RT_E_RUNNER_FAILED/, "the refusal is coded");
     assert.notEqual(VERDICT_CHANNEL_FAILED_REASON, NO_CALLABLE_EXPORTS_REASON);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR-20 (D2 / I6) — the monotone fix gate + the frozen spec-first oracle
+// contract. A fix is accepted ONLY when it strictly reduces the failing set
+// (or makes one non-recurring lateral move); otherwise the prior best source is
+// kept, the loop stops early, and the outcome says `regressed: true`. The
+// frozen contract makes the SAME model unable to author both the module and
+// its cases: the pinned oracle ids + spec requirements are fixed before
+// synthesis and are stable across cycles.
+// ---------------------------------------------------------------------------
+describe("PR-20 (D2/I6) — monotone fix acceptance + frozen oracle cases", () => {
+  it("failingCaseIds is sorted/deduped and marks a compile failure with a sentinel", () => {
+    assert.deepEqual(
+      failingCaseIds({
+        results: [
+          { id: "b", pass: false, detail: "" },
+          { id: "a", pass: false, detail: "" },
+          { id: "a", pass: false, detail: "" },
+        ],
+      }),
+      ["a", "b"],
+    );
+    assert.deepEqual(failingCaseIds({ results: [], compileError: "boom" }), [COMPILE_FAILURE_CASE_ID]);
+    assert.deepEqual(failingCaseIds({ results: [{ id: "a", pass: true, detail: "" }] }), []);
+  });
+
+  it("isMonotoneFix accepts a strict subset / non-recurring lateral move, rejects supersets / identical / recurring", () => {
+    assert.equal(isMonotoneFix(["a"], ["a", "b"], [["a", "b"]]), true, "strict subset");
+    assert.equal(isMonotoneFix([], ["a"], [["a"]]), true, "a pass is the empty strict subset");
+    assert.equal(isMonotoneFix(["c"], ["a"], [["a"]]), true, "equal-size non-recurring lateral move");
+    assert.equal(isMonotoneFix(["a", "b"], ["a"], [["a"]]), false, "superset is never an improvement");
+    assert.equal(isMonotoneFix(["a"], ["a"], [["a"]]), false, "an identical set is no progress");
+    assert.equal(isMonotoneFix(["b"], ["a"], [["a"], ["b"]]), false, "a recurring lateral member is rejected");
+  });
+
+  it("frozenOracleCases is deterministic, pins every oracle id, and is spec-grounded", () => {
+    const project = seedProject({
+      oracle: ORACLE,
+      implementationSpec: {
+        requirements: ["Do X", "Do Y"],
+        edgeCases: [],
+        errorHandling: [],
+        typeSignatures: ["function dispatch(x: X): boolean"],
+        dataFlow: [],
+        negativeConstraints: [],
+        source: "p6",
+        briefHash: "h",
+        createdAt: 0,
+      },
+    });
+    const a = frozenOracleCases(project);
+    const b = frozenOracleCases(project);
+    assert.equal(a, b, "identical project ⇒ identical frozen contract");
+    for (const o of ORACLE) assert.ok(a.includes(o.id), `pinned id ${o.id} is rendered`);
+    assert.match(a, /req-1: Do X/, "spec requirements are frozen with stable ids");
+    assert.match(a, /function dispatch/, "required signatures are frozen");
+    assert.equal(
+      frozenOracleCases(seedProject({ oracle: [], implementationSpec: null })),
+      "",
+      "an empty contract renders '' (nothing to freeze)",
+    );
+  });
+
+  it("rejects a fix that does not reduce the failing set; keeps best-so-far and reports regressed", { skip: !available }, async () => {
+    const restoreKey = withFakeKey();
+    const BAD = "exports.add = (a, b) => a - b;"; // fails case-1 only
+    const WORSE = "exports.add = (a, b) => a + b + 1;"; // fails BOTH cases
+    const gen = {
+      cases: [
+        { id: "case-1", expression: "add(2,3) === 5" },
+        { id: "case-2", expression: "add(0,0) === 0" },
+      ],
+    };
+    const mock = mockChat([gen, WORSE]);
+    try {
+      const outcome = await verifyAndFixServer(BAD, "add module", { maxIterations: 2 });
+      assert.equal(outcome.status, "failed", `a worsening fix must not pass: ${JSON.stringify(outcome)}`);
+      assert.match(outcome.evidence, /regressed: true/, "the regression is reported honestly");
+      assert.match(outcome.evidence, /after 2 iterations/, "the loop stopped early but names its iteration");
+      assert.equal(outcome.finalSource, BAD, "the worse fix is never written to finalSource");
+      assert.equal(mock.calls.length, 2, "generation + exactly one fix dispatch (no further spend)");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
+  });
+
+  it("accepts a fix that strictly reduces the failing set (progress is never blocked)", { skip: !available }, async () => {
+    const restoreKey = withFakeKey();
+    const BAD = "exports.add = (a, b) => a - b;"; // fails case-1 only
+    const GOOD = "exports.add = (a, b) => a + b;"; // passes both
+    const gen = {
+      cases: [
+        { id: "case-1", expression: "add(2,3) === 5" },
+        { id: "case-2", expression: "add(0,0) === 0" },
+      ],
+    };
+    const mock = mockChat([gen, GOOD]);
+    try {
+      const outcome = await verifyAndFixServer(BAD, "add module", { maxIterations: 2 });
+      assert.equal(outcome.status, "passed", `a strict improvement must be accepted: ${JSON.stringify(outcome)}`);
+      assert.equal(outcome.iterations, 2, "the fix was accepted on the second iteration");
+      assert.equal(outcome.finalSource, GOOD, "the improved source is the final one");
+    } finally {
+      mock.restore();
+      restoreKey();
+    }
   });
 });

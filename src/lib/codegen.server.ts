@@ -132,7 +132,7 @@ import {
   isDeepSeekConfigured,
   type DeepSeekCompleteOptions,
 } from "./deepseek.server.ts";
-import { expandBrief, expandedSpecViolations, EXPAND_LESSON_RANK_LIMIT, lessonLinesForBrief, type ExpandBriefResult } from "./prompt-engine.ts";
+import { expandBrief, expandedSpecViolations, EXPAND_LESSON_RANK_LIMIT, lessonLinesForBrief, repairSystemPrompt, type ExpandBriefResult } from "./prompt-engine.ts";
 import { selectLessons, type RankableLessonRow } from "./knowledge.ts";
 import { verifyAndFixServer, type VerifyOutcome } from "./verify.server.ts";
 import type { ErrorCode } from "./errors.ts";
@@ -149,6 +149,7 @@ import { P6_PHASE_MAX_MS } from "./rt-events.ts";
 // fixes/343-1: the opt-in best-of-N policy (count resolution + deterministic
 // lazy selection). The gates it selects against stay in this module.
 import {
+  adaptiveChunkSize,
   candidatesLogDetail,
   resolveSynthesisCandidates,
   selectBestOfN,
@@ -596,6 +597,12 @@ export function p6SynthesisSystemPrompt(): string {
     "Worked example (shape only — the content is yours; note every parameter and the",
     "return type are ANNOTATED — see rule 10):",
     '{"module":"function add(a: number, b: number): number { return a + b; }\\nmodule.exports.add = add;","exports":["add"],"reqTrace":{"req-1":"add"}}',
+    // W61 lane D (D1 / R2 §2.2): a LEGAL refusal channel. The prose-in-code
+    // detector exists because a model that cannot satisfy the spec leaks its
+    // deliberation into the module; this gives it an honest, coded alternative
+    // that costs no repair and can never be mistaken for a pass.
+    "LEGAL REFUSAL REPLY (use ONLY when the spec and the brief cannot both be satisfied):",
+    '{"refusal":"<one sentence>","reason":"<which requirement conflicts with which signature>"} — return this INSTEAD of the module envelope; never write planning prose or a partial module into `module`, and never emit a refusal when you can implement the spec.',
     "RULES (all mandatory):",
     // 216f (T-10 / F-08): the export-ceiling rule and the requirement list must
     // be CONSISTENT. The old pair ("export exactly these ... nothing more" +
@@ -1238,6 +1245,16 @@ function withRepoMapContext(user: string, rendered: string): string {
   return `${user}\n\nREPO MAP (deterministic outline of the tree so far — path: exported symbols, ranked):\n${rendered}`;
 }
 
+/**
+ * PR-19 (A7): the DEDICATED repair-agent SYSTEM prompt is now the PURE contract
+ * owned by `prompt-engine.ts` (PR-18) — one source of truth for the delta/full/
+ * refusal reply shapes, so the prompt and its parity test cannot drift from the
+ * consumer. Kept as a named delegate for callers/tests pinned on this symbol.
+ */
+export function p6RepairAgentSystemPrompt(): string {
+  return repairSystemPrompt();
+}
+
 /** Repair re-prompt after an unparseable envelope (audit-88 bounded-retry pattern). */
 export function p6SynthesisRepairPrompt(treeFailure?: string): string {
   return [
@@ -1433,6 +1450,45 @@ export function p6SynthesisAsyncAwaitRepairPrompt(
     "The named function(s) return a Promise. Reading a property off that Promise yields `undefined`, and the call's real rejection floats past every caller (an unhandled rejection that reds the whole spec file).",
     `Fix: mark the ENCLOSING function \`async\` (if it is not already) and \`await\` each call before reading or destructuring its result: \`const x = await ${names[0] ?? "fn"}(...); x.ok\` or \`const { ok } = await ${names[0] ?? "fn"}(...)\`.${names.length > 1 ? ` Apply this to: ${names.join(", ")}.` : ""}`,
     "Do NOT delete the call, do NOT store the un-awaited Promise in a variable, and do NOT change the function's exported name or signature.",
+    'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
+    "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no prose, no markdown fences.",
+  ].join("\n") + repairTreeFailureTail(treeFailure);
+}
+
+/**
+ * A12 (SYNTHSPEC F5): repair re-prompt for raw JSX in a `.ts` module. Names the
+ * offending lines and asks for a JSX-free rewrite; never strips the tags.
+ */
+export function p6SynthesisJsxRepairPrompt(hits: readonly number[], treeFailure?: string): string {
+  const lines = [...new Set((Array.isArray(hits) ? hits : []).filter((n) => Number.isFinite(n)))].sort((a, b) => a - b);
+  return [
+    "Your previous module contains raw JSX, but this module is a `.ts` file — the JSX transform applies to `.tsx` only, so raw elements are a syntax error (TS1005: '>' expected) and the tree cannot be loaded.",
+    `Offending line(s): ${lines.slice(0, 12).join(", ") || "(unknown)"}.`,
+    "Rewrite the module as JSX-free plain TypeScript: return the data (a string, a plain object, a record) from the function and let the UI shell render it. Do NOT keep any `<Tag …>` / `</Tag>` element and do NOT re-export a component.",
+    'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
+    "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no prose, no markdown fences.",
+  ].join("\n") + repairTreeFailureTail(treeFailure);
+}
+
+/**
+ * BF-5 (SYNTHSPEC A5): repair re-prompt for a money-semantics violation — a
+ * money-named export that sums a QUANTITY field as if it were the amount
+ * (the measured `computeCartTotalPence` returned `4` for 3×£2.50 + 1×£4.00).
+ * Names the function, its line, and the offending operand, and demands the
+ * price×quantity arithmetic. ONE bounded attempt; a repeat is refused.
+ */
+export function p6SynthesisMoneyRepairPrompt(
+  hits: readonly MoneySemanticsHit[],
+  treeFailure?: string,
+): string {
+  const rows = (Array.isArray(hits) ? hits : []).filter((h) => h && typeof h.name === "string");
+  const detail = rows.map((h) => `- "${h.name}" at line ${h.line} — accumulates only \`${h.operand}\``).join("\n");
+  const first = rows[0];
+  return [
+    "Your previous module computes a MONEY amount incorrectly: a money-named function sums a QUANTITY as if it were the price, so the total is a count of items rather than an amount in minor units.",
+    detail || "(none listed)",
+    "Fix the arithmetic: the amount contributed by each line is its unit price TIMES its quantity (guard the operands and floor/round the result to integer minor units). Example shape: `total = total + Math.floor(unitPriceMinor * qty);`.",
+    `Do NOT rename or remove the export${first ? ` \`${first.name}\`` : ""}; keep its signature and its return type (integer minor units), and keep every other line byte-identical.`,
     'Return JSON ONLY with the SAME envelope: {"module":"<complete corrected module source>","exports":[...],"reqTrace":{...}}.',
     "Same rules as before: exact typeSignature exports (nothing more, nothing less), zero imports, JSDoc, // req-N markers, no forbidden primitives, no prose, no markdown fences.",
   ].join("\n") + repairTreeFailureTail(treeFailure);
@@ -1655,6 +1711,14 @@ export function p6SynthesisChunkUserPrompt(
   // carries at least one renderable entity/endpoint row (the FM-08 non-empty
   // gate, mirrored); a contract-less project keeps the exact legacy bytes.
   const contractLines = p6SynthesisContractsLines(contracts);
+  // W61 lane D (D5 / R2 Row 1 / A8): CACHE-AWARE BLOCK ORDER. All
+  // project-stable blocks lead (BRIEF → REQUIREMENTS → NEGATIVE CONSTRAINTS →
+  // EDGE CASES → DATA FLOW → ERROR HANDLING → DATA CONTRACTS); the PER-CHUNK
+  // volatile TYPE SIGNATURES block trails them, so every chunk of one project
+  // shares one byte-stable cacheable prefix (vendor prefix caching keys on the
+  // leading bytes; the old order put TYPE SIGNATURES third and cachedPromptTokens
+  // was 0 on all 212 calls — FINDINGS O-02). The literal marker
+  // "TYPE SIGNATURES (must export" is unchanged (test-internal detector).
   const lines = [
     "BRIEF:",
     capped || "(empty brief — implement the spec requirements only)",
@@ -1664,11 +1728,6 @@ export function p6SynthesisChunkUserPrompt(
     // unsatisfiable half of the contradiction (chunk-0.ts:350).
     "REQUIREMENTS (the project's complete list — implemented across ALL of its files; this file implements every one its TYPE SIGNATURES below cover, marking each implementing function with its // req-N comment. A requirement owned by another file is implemented THERE behind that file's own signatures — never hide its logic behind non-exported helpers here):",
     ...spec.requirements.map((r, i) => `${i + 1}. ${r}`),
-    "",
-    // Keeps the literal marker "TYPE SIGNATURES (must export" (test-internal
-    // synthesis-prompt detector) while scoping the list to this file.
-    "TYPE SIGNATURES (must export — exactly these names, nothing more, nothing less; THIS file's share of the project — the project's other files export the remaining signatures):",
-    ...sigs.map((s) => `- ${s}`),
     "",
     "NEGATIVE CONSTRAINTS (all mandatory):",
     ...spec.negativeConstraints.map((c) => `- ${c}`),
@@ -1702,6 +1761,10 @@ export function p6SynthesisChunkUserPrompt(
     // capped at P6_SYNTH_CONTRACTS_MAX_ROWS with a visible elision marker;
     // the empty list keeps the legacy prompt bytes (keyless byte-parity).
     ...contractLines,
+    // The PER-CHUNK volatile block trails every stable block (D5/A8).
+    "",
+    "TYPE SIGNATURES (must export — exactly these names, nothing more, nothing less; THIS file's share of the project — the project's other files export the remaining signatures):",
+    ...sigs.map((s) => `- ${s}`),
   ];
   if (Array.isArray(priorFiles) && priorFiles.length > 0) {
     lines.push(
@@ -1767,6 +1830,34 @@ export function p6SynthesisChunkUserPrompt(
  *  synthesis call — the rotating-failure-class root cause was ONE 60k-envelope
  *  pro call (121: expansion → brief-fit → runtime-binding → oracle). */
 export const P6_SYNTH_CHUNK_SIZE = 8;
+
+/**
+ * A1 (SYNTHSPEC P1): the brief-driven minimum file set. The plan used to be a
+ * pure function of the model's emitted `typeSignatures`, so a brief whose model
+ * spec carried two signatures planned 1–2 chunks and dropped the brief's
+ * nouns. These constants bound the deterministic floor derived from the brief
+ * itself (never the model): one required module per ~N core nouns, and never
+ * fewer than two.
+ */
+export const P6_NOUNS_PER_MODULE = 4;
+export const P6_MIN_TREE_MODULES = 2;
+/** Hard cap on brief-floor modules so a noun-dense brief cannot inflate the plan. */
+export const P6_MIN_BRIEF_MODULES_MAX = 8;
+/**
+ * The brief-noun floor only engages when the brief is genuinely noun-rich
+ * (≥N required nouns). A short brief whose model plan is one chunk keeps that
+ * plan — the floor targets the measured under-production (a ~20-noun website
+ * brief planning 1–2 chunks), not every small fixture.
+ */
+export const P6_FLOOR_MIN_NOUNS = 8;
+
+/** Repo-relative roots a relaxed job node may be keyed to (UI is scaffold-owned). */
+const REQUIRED_MODULE_ROOTS = ["src/jobs/", "src/domain/", "src/state/", "src/api/", "src/generated/"] as const;
+
+function isRequiredModulePath(p: unknown): p is string {
+  if (typeof p !== "string" || !/\.ts$/.test(p)) return false;
+  return REQUIRED_MODULE_ROOTS.some((root) => p.startsWith(root));
+}
 
 /** Entry-file tree path. `materializeImportableTree` writes the ESM barrel
  *  (every tree, one chunk or many) here — parity with scaffold's
@@ -2220,6 +2311,233 @@ export function reconcilePlanTypeSignatures(
   return { typeSignatures: [...sigs, ...added], added, addedLabels };
 }
 
+// ---------------------------------------------------------------------------
+// A1 (SYNTHSPEC P1) — BRIEF-DRIVEN MINIMUM FILE SET.
+//
+// The plan below is derived from the brief's declared capabilities (spec-graph
+// job nodes, contract entities, lattice jobs) and a brief-noun floor — never
+// from the model's emitted signatures alone. `mergeMinimumPlan` is ADD-ONLY: it
+// never drops a plan row and never claims the entry path, so a model plan that
+// already covers a capability keeps its exact bytes.
+// ---------------------------------------------------------------------------
+
+/** One capability that must materialise as a tree file. */
+export type RequiredModule = {
+  /** Stable de-dup key (`job:<id>`, `entity:<name>`, `lattice:<label>`, `brief:<noun>`). */
+  key: string;
+  /** Planned tree path. */
+  path: string;
+  /** ≥1 signature whose function name the chunk must export. */
+  signatures: string[];
+  source: "spec" | "job" | "entity" | "lattice" | "brief";
+  /** Display label (job/lattice label, entity name, noun) for logs. */
+  label: string;
+};
+
+/** Deterministic floor signatures for one label (the lattice capability pair). */
+function floorSignaturesForLabel(label: string, entities: readonly string[]): string[] {
+  const pool = entities.length > 0 ? [...entities] : ["record"];
+  return deriveTypeSignatures({ jobs: [label], entities: pool });
+}
+
+/**
+ * Deterministic union of every DECLARED capability the brief must materialise as
+ * a file (A1):
+ *   1. spec-graph job nodes with a parseable label + `src/jobs/*.ts` path;
+ *   2. RELAXED `job-*` nodes whose `file` sits under an emitted root even when no
+ *      quoted label parses or the path is outside src/jobs/ (label derived from
+ *      the capability id or the file stem) — the nodes the strict rule dropped.
+ *      The `ui` family is scaffold-owned (A4), never a synthesized chunk.
+ * Each entry carries ≥1 floor signature so `mergeMinimumPlan` can always add a
+ * real chunk. The brief-noun floor + domain fallback that force a minimum plan
+ * size live in `briefModuleFloor` / `minimumTreeFileCount` / `mergeMinimumPlan`
+ * (applied only when the plan is BELOW the floor). Pure + deterministic.
+ */
+export function deriveRequiredModules(
+  project:
+    | {
+        brief?: string | null;
+        specGraph?: { nodes?: readonly { id?: unknown; file?: unknown; purpose?: unknown }[] } | null;
+        lattice?: { jobs?: readonly string[]; entities?: readonly string[]; domain?: string } | null;
+        contracts?: { entities?: readonly { name?: string }[] } | null;
+      }
+    | null
+    | undefined,
+  spec: { typeSignatures: readonly string[] },
+): RequiredModule[] {
+  const out: RequiredModule[] = [];
+  const byPath = new Map<string, RequiredModule>();
+  const add = (m: RequiredModule): void => {
+    const existing = byPath.get(m.path);
+    if (existing !== undefined) {
+      for (const s of m.signatures) if (!existing.signatures.includes(s)) existing.signatures.push(s);
+      return;
+    }
+    byPath.set(m.path, m);
+    out.push(m);
+  };
+  const entities = (Array.isArray(project?.lattice?.entities) ? project!.lattice!.entities! : []).filter(
+    (e): e is string => typeof e === "string" && e.trim().length > 0,
+  );
+  const sigs = (Array.isArray(spec?.typeSignatures) ? spec.typeSignatures : []).filter(
+    (s): s is string => typeof s === "string" && s.trim().length > 0,
+  );
+
+  // 1. strict job targets (exact current rule).
+  for (const t of specGraphJobTargets(project)) {
+    const own = sigs.filter((s) => {
+      const name = signatureFunctionNames([s])[0] ?? null;
+      return name !== null && normalizedLabelForm(name).includes(normalizedLabelForm(t.label));
+    });
+    add({
+      key: `job:${t.id}`,
+      path: t.path,
+      signatures: own.length > 0 ? own : floorSignaturesForLabel(t.label, entities),
+      source: "job",
+      label: t.label,
+    });
+  }
+  // 1b. RELAXED job nodes: a `job-*` node with a file under an emitted root even
+  //     when no quoted label parses or the path is outside src/jobs/ (the strict
+  //     rule dropped these). The UI family is scaffold-owned (A4), never a
+  //     synthesized chunk.
+  const strictPaths = new Set(out.map((m) => m.path));
+  const nodes = Array.isArray(project?.specGraph?.nodes) ? project!.specGraph!.nodes! : [];
+  for (const n of nodes) {
+    if (n === null || typeof n !== "object") continue;
+    const id = typeof (n as { id?: unknown }).id === "string" ? (n as { id: string }).id : "";
+    if (!id.startsWith("job-")) continue;
+    const file = (n as { file?: unknown }).file;
+    if (!isRequiredModulePath(file) || strictPaths.has(file)) continue;
+    const stem = file.split("/").pop()?.replace(/\.ts$/, "") ?? id.slice(4);
+    const parsed = jobLabelFromPurpose((n as { purpose?: unknown }).purpose);
+    const label = parsed ?? (id.slice(4).replace(/[-_]+/g, " ").trim() || stem);
+    add({
+      key: `job:${id}`,
+      path: file,
+      signatures: floorSignaturesForLabel(label, entities),
+      source: "job",
+      label,
+    });
+    strictPaths.add(file);
+  }
+  // NOTE (A1): lattice-only jobs (a lattice job with no spec-graph job node) are
+  // deliberately NOT materialised here. `reconcilePlanTypeSignatures` already
+  // floors every declared spec-graph target from the lattice; manufacturing
+  // extra `src/jobs/<label>.ts` chunks the model never planned produces
+  // unfillable signatures. The brief-noun floor below covers the file-count case.
+  return out;
+}
+
+/** A1/SYNTHSPEC P1: the brief-noun module floor — 0 for a noun-thin brief, else ≥2, one per ~P6_NOUNS_PER_MODULE nouns, capped. */
+export function briefModuleFloor(project: { brief?: string | null } | null | undefined): number {
+  const required = briefNounHits(typeof project?.brief === "string" ? project.brief : "").required;
+  if (required.length < P6_FLOOR_MIN_NOUNS) return 0;
+  return Math.min(
+    P6_MIN_BRIEF_MODULES_MAX,
+    Math.max(P6_MIN_TREE_MODULES, Math.ceil(required.length / P6_NOUNS_PER_MODULE)),
+  );
+}
+
+/**
+ * Lower bound on the emitted `generatedTree` rows for THIS project (the barrel
+ * is not a module): the declared capabilities, but never fewer than the
+ * brief-noun floor.
+ */
+export function minimumTreeFileCount(
+  project: Parameters<typeof deriveRequiredModules>[0] & { brief?: string | null },
+  spec: { typeSignatures: readonly string[] },
+): number {
+  return Math.max(deriveRequiredModules(project, spec).length, briefModuleFloor(project));
+}
+
+/** A1 floor fallback: synthetic modules added ONLY when the plan is below the brief floor. */
+function floorFallbackModules(
+  project: {
+    brief?: string | null;
+    lattice?: { domain?: string; entities?: readonly string[] } | null;
+    contracts?: { entities?: readonly { name?: string }[] } | null;
+  } | null
+  | undefined,
+): RequiredModule[] {
+  const entities = (Array.isArray(project?.lattice?.entities) ? project!.lattice!.entities! : []).filter(
+    (e): e is string => typeof e === "string" && e.trim().length > 0,
+  );
+  const contracted = (Array.isArray(project?.contracts?.entities) ? project!.contracts!.entities! : []).filter(
+    (e) => e && typeof e.name === "string" && e.name.trim().length > 0,
+  );
+  const domainName =
+    (typeof project?.lattice?.domain === "string" && project.lattice.domain.trim()) ||
+    (contracted[0]!.name ?? "").trim() ||
+    "domain";
+  const nouns = briefNounHits(typeof project?.brief === "string" ? project.brief : "").required;
+  const out: RequiredModule[] = [
+    {
+      key: `entity:${domainName}`,
+      path: `src/domain/${pathSlugFromNames([domainName])}.ts`,
+      signatures: floorSignaturesForLabel(domainName, entities),
+      source: "entity",
+      label: domainName,
+    },
+  ];
+  for (const noun of nouns.length > 0 ? nouns : ["core"]) {
+    out.push({
+      key: `brief:${pathSlugFromNames([noun])}`,
+      path: `src/generated/${pathSlugFromNames([noun]) || "core"}.ts`,
+      signatures: floorSignaturesForLabel(noun, entities),
+      source: "brief",
+      label: noun,
+    });
+  }
+  return out;
+}
+
+/**
+ * ADD-ONLY merge of the brief-driven floor into a model-derived plan. First it
+ * adds one chunk per uncovered `RequiredModule` (a declared capability the model
+ * plan missed); then, ONLY when the total is still below `options.minimum`, it
+ * adds synthetic floor modules (one `src/domain/<domain>.ts` then brief-noun
+ * modules) so a noun-rich / capability-thin brief cannot plan 1–2 chunks. The
+ * plan is never reordered or dropped here (the caller applies `orderTreeChunks`),
+ * and the entry path is never claimed.
+ */
+export function mergeMinimumPlan(
+  basePlan: readonly TreeChunk[],
+  required: readonly RequiredModule[],
+  options: {
+    minimum?: number;
+    project?: Parameters<typeof floorFallbackModules>[0];
+    taken?: ReadonlySet<string>;
+  } = {},
+): TreeChunk[] {
+  const rows = (Array.isArray(basePlan) ? basePlan : []).filter(
+    (c): c is TreeChunk => c !== null && typeof c === "object" && typeof c.path === "string" && Array.isArray(c.signatures),
+  );
+  const have = new Set<string>([...(options.taken ?? []), ...rows.map((c) => c.path)]);
+  const push = (path: string, signatures: readonly string[], nodeId?: string, label?: string): boolean => {
+    if (!path.trim() || have.has(path) || path === TREE_ENTRY_PATH) return false;
+    const sigs = (Array.isArray(signatures) ? signatures : []).filter(
+      (s): s is string => typeof s === "string" && s.trim().length > 0,
+    );
+    if (sigs.length === 0) return false;
+    rows.push({ path, signatures: sigs, ...(nodeId ? { nodeId, label } : {}) });
+    have.add(path);
+    return true;
+  };
+  for (const r of required ?? []) {
+    if (!r || typeof r.path !== "string") continue;
+    push(r.path, r.signatures, r.source === "job" && r.key.startsWith("job:") ? r.key.slice(4) : undefined, r.label);
+  }
+  const minimum = Math.max(rows.length, options.minimum ?? 0);
+  if (rows.length < minimum && options.project !== undefined) {
+    for (const f of floorFallbackModules(options.project)) {
+      if (rows.length >= minimum) break;
+      push(f.path, f.signatures, undefined, f.label);
+    }
+  }
+  return rows;
+}
+
 /**
  * Assemble the ENTRY module from the accepted tree files — the
  * concatenation-safe form of the tree (used for brief-fit vocabulary scan
@@ -2520,6 +2838,38 @@ export function localBindingLines(module: string): Map<string, number[]> {
   return out;
 }
 
+/**
+ * A2 (SYNTHSPEC P2): the top-level binding surface a materialized module can
+ * collide on — `localBindingLines` PLUS the residual CJS assignments
+ * (`module.exports.NAME = …` / `exports.NAME = …`) that
+ * `neutralizeResidualCjsExports` converts into a real binding. `localBindingLines`
+ * deliberately omits that shape, so a later chunk redeclaring a name a prior
+ * chunk exports ONLY through residual CJS was invisible to the duplicate
+ * detector — the exact `getDailyRevenueByCategory` (TS2308) escape.
+ * Deterministic, line-based, same masking as `localBindingLines`.
+ */
+export function bindingLinesForCollision(module: string): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  const add = (name: string, line: number): void => {
+    const arr = out.get(name);
+    if (arr === undefined) out.set(name, [line]);
+    else if (!arr.includes(line)) arr.push(line);
+  };
+  for (const [name, lines] of localBindingLines(String(module ?? ""))) {
+    for (const line of lines) add(name, line);
+  }
+  const lines = String(module ?? "").split("\n");
+  const state = { block: false, template: false };
+  for (let i = 0; i < lines.length; i++) {
+    const code = maskCodeLine(lines[i] ?? "", state);
+    if (!code.trim()) continue;
+    const m = /^(?:module\.)?exports(?:\.([A-Za-z_$][\w$]*)|\[\s*["']([A-Za-z_$][\w$]*)["']\s*\])\s*=/.exec(code.trim());
+    const name = m?.[1] ?? m?.[2];
+    if (name && !RESERVED_BINDING_WORDS.has(name)) add(name, i + 1);
+  }
+  return out;
+}
+
 /** One top-level name a later chunk declares that an earlier chunk already exports. */
 export type CrossChunkDuplicate = { name: string; line: number; priorPath: string };
 
@@ -2540,7 +2890,9 @@ export function crossChunkDuplicateDeclarations(
     (c): c is { path: string; exports: readonly string[] } => c !== null && typeof c === "object" && typeof c.path === "string",
   );
   if (chunks.length === 0) return [];
-  const lines = localBindingLines(String(module ?? ""));
+  // A2: the collision surface includes residual-CJS assignment bindings, so a
+  // name a prior chunk exports only via `module.exports.NAME = …` is caught.
+  const lines = bindingLinesForCollision(String(module ?? ""));
   const out: CrossChunkDuplicate[] = [];
   const seen = new Set<string>();
   for (const chunk of chunks) {
@@ -2554,6 +2906,395 @@ export function crossChunkDuplicateDeclarations(
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// A2 (SYNTHSPEC P2) — FROZEN CROSS-CHUNK EXPORT REGISTRY.
+//
+// The validator read the prior chunk's ENVELOPE CLAIM (`synth.envelope.exports`)
+// while the materializer imported the prior chunk's MATERIALIZED union (claim ∪
+// residual-CJS conversions). A name exported only through residual CJS was
+// therefore invisible to the duplicate detector but imported into the later
+// file — the TS2308/SyntaxError class. The registry freezes one immutable
+// inventory immediately after a chunk is accepted and is the single source the
+// validator, the prompt and the materializer read.
+// ---------------------------------------------------------------------------
+
+/**
+ * The real top-level bindings the materializer exports for ONE file:
+ * the envelope claim ∪ the residual-CJS conversions the materializer will make.
+ * Mirrors `materializeImportableTree`'s own `exportNames` computation exactly.
+ */
+export function materializedExportNames(source: string, claimed: readonly string[]): string[] {
+  const claim = (Array.isArray(claimed) ? claimed : []).filter(
+    (n): n is string => typeof n === "string" && isIdent(n.trim()) && n.trim() === n,
+  );
+  const residual = neutralizeResidualCjsExports(stripCjsExportAssignments(source, claim)).exported;
+  return [...new Set([...claim, ...residual.filter(isIdent)])];
+}
+
+export type FrozenExport = { name: string; path: string };
+
+/** The frozen surface of one accepted file, keyed globally and by path. */
+export type FrozenExportRegistry = {
+  entries: Map<string, FrozenExport>;
+  files: Map<string, FrozenExport[]>;
+};
+
+/** The names a later file must import from `path` — EXACTLY the materialized surface. */
+export function registryNamesFor(reg: FrozenExportRegistry, path: string): string[] {
+  const entries = reg?.files?.get(path);
+  return entries === undefined ? [] : entries.map((e) => e.name);
+}
+
+/**
+ * Immutable append: freeze one accepted file's materialized surface. A name
+ * already owned by an earlier path is a collision (returned, never silently
+ * dropped) — the caller refuses rather than emitting a colliding barrel.
+ */
+export function freezeFileExports(
+  reg: FrozenExportRegistry,
+  file: { path: string; source: string; exports: readonly string[] },
+): { reg: FrozenExportRegistry; collisions: CrossChunkDuplicate[] } {
+  const entries = new Map(reg?.entries ?? []);
+  const files = new Map(reg?.files ?? []);
+  const names = materializedExportNames(file.source, file.exports);
+  const own: FrozenExport[] = [];
+  const collisions: CrossChunkDuplicate[] = [];
+  for (const name of names) {
+    const owner = entries.get(name);
+    if (owner !== undefined && owner.path !== file.path) {
+      collisions.push({ name, line: 0, priorPath: owner.path });
+      continue;
+    }
+    entries.set(name, { name, path: file.path });
+    own.push({ name, path: file.path });
+  }
+  files.set(file.path, own);
+  return { reg: { entries, files }, collisions };
+}
+
+/**
+ * A2 (SYNTHSPEC §5 trap 1): a gate, not a lint nit — refuse a generated module
+ * that injects a compiler/linter suppression pragma. Returns the offending
+ * token, or null. Enforced by `validateSynthesisModule`.
+ */
+export function suppressionPragmaHit(module: string): string | null {
+  const m = /@ts-nocheck|@ts-ignore|@ts-expect-error|eslint-disable(?:-next-line|-line)?/.exec(String(module ?? ""));
+  return m === null ? null : m[0];
+}
+
+// ---------------------------------------------------------------------------
+// A12 (SYNTHSPEC F5/P5a) — the generated-chunk module contract: a planned chunk
+// path is a `.ts` file (`genericTreePath`), where raw JSX is a syntax error
+// (TS1005) even with `"jsx":"react-jsx"` (that applies to `.tsx` only). The
+// detector refuses a `.ts` module carrying JSX with one bounded repair. It
+// never strips `<…>` tags (data loss).
+// ---------------------------------------------------------------------------
+
+/**
+ * Line numbers carrying raw JSX in a module (1-based). Conservative lexical
+ * detection on literal/comment-masked lines: a closing tag (`</Tag>`), a
+ * self-closing tag (`<Tag … />`), or an opening tag carrying at least one
+ * attribute (`<Tag attr=…`) or a text child. TypeScript generics
+ * (`Array<Foo>`) and comparisons (`a < b`) do not carry `</`, `/>`, or an
+ * attribute, so they never trip. Pure + deterministic.
+ */
+export function jsxHits(module: string): number[] {
+  const out: number[] = [];
+  const lines = String(module ?? "").split("\n");
+  const state = { block: false, template: false };
+  const JSX_OPEN_ATTR = /<[A-Za-z][\w.]*(?:\s+[A-Za-z_][\w.:-]*(?:\s*=\s*(?:\{[^}]*\}|"[^"]*"|'[^']*'))?)+/;
+  const JSX_SELF_CLOSE = /<[A-Za-z][\w.]*(?:\s[^<>]*)?\/>/;
+  const JSX_CLOSE = /<\/[A-Za-z][\w.]*\s*>/;
+  const JSX_FRAGMENT = /<>\s*[^<>]|<[^<>]*>\s*<\/>/;
+  for (let i = 0; i < lines.length; i++) {
+    const code = maskCodeLine(lines[i] ?? "", state);
+    if (!code.trim()) continue;
+    if (
+      JSX_CLOSE.test(code) ||
+      JSX_SELF_CLOSE.test(code) ||
+      JSX_OPEN_ATTR.test(code) ||
+      JSX_FRAGMENT.test(code)
+    ) {
+      out.push(i + 1);
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// BF-5 (SYNTHSPEC A5) — MONEY SEMANTICS.
+//
+// The measured defect: `computeCartTotalPence` documented "cart total in integer
+// pence" but its body summed each line's `quantity` (never `pricePence`) and
+// returned 4 for 3×£2.50 + 1×£4.00 — a real product bug every deterministic
+// validator accepted, because none measured arithmetic MEANING. The guard is
+// lexical + name-scoped: a money-named export whose only accumulated operand is
+// a quantity field (no price/unit-cost operand and no multiplication of the two)
+// is refused with ONE bounded repair. It never rewrites the body.
+// ---------------------------------------------------------------------------
+
+/** A money-named export whose accumulation ignores price. */
+export type MoneySemanticsHit = { name: string; line: number; operand: string };
+
+/** Unambiguous money tokens (a bare `total` is deliberately NOT enough — a
+ *  `computeTotalCount` must not be flagged). */
+const MONEY_NAME_HINT = /(pence|price|cost|amount|currency|revenue|subtotal|grandtotal|carttotal|ordertotal|billtotal|invoicetotal|paymenttotal|salestotal|totaldue|amountdue)/i;
+/** An operand that makes a sum money-shaped (price/unit cost/rate/currency). */
+const MONEY_PRICE_OPERAND = /(price|unitcost|unitprice|cost|rate|amount|pence|gbp|usd|eur|currency|fee|value)/i;
+/** A pure count operand. */
+const MONEY_QTY_OPERAND = /(qty|quantity|count|units?|howmany|numitems|itemcount)/i;
+
+/**
+ * Money-semantics violations in a module (masked source, 1-based lines): for
+ * every top-level function whose NAME names money, flag an accumulation
+ * (`acc = acc + rhs` / `acc += rhs`) whose right-hand operand is a quantity
+ * field and carries NO price operand and NO `*`/`Math.round` multiplication.
+ * Deterministic; pure; never throws. Enforced by `validateSynthesisModule`.
+ */
+export function moneySemanticsHits(module: string): MoneySemanticsHit[] {
+  const src = typeof module === "string" ? module : "";
+  if (!src.trim()) return [];
+  const masked = maskLiteralsAndComments(src);
+  const hits: MoneySemanticsHit[] = [];
+  const seen = new Set<string>();
+  const fnRe = /^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)[^{]*\{/gm;
+  for (const decl of masked.matchAll(fnRe)) {
+    const name = decl[1]!;
+    if (!MONEY_NAME_HINT.test(name) || seen.has(name)) continue;
+    const braceStart = decl.index! + decl[0].length - 1;
+    const bodyEnd = matchingBraceEnd(masked, braceStart);
+    if (bodyEnd < 0) continue;
+    const body = masked.slice(braceStart + 1, bodyEnd);
+    const accRe = /([A-Za-z_$][\w$]*)\s*(?:\+=\s*([^;\n}]+)|=\s*\1\s*\+\s*([^;\n}]+))/g;
+    for (const acc of body.matchAll(accRe)) {
+      const rhs = (acc[2] ?? acc[3] ?? "").trim();
+      if (!rhs) continue;
+      if (MONEY_PRICE_OPERAND.test(rhs)) continue; // price/unit cost present — money-shaped
+      if (/\*/.test(rhs)) continue; // a product (qty × price, literal or field) — money-shaped
+      if (!MONEY_QTY_OPERAND.test(rhs)) continue; // not a bare quantity sum — not this defect
+      // Masking preserves length, so the masked index aligns with the raw
+      // source — count the line off the RAW bytes (block-comment newlines are
+      // spaces in the mask and would undercount).
+      const line = src.slice(0, braceStart + 1 + (acc.index ?? 0)).split("\n").length;
+      hits.push({ name, line, operand: rhs.replace(/\s+/g, " ").slice(0, 80) });
+      seen.add(name);
+      break;
+    }
+  }
+  return hits;
+}
+
+/** Index of the `}` matching the `{` at `openIndex`, or -1. Masked source. */
+function matchingBraceEnd(masked: string, openIndex: number): number {
+  let depth = 0;
+  for (let i = openIndex; i < masked.length; i++) {
+    const ch = masked[i];
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+// ---------------------------------------------------------------------------
+// A3 (SYNTHSPEC P3) — DETERMINISTIC TREE NORMALIZER.
+//
+// A pure post-assembly pass over the raw accepted modules (and the materialized
+// files). It only reorders PROVABLY-PURE top-level initializers, deletes
+// byte-identical duplicate declarations, merges/dedupes imports, and dedupes
+// barrel specifiers. It never rewrites a function body, never drops a name
+// another file needs, and never suppresses a type error.
+// ---------------------------------------------------------------------------
+
+export type NormalizeChange =
+  | { kind: "hoist"; file: string; name: string; fromLine: number; toLine: number }
+  | { kind: "drop-duplicate-decl"; file: string; name: string; droppedLines: number[] }
+  | { kind: "dedupe-import"; file: string; specifier: string; removed: string[] }
+  | { kind: "dedupe-barrel"; file: string; specifier: string };
+
+/** Provably-pure initializer forms whose declaration may be hoisted (never side-effecting). */
+const PURE_INITIALIZER =
+  /^(?:undefined|null|true|false|-?\d+(?:\.\d+)?|"[^"]*"|'[^']*'|\[\s*\]|\{\s*\}|Object\.freeze\(\s*\{\s*\}\s*\))\s*;?$/;
+
+const TOP_LEVEL_DECL =
+  /^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=]+)?=\s*([\s\S]*)$/;
+
+const NAMED_IMPORT = /^import\s*\{([^}]*)\}\s*from\s*(["'])([^"']+)\2\s*;?\s*$/;
+const NAMESPACE_IMPORT = /^import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s*(["'])([^"']+)\2\s*;?\s*$/;
+const STAR_EXPORT = /^export\s+\*\s+from\s*(["'])([^"']+)\1\s*;?\s*$/;
+
+/** Identifier references on one masked line (excluding property/member accesses' right side). */
+function referencedIdents(maskedLine: string): string[] {
+  const out: string[] = [];
+  for (const m of maskedLine.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)/g)) out.push(m[1]!);
+  return out;
+}
+
+/**
+ * Normalize one tree file's source. Returns the new source plus the changes
+ * applied and the unresolved defects (a duplicate whose two bodies differ — the
+ * normalizer refuses to guess which is correct).
+ */
+function normalizeOneFile(
+  path: string,
+  source: string,
+  changes: NormalizeChange[],
+  unresolved: string[],
+): string {
+  let lines = String(source ?? "").split("\n");
+
+  // 1. Import merge/dedup: union same-specifier named imports, drop names the
+  //    module's own body redeclares, drop exact-duplicate namespace imports.
+  {
+    const namedIdx: number[] = [];
+    const specNames = new Map<string, Set<string>>();
+    const nsSeen = new Set<string>();
+    const drop = new Set<number>();
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      const named = NAMED_IMPORT.exec(line);
+      if (named !== null) {
+        namedIdx.push(i);
+        const set = specNames.get(named[3]!) ?? new Set<string>();
+        for (const part of named[1]!.split(",")) {
+          const n = part.trim().replace(/\s+as\s+[\w$]+$/, "").trim();
+          if (n) set.add(n);
+        }
+        specNames.set(named[3]!, set);
+        continue;
+      }
+      const ns = NAMESPACE_IMPORT.exec(line);
+      if (ns !== null) {
+        const key = `${ns[1]}|${ns[3]}`;
+        if (nsSeen.has(key)) drop.add(i);
+        else nsSeen.add(key);
+      }
+    }
+    if (namedIdx.length > 0) {
+      const bound = localBindingLines(lines.filter((_, i) => !namedIdx.includes(i)).join("\n"));
+      for (const [spec, names] of specNames) {
+        const kept = [...names].filter((n) => !bound.has(n)).sort();
+        const at = namedIdx.filter((i) => NAMED_IMPORT.exec(lines[i]!)![3] === spec);
+        const firstIdx = at[0]!;
+        const merged = `import { ${kept.join(", ")} } from ${JSON.stringify(spec)};`;
+        // Record only a REAL dedupe/merge (duplicate lines or a dropped binding);
+        // a canonical name re-order alone is silent.
+        if (at.length > 1 || kept.length < names.size) {
+          changes.push({ kind: "dedupe-import", file: path, specifier: spec, removed: [...names].filter((n) => !kept.includes(n)) });
+        }
+        lines[firstIdx] = merged;
+        for (let k = 1; k < at.length; k++) drop.add(at[k]!);
+      }
+    }
+    if (drop.size > 0) lines = lines.filter((_, i) => !drop.has(i));
+  }
+
+  // 2. Hoist provably-pure declarations above their first top-level reader (TDZ).
+  for (let pass = 0; pass < 8; pass++) {
+    const declLine = new Map<string, number>();
+    const declInit = new Map<string, string>();
+    for (let i = 0; i < lines.length; i++) {
+      const m = TOP_LEVEL_DECL.exec(lines[i]!);
+      if (m === null) continue;
+      declLine.set(m[1]!, i);
+      declInit.set(m[1]!, m[2]!.trim());
+    }
+    const moves: { name: string; from: number; to: number }[] = [];
+    for (const [name, at] of declLine) {
+      const init = declInit.get(name) ?? "";
+      const initReads = referencedIdents(maskLiteralsAndComments(init));
+      for (const [other, otherAt] of declLine) {
+        if (other === name || otherAt <= at) continue;
+        // Only a later declaration whose own initializer is provably pure may
+        // be hoisted above this reader (never reorder side-effecting code).
+        if (!PURE_INITIALIZER.test(declInit.get(other) ?? "")) continue;
+        if (!initReads.includes(other)) continue;
+        moves.push({ name: other, from: otherAt, to: at });
+        break;
+      }
+    }
+    if (moves.length === 0) break;
+    const moved = new Set(moves.map((m) => m.from));
+    const pendingBefore = new Map<number, string[]>();
+    for (const mv of moves) {
+      const arr = pendingBefore.get(mv.to) ?? [];
+      arr.push(lines[mv.from]!);
+      pendingBefore.set(mv.to, arr);
+      changes.push({ kind: "hoist", file: path, name: mv.name, fromLine: mv.from + 1, toLine: mv.to + 1 });
+    }
+    const next: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const pre = pendingBefore.get(i);
+      if (pre !== undefined) next.push(...pre);
+      if (moved.has(i)) continue;
+      next.push(lines[i]!);
+    }
+    lines = next;
+  }
+
+  // 3. Drop byte-identical duplicate declarations (TS2393). `localBindingLines`
+  //    reports every top-level declaration line (functions/classes/types too);
+  //    identical declaration LINES are safe to dedupe. A differing redeclaration
+  //    is surfaced in `unresolved` — never guess which body is right.
+  {
+    const declLines = localBindingLines(lines.join("\n"));
+    const drop = new Set<number>();
+    for (const [name, at] of declLines) {
+      if (at.length < 2) continue;
+      const texts = at.map((ln) => lines[ln - 1]!.trim());
+      if (texts.every((t) => t === texts[0])) {
+        for (const ln of at.slice(1)) drop.add(ln - 1);
+        changes.push({ kind: "drop-duplicate-decl", file: path, name, droppedLines: at.slice(1) });
+      } else {
+        for (const ln of at.slice(1)) unresolved.push(`${path}:${name}@${ln}`);
+      }
+    }
+    if (drop.size > 0) lines = lines.filter((_, i) => !drop.has(i));
+  }
+
+  // 4. Barrel dedupe: one `export *` per specifier.
+  {
+    const seen = new Set<string>();
+    const drop = new Set<number>();
+    for (let i = 0; i < lines.length; i++) {
+      const m = STAR_EXPORT.exec(lines[i]!);
+      if (m === null) continue;
+      if (seen.has(m[2]!)) {
+        drop.add(i);
+        changes.push({ kind: "dedupe-barrel", file: path, specifier: m[2]! });
+      } else seen.add(m[2]!);
+    }
+    if (drop.size > 0) lines = lines.filter((_, i) => !drop.has(i));
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * A3: normalize a tree's files (order preserved). `changes` names every rewrite;
+ * `unresolved` carries a duplicate declaration the normalizer could not safely
+ * resolve (the caller surfaces it and the typecheck gate stays fail-closed).
+ */
+export function normalizeTreeFiles(
+  files: readonly { path: string; source: string; exports?: readonly string[] }[] | null | undefined,
+): {
+  files: { path: string; source: string; exports: string[] }[];
+  changes: NormalizeChange[];
+  unresolved: string[];
+} {
+  const changes: NormalizeChange[] = [];
+  const unresolved: string[] = [];
+  const out: { path: string; source: string; exports: string[] }[] = [];
+  for (const f of files ?? []) {
+    if (!f || typeof f.path !== "string" || typeof f.source !== "string") continue;
+    const source = normalizeOneFile(f.path, f.source, changes, unresolved);
+    out.push({ path: f.path, source, exports: (Array.isArray(f.exports) ? [...f.exports] : []) });
+  }
+  return { files: out, changes, unresolved };
 }
 
 /**
@@ -3073,10 +3814,14 @@ export function materializeImportableTree(
   const rewritten: ImportableTreeFile[] = [];
   for (let i = 0; i < raw.length; i++) {
     const f = raw[i]!;
+    // A2/A3: never import a name THIS file itself binds — that is the
+    // import/local conflict (TS2440) / load-time `Identifier already declared`.
+    // The later file's own declaration is authoritative.
+    const selfBound = localBindingLines(f.source);
     const importLines: string[] = [];
     for (let j = 0; j < i; j++) {
       const prior = rewritten[j]!;
-      const names = prior.exports.filter(isIdent);
+      const names = prior.exports.filter((n) => isIdent(n) && !selfBound.has(n));
       if (names.length === 0) continue;
       importLines.push(`import { ${names.join(", ")} } from ${JSON.stringify(relTsImport(f.path, prior.path))};`);
     }
@@ -3090,9 +3835,22 @@ export function materializeImportableTree(
     const source = [...importLines, body, exportLine].filter((s) => s.length > 0).join("\n") + "\n";
     rewritten.push({ path: f.path, source, exports: exportNames, reqTrace: { ...f.reqTrace } });
   }
-  const barrelLines = rewritten.map(
-    (f) => `export * from ${JSON.stringify(relTsImport(TREE_ENTRY_PATH, f.path))};`,
-  );
+  // A2 (SYNTHSPEC P2): a NAMED barrel, first-occurrence-wins. A name two
+  // providers both export is re-exported once (its canonical first owner), so a
+  // duplicate export can never become TS2308. When no name collides the emitted
+  // bytes are exactly the legacy `export *` lines (byte-parity). A file with no
+  // un-owned names gets no re-export line (its provider file still exists).
+  const owned = new Set<string>();
+  const barrelLines: string[] = [];
+  for (const f of rewritten) {
+    const names = f.exports.filter(isIdent);
+    const unowned = names.filter((n) => !owned.has(n));
+    if (unowned.length === 0) continue;
+    const spec = JSON.stringify(relTsImport(TREE_ENTRY_PATH, f.path));
+    if (unowned.length === names.length) barrelLines.push(`export * from ${spec};`);
+    else barrelLines.push(`export { ${unowned.join(", ")} } from ${spec};`);
+    for (const n of unowned) owned.add(n);
+  }
   const entrySource = barrelLines.join("\n") + "\n";
   const barrel: ImportableTreeFile = {
     path: TREE_ENTRY_PATH,
@@ -3144,6 +3902,10 @@ export function parseSynthesisEnvelope(text: unknown, sink?: EnvelopeReadSink): 
     return null;
   }
   const rec = obj as Record<string, unknown>;
+  // W61 lane D (D1): a legal `{"refusal":…}` reply is NOT an unreadable reply —
+  // return null WITHOUT the read-failure sink; the caller checks
+  // parseSynthesisRefusal() and records the coded refusal, skipping repair.
+  if (typeof rec.refusal === "string" && rec.refusal.trim()) return null;
   const module = typeof rec.module === "string" ? rec.module.trim() : "";
   if (!module) {
     sink?.(readFailure("parseSynthesisEnvelope", text, "unexpected-shape", "the payload has no non-empty `module` string"));
@@ -3159,6 +3921,43 @@ export function parseSynthesisEnvelope(text: unknown, sink?: EnvelopeReadSink): 
     }
   }
   return { module, exports: exportsList, reqTrace };
+}
+
+/**
+ * W61 lane D (D1 / R2 §2.2/§2.3): the LEGAL refusal envelope a synthesizer or
+ * repair agent may return instead of a module — `{"refusal":"…","reason":"…"}`.
+ * `reason` is optional; a non-empty `refusal` string is required. Pure; tolerant
+ * of ```json fences; never throws; null for anything else.
+ */
+export type SynthesisRefusal = { refusal: string; reason: string };
+
+export function parseSynthesisRefusal(text: unknown): SynthesisRefusal | null {
+  if (typeof text !== "string") return null;
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+  if (cleaned.length === 0) return null;
+  let obj: unknown;
+  try {
+    obj = JSON.parse(cleaned);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+  const rec = obj as Record<string, unknown>;
+  const refusal = typeof rec.refusal === "string" ? rec.refusal.replace(/\s+/g, " ").trim() : "";
+  if (!refusal) return null;
+  const reason = typeof rec.reason === "string" ? rec.reason.replace(/\s+/g, " ").trim() : "";
+  return { refusal, reason };
+}
+
+/** Bounded, honest detail for a legal refusal (used by the coded
+ *  `p6.synthesis.refused` record and the returned error string). Pure. */
+export function synthesisRefusalDetail(refusal: SynthesisRefusal): string {
+  const reason = refusal.reason ? ` (reason: ${refusal.reason})` : "";
+  return `model returned a legal refusal: ${refusal.refusal}${reason}`;
 }
 
 /**
@@ -3292,6 +4091,16 @@ export function validateSynthesisModule(
   if (/```/.test(module)) {
     return { ok: false, code: "RT_E_VALIDATION", error: "module contains markdown fences" };
   }
+  // A2 (SYNTHSPEC §5 trap 1): a suppression pragma is a gate, not a lint nit —
+  // it would defeat the compiler/pre-seal typecheck the whole pipeline relies on.
+  const pragma = suppressionPragmaHit(module);
+  if (pragma !== null) {
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error: `generated module injects a compiler/linter suppression pragma (${pragma}) — remove it and fix the underlying defect`,
+    };
+  }
   const masked = maskLiteralsAndComments(module);
   const hit = forbiddenPrimitiveHit(masked);
   if (hit.hard !== null || hit.soft !== null) {
@@ -3325,6 +4134,32 @@ export function validateSynthesisModule(
       ok: false,
       code: "RT_E_VALIDATION",
       error: `prose-in-code in generated module (${prose.length} prose line${prose.length === 1 ? "" : "s"}; first at line ${first.line}: ${JSON.stringify(first.text)})`,
+    };
+  }
+  // A12 (SYNTHSPEC F5): a planned chunk path is a `.ts` module (the JSX transform
+  // applies to `.tsx` only), so raw JSX is a syntax error there. Checked AFTER
+  // the import/forbidden/prose gates so the documented refusal priority is
+  // unchanged; never regex-strip the tags (data loss).
+  const jsx = jsxHits(module);
+  if (jsx.length > 0) {
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error: `JSX in a .ts module (raw element at line${jsx.length === 1 ? "" : "s"} ${jsx.slice(0, 6).join(", ")}) — the generated chunk contract is JSX-free plain-TS logic; return the value as a string/data and let the UI shell render it`,
+    };
+  }
+  // BF-5 (SYNTHSPEC A5): a money-named export that sums a quantity field is the
+  // measured `computeCartTotalPence` defect. Checked after the load-time gates
+  // (suppression/forbidden/nondeterminism/prose/JSX) so their refusal priority
+  // is unchanged; one bounded repair upstream. Deterministic, name-scoped.
+  const money = moneySemanticsHits(module);
+  if (money.length > 0) {
+    const first = money[0]!;
+    const extra = money.length > 1 ? ` (+${money.length - 1} more)` : "";
+    return {
+      ok: false,
+      code: "RT_E_VALIDATION",
+      error: `money-semantics: "${first.name}" at line ${first.line} accumulates only a quantity (\`${first.operand}\`) — a money amount must be price × quantity in integer minor units${extra}`,
     };
   }
   const claimed = [...new Set(claimedExports)];
@@ -3658,6 +4493,26 @@ export const P6_TYPECHECK_REPAIR_MAX_CHUNKS = 3;
  * separators, optional leading whitespace). Deduped, declaration order kept,
  * capped. Pure + deterministic.
  */
+/**
+ * A6 (SYNTHSPEC P4a): classify a compiler-named path as a synthesized chunk, the
+ * tree barrel (`src/generated.ts`), or neither. B's monotone journey consumes
+ * this to route offenders without re-deriving the path families.
+ */
+export function offenderClass(path: string): "chunk" | "barrel" | "none" {
+  const p = String(path ?? "").replace(/\\/g, "/");
+  if (p === TREE_ENTRY_PATH) return "barrel";
+  if (p.startsWith("src/generated/") || p.startsWith("src/jobs/") || p.startsWith("src/domain/") || p.startsWith("src/state/") || p.startsWith("src/api/")) {
+    return "chunk";
+  }
+  return "none";
+}
+
+/** Count of compiler diagnostics (`TSxxxx`) in a compiler tail. Deterministic. */
+export function typecheckErrorCount(detail: string | undefined): number {
+  const m = String(detail ?? "").match(/TS\d{4}/g);
+  return m === null ? 0 : m.length;
+}
+
 export function typecheckOffenderPaths(detail: string | undefined): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -3795,6 +4650,7 @@ function materializedPathForAccepted(accepted: readonly { path: string }[], i: n
 function typecheckOffenderIndices(
   verdict: P6TreeTypecheckVerdict,
   accepted: readonly { path: string }[],
+  registry?: FrozenExportRegistry,
 ): number[] {
   const paths = new Set<string>((verdict.files ?? []).map((p) => String(p).replace(/\\/g, "/")));
   for (const p of typecheckOffenderPaths(verdict.detail)) paths.add(p);
@@ -3802,6 +4658,24 @@ function typecheckOffenderIndices(
   for (let i = 0; i < accepted.length; i++) {
     if (paths.has(materializedPathForAccepted(accepted, i))) out.push(i);
     if (out.length >= P6_TYPECHECK_REPAIR_MAX_CHUNKS) break;
+  }
+  // A6 (SYNTHSPEC P4a): a barrel/scaffold offender (src/generated.ts) maps to no
+  // accepted chunk directly. Resolve the colliding symbol through the frozen
+  // registry to the provider file(s) so the repair targets a real chunk instead
+  // of refusing with "no synthesized chunk maps".
+  if (out.length === 0 && registry !== undefined) {
+    const detail = String(verdict.detail ?? "");
+    const barrelish = paths.has(TREE_ENTRY_PATH) || /TS2308|already exported/.test(detail);
+    if (barrelish) {
+      const providers = new Set<string>();
+      for (const [name, entry] of registry.entries) {
+        if (name.length >= 3 && detail.includes(name)) providers.add(entry.path);
+      }
+      for (let i = 0; i < accepted.length; i++) {
+        if (providers.has(materializedPathForAccepted(accepted, i))) out.push(i);
+        if (out.length >= P6_TYPECHECK_REPAIR_MAX_CHUNKS) break;
+      }
+    }
   }
   return out;
 }
@@ -4437,6 +5311,11 @@ async function synthesizeSingleModule(
     timeoutMs: P6_SYNTH_TIMEOUT_MS,
     system: p6SynthesisSystemPrompt(),
   };
+  // W61 lane D (D1): repair turns run under the DEDICATED repair persona — the
+  // delta-or-rewrite contract belongs to the repair prompt, not the generator's.
+  // PR-19 (A7): repair turns consume prompt-engine's PURE repair contract
+  // (PR-18) — the delta/full/refusal reply shapes live there, not here.
+  const repairOpts: DeepSeekCompleteOptions = { ...opts, system: repairSystemPrompt() };
   // fixes/153 (P1): per-attempt p6.synthesis.attempt journal for this one
   // chunk — every model call below (synthWithBackoff retries + each bounded
   // repair re-prompt) reports chunk 1/1 + a sequential attempt number.
@@ -4468,7 +5347,14 @@ async function synthesizeSingleModule(
   }
   let envelope = parseSynthesisEnvelope(res.text, readSink);
   if (envelope === null) {
-    const repair = await completeCall(p6SynthesisRepairPrompt(treeFailure), opts);
+    // W61 lane D (D1): a LEGAL refusal is not an unparseable reply — record the
+    // coded refusal and skip the repair call (a legitimate refusal costs no
+    // repair and can never become a pass). Checked before the repair dispatch.
+    const refusal = parseSynthesisRefusal(res.text);
+    if (refusal !== null) {
+      return refuse(withAttemptLogs(project, attemptLogs), "RT_E_LLM_REJECTED", synthesisRefusalDetail(refusal));
+    }
+    const repair = await completeCall(p6SynthesisRepairPrompt(treeFailure), repairOpts);
     // FM-03 (W37 Y1): repair-re-prompt spend is metered against the session
     // budget; a stop is served as the coded refusal, never as model-failure prose.
     const repairStop = accountRepairUsage(repair);
@@ -4556,6 +5442,9 @@ async function synthesizeSingleModule(
     // is refused. A HARD forbidden primitive still refuses with no repair.
     const nondet = nondeterministicPrimitiveHit(masked);
     const prose = proseLineHits(envelope.module);
+    // BF-5 (SYNTHSPEC A5): the money-semantics class — a money-named export that
+    // sums a quantity field instead of price × quantity. ONE bounded repair.
+    const money = moneySemanticsHits(envelope.module);
     // W46/332-1 (P1): the un-awaited-async-value class for the single-module
     // path (its own `async function` used as a value without await).
     const asyncUses = unawaitedAsyncValueUses(envelope.module, asyncNamesInScope(envelope.module));
@@ -4593,7 +5482,7 @@ async function synthesizeSingleModule(
           lines: defect.lines,
           signatureNames,
           completeCall,
-          opts,
+          opts: repairOpts,
           treeFailure,
           path: patch.path,
           log: patch.log,
@@ -4605,7 +5494,10 @@ async function synthesizeSingleModule(
         }
       }
     }
-    if (!patchLanded && (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || asyncUses.length > 0)) {
+    if (
+      !patchLanded &&
+      (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || asyncUses.length > 0 || money.length > 0)
+    ) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
         : repairableForbidden
@@ -4616,8 +5508,10 @@ async function synthesizeSingleModule(
               ? p6SynthesisNondeterministicRepairPrompt(nondet, treeFailure)
               : prose.length > 0
                 ? p6SynthesisProseRepairPrompt(prose, treeFailure)
-                : p6SynthesisAsyncAwaitRepairPrompt(asyncUses, treeFailure);
-      const repair = await completeCall(repairPrompt, opts);
+                : asyncUses.length > 0
+                  ? p6SynthesisAsyncAwaitRepairPrompt(asyncUses, treeFailure)
+                  : p6SynthesisMoneyRepairPrompt(money, treeFailure);
+      const repair = await completeCall(repairPrompt, repairOpts);
       // FM-03 (W37 Y1): metered like every bounded repair call.
       const repairStop = accountRepairUsage(repair);
       if (repairStop) {
@@ -4637,7 +5531,7 @@ async function synthesizeSingleModule(
   if (!fit.ok) {
     // fixes/121: the brief-fit class gets ONE bounded repair re-prompt too —
     // the module may have ignored the brief's vocabulary on the first pass.
-    const repair = await completeCall(p6SynthesisBriefFitRepairPrompt(fit.missing, treeFailure), opts);
+    const repair = await completeCall(p6SynthesisBriefFitRepairPrompt(fit.missing, treeFailure), repairOpts);
     // FM-03 (W37 Y1): metered like every bounded repair call.
     const repairStop = accountRepairUsage(repair);
     if (repairStop) {
@@ -4859,7 +5753,24 @@ async function synthesizeChunkedTree(
   // zero job nodes ⇒ treeChunkPlan's legacy branch ⇒ identical paths, identical
   // per-chunk prompts (pre-216k byte parity). `plan.length` is the honest chunk
   // total: every plan row is exactly one synthesis call.
-  const plan = orderTreeChunks(treeChunkPlan(project, treeSpec.typeSignatures));
+  //
+  // A1 (SYNTHSPEC P1): merge the BRIEF-DRIVEN minimum file set — one required
+  // module per declared capability plus a brief-noun floor — so the plan can no
+  // longer collapse to 1–2 chunks. `mergeMinimumPlan` is ADD-ONLY; a plan that
+  // already covers every capability keeps its exact rows.
+  // A9/PR-15: size each chunk by the rendered signature text — `clamp(floor(
+  // budget / avgSigChars), 4, 12)` — so a signature-dense spec does not overload
+  // one call. The default budget reproduces the legacy 8 for typical corpus
+  // signatures (byte-parity for the recorded fixtures).
+  const chunkSize = adaptiveChunkSize(treeSpec.typeSignatures);
+  const basePlan = treeChunkPlan(project, treeSpec.typeSignatures, chunkSize);
+  const requiredModules = deriveRequiredModules(project, treeSpec);
+  const minTreeFiles = minimumTreeFileCount(project, treeSpec);
+  const mergedPlan = mergeMinimumPlan(basePlan, requiredModules, { minimum: minTreeFiles, project });
+  const plan = orderTreeChunks(mergedPlan);
+  // A2 (SYNTHSPEC P2): the frozen cross-chunk export registry — one immutable
+  // inventory the validator, the prompt and the materializer all read.
+  let registry: FrozenExportRegistry = { entries: new Map(), files: new Map() };
   // fixes/153 (P1): per-attempt p6.synthesis.attempt journal — the observer
   // closure carries the chunk context so every model call of chunk i reports
   // chunk (i+1)/total + a sequential per-chunk attempt number.
@@ -4879,7 +5790,7 @@ async function synthesizeChunkedTree(
   // instead of vanishing with the scaffold's in-process warnings array. Nothing is
   // appended when every declared job is planned (byte-identity for the pipelines).
   {
-    const census = treeChunkPlanCensus(project, treeSpec.typeSignatures);
+    const census = treeChunkPlanCensus(project, treeSpec.typeSignatures, chunkSize);
     if (census.unbound.length > 0) {
       // W46/332-1 (P2): the full partition rides the row, so the coverage
       // shortfall is legible (and deterministic) instead of a bare name list.
@@ -4887,6 +5798,18 @@ async function synthesizeChunkedTree(
       if (!attemptLogs.some((l) => l.event === "p6.tree.shortfall" && l.detail === detail)) {
         attemptLogs.push({ ts: Date.now(), phase: 6, level: "warn", event: "p6.tree.shortfall", detail });
       }
+    }
+  }
+
+  // A1: legible record of what the brief-driven floor ADDED to the plan.
+  if (plan.length > basePlan.length) {
+    const added = requiredModules.filter((m) => !basePlan.some((c) => c.path === m.path));
+    const detail = `brief-driven minimum plan: +${added.length} module(s) over the model plan (minimum ${minTreeFiles}); ${added
+      .slice(0, 12)
+      .map((m) => `${m.source}:${m.label}→${m.path}`)
+      .join(", ")}`;
+    if (!attemptLogs.some((l) => l.event === "p6.tree.plan.floor" && l.detail === detail)) {
+      attemptLogs.push({ ts: Date.now(), phase: 6, level: "info", event: "p6.tree.plan.floor", detail });
     }
   }
 
@@ -4959,16 +5882,201 @@ async function synthesizeChunkedTree(
     // planned chunk — the plan already de-duped every path, job siblings
     // included via jobSiblingPath).
     const path = chunk.path;
-    accepted.push({ path, source: synth.envelope.module, exports: [...synth.envelope.exports], reqTrace: { ...synth.envelope.reqTrace } });
+    // A2: freeze the chunk's MATERIALIZED surface (claim ∪ residual CJS) so the
+    // next chunk's validator and prompt see names the materializer will import
+    // — not just the envelope claim. The frozen union is what `prior.exports`
+    // carries below, closing the claim-vs-materialized gap.
+    const frozenNames = materializedExportNames(synth.envelope.module, synth.envelope.exports);
+    const frozen = freezeFileExports(registry, { path, source: synth.envelope.module, exports: synth.envelope.exports });
+    registry = frozen.reg;
+    if (frozen.collisions.length > 0) {
+      pushAttemptLog(attemptLogs, {
+        ts: Date.now(),
+        phase: 6 as PhaseId,
+        level: "warn",
+        event: "p6.tree.registry.collision",
+        detail: `chunk ${i + 1}/${plan.length}: name(s) already frozen by an earlier file: ${frozen.collisions
+          .map((c) => `${c.name}←${c.priorPath}`)
+          .join(", ")}`,
+      });
+    }
+    accepted.push({ path, source: synth.envelope.module, exports: frozenNames, reqTrace: { ...synth.envelope.reqTrace } });
     if (servedModel === null) servedModel = synth.servedModel;
     prior.push({
       path,
-      exports: [...synth.envelope.exports],
+      // A2: the frozen materialized surface — the same inventory the
+      // materializer imports (registryNamesFor), never the raw claim alone.
+      exports: registryNamesFor(registry, path),
       reqTrace: { ...synth.envelope.reqTrace },
       // W46/332-1 (P1): a later chunk must `await` this file's async exports —
       // the validator and prompt both read this mark.
       asyncExports: asyncExportNames(synth.envelope.module, synth.envelope.exports),
     });
+
+    // A6 (SYNTHSPEC P4a / PR-13): PER-CHUNK FAIL-FAST. Before paying for chunk
+    // i+1, materialize the accepted prefix and run the tree's OWN declared
+    // typecheck. An earlier file can never be fixed by a LATER chunk (the
+    // materializer only imports earlier exports), so a red prefix is either
+    // repaired now (one bounded re-synthesis of the offender with the compiler
+    // tail as context, monotonic) or refused — chunk i+1 is never synthesized
+    // on a tree that already cannot compile. Only chunk-attributable offenders
+    // act (a scaffold-only error with no mapped chunk is left to the final
+    // whole-tree gate, so this is never a false stop).
+    if (typecheck !== null && plan.length > 1 && i < plan.length - 1) {
+      const partialVerdict = await runTreeSelfTypecheck(project, materializeImportableTree(accepted), typecheck);
+      if (partialVerdict.run === "fail") {
+        const offenders = typecheckOffenderIndices(partialVerdict, accepted, registry);
+        if (offenders.length > 0) {
+          pushAttemptLog(attemptLogs, {
+            ts: Date.now(),
+            phase: 6 as PhaseId,
+            level: "warn",
+            event: "p6.synthesis.failfast",
+            detail: `chunk ${i + 1}/${plan.length}: the accepted prefix fails the tree's OWN declared typecheck before chunk ${i + 2} is synthesized — ${String(partialVerdict.detail ?? "").replace(/\s+/g, " ").slice(0, 400)}`,
+          });
+          const oi = offenders[offenders.length - 1]!;
+          const oChunk = plan[oi]!;
+          const priorForO = accepted.slice(0, oi).map((f) => ({
+            path: f.path,
+            exports: [...f.exports],
+            reqTrace: { ...f.reqTrace },
+            asyncExports: asyncExportNames(f.source, f.exports),
+          }));
+          const context = typecheckRepairContext(partialVerdict);
+          const repairLessons = lessonLinesForBrief(
+            brief,
+            selectLessons(project.memory ?? [], 6, EXPAND_LESSON_RANK_LIMIT),
+            { limit: EXPAND_LESSON_RANK_LIMIT, proven },
+          );
+          const repairUser = withTreeFailureContext(
+            withSynthesisRefusalContext(
+              withGateRepairContext(
+                p6SynthesisChunkUserPrompt(brief, treeSpec, oChunk.signatures, priorForO, repairLessons, project.contracts),
+                gateRepair,
+              ),
+              synthesisRefusal,
+            ),
+            context,
+          );
+          const repairPatch: PatchRepairOptions | undefined = patchRepairs
+            ? { path: oChunk.path, log: (entry) => pushAttemptLog(attemptLogs, entry) }
+            : undefined;
+          const repaired = await synthesizeChunkEnvelope(
+            complete,
+            repairUser,
+            opts,
+            signatureFunctionNames(oChunk.signatures),
+            context,
+            repairPatch,
+            (attempt, res) =>
+              pushAttemptLog(
+                attemptLogs,
+                synthAttemptLogEntry({ chunkIndex: oi, chunkTotal: plan.length, attempt, timeoutMs: opts.timeoutMs ?? P6_SYNTH_TIMEOUT_MS, res }),
+              ),
+            (failure) => pushAttemptLog(attemptLogs, envelopeReadLogEntry(failure, oChunk.path)),
+            priorForO,
+          );
+          let fixed = false;
+          if (repaired.ok) {
+            const substituted = accepted.slice();
+            substituted[oi] = {
+              path: oChunk.path,
+              source: repaired.envelope.module,
+              exports: materializedExportNames(repaired.envelope.module, repaired.envelope.exports),
+              reqTrace: { ...repaired.envelope.reqTrace },
+            };
+            const probe = await runTreeSelfTypecheck(project, materializeImportableTree(substituted), typecheck);
+            const before = typecheckErrorCount(partialVerdict.detail);
+            const after = typecheckErrorCount(probe.detail);
+            if (probe.run !== "fail" || after < before) {
+              accepted[oi] = substituted[oi]!;
+              // Rebuild the frozen registry from the (now repaired) accepted set
+              // so the next chunk's prompt/validator see the real union.
+              registry = { entries: new Map(), files: new Map() };
+              for (const f of accepted) {
+                registry = freezeFileExports(registry, { path: f.path, source: f.source, exports: f.exports }).reg;
+              }
+              prior[oi] = {
+                path: oChunk.path,
+                exports: registryNamesFor(registry, oChunk.path),
+                reqTrace: { ...repaired.envelope.reqTrace },
+                asyncExports: asyncExportNames(repaired.envelope.module, repaired.envelope.exports),
+              };
+              if (servedModel === null) servedModel = repaired.servedModel;
+              fixed = true;
+            } else {
+              pushAttemptLog(attemptLogs, {
+                ts: Date.now(),
+                phase: 6 as PhaseId,
+                level: "info",
+                event: "p6.synthesis.monotonic",
+                detail: `chunk ${oi + 1}/${plan.length} (fail-fast): repair reverted — diagnostics ${before} → ${after} (not strictly fewer); the pre-repair chunk stands`,
+              });
+            }
+          }
+          if (!fixed) {
+            return partialTreeRefuse(
+              withAttemptLogs(project, attemptLogs),
+              accepted,
+              i,
+              plan.length,
+              "RT_E_VALIDATION",
+              `the accepted tree prefix fails its OWN declared \`typecheck\` after chunk ${i + 1}/${plan.length} and the bounded fail-fast repair did not converge — chunk ${i + 2} was never synthesized (${partialVerdict.detail ?? ""})`,
+              servedModel,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // A1 (SYNTHSPEC P1): the accepted-file floor. A refused chunk already returned
+  // above; this is the fail-closed backstop that never seals a tree below the
+  // brief-driven minimum.
+  if (accepted.length < minTreeFiles) {
+    return partialTreeRefuse(
+      withAttemptLogs(project, attemptLogs),
+      accepted,
+      -1,
+      plan.length,
+      "RT_E_VALIDATION",
+      `tree has ${accepted.length} file(s) but the brief demands >= ${minTreeFiles} module(s) (${requiredModules
+        .map((m) => `${m.source}:${m.label}`)
+        .slice(0, 12)
+        .join(", ")})`,
+      servedModel,
+    );
+  }
+
+  // A3 (SYNTHSPEC P3): normalize the accepted raw modules BEFORE assembly —
+  // hoist provably-pure store declarations (the `globalThisStore` TDZ), delete
+  // byte-identical duplicate declarations, merge/dedupe imports. Only pure
+  // reorders and exact deletions; anything else is surfaced and left to the
+  // fail-closed pre-seal typecheck gate.
+  {
+    const norm = normalizeTreeFiles(accepted.map((f) => ({ path: f.path, source: f.source, exports: f.exports })));
+    for (let i = 0; i < accepted.length && i < norm.files.length; i++) accepted[i]!.source = norm.files[i]!.source;
+    if (norm.changes.length > 0) {
+      pushAttemptLog(attemptLogs, {
+        ts: Date.now(),
+        phase: 6 as PhaseId,
+        level: "info",
+        event: "p6.tree.normalized",
+        detail: `${norm.changes.length} rewrite(s): ${norm.changes
+          .slice(0, 8)
+          .map((c) => `${c.kind}:${c.kind === "hoist" ? c.name : c.kind === "drop-duplicate-decl" ? c.name : c.specifier}`)
+          .join(", ")}`,
+      });
+    }
+    if (norm.unresolved.length > 0) {
+      pushAttemptLog(attemptLogs, {
+        ts: Date.now(),
+        phase: 6 as PhaseId,
+        level: "warn",
+        event: "p6.tree.normalized.unresolved",
+        detail: `unresolved duplicate declaration(s): ${norm.unresolved.slice(0, 8).join(", ")} — the pre-seal typecheck gate stays fail-closed`,
+      });
+    }
   }
 
   // All chunks accepted → assemble the entry and run the TREE-LEVEL brief-fit
@@ -4996,10 +6104,13 @@ async function synthesizeChunkedTree(
   if (typecheck !== null) {
     const first = await runTreeSelfTypecheck(project, materialized, typecheck);
     if (first.run === "fail") {
-      const offenders = typecheckOffenderIndices(first, accepted);
+      const offenders = typecheckOffenderIndices(first, accepted, registry);
       const context = typecheckRepairContext(first);
       const tc = typecheck;
       let repairedAny = false;
+      // A6: the verdict of the last ACCEPTED substitution — reused as the
+      // post-repair gate verdict so the monotonic probe is not a second run.
+      let postRepairVerdict: P6TreeTypecheckVerdict | null = null;
       // fixes/343-1: opt-in best-of-N over the compiler-named chunks. With the
       // default (1) the block below collapses to the legacy single re-synthesis.
       // With >1, an offender chunk is resampled up to `candidates` times with
@@ -5117,18 +6228,40 @@ async function synthesizeChunkedTree(
             servedModel,
           );
         }
-        accepted[i] = {
+        // A6 (SYNTHSPEC P4b · monotonic repair): accept the substituted chunk
+        // ONLY when its own pre-seal typecheck STRICTLY decreases the diagnostic
+        // count. A repair that trades one error for two (or fixes nothing) is
+        // reverted to the pre-repair chunk — never written into the partial.
+        const substituted = accepted.slice();
+        substituted[i] = {
           path: chunk.path,
           source: repaired.envelope.module,
-          exports: [...repaired.envelope.exports],
+          exports: materializedExportNames(repaired.envelope.module, repaired.envelope.exports),
           reqTrace: { ...repaired.envelope.reqTrace },
         };
-        if (servedModel === null) servedModel = repaired.servedModel;
-        repairedAny = true;
+        const probe = await runTreeSelfTypecheck(project, materializeImportableTree(substituted), tc);
+        const before = typecheckErrorCount(first.detail);
+        const after = typecheckErrorCount(probe.detail);
+        if (probe.run !== "fail" || after < before) {
+          accepted[i] = substituted[i]!;
+          postRepairVerdict = probe;
+          if (servedModel === null) servedModel = repaired.servedModel;
+          repairedAny = true;
+        } else {
+          pushAttemptLog(attemptLogs, {
+            ts: Date.now(),
+            phase: 6 as PhaseId,
+            level: "info",
+            event: "p6.synthesis.monotonic",
+            detail: `chunk ${i + 1}/${plan.length}: repair reverted — diagnostics ${before} → ${after} (not strictly fewer); the pre-repair chunk stands`,
+          });
+        }
       }
       if (repairedAny) {
         materialized = materializeImportableTree(accepted);
-        const second = await runTreeSelfTypecheck(project, materialized, typecheck);
+        // A6: the last accepted substitution already ran the gate; only run it
+        // again when no accepted probe verdict is available.
+        const second = postRepairVerdict ?? (await runTreeSelfTypecheck(project, materialized, typecheck));
         if (second.run === "fail") {
           return partialTreeRefuse(
             withAttemptLogs(project, attemptLogs),
@@ -5205,6 +6338,9 @@ async function synthesizeChunkEnvelope(
   // model call (synthWithBackoff retries + each bounded repair re-prompt); an
   // absent observer keeps this path the exact legacy no-op.
   const completeCall = attemptObservedComplete(complete, (attempt, res) => onAttempt?.(attempt, res));
+  // PR-19 (A7): repair turns run under the prompt-engine PURE repair contract
+  // (PR-18), so the system persona and the `{"patch"}` user message agree.
+  const repairOpts: DeepSeekCompleteOptions = { ...opts, system: repairSystemPrompt() };
   const res = await synthWithBackoff(completeCall, user, opts);
   if (!res.ok) {
     return {
@@ -5215,7 +6351,13 @@ async function synthesizeChunkEnvelope(
   }
   let envelope = parseSynthesisEnvelope(res.text, readSink);
   if (envelope === null) {
-    const repair = await completeCall(p6SynthesisRepairPrompt(treeFailure), opts);
+    // W61 lane D (D1): a LEGAL refusal is not an unparseable reply — surface the
+    // coded refusal and skip the repair call (no repair for a stated refusal).
+    const refusal = parseSynthesisRefusal(res.text);
+    if (refusal !== null) {
+      return { ok: false, code: "RT_E_LLM_REJECTED", error: synthesisRefusalDetail(refusal) };
+    }
+    const repair = await completeCall(p6SynthesisRepairPrompt(treeFailure), repairOpts);
     // FM-03 (W37 Y1): metered like every bounded repair call.
     const repairStop = accountRepairUsage(repair);
     if (repairStop) {
@@ -5244,6 +6386,10 @@ async function synthesizeChunkEnvelope(
     // modules that ever reach it are model-authored chunk envelopes.
     const nondet = nondeterministicPrimitiveHit(masked);
     const prose = proseLineHits(envelope.module);
+    // A12: raw JSX in a `.ts` module gets ONE bounded JSX-free rewrite re-prompt.
+    const jsx = jsxHits(envelope.module);
+    // BF-5 (SYNTHSPEC A5): the money-semantics class (one bounded repair).
+    const money = moneySemanticsHits(envelope.module);
     // T-107.1 (216r · W7-L1): the patch-first delta repair, ONLY when the
     // caller opted in and the defect is a LOCALIZED text edit (soft forbidden
     // token / non-deterministic primitive / prose). A landed delta is applied
@@ -5275,7 +6421,7 @@ async function synthesizeChunkEnvelope(
           lines: defect.lines,
           signatureNames,
           completeCall,
-          opts,
+          opts: repairOpts,
           treeFailure,
           path: patch.path,
           log: patch.log,
@@ -5289,7 +6435,7 @@ async function synthesizeChunkEnvelope(
     }
     if (
       !patchLanded &&
-      (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || dup.length > 0 || asyncUses.length > 0)
+      (unbound.length > 0 || repairableForbidden || missingSig.length > 0 || nondet !== null || prose.length > 0 || dup.length > 0 || asyncUses.length > 0 || jsx.length > 0 || money.length > 0)
     ) {
       const repairPrompt = unbound.length > 0
         ? p6SynthesisExportRepairPrompt(unbound, treeFailure)
@@ -5303,8 +6449,12 @@ async function synthesizeChunkEnvelope(
                 ? p6SynthesisProseRepairPrompt(prose, treeFailure)
                 : dup.length > 0
                   ? p6SynthesisDuplicateDeclRepairPrompt(dup, treeFailure)
-                  : p6SynthesisAsyncAwaitRepairPrompt(asyncUses, treeFailure);
-      const repair = await completeCall(repairPrompt, opts);
+                  : asyncUses.length > 0
+                    ? p6SynthesisAsyncAwaitRepairPrompt(asyncUses, treeFailure)
+                    : jsx.length > 0
+                      ? p6SynthesisJsxRepairPrompt(jsx, treeFailure)
+                      : p6SynthesisMoneyRepairPrompt(money, treeFailure);
+      const repair = await completeCall(repairPrompt, repairOpts);
       // FM-03 (W37 Y1): metered like every bounded repair call.
       const repairStop = accountRepairUsage(repair);
       if (repairStop) {
@@ -5476,6 +6626,42 @@ function treeUpgraded(
 // (driveP6Journey's converged branch, or run-eval's single-synthesis flow)
 // invokes it ONCE with the real TreeRunOutcome.
 
+/**
+ * PR-30 / BF-6 (S-side mint half): a stable FNV-1a digest over the tree's OWN
+ * bytes — per-file path + content hash, sorted — so a "tested" evidenceHash
+ * identifies the TREE it describes, not merely the generic run summary.
+ * BUILD_FORENSICS §3.8: the summary-only hash reused `761559975` across three
+ * distinct projects (flower/scheduler/stock v1), so the machine-acceptance
+ * reading could not be treated as per-tree external evidence. Each row's
+ * `hash` (toGeneratedTreeFile: fnv1a(source)) is folded; a legacy row without
+ * one falls back to hashing its `source`. A project with NO generatedTree
+ * yields "" so its minted hash stays byte-identical to the pre-BF-6 summary
+ * hash. Pure.
+ */
+export function treeBytesDigest(files: unknown): string {
+  const rows = Array.isArray(files) ? files : [];
+  const parts: string[] = [];
+  for (const f of rows) {
+    if (!f || typeof f !== "object") continue;
+    const r = f as { path?: unknown; hash?: unknown; source?: unknown };
+    const path = typeof r.path === "string" ? r.path : "";
+    if (!path) continue;
+    // Always hash the SOURCE bytes when present — a stored `hash` could be
+    // stale relative to an edited source, and a stale digest would let two
+    // different trees collide again. The stored hash is a legacy fallback only.
+    const fileHash =
+      typeof r.source === "string"
+        ? String(fnv1a(r.source))
+        : typeof r.hash === "string" && r.hash.length > 0
+          ? r.hash
+          : "";
+    parts.push(`${path}\u0000${fileHash}`);
+  }
+  if (parts.length === 0) return "";
+  parts.sort();
+  return String(fnv1a(parts.join("\n")));
+}
+
 /** Deterministic evidence summary of a green TreeRunOutcome (rel spec paths +
  *  verdicts + counts only — never the run dir, timings or detail prose, so the
  *  fnv1a evidence hash reproduces across hosts). `executed` is the honesty
@@ -5584,7 +6770,11 @@ export function mintTreeRunTested(project: Project, outcome: TreeRunOutcome): Pr
       ].slice(-200),
     };
   }
-  const evidenceHash = String(fnv1a(ev.summary));
+  // BF-6 (PR-30): bind the evidence hash to the TREE BYTES, not just the
+  // generic run summary — two distinct trees must never share a "tested" hash.
+  // No generatedTree ⇒ treeDigest "" ⇒ the pre-BF-6 summary hash is preserved.
+  const treeDigest = treeBytesDigest(project.generatedTree);
+  const evidenceHash = String(fnv1a(treeDigest ? `${ev.summary} · tree ${treeDigest}` : ev.summary));
   if (alreadyTested) {
     // 336-2 follow-up: an already-"tested" project must not keep an evidence
     // hash that describes a DIFFERENT verification (the same two-artifacts-

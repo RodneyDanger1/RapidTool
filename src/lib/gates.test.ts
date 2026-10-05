@@ -21,7 +21,7 @@ import {
 } from "./dod.ts";
 import { applyPhaseResult, emptyProject, rejectHitl, stampP6ReqTrace } from "./engine.ts";
 import { fnv1a } from "./algorithms.ts";
-import { buildPhase6Module } from "./sandbox.ts";
+import { briefNounCore, buildPhase6Module } from "./sandbox.ts";
 import { ALL_PHASES, runHeadless, runToGate, seedProject } from "./testing/fixtures.ts";
 import { exportProjectJson } from "./io.ts";
 import type { MemoryEntry, PhaseId, Project } from "./types.ts";
@@ -585,28 +585,31 @@ describe("P0-01/P0-02 brief-conformance probes (fixes/97)", () => {
     assert.ok(r.unmet.some((g) => g.id === "p6-brief-fit"));
   });
 
-  it("322 X1 (P6-C): p6-brief-fit bar 0.35 — need ceil(20×0.35)=7: six nouns FAIL, seven PASS", () => {
-    // Curated 20-noun prose brief (pairwise non-substring; verified stem-clean).
-    const NOUN20 =
-      "aurora basalt cipher dune ember fjord glade harbor isle juniper kestrel lagoon mesa nimbus orchid peak quarry ridge summit tundra";
-    const p = promote(runHeadless(seedProject({ brief: NOUN20 }), ALL_PHASES));
-    const src = (k: number) =>
-      NOUN20.split(" ")
-        .slice(0, k)
-        .map((n) => `const ${n} = 0;`)
-        .join("\n");
-    const six = { ...p, generatedSource: src(6) } as Project;
+  it("W61 C1: p6-brief-fit requires the brief's CORE nouns (flat 0.35 count-bar retired)", () => {
+    // The authoritative RED->GREEN calibration (the real office-stock-tracker /
+    // office-scheduler / bakery-website fixtures) lives in dod.test.ts. This
+    // unit pins the bar's shape on a controlled brief: the H1 + bold labels
+    // ground a core, a module naming every core noun passes, one naming none
+    // fails. Replaces the retired flat 0.35 count-bar pin.
+    const BRIEF =
+      "# Officestock - Office Supplies Inventory Tracker\n\n" +
+      "## Core domain\n- **Item**, **Movement**, **PurchaseRequest**.";
+    const p = promote(runHeadless(seedProject({ brief: BRIEF }), ALL_PHASES));
+    const { core } = briefNounCore(BRIEF, p);
+    assert.ok(core.length >= 4, `the brief grounds a core (${core.join(",")})`);
+    const all = core.map((n) => `export function ${n}Handler() { return 1; }`).join("\n");
+    const none = "export function unrelatedHelper() { return 1; }";
     assert.ok(
-      runGate(six, 6).unmet.some((g) => g.id === "p6-brief-fit"),
-      "6 hits < the 0.35 need of 7 must stay red",
+      !runGate({ ...p, generatedSource: all } as Project, 6).unmet.some((g) => g.id === "p6-brief-fit"),
+      "a module naming every core noun passes",
     );
-    const seven = { ...p, generatedSource: src(7) } as Project;
+    const under = { ...p, generatedSource: none } as Project;
     assert.ok(
-      !runGate(seven, 6).unmet.some((g) => g.id === "p6-brief-fit"),
-      "7 hits ≥ the 0.35 need of 7 must pass",
+      runGate(under, 6).unmet.some((g) => g.id === "p6-brief-fit"),
+      "a module naming no core noun fails",
     );
-    // Provenance: the old ½ bar demanded 10 — this same 7-hit source was red
-    // under it (322 X1 measured honest coverage 40–50% on real artifacts).
+    const reason = runGate(under, 6).unmet.find((g) => g.id === "p6-brief-fit")?.reason ?? "";
+    assert.match(reason, /core missing \(/, "the state line names the missing core nouns");
   });
 
   it("p0-brief-grounded records a vocabulary-bearing brief that sailed on the fallback lattice", () => {

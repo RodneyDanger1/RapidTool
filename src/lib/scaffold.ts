@@ -236,6 +236,21 @@ function prose(raw: string): string {
   return collapse(raw).replace(/\*\//g, "* /");
 }
 
+/**
+ * A4 (SYNTHSPEC P5c): the human display name — the brief's H1 markdown is not
+ * markup. Strips leading `#`s and whitespace and a trailing separator/em-dash
+ * (`"# Wildstem Florist —"` → `"Wildstem Florist"`). Pure; falls back to the
+ * collapsed raw value when stripping would empty it.
+ */
+function displayName(raw: string): string {
+  const collapsed = collapse(raw);
+  const stripped = collapsed
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/\s*[—–-]\s*$/, "")
+    .trim();
+  return stripped || collapsed || "RapidTool scaffold";
+}
+
 /** JSON-escaped string literal body (safe inside '…', "…", `…` and fences). */
 function jstr(raw: string): string {
   return JSON.stringify(String(raw ?? ""));
@@ -1284,7 +1299,12 @@ type UiCallable = {
   params: { name: string; type: string; rest: boolean }[];
   /** Keys of a single object-literal parameter default (`spec = { a, b }`). */
   objectKeys: { name: string; type: string }[] | null;
+  /** A4: true for an `async` export — never called synchronously by the shell. */
+  async?: boolean;
 };
+
+/** A4: a briefed surface page (derived from contracts/lattice/spec graph). */
+export type UiPage = { id: string; title: string };
 
 /** TS primitive param types that take a scalar argument, not an object. */
 const UI_PRIMITIVE_TYPE = /^(string|number|boolean|bigint|symbol)$/i;
@@ -1397,6 +1417,10 @@ function uiExportedCallables(source: string): UiCallable[] {
       if (declared.has(local)) calls.set(exported, declared.get(local)!);
     }
   }
+  // A4: names exported as `async` — the shell must never call one synchronously.
+  const asyncNames = new Set<string>();
+  for (const m of text.matchAll(/^export\s+async\s+function\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm)) asyncNames.add(m[1]!);
+  for (const m of text.matchAll(/^export\s+(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*async\b/gm)) asyncNames.add(m[1]!);
   const out: UiCallable[] = [];
   for (const [name, paramsText] of calls) {
     if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) || out.some((c) => c.name === name)) continue;
@@ -1408,9 +1432,46 @@ function uiExportedCallables(source: string): UiCallable[] {
       params.push({ name: parsed.name, type: parsed.type, rest: parsed.rest });
       if (parsed.defaultText) objectKeys = uiObjectLiteralKeys(parsed.defaultText) ?? objectKeys;
     }
-    out.push({ name, params, objectKeys });
+    out.push({ name, params, objectKeys, ...(asyncNames.has(name) ? { async: true } : {}) });
   }
   return out;
+}
+
+/**
+ * A4: the briefed surfaces a website/marketing shell should present, in
+ * deterministic order — contract entity names, spec-graph job labels, then the
+ * lattice's own jobs/entities. Deduped by normalized title, capped at 6. Titles
+ * are derived strictly from the brief's own declarations; nothing invented.
+ */
+export function uiBriefPages(project: Project): UiPage[] {
+  const out: UiPage[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string): void => {
+    const title = collapse(raw).slice(0, 60);
+    if (!title) return;
+    const id = ident(title, "page");
+    if (seen.has(id)) return;
+    seen.add(id);
+    out.push({ id, title });
+  };
+  for (const ent of project.contracts?.entities ?? []) if (ent && typeof ent.name === "string") push(ent.name);
+  for (const node of project.specGraph?.nodes ?? []) {
+    const m = /[“"]([^”"]+)[”"]/.exec(typeof node.purpose === "string" ? node.purpose : "");
+    if (m && m[1]!.trim()) push(m[1]!);
+  }
+  for (const job of project.lattice?.jobs ?? []) if (typeof job === "string") push(job);
+  for (const ent of project.lattice?.entities ?? []) if (typeof ent === "string") push(ent);
+  return out.slice(0, 6);
+}
+
+/** A4: a generated export shaped like a page/screen renderer (drives the multi-section shell). */
+function uiRenderLike(c: UiCallable): boolean {
+  return /^(?:render[A-Z_$]|.*Page$|get[A-Za-z0-9_$]*Screen$)/.test(c.name) && c.async !== true;
+}
+
+/** A4: a render-like export the shell may actually CALL — no required params, not async. */
+function uiRenderCallable(c: UiCallable): boolean {
+  return uiRenderLike(c) && c.params.filter((p) => !p.rest).length === 0;
 }
 
 /**
@@ -1576,6 +1637,52 @@ function uiDomainFields(
 }
 
 /**
+ * A4 (SYNTHSPEC P5b): the multi-section shell for a website/marketing brief — a
+ * <nav> from the briefed page titles and one <section> per page. A page whose
+ * discovered render export is callable with no arguments calls it and renders
+ * the result (a string via a <div>; a JSX node directly); a page with no such
+ * export gets an honest "not implemented" note. Never fabricates data; never a
+ * <canvas>. The H1 is the markdown-stripped display name.
+ */
+function defaultUiShellBody(project: Project, pages: UiPage[], renderCallables: UiCallable[]): string[] {
+  const lines: string[] = [];
+  const nodeExpr: string[] = [];
+  const used = new Set<string>();
+  for (const page of pages) {
+    const key = page.id.toLowerCase().replace(/_/g, "");
+    const rc =
+      renderCallables.find((c) => !used.has(c.name) && c.name.toLowerCase().replace(/_/g, "").includes(key)) ??
+      renderCallables.find((c) => !used.has(c.name));
+    if (rc !== undefined) {
+      used.add(rc.name);
+      lines.push(`  const ${`__page_${page.id}`}: unknown = generated.${rc.name}();`);
+      nodeExpr.push(`__page_${page.id}`);
+    } else {
+      nodeExpr.push("null");
+    }
+  }
+  lines.push(
+    `  const pages: { id: string; title: string }[] = [`,
+    ...pages.map((p) => `    { id: ${jstr(p.id)}, title: ${jstr(p.title)} },`),
+    `  ];`,
+    `  const pageNodes: unknown[] = [${nodeExpr.join(", ")}];`,
+    `  return (`,
+    `    <main>`,
+    `      <h1>{${jstr(displayName(project.name))}}</h1>`,
+    `      <nav>{pages.map((p) => <span key={p.id}>{p.title}</span>)}</nav>`,
+    `      {pages.map((p, i) => (`,
+    `        <section key={p.id}>`,
+    `          <h2>{p.title}</h2>`,
+    `          {typeof pageNodes[i] === "string" ? <div>{pageNodes[i] as string}</div> : (pageNodes[i] as JSX.Element | null)}`,
+    `        </section>`,
+    `      ))}`,
+    `    </main>`,
+    `  );`,
+  );
+  return lines;
+}
+
+/**
  * fixes/277 / 340-6 (A3-f07 / W-14): the DEFAULT emitted-UI generation. Null
  * generatedNamespace ⇒ the honest no-module panel (byte-identical to the
  * pre-277 shell). Otherwise a real generator over project.implementationSpec,
@@ -1595,7 +1702,7 @@ const defaultUiGeneration = ({
       `  );`,
       `  return (`,
       `    <main>`,
-      `      <h1>{${jstr(prose(project.name))}}</h1>`,
+      `      <h1>{${jstr(displayName(project.name))}}</h1>`,
       `      <p>{notice}</p>`,
       `    </main>`,
       `  );`,
@@ -1603,6 +1710,21 @@ const defaultUiGeneration = ({
   }
   const entrySource = uiGeneratedEntrySource(project);
   const callables = entrySource === null ? [] : uiExportedCallables(entrySource);
+  // A4 (SYNTHSPEC P5b): a website/marketing brief — its generated entry exports
+  // a `render*`/`*Page`/`get*Screen` callable — becomes a multi-section shell,
+  // not a single debug form. Requiring the render export keeps the honest form
+  // generator for a data/app brief that has none (and prevents a shell that is
+  // entirely "not implemented"). Only a zero-arg, non-async render export is
+  // actually CALLED; a param-bearing one still yields its honest section.
+  const renderLike = callables.filter(uiRenderLike);
+  if (renderLike.length > 0) {
+    const pages = uiBriefPages(project);
+    const shellPages =
+      pages.length > 0
+        ? pages
+        : renderLike.map((c) => ({ id: ident(c.name.replace(/^render/, "") || c.name, "page"), title: c.name }));
+    return defaultUiShellBody(project, shellPages, renderLike.filter(uiRenderCallable));
+  }
   // Prefer a callable whose own surface can carry ≥2 real fields.
   const callable =
     callables.find((c) => (c.objectKeys?.length ?? 0) >= 2 || c.params.filter((p) => !p.rest).length >= 2) ??
@@ -1644,7 +1766,7 @@ const defaultUiGeneration = ({
       `  const notice = ${jstr(`shell — ${reason}; nothing to wire yet`)};`,
       `  return (`,
       `    <main>`,
-      `      <h1>{${jstr(prose(project.name))}}</h1>`,
+      `      <h1>{${jstr(displayName(project.name))}}</h1>`,
       `      <p>{notice}</p>`,
       `    </main>`,
       `  );`,
@@ -2953,7 +3075,7 @@ function emitStylesCss(): string {
  */
 function emitMainEntry(kind: ProjectKind, project: Project, uiSpecifier: string | null): string {
   if (kind === "webapp") {
-    const title = jstr(prose(project.name) || "RapidTool scaffold");
+    const title = jstr(displayName(project.name) || "RapidTool scaffold");
     const lines = [
       ...sourceHeader("src/main.tsx", "Browser entry — mounts the UI shell (P8 interface contract)", project, [
         "// The mounted surface is the contract-level Console shell from src/ui; wiring",
@@ -3331,7 +3453,21 @@ function readmeBody(
       files.push([`bin/${slugName(project.name)}.mjs`, "package bin launcher — delegates to src/main.ts"]);
     }
   }
-  files.push(...specRows);
+  // A10 (SYNTHSPEC F-03 / BF-11): the "What ships" table must name only files
+  // that are ON DISK. A declared spec-graph job node the tree did not
+  // materialise (tree mode: `unmaterialisedJobs`) or a refused tree row has NO
+  // file — listing it beside emitted modules was the measured self-contradiction
+  // (README:34 listed 5 `src/jobs/*.ts` the tree never wrote, while "Honest
+  // boundaries" said so ~50 lines below). Split those rows into a labelled
+  // "declared, NOT emitted" sub-table instead of dropping them (never silent).
+  const notEmitted = new Set<string>();
+  for (const j of jobScope.unmaterialisedJobs ?? []) if (j && typeof j.file === "string") notEmitted.add(j.file);
+  for (const r of treeRefusals) {
+    const m = /^generatedTree:refused:"([^"]+)":/.exec(String(r));
+    if (m) notEmitted.add(m[1]!);
+  }
+  const declaredRows = specRows.filter(([p]) => notEmitted.has(p));
+  files.push(...specRows.filter(([p]) => !notEmitted.has(p)));
   // fixes/144 (M2): generated-tree files the spec graph does not already table
   // (their paths are added under their node rows) get their own rows so the
   // README names every emitted file — never a stale "spec graph only" claim.
@@ -3419,6 +3555,19 @@ function readmeBody(
     "| File | Origin |",
     "| --- | --- |",
     ...files.map(([f, why]) => `| \`${f}\` | ${why} |`),
+    // A10: a declared capability with no file is named here, never in the table
+    // above (which reads as "what ships"). Rendered only when non-empty so a
+    // fully materialised tree keeps its prior bytes.
+    ...(declaredRows.length > 0
+      ? [
+          "",
+          "### Declared, NOT emitted",
+          "",
+          "| File (declared) | Why it is not on disk |",
+          "| --- | --- |",
+          ...declaredRows.map(([f, why]) => `| \`${f}\` | declared in the spec graph, no file emitted by this scaffold — see Honest boundaries (${why}) |`),
+        ]
+      : []),
     "",
     "## Phase rail",
     "",

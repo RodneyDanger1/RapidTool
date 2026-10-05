@@ -96,3 +96,38 @@ export function candidatesLogDetail(unit: string, count: number, winner: number 
   const winnerText = winner === null ? "none" : String(winner + 1);
   return `${unit} · candidates ${count} · winner ${winnerText} · ${outcomes.join(" | ")}`.slice(0, 1000);
 }
+
+// ---------------------------------------------------------------------------
+// A9/PR-15 — adaptive chunk sizing.
+//
+// Chunk size used to be the fixed P6_SYNTH_CHUNK_SIZE (=8) regardless of how
+// much signature text a chunk carries: eight 120-char signatures is a very
+// different output budget from eight 30-char ones. Size a chunk by the rendered
+// signature text: `perChunk = clamp(floor(budget / avgSigChars), 4, 12)`.
+// `P6_SYNTH_MODULE_BUDGET` is the rendered-signature character budget for one
+// call; the default reproduces the legacy 8 for typical corpus signatures.
+// ---------------------------------------------------------------------------
+
+/** Floor/ceiling on a chunk's signature count (cost + coherence bound). */
+export const P6_SYNTH_CHUNK_MIN = 4;
+export const P6_SYNTH_CHUNK_MAX = 12;
+/** Rendered-signature character budget for one synthesis call. */
+export const P6_SYNTH_MODULE_BUDGET = 480;
+
+/**
+ * Signature count for one chunk: `clamp(floor(budget / avgSigChars), 4, 12)`,
+ * where `avgSigChars` is the mean length of the non-blank rendered signatures.
+ * No signatures (or a non-positive budget) ⇒ the legacy default 8. Pure +
+ * deterministic; never throws on hostile input.
+ */
+export function adaptiveChunkSize(signatures: readonly string[], budget: number = P6_SYNTH_MODULE_BUDGET): number {
+  const sigs = (Array.isArray(signatures) ? signatures : []).filter(
+    (s): s is string => typeof s === "string" && s.trim().length > 0,
+  );
+  if (sigs.length === 0) return 8;
+  const avg = sigs.reduce((sum, s) => sum + s.length, 0) / sigs.length;
+  if (!Number.isFinite(avg) || avg <= 0) return 8;
+  const b = Number.isFinite(budget) && budget > 0 ? budget : P6_SYNTH_MODULE_BUDGET;
+  const sized = Math.floor(b / avg);
+  return Math.max(P6_SYNTH_CHUNK_MIN, Math.min(P6_SYNTH_CHUNK_MAX, sized));
+}

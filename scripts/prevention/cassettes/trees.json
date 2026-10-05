@@ -1,0 +1,18 @@
+{
+  "count": 13,
+  "trees": [
+    "bakery-website/emitted",
+    "bakery-website/emitted.v2",
+    "flower-shop-website/emitted",
+    "flower-shop-website/emitted.v2",
+    "bakery-florist-orders/emitted",
+    "bakery-florist-orders/emitted.v2",
+    "mobile-companion/emitted",
+    "mobile-companion/emitted.v2",
+    "office-stock-tracker/emitted",
+    "office-stock-tracker/emitted.v2",
+    "office-scheduler/emitted",
+    "office-scheduler/emitted.v2",
+    "office-invoice-tracker/emitted"
+  ]
+}

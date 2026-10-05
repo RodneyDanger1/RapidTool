@@ -1262,6 +1262,145 @@ export function selectLessons(
   return [...pool].sort(compareLessons).slice(0, cap);
 }
 
+// ---------------------------------------------------------------------------
+// W61 lane C (C7 / I5): the defect→repair learning loop. A failed run's coded
+// defect mints a STRUCTURED lesson (class `defect-repair`, keyed by the coded
+// defect class) whose body is a DETERMINISTIC remediation directive authored by
+// the detecting seam — not inferred by an LLM. selectDefectRepairLessons feeds
+// the matching rows into the next run's synthesis/repair prompts, and
+// applyLessonDemotion deterministically demotes a lesson injected repeatedly
+// with no pass (recurrence != causation).
+// ---------------------------------------------------------------------------
+
+/** I5: the coded defect classes the loop keys on (shared with verify.server). */
+export type DefectClass =
+  | "TS2308:barrel-dup-export"
+  | "TS2448:use-before-decl"
+  | "TS2440:dup-decl"
+  | "TS2393:dup-func"
+  | "TS1005:jsx-in-ts"
+  | "validation:unbindable-object-param"
+  | "validation:unawaited-async"
+  | "validation:money-semantics"
+  | "probe:p6-brief-fit:core-noun";
+
+const DEFECT_CLASS_PATTERNS: { re: RegExp; cls: DefectClass }[] = [
+  { re: /TS2308|duplicate export|duplicate-export/i, cls: "TS2308:barrel-dup-export" },
+  { re: /TS2448|used before (?:its )?declaration|use-before-decl/i, cls: "TS2448:use-before-decl" },
+  { re: /TS2440|duplicate identifier/i, cls: "TS2440:dup-decl" },
+  { re: /TS2393|duplicate function/i, cls: "TS2393:dup-func" },
+  { re: /TS1005|TS2503|jsx-in-ts|\bJSX\b/i, cls: "TS1005:jsx-in-ts" },
+  { re: /unbindable|object param/i, cls: "validation:unbindable-object-param" },
+  { re: /unawaited|un-awaited|floating promise/i, cls: "validation:unawaited-async" },
+  { re: /money-semantics|price.*quantity|pence/i, cls: "validation:money-semantics" },
+  { re: /p6-brief-fit|core.noun/i, cls: "probe:p6-brief-fit:core-noun" },
+];
+
+/** I5: map free-text failure evidence to a coded DefectClass, or null. */
+export function defectClassOf(reason: string): DefectClass | null {
+  const s = typeof reason === "string" ? reason : "";
+  for (const row of DEFECT_CLASS_PATTERNS) if (row.re.test(s)) return row.cls;
+  return null;
+}
+
+/** The deterministic remediation directive per defect class (authored here, the
+ *  sink side; the detecting seam only supplies the class). */
+export const DEFECT_REMEDIATION: Record<DefectClass, string> = {
+  "TS2308:barrel-dup-export": "Declare each export exactly once in its owning chunk; re-export explicitly (first-occurrence wins) instead of blind `export *`; never drop an export a required signature names.",
+  "TS2448:use-before-decl": "Hoist a shared store binding into src/state/store.ts and import it from later chunks; never read a block-scoped binding in an earlier top-level initializer.",
+  "TS2440:dup-decl": "Remove the later byte-identical declaration of the same top-level name; keep one definition per name per module.",
+  "TS2393:dup-func": "Merge or delete the duplicated function implementation; keep exactly one definition of the same name.",
+  "TS1005:jsx-in-ts": "Emit JSX-free plain TypeScript in a `.ts` chunk (or relocate the chunk to `.tsx`); never place raw JSX in a `.ts` file.",
+  "validation:unbindable-object-param": "Construct the callable's object parameter from the entity fields; do not wire a UI action to an unbindable signature.",
+  "validation:unawaited-async": "Await every async call before reading its result; never use an un-awaited Promise as a value.",
+  "validation:money-semantics": "For a money-named export, derive the result from price × quantity (read a price/unit-cost operand); never sum quantities as money.",
+  "probe:p6-brief-fit:core-noun": "Implement the brief's CORE product/domain nouns as real identifiers across the tree; do not pass the fit gate on generic scaffolding words.",
+};
+
+/** The classShort every defect→repair lesson row carries. */
+export const DEFECT_REPAIR_CLASS = "defect-repair";
+/** The tag encoding a row's defect class (`defect:<Class>`). */
+export function defectTag(cls: DefectClass): string {
+  return `defect:${cls}`;
+}
+
+/**
+ * C7 §1: mint the structured defect→repair row for one coded defect. The body
+ * is the deterministic remediation directive; the signature keys the row by the
+ * defect class so a recurrence dedupes to the same row. Pure.
+ */
+export function defectRepairLesson(
+  project: Project,
+  defectClass: DefectClass,
+  opts?: { signature?: string; phase?: PhaseId; score?: number },
+): MemoryEntry {
+  const phase = (Number.isFinite(opts?.phase) ? Number(opts?.phase) : 6) as PhaseId;
+  const signature = typeof opts?.signature === "string" && opts.signature.trim() ? opts.signature.trim() : `defect:${defectClass}`;
+  return lessonRow({
+    classShort: DEFECT_REPAIR_CLASS,
+    level: "L2",
+    kind: "procedural",
+    phase,
+    text: `defect-repair ${defectClass}: ${DEFECT_REMEDIATION[defectClass]}`,
+    score: typeof opts?.score === "number" && Number.isFinite(opts.score) ? opts.score : 0.8,
+    source: "engine",
+    tags: [LESSON_TAG, defectTag(defectClass), `project:${project.id}`],
+    signature,
+  });
+}
+
+/**
+ * C7 §2: deterministically select the defect→repair lessons that match the
+ * current cycle's defect classes — the injection path for the synthesis/repair
+ * prompts. Phase-matched rows first, then the class-tagged pool; tiebreak
+ * score-desc/id-asc (compareLessons); capped. No LLM judge.
+ */
+export function selectDefectRepairLessons(
+  memory: readonly MemoryEntry[],
+  phase: PhaseId,
+  defectClasses: readonly DefectClass[],
+  limit = 2,
+): MemoryEntry[] {
+  const wanted = new Set(defectClasses.map((c) => defectTag(c)));
+  const rows = (Array.isArray(memory) ? memory : []).filter(
+    (m): m is MemoryEntry =>
+      !!m &&
+      typeof m === "object" &&
+      Array.isArray(m.tags) &&
+      m.tags.includes(LESSON_TAG) &&
+      m.tags.includes(DEFECT_REPAIR_CLASS) &&
+      m.tags.some((t: string) => wanted.has(t)),
+  );
+  if (rows.length === 0) return [];
+  const phaseRows = rows.filter((m) => m.phase === phase);
+  const pool = phaseRows.length > 0 ? phaseRows : rows;
+  const cap = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0;
+  return [...pool].sort(compareLessons).slice(0, cap);
+}
+
+/** C7 §4: deterministic effectiveness demotion. A defect→repair lesson injected
+ *  `>= minInjections` times with ZERO passes loses `penalty` score (its advice
+ *  is not helping on this campaign); insufficient evidence (fewer injections)
+ *  is left untouched — recurrence is not causation. Pure. */
+export function applyLessonDemotion(
+  rows: readonly MemoryEntry[],
+  effectiveness: Readonly<Record<string, { injected: number; passed: number }>>,
+  opts?: { minInjections?: number; penalty?: number },
+): MemoryEntry[] {
+  const minInjections = Number.isFinite(opts?.minInjections) ? Math.max(1, Math.floor(opts!.minInjections!)) : 3;
+  const penalty = Number.isFinite(opts?.penalty) ? Math.max(0, opts!.penalty!) : 0.2;
+  return (Array.isArray(rows) ? rows : []).map((m) => {
+    if (!m || typeof m !== "object" || !Array.isArray(m.tags)) return m;
+    if (!m.tags.includes(DEFECT_REPAIR_CLASS)) return m;
+    const clsTag = m.tags.find((t: string) => t.startsWith("defect:"));
+    const stats = clsTag ? effectiveness[clsTag] : undefined;
+    if (!stats || stats.injected < minInjections || stats.passed > 0) return m;
+    const base = Number.isFinite(m.score) ? m.score : 0.5;
+    // Round to 3dp so the demotion is a clean, deterministic number.
+    return { ...m, score: Math.max(0, Math.round((base - penalty) * 1000) / 1000) };
+  });
+}
+
 /**
  * C: eval-gated promotion. A lesson may be written into the live read-back
  * pool only when the new maker card is a number AND did not regress vs prior.

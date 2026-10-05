@@ -1,0 +1,65 @@
+{
+  "slug": "office-stock-tracker",
+  "briefFile": "office-stock-tracker/brief.md",
+  "brief": "# Officestock — Office Supplies Inventory Tracker\n\n## What this is\nAn internal tool to track office supplies (stationery, printer consumables,\nkitchen and cleaning items) so nothing runs out unannounced. Staff record what\nthey take; the office manager receives deliveries and runs stocktakes.\n\n## Users\n- **Staff** — take an item from the cupboard.\n- **Office manager** — receive deliveries, adjust counts, run stocktakes.\n- **Approver** — approve purchase requests raised below reorder level.\n\n## Core domain\n- **Item**: id, name, category (Stationery | Printer | Kitchen | Cleaning |\n  Tech), unit (each / box / ream / pack), current qty, reorder level, target\n  qty (to top up to), location, active.\n- **Movement**: id, item, delta (+/-), reason (Issued | Received | Damaged |\n  Adjustment | Stocktake), actor, timestamp, note, resulting qty.\n- **PurchaseRequest**: id, item, requested qty, status (Open | Approved |\n  Ordered | Received | Cancelled), raised-by, decision note.\n\n## Required features\n1. **Item list** — searchable, filterable by category and by a \"needs reorder\"\n   toggle; each row shows qty, reorder level, a colour-coded status, and\n   location. Sort by name, qty, or category.\n2. **Issue an item** — pick item, quantity, actor; refuse if quantity exceeds\n   current stock; write an Issued movement and decrement qty.\n3. **Receive stock** — increase qty and write a Received movement; if an Open/\n   Approved/Ordered purchase request exists for that item, mark it Received.\n4. **Adjust / damage** — record a Damaged or Adjustment movement; an adjustment\n   requires a note and can set the qty to a counted value (the delta is\n   computed), never silently.\n5. **Purchase requests** — raise a request for a below-reorder item with a\n   suggested quantity of (target − current); approve, order, receive, cancel\n   with constrained transitions; receiving a request writes a Received movement.\n6. **Stocktake** — enter a counted qty per item in a category; for each item the\n   app writes a Stocktake movement whose delta is counted − current, and shows a\n   variance report (items over/under by more than a threshold).\n7. **Dashboard** — total items, count below reorder, open purchase requests, and\n   total value on hand if an optional unit cost is set per item.\n\n## Functional requirements\n- Quantities are non-negative integers; stock can never go negative (issuing\n  more than on hand is refused naming the shortfall).\n- Current qty is the running sum of movements; a reconstruction from the\n  movement log must equal the stored qty (invariant check exposed).\n- Purchase-request status transitions constrained: Open→Approved→Ordered→\n  Received (or →Cancelled from Open/Approved/Ordered); Received is terminal.\n- Suggested reorder qty = max(0, target − current).\n- Optional value on hand = qty × unit cost (integer pence), displayed GBP.\n\n## Non-functional requirements\n- Desktop-first, usable to 768px; accessible tables and forms.\n- Deterministic inventory logic separated from UI for unit testing.\n- Local persistence; no external services required.\n\n## Explicitly out of scope\n- Barcode scanning.\n- Supplier ordering / EDI integration.\n- Asset depreciation or accounting.\n- Multi-site inventory.\n",
+  "persisted": {
+    "name": "# Officestock — Office",
+    "domain": "analytics",
+    "kind": "app"
+  },
+  "expected": {
+    "domain": "operations",
+    "kind": "app",
+    "name": "Officestock",
+    "incidents": [
+      "INC-07",
+      "INC-12",
+      "INC-23"
+    ]
+  },
+  "trees": [
+    "emitted",
+    "emitted.v2"
+  ],
+  "historicalDefects": [
+    "INC-07",
+    "INC-12",
+    "INC-23"
+  ],
+  "failureSignatures": [
+    {
+      "file": "unattended.out.json",
+      "ok": false,
+      "exit_code": 1,
+      "code": "RT_E_GATE_PENDING",
+      "error": "P6 DoD unmet ΓÇö hard gate blocks advance: p6-arch. ΓÇö resolve the unmet DoD criteria before advancing.",
+      "unmet": [
+        "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)"
+      ]
+    },
+    {
+      "file": "emit.out.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "treerun.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "build.json",
+      "ok": null,
+      "exit_code": null,
+      "code": null,
+      "error": null,
+      "unmet": []
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "slug": "bakery-florist-orders",
+  "briefFile": "bakery-florist-orders/brief.md",
+  "brief": "# Crumb & Bloom — Combined Order & Inventory Back-Office\n\n## What this is\nA back-office business application for a shop that sells BOTH baked goods and\nflowers. Staff use it at a counter and in the back room to take orders, manage\nproduct inventory, and see what needs restocking. This is an internal tool, not a\nmarketing site.\n\n## Users and roles\n- **Counter staff** — create and fulfil customer orders.\n- **Stock keeper** — receive stock, adjust counts, set reorder levels.\n- **Manager** — view reports and configure product catalogue.\n\n## Core domain\n- **Product**: id, name, category (Bakery | Floral), unit price, unit\n  (each / dozen / bunch / box), current stock on hand, reorder level, allergens\n  (for bakery), stem count (for floral), active flag.\n- **Customer**: id, name, phone, email.\n- **Order**: id, customer, created-at, fulfilment date, status (Draft | Confirmed\n  | Ready | Fulfilled | Cancelled), lines, total. A line references a product,\n  quantity, and unit price captured at order time.\n- **Stock movement**: id, product, delta (+/-), reason (Received | Sold |\n  Spoiled | Adjustment), timestamp, resulting count.\n\n## Required features\n1. **Product catalogue** — list, search, filter by category and active status;\n   create and edit products; soft-deactivate rather than hard-delete.\n2. **Order taking** — build an order by adding product lines with quantity; the\n   app computes line totals and the order total; confirm an order and validate\n   that every line has enough stock, then decrement stock and write a Sold\n   movement. Cancelling an order restores stock and writes a movement.\n3. **Stock management** — receive stock (increments and writes Received),\n   record spoilage, and perform a manual adjustment that requires a reason.\n   Every change is a stock movement; the product count is the running sum.\n4. **Low-stock dashboard** — products at or below reorder level, sorted by how\n   far below, with a suggested reorder quantity.\n5. **Order list** — filter by status and date, search by customer or order id,\n   and show a per-status count summary.\n6. **Reports** — daily revenue split by category (Bakery vs Floral), top-selling\n   products, and total waste (spoiled units) over a selectable date range.\n\n## Functional requirements\n- Money is stored and computed in integer minor units (pence) to avoid float\n  drift; display formats as GBP.\n- Stock can never go negative: confirming an order with insufficient stock is\n  refused with a per-line error naming the shortfall.\n- Order status transitions are constrained (Draft→Confirmed→Ready→Fulfilled;\n  Draft/Confirmed→Cancelled); illegal transitions are refused.\n- All stock changes are append-only movements; the product count is derivable\n  from the movement log (a reconstruction check must agree with the stored\n  count).\n- Reports aggregate over movements and orders, not over mutable counters alone.\n\n## Non-functional requirements\n- Desktop-first but usable on a tablet at the counter (min 768px).\n- Forms accessible and keyboard-navigable; destructive actions require confirm.\n- Deterministic core logic separated from the UI so it can be unit-tested.\n- No external services required to run; data persists locally.\n\n## Explicitly out of scope\n- Payment processing.\n- Multi-branch / multi-tenant support.\n- Customer-facing storefront (that is a separate marketing site).\n- Barcode scanning hardware integration.\n",
+  "persisted": {
+    "name": "# Crumb & Bloom",
+    "domain": "real-estate",
+    "kind": "app"
+  },
+  "expected": {
+    "domain": "web-marketing",
+    "kind": "app",
+    "name": "Crumb & Bloom",
+    "incidents": [
+      "INC-04",
+      "INC-15",
+      "INC-18",
+      "INC-19",
+      "INC-21",
+      "INC-30"
+    ]
+  },
+  "trees": [
+    "emitted",
+    "emitted.v2"
+  ],
+  "historicalDefects": [
+    "INC-04",
+    "INC-15",
+    "INC-18",
+    "INC-19",
+    "INC-21",
+    "INC-30"
+  ],
+  "failureSignatures": [
+    {
+      "file": "unattended.out.json",
+      "ok": false,
+      "exit_code": 1,
+      "code": "RT_E_GATE_PENDING",
+      "error": "P6 DoD unmet ΓÇö hard gate blocks advance: p6-test, p6-verified, p6-arch. ΓÇö resolve the unmet DoD criteria before advancing.",
+      "unmet": [
+        "Last template self-test run passed",
+        "Machine verification promoted a tested verdict (lastTest.label === \"tested\" with evidenceHash)",
+        "Tree architecture: every expanded-spec capability maps to a real generatedTree file carrying its stemmed identifier; no tree file is a template stub or an out-of-tree reexport-only leftover (an assembly barrel whose targets all resolve in-tree is exempt; absent tree = single-module legacy path)"
+      ]
+    },
+    {
+      "file": "repair.json",
+      "ok": false,
+      "exit_code": 1,
+      "code": "RT_E_REPAIR_FAILED",
+      "error": "repair budget exhausted after 3/3 cycle(s) over C:\\Users\\mnril\\Desktop\\testruns\\bakery-florist-orders\\emitted ΓÇö the emitted project's own `npm run typecheck` fail (exit 2) ΓÇö \"./generated/remove-order-line.ts\" has already exported a member named 'getDailyRevenueByCategory'. Consider explicitly re",
+      "unmet": null
+    },
+    {
+      "file": "verify.json",
+      "ok": false,
+      "exit_code": 4,
+      "code": "RT_E_UNKNOWN",
+      "error": "module uses ES-module import/export syntax ΓÇö the bounded CommonJS harness (new Function) cannot execute it (RT_E_RUNNER_FAILED); verify a materialized tree with the tree-run path, not the single-module harness",
+      "unmet": null
+    },
+    {
+      "file": "emit-banner.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "emit-git.json",
+      "ok": true,
+      "exit_code": 0,
+      "code": null,
+      "error": null,
+      "unmet": null
+    },
+    {
+      "file": "treerun.json",
+      "ok": false,
+      "exit_code": 1,
+      "code": "RT_E_TREE_RUN_FAILED",
+      "error": "the emitted project's own `npm run typecheck` fail (exit 2) ΓÇö \"./generated/remove-order-line.ts\" has already exported a member named 'getDailyRevenueByCategory'. Consider explicitly re-exporting to resolve the ambiguity.\r\nsrc/generated.ts(3,1): error TS2308: Module \"./generated/remove-order-line.t",
+      "unmet": null
+    },
+    {
+      "file": "build.json",
+      "ok": null,
+      "exit_code": null,
+      "code": null,
+      "error": null,
+      "unmet": []
+    }
+  ]
+}

@@ -1235,6 +1235,12 @@ function truncateToBudget(assembled: string): string {
    *  Masks contain no newline, so index k names the same line in both copies. */
   const realLineCut = (normCut: string): string =>
     realLines.slice(0, normCut.split("\n").length).join("\n");
+  // W61 C4 (R1 E3 claim 10): all 7 recorded packets dropped the DoD exit
+  // criteria / artifacts / live research sources. The tail anchor stays
+  // `## Required output schema`, and the three protected HEAD sections are
+  // budget-reserved and re-attached whole whenever the head cut drops them.
+  // (Anchoring the whole tail at the DoD section instead would cut the
+  // phase-coverage rail line, which the T-14 tests pin.)
   const headingAt = assembled.indexOf(REQUIRED_OUTPUT_HEADING);
   const headingAtN = normalized.indexOf(REQUIRED_OUTPUT_HEADING);
   if (headingAt === -1 || headingAtN === -1) {
@@ -1245,13 +1251,27 @@ function truncateToBudget(assembled: string): string {
       .replace(/\n[^\n]*$/, "");
     return `${realLineCut(normCut)}${markerLine}`;
   }
+  const sliceSection = (text: string, heading: string): string => {
+    const at = text.indexOf(heading);
+    if (at === -1) return "";
+    const next = text.indexOf("\n## ", at + heading.length);
+    return next === -1 ? text.slice(at) : text.slice(at, next);
+  };
+  const protectedBlocks = [
+    "\n## Exit criteria (DoD)\n",
+    "\n## Artifacts (trimmed)\n",
+    "\n## Research sources (live)\n",
+  ]
+    .map((h) => ({ h, real: sliceSection(assembled, h), norm: sliceSection(normalized, h), atN: normalized.indexOf(h) }))
+    .filter((b) => b.real !== "" && b.atN !== -1);
   const tail = assembled.slice(headingAt); // "\n## Required output schema\n…" through the end
   const tailN = normalized.slice(headingAtN);
   const markerBlock = `\n\n${TRUNC_MARKER}\n`;
-  const budget = PACKET_MAX_CHARS - tailN.length - markerBlock.length;
+  const reserveN = protectedBlocks.reduce((s, b) => s + b.norm.length + 1, 0); // + join newlines
+  const budget = PACKET_MAX_CHARS - tailN.length - markerBlock.length - reserveN;
   if (budget <= 0) {
-    // Tail + marker alone over budget (pathological): degrade to the legacy
-    // cut rather than emit a schema-less head or an over-budget document.
+    // Tail + protected + marker alone over budget (pathological): degrade to
+    // the legacy cut rather than emit a schema-less head or an over-budget doc.
     const normCut = normalized
       .slice(0, PACKET_MAX_CHARS - markerLine.length)
       .replace(/\n[^\n]*$/, "");
@@ -1264,7 +1284,12 @@ function truncateToBudget(assembled: string): string {
   const cutAt = boundaryAt >= Math.floor(budget / 2) ? boundaryAt : budget;
   let cutN = headN.slice(0, cutAt);
   if (cutAt === budget) cutN = cutN.replace(/\n[^\n]*$/, "");
-  return `${realLineCut(cutN)}${markerBlock}${tail}`;
+  // Re-attach only the protected blocks the head cut actually dropped.
+  const reattached = protectedBlocks
+    .filter((b) => b.atN >= cutN.length)
+    .map((b) => b.real)
+    .join("\n");
+  return `${realLineCut(cutN)}${markerBlock}${reattached ? `${reattached}\n` : ""}${tail}`;
 }
 
 // ---------------------------------------------------------------------------

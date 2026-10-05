@@ -119,6 +119,19 @@ export type CrewCritique = {
   revised?: CrewPlanStep[];
 };
 
+/** W61 lane D (D6 / R2 Row 8): a deterministic record that the ADVISORY
+ *  reviewer's verdict disagreed with the recorded deterministic gate. The row
+ *  is evidence that the model judge is visible and measurable — it is never a
+ *  way for the crew to override `rec.gate`. Absent when either side stated no
+ *  verdict/gate (never guessed). */
+export type CrewGateDisagreement = {
+  event: "crew.critic.disagreement";
+  phase: number;
+  claimed: "PASS" | "FAIL";
+  gate: "PASS" | "FAIL";
+  detail: string;
+};
+
 export type CrewRunResult =
   | {
       ok: true;
@@ -132,6 +145,10 @@ export type CrewRunResult =
       mode?: "default" | "plan-act";
       plan?: CrewPlanStep[] | null;
       critique?: CrewCritique | null;
+      /** Reviewer-vs-gate disagreements observed this run (omitted when none).
+       *  Deterministic rows — the crew verdict never mutates or overrides the
+       *  recorded gate; this only makes a contradiction visible. */
+      disagreements?: CrewGateDisagreement[];
     }
   | {
       ok: false;

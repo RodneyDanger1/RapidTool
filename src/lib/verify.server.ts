@@ -10,7 +10,11 @@
 //      the source and each expression, printing machine-readable results.
 //      The machine — never the LLM — declares pass/fail.
 //   3. verifyAndFixServer() — bounded loop: fail → DeepSeek emits a patched
-//      source → re-run, up to maxIterations.
+//      source → re-run, up to maxIterations. PR-20 (D2): the loop is MONOTONE —
+//      a fix is accepted only when its failing-case set is a strict subset (or
+//      one non-recurring lateral move); a non-improving fix is rejected, the
+//      prior best source is kept, the loop stops early, and the outcome reports
+//      `regressed: true` — never worse bytes in `finalSource`.
 //   4. E-08 (A4-b) oracle pinning: generateCases() is SEEDED with the
 //      project's A7 oracle rows (a caller-rendered oracleToCaseSeeds() string
 //      + the pinned ids — passed as parameters so this module never imports
@@ -45,7 +49,7 @@ import { countLooseEquals, stripStringsAndComments } from "./bench.ts";
 import { briefNounHits, identifierHits } from "./sandbox.ts";
 import { failureLessonFromRecord, verifyOutcomeLesson } from "./knowledge.ts";
 import type { ErrorCode } from "./errors.ts";
-import type { JsonLog, MemoryEntry } from "./types.ts";
+import type { JsonLog, MemoryEntry, Project } from "./types.ts";
 // 339-1: the P6 prompt mandates fully-typed TypeScript (rule 10), but the
 // harness compiles __SRC with the JS-only `new Function`. Strip the types on
 // the PARENT side (Node builtin, present on both required runtimes) before the
@@ -72,6 +76,15 @@ export type VerifyOutcome = {
   status: "passed" | "failed" | "not-configured" | "error";
   iterations: number;
   evidence: string;
+  /**
+   * W61 lane D (D2 / I3 — the D→B interface): the REAL top-level error class of
+   * this outcome, so a caller (the CLI's `verify` arm, the store) can branch on
+   * the actual failure instead of classifying the evidence prose and flattening
+   * to `RT_E_UNKNOWN`. Absent on a `passed` outcome (success carries no error
+   * class). `RT_E_RUNNER_FAILED` is the ESM/tree-mode and exhausted-run class;
+   * not-configured / provider / budget stops carry their own registered code.
+   */
+  code?: ErrorCode;
   finalSource?: string;
   cases?: VerifyCase[];
   /** Non-empty only when the final source triggered lintFailures() findings. */
@@ -776,6 +789,54 @@ function buildHarness(source: string, cases: VerifyCase[]): string {
 }
 
 export type CaseResult = { id: string; pass: boolean; detail: string };
+
+/** PR-20 (D2): the sentinel member of a failing set when the RUN itself could
+ *  not happen (compile refusal). Without it an empty `results` list would read
+ *  as an empty (improving) failing set and a broken fix would look like progress. */
+export const COMPILE_FAILURE_CASE_ID = "<compile-failure>";
+
+/**
+ * PR-20 (D2 / R2 Row 3): the comparable failing-case id set of a machine run —
+ * sorted + deduped so two runs of the same failure compare equal. A compile
+ * failure contributes the `COMPILE_FAILURE_CASE_ID` sentinel, never an empty
+ * set. Pure; never throws.
+ */
+export function failingCaseIds(run: {
+  results?: readonly CaseResult[];
+  compileError?: string | null;
+}): string[] {
+  const ids = (Array.isArray(run?.results) ? run.results : [])
+    .filter((r) => r && r.pass !== true)
+    .map((r) => (typeof r.id === "string" && r.id ? r.id : "case-?"));
+  if (run && typeof run.compileError === "string" && run.compileError) {
+    ids.push(COMPILE_FAILURE_CASE_ID);
+  }
+  return [...new Set(ids)].sort();
+}
+
+/**
+ * PR-20 (D2 / R2 Row 3): is `next` an acceptable monotone improvement over
+ * `prior`? Yes iff it is a STRICT subset of `prior`, or an EQUAL-SIZE set that
+ * differs from `prior` and whose members are non-recurring (absent from every
+ * previously-seen failing set — one lateral move allowed, no oscillation). A
+ * superset, an identical set, or a recurring lateral set is NOT an improvement:
+ * the fix must be rejected and the prior best kept. Pure; never throws.
+ */
+export function isMonotoneFix(
+  next: readonly string[],
+  prior: readonly string[],
+  seen: readonly (readonly string[])[] = [],
+): boolean {
+  const n = [...new Set(next)];
+  const p = new Set(prior);
+  if (n.length < prior.length && n.every((id) => p.has(id))) return true;
+  if (n.length === prior.length && n.some((id) => !p.has(id))) {
+    const recurring = new Set<string>();
+    for (const s of seen) for (const id of s) recurring.add(id);
+    return n.every((id) => !recurring.has(id));
+  }
+  return false;
+}
 
 /**
  * T-01 (109 C-01): the honest reason a run is refused when the compiled module
@@ -1677,6 +1738,49 @@ export function buildOracleCasesPrompt(input: OracleCasesPromptInput): string {
 }
 
 /**
+ * I6 (PR-20 / D4): the FROZEN, spec-derived acceptance contract rendered for the
+ * P6 synthesis prompt. The SAME model must not author both the module and its
+ * cases: the pinned A7 oracle rows (`project.oracle`) plus the spec's
+ * requirements/typeSignatures fix the acceptance contract BEFORE any module is
+ * written, so acceptance is spec-grounded and its ids are stable across repair
+ * cycles. Pure and deterministic — no key, no LLM; identical project ⇒ identical
+ * string. An empty contract (no oracle rows, no spec) renders "". Consumer:
+ * codegen's `p6SynthesisChunkUserPrompt` (Lane S) renders it as the contract.
+ */
+export function frozenOracleCases(project: Project): string {
+  const oneLine = (v: unknown): string =>
+    typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
+  const oracle = Array.isArray(project?.oracle) ? project.oracle : [];
+  const spec = project?.implementationSpec ?? null;
+  const rows = oracle
+    .filter((o) => o && typeof o.id === "string" && o.id.length > 0)
+    .map(
+      (o) =>
+        `- ${o.id}: ${oneLine(o.name) || oneLine(o.job) || "case"} — given: ${oneLine(o.given)} ⇒ expect: ${oneLine(o.expect)}`,
+    );
+  const reqsRaw = spec && Array.isArray(spec.requirements) ? spec.requirements : [];
+  const sigsRaw = spec && Array.isArray(spec.typeSignatures) ? spec.typeSignatures : [];
+  const reqs = reqsRaw.filter((r): r is string => typeof r === "string" && r.trim().length > 0);
+  const sigs = sigsRaw.filter((s): s is string => typeof s === "string" && s.trim().length > 0);
+  if (rows.length === 0 && reqs.length === 0 && sigs.length === 0) return "";
+  const lines = [
+    "FROZEN ACCEPTANCE CONTRACT (spec-first — author the module against EXACTLY these; the ids are pinned and must not change across repair cycles):",
+  ];
+  if (rows.length > 0) {
+    lines.push("PINNED ORACLE ROWS (each must pass exactly once with the id shown):", ...rows);
+  }
+  if (reqs.length > 0) {
+    lines.push("REQUIRED BEHAVIOR (the module must implement every line):");
+    reqs.forEach((r, i) => lines.push(`- req-${i + 1}: ${oneLine(r)}`));
+  }
+  if (sigs.length > 0) {
+    lines.push("REQUIRED SIGNATURES (export exactly these):");
+    sigs.forEach((s) => lines.push(`- ${oneLine(s)}`));
+  }
+  return lines.join("\n");
+}
+
+/**
  * Pinned oracle ids (in seed order) that a returned case list DROPPED — the
  * verify-side mirror of dod.ts `missingOracleCaseIds()` over the id list the
  * caller passes (verify.server.ts never imports dod.ts — A4-b seam). Extra
@@ -2016,7 +2120,12 @@ export async function verifyAndFixServer(
       ? Math.min(Math.max(Math.floor(requestedIterations), 1), 5)
       : MAX_ITERATIONS;
   if (!isDeepSeekConfigured()) {
-    return { status: "not-configured", iterations: 0, evidence: "no DEEPSEEK_API_KEY server-side" };
+    return {
+      status: "not-configured",
+      iterations: 0,
+      evidence: "no DEEPSEEK_API_KEY server-side",
+      code: "RT_E_LLM_NOT_CONFIGURED",
+    };
   }
   // 340-3: structural refusal BEFORE any case generation — a module the
   // CommonJS harness cannot compile (a materialized ESM tree entry, whose
@@ -2030,6 +2139,9 @@ export async function verifyAndFixServer(
       status: "error",
       iterations: 0,
       evidence: esmReason,
+      // D2/I3: the REAL top-level class for a tree-mode ESM source the CJS
+      // harness cannot execute — never flattened to RT_E_UNKNOWN by a caller.
+      code: "RT_E_RUNNER_FAILED",
       ...gatedFailureMint([], esmReason, 0, "RT_E_RUNNER_FAILED"),
     };
   }
@@ -2055,6 +2167,10 @@ export async function verifyAndFixServer(
       status,
       iterations: 0,
       evidence,
+      // D2/I3: the generation seam's OWN code rides the top level (the L3 mint
+      // below only carried it inside a lesson, so the CLI saw no code and
+      // classified RT_E_UNKNOWN — BL-007).
+      code: gen.code,
       // L3 verify-failure on a refused run (oracle generation failed / compile
       // refused) — never on a mere not-configured (98 §2.3 writer 2(c)).
       // 216i (112 §4.3 — T2): this path never ran a case, so there is NO
@@ -2065,6 +2181,13 @@ export async function verifyAndFixServer(
   }
   const cases = gen.cases;
   let current = source;
+  // PR-20 (D2 / R2 Row 3): the monotone gate. Track the prior accepted failing
+  // set and the best (fewest-failures) source seen; a fix that does not reduce
+  // the failing set is rejected — keep best-so-far, stop early, and report the
+  // regression honestly instead of writing worse bytes into `finalSource`.
+  let bestSource = source;
+  let priorFailing: string[] | null = null;
+  const seenFailing: string[][] = [];
   for (let i = 0; i < maxIterations; i++) {
     const run = await runCases(current, cases);
     const lint = lintFailures(current);
@@ -2087,6 +2210,31 @@ export async function verifyAndFixServer(
         lesson: verifyOutcomeLesson("passed", 6, evidence, i + 1, cases.map((c) => c.id)),
       };
     }
+    // PR-20 (D2): reject a fix that did not strictly reduce the failing set. The
+    // `run.pass` short-circuit above returns first, so this compares only
+    // failing runs against the prior accepted failing set. On rejection the
+    // prior best source is kept, the loop stops early, and the evidence says so.
+    if (priorFailing !== null) {
+      const nextFailing = failingCaseIds(run);
+      if (!isMonotoneFix(nextFailing, priorFailing, seenFailing)) {
+        const fails = run.results.filter((r) => !r.pass);
+        const evidence = `machine-run cases still failing after ${i + 1} iterations: ${fails
+          .map((f) => `${f.id}: ${f.detail}`)
+          .join("; ")}${run.compileError ? ` (${run.compileError})` : ""}${lintSuffix}; no improvement over the previous failing set (${priorFailing.length} case(s)) — kept the best source seen (regressed: true)`;
+        return {
+          status: "failed",
+          iterations: i + 1,
+          evidence,
+          code: "RT_E_RUNNER_FAILED",
+          finalSource: bestSource,
+          cases,
+          ...(lint.length > 0 ? { lint } : {}),
+          // Anchored to the failing ids observed this iteration — the
+          // counterexample is real, so the L3 row is provable (never a refusal).
+          ...gatedFailureMint(fails.map((f) => f.id), evidence, i + 1, null),
+        };
+      }
+    }
     if (i === maxIterations - 1) {
       const fails = run.results.filter((r) => !r.pass);
       const evidence = `machine-run cases still failing after ${maxIterations} iterations: ${fails
@@ -2096,6 +2244,9 @@ export async function verifyAndFixServer(
         status: "failed",
         iterations: maxIterations,
         evidence,
+        // D2/I3: the machine harness ran and did not pass — the runner-family
+        // class, not a flattened RT_E_UNKNOWN.
+        code: "RT_E_RUNNER_FAILED",
         finalSource: current,
         cases,
         ...(lint.length > 0 ? { lint } : {}),
@@ -2108,6 +2259,12 @@ export async function verifyAndFixServer(
       };
     }
     // Fail → ask the model for a patched source (it NEVER declares the pass).
+    // This run is the accepted incumbent: record it (and its failing set) so the
+    // next iteration's fix is judged against the best state, not a worse one.
+    const incumbentIds = failingCaseIds(run);
+    bestSource = current;
+    priorFailing = incumbentIds;
+    seenFailing.push(incumbentIds);
     const failing = run.results.filter((r) => !r.pass);
     const failures = failing.map((f) => `${f.id}: ${f.detail}`).join("; ");
     const fix = await runBudgetedCall(opts.budget, () =>
@@ -2135,6 +2292,7 @@ export async function verifyAndFixServer(
         status: "error",
         iterations: i + 1,
         evidence,
+        code: fix.code,
         finalSource: current,
         cases,
         ...gatedFailureMint(failing.map((f) => f.id), evidence, i + 1, fix.code),
@@ -2153,6 +2311,7 @@ export async function verifyAndFixServer(
     status: "failed",
     iterations: maxIterations,
     evidence,
+    code: "RT_E_RUNNER_FAILED",
     finalSource: current,
     cases,
     ...(exhaustedLint.length > 0 ? { lint: exhaustedLint } : {}),

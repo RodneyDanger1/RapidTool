@@ -474,6 +474,90 @@ export function applyPolicies(spec: ExpandedSpec, policies?: readonly string[]):
 }
 
 // ---------------------------------------------------------------------------
+// PR-18 (A7 repair contract) — the PURE dedicated repair-agent SYSTEM prompt
+// and the legal refusal-channel consumer contract.
+//
+// R2 §2.3: repair calls reused the generator persona while the user message
+// asked for a `{"patch":{oldStr,newStr}}` delta — two contradictory output
+// contracts, a plausible source of `envelope.unreadable` repairs. This prompt
+// fixes ONLY the named defect, offers the delta FIRST and the full corrected
+// module envelope SECOND, forbids success claims and check-weakening, and
+// gives the model a LEGAL `{"refusal","reason"}` channel (a defect that is not
+// present is not a repair — it is an honest refusal).
+//
+// PURE + deterministic: no key, no I/O; identical inputs ⇒ identical string.
+//
+// CONSUMER CONTRACT (codegen PR-19 wires it): a reply the consumer parses as a
+// legal refusal is NOT an unreadable envelope — it records a coded
+// `p6.synthesis.refused` and SKIPS the repair call. A refusal is never
+// converted into a pass; it only replaces a wasted repair with an honest,
+// coded stop.
+//
+// The advertised rules are drift-proof by test: prompt-engine.test.ts asserts
+// every name in codegen's FORBIDDEN_PRIMITIVE_NAMES appears in the prompt and
+// that each rule family is backed by a live validator — never enforce an
+// unadvertised rule, never advertise an unenforced one (the repo's 215b
+// principle).
+// ---------------------------------------------------------------------------
+
+/** The forbidden-primitive display names the validator enforces, mirrored from
+ *  codegen.server.ts `FORBIDDEN_PRIMITIVE_NAMES`. The copy is deliberate:
+ *  codegen imports prompt-engine, so importing it back would be a cycle. The
+ *  PR-18 parity test asserts the two lists are equal, so they cannot drift. */
+export const REPAIR_FORBIDDEN_PRIMITIVE_NAMES = [
+  "eval",
+  "Function",
+  "import",
+  "process",
+  "require",
+  "globalThis",
+  "window",
+  "self",
+  "fetch",
+  "WebSocket",
+  "XMLHttpRequest",
+  "document",
+  "localStorage",
+  "indexedDB",
+] as const;
+
+/** The exact legal refusal reply a repair turn may return instead of an
+ *  envelope — the `{"refusal","reason"}` channel (R2 §2.3). */
+export const REPAIR_REFUSAL_ENVELOPE =
+  '{"refusal":"defect not present","reason":"<quote the relevant module text>"}';
+
+/** Every rule a repair reply must PRESERVE, each backed by a deterministic
+ *  validator (the parity test links each to its validator). Advertised
+ *  verbatim by `repairSystemPrompt()`. */
+export const REPAIR_PRESERVED_RULES = [
+  "export EXACTLY the required signatures and nothing more",
+  "zero imports/requires",
+  `never reference a forbidden primitive (${REPAIR_FORBIDDEN_PRIMITIVE_NAMES.join(", ")})`,
+  "never use Math.random (nondeterministic primitive)",
+  "no planning prose in the module body",
+  "await every async call",
+  "never redeclare a name another chunk already exports",
+] as const;
+
+/**
+ * The DEDICATED repair-agent system prompt (pure). Consumer: the P6 repair
+ * call sites (codegen.server.ts) — it replaces the generator persona there so
+ * the system and the `{"patch"}` user message no longer contradict.
+ */
+export function repairSystemPrompt(): string {
+  return [
+    "You are RapidTool's bounded repair agent. You are given a module that failed a specific, named defect.",
+    "Fix ONLY that defect.",
+    'If the defect is a local text replacement, return the delta FIRST: {"patch":{"oldStr":"<exact text copied from the quoted module — it must occur EXACTLY once>","newStr":"<the replacement text; empty deletes the matched text>"}}.',
+    'Otherwise return the complete corrected module envelope: {"module":"...","exports":[...],"reqTrace":{...}}.',
+    "You may not weaken, delete, or rename the checks you were given; you may not claim the repair succeeded; you may not add features.",
+    `If the cited defect is not actually present in the module, return ${REPAIR_REFUSAL_ENVELOPE}.`,
+    `RULES YOU MUST PRESERVE (each is validator-enforced; a repair that breaks one is refused): ${REPAIR_PRESERVED_RULES.join("; ")}.`,
+    "Return JSON ONLY — the word json, one object, nothing before or after it.",
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // FusionRank-ranked lesson injection (fixes/98 §5 Tier 3): the top-k lesson
 // rows for a brief — project-memory rows tagged "lesson" plus caller-mapped
 // knowledge-store proven rows — ranked by the SAME FusionRank call the packet

@@ -1,0 +1,23 @@
+{
+  "incident": "BL-010",
+  "title": "office-stock-tracker ran while src/** was edited",
+  "run": {
+    "project": "office-stock-tracker",
+    "createdAt": "2026-10-04T21:32:58",
+    "emitAt": "2026-10-04T21:35:22"
+  },
+  "srcMtimes": [
+    {
+      "file": "src/lib/websearch.server.ts",
+      "mtime": "2026-10-04T21:32:24"
+    },
+    {
+      "file": "src/lib/harvest.ts",
+      "mtime": "2026-10-04T21:32:50"
+    },
+    {
+      "file": "src/lib/harvest.test.ts",
+      "mtime": "2026-10-04T21:34:01"
+    }
+  ]
+}

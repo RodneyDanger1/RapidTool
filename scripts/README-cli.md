@@ -146,7 +146,7 @@ node --experimental-strip-types scripts/rapidtool-cli.mjs run --project build.js
 
 # 3. Advance until the pipeline parks (awaiting_hitl / complete / blocked)
 #    --autopilot auto-approves non-stock, non-forceHuman gates only
-node --experimental-strip-types scripts/rapidtool-cli.mjs gate --project build.json [--autopilot] [--live]
+node --experimental-strip-types scripts/rapidtool-cli.mjs gate --project build.json [--autopilot] [--live] [--resynthesize]
 
 # 4. Approve / reject the pending gate (`reject` requires ≥12 characters of --note;
 #    a shorter note is refused — exit 1 RT_E_VALIDATION, nothing written. Both
@@ -435,6 +435,15 @@ executes them → on failure DeepSeek patches the source → re-run, up to
 Requires `DEEPSEEK_API_KEY`. Fails fast (exit 1) when the project has no
 `generatedSource` yet (codegen phases never ran).
 
+**Tree mode (W61 B3):** when the project carries a `generatedTree`, `verify`
+routes to the REAL **tree-run** path instead of the single-module CommonJS
+harness (which cannot load the emitted ESM `import`/`export` and used to surface
+an opaque `RT_E_UNKNOWN`): the tree is emitted to a probe dir and its own specs +
+entry are executed. A green tree-run → `status: "passed"`; a red tree →
+`status: "failed"` (exit 1) with the tree-run failure tail as `evidence`; a
+tree-run seam that could not execute at all refuses with a coded top-level
+`RT_E_RUNNER_FAILED` (exit 4) — never `RT_E_UNKNOWN`.
+
 `--apply` persists the outcome into the project file: a **passed** verdict
 stamps `lastTest` (label `"tested"` + evidence hash) and appends a `verify`
 artifact; **failed/error** append a `verify.fail` artifact; **not-configured**
@@ -528,11 +537,17 @@ tree still exists on disk**, so the failure is in delivery, never in the build.
 > reason names the leg: `tree-run-red` (a red `--run`, code
 > `RT_E_TREE_RUN_FAILED`; W346 · P0-3), `check-red` (a red `--check`, code
 > `RT_E_CHECK_FAILED`), `verify-kind-red` (a red `--verify-kind`, code
-> `RT_E_VERIFY_KIND_FAILED`), or `foreign-files-left-in-place` (a supported
-> quarantine left the tree mixed). A GREEN leg commits exactly as before. `emit
-> --git` WITHOUT any judging leg is unchanged: it cannot consult a verdict it
-> never computed, so it lands the commit as today. This is the CLI-level mirror of
-> the deliver step's verify-before-commit ordering in
+> `RT_E_VERIFY_KIND_FAILED`), `substance-empty` (W61 B1: with `--run`, the
+> tree's substance verdict is `"empty"` — no job modules — or the project carries
+> an uncleared red tree-run trail, code `RT_E_SUBSTANCE_EMPTY`), or
+> `foreign-files-left-in-place` (a supported quarantine left the tree mixed). The
+> substance hold is checked before `tree-run-red`, so an empty tree refuses with
+> its own specific code. It is lifted by the explicit **`--allow-empty`** opt-in
+> (a deliberate scaffold-only delivery), which lands the commit as before. A GREEN
+> leg commits exactly as before. `emit --git` WITHOUT any judging leg is
+> unchanged: it cannot consult a verdict it never computed, so it lands the commit
+> as today. This is the CLI-level mirror of the deliver step's verify-before-commit
+> ordering in
 > [`scripts/factory-watch.mjs`](#the-walk-away-factory-scriptsfactory-watchmjs).
 
 `--force` admits an emit into a folder that already holds foreign files — without it the
@@ -653,6 +668,21 @@ nothing** — the rules are heuristics, so every finding carries `advisory: true
   `DEEPSEEK_API_KEY` the default synthesis seam is the deterministic floor, so a
   red dir exhausts the budget honestly (no fake repair, exit 1) — a green dir
   still converges at cycle 0 with the mint + honest gate record.
+- **`gate --resynthesize` / `repair --from-gate`** (PR-22 — the recovery door out
+  of a red RUNNING P6, BL-003) — a keyed P6 that failed leaves the project
+  `running` (no rejected record to `retry`), so plain `gate` re-parks at 0 steps.
+  `gate --resynthesize` re-opens the phase (`retry`) and re-enters the P6 journey
+  **live**, bounded by the driver's own iteration cap, so the recorded unmet
+  requirements drive the next cycle instead of a silent 0-step park.
+  `repair --from-gate` applies the same one bounded re-entry to the EDITED dir
+  before the repair cycle. Neither fabricates a green gate: the repaired tree
+  faces the same tree-run + real gate probes.
+- **In-run RUNLOCK guard** (PR-16 · B5/C-11) — `run`/`gate`/`unattended` stamp
+  the run window and, after the drive, scan the repo's own `src/**` + `scripts/**`
+  for mtimes newer than the run start. A change during the run (the BL-010
+  overlap) refuses the result with `RT_E_SRC_EDITED_DURING_RUN` + a `runlock`
+  block naming the file(s), instead of presenting a clean result produced against
+  a moving tree. A frozen window is untouched.
 - **`emit --verify-kind`** (SHIPPED — fixes/216z · T4.1; keyless, network) — opt-in
   bounded scratch-copy install (`npm ci` / `npm install`) + the tree's declared
   build/test for webapp/game kinds in a temp dir (never mutating the emitted
@@ -781,7 +811,12 @@ UI's retry affordance).
 Exit 0 on success. Wrong state (project is not `blocked`) → exit 1 with
 `code: "RT_E_PHASE_ILLEGAL"` — nothing is mutated. `retry` is the headless
 recovery after `reject --note "…"` parks the project: `reject` → `retry` →
-`gate` again.
+`gate` again. **W61 B3:** `retry` also reopens a **red running P6** — a keyed P6
+that failed and left the project `running` with a red gate / tree trail / lastTest
+and no `rejected` record — clearing the parked HITL and marking P6 `ready` so the
+next `run`/`gate` re-attempts it. A project with neither a rejected phase nor a red
+P6 stall refuses with `RT_E_PHASE_ILLEGAL` and mutates nothing (never a silent
+ok:true no-op).
 
 ## Chat (`chat`)
 
@@ -1189,7 +1224,11 @@ so the contract is strict and stable:
   project file) — stdout is `{ "ok": false, "error": "…" }`.
   `run`/`gate` also exit 1 (code `RT_E_GATES_FAILED`, `sealedWithFailures:
   true`) when the run sealed COMPLETE with one or more recorded FAILED DoD
-  gates — a red-gate completion is never a clean exit 0.
+  gates — a red-gate completion is never a clean exit 0. **W61 B3:** `run`/`gate`
+  also exit 1 (code `RT_E_GATE_PENDING`) when the invocation advanced NOTHING
+  (`steps: 0`) and did not reach a designed park or a clean seal — a stalled red
+  P6 is surfaced coded instead of a silent `ok:true` re-park at 0 steps (reopen
+  it with `retry`).
 - **Exit 2** = `run`/`gate` parked the project at a HITL gate or in `blocked`
   (full state is on stdout — `approve`/`reject`/`retry` next).
 - **Exit 3** = a backend is not configured — no `DEEPSEEK_API_KEY` where one is

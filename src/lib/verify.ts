@@ -101,6 +101,10 @@ export type VerifyOutcomeShape = {
   status: "passed" | "failed" | "not-configured" | "error";
   iterations: number;
   evidence: string;
+  /** W61 lane D (D2 / I3): the real top-level error class (absent on a pass) —
+   *  the contract the CLI/store branch on instead of classifying prose
+   *  (RT_E_UNKNOWN). See verify.server.ts VerifyOutcome.code. */
+  code?: VerifyOutcome["code"];
   finalSource?: string;
   cases?: unknown[];
   /** B4 lint-advisory findings (verify.server.ts's LintFailure[], structurally).
