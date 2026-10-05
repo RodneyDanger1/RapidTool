@@ -674,6 +674,7 @@ function RunStatusPanel({
   action,
   onPrimary,
   primaryBlockedReason,
+  busy,
 }: {
   project: Project;
   action: UiNextAction;
@@ -682,6 +683,10 @@ function RunStatusPanel({
   /** Set when the HITL override checkbox must be ticked first: the panel then
    *  withholds its Approve button instead of minting a bypass path (110 UI-01). */
   primaryBlockedReason?: string;
+  /** UI-11 (346 T4): any in-flight action (run/step/module/crew/reject) — the
+   *  panel's button disables so it can never look idle while one is running
+   *  (matches the action bar's canExecute gate). */
+  busy?: boolean;
 }) {
   const def = PHASES[project.currentPhase];
   const done = project.phases.filter((r) => r.status === "complete").length;
@@ -711,7 +716,8 @@ function RunStatusPanel({
           <button
             type="button"
             onClick={onPrimary}
-            className="btn-solid inline-flex min-h-11 items-center gap-2 rounded-md bg-fg px-4 text-sm font-medium text-bg"
+            disabled={busy === true}
+            className="btn-solid inline-flex min-h-11 items-center gap-2 rounded-md bg-fg px-4 text-sm font-medium text-bg disabled:opacity-40"
           >
             {buttonLabel}
           </button>
@@ -2316,6 +2322,11 @@ export function RunScreen({ id }: { id: string }) {
   const rec = project?.phases[project.currentPhase];
   const artifacts = useMemo(() => project?.artifacts ?? [], [project?.artifacts]);
   const running = rec?.status === "running";
+  // UI-11 (346 T4): the store commits a run's phases in one update, so the
+  // phase record stays "ready" while the client run/step action is in flight.
+  // Reading ONLY the record made the status panel say "Ready when you are" and
+  // offer an enabled Run button while the action bar already said "Running…".
+  const actionRunning = running || busyAction === "run" || busyAction === "step";
   const visibleArtifacts = useMemo(() => {
     const q = query.trim().toLowerCase();
     return artifacts.filter(
@@ -2430,7 +2441,7 @@ export function RunScreen({ id }: { id: string }) {
   // 111 TASK-02: one derived next action and its single primary handler. The
   // handler is the SAME function the action bar uses — never a second path to
   // run/approve (the stated risk of TASK-02).
-  const nextAction = uiNextAction(project, running);
+  const nextAction = uiNextAction(project, actionRunning);
   const nextNeedsOverride = hitlNeedsOverride(project);
   const nextPrimary =
     nextAction.kind === "approve"
@@ -3601,6 +3612,7 @@ export function RunScreen({ id }: { id: string }) {
             project={project}
             action={nextAction}
             onPrimary={nextPrimary}
+            busy={busyAction !== null}
             primaryBlockedReason={
               nextAction.kind === "approve" && nextNeedsOverride
                 ? "Tick the override checkbox in the approval panel below before approving."
@@ -3804,7 +3816,8 @@ export function RunScreen({ id }: { id: string }) {
                         <button
                           type="button"
                           onClick={() => void runUntil()}
-                          className="btn-solid mt-3 inline-flex min-h-11 items-center gap-2 rounded-md bg-fg px-4 text-sm font-medium text-bg"
+                          disabled={!canExecute(project, busyAction !== null)}
+                          className="btn-solid mt-3 inline-flex min-h-11 items-center gap-2 rounded-md bg-fg px-4 text-sm font-medium text-bg disabled:opacity-40"
                         >
                           Run to next gate
                         </button>

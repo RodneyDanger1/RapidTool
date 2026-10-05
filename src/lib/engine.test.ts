@@ -30,7 +30,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { applyPhaseResult, approveHitl, emptyProject, databaseSchemaSql, deliveryKindOf, hydrateProject, liveLayer, rejectHitl, repairPhases, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
+import { applyPhaseResult, approveHitl, emptyProject, databaseSchemaSql, deliveryKindOf, hydrateProject, inferDomain, liveLayer, rejectHitl, repairPhases, synthesizePhase, wildLog, wildStep, withDeliveryKind, type WildReviewer } from "./engine.ts";
 import { exportProjectJson, importProject } from "./io.ts";
 import { recordSessionSpend, resetSessionBudget, type TokenSpend } from "./token-ledger.ts";
 import { wildResumeRun } from "./headless.ts";
@@ -401,6 +401,61 @@ describe("342-4 — the stored delivery kind is the single source of truth", () 
     const stamped = withDeliveryKind(p);
     assert.equal(stamped.kind, "library");
     assert.equal(withDeliveryKind(stamped), stamped, "an already-decided project is returned unchanged");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 346 T1 — classification matches the words a brief WROTE, never stem
+// collisions. Pre-fix, tokenizeWords canonicalized every brief word and the
+// registers were compared stem-to-stem, so ordinary English hijacked a domain/
+// kind: a bakery site's "Home" page ⇒ real-estate, "shows"⇒showing,
+// "list"⇒listing, "multi-tenant"⇒real-estate, "packaging"⇒package(library),
+// "field-level"⇒level(game). Each assertion below failed on the pre-fix code.
+// ---------------------------------------------------------------------------
+describe("346 T1 — surface-word classification (no stem collisions)", () => {
+  it("a marketing-site brief is not typed real-estate by its Home page", () => {
+    const brief =
+      "A marketing website for a neighbourhood bakery. Home page, a menu with allergen tags, an opening-hours badge, and an order form with field-level validation.";
+    assert.equal(inferDomain(brief), "custom-software");
+  });
+
+  it("a back-office with a product list and multi-tenant scope is operations, not real-estate", () => {
+    const brief =
+      "An internal back-office to take orders, manage inventory and stock, and show a product list. Multi-tenant support is out of scope.";
+    assert.equal(inferDomain(brief), "operations");
+  });
+
+  it("an appointment 'title' field does not make a scheduler real-estate", () => {
+    const brief = "An office shift and appointment scheduler: each appointment has a title, a room and a date.";
+    assert.notEqual(inferDomain(brief), "real-estate");
+  });
+
+  it("a genuine rental brief still classifies real-estate (no false negative)", () => {
+    const brief =
+      "A rental portfolio manager: track each rental property, its tenants and lease terms, and collect rent payments.";
+    assert.equal(inferDomain(brief), "real-estate");
+  });
+
+  it("'field-level' is not a game and 'packaging' is not a library", () => {
+    const web = emptyProject({
+      name: "Bakery",
+      brief: "A bakery marketing website with field-level form validation and a menu.",
+    });
+    assert.equal(deliveryKindOf(web), "app");
+    const mobile = emptyProject({
+      name: "Companion",
+      brief: "A mobile companion app; no app-store packaging required; works one-handed.",
+    });
+    assert.equal(deliveryKindOf(mobile), "app");
+  });
+
+  it("the unambiguous kind signals still decide game/library/service", () => {
+    assert.equal(deliveryKindOf(emptyProject({ name: "Arcade", brief: "Retro arcade game with levels" })), "game");
+    assert.equal(
+      deliveryKindOf(emptyProject({ name: "Lib", brief: "A kanban board library exposing a typed board client" })),
+      "library",
+    );
+    assert.equal(deliveryKindOf(emptyProject({ name: "Hook", brief: "A webhook worker API for billing" })), "service");
   });
 });
 

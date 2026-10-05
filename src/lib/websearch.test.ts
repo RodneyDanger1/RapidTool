@@ -42,6 +42,22 @@ describe("freeWebSearch", () => {
     }
   });
 
+  it("decodes numeric HTML character references in snippets (346 — &#x27; leak)", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).includes("duckduckgo")) {
+        return htmlResponse(
+          `<a href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Flease">Lease</a>` +
+            `<td class='result-snippet'>the tenant&#x27;s credit &#8212; check it</td>`,
+        );
+      }
+      return jsonResponse({ query: { search: [] } });
+    }) as SearchFetch;
+
+    const res = await freeWebSearch("lease", { ...FAST, fetchImpl });
+    assert.equal(res.ok, true);
+    if (res.ok) assert.equal(res.items[0].content, "the tenant's credit — check it");
+  });
+
   it("dedupes results by normalized URL (www, trailing slash, tracking params)", async () => {
     const fetchImpl = (async (url: unknown) => {
       if (String(url).includes("duckduckgo")) {

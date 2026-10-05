@@ -1530,6 +1530,22 @@ export const useRapid = create<RapidState>()(
         if (!p) return { ok: false, error: "Project not found.", code: "RT_E_PROJECT_MISSING" };
         try {
           const next = await deepenResearchEngine(p, phase);
+          // 346 T2: a deepen that landed NO findings must not be committed.
+          // engine.deepenResearch stamps meta.liveUnavailable when the live fetch
+          // is unavailable (the bare-Node/keyless case) and then re-records the
+          // phase gate via recordGateInto — whose p7-research probe WAIVES on that
+          // flag, heaping a FAILED gate to PASS with an empty corpus. Refuse
+          // before the fabricated waiver is persisted; a deepen that really
+          // brought findings (or an idempotent re-run over an existing corpus)
+          // still commits and re-records. The CLI `deepen` verb shares the engine
+          // seam and needs the same guard (engine.ts owns it — out of this lane).
+          if (next !== p && (next.research?.length ?? 0) === 0) {
+            return {
+              ok: false,
+              error: "Live research returned no findings — nothing to deepen; the phase gate was not re-recorded.",
+              code: "RT_E_RESEARCH_UNAVAILABLE",
+            };
+          }
           set((s) => ({
             projects: s.projects.map((x) => (x.id === id ? keepLiveWildRun(rebaseUserFields(next, x), x) : x)),
           }));

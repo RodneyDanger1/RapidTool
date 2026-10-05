@@ -61,3 +61,26 @@ test("DesignPane.copyCssVars uses the latest-action flash guard", () => {
   // The un-guarded timer that cleared a newer copy early must be gone.
   assert.doesNotMatch(CONSOLE, /window\.setTimeout\(\(\) => setCopiedCss\(false\), 1600\)/);
 });
+
+test("Run CTAs reflect the busy latch (346 T4 · UI-11)", () => {
+  // A client run commits its phases in ONE store update, so the phase record
+  // stays "ready" while run/step is in flight. The next-action panel must fold
+  // the busy latch into `running`, or it renders "Ready when you are" plus an
+  // ENABLED Run button beside the action bar's "Running…" (operator ui-03).
+  assert.match(
+    CONSOLE,
+    /const actionRunning = running \|\| busyAction === "run" \|\| busyAction === "step";/,
+    "the next-action running flag must include the run/step busy actions",
+  );
+  assert.match(CONSOLE, /uiNextAction\(project, actionRunning\)/, "uiNextAction must read the busy-inclusive flag");
+  assert.doesNotMatch(CONSOLE, /uiNextAction\(project, running\)/, "the record-only running flag must not drive the panel");
+  // RunStatusPanel's primary button disables while ANY action is in flight.
+  assert.match(CONSOLE, /disabled=\{busy === true\}/, "RunStatusPanel button must gate on busy");
+  assert.match(CONSOLE, /busy=\{busyAction !== null\}/, "RunScreen must pass the busy latch to RunStatusPanel");
+  // The Artifacts empty-state CTA is a run action too — same predicate as the bar.
+  assert.match(
+    CONSOLE,
+    /onClick=\{\(\) => void runUntil\(\)\}\s*\n\s*disabled=\{!canExecute\(project, busyAction !== null\)\}/,
+    "the Artifacts empty-state Run CTA must use the shared canExecute predicate",
+  );
+});

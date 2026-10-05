@@ -213,6 +213,18 @@ describe("harvestRepos", () => {
     assert.ok(fetchTextCalls + fetchJsonCalls <= 4, `total fetches ${fetchTextCalls + fetchJsonCalls} exceeded the 4-fetch bound`);
   });
 
+  it("decodes numeric HTML character references in fetched snippets (346 — &#x27; leak)", async () => {
+    const res = await harvestRepos(["florist"], {
+      search: searchWith([{ title: "Acme", url: "https://github.com/acme/x", content: "x" }]),
+      fetchText: async () => "README: the owner&#x27;s guide &#8212; done",
+      fetchJson: async () => null,
+      maxFetches: 1,
+    });
+    assert.equal(res.hits.length, 1);
+    assert.equal(res.hits[0].snippet, "README: the owner's guide — done");
+    assert.equal(res.hits[0].provenance, "github-raw");
+  });
+
   it("raw README fetch fails → search-snippet fallback, provenance web-search, no license claim", async () => {
     const res = await harvestRepos(["q"], {
       search: searchWith([{ title: "Acme", url: "https://github.com/acme/scheduler", content: "search summary text" }]),

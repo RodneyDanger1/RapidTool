@@ -112,6 +112,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Decode ONE numeric HTML character reference body (already matched by the
+ * `&#(x?[0-9a-fA-F]+);` group, so a leading `x`/`X` selects hex). Out-of-range
+ * and surrogate code points fall back to the raw source text — never a throw.
+ * Scraped provider HTML routinely escapes apostrophes as `&#x27;`; without
+ * this the entity leaks into the snippets the model is grounded on (346 live
+ * run: `tenant&#x27;s` reached build.json and the vault).
+ */
+function decodeNumericEntity(body: string, fallback: string): string {
+  const hex = body[0] === "x" || body[0] === "X";
+  const cp = parseInt(hex ? body.slice(1) : body, hex ? 16 : 10);
+  if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) {
+    return fallback;
+  }
+  return String.fromCodePoint(cp);
+}
+
 function stripHtml(s: string): string {
   return s
     .replace(/<[^>]*>/g, " ")
@@ -120,7 +137,8 @@ function stripHtml(s: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#(x?[0-9a-fA-F]+);/g, (m, body: string) => decodeNumericEntity(body, m))
+    .replace(/&apos;/g, "'")
     .replace(/\s+/g, " ")
     .trim();
 }

@@ -433,6 +433,41 @@ test("deepenResearch classifies the thrown path — a real engine throw carries 
   }
 });
 
+test("346 T2: an empty-corpus deepen refuses to heap a FAILED p7-research gate to PASS", async () => {
+  // Under bare Node the engine's research/llm server fns cannot run, so
+  // fetchResearch reports unavailable with ZERO findings deterministically — no
+  // mock, and exactly the console's keyless "Run live research" case. The
+  // pre-fix store committed the engine's meta.liveUnavailable + re-recorded gate,
+  // flipping this RED gate green with an empty corpus (proof: the repro at HEAD
+  // read {ok:true} and gate.passed false -> true with research.length 0).
+  const base = seedProject({ status: "complete", currentPhase: 12 as PhaseId });
+  const p = install({
+    ...base,
+    competitors: [
+      { name: "A", class: "tool", strength: "x", gap: "y", source: "illustrative" },
+      { name: "B", class: "tool", strength: "x", gap: "y", source: "illustrative" },
+    ],
+    phases: base.phases.map((r) =>
+      r.id === 7
+        ? {
+            ...r,
+            status: "complete" as const,
+            gate: { passed: false, unmet: ["p7-research"], evidenceHash: "deadbeefcafe", checkedAt: Date.now() - 60_000 },
+          }
+        : r,
+    ),
+  });
+  assert.equal(runGate(p, 7).pass, false, "precondition: the seeded P7 gate is honestly RED");
+  const res = await useRapid.getState().deepenResearch(p.id, 7);
+  assert.equal(res.ok, false, "an empty-corpus deepen is refused, never committed as a gate pass");
+  if (!res.ok) assert.equal(res.code, "RT_E_RESEARCH_UNAVAILABLE");
+  const after = current(p.id);
+  const gate7 = after.phases.find((r) => r.id === 7)?.gate;
+  assert.equal(gate7?.passed, false, "the recorded FAILED gate survives — no fabricated waiver");
+  assert.equal(gate7?.evidenceHash, "deadbeefcafe", "the recorded gate was not re-recorded");
+  assert.notEqual(after.meta?.liveUnavailable, true, "no liveUnavailable waiver was committed either");
+});
+
 test("runP6Journey guards an unknown project id (fixes/150 M4 ms4 journey mirror)", async () => {
   const res = await useRapid.getState().runP6Journey("no-such-project");
   assert.ok(!res.ok);

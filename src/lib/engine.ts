@@ -216,7 +216,10 @@ const DELIVERY_KIND_KEYWORDS: { kind: DeliveryKind; words: string[] }[] = [
     kind: "tool",
     words: ["cli", "command-line", "commandline", "terminal", "console-tool", "parse", "convert", "agent", "script"],
   },
-  { kind: "game", words: ["game", "play", "level", "arcade"] },
+  // 346 T1: "level" was removed — a bare English noun ("field-level",
+  // "reorder level", "skill level") made every such brief a game. "game"/
+  // "arcade"/"play" remain the unambiguous signals.
+  { kind: "game", words: ["game", "play", "arcade"] },
   { kind: "service", words: ["api", "service", "webhook", "worker"] },
 ];
 
@@ -225,10 +228,16 @@ export function deliveryKindOf(project: Pick<Project, "kind" | "brief" | "domain
   if (declared !== undefined && declared !== null && (DELIVERY_KINDS as readonly string[]).includes(declared)) {
     return declared;
   }
-  const tokens = new Set(
-    tokenizeWords([project.brief, project.domain ?? "", project.lattice?.jobs?.join(" ") ?? ""].join(" ")),
-  );
-  const hit = (h: string): boolean => tokens.has(h) || tokens.has(stemToken(h));
+  // 346 T1: match the words the brief actually wrote (plus a simple plural),
+  // never stemmed forms. tokenizeWords canonicalizes, so the old stem match
+  // fired on unrelated words: "packaging"→"package" (library), "field-level"→
+  // "level" (game), "works"→"worker" (service) — mis-typing real runs.
+  const tokens = new Set(([project.brief, project.domain ?? "", Array.isArray(project.lattice?.jobs) ? project.lattice.jobs.join(" ") : ""].join(" ").toLowerCase().match(/[a-z0-9]+/g) ?? []));
+  const hit = (h: string): boolean =>
+    tokens.has(h) ||
+    tokens.has(`${h}s`) ||
+    tokens.has(`${h}es`) ||
+    (h.endsWith("y") && tokens.has(`${h.slice(0, -1)}ies`));
   for (const row of DELIVERY_KIND_KEYWORDS) {
     if (row.words.some(hit)) return row.kind;
   }
@@ -260,7 +269,10 @@ function uiKindOf(project: Project): "cli-tool" | "library" | "ui" {
   return "ui";
 }
 
-/** Domain vocabulary (raw forms; stemmed at compare time so `routing` matches `route`). */
+/** Domain vocabulary. 346 T1: `inferDomain` matches these as SURFACE forms
+ *  (the word the brief wrote, plus a simple plural/s/es/ies) — see inferDomain.
+ *  Register terms must therefore be words a brief of that domain actually
+ *  uses; a generic English noun here hijacks every unrelated brief. */
 const DOMAIN_TERMS: Record<string, string[]> = {
   "revenue-ops": ["crm", "pipeline", "lead", "sales"],
   operations: ["inventory", "warehouse", "sku", "stock"],
@@ -275,9 +287,13 @@ const DOMAIN_TERMS: Record<string, string[]> = {
   // never as analytics/finance-ops — the previous register had zero REI vocab so
   // "track/estimate/report" in such briefs landed on analytics (maker-loop bug).
   "real-estate": [
-    "house", "property", "estate", "home", "showing", "flip", "arv", "rental",
+    // 346 T1: "home" and "title" were removed. Both are ordinary web/form
+    // words — a marketing site's "Home" page classified as real-estate, and an
+    // office scheduler's appointment "title" field did too. Genuine property
+    // briefs still carry house/property/rental/tenant/lease/landlord.
+    "house", "property", "estate", "showing", "flip", "arv", "rental",
     "tenant", "lease", "landlord", "mortgage", "appraisal", "escrow", "closing",
-    "title", "deed", "condo", "duplex", "multifamily", "comps", "beds", "baths",
+    "deed", "condo", "duplex", "multifamily", "comps", "beds", "baths",
     "sqft", "realtor", "listing", "agent", "buyer", "seller",
   ],
   construction: [
@@ -289,23 +305,35 @@ const DOMAIN_TERMS: Record<string, string[]> = {
 const DOMAIN_ORDER = Object.keys(DOMAIN_TERMS);
 
 export function inferDomain(brief: string): string {
-  const tokens = new Set(tokenizeWords(brief));
+  // 346 T1: surface-form matching (raw brief words + a simple plural/s/es/ies),
+  // NOT canonicalStem. tokenizeWords stems every brief word, and comparing
+  // stemmed tokens to stemmed register terms conflated unrelated words —
+  // "shows" matched "showing" (both stem `show`), "list" matched "listing",
+  // "multi-tenant" matched "tenant", "packaging" matched "package". Real keyed
+  // runs were mislabeled (a bakery marketing site became real-estate and its
+  // P0/P7/P11 research returned rental/lease sources). A register term now only
+  // fires on itself (or its plural).
+  const tokens = new Set((typeof brief === "string" ? brief : "").toLowerCase().match(/[a-z0-9]+/g) ?? []);
+  const hit = (term: string): boolean =>
+    tokens.has(term) ||
+    tokens.has(`${term}s`) ||
+    tokens.has(`${term}es`) ||
+    (term.endsWith("y") && tokens.has(`${term.slice(0, -1)}ies`));
   let best = "custom-software";
   let bestCount = 0;
-  let bestLen = 0;
+  // First domain in DOMAIN_ORDER wins a tie (deterministic, and additive-only:
+  // a domain still needs strictly more matches than the current best). The old
+  // longest-matched-term tie-break let a longer generic term ("dashboard")
+  // outrank a shorter specific one ("stock") and typed an office inventory
+  // tracker as analytics.
   for (const domain of DOMAIN_ORDER) {
     let count = 0;
-    let len = 0;
     for (const raw of DOMAIN_TERMS[domain]) {
-      if (tokens.has(stemToken(raw))) {
-        count += 1;
-        len += raw.length;
-      }
+      if (hit(raw)) count += 1;
     }
-    if (count > bestCount || (count === bestCount && len > bestLen)) {
+    if (count > bestCount) {
       best = domain;
       bestCount = count;
-      bestLen = len;
     }
   }
   return best;
